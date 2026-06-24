@@ -6,10 +6,6 @@
 
 use std::path::{Path, PathBuf};
 
-use scenarium::prelude::DiskCache;
-
-use crate::core::func_lib::runtime_codec_registry;
-
 /// The cache directory for a document: `<stem>.darkroom-cache/` beside the
 /// document file (e.g. `proj/scene.rhai` → `proj/scene.darkroom-cache/`).
 /// Per-document-named so two projects in one folder keep separate stores.
@@ -20,14 +16,14 @@ pub(crate) fn document_cache_root(doc_path: &Path) -> PathBuf {
     doc_path.with_file_name(name)
 }
 
-/// Build a [`DiskCache`] rooted at the document's cache dir, ensuring the dir
-/// and a self-ignoring `.gitignore` exist. Save-As / moving the project does
-/// *not* carry the cache along — each location keeps its own store, content-
-/// addressed so the new one refills lazily.
-pub(crate) fn build_document_disk_cache(doc_path: &Path) -> DiskCache {
+/// The document's content-addressed store root, ensuring the dir and a
+/// self-ignoring `.gitignore` exist. Save-As / moving the project does *not* carry
+/// the cache along — each location keeps its own store, content-addressed so the
+/// new one refills lazily.
+pub(crate) fn prepare_document_cache_root(doc_path: &Path) -> PathBuf {
     let root = document_cache_root(doc_path);
     ensure_gitignore(&root);
-    DiskCache::new(root, runtime_codec_registry())
+    root
 }
 
 /// Best-effort: create `root` and drop a `*`-pattern `.gitignore`, so the whole
@@ -83,9 +79,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let doc_path = dir.join("scene.rhai");
 
-        let _cache = build_document_disk_cache(&doc_path);
+        let root = prepare_document_cache_root(&doc_path);
 
-        let root = dir.join("scene.darkroom-cache");
+        assert_eq!(root, dir.join("scene.darkroom-cache"));
         assert!(root.is_dir(), "cache dir created beside the document");
         let gitignore = root.join(".gitignore");
         assert_eq!(

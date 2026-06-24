@@ -6,10 +6,10 @@
 
 use std::path::Path;
 
-use scenarium::prelude::Graph;
+use scenarium::prelude::{Graph, OutputCache};
 
-use crate::core::func_lib::{SharedFuncLib, runtime_func_lib};
-use crate::core::io::cache::build_document_disk_cache;
+use crate::core::func_lib::{SharedFuncLib, runtime_codec_registry, runtime_func_lib};
+use crate::core::io::cache::prepare_document_cache_root;
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::worker::{ValueRequest, WorkerBridge, WorkerEvent};
@@ -33,9 +33,10 @@ impl Engine {
     /// both woken through `wake`.
     pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
         let func_lib = runtime_func_lib();
-        // Starts memory-only; the frontend points the worker at the active
-        // document's cache dir via `set_document_cache` once a path is known.
         let worker = WorkerBridge::new(wake.clone());
+        // Install the codec registry up front (memory-only until a document has a
+        // path); `set_document_cache` repoints the store root as documents open.
+        worker.set_output_cache(OutputCache::new(runtime_codec_registry(), None));
         let script = ScriptHost::start(script_cfg, func_lib.clone(), wake);
         Self {
             func_lib,
@@ -44,13 +45,14 @@ impl Engine {
         }
     }
 
-    /// Point the worker's disk cache at `doc_path`'s project-local store
-    /// (`<stem>.darkroom-cache/` beside the file), so `persist` nodes reload
-    /// across sessions. `None` (an unsaved document) is memory-only — nothing
-    /// is written until the document has a home on disk.
+    /// Point the content-addressed cache at `doc_path`'s project-local store
+    /// (`<stem>.darkroom-cache/` beside the file), so `persist` nodes reload across
+    /// sessions. `None` (an unsaved document) is memory-only. Explicit-path cache
+    /// nodes are unaffected — they always use their own path.
     pub(crate) fn set_document_cache(&self, doc_path: Option<&Path>) {
+        let root = doc_path.map(prepare_document_cache_root);
         self.worker
-            .set_disk_cache(doc_path.map(build_document_disk_cache));
+            .set_output_cache(OutputCache::new(runtime_codec_registry(), root));
     }
 
     /// Send `graph` to the worker for one evaluation (paired with the

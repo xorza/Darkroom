@@ -14,7 +14,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use scenarium::execution::{ArgumentValues, Error as ExecError};
 use scenarium::execution_stats::{ExecutionStats, RunProgress};
-use scenarium::prelude::{DiskCache, FuncLib, Graph, NodeId};
+use scenarium::prelude::{FuncLib, Graph, NodeId, OutputCache};
 use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
@@ -75,10 +75,11 @@ impl std::fmt::Debug for WorkerBridge {
 }
 
 impl WorkerBridge {
-    /// Spin up the worker on a fresh multi-thread runtime. Starts memory-only;
-    /// the host points it at a document's cache via [`Self::set_disk_cache`].
-    /// The callback runs on a worker thread: it forwards the result over `tx`
-    /// and asks the host to paint, so the next frame drains it.
+    /// Spin up the worker on a fresh multi-thread runtime. Starts memory-only; the
+    /// host installs the codec registry via [`Self::set_value_registry`] and points
+    /// it at a document's store via [`Self::set_disk_root`]. The callback runs on a
+    /// worker thread: it forwards the result over `tx` and asks the host to paint,
+    /// so the next frame drains it.
     pub(crate) fn new(wake: Wake) -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -90,7 +91,7 @@ impl WorkerBridge {
             let _guard = runtime.enter();
             let tx = tx.clone();
             let wake = wake.clone();
-            Worker::new(None, move |report| Self::deliver(&tx, &wake, report))
+            Worker::new(move |report| Self::deliver(&tx, &wake, report))
         };
         Self {
             runtime,
@@ -121,11 +122,11 @@ impl WorkerBridge {
         ]);
     }
 
-    /// Point the worker's engine at `cache` (or `None` for memory-only) for
-    /// the active document. Takes effect before the next run's compile. A
-    /// dropped send (worker already exited) is a harmless shutdown no-op.
-    pub(crate) fn set_disk_cache(&self, cache: Option<DiskCache>) {
-        let _ = self.worker.send(WorkerMessage::SetDiskCache(cache));
+    /// Swap the engine's output cache (codec registry + content-addressed store
+    /// root) — e.g. to repoint at the active document's store. Takes effect before
+    /// the next run's compile. A dropped send (worker exited) is a harmless no-op.
+    pub(crate) fn set_output_cache(&self, cache: OutputCache) {
+        let _ = self.worker.send(WorkerMessage::SetOutputCache(cache));
     }
 
     /// Request cancellation of the in-flight run. Coarse: the running node

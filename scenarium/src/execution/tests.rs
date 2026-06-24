@@ -75,8 +75,13 @@ mod cache_persistence {
     /// (simulating a reopen when called twice against the same dir). The default
     /// empty registry is fine — these tests cache plain values.
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
+        use crate::execution::output_cache::OutputCache;
+        use crate::value_codec::CustomValueRegistry;
         let mut engine = ExecutionEngine::default();
-        engine.set_disk_root(Some(dir.0.clone()));
+        engine.set_output_cache(OutputCache::new(
+            CustomValueRegistry::default(),
+            Some(dir.0.clone()),
+        ));
         engine
     }
 

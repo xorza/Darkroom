@@ -22,6 +22,7 @@ pub mod prelude {
     pub use crate::data::{CustomValue, DataType, DynamicValue, StaticValue, TypeId};
     pub use crate::execution::ExecutionEngine;
     pub use crate::execution::event::{EventRef, EventTrigger};
+    pub use crate::execution::output_cache::OutputCache;
     pub use crate::execution_stats::{
         ExecutedNodeStats, ExecutionStats, FlattenMap, LogEntry, LogLevel, NodeError, RunPhase,
         RunProgress,

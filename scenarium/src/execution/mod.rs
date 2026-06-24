@@ -22,12 +22,13 @@ use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use crate::prelude::FuncId;
 
+pub(crate) mod blob;
 pub(crate) mod cache;
 pub(crate) mod digest;
-pub(crate) mod disk_cache;
 pub(crate) mod event;
 pub(crate) mod executor;
 mod flatten;
+pub(crate) mod output_cache;
 pub(crate) mod plan;
 pub(crate) mod planner;
 pub(crate) mod program;
@@ -37,9 +38,9 @@ mod tests;
 pub(crate) mod validate;
 
 use cache::Cache;
-use disk_cache::{DiskCache, DiskCacheLayer};
 use event::EventRef;
 use executor::Executor;
+use output_cache::OutputCache;
 use plan::ExecutionPlan;
 use planner::Planner;
 use program::{ExecutionNode, ExecutionProgram};
@@ -89,8 +90,8 @@ pub struct RunSeeds {
 /// `flattener` (compile scratch) and its `flatten` map (flat↔authoring ids), the
 /// reusable `plan` buffer, the `planner` (scheduling scratch), the cross-run
 /// `cache` (per-node outputs + state), the `executor` (run loop + context), and
-/// the optional `disk` cache layer. Not serializable — the persistent form is the
-/// [`ExecutionProgram`] alone.
+/// the `output_cache` (file persistence). Not serializable — the persistent form
+/// is the [`ExecutionProgram`] alone.
 #[derive(Debug, Default)]
 pub struct ExecutionEngine {
     pub(crate) program: ExecutionProgram,
@@ -108,10 +109,12 @@ pub struct ExecutionEngine {
     planner: Planner,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
-    /// Disk-cache coordinator. Empty by default (memory-only); set/swapped via
-    /// [`Self::set_disk_cache`]. Hydrates `persist` outputs into the RAM cache at
-    /// `update` and persists fresh ones after a run.
-    disk: DiskCacheLayer,
+    /// Output cache: hydrates `persist` (content-addressed) and `CachePassthrough`
+    /// (explicit-path) node outputs into the RAM cache at `update`, and persists
+    /// fresh ones after a run. Holds the one codec registry and the optional disk
+    /// root; empty default is memory-only. Set via [`Self::set_disk_root`] /
+    /// [`Self::set_value_registry`].
+    output_cache: OutputCache,
 }
 
 impl ExecutionEngine {
@@ -138,14 +141,14 @@ impl ExecutionEngine {
         self.cache.reset_states();
     }
 
-    /// Swap the disk cache backing this engine (`None` = memory-only). At the
-    /// next `update`, a `persist` (Disk-marked) node's output is loaded from
-    /// `cache` on a digest hit (skipping recompute), and after a run its
-    /// freshly-computed `persist` outputs are stored. The in-RAM cache is keyed
-    /// by node id + digest, independent of the disk root, so swapping the root
-    /// keeps any warm in-memory outputs.
-    pub fn set_disk_cache(&mut self, cache: Option<DiskCache>) {
-        self.disk.set(cache);
+    /// Swap the [`OutputCache`] — the codec registry plus the optional
+    /// content-addressed store root. At the next `update`, `persist` (content-
+    /// addressed) and `CachePassthrough` (explicit-path) outputs hydrate from their
+    /// files on a hit (skipping recompute), and freshly-computed ones are stored
+    /// after a run. The RAM cache is keyed by node id + digest, independent of the
+    /// root, so swapping keeps any warm in-memory outputs.
+    pub fn set_output_cache(&mut self, cache: OutputCache) {
+        self.output_cache = cache;
     }
 
     // === Phase 1: compile ===
@@ -192,7 +195,9 @@ impl ExecutionEngine {
         // is that an external file change with no graph edit isn't noticed until
         // the next update/reopen.
         self.cache.recompute_digests(&self.program);
-        self.disk.load_into(&self.program, &mut self.cache);
+        // Hydrate cached outputs (content-addressed `persist` + explicit-path
+        // `CachePassthrough`) into the RAM cache, so the planner prunes their cones.
+        self.output_cache.load_into(&self.program, &mut self.cache);
         Ok(())
     }
 
@@ -226,13 +231,14 @@ impl ExecutionEngine {
             )
             .await;
 
-        // Phase 3b: persist freshly-computed `persist` outputs to disk. The
-        // snapshot is taken synchronously (the cache isn't `Sync`), then stored.
-        let pending = self
-            .disk
-            .pending_persists(&self.program, &self.plan, &self.cache);
-        self.disk
-            .store_pending(pending, &mut self.executor.ctx_manager)
+        // Phase 3b: persist freshly-computed cache outputs to their files.
+        self.output_cache
+            .store(
+                &self.program,
+                &self.plan,
+                &self.cache,
+                &mut self.executor.ctx_manager,
+            )
             .await;
 
         stats.triggered_events = seeds.events;

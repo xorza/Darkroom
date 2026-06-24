@@ -1557,7 +1557,7 @@ async fn drop_without_exit_shuts_down_cleanly() {
 /// The disk cache wires through both entry points and persists across worker
 /// restarts: a `persist` (Disk-marked) reproducible node's output, stored on a
 /// cold run, reloads on a fresh worker over the same store so its upstream never
-/// recomputes. The store root is set at runtime via a `SetDiskRoot` message in the
+/// recomputes. The cache is set at runtime via a `SetOutputCache` message in the
 /// same batch as `Update` — exercising that it's applied before the compile
 /// hydrates.
 #[tokio::test]
@@ -1565,8 +1565,10 @@ async fn disk_cache_persists_node_across_worker_restart() {
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
+    use crate::execution::output_cache::OutputCache;
     use crate::graph::CachePersistence;
     use crate::testing::{TestFuncHooks, test_func_lib};
+    use crate::value_codec::CustomValueRegistry;
 
     /// A unique temp dir removed on drop, so the test doesn't collide or leak.
     struct TempDir(std::path::PathBuf);
@@ -1622,11 +1624,12 @@ async fn disk_cache_persists_node_across_worker_restart() {
                 tx.try_send(result).ok();
             }
         });
-        // SetDiskRoot shares the batch with Update, proving it's applied before
+        // SetOutputCache shares the batch with Update, proving it's applied before
         // the compile hydrates.
+        let cache = OutputCache::new(CustomValueRegistry::default(), Some(root.to_path_buf()));
         worker
             .send_many([
-                WorkerMessage::SetDiskRoot(Some(root.to_path_buf())),
+                WorkerMessage::SetOutputCache(cache),
                 WorkerMessage::Update { graph, func_lib },
                 WorkerMessage::ExecuteTerminals,
             ])

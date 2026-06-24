@@ -10,8 +10,8 @@ use common::CancelToken;
 use common::PauseGate;
 use common::ReadyState;
 
-use crate::execution::disk_cache::DiskCache;
 use crate::execution::event::{EventRef, EventTrigger};
+use crate::execution::output_cache::OutputCache;
 use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result, RunSeeds};
 use crate::execution_stats::{ExecutionStats, RunProgress};
 use crate::function::FuncLib;
@@ -53,11 +53,10 @@ pub enum WorkerMessage {
         func_lib: Arc<FuncLib>,
     },
     Clear,
-    /// Swap the engine's disk cache (or drop it, with `None`, for memory-only).
-    /// Applied before any graph op in the same batch, so the next `Update`
-    /// hydrates `persist` outputs from the new store. Lets a host repoint the
-    /// cache when the active document changes (e.g. a per-project cache dir).
-    SetDiskCache(Option<DiskCache>),
+    /// Swap the engine's output cache (codec registry + content-addressed store
+    /// root). Applied before any graph op in the same batch, so the next `Update`
+    /// hydrates from the new config — e.g. repointing at a per-document store dir.
+    SetOutputCache(OutputCache),
     ExecuteTerminals,
     StartEventLoop,
     StopEventLoop,
@@ -95,14 +94,10 @@ pub struct Worker {
 }
 
 impl Worker {
-    /// Spin up a worker, optionally backed by a disk cache. When `disk_cache` is
-    /// `Some`, the engine hydrates `persist` (Disk-marked) node outputs from it at
-    /// `update` and stores fresh ones after each run; `None` is memory-only. The
-    /// cache can be repointed later via [`WorkerMessage::SetDiskCache`].
-    pub fn new<ExecutionCallback>(
-        disk_cache: Option<DiskCache>,
-        callback: ExecutionCallback,
-    ) -> Self
+    /// Spin up a worker. The engine starts memory-only; the host configures its
+    /// output cache via [`WorkerMessage::SetValueRegistry`] (once) and
+    /// [`WorkerMessage::SetDiskRoot`] (e.g. per active document).
+    pub fn new<ExecutionCallback>(callback: ExecutionCallback) -> Self
     where
         ExecutionCallback: Fn(WorkerReport) + Send + 'static,
     {
@@ -113,7 +108,7 @@ impl Worker {
             let event_loop_started = event_loop_started.clone();
             let cancel = cancel.clone();
             async move {
-                worker_loop(rx, callback, event_loop_started, cancel, disk_cache).await;
+                worker_loop(rx, callback, event_loop_started, cancel).await;
             }
         });
 
@@ -267,7 +262,7 @@ enum LoopCommand {
 /// | Slot                  | Variants that write it      | Rule          |
 /// | --------------------- | --------------------------- | ------------- |
 /// | `graph_state`         | Update, Clear               | last-write-wins |
-/// | `disk_cache`          | SetDiskCache                | last-write-wins, applied pre-graph-op |
+/// | `output_cache`        | SetOutputCache              | last-write-wins, applied pre-graph-op |
 /// | `loop_request`        | StartEventLoop, StopEventLoop | last-write-wins |
 /// | `execute_terminals`   | ExecuteTerminals            | idempotent flag |
 /// | `events`              | InjectEvents                | set union (dedup) |
@@ -277,9 +272,9 @@ enum LoopCommand {
 #[derive(Debug, Default)]
 struct BatchIntent {
     graph_state: Option<GraphOp>,
-    /// Outer `Option` = "was a `SetDiskCache` in this batch?"; the inner is the
-    /// new cache (or `None` for memory-only). Applied before `graph_state`.
-    disk_cache: Option<Option<DiskCache>>,
+    /// `Some` = a `SetOutputCache` was in this batch (the new cache). Applied
+    /// before `graph_state`, so a same-batch `Update` hydrates from it.
+    output_cache: Option<OutputCache>,
     loop_request: Option<LoopCommand>,
     execute_terminals: bool,
     exit: bool,
@@ -309,7 +304,7 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
                 intent.graph_state = Some(GraphOp::Replace(graph, func_lib));
             }
             WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
-            WorkerMessage::SetDiskCache(cache) => intent.disk_cache = Some(cache),
+            WorkerMessage::SetOutputCache(cache) => intent.output_cache = Some(cache),
             WorkerMessage::ExecuteTerminals => intent.execute_terminals = true,
             WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
             WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
@@ -329,12 +324,10 @@ async fn worker_loop<ExecutionCallback>(
     execution_callback: ExecutionCallback,
     event_loop_started: Arc<AtomicBool>,
     cancel: CancelToken,
-    disk_cache: Option<DiskCache>,
 ) where
     ExecutionCallback: Fn(WorkerReport) + Send + 'static,
 {
     let mut execution_engine = ExecutionEngine::default();
-    execution_engine.set_disk_cache(disk_cache);
 
     let mut cmd_batch: Vec<WorkerMessage> = Vec::new();
     let mut ev_buf: Vec<EventRef> = Vec::with_capacity(EVENT_LOOP_BACKPRESSURE);
@@ -400,10 +393,10 @@ async fn worker_loop<ExecutionCallback>(
             return;
         }
 
-        // Swap the disk cache before any graph op, so a same-batch `Update`
-        // hydrates `persist` outputs from the new store rather than the old.
-        if let Some(cache) = intent.disk_cache.take() {
-            execution_engine.set_disk_cache(cache);
+        // Swap the output cache before any graph op, so a same-batch `Update`
+        // hydrates from the new config rather than the old.
+        if let Some(cache) = intent.output_cache.take() {
+            execution_engine.set_output_cache(cache);
         }
 
         let update_ok = match intent.graph_state.take() {
