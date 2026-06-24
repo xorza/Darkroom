@@ -1750,72 +1750,53 @@ mod error_propagation {
 
         let stats = execution_graph.execute_terminals().await?;
 
-        // get_a fails with error, no outputs
-        let get_a = execution_graph.runtime_slot(execution_graph.by_name("get_a").unwrap());
-        assert!(get_a.error.is_some());
-        assert!(get_a.output_values.is_none());
+        // Errors are reported through the run stats (the per-run channel), not the
+        // cross-run cache; the cache only reflects which outputs survived.
+        let error_for = |name: &str| {
+            let id = execution_graph.by_name(name).unwrap().id;
+            stats.node_errors.iter().find(move |e| e.node_id == id)
+        };
+        let output_values = |name: &str| {
+            execution_graph
+                .runtime_slot(execution_graph.by_name(name).unwrap())
+                .output_values
+                .clone()
+        };
 
-        // get_b succeeds
-        let get_b = execution_graph.runtime_slot(execution_graph.by_name("get_b").unwrap());
-        assert!(get_b.error.is_none());
-        assert!(get_b.output_values.is_some());
+        // get_a fails with error, no outputs.
         assert!(
-            get_b.output_values.as_ref().unwrap()[0]
-                .as_f64()
+            error_for("get_a")
                 .unwrap()
-                .approximately_eq(42.0)
-        );
-
-        // sum depends on get_a, gets upstream error
-        let sum = execution_graph.runtime_slot(execution_graph.by_name("sum").unwrap());
-        assert!(sum.error.is_some());
-        assert!(sum.output_values.is_none());
-        assert!(
-            sum.error
-                .as_ref()
-                .unwrap()
-                .to_string()
-                .contains("upstream error")
-        );
-
-        // mult depends on sum, also gets upstream error
-        let mult = execution_graph.runtime_slot(execution_graph.by_name("mult").unwrap());
-        assert!(mult.error.is_some());
-        assert!(mult.output_values.is_none());
-        assert!(
-            mult.error
-                .as_ref()
-                .unwrap()
-                .to_string()
-                .contains("upstream error")
-        );
-
-        // print depends on mult, also gets upstream error
-        let print = execution_graph.runtime_slot(execution_graph.by_name("print").unwrap());
-        assert!(print.error.is_some());
-        assert!(print.output_values.is_none());
-
-        // Stats: 4 errors (get_a original + 3 upstream propagated)
-        assert_eq!(stats.node_errors.len(), 4);
-
-        let get_a_error = stats
-            .node_errors
-            .iter()
-            .find(|e| e.node_id == get_a.id)
-            .unwrap();
-        assert!(
-            get_a_error
                 .error
                 .to_string()
                 .contains("Intentional failure")
         );
+        assert!(output_values("get_a").is_none());
 
-        let sum_error = stats
-            .node_errors
-            .iter()
-            .find(|e| e.node_id == sum.id)
-            .unwrap();
-        assert!(sum_error.error.to_string().contains("upstream error"));
+        // get_b succeeds: no error, output present.
+        assert!(error_for("get_b").is_none());
+        let get_b_out = output_values("get_b").unwrap();
+        assert!(get_b_out[0].as_f64().unwrap().approximately_eq(42.0));
+
+        // sum depends on get_a, mult on sum, print on mult — each inherits the
+        // upstream error and drops its output.
+        for name in ["sum", "mult", "print"] {
+            assert!(
+                error_for(name)
+                    .unwrap_or_else(|| panic!("{name} should carry an upstream error"))
+                    .error
+                    .to_string()
+                    .contains("upstream error"),
+                "{name} should report an upstream error",
+            );
+            assert!(
+                output_values(name).is_none(),
+                "{name} should have no output"
+            );
+        }
+
+        // 4 errors total: get_a original + 3 upstream-propagated.
+        assert_eq!(stats.node_errors.len(), 4);
 
         Ok(())
     }

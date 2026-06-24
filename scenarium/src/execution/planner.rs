@@ -10,7 +10,7 @@ use hashbrown::HashSet;
 
 use crate::execution::event::EventRef;
 
-use crate::execution::executor::Executor;
+use crate::execution::cache::Cache;
 use crate::execution::plan::{ExecutionPlan, NodeFlags};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::{Error, Result};
@@ -52,13 +52,13 @@ pub(crate) struct Planner {
 }
 
 impl Planner {
-    /// Build the per-run schedule into `plan` from the program and the
-    /// executor's cache state (which nodes hold cached outputs, which are
-    /// disk-pinned). Errors only on a dependency cycle.
+    /// Build the per-run schedule into `plan` from the program and the cache
+    /// state (which nodes hold a valid cached output). Errors only on a
+    /// dependency cycle.
     pub(crate) fn plan(
         &mut self,
         program: &ExecutionProgram,
-        executor: &Executor,
+        cache: &Cache,
         terminals: bool,
         event_triggers: bool,
         events: &[EventRef],
@@ -70,7 +70,7 @@ impl Planner {
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
-            self.resolve_node_flags(program, executor, plan);
+            self.resolve_node_flags(program, cache, plan);
             self.walk_backward_collect_execute_order(program, plan);
             self.validate_for_execution(program, plan);
         }
@@ -199,7 +199,7 @@ impl Planner {
     fn resolve_node_flags(
         &self,
         program: &ExecutionProgram,
-        executor: &Executor,
+        cache: &Cache,
         plan: &mut ExecutionPlan,
     ) {
         // Debug-only: verify every Bind dep was already processed in this
@@ -214,15 +214,11 @@ impl Planner {
 
         for order_idx in 0..plan.process_order.len() {
             let e_node_idx = plan.process_order[order_idx];
-            let slot = &executor.slots[e_node_idx];
 
             // Cache hit: the slot holds a value produced under this node's current
             // digest (a disk-cached value was hydrated into the slot at update, so
             // this is a RAM check either way). `None` (impure cone) never matches.
-            let cached = match slot.current_digest {
-                Some(d) => slot.output_values.is_some() && slot.output_digest == Some(d),
-                None => false,
-            };
+            let cached = cache.is_hit(e_node_idx);
 
             if cached {
                 plan.node_flags[e_node_idx] = NodeFlags {

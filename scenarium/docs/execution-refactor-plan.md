@@ -66,20 +66,27 @@ Mechanical, no behavior change. Removes the `execution ↔ worker` cycle.
 - `lib.rs` prelude re-exports them (they appear in the public `ExecutionStats`
   and `active_event_triggers` surface).
 
-### Stage 2 — introduce a `Cache` type owning the slots (issues A, B, E)
+### Stage 2 — introduce a `Cache` type owning the slots (issues A, B, E) ✅ done
 
 The central change.
 
-- New `execution/cache.rs` owning `Vec<RuntimeSlot-cache-part>` (cross-run only:
-  `state`, `event_state`, `output_values`, `current_digest`, `output_digest`).
-- Intent-revealing API: `set_current_digest`, `is_hit(idx) -> bool` (the single
-  cache-hit definition), `hydrate(idx, values, digest)`, `store_output(...)`,
-  `reconcile(e_nodes)`, `reset_states`.
-- `Planner::plan` takes `&Cache` instead of `&Executor` (cuts issue B).
-- Move per-run results (`error`, `run_time`) out of the slot into a transient
-  run-state column owned by `run()`.
-- Fold the duplicated cache-hit predicate (planner + engine `load_disk_cache`)
-  into `Cache::is_hit`.
+- New `execution/cache.rs` owns `Cache { slots: KeyIndexVec<NodeId, RuntimeSlot> }`.
+  `RuntimeSlot` moved here from `executor.rs` and slimmed to cross-run state only:
+  `state`, `event_state`, `output_values`, `current_digest`, `output_digest`.
+- Intent-revealing API: `reconcile`, `reset_states`, `set_current_digest`,
+  `current_digest`, `output_values`, `is_hit(idx) -> bool` (the single cache-hit
+  definition), `hydrate(idx, values, digest)`.
+- `Planner::plan` now takes `&Cache` instead of `&Executor` — issue B resolved.
+  `planner` no longer imports `executor`.
+- Per-run results (`error`, `run_time`) moved out of the slot into local columns
+  owned by `Executor::run` (reused as scratch across runs). `Executor` now owns
+  only `ctx_manager` + invoke/result scratch.
+- The cache-hit predicate (was duplicated in planner + engine `load_disk_cache`)
+  is now `Cache::is_hit` alone.
+- `node_error_propagates_to_dependents` rewritten to read errors from
+  `stats.node_errors` (the per-run channel) rather than the slot.
+- New colocated unit tests in `cache.rs` for `is_hit` (full truth table) and
+  `hydrate`. Full suite: 174 passing.
 
 ### Stage 3 — slim `ExecutionEngine` (issue D)
 

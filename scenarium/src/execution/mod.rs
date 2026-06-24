@@ -7,8 +7,9 @@
 //! 3. **execute** — the [`Executor`](executor::Executor) runs the plan,
 //!    invoking each scheduled node and updating its runtime cache.
 //!
-//! [`ExecutionEngine`] owns all four pieces (program, plan, planner, executor)
-//! and exposes `update` (phase 1) and `execute*` (phases 2–3, run back-to-back).
+//! [`ExecutionEngine`] owns every piece (program, plan, planner, the cross-run
+//! cache, and executor) and exposes `update` (phase 1) and `execute` (phases
+//! 2–3, run back-to-back).
 
 use common::CancelToken;
 use common::is_debug;
@@ -23,11 +24,8 @@ use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use crate::prelude::FuncId;
 
-// Content digests for node outputs — the cache key. Recomputed every `update`
-// and consumed by the planner/executor (RAM cache) and the disk cache below.
+pub(crate) mod cache;
 pub(crate) mod digest;
-// Content-addressed on-disk output cache. Active only once a caller wires a
-// `DiskCache` via `set_disk_cache` (today: tests); the RAM cache runs regardless.
 pub(crate) mod disk_cache;
 pub(crate) mod event;
 pub(crate) mod executor;
@@ -38,6 +36,7 @@ pub(crate) mod program;
 #[cfg(test)]
 mod tests;
 
+use cache::Cache;
 use digest::{Digest, DigestEngine};
 use disk_cache::DiskCache;
 use event::{EventRef, EventTrigger};
@@ -89,8 +88,9 @@ impl OutputUsage {
 
 /// The three-phase pipeline container. Owns the compiled `program`, the
 /// `flattener` (compile scratch), the reusable `plan` buffer, the `planner`
-/// (scheduling scratch), and the `executor` (runtime cache + context). Not
-/// serializable — the persistent form is the [`ExecutionProgram`] alone.
+/// (scheduling scratch), the cross-run `cache` (per-node outputs + state), and
+/// the `executor` (run loop + context). Not serializable — the persistent form
+/// is the [`ExecutionProgram`] alone.
 #[derive(Debug, Default)]
 pub struct ExecutionEngine {
     pub(crate) program: ExecutionProgram,
@@ -101,6 +101,9 @@ pub struct ExecutionEngine {
     /// so the editor can project stats onto its nodes. Compile scratch,
     /// not part of the serialized program.
     flatten: FlattenMap,
+    /// Per-node cross-run cache (output values, digests, node state), reconciled
+    /// to the node set at each `update`.
+    cache: Cache,
     executor: Executor,
     planner: Planner,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
@@ -126,11 +129,11 @@ impl ExecutionEngine {
     pub fn clear(&mut self) {
         self.program.clear();
         self.plan.clear();
-        self.executor.slots.clear();
+        self.cache.clear();
     }
 
     pub fn reset_states(&mut self) {
-        self.executor.reset_states();
+        self.cache.reset_states();
     }
 
     /// Enable disk-backed output caching: at `update` a `persist` node's output is
@@ -177,7 +180,7 @@ impl ExecutionEngine {
 
         // Realign the runtime cache to the rebuilt node set (preserve by id,
         // default new, trim gone).
-        self.executor.reconcile(&self.program.e_nodes);
+        self.cache.reconcile(&self.program.e_nodes);
 
         self.validate_built(func_lib);
 
@@ -211,7 +214,7 @@ impl ExecutionEngine {
         // recomputed at `update` time and persist across re-executes).
         self.planner.plan(
             &self.program,
-            &self.executor,
+            &self.cache,
             terminals,
             event_triggers,
             &events,
@@ -221,7 +224,14 @@ impl ExecutionEngine {
         // Phase 3: run the schedule.
         let mut stats = self
             .executor
-            .run(&self.program, &self.plan, &self.flatten, progress, cancel)
+            .run(
+                &self.program,
+                &self.plan,
+                &mut self.cache,
+                &self.flatten,
+                progress,
+                cancel,
+            )
             .await;
 
         // Phase 3b: persist freshly-computed `persist` outputs to disk.
@@ -244,7 +254,7 @@ impl ExecutionEngine {
     fn recompute_digests(&mut self) {
         let mut engine = DigestEngine::with_fs(&self.program);
         for idx in 0..self.program.e_nodes.len() {
-            self.executor.slots[idx].current_digest = engine.node_digest(idx);
+            self.cache.set_current_digest(idx, engine.node_digest(idx));
         }
     }
 
@@ -260,17 +270,14 @@ impl ExecutionEngine {
             if !self.program.e_nodes[idx].persist {
                 continue;
             }
-            let slot = &self.executor.slots[idx];
-            let Some(digest) = slot.current_digest else {
+            let Some(digest) = self.cache.current_digest(idx) else {
                 continue;
             };
-            if slot.output_values.is_some() && slot.output_digest == Some(digest) {
+            if self.cache.is_hit(idx) {
                 continue; // RAM already holds it for this digest.
             }
             if let Some(values) = disk.load(&digest) {
-                let slot = &mut self.executor.slots[idx];
-                slot.output_values = Some(values);
-                slot.output_digest = Some(digest);
+                self.cache.hydrate(idx, values, digest);
             }
         }
     }
@@ -283,19 +290,18 @@ impl ExecutionEngine {
         if self.disk_cache.is_none() {
             return;
         }
-        // Collect first so the executor's borrows are released before the async
-        // stores (which need it mutably). The clone is cheap — custom values are
-        // `Arc`.
+        // Collect first so the cache borrow is released before the async stores
+        // (which need `ctx_manager` mutably). The clone is cheap — custom values
+        // are `Arc`.
         let mut pending: Vec<(Digest, Vec<DynamicValue>)> = Vec::new();
         for &idx in &self.plan.execute_order {
             if !self.program.e_nodes[idx].persist {
                 continue;
             }
-            let slot = &self.executor.slots[idx];
-            let Some(digest) = slot.current_digest else {
+            let Some(digest) = self.cache.current_digest(idx) else {
                 continue;
             };
-            if let Some(outputs) = slot.output_values.as_ref() {
+            if let Some(outputs) = self.cache.output_values(idx) {
                 pending.push((digest, outputs.clone()));
             }
         }
@@ -322,17 +328,17 @@ impl ExecutionEngine {
             .map(|input| match &input.binding {
                 ExecutionBinding::None => None,
                 ExecutionBinding::Const(v) => Some(DynamicValue::from(v)),
-                ExecutionBinding::Bind(addr) => self.executor.slots[addr.target_idx]
-                    .output_values
-                    .as_ref()
+                ExecutionBinding::Bind(addr) => self
+                    .cache
+                    .output_values(addr.target_idx)
                     .and_then(|o| o.get(addr.port_idx))
                     .cloned(),
             })
             .collect();
 
-        let outputs = self.executor.slots[idx]
-            .output_values
-            .as_ref()
+        let outputs = self
+            .cache
+            .output_values(idx)
             .map(|o| o.to_vec())
             .unwrap_or_default();
 
@@ -375,7 +381,7 @@ impl ExecutionEngine {
             .flat_map(|node_id| {
                 let e_node = self.by_id(&node_id).unwrap();
                 let event_state = self
-                    .executor
+                    .cache
                     .slots
                     .by_key(&node_id)
                     .unwrap()
@@ -410,13 +416,13 @@ impl ExecutionEngine {
         }
 
         // Runtime slots stay index-aligned to nodes after `reconcile`.
-        assert_eq!(self.executor.slots.len(), self.program.e_nodes.len());
+        assert_eq!(self.cache.slots.len(), self.program.e_nodes.len());
 
         let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.program.e_nodes.len());
         for (idx, e_node) in self.program.e_nodes.iter().enumerate() {
             assert!(seen_node_ids.insert(e_node.id));
 
-            let slot = &self.executor.slots[idx];
+            let slot = &self.cache.slots[idx];
             assert_eq!(slot.id, e_node.id);
             if let Some(output_values) = slot.output_values.as_ref() {
                 assert_eq!(output_values.len(), e_node.outputs.len as usize);
@@ -467,7 +473,7 @@ impl ExecutionEngine {
     ) -> Result<()> {
         self.planner.plan(
             &self.program,
-            &self.executor,
+            &self.cache,
             terminals,
             event_triggers,
             events,
@@ -499,13 +505,13 @@ impl ExecutionEngine {
         &self.plan.output_usage[e_node.outputs.range()]
     }
 
-    pub(crate) fn runtime_slot(&self, e_node: &ExecutionNode) -> &executor::RuntimeSlot {
-        self.executor.slots.by_key(&e_node.id).unwrap()
+    pub(crate) fn runtime_slot(&self, e_node: &ExecutionNode) -> &cache::RuntimeSlot {
+        self.cache.slots.by_key(&e_node.id).unwrap()
     }
 
     /// Iterator over runtime slots, index-aligned to `e_nodes`.
-    pub(crate) fn runtime_slots(&self) -> std::slice::Iter<'_, executor::RuntimeSlot> {
-        self.executor.slots.iter()
+    pub(crate) fn runtime_slots(&self) -> std::slice::Iter<'_, cache::RuntimeSlot> {
+        self.cache.slots.iter()
     }
 
     /// Seed a node's cached output (simulating a prior run): set the value and
@@ -516,7 +522,7 @@ impl ExecutionEngine {
             .e_nodes
             .index_of_key(&self.by_name(node_name).unwrap().id);
         let idx = idx.unwrap();
-        let slot = &mut self.executor.slots[idx];
+        let slot = &mut self.cache.slots[idx];
         slot.output_values = Some(values);
         slot.output_digest = slot.current_digest;
     }
