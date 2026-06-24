@@ -305,10 +305,7 @@ fn collect_execution_stats(
             // stored column.
             for (i, pool_idx) in e.inputs.range().enumerate() {
                 if input_missing(&program.inputs[pool_idx], &plan.node_flags) {
-                    missing_inputs.push(InputPort {
-                        node_id: e.id,
-                        port_idx: i,
-                    });
+                    missing_inputs.push(InputPort::new(e.id, i));
                 }
             }
         }

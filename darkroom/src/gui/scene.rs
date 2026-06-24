@@ -430,32 +430,19 @@ fn default_static_value(input: &FuncInput) -> Option<StaticValue> {
 /// def output it mirrors — name + type carry over; it's not user-set, so
 /// it has no declared default and no value options.
 fn boundary_input(output: &FuncOutput) -> FuncInput {
-    FuncInput {
-        name: output.name.clone(),
-        required: false,
-        data_type: output.data_type.clone(),
-        const_only: false,
-        default_value: None,
-        value_variants: Vec::new(),
-    }
+    FuncInput::optional(output.name.clone(), output.data_type.clone())
 }
 
 /// Synthesize a `FuncOutput` for a `SubgraphInput`'s output port from the
 /// def input it mirrors — name + type carry over.
 fn boundary_output(input: &FuncInput) -> FuncOutput {
-    FuncOutput {
-        name: input.name.clone(),
-        data_type: input.data_type.clone(),
-    }
+    FuncOutput::new(input.name.clone(), input.data_type.clone())
 }
 
 /// The trailing "connect here to add a port" placeholder output on the
 /// `SubgraphInput` boundary node: untyped until something connects.
 fn placeholder_output() -> FuncOutput {
-    FuncOutput {
-        name: PLACEHOLDER_PORT.to_string(),
-        data_type: DataType::default(),
-    }
+    FuncOutput::new(PLACEHOLDER_PORT, DataType::default())
 }
 
 /// Label for the trailing "connect here to add a port" placeholder on a
@@ -466,14 +453,7 @@ const PLACEHOLDER_PORT: &str = "+";
 /// until something connects (at which point reconcile materializes a real
 /// `def.outputs` entry from the wired producer's type).
 fn placeholder_input() -> FuncInput {
-    FuncInput {
-        name: PLACEHOLDER_PORT.to_string(),
-        required: false,
-        data_type: DataType::default(),
-        const_only: false,
-        default_value: None,
-        value_variants: Vec::new(),
-    }
+    FuncInput::optional(PLACEHOLDER_PORT, DataType::default())
 }
 
 fn extend_pool<T>(pool: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Span {
@@ -489,14 +469,7 @@ mod tests {
     use scenarium::prelude::{InputPort, Node, SubgraphDef};
 
     fn finput(name: &str, ty: DataType) -> FuncInput {
-        FuncInput {
-            name: name.into(),
-            required: false,
-            data_type: ty,
-            const_only: false,
-            default_value: None,
-            value_variants: Vec::new(),
-        }
+        FuncInput::optional(name, ty)
     }
 
     /// `def`: inputs A:Int, B:Float → outputs Sum:Int. Interior wires the
@@ -513,19 +486,11 @@ mod tests {
         inner.add(out_node);
         inner.set_input_binding(InputPort::new(out_id, 0), (in_id, 0).into());
 
-        let def = SubgraphDef {
-            id: "00000000-0000-0000-0000-000000000000".into(),
-            name: "Adder".into(),
-            category: "Subgraph".into(),
-            graph: inner,
-            inputs: vec![finput("A", DataType::Int), finput("B", DataType::Float)],
-            outputs: vec![FuncOutput {
-                name: "Sum".into(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-            origin: None,
-        };
+        let def = SubgraphDef::new("00000000-0000-0000-0000-000000000000", "Adder")
+            .category("Subgraph")
+            .graph(inner)
+            .inputs([finput("A", DataType::Int), finput("B", DataType::Float)])
+            .output(FuncOutput::new("Sum", DataType::Int));
         (def, in_id, out_id)
     }
 

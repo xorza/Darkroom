@@ -506,10 +506,7 @@ impl<'a> Run<'a> {
                 else {
                     return Source::None;
                 };
-                let binding = def.graph.input_binding(InputPort {
-                    node_id: so.id,
-                    port_idx,
-                });
+                let binding = def.graph.input_binding(InputPort::new(so.id, port_idx));
                 self.push_level(node_id);
                 let source = self.resolve_binding(&binding);
                 self.path.pop();
@@ -519,10 +516,9 @@ impl<'a> Run<'a> {
             // instance's exposed input `port_idx`; resolve it one level up.
             NodeKind::SubgraphInput => {
                 let instance_id = self.path.pop().expect("SubgraphInput at the root level");
-                let binding = self.current().input_binding(InputPort {
-                    node_id: instance_id,
-                    port_idx,
-                });
+                let binding = self
+                    .current()
+                    .input_binding(InputPort::new(instance_id, port_idx));
                 let source = self.resolve_binding(&binding);
                 self.path.push(instance_id);
                 source

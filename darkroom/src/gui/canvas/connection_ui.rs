@@ -4,7 +4,7 @@ use palantir::{
     Ui,
 };
 use scenarium::data::DataType;
-use scenarium::graph::{Binding, InputPort, OutputPort};
+use scenarium::graph::{Binding, InputPort};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
@@ -303,10 +303,12 @@ impl ConnectionUI {
                 .is_some_and(|b| b.intersects_cubic(p0, p1, p2, p3));
             if broken {
                 // unwrap: `broken == true` implies `state` is `Some`.
-                probe.state.as_deref_mut().unwrap().broken.push(InputPort {
-                    node_id: c.tgt_node,
-                    port_idx: c.tgt_port,
-                });
+                probe
+                    .state
+                    .as_deref_mut()
+                    .unwrap()
+                    .broken
+                    .push(InputPort::new(c.tgt_node, c.tgt_port));
             }
             // Gradient from output (p0) → input (p3) port color so each
             // end of a connection visually matches the port it touches —
@@ -535,10 +537,7 @@ fn commit_connection(start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
     out.push(Intent::SetInput {
         node_id: input.node_id,
         input_idx: input.port_idx,
-        to: Binding::Bind(OutputPort {
-            node_id: output.node_id,
-            port_idx: output.port_idx,
-        }),
+        to: Binding::bind(output.node_id, output.port_idx),
     });
 }
 

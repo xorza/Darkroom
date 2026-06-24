@@ -24,6 +24,12 @@ pub struct OutputPort {
     pub port_idx: usize,
 }
 
+impl OutputPort {
+    pub fn new(node_id: NodeId, port_idx: usize) -> Self {
+        Self { node_id, port_idx }
+    }
+}
+
 /// Address of a consumer node's input port. Keys a node's data binding in
 /// `Graph.bindings`, and reports unsatisfied inputs
 /// (`ExecutionStats::missing_inputs`) / edges the editor's breaker severs.
@@ -284,7 +290,7 @@ impl Graph {
         (0..arity).map(move |port_idx| {
             (
                 port_idx,
-                self.input_binding(InputPort { node_id, port_idx }),
+                self.input_binding(InputPort::new(node_id, port_idx)),
             )
         })
     }
@@ -310,15 +316,9 @@ impl Graph {
             .bindings
             .iter()
             .map(|(port, binding)| {
-                let port = InputPort {
-                    node_id: remap(port.node_id),
-                    port_idx: port.port_idx,
-                };
+                let port = InputPort::new(remap(port.node_id), port.port_idx);
                 let binding = match binding {
-                    Binding::Bind(op) => Binding::Bind(OutputPort {
-                        node_id: remap(op.node_id),
-                        port_idx: op.port_idx,
-                    }),
+                    Binding::Bind(op) => Binding::bind(remap(op.node_id), op.port_idx),
                     other => other.clone(),
                 };
                 (port, binding)
@@ -776,7 +776,7 @@ impl Graph {
         for (port_idx, func_input) in func.inputs.iter().enumerate() {
             if let Some(default) = &func_input.default_value {
                 self.set_input_binding(
-                    InputPort { node_id, port_idx },
+                    InputPort::new(node_id, port_idx),
                     Binding::Const(default.clone()),
                 );
             }
@@ -793,7 +793,7 @@ impl Graph {
         for (port_idx, io) in def.inputs.iter().enumerate() {
             if let Some(default) = &io.default_value {
                 self.set_input_binding(
-                    InputPort { node_id, port_idx },
+                    InputPort::new(node_id, port_idx),
                     Binding::Const(default.clone()),
                 );
             }
@@ -848,6 +848,11 @@ impl From<&Func> for Node {
 }
 
 impl Binding {
+    /// A data binding wired to producer `node_id`'s output port `port_idx`.
+    pub fn bind(node_id: NodeId, port_idx: usize) -> Self {
+        Binding::Bind(OutputPort::new(node_id, port_idx))
+    }
+
     pub fn as_output_binding(&self) -> Option<&OutputPort> {
         match self {
             Binding::Bind(output_binding) => Some(output_binding),
@@ -878,10 +883,7 @@ impl From<OutputPort> for Binding {
 
 impl From<(NodeId, usize)> for Binding {
     fn from((output_node_id, output_idx): (NodeId, usize)) -> Self {
-        Binding::Bind(OutputPort {
-            node_id: output_node_id,
-            port_idx: output_idx,
-        })
+        Binding::bind(output_node_id, output_idx)
     }
 }
 
@@ -900,7 +902,7 @@ impl From<i64> for Binding {
 #[cfg(test)]
 mod tests {
     use crate::data::DataType;
-    use crate::function::{Func, FuncInput};
+    use crate::function::{Func, FuncId, FuncInput};
     use crate::graph::{
         Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort,
         Subscription,
@@ -988,13 +990,7 @@ mod tests {
             let mut graph = Graph::default();
             let producer = graph.add_func_node(&func);
             let consumer = graph.add_func_node(&func);
-            graph.set_input_binding(
-                InputPort::new(consumer, 0),
-                Binding::Bind(OutputPort {
-                    node_id: producer,
-                    port_idx: 0,
-                }),
-            );
+            graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
             graph.check_with(&func_lib)
         };
 
@@ -1071,10 +1067,7 @@ mod tests {
 
     #[test]
     fn binding_accessors() {
-        let out = OutputPort {
-            node_id: NodeId::unique(),
-            port_idx: 2,
-        };
+        let out = OutputPort::new(NodeId::unique(), 2);
         let bind = Binding::Bind(out);
         assert_eq!(bind.as_output_binding(), Some(&out));
         assert!(bind.is_some());
@@ -1094,11 +1087,7 @@ mod tests {
     #[test]
     fn binding_conversions() {
         let nid = NodeId::unique();
-        let from_port: Binding = OutputPort {
-            node_id: nid,
-            port_idx: 1,
-        }
-        .into();
+        let from_port: Binding = OutputPort::new(nid, 1).into();
         let from_tuple: Binding = (nid, 1usize).into();
         assert_eq!(from_port, from_tuple);
         assert_eq!(from_port.as_output_binding().unwrap().port_idx, 1);
@@ -1120,20 +1109,8 @@ mod tests {
         assert_eq!(
             bindings,
             vec![
-                (
-                    0,
-                    Binding::Bind(OutputPort {
-                        node_id: get_a_id,
-                        port_idx: 0
-                    })
-                ),
-                (
-                    1,
-                    Binding::Bind(OutputPort {
-                        node_id: get_b_id,
-                        port_idx: 0
-                    })
-                ),
+                (0, Binding::bind(get_a_id, 0)),
+                (1, Binding::bind(get_b_id, 0)),
                 (2, Binding::None),
             ]
         );
@@ -1232,18 +1209,8 @@ mod tests {
     // === Construction helpers seed default const bindings ===
 
     fn func_with_default(default: i64) -> Func {
-        Func {
-            name: "withdefault".into(),
-            inputs: vec![FuncInput {
-                name: "x".into(),
-                required: false,
-                data_type: DataType::Int,
-                const_only: false,
-                default_value: Some(default.into()),
-                value_variants: vec![],
-            }],
-            ..Default::default()
-        }
+        Func::new(FuncId::unique(), "withdefault")
+            .input(FuncInput::optional("x", DataType::Int).default(default))
     }
 
     #[test]
@@ -1272,27 +1239,13 @@ mod tests {
 
     #[test]
     fn add_subgraph_node_seeds_default_const_binding() {
-        let mut input = FuncInput {
-            name: "A".into(),
-            required: false,
-            data_type: DataType::Int,
-            const_only: false,
-            default_value: Some(3i64.into()),
-            value_variants: vec![],
-        };
-        let def = SubgraphDef {
-            id: SubgraphId::unique(),
-            name: "Def".into(),
-            category: "Test".into(),
-            graph: Graph::default(),
-            inputs: vec![input.clone(), {
+        let mut input = FuncInput::optional("A", DataType::Int).default(3i64);
+        let def = SubgraphDef::new(SubgraphId::unique(), "Def")
+            .category("Test")
+            .inputs([input.clone(), {
                 input.default_value = None;
                 input
-            }],
-            outputs: vec![],
-            events: vec![],
-            origin: None,
-        };
+            }]);
 
         let mut graph = Graph::default();
         let id = graph.add_subgraph_node(&def, SubgraphRef::Local(def.id));
@@ -1312,29 +1265,13 @@ mod tests {
         let mut func_lib = test_func_lib(TestFuncHooks::default());
 
         let linked_id = SubgraphId::unique();
-        func_lib.add_subgraph(SubgraphDef {
-            id: linked_id,
-            name: "Linked".into(),
-            category: "Test".into(),
-            graph: Graph::default(),
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![],
-            origin: None,
-        });
+        func_lib.add_subgraph(SubgraphDef::new(linked_id, "Linked").category("Test"));
 
         let mut graph = Graph::default();
         let local_id = SubgraphId::unique();
-        graph.subgraphs.add(SubgraphDef {
-            id: local_id,
-            name: "Local".into(),
-            category: "Test".into(),
-            graph: Graph::default(),
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![],
-            origin: None,
-        });
+        graph
+            .subgraphs
+            .add(SubgraphDef::new(local_id, "Local").category("Test"));
 
         assert_eq!(
             graph

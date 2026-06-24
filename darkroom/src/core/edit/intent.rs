@@ -30,7 +30,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
 use scenarium::graph::{
-    Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort, Subscription,
+    Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, Subscription,
 };
 use scenarium::prelude::{SubgraphDef, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
@@ -630,10 +630,7 @@ pub fn build_duplicate_intent_for(
             }
             let new_binding = match binding {
                 Binding::Bind(src) => match id_map.get(&src.node_id) {
-                    Some(&new_src) => Binding::Bind(OutputPort {
-                        node_id: new_src,
-                        port_idx: src.port_idx,
-                    }),
+                    Some(&new_src) => Binding::bind(new_src, src.port_idx),
                     None if include_incoming => Binding::Bind(src),
                     None => continue,
                 },

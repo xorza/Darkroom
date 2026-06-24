@@ -440,23 +440,16 @@ mod tests {
     }
 
     fn def(name: &str, origin: Option<SubgraphId>) -> SubgraphDef {
-        SubgraphDef {
-            id: SubgraphId::unique(),
-            name: name.into(),
-            origin,
-            ..Default::default()
-        }
+        let mut def = SubgraphDef::new(SubgraphId::unique(), name);
+        def.origin = origin;
+        def
     }
 
     #[test]
     fn publish_updates_linked_library_def_in_place() {
         let lib_id = SubgraphId::unique();
         let mut func_lib = FuncLib::default();
-        func_lib.add_subgraph(SubgraphDef {
-            id: lib_id,
-            name: "Old".into(),
-            ..Default::default()
-        });
+        func_lib.add_subgraph(SubgraphDef::new(lib_id, "Old"));
         let func_lib = ArcSwap::from_pointee(func_lib);
 
         // Local copy linked to that library def, with diverged content.

@@ -422,29 +422,13 @@ fn history_bounded_by_byte_budget() {
 fn doc_with_def() -> (Document, GraphRef) {
     use scenarium::data::DataType;
     use scenarium::function::{FuncInput, FuncOutput};
-    use scenarium::prelude::{Graph, SubgraphDef};
+    use scenarium::prelude::SubgraphDef;
 
     let mut doc: Document = test_graph().into();
-    let def = SubgraphDef {
-        id: "00000000-0000-0000-0000-0000000000bb".into(),
-        name: "S".into(),
-        category: "Subgraph".into(),
-        graph: Graph::default(),
-        inputs: vec![FuncInput {
-            name: "A".into(),
-            required: false,
-            data_type: DataType::Int,
-            const_only: false,
-            default_value: None,
-            value_variants: Vec::new(),
-        }],
-        outputs: vec![FuncOutput {
-            name: "R".into(),
-            data_type: DataType::Int,
-        }],
-        events: vec![],
-        origin: None,
-    };
+    let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000bb", "S")
+        .category("Subgraph")
+        .input(FuncInput::optional("A", DataType::Int))
+        .output(FuncOutput::new("R", DataType::Int));
     let id = def.id;
     doc.graph.subgraphs.add(def);
     (doc, GraphRef::Local(id))
@@ -548,27 +532,13 @@ fn rename_undo_survives_interface_compaction() {
     use crate::core::edit::intent::revert_step;
     use scenarium::data::DataType;
     use scenarium::function::FuncInput;
-    use scenarium::prelude::{Graph, SubgraphDef};
+    use scenarium::prelude::SubgraphDef;
 
-    let finput = |n: &str| FuncInput {
-        name: n.into(),
-        required: false,
-        data_type: DataType::Int,
-        const_only: false,
-        default_value: None,
-        value_variants: Vec::new(),
-    };
+    let finput = |n: &str| FuncInput::optional(n, DataType::Int);
     let mut doc: Document = test_graph().into();
-    let def = SubgraphDef {
-        id: "00000000-0000-0000-0000-0000000000cc".into(),
-        name: "S".into(),
-        category: "Subgraph".into(),
-        graph: Graph::default(),
-        inputs: vec![finput("A"), finput("B")],
-        outputs: vec![],
-        events: vec![],
-        origin: None,
-    };
+    let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000cc", "S")
+        .category("Subgraph")
+        .inputs([finput("A"), finput("B")]);
     let def_id = def.id;
     doc.graph.subgraphs.add(def);
     let target = GraphRef::Local(def_id);

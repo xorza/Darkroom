@@ -421,16 +421,11 @@ impl Document {
         let (input_id, output_id) = (input.id, output.id);
         graph.add(input);
         graph.add(output);
-        let def = SubgraphDef {
-            id: SubgraphId::unique(),
-            name: format!("subgraph {}", self.graph.subgraphs.len() + 1),
-            category: String::new(),
-            graph,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            events: Vec::new(),
-            origin: None,
-        };
+        let def = SubgraphDef::new(
+            SubgraphId::unique(),
+            format!("subgraph {}", self.graph.subgraphs.len() + 1),
+        )
+        .graph(graph);
         let id = def.id;
         // Drop an instance of the new subgraph into the root graph,
         // staggered so repeated creates don't perfectly overlap. Built
@@ -597,11 +592,7 @@ mod tests {
 
     /// A childless local def with the given id/name.
     fn leaf_def(id: SubgraphId, name: &str) -> SubgraphDef {
-        SubgraphDef {
-            id,
-            name: name.into(),
-            ..Default::default()
-        }
+        SubgraphDef::new(id, name)
     }
 
     #[test]
@@ -614,12 +605,7 @@ mod tests {
         let mut interior = CoreGraph::default();
         interior.subgraphs.add(leaf_def(child_id, "child"));
         interior.add(Node::new(NodeKind::Subgraph(SubgraphRef::Local(child_id))));
-        let parent = SubgraphDef {
-            id: parent_id,
-            name: "parent".into(),
-            graph: interior,
-            ..Default::default()
-        };
+        let parent = SubgraphDef::new(parent_id, "parent").graph(interior);
 
         let mut doc = Document::default();
         let new_id = doc.import_subgraph(parent);

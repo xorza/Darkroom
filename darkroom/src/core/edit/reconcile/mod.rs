@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use scenarium::data::DataType;
 use scenarium::function::{FuncInput, FuncOutput};
-use scenarium::graph::{Binding, Graph, InputPort, NodeKind, OutputPort};
+use scenarium::graph::{Binding, Graph, InputPort, NodeKind};
 use scenarium::prelude::{FuncLib, NodeId, SubgraphDef, SubgraphId};
 
 use crate::core::document::{Document, GraphRef};
@@ -151,7 +151,7 @@ fn plan_outputs(def: &SubgraphDef, func_lib: &FuncLib) -> Option<SidePlan<FuncOu
             Some(existing) => existing.name.clone(),
             None => format!("output{new_idx}"),
         };
-        interface.push(FuncOutput { name, data_type });
+        interface.push(FuncOutput::new(name, data_type));
     }
     let changed = interface != def.outputs || remap.iter().any(|(o, n)| o != n);
     Some(SidePlan {
@@ -174,13 +174,7 @@ fn remap_source_edges(graph: &mut Graph, node: NodeId, remap: &HashMap<usize, us
         .collect();
     for (tgt, old) in edges {
         match remap.get(&old) {
-            Some(&new) if new != old => graph.set_input_binding(
-                tgt,
-                Binding::Bind(OutputPort {
-                    node_id: node,
-                    port_idx: new,
-                }),
-            ),
+            Some(&new) if new != old => graph.set_input_binding(tgt, Binding::bind(node, new)),
             Some(_) => {}
             None => graph.set_input_binding(tgt, Binding::None),
         }
@@ -202,23 +196,11 @@ fn remap_target_bindings(graph: &mut Graph, node: NodeId, remap: &HashMap<usize,
         return;
     }
     for (old, _) in &current {
-        graph.set_input_binding(
-            InputPort {
-                node_id: node,
-                port_idx: *old,
-            },
-            Binding::None,
-        );
+        graph.set_input_binding(InputPort::new(node, *old), Binding::None);
     }
     for (old, b) in current {
         if let Some(&new) = remap.get(&old) {
-            graph.set_input_binding(
-                InputPort {
-                    node_id: node,
-                    port_idx: new,
-                },
-                b,
-            );
+            graph.set_input_binding(InputPort::new(node, new), b);
         }
     }
 }
@@ -253,14 +235,7 @@ fn used_sorted(indices: impl Iterator<Item = usize>) -> Vec<usize> {
 }
 
 fn synth_input(idx: usize, data_type: DataType) -> FuncInput {
-    FuncInput {
-        name: format!("input{idx}"),
-        required: false,
-        data_type,
-        const_only: false,
-        default_value: None,
-        value_variants: Vec::new(),
-    }
+    FuncInput::optional(format!("input{idx}"), data_type)
 }
 
 /// Type of subgraph input `old`: the type the interior consumer it feeds

@@ -1083,26 +1083,17 @@ mod behavior {
 
         use crate::async_lambda;
         use crate::execution_stats::NodeError;
-        use crate::function::{Func, FuncLib, FuncOutput};
+        use crate::function::{Func, FuncLib};
         use crate::graph::{Graph, NodeId};
 
         // Trips the cancel on its first invoke only, so the re-run completes.
         let cancel_first = Arc::new(AtomicBool::new(true));
-        let func_lib: FuncLib = [Func {
-            id: "8400cb3a-a5d2-4fcd-a9d8-0ab4880c710f".into(),
-            name: "self_cancel".to_string(),
-            description: None,
-            category: "Debug".to_string(),
-            behavior: FuncBehavior::Pure,
-            terminal: true,
-            inputs: vec![],
-            outputs: vec![FuncOutput {
-                name: "out".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: async_lambda!(
+        let func_lib: FuncLib = [Func::new("8400cb3a-a5d2-4fcd-a9d8-0ab4880c710f", "self_cancel")
+            .category("Debug")
+            .pure()
+            .terminal()
+            .output("out", DataType::Int)
+            .lambda(async_lambda!(
                 move |ctx, _, _, _, _, outputs| { cancel_first = Arc::clone(&cancel_first) } => {
                     if cancel_first.swap(false, Ordering::Relaxed) {
                         // Stand in for the user hitting Cancel while this node runs.
@@ -1111,9 +1102,7 @@ mod behavior {
                     outputs[0] = DynamicValue::Static(StaticValue::Int(7));
                     Ok(())
                 }
-            ),
-            ..Default::default()
-        }]
+            ))]
         .into();
 
         let mut graph = Graph::default();
@@ -1188,27 +1177,21 @@ mod behavior {
         use crate::async_lambda;
         use crate::execution_stats::NodeError;
         use crate::func_lambda::InvokeError;
-        use crate::function::{Func, FuncLib, FuncOutput};
+        use crate::function::{Func, FuncLib};
         use crate::graph::{Graph, NodeId};
 
-        let func_lib: FuncLib = [Func {
-            id: "8003e30b-0417-474d-a77f-1d3ea71ac6b3".into(),
-            name: "always_cancel".to_string(),
-            description: None,
-            category: "Debug".to_string(),
-            behavior: FuncBehavior::Pure,
-            terminal: true,
-            inputs: vec![],
-            outputs: vec![FuncOutput {
-                name: "out".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-            required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, _, _, _, _| { Err(InvokeError::Cancelled) }),
-            ..Default::default()
-        }]
-        .into();
+        let func_lib: FuncLib =
+            [
+                Func::new("8003e30b-0417-474d-a77f-1d3ea71ac6b3", "always_cancel")
+                    .category("Debug")
+                    .pure()
+                    .terminal()
+                    .output("out", DataType::Int)
+                    .lambda(async_lambda!(move |_, _, _, _, _, _| {
+                        Err(InvokeError::Cancelled)
+                    })),
+            ]
+            .into();
 
         let mut graph = Graph::default();
         let node_id: NodeId = "c791f8aa-3bf9-435d-8530-f3904b4b6a28".into();
@@ -1286,10 +1269,7 @@ mod composite_behavior {
     }
 
     fn int_output(name: &str) -> FuncOutput {
-        FuncOutput {
-            name: name.to_string(),
-            data_type: DataType::Int,
-        }
+        FuncOutput::new(name, DataType::Int)
     }
 
     /// A subgraph def with no inputs and one output, whose interior is the
@@ -1308,16 +1288,9 @@ mod composite_behavior {
         interior.add(inner);
         interior.add(so);
         interior.set_input_binding(InputPort::new(so_id, 0), (inner_id, 0).into());
-        SubgraphDef {
-            id: id.into(),
-            name: name.to_string(),
-            category: String::new(),
-            graph: interior,
-            inputs: vec![],
-            outputs: vec![int_output("Out")],
-            events: vec![],
-            origin: None,
-        }
+        SubgraphDef::new(id, name)
+            .graph(interior)
+            .output(int_output("Out"))
     }
 
     /// Main graph: one instance of `def` whose output feeds a terminal `print`.
@@ -1415,16 +1388,9 @@ mod composite_behavior {
         let so_id = so.id;
         outer_interior.add(so);
         outer_interior.set_input_binding(InputPort::new(so_id, 0), (inner_inst, 0).into());
-        let outer_def = SubgraphDef {
-            id: "00000000-0000-0000-0000-0000000000b2".into(),
-            name: "Outer".to_string(),
-            category: String::new(),
-            graph: outer_interior,
-            inputs: vec![],
-            outputs: vec![int_output("Out")],
-            events: vec![],
-            origin: None,
-        };
+        let outer_def = SubgraphDef::new("00000000-0000-0000-0000-0000000000b2", "Outer")
+            .graph(outer_interior)
+            .output(int_output("Out"));
         let graph = main_with(&func_lib, outer_def);
         assert!(
             reruns_with_cache(&graph, &func_lib, "deep"),
@@ -2004,7 +1970,7 @@ mod events {
     use crate::async_lambda;
     use crate::event_lambda::EventLambda;
     use crate::execution::event::EventRef;
-    use crate::function::{Func, FuncEvent, FuncInput, FuncOutput};
+    use crate::function::{Func, FuncInput};
 
     const EMIT_FUNC: FuncId = FuncId::from_u128(0xE311);
     const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);
@@ -2026,49 +1992,31 @@ mod events {
         let emit_calls_l = emit_calls.clone();
         let recv_values_l = recv_values.clone();
 
-        // Fields left unset (behavior, terminal, etc.) match Func::default():
-        // both funcs are Impure non-terminals.
+        // Both funcs are Impure non-terminals (the `Func::new` default).
         let mut func_lib = FuncLib::default();
-        func_lib.add(Func {
-            id: EMIT_FUNC,
-            name: "emit".to_string(),
-            outputs: vec![FuncOutput {
-                name: "out".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![FuncEvent {
-                name: "tick".to_string(),
-                event_lambda: EventLambda::new(|_state| Box::pin(async move {})),
-            }],
-            lambda: async_lambda!(
-                move |_, _, _, _, _, outputs| { calls = emit_calls_l.clone() } => {
-                    let mut n = calls.lock().await;
-                    *n += 1;
-                    outputs[0] = DynamicValue::Static(StaticValue::Int(*n));
-                    Ok(())
-                }
-            ),
-            ..Default::default()
-        });
-        func_lib.add(Func {
-            id: RECV_FUNC,
-            name: "recv".to_string(),
-            inputs: vec![FuncInput {
-                name: "in".to_string(),
-                required: true,
-                data_type: DataType::Int,
-                const_only: false,
-                default_value: None,
-                value_variants: vec![],
-            }],
-            lambda: async_lambda!(
-                move |_, _, _, inputs, _, _| { values = recv_values_l.clone() } => {
-                    values.lock().await.push(inputs[0].value.as_i64().unwrap());
-                    Ok(())
-                }
-            ),
-            ..Default::default()
-        });
+        func_lib.add(
+            Func::new(EMIT_FUNC, "emit")
+                .output("out", DataType::Int)
+                .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
+                .lambda(async_lambda!(
+                    move |_, _, _, _, _, outputs| { calls = emit_calls_l.clone() } => {
+                        let mut n = calls.lock().await;
+                        *n += 1;
+                        outputs[0] = DynamicValue::Static(StaticValue::Int(*n));
+                        Ok(())
+                    }
+                )),
+        );
+        func_lib.add(
+            Func::new(RECV_FUNC, "recv")
+                .input(FuncInput::required("in", DataType::Int))
+                .lambda(async_lambda!(
+                    move |_, _, _, inputs, _, _| { values = recv_values_l.clone() } => {
+                        values.lock().await.push(inputs[0].value.as_i64().unwrap());
+                        Ok(())
+                    }
+                )),
+        );
 
         let emit_id = NodeId::unique();
         let recv_id = NodeId::unique();
@@ -2195,7 +2143,7 @@ mod output_usage {
     use crate::func_lambda::OutputUsage;
     use crate::{
         async_lambda,
-        function::{Func, FuncInput, FuncOutput},
+        function::{Func, FuncInput},
     };
 
     const SPLIT_FUNC: FuncId = FuncId::from_u128(0x5911);
@@ -2207,44 +2155,25 @@ mod output_usage {
         let seen_usage_l = seen_usage.clone();
 
         let mut func_lib = FuncLib::default();
-        func_lib.add(Func {
-            id: SPLIT_FUNC,
-            name: "split".to_string(),
-            outputs: vec![
-                FuncOutput {
-                    name: "a".to_string(),
-                    data_type: DataType::Int,
-                },
-                FuncOutput {
-                    name: "b".to_string(),
-                    data_type: DataType::Int,
-                },
-            ],
-            lambda: async_lambda!(
-                move |_, _, _, _, usage, outputs| { seen = seen_usage_l.clone() } => {
-                    seen.lock().await.extend_from_slice(usage);
-                    outputs[0] = DynamicValue::Static(StaticValue::Int(1));
-                    outputs[1] = DynamicValue::Static(StaticValue::Int(2));
-                    Ok(())
-                }
-            ),
-            ..Default::default()
-        });
-        func_lib.add(Func {
-            id: SINK_FUNC,
-            name: "sink".to_string(),
-            terminal: true,
-            inputs: vec![FuncInput {
-                name: "in".to_string(),
-                required: true,
-                data_type: DataType::Int,
-                const_only: false,
-                default_value: None,
-                value_variants: vec![],
-            }],
-            lambda: async_lambda!(|_, _, _, _, _, _| { Ok(()) }),
-            ..Default::default()
-        });
+        func_lib.add(
+            Func::new(SPLIT_FUNC, "split")
+                .output("a", DataType::Int)
+                .output("b", DataType::Int)
+                .lambda(async_lambda!(
+                    move |_, _, _, _, usage, outputs| { seen = seen_usage_l.clone() } => {
+                        seen.lock().await.extend_from_slice(usage);
+                        outputs[0] = DynamicValue::Static(StaticValue::Int(1));
+                        outputs[1] = DynamicValue::Static(StaticValue::Int(2));
+                        Ok(())
+                    }
+                )),
+        );
+        func_lib.add(
+            Func::new(SINK_FUNC, "sink")
+                .terminal()
+                .input(FuncInput::required("in", DataType::Int))
+                .lambda(async_lambda!(|_, _, _, _, _, _| { Ok(()) })),
+        );
 
         let split_id = NodeId::unique();
         let sink_id = NodeId::unique();
@@ -2551,9 +2480,8 @@ mod previews {
 mod subgraph {
     use super::*;
     use crate::event_lambda::EventLambda;
-    use crate::function::{Func, FuncBehavior, FuncEvent, FuncId, FuncOutput};
+    use crate::function::{Func, FuncId, FuncInput, FuncOutput};
     use crate::graph::NodeKind;
-    use crate::prelude::FuncLambda;
     use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
     use std::sync::Mutex as StdMutex;
 
@@ -2562,10 +2490,7 @@ mod subgraph {
     }
 
     fn int_out(name: &str) -> FuncOutput {
-        FuncOutput {
-            name: name.into(),
-            data_type: DataType::Int,
-        }
+        FuncOutput::new(name, DataType::Int)
     }
 
     /// `in(A,B) -> sum -> out(Sum)`.
@@ -2585,33 +2510,12 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(sum_id, 1), (in_id, 1).into());
         graph.set_input_binding(InputPort::new(out_id, 0), (sum_id, 0).into());
 
-        SubgraphDef {
-            id: SubgraphId::unique(),
-            name: "WrapSum".into(),
-            category: "Test".into(),
-            graph,
-            inputs: vec![
-                crate::function::FuncInput {
-                    name: "A".into(),
-                    required: true,
-                    data_type: DataType::Int,
-                    const_only: false,
-                    default_value: None,
-                    value_variants: vec![],
-                },
-                crate::function::FuncInput {
-                    name: "B".into(),
-                    required: false,
-                    data_type: DataType::Int,
-                    const_only: false,
-                    default_value: None,
-                    value_variants: vec![],
-                },
-            ],
-            outputs: vec![int_out("Sum")],
-            events: vec![],
-            origin: None,
-        }
+        SubgraphDef::new(SubgraphId::unique(), "WrapSum")
+            .category("Test")
+            .graph(graph)
+            .input(FuncInput::required("A", DataType::Int))
+            .input(FuncInput::optional("B", DataType::Int))
+            .output(int_out("Sum"))
     }
 
     /// A composite computes through the flattened interior end to end.
@@ -2682,16 +2586,10 @@ mod subgraph {
         def_graph.add(out);
         def_graph.set_input_binding(InputPort::new(out_id, 0), (sa, 0).into());
         def_graph.set_input_binding(InputPort::new(out_id, 1), (sb, 0).into());
-        let def = SubgraphDef {
-            id: SubgraphId::unique(),
-            name: "TwoSources".into(),
-            category: "Test".into(),
-            graph: def_graph,
-            inputs: vec![],
-            outputs: vec![int_out("O0"), int_out("O1")],
-            events: vec![],
-            origin: None,
-        };
+        let def = SubgraphDef::new(SubgraphId::unique(), "TwoSources")
+            .category("Test")
+            .graph(def_graph)
+            .outputs([int_out("O0"), int_out("O1")]);
 
         // parent: C, print <- C.out0 (out1 unused).
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
@@ -2878,24 +2776,12 @@ mod subgraph {
     /// Add a `ticker` func (one event, no I/O) usable as an interior or parent
     /// emitter; instantiate it by name with `fnode`.
     fn add_ticker(func_lib: &mut FuncLib) {
-        func_lib.add(Func {
-            id: FuncId::unique(),
-            name: "ticker".into(),
-            category: "Test".into(),
-            terminal: true,
-            uncacheable: false,
-            behavior: FuncBehavior::Impure,
-            version: 0,
-            description: None,
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![FuncEvent {
-                name: "tick".into(),
-                event_lambda: EventLambda::default(),
-            }],
-            required_contexts: vec![],
-            lambda: FuncLambda::default(),
-        });
+        func_lib.add(
+            Func::new(FuncId::unique(), "ticker")
+                .category("Test")
+                .terminal()
+                .event("tick", EventLambda::default()),
+        );
     }
 
     fn func_lib_with_ticker() -> FuncLib {
@@ -2920,20 +2806,14 @@ mod subgraph {
         let emitter_id = emitter.id;
         let mut def_graph = Graph::default();
         def_graph.add(emitter);
-        let def = SubgraphDef {
-            id: SubgraphId::unique(),
-            name: "Exposer".into(),
-            category: "Test".into(),
-            graph: def_graph,
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![SubgraphEvent {
+        let def = SubgraphDef::new(SubgraphId::unique(), "Exposer")
+            .category("Test")
+            .graph(def_graph)
+            .event(SubgraphEvent {
                 name: "tick".into(),
                 emitter: emitter_id,
                 emitter_event_idx: 0,
-            }],
-            origin: None,
-        };
+            });
 
         // parent: composite C, and `listener` subscribing to C's event 0.
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
@@ -2970,16 +2850,9 @@ mod subgraph {
         def_graph.add(si);
         def_graph.add(reactor);
         def_graph.subscribe(si_id, 0, reactor_id);
-        let def = SubgraphDef {
-            id: SubgraphId::unique(),
-            name: "Reactor".into(),
-            category: "Test".into(),
-            graph: def_graph,
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![],
-            origin: None,
-        };
+        let def = SubgraphDef::new(SubgraphId::unique(), "Reactor")
+            .category("Test")
+            .graph(def_graph);
 
         // parent: `ticker` emits; composite C subscribes to it.
         let emitter = fnode(&func_lib, "ticker");
@@ -3126,16 +2999,9 @@ mod subgraph {
         def_graph.add(si);
         def_graph.add(reactor);
         def_graph.subscribe(si_id, 0, reactor_id);
-        let def = SubgraphDef {
-            id: SubgraphId::unique(),
-            name: "Reactor".into(),
-            category: "Test".into(),
-            graph: def_graph,
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![],
-            origin: None,
-        };
+        let def = SubgraphDef::new(SubgraphId::unique(), "Reactor")
+            .category("Test")
+            .graph(def_graph);
 
         // parent: `ticker` E; composite C subscribes to E's event.
         let emitter = fnode(&func_lib, "ticker");

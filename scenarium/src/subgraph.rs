@@ -93,13 +93,71 @@ pub struct SubgraphDef {
 }
 
 impl SubgraphDef {
+    /// Start a composite definition. Defaults: empty category/interface and an
+    /// empty interior `Graph`, no `origin` — set the rest with the chained
+    /// builders below.
+    pub fn new(id: impl Into<SubgraphId>, name: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn category(mut self, category: impl Into<String>) -> Self {
+        self.category = category.into();
+        self
+    }
+
+    pub fn graph(mut self, graph: Graph) -> Self {
+        self.graph = graph;
+        self
+    }
+
+    pub fn input(mut self, input: FuncInput) -> Self {
+        self.inputs.push(input);
+        self
+    }
+
+    pub fn inputs(mut self, inputs: impl IntoIterator<Item = FuncInput>) -> Self {
+        self.inputs.extend(inputs);
+        self
+    }
+
+    pub fn output(mut self, output: FuncOutput) -> Self {
+        self.outputs.push(output);
+        self
+    }
+
+    pub fn outputs(mut self, outputs: impl IntoIterator<Item = FuncOutput>) -> Self {
+        self.outputs.extend(outputs);
+        self
+    }
+
+    pub fn event(mut self, event: SubgraphEvent) -> Self {
+        self.events.push(event);
+        self
+    }
+
+    pub fn events(mut self, events: impl IntoIterator<Item = SubgraphEvent>) -> Self {
+        self.events.extend(events);
+        self
+    }
+
+    /// Record the shared-library def this one was copied from. See
+    /// [`SubgraphDef::origin`].
+    pub fn origin(mut self, origin: SubgraphId) -> Self {
+        self.origin = Some(origin);
+        self
+    }
+
     /// An independent copy with a fresh def id and fresh interior node
     /// ids (exposed-event emitters remapped to match), preserving the
     /// interface. Used to localize a `Linked` instance or make an
     /// instance unique without sharing identity with the original.
     pub fn fresh_copy(&self) -> SubgraphDef {
         let fresh = self.graph.with_fresh_node_ids();
-        let events = self
+        let events: Vec<SubgraphEvent> = self
             .events
             .iter()
             .map(|e| SubgraphEvent {
@@ -107,18 +165,14 @@ impl SubgraphDef {
                 ..e.clone()
             })
             .collect();
-        SubgraphDef {
-            id: SubgraphId::unique(),
-            name: self.name.clone(),
-            category: self.category.clone(),
-            graph: fresh.graph,
-            inputs: self.inputs.clone(),
-            outputs: self.outputs.clone(),
-            events,
-            // A fresh copy is its own def; the caller (library instancing)
-            // sets `origin` to the source library id if it wants lineage.
-            origin: None,
-        }
+        // A fresh copy is its own def; the caller (library instancing) sets
+        // `origin` to the source library id if it wants lineage.
+        SubgraphDef::new(SubgraphId::unique(), self.name.clone())
+            .category(self.category.clone())
+            .graph(fresh.graph)
+            .inputs(self.inputs.clone())
+            .outputs(self.outputs.clone())
+            .events(events)
     }
 }
 
@@ -138,21 +192,11 @@ mod tests {
     use common::SerdeFormat;
 
     fn fin(name: &str) -> FuncInput {
-        FuncInput {
-            name: name.into(),
-            required: false,
-            data_type: DataType::Int,
-            const_only: false,
-            default_value: None,
-            value_variants: vec![],
-        }
+        FuncInput::optional(name, DataType::Int)
     }
 
     fn fout(name: &str) -> FuncOutput {
-        FuncOutput {
-            name: name.into(),
-            data_type: DataType::Int,
-        }
+        FuncOutput::new(name, DataType::Int)
     }
 
     /// `in(A, B) -> sum -> out(Sum)`.
@@ -176,16 +220,11 @@ mod tests {
         graph.set_input_binding(InputPort::new(sum_node_id, 1), (in_id, 1).into());
         graph.set_input_binding(InputPort::new(out_id, 0), (sum_node_id, 0).into());
 
-        SubgraphDef {
-            id: SubgraphId::unique(),
-            name: "WrapSum".into(),
-            category: "Test".into(),
-            graph,
-            inputs: vec![fin("A"), fin("B")],
-            outputs: vec![fout("Sum")],
-            events: vec![],
-            origin: None,
-        }
+        SubgraphDef::new(SubgraphId::unique(), "WrapSum")
+            .category("Test")
+            .graph(graph)
+            .inputs([fin("A"), fin("B")])
+            .output(fout("Sum"))
     }
 
     #[test]
@@ -268,16 +307,10 @@ mod tests {
         graph.add(out_node);
         graph.set_input_binding(InputPort::new(out_id, 0), (src_id, 0).into());
 
-        let def = SubgraphDef {
-            id: SubgraphId::unique(),
-            name: "Source".into(),
-            category: "Test".into(),
-            graph,
-            inputs: vec![],
-            outputs: vec![fout("Val")],
-            events: vec![],
-            origin: None,
-        };
+        let def = SubgraphDef::new(SubgraphId::unique(), "Source")
+            .category("Test")
+            .graph(graph)
+            .output(fout("Val"));
 
         let mut parent = Graph::default();
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
@@ -304,16 +337,10 @@ mod tests {
         graph.add(print_node);
         graph.set_input_binding(InputPort::new(print_node_id, 0), (in_id, 0).into());
 
-        let def = SubgraphDef {
-            id: SubgraphId::unique(),
-            name: "Sink".into(),
-            category: "Test".into(),
-            graph,
-            inputs: vec![fin("msg")],
-            outputs: vec![],
-            events: vec![],
-            origin: None,
-        };
+        let def = SubgraphDef::new(SubgraphId::unique(), "Sink")
+            .category("Test")
+            .graph(graph)
+            .input(fin("msg"));
 
         let mut parent = Graph::default();
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
@@ -333,16 +360,7 @@ mod tests {
         let a_id = SubgraphId::unique();
         let mut inner = Graph::default();
         inner.add(Node::new(NodeKind::Subgraph(SubgraphRef::Linked(a_id))));
-        func_lib.add_subgraph(SubgraphDef {
-            id: a_id,
-            name: "A".into(),
-            category: "Test".into(),
-            graph: inner,
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![],
-            origin: None,
-        });
+        func_lib.add_subgraph(SubgraphDef::new(a_id, "A").category("Test").graph(inner));
 
         let mut parent = Graph::default();
         parent.add(Node::new(NodeKind::Subgraph(SubgraphRef::Linked(a_id))));
@@ -352,29 +370,16 @@ mod tests {
     /// A func with one event and no I/O, for exposed-event tests.
     fn ticker_func_lib() -> (FuncLib, FuncId) {
         use crate::event_lambda::EventLambda;
-        use crate::func_lambda::FuncLambda;
-        use crate::function::{Func, FuncBehavior, FuncEvent};
+        use crate::function::Func;
 
         let id = FuncId::unique();
         let mut lib = FuncLib::default();
-        lib.add(Func {
-            id,
-            name: "ticker".into(),
-            category: "Test".into(),
-            terminal: true,
-            uncacheable: false,
-            behavior: FuncBehavior::Impure,
-            version: 0,
-            description: None,
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![FuncEvent {
-                name: "tick".into(),
-                event_lambda: EventLambda::default(),
-            }],
-            required_contexts: vec![],
-            lambda: FuncLambda::default(),
-        });
+        lib.add(
+            Func::new(id, "ticker")
+                .category("Test")
+                .terminal()
+                .event("tick", EventLambda::default()),
+        );
         (lib, id)
     }
 
@@ -388,20 +393,14 @@ mod tests {
         let mut graph = Graph::default();
         graph.add(emitter);
 
-        let def = SubgraphDef {
-            id: SubgraphId::unique(),
-            name: "Exposer".into(),
-            category: "Test".into(),
-            graph,
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![SubgraphEvent {
+        let def = SubgraphDef::new(SubgraphId::unique(), "Exposer")
+            .category("Test")
+            .graph(graph)
+            .event(SubgraphEvent {
                 name: "tick".into(),
                 emitter: emitter_id,
                 emitter_event_idx: 0,
-            }],
-            origin: None,
-        };
+            });
 
         let mut parent = Graph::default();
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));

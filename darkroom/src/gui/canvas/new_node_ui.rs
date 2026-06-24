@@ -250,14 +250,9 @@ mod tests {
     use super::*;
 
     fn finput(default: Option<StaticValue>) -> FuncInput {
-        FuncInput {
-            name: "p".to_string(),
-            required: true,
-            data_type: DataType::Float,
-            const_only: false,
-            default_value: default,
-            value_variants: vec![],
-        }
+        let mut input = FuncInput::required("p", DataType::Float);
+        input.default_value = default;
+        input
     }
 
     #[test]
