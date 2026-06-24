@@ -6,7 +6,9 @@ use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
 use scenarium::function::{FuncInput, FuncOutput, ValueVariant};
-use scenarium::prelude::{Binding, FuncLib, Graph, NodeId, NodeKind, SubgraphDef, SubgraphRef};
+use scenarium::prelude::{
+    Binding, CachePersistence, FuncLib, Graph, NodeId, NodeKind, SubgraphDef, SubgraphRef,
+};
 
 use crate::core::document::GraphView;
 use crate::gui::run_state::{ExecStatus, RunState};
@@ -126,6 +128,10 @@ pub struct SceneNode {
     /// Excluded from execution (`Node::disabled`). The header badge
     /// toggles this via `Intent::SetDisabled`; the body paints dimmed.
     pub disabled: bool,
+    /// `true` when this node's output is cached to disk
+    /// (`CachePersistence::Disk`), `false` for memory-only. The header `C`
+    /// badge toggles it via `Intent::SetPersist`.
+    pub persist: bool,
     /// A `SubgraphInput`/`SubgraphOutput` interface boundary node. Its
     /// ports route the subgraph interface rather than carry literal
     /// values, so the const-value affordances (inline editor, "Set
@@ -319,6 +325,7 @@ impl Scene {
                 subgraph: interface.subgraph,
                 terminal: interface.terminal,
                 disabled: node.disabled,
+                persist: node.persist == CachePersistence::Disk,
                 boundary: matches!(
                     node.kind,
                     NodeKind::SubgraphInput | NodeKind::SubgraphOutput
@@ -636,5 +643,32 @@ mod tests {
             !scene.inputs(known_node.inputs).is_empty(),
             "the resolved func still renders its interface"
         );
+    }
+
+    #[test]
+    fn persist_flag_projects_disk_as_true_memory_as_false() {
+        use scenarium::elements::basic_funclib::basic_funclib;
+        use scenarium::prelude::CachePersistence;
+
+        // Two identical funcs differing only in cache policy: one default
+        // (Memory), one Disk. The projection must mirror each.
+        let func_lib = basic_funclib();
+        let mut graph = Graph::default();
+        let memory_node: Node = func_lib.by_name("add").unwrap().into();
+        let memory_id = memory_node.id;
+        graph.add(memory_node);
+        let mut disk_node: Node = func_lib.by_name("add").unwrap().into();
+        disk_node.persist = CachePersistence::Disk;
+        let disk_id = disk_node.id;
+        graph.add(disk_node);
+
+        let view = GraphView::for_graph(&graph);
+        let mut scene = Scene::default();
+        scene.rebuild(&graph, &view, &func_lib, None, &RunState::default());
+
+        let memory = scene.nodes.iter().find(|n| n.id == memory_id).unwrap();
+        let disk = scene.nodes.iter().find(|n| n.id == disk_id).unwrap();
+        assert!(!memory.persist, "default node projects memory-only");
+        assert!(disk.persist, "Disk-marked node projects persist=true");
     }
 }

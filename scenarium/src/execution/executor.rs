@@ -397,19 +397,19 @@ mod tests {
     /// A plan that runs every node in index order, each output marked needed.
     fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
         let n = program.e_nodes.len();
-        let mut plan = ExecutionPlan::default();
-        plan.process_order = (0..n).collect();
-        plan.execute_order = (0..n).collect();
-        plan.node_flags = vec![
-            NodeFlags {
-                wants_execute: true,
-                cached: false,
-                missing_required_inputs: false,
-            };
-            n
-        ];
-        plan.output_usage = vec![1; program.n_outputs];
-        plan
+        ExecutionPlan {
+            process_order: (0..n).collect(),
+            execute_order: (0..n).collect(),
+            node_flags: vec![
+                NodeFlags {
+                    wants_execute: true,
+                    cached: false,
+                    missing_required_inputs: false,
+                };
+                n
+            ],
+            output_usage: vec![1; program.n_outputs],
+        }
     }
 
     async fn run(program: &ExecutionProgram, plan: &ExecutionPlan) -> (Cache, ExecutionStats) {

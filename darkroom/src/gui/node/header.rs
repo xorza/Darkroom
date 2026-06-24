@@ -1,12 +1,13 @@
 //! Node header bar: the title plus the right-aligned indicator chips
-//! (`S` subgraph-open, `T` terminal, `C` cache-toggle). Drawn as the
-//! top child of each node body by [`crate::gui::node::NodeUI`].
+//! (`S` subgraph-open, `T` terminal, `D` disable-toggle, `C` cache-toggle,
+//! and the `i` inspect chip). Drawn as the top child of each node body by
+//! [`crate::gui::node::NodeUI`].
 
 use palantir::{
     Align, Background, Color, Configure, Corners, Panel, Sense, Sizing, Spacing, Spinner, Stroke,
     Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
-use scenarium::prelude::NodeId;
+use scenarium::prelude::{CachePersistence, NodeId};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
@@ -94,10 +95,10 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
 }
 
 /// The status strip under the header: the last-run time label (left) and
-/// the indicator chips (`S` subgraph-open, `T` terminal, `C` cache),
-/// right-aligned. Its own row so the time appearing/disappearing doesn't
-/// resize the header; the cache chip always shows, so the row's height is
-/// reserved regardless.
+/// the indicator chips (`S` subgraph-open, `T` terminal, `D` disable, `C`
+/// cache), right-aligned. Its own row so the time appearing/disappearing
+/// doesn't resize the header; the disable chip always shows, so the row's
+/// height is reserved regardless.
 pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     Panel::hstack()
@@ -179,6 +180,32 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     to: !node.disabled,
                 });
             }
+            // Cache toggle: filled when the node's output persists to the
+            // on-disk store (`CachePersistence::Disk`), hollow for
+            // memory-only. Muted swatch, like the disable toggle — a config
+            // flip, not an alarm. Suppressed on boundary nodes (pure routing,
+            // no output to cache).
+            if !node.boundary {
+                let persist_toggled = Badge {
+                    salt: "badge_c",
+                    glyph: "C",
+                    color: theme.text_muted,
+                    filled: node.persist,
+                    wid: Some(persist_badge_wid(node.id)),
+                    tip: "Cache to disk — persist output across runs",
+                }
+                .show(ui, theme);
+                if persist_toggled {
+                    out.push(Intent::SetPersist {
+                        node_id: node.id,
+                        to: if node.persist {
+                            CachePersistence::Memory
+                        } else {
+                            CachePersistence::Disk
+                        },
+                    });
+                }
+            }
         });
 }
 
@@ -208,6 +235,11 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
 /// Stable id for a node's clickable enable/disable chip.
 fn disable_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.disable_badge", node_id))
+}
+
+/// Stable id for a node's clickable memory/disk cache chip.
+fn persist_badge_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.persist_badge", node_id))
 }
 
 /// Stable id for a subgraph node's clickable open-in-tab chip.

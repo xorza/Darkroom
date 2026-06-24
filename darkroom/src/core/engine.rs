@@ -4,9 +4,9 @@
 //! orchestration on top — so the worker/script construction and the
 //! drain/run primitives live here once instead of in both shells.
 
-use scenarium::prelude::Graph;
+use scenarium::prelude::{DiskCache, Graph};
 
-use crate::core::func_lib::{SharedFuncLib, runtime_func_lib};
+use crate::core::func_lib::{SharedFuncLib, runtime_codec_registry, runtime_func_lib};
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::worker::{ValueRequest, WorkerBridge, WorkerEvent};
@@ -30,7 +30,11 @@ impl Engine {
     /// both woken through `wake`.
     pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
         let func_lib = runtime_func_lib();
-        let worker = WorkerBridge::new(wake.clone());
+        // Disk cache at the machine-global default root, so `persist` nodes
+        // reload their outputs across sessions. Always wired; only Disk-marked
+        // reproducible nodes ever write to it.
+        let disk_cache = DiskCache::new(DiskCache::default_root(), runtime_codec_registry());
+        let worker = WorkerBridge::new(wake.clone(), disk_cache);
         let script = ScriptHost::start(script_cfg, func_lib.clone(), wake);
         Self {
             func_lib,

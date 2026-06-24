@@ -10,6 +10,7 @@ use common::CancelToken;
 use common::PauseGate;
 use common::ReadyState;
 
+use crate::execution::disk_cache::DiskCache;
 use crate::execution::event::{EventRef, EventTrigger};
 use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result, RunSeeds};
 use crate::execution_stats::{ExecutionStats, RunProgress};
@@ -89,7 +90,23 @@ pub struct Worker {
 }
 
 impl Worker {
+    /// Spin up a memory-only worker. Equivalent to
+    /// [`Worker::with_disk_cache`] with no disk cache.
     pub fn new<ExecutionCallback>(callback: ExecutionCallback) -> Self
+    where
+        ExecutionCallback: Fn(WorkerReport) + Send + 'static,
+    {
+        Self::with_disk_cache(callback, None)
+    }
+
+    /// Spin up a worker, optionally backed by a disk cache. When `disk_cache` is
+    /// `Some`, the engine hydrates `persist` (Disk-marked) node outputs from it at
+    /// `update` and stores fresh ones after each run; `None` is memory-only. The
+    /// cache is a construction-time property — every run of this worker shares it.
+    pub fn with_disk_cache<ExecutionCallback>(
+        callback: ExecutionCallback,
+        disk_cache: Option<DiskCache>,
+    ) -> Self
     where
         ExecutionCallback: Fn(WorkerReport) + Send + 'static,
     {
@@ -100,7 +117,7 @@ impl Worker {
             let event_loop_started = event_loop_started.clone();
             let cancel = cancel.clone();
             async move {
-                worker_loop(rx, callback, event_loop_started, cancel).await;
+                worker_loop(rx, callback, event_loop_started, cancel, disk_cache).await;
             }
         });
 
@@ -311,10 +328,14 @@ async fn worker_loop<ExecutionCallback>(
     execution_callback: ExecutionCallback,
     event_loop_started: Arc<AtomicBool>,
     cancel: CancelToken,
+    disk_cache: Option<DiskCache>,
 ) where
     ExecutionCallback: Fn(WorkerReport) + Send + 'static,
 {
-    let mut execution_engine = ExecutionEngine::default();
+    let mut execution_engine = match disk_cache {
+        Some(cache) => ExecutionEngine::with_disk_cache(cache),
+        None => ExecutionEngine::default(),
+    };
 
     let mut cmd_batch: Vec<WorkerMessage> = Vec::new();
     let mut ev_buf: Vec<EventRef> = Vec::with_capacity(EVENT_LOOP_BACKPRESSURE);

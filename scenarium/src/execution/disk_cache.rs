@@ -31,7 +31,7 @@ use crate::value_codec::{self, CustomValueRegistry, deserialize_outputs, seriali
 /// Disk-backed output cache: a content-addressed blob directory plus the codec
 /// registry that turns a node's outputs into bytes and back.
 #[derive(Debug)]
-pub(crate) struct DiskCache {
+pub struct DiskCache {
     root: PathBuf,
     /// In-RAM presence index: `true` = blob known on disk, `false` = known absent,
     /// missing = never checked. Lets repeated lookups/writes for one digest skip
@@ -54,11 +54,7 @@ pub(crate) enum Error {
 }
 
 impl DiskCache {
-    // `new`/`default_root` have no production caller until the worker wires the
-    // disk cache (Phase 8) — tests construct it directly. `load`/`store` below are
-    // live (the engine calls them).
-    #[allow(dead_code)]
-    pub(crate) fn new(root: impl Into<PathBuf>, registry: CustomValueRegistry) -> Self {
+    pub fn new(root: impl Into<PathBuf>, registry: CustomValueRegistry) -> Self {
         Self {
             root: root.into(),
             presence: Mutex::new(HashMap::new()),
@@ -68,8 +64,7 @@ impl DiskCache {
 
     /// The machine-global default location: `$XDG_CACHE_HOME/scenarium`, else
     /// `$HOME/.cache/scenarium`, else `<tempdir>/scenarium`.
-    #[allow(dead_code)]
-    pub(crate) fn default_root() -> PathBuf {
+    pub fn default_root() -> PathBuf {
         if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME") {
             return PathBuf::from(xdg).join("scenarium");
         }
@@ -211,9 +206,8 @@ pub(crate) struct DiskCacheLayer {
 }
 
 impl DiskCacheLayer {
-    #[allow(dead_code)] // no production caller until the worker wires the cache.
-    pub(crate) fn set(&mut self, cache: DiskCache) {
-        self.inner = Some(cache);
+    pub(crate) fn new(cache: DiskCache) -> Self {
+        Self { inner: Some(cache) }
     }
 
     /// Pull any disk-cached `persist` output into its slot, so a digest the disk

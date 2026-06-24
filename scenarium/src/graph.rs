@@ -104,7 +104,7 @@ mod binding_map_serde {
 /// is a *request* honored only for reproducible nodes — a node with an impure node
 /// anywhere in its upstream cone has no content digest, so it's silently kept
 /// memory-only and never risks serving a stale value. The on-disk backend is wired
-/// only once a caller enables it (`ExecutionEngine::set_disk_cache`); until then
+/// only once a caller enables it (`ExecutionEngine::with_disk_cache`); until then
 /// every node is memory-only regardless. See `docs/disk-cache-design.md`.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum CachePersistence {

@@ -172,7 +172,7 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   `SwitchTab`/`CloseTab` are graph-agnostic and special-cased ahead of the
   scope lookup. Adding a variant touches ~6 spots — the doc comment lists them.
 - Variants: `AddNode`, `DuplicateNodes`, `RemoveNode`, `MoveNodes`,
-  `RenameNode`, `SetInput`, `SetSelection`, `SetDisabled`,
+  `RenameNode`, `SetInput`, `SetSelection`, `SetDisabled`, `SetPersist`,
   `DetachSubgraph`, `SetViewport`, `RenameBoundaryPort`, `RenameSubgraph`,
   plus document-global `SwitchTab` / `CloseTab`.
 - `DuplicateNodes` is assembled from the current selection by
@@ -274,8 +274,9 @@ the open-tab strip + "+" new-subgraph chip, emits `UiAction`s). The rest:
   inputs (live values when fetched, else static bindings), outputs, log tail.
 - **`gui/node/`** — the node-body widget: `mod.rs` is `NodeUI` (node bodies +
   drag; emits `MoveNodes`, subgraph-open requests, port-disconnect
-  double-clicks), with sub-widgets `header` (title + `S`/`T`/`D`/`i` badges:
-  subgraph / terminal / disable / inspect), `port_row` (the two port
+  double-clicks), with sub-widgets `header` (title + `S`/`T`/`D`/`C`/`i`
+  badges: subgraph / terminal / disable / cache / inspect; the `C` chip
+  toggles `Node::persist` Memory⇄Disk via `SetPersist`), `port_row` (the two port
   columns + circles + binding menu; a required input's port paints in the
   missing/warning color only once a run flagged its node `MissingInputs` —
   `SceneInput::required` + `node.exec_status` + `exec_missing_glow` — so the

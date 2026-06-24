@@ -30,7 +30,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
 use scenarium::graph::{
-    Binding, Graph, InputPort, Node, NodeId, NodeKind, OutputPort, Subscription,
+    Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort, Subscription,
 };
 use scenarium::prelude::{SubgraphDef, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
@@ -116,6 +116,14 @@ pub enum Intent {
     SetDisabled {
         node_id: NodeId,
         to: bool,
+    },
+    /// Set where a node's output is cached (`Node::persist` —
+    /// `Memory`/`Disk`). The header `C` badge toggles it; `Disk` persists the
+    /// output to the content-addressed store so a reproducible node reloads
+    /// instead of recomputing.
+    SetPersist {
+        node_id: NodeId,
+        to: CachePersistence,
     },
     /// Fork a private standalone copy of a `Subgraph(Local(_))` node's
     /// def and re-point the node at it (the S-badge "Detach" action).
@@ -244,6 +252,11 @@ pub enum GraphStep {
         from: bool,
         to: bool,
     },
+    SetPersist {
+        node_id: NodeId,
+        from: CachePersistence,
+        to: CachePersistence,
+    },
     /// Fork + re-point: `def` (a fresh standalone copy) joins the
     /// graph's local defs and the node swaps from `from_id` to `def.id`.
     /// Undo restores the `from_id` ref and drops `def`.
@@ -341,6 +354,7 @@ impl GraphStep {
             GraphStep::SetInput { from, to, .. } => from == to,
             GraphStep::SetSelection { from, to } => from == to,
             GraphStep::SetDisabled { from, to, .. } => from == to,
+            GraphStep::SetPersist { from, to, .. } => from == to,
             GraphStep::SetViewport {
                 from_pan,
                 from_scale,
@@ -504,6 +518,11 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
         },
         Intent::SetDisabled { node_id, to } => GraphStep::SetDisabled {
             from: graph.by_id(&node_id)?.disabled,
+            node_id,
+            to,
+        },
+        Intent::SetPersist { node_id, to } => GraphStep::SetPersist {
+            from: graph.by_id(&node_id)?.persist,
             node_id,
             to,
         },
@@ -789,6 +808,9 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetDisabled { node_id, to, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().disabled = *to;
         }
+        GraphStep::SetPersist { node_id, to, .. } => {
+            scope.graph.by_id_mut(node_id).unwrap().persist = *to;
+        }
         GraphStep::DetachSubgraph { node_id, def, .. } => {
             scope.graph.subgraphs.add((**def).clone());
             scope.graph.by_id_mut(node_id).unwrap().kind =
@@ -908,6 +930,9 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetDisabled { node_id, from, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().disabled = *from;
         }
+        GraphStep::SetPersist { node_id, from, .. } => {
+            scope.graph.by_id_mut(node_id).unwrap().persist = *from;
+        }
         GraphStep::DetachSubgraph {
             node_id,
             from_id,
@@ -974,7 +999,9 @@ impl UndoStep {
             }
             GraphStep::SetSelection { .. }
             // Disabling only dims the body paint — same rect, no remeasure.
-            | GraphStep::SetDisabled { .. } => false,
+            | GraphStep::SetDisabled { .. }
+            // The cache toggle flips a badge fill — same rect, no remeasure.
+            | GraphStep::SetPersist { .. } => false,
         },
     }
     }
@@ -1002,6 +1029,7 @@ impl UndoStep {
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetSelection { .. }
                 | GraphStep::SetDisabled { .. }
+                | GraphStep::SetPersist { .. }
                 | GraphStep::SetViewport { .. },
             )
             | UndoStep::Doc(_) => false,
@@ -1032,6 +1060,7 @@ impl UndoStep {
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetSelection { .. }
                 | GraphStep::SetDisabled { .. }
+                | GraphStep::SetPersist { .. }
                 | GraphStep::DetachSubgraph { .. },
             )
             | UndoStep::Doc(
@@ -1236,5 +1265,60 @@ mod tests {
         let mut doc = Document::default();
         add_node_at(&mut doc, Vec2::ZERO);
         assert!(build_duplicate_intent(&doc, GraphRef::Main).is_none());
+    }
+
+    #[test]
+    fn set_persist_commits_and_reverts() {
+        let mut doc = Document::default();
+        let id = add_node_at(&mut doc, Vec2::ZERO);
+        // Fresh nodes default to memory-only.
+        assert_eq!(
+            doc.graph.by_id(&id).unwrap().persist,
+            CachePersistence::Memory
+        );
+
+        // Flip to Disk: the step applies and carries the prior value for revert.
+        let step = commit_intent(
+            Intent::SetPersist {
+                node_id: id,
+                to: CachePersistence::Disk,
+            },
+            &mut doc,
+            GraphRef::Main,
+        )
+        .expect("Memory → Disk is a real change, not a no-op");
+        assert_eq!(
+            doc.graph.by_id(&id).unwrap().persist,
+            CachePersistence::Disk
+        );
+        assert!(
+            !step.requires_relayout() && !step.requires_reconcile(),
+            "a cache toggle neither remeasures nor reshapes the interface"
+        );
+        assert!(
+            step.gesture_key().is_none(),
+            "each cache toggle is its own undo entry"
+        );
+
+        // Undo restores memory-only.
+        revert_step(&step, &mut doc, GraphRef::Main);
+        assert_eq!(
+            doc.graph.by_id(&id).unwrap().persist,
+            CachePersistence::Memory
+        );
+
+        // Setting it to the value it already holds is a no-op (no undo entry).
+        assert!(
+            commit_intent(
+                Intent::SetPersist {
+                    node_id: id,
+                    to: CachePersistence::Memory,
+                },
+                &mut doc,
+                GraphRef::Main,
+            )
+            .is_none(),
+            "Memory → Memory writes nothing"
+        );
     }
 }

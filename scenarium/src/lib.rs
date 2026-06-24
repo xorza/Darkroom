@@ -20,6 +20,7 @@ pub mod prelude {
     pub use crate::context::ContextType;
     pub use crate::data::{CustomValue, DataType, DynamicValue, StaticValue, TypeId};
     pub use crate::execution::ExecutionEngine;
+    pub use crate::execution::disk_cache::DiskCache;
     pub use crate::execution::event::{EventRef, EventTrigger};
     pub use crate::execution_stats::{
         ExecutedNodeStats, ExecutionStats, FlattenMap, LogEntry, LogLevel, NodeError, RunPhase,
@@ -28,7 +29,8 @@ pub mod prelude {
     pub use crate::func_lambda::{FuncLambda, InvokeError, InvokeInput, InvokeResult};
     pub use crate::function::{Func, FuncBehavior, FuncId, FuncLib};
     pub use crate::graph::{
-        Binding, Graph, InputPort, Node, NodeId, NodeKind, OutputPort, Subscription,
+        Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort,
+        Subscription,
     };
     pub use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
     pub use crate::value_codec::{CustomValueCodec, CustomValueRegistry};
