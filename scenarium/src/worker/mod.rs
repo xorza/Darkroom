@@ -11,7 +11,7 @@ use common::PauseGate;
 use common::ReadyState;
 
 use crate::execution::event::{EventRef, EventTrigger};
-use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result};
+use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result, RunSeeds};
 use crate::execution_stats::{ExecutionStats, RunProgress};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
@@ -441,9 +441,11 @@ async fn worker_loop<ExecutionCallback>(
             let mut prog_buf: Vec<RunProgress> = Vec::new();
             let result = {
                 let run = execution_engine.execute(
-                    intent.execute_terminals,
-                    in_loop,
-                    intent.events.drain(),
+                    RunSeeds {
+                        terminals: intent.execute_terminals,
+                        event_triggers: in_loop,
+                        events: intent.events.drain().collect(),
+                    },
                     Some(&prog_tx),
                     cancel.clone(),
                 );

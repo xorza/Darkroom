@@ -70,17 +70,17 @@ pub struct ArgumentValues {
     pub outputs: Vec<DynamicValue>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OutputUsage {
-    Skip,
-    /// Number of executing consumers reading this output this run (always `> 0`).
-    Needed(u32),
-}
-
-impl OutputUsage {
-    pub fn is_needed(&self) -> bool {
-        matches!(self, Self::Needed(_))
-    }
+/// What seeds a run's schedule — the roots the planner walks back from. The three
+/// are independent and combine: a run can target terminal nodes, the event loop's
+/// triggerable events, and/or a set of injected events, all at once.
+#[derive(Debug, Default, Clone)]
+pub struct RunSeeds {
+    /// Include all terminal nodes — the ordinary "produce the outputs" trigger.
+    pub terminals: bool,
+    /// Include every node owning a subscribed event — drives the event loop.
+    pub event_triggers: bool,
+    /// Run the subscribers of these specific fired events.
+    pub events: Vec<EventRef>,
 }
 
 // === Execution Engine ===
@@ -200,26 +200,16 @@ impl ExecutionEngine {
     /// each node's lambda runs, for live per-node feedback ahead of the final
     /// stats. When `cancel` is `Some` and gets set mid-run, scheduling stops
     /// after the in-flight node and the returned stats are marked `cancelled`.
-    pub async fn execute<T: IntoIterator<Item = EventRef>>(
+    pub async fn execute(
         &mut self,
-        terminals: bool,
-        event_triggers: bool,
-        events: T,
+        seeds: RunSeeds,
         progress: Option<&UnboundedSender<RunProgress>>,
         cancel: CancelToken,
     ) -> Result<ExecutionStats> {
-        let events: Vec<EventRef> = events.into_iter().collect();
-
         // Phase 2: schedule into the reusable plan buffer (node digests were
         // recomputed at `update` time and persist across re-executes).
-        self.planner.plan(
-            &self.program,
-            &self.cache,
-            terminals,
-            event_triggers,
-            &events,
-            &mut self.plan,
-        )?;
+        self.planner
+            .plan(&self.program, &self.cache, &seeds, &mut self.plan)?;
 
         // Phase 3: run the schedule.
         let mut stats = self
@@ -243,7 +233,7 @@ impl ExecutionEngine {
             .store_pending(pending, &mut self.executor.ctx_manager)
             .await;
 
-        stats.triggered_events = events;
+        stats.triggered_events = seeds.events;
         // Annotate with how the graph was flattened so the stats' flat ids
         // can be projected back onto authoring nodes (the executor itself
         // stays oblivious to the authoring graph).
@@ -259,16 +249,30 @@ impl ExecutionEngine {
 #[cfg(test)]
 impl ExecutionEngine {
     pub(crate) async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
-        self.execute(true, false, [], None, CancelToken::never())
-            .await
+        self.execute(
+            RunSeeds {
+                terminals: true,
+                ..Default::default()
+            },
+            None,
+            CancelToken::never(),
+        )
+        .await
     }
 
     pub(crate) async fn execute_events<T: IntoIterator<Item = EventRef>>(
         &mut self,
         events: T,
     ) -> Result<ExecutionStats> {
-        self.execute(false, false, events, None, CancelToken::never())
-            .await
+        self.execute(
+            RunSeeds {
+                events: events.into_iter().collect(),
+                ..Default::default()
+            },
+            None,
+            CancelToken::never(),
+        )
+        .await
     }
 
     /// Run only the planning phase (no execution), leaving the schedule in
@@ -279,14 +283,13 @@ impl ExecutionEngine {
         event_triggers: bool,
         events: &[EventRef],
     ) -> Result<()> {
-        self.planner.plan(
-            &self.program,
-            &self.cache,
+        let seeds = RunSeeds {
             terminals,
             event_triggers,
-            events,
-            &mut self.plan,
-        )
+            events: events.to_vec(),
+        };
+        self.planner
+            .plan(&self.program, &self.cache, &seeds, &mut self.plan)
     }
 
     pub(crate) fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {

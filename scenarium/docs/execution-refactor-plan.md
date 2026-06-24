@@ -126,12 +126,31 @@ Colocated `#[cfg(test)]` modules added where there were none (+10 tests, suite
   upstream-error-skips-dependent with output cleared. Each phase is now testable
   without the others, so a bug in one can't mask a bug in another.
 
-### Stage 5 — ergonomics + cleanups (issues E, F, H)
+### Stage 5 — ergonomics + cleanups (issues E, F, H) ✅ done
 
-- Replace `execute`'s positional bools with a `RunSeeds` struct.
-- Extract shared `input_missing(...)` used by planner + executor stats.
-- Move `OutputUsage` to `plan.rs`; refresh the stale `#[cfg(test)]` doc comment;
-  decide `execution_stats` placement.
+- **F:** `execute`'s positional bools replaced by a `RunSeeds { terminals,
+  event_triggers, events }` struct (in `mod.rs`). `Planner::plan` takes
+  `&RunSeeds` too; `collect_terminal_nodes` reads its fields. Call sites updated
+  (worker, test helpers, ~8 direct test calls). No more `execute(true, false, …)`.
+- **E (last bit):** the per-input "is this missing" predicate, duplicated in the
+  planner's forward pass and the executor's stats, is now `plan::input_missing`
+  alone. The planner keeps its post-order debug asserts around the shared call.
+- **H:** `OutputUsage` moved out of the orchestrator — to `func_lambda.rs`, not
+  `plan.rs` as first sketched: it's the lambda ABI (the `invoke` signature),
+  belongs beside `InvokeInput`, and the move removes `func_lambda`'s backwards
+  import from `execution`. The dead `OutputUsage::is_needed` was deleted. The
+  stale `#[cfg(test)]` doc comment was already refreshed in Stage 1.
+- `execution_stats` placement: left top-level (widely consumed; a tighter
+  `execution::stats` was judged not worth the churn).
+
+## Outcome
+
+All five stages done; suite 172 → 184, clippy/fmt clean, full workspace builds.
+The three-phase pipeline now has: one owner for the cross-run cache (`Cache`), no
+phase→phase dependencies (planner/executor depend only on `program`/`plan`/
+`cache`), no `execution ↔ worker` cycle, a thin orchestrator (`mod.rs` ~290 lines
+vs ~525), one definition each for the cache-hit and missing-input predicates, and
+colocated unit tests for every phase.
 
 ## Sequencing rationale
 

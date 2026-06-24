@@ -4,12 +4,28 @@
 //! the program's pools. Reused via a buffer on the engine so a repeated run
 //! does no scheduling allocation.
 
+use crate::execution::program::{ExecutionBinding, ExecutionInput};
+
 /// Per-run scheduling state for one node, indexed by `e_node_idx`.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct NodeFlags {
     pub(crate) wants_execute: bool,
     pub(crate) cached: bool,
     pub(crate) missing_required_inputs: bool,
+}
+
+/// Whether one input is unsatisfied: an unbound *required* port, or a bind to a
+/// producer that itself can't run (missing propagates only through non-runnable
+/// producers — a cached or executing one delivers a value, optional or not).
+/// `node_flags` must already hold the producer's verdict, which the planner's
+/// post-order forward pass guarantees. Shared by that pass and the executor's
+/// stats so the two can't drift.
+pub(crate) fn input_missing(input: &ExecutionInput, node_flags: &[NodeFlags]) -> bool {
+    match &input.binding {
+        ExecutionBinding::None => input.required,
+        ExecutionBinding::Const(_) => false,
+        ExecutionBinding::Bind(addr) => node_flags[addr.target_idx].missing_required_inputs,
+    }
 }
 
 #[derive(Debug, Default)]

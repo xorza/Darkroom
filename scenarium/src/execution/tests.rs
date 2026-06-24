@@ -852,9 +852,10 @@ mod behavior {
         let (tx, mut rx) = unbounded_channel::<RunProgress>();
         let stats = eg
             .execute(
-                true,
-                false,
-                Vec::<EventRef>::new(),
+                RunSeeds {
+                    terminals: true,
+                    ..Default::default()
+                },
                 Some(&tx),
                 CancelToken::never(),
             )
@@ -915,7 +916,14 @@ mod behavior {
         let tripped = CancelToken::new();
         tripped.cancel();
         let stats = eg
-            .execute(true, false, Vec::<EventRef>::new(), None, tripped)
+            .execute(
+                RunSeeds {
+                    terminals: true,
+                    ..Default::default()
+                },
+                None,
+                tripped,
+            )
             .await?;
         assert!(stats.cancelled, "pre-tripped run is cancelled");
         assert!(
@@ -927,9 +935,10 @@ mod behavior {
         // the aborted run above).
         let stats = eg
             .execute(
-                true,
-                false,
-                Vec::<EventRef>::new(),
+                RunSeeds {
+                    terminals: true,
+                    ..Default::default()
+                },
                 None,
                 CancelToken::new(),
             )
@@ -1004,9 +1013,10 @@ mod behavior {
         // executed (it didn't complete), and the run is flagged cancelled.
         let stats = eg
             .execute(
-                true,
-                false,
-                Vec::<EventRef>::new(),
+                RunSeeds {
+                    terminals: true,
+                    ..Default::default()
+                },
                 None,
                 CancelToken::new(),
             )
@@ -1029,9 +1039,10 @@ mod behavior {
         // re-executes rather than being served from a bogus cache.
         let stats = eg
             .execute(
-                true,
-                false,
-                Vec::<EventRef>::new(),
+                RunSeeds {
+                    terminals: true,
+                    ..Default::default()
+                },
                 None,
                 CancelToken::new(),
             )
@@ -1093,9 +1104,10 @@ mod behavior {
         eg.update(&graph, &func_lib).unwrap();
         let stats = eg
             .execute(
-                true,
-                false,
-                Vec::<EventRef>::new(),
+                RunSeeds {
+                    terminals: true,
+                    ..Default::default()
+                },
                 None,
                 common::CancelToken::new(),
             )
@@ -1994,9 +2006,10 @@ mod events {
         // terminals=false, event_triggers=true → emit (owns a subscribed event)
         // becomes a root; recv is downstream of emit, not a root.
         eg.execute(
-            false,
-            true,
-            Vec::<EventRef>::new(),
+            RunSeeds {
+                event_triggers: true,
+                ..Default::default()
+            },
             None,
             CancelToken::never(),
         )
@@ -2017,9 +2030,10 @@ mod events {
 
         let stats = eg
             .execute(
-                false,
-                true,
-                Vec::<EventRef>::new(),
+                RunSeeds {
+                    event_triggers: true,
+                    ..Default::default()
+                },
                 None,
                 CancelToken::never(),
             )
@@ -2060,6 +2074,7 @@ mod events {
 
 mod output_usage {
     use super::*;
+    use crate::func_lambda::OutputUsage;
     use crate::{
         async_lambda,
         function::{Func, FuncInput, FuncOutput},

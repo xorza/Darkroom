@@ -291,8 +291,7 @@ where
 mod tests {
     use crate::context::ContextManager;
     use crate::data::{DynamicValue, StaticValue};
-    use crate::execution::OutputUsage;
-    use crate::func_lambda::InvokeInput;
+    use crate::func_lambda::{InvokeInput, OutputUsage};
     use crate::function::FuncLib;
     use crate::prelude::AnyState;
     use crate::testing::{TestFuncHooks, test_func_lib};

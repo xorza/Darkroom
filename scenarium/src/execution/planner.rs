@@ -8,10 +8,9 @@
 use common::is_debug;
 
 use crate::execution::cache::Cache;
-use crate::execution::event::EventRef;
-use crate::execution::plan::{ExecutionPlan, NodeFlags};
+use crate::execution::plan::{ExecutionPlan, NodeFlags, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::execution::{Error, Result, validate};
+use crate::execution::{Error, Result, RunSeeds, validate};
 
 /// DFS coloring for the two backward passes. White = unvisited, Gray = on
 /// stack (Done pushed, children pending), Black = children done.
@@ -57,14 +56,12 @@ impl Planner {
         &mut self,
         program: &ExecutionProgram,
         cache: &Cache,
-        terminals: bool,
-        event_triggers: bool,
-        events: &[EventRef],
+        seeds: &RunSeeds,
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
         plan.reset(program.e_nodes.len(), program.n_outputs);
 
-        self.collect_terminal_nodes(program, terminals, event_triggers, events);
+        self.collect_terminal_nodes(program, seeds);
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
@@ -83,19 +80,13 @@ impl Planner {
         }
     }
 
-    fn collect_terminal_nodes(
-        &mut self,
-        program: &ExecutionProgram,
-        terminals: bool,
-        event_triggers: bool,
-        events: &[EventRef],
-    ) {
+    fn collect_terminal_nodes(&mut self, program: &ExecutionProgram, seeds: &RunSeeds) {
         self.is_terminal.clear();
         self.is_terminal.resize(program.e_nodes.len(), false);
         self.terminal_seeds.clear();
 
         // Add event subscribers
-        for event in events {
+        for event in &seeds.events {
             let e_node = program.e_nodes.by_key(&event.node_id).unwrap();
             let subs = program.events[e_node.events.range()][event.event_idx]
                 .subscribers
@@ -107,7 +98,7 @@ impl Planner {
         }
 
         // Add terminal nodes
-        if terminals {
+        if seeds.terminals {
             for (idx, e) in program.e_nodes.iter().enumerate() {
                 if e.terminal {
                     self.mark_terminal(idx);
@@ -116,7 +107,7 @@ impl Planner {
         }
 
         // Add nodes with event triggers
-        if event_triggers {
+        if seeds.event_triggers {
             for (idx, e) in program.e_nodes.iter().enumerate() {
                 if program.events[e.events.range()]
                     .iter()
@@ -240,23 +231,18 @@ impl Planner {
             let mut missing_required = false;
             for pool_idx in inputs_span.range() {
                 let e_input = &program.inputs[pool_idx];
-                let missing = match &e_input.binding {
-                    ExecutionBinding::None => e_input.required,
-                    ExecutionBinding::Const(_) => false,
-                    ExecutionBinding::Bind(addr) => {
-                        assert!(
-                            addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize
-                        );
-                        if is_debug() {
-                            assert!(
-                                processed[addr.target_idx],
-                                "forward pass: dep not yet processed"
-                            );
-                        }
-                        plan.node_flags[addr.target_idx].missing_required_inputs
-                    }
-                };
-                missing_required |= missing;
+                if is_debug()
+                    && let ExecutionBinding::Bind(addr) = &e_input.binding
+                {
+                    // Post-order guarantees the producer's verdict is already in
+                    // `node_flags` before `input_missing` reads it.
+                    assert!(addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize);
+                    assert!(
+                        processed[addr.target_idx],
+                        "forward pass: dep not yet processed"
+                    );
+                }
+                missing_required |= input_missing(e_input, &plan.node_flags);
             }
 
             plan.node_flags[e_node_idx] = NodeFlags {
@@ -411,8 +397,12 @@ mod tests {
         }
         let mut planner = Planner::default();
         let mut plan = ExecutionPlan::default();
+        let seeds = RunSeeds {
+            terminals: true,
+            ..Default::default()
+        };
         planner
-            .plan(&fix.program, &cache, true, false, &[], &mut plan)
+            .plan(&fix.program, &cache, &seeds, &mut plan)
             .expect("no cycle");
         plan
     }
@@ -510,7 +500,11 @@ mod tests {
         cache.reconcile(&f.program.e_nodes);
         let mut planner = Planner::default();
         let mut plan = ExecutionPlan::default();
-        let result = planner.plan(&f.program, &cache, true, false, &[], &mut plan);
+        let seeds = RunSeeds {
+            terminals: true,
+            ..Default::default()
+        };
+        let result = planner.plan(&f.program, &cache, &seeds, &mut plan);
         assert!(matches!(result, Err(Error::CycleDetected { .. })));
     }
 }

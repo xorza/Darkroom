@@ -17,13 +17,13 @@ use crate::data::DynamicValue;
 use crate::execution_stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
-use crate::func_lambda::{InvokeError, InvokeInput};
+use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage};
 use crate::graph::InputPort;
 
+use crate::execution::Error;
 use crate::execution::cache::Cache;
-use crate::execution::plan::ExecutionPlan;
+use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::execution::{Error, OutputUsage};
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
@@ -305,19 +305,11 @@ fn collect_execution_stats(
         let e = &program.e_nodes[idx];
         let flags = plan.node_flags[idx];
         if flags.missing_required_inputs {
-            // Recompute which ports are unsatisfied (mirrors the planner's
-            // per-input check) — only for the rare missing node, so it isn't
-            // worth a stored column.
+            // Recompute which ports are unsatisfied (shares `input_missing` with
+            // the planner) — only for the rare missing node, so it isn't worth a
+            // stored column.
             for (i, pool_idx) in e.inputs.range().enumerate() {
-                let input = &program.inputs[pool_idx];
-                let missing = match &input.binding {
-                    ExecutionBinding::None => input.required,
-                    ExecutionBinding::Const(_) => false,
-                    ExecutionBinding::Bind(addr) => {
-                        plan.node_flags[addr.target_idx].missing_required_inputs
-                    }
-                };
-                if missing {
+                if input_missing(&program.inputs[pool_idx], &plan.node_flags) {
                     missing_inputs.push(InputPort {
                         node_id: e.id,
                         port_idx: i,
