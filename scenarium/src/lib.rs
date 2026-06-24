@@ -9,6 +9,7 @@ pub mod func_lambda;
 pub mod function;
 pub mod graph;
 pub mod macros;
+pub mod special;
 pub mod subgraph;
 pub mod testing;
 pub mod value_codec;
@@ -19,7 +20,7 @@ pub mod prelude {
     pub use crate::common::shared_any_state::SharedAnyState;
     pub use crate::context::ContextType;
     pub use crate::data::{CustomValue, DataType, DynamicValue, StaticValue, TypeId};
-    pub use crate::elements::special::{SpecialNode, special_func};
+    pub use crate::special::{SpecialNode, special_func};
     pub use crate::execution::ExecutionEngine;
     pub use crate::execution::event::{EventRef, EventTrigger};
     pub use crate::execution::output_cache::OutputCache;
