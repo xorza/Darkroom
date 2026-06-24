@@ -669,6 +669,12 @@ impl Graph {
                 dst.port_idx
             );
             if let Binding::Bind(src) = binding {
+                ensure!(
+                    !self.input_is_const_only(consumer, dst.port_idx, func_lib),
+                    "input {} on node {:?} is const-only and cannot be wired to an upstream output",
+                    dst.port_idx,
+                    dst.node_id
+                );
                 let producer = self
                     .by_id(&src.node_id)
                     .with_context(|| format!("binding from missing node {:?}", src.node_id))?;
@@ -699,6 +705,20 @@ impl Graph {
     /// Number of input ports a node exposes — by kind. `ctx_def` is the
     /// enclosing def, needed only for `SubgraphOutput` (whose inputs are the
     /// def's exposed outputs).
+    /// Whether the consumer port `(node, port_idx)` is declared const-only — it
+    /// may hold a `Const` literal but must not be wired to an upstream output.
+    /// Boundary nodes route the interface (no literals), so they're never
+    /// const-only. Resolution mirrors [`Self::input_count`].
+    fn input_is_const_only(&self, node: &Node, port_idx: usize, func_lib: &FuncLib) -> bool {
+        let inputs = match &node.kind {
+            NodeKind::Func(func_id) => &func_lib.by_id(func_id).unwrap().inputs,
+            NodeKind::Subgraph(r) => &self.resolve_def(*r, func_lib).unwrap().inputs,
+            NodeKind::Special(s) => &s.func().inputs,
+            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => return false,
+        };
+        inputs.get(port_idx).is_some_and(|i| i.const_only)
+    }
+
     fn input_count(&self, node: &Node, func_lib: &FuncLib, ctx_def: Option<&SubgraphDef>) -> usize {
         match &node.kind {
             NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().inputs.len(),
@@ -951,6 +971,45 @@ mod tests {
     }
 
     #[test]
+    fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
+        use crate::function::{FuncId, FuncLib};
+
+        // One Int-in / Int-out func, so a wire between two instances is otherwise
+        // valid — only the `const_only` flag decides whether check accepts it.
+        let check = |const_only: bool| -> anyhow::Result<()> {
+            let port = FuncInput::required("locked", DataType::Int);
+            let port = if const_only { port.const_only() } else { port };
+            let func = Func::new(FuncId::unique(), "f")
+                .input(port)
+                .output("out", DataType::Int);
+            let mut func_lib = FuncLib::default();
+            func_lib.funcs.add(func.clone());
+
+            let mut graph = Graph::default();
+            let producer = graph.add_func_node(&func);
+            let consumer = graph.add_func_node(&func);
+            graph.set_input_binding(
+                InputPort::new(consumer, 0),
+                Binding::Bind(OutputPort {
+                    node_id: producer,
+                    port_idx: 0,
+                }),
+            );
+            graph.check_with(&func_lib)
+        };
+
+        assert!(
+            check(false).is_ok(),
+            "a normal input accepts a wired binding"
+        );
+        let err = check(true).expect_err("a const-only input must reject a wired binding");
+        assert!(
+            err.to_string().contains("const-only"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn deserialize_rejects_corrupt_graph() {
         let mut graph = test_graph();
         let sum_id = graph.by_name("sum").unwrap().id;
@@ -1179,6 +1238,7 @@ mod tests {
                 name: "x".into(),
                 required: false,
                 data_type: DataType::Int,
+                const_only: false,
                 default_value: Some(default.into()),
                 value_variants: vec![],
             }],
@@ -1216,6 +1276,7 @@ mod tests {
             name: "A".into(),
             required: false,
             data_type: DataType::Int,
+            const_only: false,
             default_value: Some(3i64.into()),
             value_variants: vec![],
         };

@@ -434,6 +434,7 @@ fn doc_with_def() -> (Document, GraphRef) {
             name: "A".into(),
             required: false,
             data_type: DataType::Int,
+            const_only: false,
             default_value: None,
             value_variants: Vec::new(),
         }],
@@ -553,6 +554,7 @@ fn rename_undo_survives_interface_compaction() {
         name: n.into(),
         required: false,
         data_type: DataType::Int,
+        const_only: false,
         default_value: None,
         value_variants: Vec::new(),
     };

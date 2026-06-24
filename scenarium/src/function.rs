@@ -29,6 +29,12 @@ pub struct FuncInput {
     pub name: String,
     pub required: bool,
     pub data_type: DataType,
+    /// When set, this input may only hold a `Const` literal — wiring an upstream
+    /// output into it (a `Bind`) is rejected by graph validation and blocked in
+    /// the editor. For inputs the engine reads as a constant (e.g. the file-cache
+    /// node's `path`), so a stray connection can't silently defeat that.
+    #[serde(default)]
+    pub const_only: bool,
     #[serde(default)]
     pub default_value: Option<StaticValue>,
     #[serde(default)]
@@ -42,6 +48,7 @@ impl FuncInput {
             name: name.into(),
             required: true,
             data_type,
+            const_only: false,
             default_value: None,
             value_variants: Vec::new(),
         }
@@ -54,6 +61,7 @@ impl FuncInput {
             name: name.into(),
             required: false,
             data_type,
+            const_only: false,
             default_value: None,
             value_variants: Vec::new(),
         }
@@ -62,6 +70,13 @@ impl FuncInput {
     /// Seed this input's const default value.
     pub fn default(mut self, value: impl Into<StaticValue>) -> Self {
         self.default_value = Some(value.into());
+        self
+    }
+
+    /// Restrict this input to a `Const` literal — no upstream `Bind`. See
+    /// [`FuncInput::const_only`].
+    pub fn const_only(mut self) -> Self {
+        self.const_only = true;
         self
     }
 

@@ -94,6 +94,9 @@ pub struct SceneInput {
     /// A required input with no binding is a missing input — its port renders
     /// highlighted.
     pub required: bool,
+    /// Const-only inputs reject a wired binding: the connection gesture won't
+    /// snap to them, so they can only hold a literal.
+    pub const_only: bool,
     /// Span into [`Scene::value_variants_pool`] for this input's editor picker
     /// options. Empty = no options (the common case).
     pub value_variants: Span,
@@ -310,6 +313,7 @@ impl Scene {
                     binding: InputBindingView::from(&binding),
                     default: default_static_value(input),
                     required: input.required,
+                    const_only: input.const_only,
                     value_variants,
                 });
             }
@@ -416,6 +420,7 @@ fn boundary_input(output: &FuncOutput) -> FuncInput {
         name: output.name.clone(),
         required: false,
         data_type: output.data_type.clone(),
+        const_only: false,
         default_value: None,
         value_variants: Vec::new(),
     }
@@ -451,6 +456,7 @@ fn placeholder_input() -> FuncInput {
         name: PLACEHOLDER_PORT.to_string(),
         required: false,
         data_type: DataType::default(),
+        const_only: false,
         default_value: None,
         value_variants: Vec::new(),
     }
@@ -473,6 +479,7 @@ mod tests {
             name: name.into(),
             required: false,
             data_type: ty,
+            const_only: false,
             default_value: None,
             value_variants: Vec::new(),
         }

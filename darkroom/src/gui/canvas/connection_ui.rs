@@ -418,9 +418,28 @@ fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<PortRef> {
 /// palantir suppresses `hovered` on every widget except the
 /// LMB-capture owner during a drag, so while the start port owns the
 /// capture no other port can ever read `hovered = true`.
+/// Whether `port` is a const-only input — one that rejects a wired binding, so a
+/// dragged wire must never snap to it or start a bind from it.
+fn input_const_only(scene: &Scene, port: PortRef) -> bool {
+    if port.kind != PortKind::Input {
+        return false;
+    }
+    scene
+        .nodes
+        .iter()
+        .find(|n| n.id == port.node_id)
+        .and_then(|n| scene.inputs(n.inputs).get(port.port_idx))
+        .is_some_and(|i| i.const_only)
+}
+
 fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -> Option<PortRef> {
     let want_kind = start.kind.opposite();
     let pointer = ui.pointer_pos()?;
+    // A const-only input rejects wired bindings: a drag that starts on one never
+    // snaps anywhere, so its release falls through to the set-const gesture.
+    if input_const_only(scene, start) {
+        return None;
+    }
     // A passthrough (subgraph input boundary wired straight to the output
     // boundary) leaves the relayed value untyped at execution and panics
     // the worker — disallow it by never snapping one boundary node onto
@@ -440,6 +459,10 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
             continue;
         }
         for port in node_ports(n, want_kind) {
+            // A const-only input is never a valid wire target.
+            if input_const_only(scene, port) {
+                continue;
+            }
             if frame.contains_pointer(port, pointer) {
                 // Reject a drop onto an incompatible port so the wire
                 // won't latch. Geometrically only one port sits under the

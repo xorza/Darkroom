@@ -13,6 +13,7 @@ fn int_input(name: &str) -> FuncInput {
         name: name.into(),
         required: false,
         data_type: DataType::Int,
+        const_only: false,
         default_value: None,
         value_variants: Vec::new(),
     }
@@ -275,6 +276,7 @@ fn existing_port_type_is_rederived_from_wiring() {
         name: "A".into(),
         required: false,
         data_type: DataType::Bool,
+        const_only: false,
         default_value: None,
         value_variants: Vec::new(),
     };

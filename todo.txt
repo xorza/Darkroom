@@ -1,3 +1,8 @@
 comments in theme file
 
 filter connection data types on scenarium level
+
+scene
+.nodes
+.iter()
+.find(|n| n.id == port.node_id) - map?

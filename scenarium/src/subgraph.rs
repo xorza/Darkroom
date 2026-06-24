@@ -142,6 +142,7 @@ mod tests {
             name: name.into(),
             required: false,
             data_type: DataType::Int,
+            const_only: false,
             default_value: None,
             value_variants: vec![],
         }

@@ -73,11 +73,16 @@ fn build_func() -> Func {
              upstream is not recomputed.",
         )
         .input(FuncInput::required("value", DataType::Null))
-        // The path input — its index is [`CACHE_PATH_INPUT`].
-        .input(FuncInput::required(
-            "path",
-            DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::NewFile))),
-        ))
+        // The path input — its index is [`CACHE_PATH_INPUT`]. Const-only: the
+        // engine reads it as a literal `FsPath`, so a wired binding would silently
+        // disable caching (see `cache_node_path`).
+        .input(
+            FuncInput::required(
+                "path",
+                DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::NewFile))),
+            )
+            .const_only(),
+        )
         .output("value", DataType::Null)
         .lambda(crate::async_lambda!(|_, _, _, inputs, _, outputs| {
             // The engine does the path-keyed file I/O; the node is a plain
