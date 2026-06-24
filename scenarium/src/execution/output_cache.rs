@@ -19,9 +19,10 @@ use std::path::{Path, PathBuf};
 
 use crate::context::ContextManager;
 use crate::data::DynamicValue;
+use crate::elements::cache_passthrough::cache_node_path;
 use crate::execution::blob;
 use crate::execution::cache::Cache;
-use crate::execution::digest::{Digest, cache_node_path};
+use crate::execution::digest::Digest;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::ExecutionProgram;
 use crate::special::SpecialNode;
@@ -74,7 +75,8 @@ impl OutputCache {
     fn target(&self, program: &ExecutionProgram, idx: usize, cache: &Cache) -> Option<Target> {
         let e_node = &program.e_nodes[idx];
         if matches!(e_node.special, Some(SpecialNode::CachePassthrough { .. })) {
-            return cache_node_path(program, idx).map(|p| Target::Explicit(PathBuf::from(p)));
+            return cache_node_path(program.node_inputs(e_node))
+                .map(|p| Target::Explicit(PathBuf::from(p)));
         }
         if e_node.persist {
             let digest = cache.current_digest(idx)?;

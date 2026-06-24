@@ -44,7 +44,7 @@ pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, func_lib: &Fun
         assert_eq!(e_node.outputs.len as usize, func.outputs.len());
         assert_eq!(e_node.events.len as usize, func.events.len());
 
-        for e_input in &program.inputs[e_node.inputs.range()] {
+        for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
                 assert!(e_addr.target_idx < program.e_nodes.len());
                 let target = &program.e_nodes[e_addr.target_idx];
@@ -71,8 +71,7 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
     let mut seen_in_order = HashSet::with_capacity(program.e_nodes.len());
     for &idx in &plan.process_order {
         assert!(idx < program.e_nodes.len());
-        let span = program.e_nodes[idx].inputs;
-        for input in &program.inputs[span.range()] {
+        for input in program.node_inputs(&program.e_nodes[idx]) {
             if let ExecutionBinding::Bind(addr) = &input.binding {
                 assert!(addr.target_idx < program.e_nodes.len());
                 assert!(seen_in_order.contains(&addr.target_idx));
@@ -87,7 +86,7 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
             assert!(!flags.wants_execute);
         }
 
-        for e_input in &program.inputs[e_node.inputs.range()] {
+        for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(addr) = &e_input.binding {
                 assert!(addr.target_idx < program.e_nodes.len());
                 assert!(addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize);
@@ -109,7 +108,7 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
         assert!(flags.wants_execute);
         assert!(!flags.missing_required_inputs);
 
-        for e_input in &program.inputs[e_node.inputs.range()] {
+        for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(addr) = &e_input.binding {
                 assert!(!pending.contains(&addr.target_idx));
             }

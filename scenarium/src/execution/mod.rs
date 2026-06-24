@@ -308,7 +308,7 @@ impl ExecutionEngine {
     }
 
     pub(crate) fn node_inputs(&self, e_node: &ExecutionNode) -> &[program::ExecutionInput] {
-        &self.program.inputs[e_node.inputs.range()]
+        self.program.node_inputs(e_node)
     }
 
     pub(crate) fn node_events(&self, e_node: &ExecutionNode) -> &[program::ExecutionEvent] {
