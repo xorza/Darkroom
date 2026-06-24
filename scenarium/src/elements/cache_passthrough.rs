@@ -67,6 +67,9 @@ pub(crate) fn cache_passthrough_func() -> &'static Func {
 fn build_func() -> Func {
     Func::new(CACHE_PASSTHROUGH_FUNC_ID, "file cache")
         .category("cache")
+        // It owns its caching (explicit-path store), so the editor's generic
+        // disk-cache toggle doesn't apply.
+        .uncacheable()
         .description(
             "Passes its input through unchanged and caches it to the file at `path`. \
              While that file exists the value is loaded from it and the input's \
@@ -110,5 +113,13 @@ mod tests {
         assert!(path.const_only, "the cache path must reject wired bindings");
         // Seeded empty so a freshly-dropped node shows its path editor.
         assert_eq!(path.default_value, Some(StaticValue::FsPath(String::new())));
+    }
+
+    #[test]
+    fn func_is_uncacheable() {
+        // It does its own explicit-path caching, so the editor must not offer the
+        // generic disk-cache toggle.
+        let func = SpecialNode::CachePassthrough { bypass: false }.func();
+        assert!(func.uncacheable);
     }
 }

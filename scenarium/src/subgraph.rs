@@ -362,6 +362,7 @@ mod tests {
             name: "ticker".into(),
             category: "Test".into(),
             terminal: true,
+            uncacheable: false,
             behavior: FuncBehavior::Impure,
             version: 0,
             description: None,

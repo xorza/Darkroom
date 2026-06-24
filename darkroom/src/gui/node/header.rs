@@ -183,9 +183,10 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // Cache toggle: filled when the node's output persists to the
             // on-disk store (`CachePersistence::Disk`), hollow for
             // memory-only. Muted swatch, like the disable toggle — a config
-            // flip, not an alarm. Suppressed on boundary nodes (pure routing,
-            // no output to cache).
-            if !node.boundary {
+            // flip, not an alarm. Suppressed where the toggle doesn't apply:
+            // boundary nodes (pure routing) and self-caching nodes like the
+            // file-cache passthrough (`uncacheable`).
+            if !node.uncacheable {
                 let persist_toggled = Badge {
                     salt: "badge_c",
                     glyph: "C",

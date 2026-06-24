@@ -135,6 +135,10 @@ pub struct SceneNode {
     /// (`CachePersistence::Disk`), `false` for memory-only. The header `C`
     /// badge toggles it via `Intent::SetPersist`.
     pub persist: bool,
+    /// Suppresses the header's `C` (disk-cache/persist) badge. `true` for
+    /// self-caching nodes (the file-cache passthrough) and boundary/stub nodes
+    /// that have no output to persist.
+    pub uncacheable: bool,
     /// A `SubgraphInput`/`SubgraphOutput` interface boundary node. Its
     /// ports route the subgraph interface rather than carry literal
     /// values, so the const-value affordances (inline editor, "Set
@@ -206,6 +210,7 @@ impl Scene {
                     outputs: Cow::Borrowed(&f.outputs),
                     subgraph: None,
                     terminal: f.terminal,
+                    uncacheable: f.uncacheable,
                 }),
                 NodeKind::Subgraph(r) => graph.resolve_def(*r, func_lib).map(|d| NodeInterface {
                     kind_label: d.name.clone().into(),
@@ -216,6 +221,7 @@ impl Scene {
                     // time, not stored on the def; treat "no exposed
                     // outputs" as the visible sink signal.
                     terminal: d.outputs.is_empty(),
+                    uncacheable: false,
                 }),
                 // A built-in special node: its interface is the hardcoded spec.
                 NodeKind::Special(s) => {
@@ -226,6 +232,7 @@ impl Scene {
                         outputs: Cow::Borrowed(&f.outputs),
                         subgraph: None,
                         terminal: f.terminal,
+                        uncacheable: f.uncacheable,
                     })
                 }
                 // Inbound boundary: no inputs; one output per def input,
@@ -243,6 +250,7 @@ impl Scene {
                         outputs: Cow::Owned(outputs),
                         subgraph: None,
                         terminal: false,
+                        uncacheable: true,
                     }
                 }),
                 // Outbound boundary: one input per def output (synthesized
@@ -258,6 +266,7 @@ impl Scene {
                         outputs: Cow::Borrowed(&[]),
                         subgraph: None,
                         terminal: false,
+                        uncacheable: true,
                     }
                 }),
             };
@@ -290,6 +299,7 @@ impl Scene {
                         outputs: Cow::Borrowed(&[]),
                         subgraph: None,
                         terminal: false,
+                        uncacheable: true,
                     }
                 }
             };
@@ -346,6 +356,7 @@ impl Scene {
                 terminal: interface.terminal,
                 disabled: node.disabled,
                 persist: node.persist == CachePersistence::Disk,
+                uncacheable: interface.uncacheable,
                 boundary: matches!(
                     node.kind,
                     NodeKind::SubgraphInput | NodeKind::SubgraphOutput
@@ -397,6 +408,9 @@ struct NodeInterface<'a> {
     outputs: Cow<'a, [FuncOutput]>,
     subgraph: Option<SubgraphRef>,
     terminal: bool,
+    /// Node manages its own caching (or has no output to cache), so the editor's
+    /// disk-cache (persist) toggle is hidden — see [`SceneNode::uncacheable`].
+    uncacheable: bool,
 }
 
 /// The literal a port falls back to when given a const binding: its

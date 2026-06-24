@@ -119,6 +119,13 @@ pub struct Func {
     pub category: String,
     pub terminal: bool,
 
+    /// Node manages its own output caching, so the editor's disk-cache (persist)
+    /// toggle is meaningless on it and hidden — e.g. the file-cache passthrough,
+    /// whose explicit-path store supersedes the generic content-addressed cache.
+    /// `false` (the default) means a normal node that offers the toggle.
+    #[serde(default)]
+    pub uncacheable: bool,
+
     pub behavior: FuncBehavior,
 
     /// Algorithm version, folded into the disk-cache content digest so a changed
@@ -198,6 +205,13 @@ impl Func {
 
     pub fn terminal(mut self) -> Self {
         self.terminal = true;
+        self
+    }
+
+    /// Hide the editor's disk-cache (persist) toggle for this node — for nodes
+    /// that cache their output themselves. See [`Func::uncacheable`].
+    pub fn uncacheable(mut self) -> Self {
+        self.uncacheable = true;
         self
     }
 
