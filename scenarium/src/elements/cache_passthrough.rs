@@ -7,13 +7,49 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crate::data::{DataType, FsPathConfig, FsPathMode};
+use blake3::Hasher;
+
+use crate::data::{DataType, FsPathConfig, FsPathMode, StaticValue};
+use crate::execution::digest::Digest;
+use crate::execution::program::{ExecutionBinding, ExecutionInput};
 use crate::function::{Func, FuncInput};
+
+/// Domain separator for a file-cache node's path-keyed digest, kept distinct from
+/// the normal node-content digest domain so a path can't collide with a normal
+/// node's content hash.
+const DOMAIN_FILECACHE: &[u8] = b"scenarium-filecache-v1";
 
 /// Input index of a `CachePassthrough` node's `path` (the second input declared by
 /// [`cache_passthrough_func`]). The output cache and the path-keyed digest read the
 /// path from here — keep it in step with the input order below.
 pub(crate) const CACHE_PATH_INPUT: usize = 1;
+
+/// The `Const` `FsPath` at `node_inputs`'s [`CACHE_PATH_INPUT`] — for a
+/// [`CachePassthrough`](crate::special::SpecialNode) node, its cache key and
+/// load/store location. The single resolver, shared with the output cache (via
+/// `pub(crate)`), so the path-keyed digest and the load/store can't disagree on the
+/// key. `node_inputs` is the node's slice of the program input pool. `None` for a
+/// non-const / empty path. Assumes the node is a cache node.
+pub(crate) fn cache_node_path(node_inputs: &[ExecutionInput]) -> Option<&str> {
+    let path_input = node_inputs.get(CACHE_PATH_INPUT)?;
+    let ExecutionBinding::Const(StaticValue::FsPath(path)) = &path_input.binding else {
+        return None;
+    };
+    (!path.is_empty()).then_some(path.as_str())
+}
+
+/// Path-keyed digest of a [`SpecialNode::CachePassthrough`](crate::special::SpecialNode)
+/// node: a hash of its `Const` `FsPath` *alone* — deliberately ignoring `input[0]`'s
+/// cone, so the file is the sole cache key (the node's whole point). A non-const or
+/// empty path ⇒ `None` (never a hit, never stored). The file's `(len, mtime)` is
+/// *not* folded in — presence, not content, decides the hit.
+pub(crate) fn file_cache_digest(node_inputs: &[ExecutionInput]) -> Option<Digest> {
+    let path = cache_node_path(node_inputs)?;
+    let mut hasher = Hasher::new();
+    hasher.update(DOMAIN_FILECACHE);
+    hasher.update(path.as_bytes());
+    Some(hasher.finalize().into())
+}
 
 /// Stable `FuncId` standing in for the cache node in the flattened program (digest
 /// memo / stats attribution). Not registered in any `FuncLib`.
