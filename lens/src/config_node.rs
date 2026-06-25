@@ -19,7 +19,7 @@ use std::hash::Hasher;
 use std::sync::Arc;
 
 use common::{FieldKind, FieldValue, FnvHasher, Introspect};
-use scenarium::data::{CustomValue, DataType, DynamicValue, EnumDef, StaticValue, TypeDef, TypeId};
+use scenarium::data::{CustomValue, DataType, DynamicValue, EnumDef, StaticValue, TypeId};
 use scenarium::func_lambda::FuncLambda;
 use scenarium::function::{Func, FuncInput};
 
@@ -39,11 +39,8 @@ pub(crate) trait NodeConfig:
 pub(crate) struct ConfigValue<T>(pub(crate) T);
 
 impl<T: NodeConfig> CustomValue for ConfigValue<T> {
-    fn type_def(&self) -> Arc<TypeDef> {
-        Arc::new(TypeDef {
-            type_id: T::TYPE_ID.into(),
-            display_name: T::NAME.to_string(),
-        })
+    fn type_id(&self) -> TypeId {
+        T::TYPE_ID.into()
     }
 
     fn as_any(&self) -> &dyn Any {

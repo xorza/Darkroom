@@ -99,10 +99,9 @@ fn temp_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::{CustomValue, StaticValue, TypeDef};
+    use crate::data::{CustomValue, StaticValue, TypeId};
     use std::any::Any;
     use std::fmt;
-    use std::sync::Arc;
     use std::sync::atomic::AtomicU64;
 
     /// A unique temp file path removed on drop.
@@ -165,11 +164,8 @@ mod tests {
         }
     }
     impl CustomValue for Opaque {
-        fn type_def(&self) -> Arc<TypeDef> {
-            Arc::new(TypeDef {
-                type_id: "78391861-24da-4368-a3a5-2a6b7a47f112".into(),
-                display_name: "Opaque".into(),
-            })
+        fn type_id(&self) -> TypeId {
+            "78391861-24da-4368-a3a5-2a6b7a47f112".into()
         }
         fn as_any(&self) -> &dyn Any {
             self

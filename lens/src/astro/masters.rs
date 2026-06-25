@@ -9,7 +9,7 @@ use std::any::Any;
 use std::sync::{Arc, LazyLock};
 
 use lumos::CalibrationMasters;
-use scenarium::data::{CustomValue, DataType, TypeDef};
+use scenarium::data::{CustomValue, DataType, TypeDef, TypeId};
 
 pub static MASTERS_TYPE_DEF: LazyLock<Arc<TypeDef>> = LazyLock::new(|| {
     Arc::new(TypeDef {
@@ -34,8 +34,8 @@ impl Masters {
 }
 
 impl CustomValue for Masters {
-    fn type_def(&self) -> Arc<TypeDef> {
-        MASTERS_TYPE_DEF.clone()
+    fn type_id(&self) -> TypeId {
+        MASTERS_TYPE_DEF.type_id
     }
 
     fn as_any(&self) -> &dyn Any {

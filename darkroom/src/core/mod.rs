@@ -7,8 +7,8 @@
 pub(crate) mod document;
 pub(crate) mod edit;
 pub(crate) mod engine;
-pub(crate) mod library;
 pub(crate) mod io;
+pub(crate) mod library;
 pub(crate) mod script;
 pub(crate) mod session;
 pub(crate) mod theme_pref;

@@ -105,7 +105,7 @@ pub(crate) async fn serialize_outputs(
             DynamicValue::Unbound => CachedValue::Unbound,
             DynamicValue::Static(value) => CachedValue::Static(value.clone()),
             DynamicValue::Custom(value) => {
-                let type_id = value.type_def().type_id;
+                let type_id = value.type_id();
                 let codec = library.codec(&type_id).ok_or(Error::UnknownType(type_id))?;
                 let blob = codec
                     .encode(value.as_ref(), ctx)
@@ -146,7 +146,6 @@ pub(crate) fn deserialize_outputs(bytes: Vec<u8>, library: &Library) -> Result<V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::TypeDef;
     use crate::library::TypeEntry;
     use std::any::Any;
     use std::fmt;
@@ -165,11 +164,8 @@ mod tests {
     }
 
     impl CustomValue for Blob {
-        fn type_def(&self) -> Arc<TypeDef> {
-            Arc::new(TypeDef {
-                type_id: BLOB_TYPE.into(),
-                display_name: "Blob".into(),
-            })
+        fn type_id(&self) -> TypeId {
+            BLOB_TYPE.into()
         }
         fn as_any(&self) -> &dyn Any {
             self
@@ -209,11 +205,8 @@ mod tests {
     }
 
     impl CustomValue for Opaque {
-        fn type_def(&self) -> Arc<TypeDef> {
-            Arc::new(TypeDef {
-                type_id: OPAQUE_TYPE.into(),
-                display_name: "Opaque".into(),
-            })
+        fn type_id(&self) -> TypeId {
+            OPAQUE_TYPE.into()
         }
         fn as_any(&self) -> &dyn Any {
             self

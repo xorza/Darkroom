@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 use common::Slot;
 use imaginarium::{ColorFormat, ImageBuffer, ImageDesc, Transform, Vec2};
 use scenarium::context::ContextManager;
-use scenarium::data::{CustomValue, DataType, PendingPreview, TypeDef};
+use scenarium::data::{CustomValue, DataType, PendingPreview, TypeDef, TypeId};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
@@ -88,8 +88,8 @@ impl Image {
 }
 
 impl CustomValue for Image {
-    fn type_def(&self) -> Arc<TypeDef> {
-        IMAGE_TYPE_DEF.clone()
+    fn type_id(&self) -> TypeId {
+        IMAGE_TYPE_DEF.type_id
     }
 
     fn as_any(&self) -> &dyn Any {

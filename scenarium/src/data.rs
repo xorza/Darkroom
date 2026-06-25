@@ -32,9 +32,14 @@ pub trait PendingPreview: Send {
 }
 
 /// Trait for custom types that can be stored in `DynamicValue::Custom`.
-/// Implementors provide their `DataType` so it doesn't need to be passed separately.
-pub trait CustomValue: Any + Send + Sync + Display {
-    fn type_def(&self) -> Arc<TypeDef>;
+/// Implementors report their registered [`TypeId`] so the library can resolve
+/// the type's metadata and disk codec.
+///
+/// `'static` (rather than an `Any` supertrait) so the method name `type_id`
+/// doesn't collide with [`Any::type_id`]; downcasting still goes through
+/// [`as_any`](CustomValue::as_any).
+pub trait CustomValue: Send + Sync + Display + 'static {
+    fn type_id(&self) -> TypeId;
     fn gen_preview(&self, _ctx_manager: &mut ContextManager) -> Option<Box<dyn PendingPreview>> {
         None
     }
@@ -237,7 +242,7 @@ impl std::fmt::Debug for DynamicValue {
             DynamicValue::Static(value) => write!(f, "{value:?}"),
             DynamicValue::Custom(data) => f
                 .debug_struct("Custom")
-                .field("type_def", &data.type_def())
+                .field("type_id", &data.type_id())
                 .finish_non_exhaustive(),
         }
     }
