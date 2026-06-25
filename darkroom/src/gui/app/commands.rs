@@ -11,8 +11,8 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use palantir::Ui;
 use scenarium::data::{FsPathConfig, StaticValue};
-use scenarium::function::FuncLib;
 use scenarium::graph::{Binding, NodeKind};
+use scenarium::library::Library;
 use scenarium::prelude::{NodeId, SubgraphDef, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
 
@@ -107,7 +107,7 @@ impl App {
     }
 
     /// Publish a copy of the active/selected subgraph into the shared
-    /// library (the runtime `FuncLib`) and persist it, so it can be
+    /// library (the runtime `Library`) and persist it, so it can be
     /// instanced as `Linked` anywhere. A fresh-id copy (fresh interior
     /// ids too) joins the library, and the source local def's `origin`
     /// is pointed at it so it now tracks that library entry (a later
@@ -246,10 +246,10 @@ impl App {
 /// the local def's `origin` is re-pointed at it, so a later publish
 /// updates rather than re-adds. The `origin` write is lineage metadata,
 /// deliberately *not* routed through undo. Free fn (not a method) so it
-/// can be unit-tested against a bare `Document` + `FuncLib`.
+/// can be unit-tested against a bare `Document` + `Library`.
 fn publish_local_def(
     document: &mut Document,
-    func_lib: &ArcSwap<FuncLib>,
+    func_lib: &ArcSwap<Library>,
     target: GraphRef,
     node_id: NodeId,
 ) -> bool {
@@ -294,8 +294,8 @@ fn publish_local_def(
 /// (no disk write — the caller persists on success). Returns `false`
 /// when nothing resolves. On success the source local def's `origin` is
 /// re-pointed at the new library entry, so it tracks its lineage. Free
-/// fn so it's unit-testable against a bare `Document` + `FuncLib`.
-fn promote_to_library(document: &mut Document, func_lib: &ArcSwap<FuncLib>) -> bool {
+/// fn so it's unit-testable against a bare `Document` + `Library`.
+fn promote_to_library(document: &mut Document, func_lib: &ArcSwap<Library>) -> bool {
     let mut lib = func_lib.load_full();
     let Some(source) = promote_source(document, &lib) else {
         return false;
@@ -348,13 +348,13 @@ enum Promotable {
 
 /// Resolve which subgraph def an export targets: the first selected
 /// subgraph-instance node in the active graph (resolved against that
-/// graph's own `Local` table or the shared `FuncLib` for `Linked`), else
+/// graph's own `Local` table or the shared `Library` for `Linked`), else
 /// the currently open subgraph when inside one. `None` when neither
 /// resolves. Pure resolution over the document — kept here with its only
 /// callers rather than on the `Document` model.
 fn subgraph_to_export<'a>(
     document: &'a Document,
-    func_lib: &'a FuncLib,
+    func_lib: &'a Library,
 ) -> Option<&'a SubgraphDef> {
     match resolve_promotable(document, func_lib)? {
         Promotable::Node { graph, sref } => document.graph_for(graph)?.resolve_def(sref, func_lib),
@@ -367,7 +367,7 @@ fn subgraph_to_export<'a>(
 /// `Local` def in this document, where to re-link its `origin` after the
 /// library entry is created. `None` (no relink) for a `Linked` source —
 /// there's no in-document def to own it.
-fn promote_source(document: &Document, func_lib: &FuncLib) -> Option<PromoteSource> {
+fn promote_source(document: &Document, func_lib: &Library) -> Option<PromoteSource> {
     let (def, relink) = match resolve_promotable(document, func_lib)? {
         Promotable::Node { graph, sref } => {
             let def = document
@@ -399,7 +399,7 @@ fn promote_source(document: &Document, func_lib: &FuncLib) -> Option<PromoteSour
 /// Shared resolution for export / promote: the first selected
 /// subgraph-instance node in the active graph (whose def resolves), else
 /// the open subgraph interior. `None` when neither applies.
-fn resolve_promotable(document: &Document, func_lib: &FuncLib) -> Option<Promotable> {
+fn resolve_promotable(document: &Document, func_lib: &Library) -> Option<Promotable> {
     let target = document.active_target();
     let graph = document.graph_for(target)?;
     if let Some(view) = document.view(target) {
@@ -452,7 +452,7 @@ mod tests {
     #[test]
     fn publish_updates_linked_library_def_in_place() {
         let lib_id = SubgraphId::unique();
-        let mut func_lib = FuncLib::default();
+        let mut func_lib = Library::default();
         func_lib.add_subgraph(SubgraphDef::new(lib_id, "Old"));
         let func_lib = ArcSwap::from_pointee(func_lib);
 
@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn publish_without_origin_creates_entry_and_links_it() {
-        let func_lib = ArcSwap::from_pointee(FuncLib::default());
+        let func_lib = ArcSwap::from_pointee(Library::default());
         let mut doc = Document::default();
         let local = def("Standalone", None);
         let local_id = local.id;
@@ -519,7 +519,7 @@ mod tests {
 
     #[test]
     fn promote_links_source_local_def_to_new_library_entry() {
-        let func_lib = ArcSwap::from_pointee(FuncLib::default());
+        let func_lib = ArcSwap::from_pointee(Library::default());
         let mut doc = Document::default();
         // A local subgraph instance (no library lineage yet), selected
         // so `promote_source` resolves it from the active graph.
@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn promote_with_nothing_selected_is_a_noop() {
-        let func_lib = ArcSwap::from_pointee(FuncLib::default());
+        let func_lib = ArcSwap::from_pointee(Library::default());
         let mut doc = Document::default();
         assert!(!promote_to_library(&mut doc, &func_lib));
         assert_eq!(func_lib.load().subgraphs.len(), 0);
@@ -558,7 +558,7 @@ mod tests {
     #[test]
     fn publish_non_subgraph_node_is_a_noop() {
         use scenarium::prelude::FuncId;
-        let func_lib = ArcSwap::from_pointee(FuncLib::default());
+        let func_lib = ArcSwap::from_pointee(Library::default());
         let mut doc = Document::default();
         let node = Node::new(scenarium::graph::NodeKind::Func(FuncId::unique()));
         let node_id = node.id;

@@ -29,7 +29,7 @@ fn default_hooks() -> TestFuncHooks {
 }
 
 /// Instantiate a `Node` for `func_name` with a fixed id; caller wires bindings.
-fn node(func_lib: &FuncLib, func_name: &str, id: NodeId) -> Node {
+fn node(func_lib: &Library, func_name: &str, id: NodeId) -> Node {
     let mut node: Node = func_lib.by_name(func_name).unwrap().into();
     node.id = id;
     node
@@ -73,13 +73,14 @@ mod cache_persistence {
 
     /// A fresh engine backed by a content-addressed store rooted at `dir`
     /// (simulating a reopen when called twice against the same dir). The default
-    /// empty registry is fine — these tests cache plain values.
+    /// empty library is fine — these tests cache plain values.
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
         use crate::execution::output_cache::OutputCache;
-        use crate::value_codec::CustomValueRegistry;
+        use crate::library::Library;
+        use std::sync::Arc;
         let mut engine = ExecutionEngine::default();
         engine.set_output_cache(OutputCache::new(
-            CustomValueRegistry::default(),
+            Arc::new(Library::default()),
             Some(dir.0.clone()),
         ));
         engine
@@ -270,7 +271,7 @@ mod file_cache {
         path: &Path,
         get_a_calls: Arc<AtomicUsize>,
         bypass: bool,
-    ) -> (Graph, FuncLib, NodeId, NodeId) {
+    ) -> (Graph, Library, NodeId, NodeId) {
         let lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || {
                 get_a_calls.fetch_add(1, Ordering::SeqCst);
@@ -451,7 +452,7 @@ mod graph_structure {
         // Re-compiling the same graph against a library that defines none of
         // its funcs is rejected with a message naming a missing func.
         let err = execution_graph
-            .update(&graph, &FuncLib::default())
+            .update(&graph, &Library::default())
             .unwrap_err();
         let Error::InvalidGraph { message } = err else {
             panic!("expected InvalidGraph, got {err:?}");
@@ -1083,12 +1084,13 @@ mod behavior {
 
         use crate::async_lambda;
         use crate::execution_stats::NodeError;
-        use crate::function::{Func, FuncLib};
+        use crate::function::Func;
         use crate::graph::{Graph, NodeId};
+        use crate::library::Library;
 
         // Trips the cancel on its first invoke only, so the re-run completes.
         let cancel_first = Arc::new(AtomicBool::new(true));
-        let func_lib: FuncLib = [Func::new("8400cb3a-a5d2-4fcd-a9d8-0ab4880c710f", "self_cancel")
+        let func_lib: Library = [Func::new("8400cb3a-a5d2-4fcd-a9d8-0ab4880c710f", "self_cancel")
             .category("Debug")
             .pure()
             .terminal()
@@ -1177,10 +1179,11 @@ mod behavior {
         use crate::async_lambda;
         use crate::execution_stats::NodeError;
         use crate::func_lambda::InvokeError;
-        use crate::function::{Func, FuncLib};
+        use crate::function::Func;
         use crate::graph::{Graph, NodeId};
+        use crate::library::Library;
 
-        let func_lib: FuncLib =
+        let func_lib: Library =
             [
                 Func::new("8003e30b-0417-474d-a77f-1d3ea71ac6b3", "always_cancel")
                     .category("Debug")
@@ -1261,7 +1264,7 @@ mod composite_behavior {
     use crate::graph::NodeKind;
     use crate::subgraph::{SubgraphDef, SubgraphRef};
 
-    fn func_node(func_lib: &FuncLib, func_name: &str, node_name: &str) -> Node {
+    fn func_node(func_lib: &Library, func_name: &str, node_name: &str) -> Node {
         let id = func_lib.by_name(func_name).unwrap().id;
         let mut n = Node::new(NodeKind::Func(id));
         n.name = node_name.to_string();
@@ -1275,7 +1278,7 @@ mod composite_behavior {
     /// A subgraph def with no inputs and one output, whose interior is the
     /// impure `get_b` (named `inner_name`) feeding `SubgraphOutput[0]`.
     fn impure_output_def(
-        func_lib: &FuncLib,
+        func_lib: &Library,
         id: &str,
         name: &str,
         inner_name: &str,
@@ -1294,7 +1297,7 @@ mod composite_behavior {
     }
 
     /// Main graph: one instance of `def` whose output feeds a terminal `print`.
-    fn main_with(func_lib: &FuncLib, def: SubgraphDef) -> Graph {
+    fn main_with(func_lib: &Library, def: SubgraphDef) -> Graph {
         let def_id = def.id;
         let mut graph = Graph::default();
         graph.subgraphs.add(def.clone());
@@ -1308,7 +1311,7 @@ mod composite_behavior {
 
     /// `(name in execute_order)` after a second prepare, with a cached
     /// output already present for that node — i.e. "would it re-run?".
-    fn reruns_with_cache(graph: &Graph, func_lib: &FuncLib, name: &str) -> bool {
+    fn reruns_with_cache(graph: &Graph, func_lib: &Library, name: &str) -> bool {
         let mut eg = ExecutionEngine::default();
         eg.update(graph, func_lib).unwrap();
         eg.prepare_execution(true, false, &[]).unwrap();
@@ -1357,7 +1360,7 @@ mod composite_behavior {
         // A `Local` def resolves from the graph itself, so the walk reaches
         // the interior even with an empty library — and flags its `get_b`.
         let mut eg = ExecutionEngine::default();
-        let err = eg.update(&graph, &FuncLib::default()).unwrap_err();
+        let err = eg.update(&graph, &Library::default()).unwrap_err();
         let Error::InvalidGraph { message } = err else {
             panic!("expected InvalidGraph, got {err:?}");
         };
@@ -1976,7 +1979,7 @@ mod events {
     const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);
 
     struct EventFixture {
-        func_lib: FuncLib,
+        func_lib: Library,
         graph: Graph,
         emit_id: NodeId,
         emit_calls: Arc<Mutex<i64>>,
@@ -1993,7 +1996,7 @@ mod events {
         let recv_values_l = recv_values.clone();
 
         // Both funcs are Impure non-terminals (the `Func::new` default).
-        let mut func_lib = FuncLib::default();
+        let mut func_lib = Library::default();
         func_lib.add(
             Func::new(EMIT_FUNC, "emit")
                 .output("out", DataType::Int)
@@ -2154,7 +2157,7 @@ mod output_usage {
         let seen_usage: Arc<Mutex<Vec<OutputUsage>>> = Arc::new(Mutex::new(Vec::new()));
         let seen_usage_l = seen_usage.clone();
 
-        let mut func_lib = FuncLib::default();
+        let mut func_lib = Library::default();
         func_lib.add(
             Func::new(SPLIT_FUNC, "split")
                 .output("a", DataType::Int)
@@ -2256,7 +2259,7 @@ mod topology {
     #[tokio::test(flavor = "multi_thread")]
     async fn empty_graph_executes_cleanly() -> anyhow::Result<()> {
         let graph = Graph::default();
-        let func_lib = FuncLib::default();
+        let func_lib = Library::default();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &func_lib).unwrap();
@@ -2485,7 +2488,7 @@ mod subgraph {
     use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
     use std::sync::Mutex as StdMutex;
 
-    fn fnode(func_lib: &FuncLib, name: &str) -> Node {
+    fn fnode(func_lib: &Library, name: &str) -> Node {
         func_lib.by_name(name).unwrap().into()
     }
 
@@ -2494,7 +2497,7 @@ mod subgraph {
     }
 
     /// `in(A,B) -> sum -> out(Sum)`.
-    fn wrap_sum_def(func_lib: &FuncLib) -> SubgraphDef {
+    fn wrap_sum_def(func_lib: &Library) -> SubgraphDef {
         let in_node = Node::new(NodeKind::SubgraphInput);
         let in_id = in_node.id;
         let sum = fnode(func_lib, "sum");
@@ -2775,7 +2778,7 @@ mod subgraph {
 
     /// Add a `ticker` func (one event, no I/O) usable as an interior or parent
     /// emitter; instantiate it by name with `fnode`.
-    fn add_ticker(func_lib: &mut FuncLib) {
+    fn add_ticker(func_lib: &mut Library) {
         func_lib.add(
             Func::new(FuncId::unique(), "ticker")
                 .category("Test")
@@ -2784,7 +2787,7 @@ mod subgraph {
         );
     }
 
-    fn func_lib_with_ticker() -> FuncLib {
+    fn func_lib_with_ticker() -> Library {
         let mut func_lib = test_func_lib(default_hooks());
         add_ticker(&mut func_lib);
         func_lib

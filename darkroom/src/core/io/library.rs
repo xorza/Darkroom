@@ -1,5 +1,5 @@
 //! The shared subgraph library: `Linked` subgraph defs that live in the
-//! runtime `FuncLib` (where `SubgraphRef::Linked` resolves) rather than in
+//! runtime `Library` (where `SubgraphRef::Linked` resolves) rather than in
 //! any one document, so they're reusable across documents. Persisted in
 //! the working dir as Rhai, like the config — loaded into
 //! `func_lib.subgraphs` at startup, saved when "promote" grows it.
@@ -16,7 +16,7 @@ const LIBRARY_FILE: &str = "darkroom.library.rhai";
 /// On-disk wrapper so the file is a named table rather than a bare
 /// collection (more robust to hand-edit and future fields). A plain
 /// `Vec` — each def carries its own `id`, and we only ever iterate to
-/// feed `FuncLib::add_subgraph`.
+/// feed `Library::add_subgraph`.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 struct Library {
     #[serde(default)]

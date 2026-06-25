@@ -9,7 +9,8 @@ use async_trait::async_trait;
 use imaginarium::{ALL_FORMATS, ImageDesc};
 use scenarium::context::ContextManager;
 use scenarium::data::CustomValue;
-use scenarium::value_codec::{CustomValueCodec, CustomValueRegistry};
+use scenarium::library::TypeEntry;
+use scenarium::value_codec::CustomValueCodec;
 
 use super::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 use super::{IMAGE_TYPE_DEF, Image};
@@ -55,9 +56,11 @@ impl CustomValueCodec for ImageCodec {
     }
 }
 
-/// Register the [`Image`] disk codec so cached image outputs can be reloaded.
-pub fn register_image_codec(registry: &mut CustomValueRegistry) {
-    registry.register(IMAGE_TYPE_DEF.type_id, ImageCodec);
+/// The [`Image`] type's registry entry (display name + disk codec), for
+/// `image_funclib` to register via [`Library::register_type`]. Keeps the codec
+/// (a private ZST) owned here; the caller supplies only [`IMAGE_TYPE_DEF`]'s id.
+pub(crate) fn image_type_entry() -> TypeEntry {
+    TypeEntry::custom_with_codec(IMAGE_TYPE_DEF.display_name.clone(), Arc::new(ImageCodec))
 }
 
 fn encode_image(image: &imaginarium::Image) -> Vec<u8> {
@@ -177,8 +180,10 @@ mod tests {
     }
 
     #[test]
-    fn register_image_codec_wires_the_decoder() {
-        let mut registry = CustomValueRegistry::default();
-        register_image_codec(&mut registry);
+    fn register_image_type_wires_the_codec() {
+        use scenarium::library::Library;
+        let mut library = Library::default();
+        library.register_type(IMAGE_TYPE_DEF.type_id, image_type_entry());
+        assert!(library.type_decl(&IMAGE_TYPE_DEF.type_id).is_some());
     }
 }

@@ -11,5 +11,4 @@ mod image;
 // mirrors, presets, datatypes, the config bridge) stays crate-internal.
 pub use astro::funclib::astro_funclib;
 pub use image::Image;
-pub use image::codec::register_image_codec;
 pub use image::funclib::image_funclib;

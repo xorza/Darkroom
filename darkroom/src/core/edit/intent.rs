@@ -30,10 +30,10 @@
 use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
-use scenarium::function::FuncLib;
 use scenarium::graph::{
     Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, Subscription,
 };
+use scenarium::library::Library;
 use scenarium::prelude::{SubgraphDef, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
 use serde::{Deserialize, Serialize};
@@ -581,7 +581,7 @@ pub fn commit_intent_cascading(
     intent: Intent,
     doc: &mut Document,
     target: GraphRef,
-    func_lib: &FuncLib,
+    func_lib: &Library,
 ) -> Vec<UndoStep> {
     // Only a `SetInput` can retype a node's output, so only it can invalidate
     // downstream wires. Capture which input changed before the intent is moved.

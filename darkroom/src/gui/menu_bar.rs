@@ -32,7 +32,7 @@ pub(crate) enum MenuCommand {
     /// Import a subgraph bundle from a file into the current document.
     ImportSubgraph,
     /// Publish a copy of the active subgraph into the shared library
-    /// (`FuncLib`), so it can be instanced as `Linked` anywhere. No-op
+    /// (`Library`), so it can be instanced as `Linked` anywhere. No-op
     /// when the active tab / selection isn't a subgraph.
     PromoteSubgraph,
     /// Publish a specific node's local subgraph def to the library (the

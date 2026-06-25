@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use common::{KeyIndexVec, SerdeFormat, is_debug};
 use glam::Vec2;
 use scenarium::graph::{Node, NodeKind};
-use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId, SubgraphDef, SubgraphId};
+use scenarium::prelude::{Graph as CoreGraph, Library, NodeId, SubgraphDef, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -29,7 +29,7 @@ const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
 /// Which graph an editor tab is pointed at. `Main` is the document's
 /// root graph; `Local(id)` is a local subgraph def's interior graph
 /// (`Document::graph.subgraphs[id].graph`). Linked subgraphs are shared
-/// library assets in the `FuncLib` — not editable in place; to edit one
+/// library assets in the `Library` — not editable in place; to edit one
 /// you localize it (copy into the doc as a `Local` def) first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GraphRef {
@@ -215,7 +215,7 @@ impl EditScope<'_> {
 /// The thing being edited: the core `Graph` (which already nests local
 /// subgraph defs and their interior graphs) plus the editor view
 /// metadata for each graph the user has open — the root in `main_view`,
-/// every opened subgraph interior in `sub_views`. The `FuncLib` it
+/// every opened subgraph interior in `sub_views`. The `Library` it
 /// resolves against lives one level up on `App` (runtime-owned).
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
@@ -512,7 +512,7 @@ impl Document {
     /// against its interior wiring — derived state, recomputed like the
     /// scene rather than stored as undo steps. See `crate::core::edit::reconcile` for
     /// the per-def logic and rationale (placeholder ports, compaction).
-    pub fn reconcile_boundaries(&mut self, func_lib: &FuncLib) {
+    pub fn reconcile_boundaries(&mut self, func_lib: &Library) {
         if self.graph.subgraphs.is_empty() {
             return;
         }

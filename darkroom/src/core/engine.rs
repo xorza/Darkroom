@@ -8,7 +8,7 @@ use std::path::Path;
 
 use scenarium::prelude::{Graph, OutputCache};
 
-use crate::core::func_lib::{SharedFuncLib, runtime_codec_registry, runtime_func_lib};
+use crate::core::func_lib::{SharedFuncLib, runtime_func_lib};
 use crate::core::io::cache::prepare_document_cache_root;
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::wake::Wake;
@@ -34,9 +34,10 @@ impl Engine {
     pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
         let func_lib = runtime_func_lib();
         let worker = WorkerBridge::new(wake.clone());
-        // Install the codec registry up front (memory-only until a document has a
-        // path); `set_document_cache` repoints the store root as documents open.
-        worker.set_output_cache(OutputCache::new(runtime_codec_registry(), None));
+        // Install the cache up front (memory-only until a document has a path);
+        // its codecs come from the library snapshot, and `set_document_cache`
+        // repoints the store root as documents open.
+        worker.set_output_cache(OutputCache::new(func_lib.load_full(), None));
         let script = ScriptHost::start(script_cfg, func_lib.clone(), wake);
         Self {
             func_lib,
@@ -52,7 +53,7 @@ impl Engine {
     pub(crate) fn set_document_cache(&self, doc_path: Option<&Path>) {
         let root = doc_path.map(prepare_document_cache_root);
         self.worker
-            .set_output_cache(OutputCache::new(runtime_codec_registry(), root));
+            .set_output_cache(OutputCache::new(self.func_lib.load_full(), root));
     }
 
     /// Send `graph` to the worker for one evaluation (paired with the

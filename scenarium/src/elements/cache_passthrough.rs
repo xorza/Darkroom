@@ -52,7 +52,7 @@ pub(crate) fn file_cache_digest(node_inputs: &[ExecutionInput]) -> Option<Digest
 }
 
 /// Stable `FuncId` standing in for the cache node in the flattened program (digest
-/// memo / stats attribution). Not registered in any `FuncLib`.
+/// memo / stats attribution). Not registered in any `Library`.
 // generated with uuidgen
 const CACHE_PASSTHROUGH_FUNC_ID: &str = "2a969ecc-92b7-4136-9c4a-86491c9621d3";
 

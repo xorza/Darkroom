@@ -3,17 +3,19 @@ use std::sync::Arc;
 
 use crate::config_node::enum_input;
 use crate::image::blend_mode::BLENDMODE_DATATYPE;
+use crate::image::codec::image_type_entry;
 use crate::image::conversion_format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
 use crate::image::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
-use crate::image::{IMAGE_DATA_TYPE, Image};
+use crate::image::{IMAGE_DATA_TYPE, IMAGE_TYPE_DEF, Image};
 use imaginarium::{Blend, BlendMode, ContrastBrightness, SUPPORTED_EXTENSIONS, Transform, Vec2};
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::func_lambda::FuncLambda;
-use scenarium::function::{Func, FuncInput, FuncLib};
+use scenarium::function::{Func, FuncInput};
+use scenarium::library::Library;
 
 /// The imaginarium image-processing nodes (category `image`).
-pub fn image_funclib() -> FuncLib {
-    let mut func_lib = FuncLib::default();
+pub fn image_funclib() -> Library {
+    let mut func_lib = Library::default();
 
     // brightness_contrast
     func_lib.add(
@@ -267,6 +269,8 @@ pub fn image_funclib() -> FuncLib {
                 },
             )),
     );
+
+    func_lib.register_type(IMAGE_TYPE_DEF.type_id, image_type_entry());
 
     func_lib
 }

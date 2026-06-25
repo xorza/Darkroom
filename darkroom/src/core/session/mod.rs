@@ -14,7 +14,7 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
-use scenarium::function::FuncLib;
+use scenarium::library::Library;
 use scenarium::prelude::Graph as CoreGraph;
 
 use crate::core::document::Document;
@@ -199,7 +199,7 @@ fn empty_document() -> Document {
 /// gone) are dropped per-intent; a `SetInput` that retypes a wildcard output
 /// cascades into dropping the now-incompatible downstream wires (`func_lib`
 /// resolves the types).
-fn apply_intents(document: &mut Document, intents: Vec<Intent>, func_lib: &FuncLib) -> bool {
+fn apply_intents(document: &mut Document, intents: Vec<Intent>, func_lib: &Library) -> bool {
     let target = document.active_target();
     let mut needs_reconcile = false;
     for intent in intents {

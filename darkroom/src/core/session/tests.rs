@@ -23,7 +23,7 @@ fn apply_intents_adds_node_and_flags_reconcile() {
         bindings: vec![],
     };
 
-    let reconcile = apply_intents(&mut doc, vec![intent], &FuncLib::default());
+    let reconcile = apply_intents(&mut doc, vec![intent], &Library::default());
     assert_eq!(doc.graph.len(), 1);
     assert!(doc.graph.by_id(&id).is_some(), "node landed in the graph");
     assert!(reconcile, "AddNode can change the interface → reconcile");
@@ -45,7 +45,7 @@ fn apply_add_node_seeds_initial_bindings() {
         bindings: vec![(port, Binding::Const(StaticValue::Float(5.0)))],
     };
 
-    apply_intents(&mut doc, vec![intent], &FuncLib::default());
+    apply_intents(&mut doc, vec![intent], &Library::default());
     assert_eq!(
         doc.graph.input_binding(port),
         Binding::Const(StaticValue::Float(5.0)),
@@ -63,7 +63,7 @@ fn apply_intents_drops_stale_intent() {
         vec![Intent::RemoveNode {
             node_id: NodeId::unique(),
         }],
-        &FuncLib::default(),
+        &Library::default(),
     );
     assert!(!reconcile);
     assert_eq!(doc.graph.len(), 0);
@@ -87,7 +87,7 @@ fn apply_intents_selection_skips_reconcile() {
         vec![Intent::SetSelection {
             to: [id].into_iter().collect(),
         }],
-        &FuncLib::default(),
+        &Library::default(),
     );
     assert!(!reconcile);
     assert!(doc.main_view.selected_nodes.contains(&id));
@@ -111,7 +111,7 @@ fn apply_intents_batches_multiple() {
         })
         .collect();
 
-    let reconcile = apply_intents(&mut doc, intents, &FuncLib::default());
+    let reconcile = apply_intents(&mut doc, intents, &Library::default());
     assert_eq!(doc.graph.len(), 3, "all three nodes applied in one batch");
     assert!(reconcile);
 }
@@ -119,7 +119,8 @@ fn apply_intents_batches_multiple() {
 #[test]
 fn apply_intents_severs_incompatible_passthrough_output_edges() {
     use scenarium::data::DataType;
-    use scenarium::function::{Func, FuncInput, FuncLib};
+    use scenarium::function::{Func, FuncInput};
+    use scenarium::library::Library;
     use scenarium::special::SpecialNode;
 
     // Float producer → cache passthrough → Float sink, all headless.
@@ -128,7 +129,7 @@ fn apply_intents_severs_incompatible_passthrough_output_edges() {
     let float_sink = Func::new(FuncId::unique(), "fsink")
         .input(FuncInput::required("x", DataType::Float))
         .output("o", DataType::Float);
-    let func_lib = FuncLib::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
+    let func_lib = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
 
     let mut doc = empty_document();
     let fp = doc.graph.add_func_node(&float_src);
@@ -174,7 +175,8 @@ fn apply_intents_severs_incompatible_passthrough_output_edges() {
 #[test]
 fn apply_intents_severs_through_a_passthrough_chain() {
     use scenarium::data::DataType;
-    use scenarium::function::{Func, FuncInput, FuncLib};
+    use scenarium::function::{Func, FuncInput};
+    use scenarium::library::Library;
     use scenarium::special::SpecialNode;
 
     // Float producer → pass1 → pass2 → Float sink: a valid two-passthrough chain.
@@ -183,7 +185,7 @@ fn apply_intents_severs_through_a_passthrough_chain() {
     let float_sink = Func::new(FuncId::unique(), "fsink")
         .input(FuncInput::required("x", DataType::Float))
         .output("o", DataType::Float);
-    let func_lib = FuncLib::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
+    let func_lib = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
 
     let add_pass = |doc: &mut Document| {
         let node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {

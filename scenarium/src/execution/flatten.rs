@@ -23,8 +23,9 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
 };
 use crate::execution_stats::FlattenMap;
-use crate::function::{Func, FuncLib};
+use crate::function::Func;
 use crate::graph::{Binding, CachePersistence, Graph, InputPort, NodeId, NodeKind, Subscription};
+use crate::library::Library;
 use crate::special::SpecialNode;
 use crate::subgraph::SubgraphId;
 
@@ -77,7 +78,7 @@ impl Flattener {
         e_nodes: &mut KeyIndexVec<NodeId, ExecutionNode>,
         pools: Pools<'_>,
         root: &Graph,
-        func_lib: &FuncLib,
+        func_lib: &Library,
         flatten: &mut FlattenMap,
     ) -> u32 {
         self.path.clear();
@@ -134,7 +135,7 @@ impl Flattener {
 
 /// The graph at the level addressed by `path` — descend from `root`, resolving
 /// each composite instance through its (linked or local) definition.
-fn graph_at<'a>(root: &'a Graph, func_lib: &'a FuncLib, path: &[NodeId]) -> &'a Graph {
+fn graph_at<'a>(root: &'a Graph, func_lib: &'a Library, path: &[NodeId]) -> &'a Graph {
     let mut graph = root;
     for id in path {
         let r = graph
@@ -182,7 +183,7 @@ enum Source {
 /// the current graph at each level is `graph_at(root, func_lib, path)`.
 struct Run<'a> {
     root: &'a Graph,
-    func_lib: &'a FuncLib,
+    func_lib: &'a Library,
     path: &'a mut Vec<NodeId>,
     /// Scope indices parallel to `path` (the emit descent). `last()` is the
     /// scope the current level's nodes live in.

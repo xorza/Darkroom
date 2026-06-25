@@ -10,14 +10,14 @@ use hashbrown::HashSet;
 use crate::execution::cache::Cache;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::function::FuncLib;
 use crate::graph::NodeId;
+use crate::library::Library;
 
-/// Self-consistency of the compiled program against the `FuncLib`, plus that the
+/// Self-consistency of the compiled program against the `Library`, plus that the
 /// runtime cache stayed index-aligned to the nodes after `reconcile`. The source
 /// graph is gone after flattening, so this validates each `e_node` against its
 /// func and checks binding integrity.
-pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, func_lib: &FuncLib) {
+pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, func_lib: &Library) {
     if !is_debug() {
         return;
     }

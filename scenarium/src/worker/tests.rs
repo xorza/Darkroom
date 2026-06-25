@@ -10,8 +10,8 @@ use crate::elements::worker_events_funclib::worker_events_funclib;
 use crate::event_lambda::EventLambda;
 use crate::execution::{Error, Result as ExecResult};
 use crate::execution_stats::{ExecutionStats, RunPhase};
-use crate::function::FuncLib;
 use crate::graph::{Graph, InputPort, Node, NodeId, NodeKind};
+use crate::library::Library;
 
 use crate::worker::{
     EventRef, EventTrigger, Worker, WorkerMessage, WorkerReport, scan, start_event_loop,
@@ -31,7 +31,7 @@ fn messages(stats: &ExecutionStats) -> Vec<String> {
 /// `EventRef`).
 struct FrameHarness {
     worker: Worker,
-    func_lib: Arc<FuncLib>,
+    func_lib: Arc<Library>,
     graph: Graph,
     frame_event_node_id: NodeId,
     compute_rx: mpsc::Receiver<ExecResult<ExecutionStats>>,
@@ -88,7 +88,7 @@ impl FrameHarness {
     }
 }
 
-fn log_frame_no_graph(func_lib: &FuncLib) -> Graph {
+fn log_frame_no_graph(func_lib: &Library) -> Graph {
     let mut graph = Graph::default();
 
     let frame_event_node_id: NodeId = "e69c3f32-ac66-4447-a3f6-9e8528c5d830".into();
@@ -1163,7 +1163,7 @@ fn scan_exit_dominates_entire_batch() {
         WorkerMessage::StartEventLoop, // post-Exit: dropped
         WorkerMessage::Update {
             graph: Graph::default(),
-            func_lib: Arc::new(FuncLib::default()),
+            func_lib: Arc::new(Library::default()),
         },
     ]);
 
@@ -1191,7 +1191,7 @@ fn scan_update_overwrites_earlier_update_in_same_batch() {
     // implicit today (Option::replace) but worth pinning since
     // callers do send [Update(A), Update(B)] during rapid edits.
     let empty_graph = Graph::default();
-    let func_lib = Arc::new(FuncLib::default());
+    let func_lib = Arc::new(Library::default());
 
     let intent = scan(vec![
         WorkerMessage::Update {
@@ -1218,7 +1218,7 @@ fn scan_clear_then_update_yields_replace() {
         WorkerMessage::Clear,
         WorkerMessage::Update {
             graph: Graph::default(),
-            func_lib: Arc::new(FuncLib::default()),
+            func_lib: Arc::new(Library::default()),
         },
     ]);
     assert!(
@@ -1235,7 +1235,7 @@ fn scan_update_then_clear_yields_clear() {
     let intent = scan(vec![
         WorkerMessage::Update {
             graph: Graph::default(),
-            func_lib: Arc::new(FuncLib::default()),
+            func_lib: Arc::new(Library::default()),
         },
         WorkerMessage::Clear,
     ]);
@@ -1568,7 +1568,6 @@ async fn disk_cache_persists_node_across_worker_restart() {
     use crate::execution::output_cache::OutputCache;
     use crate::graph::CachePersistence;
     use crate::testing::{TestFuncHooks, test_func_lib};
-    use crate::value_codec::CustomValueRegistry;
 
     /// A unique temp dir removed on drop, so the test doesn't collide or leak.
     struct TempDir(std::path::PathBuf);
@@ -1617,7 +1616,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     graph.set_input_binding(InputPort::new(mult_id, 1), (get_a_id, 0).into());
     graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
 
-    async fn run(root: &Path, graph: Graph, func_lib: Arc<FuncLib>) -> ExecutionStats {
+    async fn run(root: &Path, graph: Graph, func_lib: Arc<Library>) -> ExecutionStats {
         let (tx, mut rx) = mpsc::channel(4);
         let worker = Worker::new(move |report| {
             if let WorkerReport::Finished(result) = report {
@@ -1626,7 +1625,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
         });
         // SetOutputCache shares the batch with Update, proving it's applied before
         // the compile hydrates.
-        let cache = OutputCache::new(CustomValueRegistry::default(), Some(root.to_path_buf()));
+        let cache = OutputCache::new(Arc::new(Library::default()), Some(root.to_path_buf()));
         worker
             .send_many([
                 WorkerMessage::SetOutputCache(cache),

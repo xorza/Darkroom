@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use palantir::Ui;
-use scenarium::prelude::{FuncLib, Graph as CoreGraph};
+use scenarium::prelude::{Graph as CoreGraph, Library};
 
 use crate::core::document::Document;
 use crate::core::engine::Engine;
@@ -32,7 +32,7 @@ pub(crate) struct AppContext<'a> {
     /// so the Theme menu can mark the active choice. Distinct from
     /// `theme`, the concrete palette `System` resolved to.
     pub(crate) theme_choice: ThemeChoice,
-    pub(crate) func_lib: &'a FuncLib,
+    pub(crate) func_lib: &'a Library,
     /// Last run's per-node state (status, logs, fetched runtime values),
     /// keyed by authoring `NodeId`. Read by the inspection panel's Log and
     /// Inputs/Outputs sections.

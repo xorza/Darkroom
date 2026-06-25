@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 use crate::data::DataType;
 use crate::event_lambda::EventLambda;
 use crate::func_lambda::FuncLambda;
-use crate::function::{Func, FuncInput, FuncLib};
+use crate::function::{Func, FuncInput};
+use crate::library::Library;
 use crate::prelude::FuncId;
 use common::FloatExt;
 use common::Slot;
@@ -18,8 +19,8 @@ struct FpsEventState {
 }
 
 /// The worker frame / fps event-source nodes.
-pub fn worker_events_funclib() -> FuncLib {
-    let mut func_lib = FuncLib::default();
+pub fn worker_events_funclib() -> Library {
+    let mut func_lib = Library::default();
 
     func_lib.add(
         Func::new(FRAME_EVENT_FUNC_ID, "frame event")

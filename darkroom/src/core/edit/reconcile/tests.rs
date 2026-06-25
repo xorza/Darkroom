@@ -4,7 +4,7 @@ use scenarium::graph::Node;
 use scenarium::prelude::{Graph, SubgraphRef};
 use scenarium::testing::{TestFuncHooks, test_func_lib};
 
-fn lib() -> FuncLib {
+fn lib() -> Library {
     test_func_lib(TestFuncHooks::default())
 }
 
@@ -17,7 +17,7 @@ fn int_input(name: &str) -> FuncInput {
 /// def (interior unwired) plus the three node ids so each test wires
 /// it as needed. `authored_inputs`/`outputs` seed the def interface.
 fn build_def(
-    func_lib: &FuncLib,
+    func_lib: &Library,
     authored_inputs: Vec<FuncInput>,
     authored_outputs: Vec<FuncOutput>,
 ) -> (SubgraphDef, NodeId, NodeId, NodeId) {

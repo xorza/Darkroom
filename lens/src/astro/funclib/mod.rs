@@ -22,7 +22,8 @@ use scenarium::data::{
     DataType, DynamicValue, EnumVariants, FsPathConfig, FsPathMode, StaticValue,
 };
 use scenarium::func_lambda::{FuncLambda, InvokeError, InvokeResult};
-use scenarium::function::{Func, FuncInput, FuncLib, ValueVariant};
+use scenarium::function::{Func, FuncInput, ValueVariant};
+use scenarium::library::Library;
 
 use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,
@@ -66,8 +67,8 @@ pub static ASTRO_DIR_DATA_TYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::Directory))));
 
 /// The lumos-backed astro nodes (category `astro`).
-pub fn astro_funclib() -> FuncLib {
-    let mut func_lib = FuncLib::default();
+pub fn astro_funclib() -> Library {
+    let mut func_lib = Library::default();
 
     // load_astro_image
     func_lib.add(

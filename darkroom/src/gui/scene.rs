@@ -7,7 +7,7 @@ use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
 use scenarium::function::{FuncInput, FuncOutput, OutputType, ValueVariant};
 use scenarium::prelude::{
-    Binding, CachePersistence, FuncLib, Graph, NodeId, NodeKind, OutputPort, SubgraphDef,
+    Binding, CachePersistence, Graph, Library, NodeId, NodeKind, OutputPort, SubgraphDef,
     SubgraphRef,
 };
 
@@ -191,7 +191,7 @@ impl Scene {
         &mut self,
         graph: &Graph,
         view: &GraphView,
-        func_lib: &FuncLib,
+        func_lib: &Library,
         ctx_def: Option<&SubgraphDef>,
         run_state: &RunState,
     ) {
@@ -530,7 +530,7 @@ mod tests {
         scene.rebuild(
             &def.graph,
             &view,
-            &FuncLib::default(),
+            &Library::default(),
             Some(&def),
             &RunState::default(),
         );
@@ -603,7 +603,7 @@ mod tests {
         scene.rebuild(
             &def.graph,
             &view,
-            &FuncLib::default(),
+            &Library::default(),
             None,
             &RunState::default(),
         );

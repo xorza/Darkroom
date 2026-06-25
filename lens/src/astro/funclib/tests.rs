@@ -4,7 +4,7 @@ use scenarium::data::StaticValue;
 
 use super::*;
 
-fn func<'a>(lib: &'a FuncLib, name: &str) -> &'a Func {
+fn func<'a>(lib: &'a Library, name: &str) -> &'a Func {
     lib.funcs
         .iter()
         .find(|f| f.name == name)

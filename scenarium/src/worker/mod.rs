@@ -14,8 +14,8 @@ use crate::execution::event::{EventRef, EventTrigger};
 use crate::execution::output_cache::OutputCache;
 use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result, RunSeeds};
 use crate::execution_stats::{ExecutionStats, RunProgress};
-use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
+use crate::library::Library;
 
 /// What the worker reports back to its host: live per-node [`RunProgress`]
 /// during a run, then a single [`WorkerReport::Finished`] with the run's full
@@ -50,7 +50,7 @@ pub enum WorkerMessage {
 
     Update {
         graph: Graph,
-        func_lib: Arc<FuncLib>,
+        func_lib: Arc<Library>,
     },
     Clear,
     /// Swap the engine's output cache (codec registry + content-addressed store
@@ -232,7 +232,7 @@ where
 #[derive(Debug)]
 enum GraphOp {
     Clear,
-    Replace(Graph, Arc<FuncLib>),
+    Replace(Graph, Arc<Library>),
 }
 
 /// Event-loop intent after a batch is scanned.

@@ -16,6 +16,7 @@
 use std::fmt::Write as _;
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::context::ContextManager;
 use crate::data::DynamicValue;
@@ -25,8 +26,8 @@ use crate::execution::cache::Cache;
 use crate::execution::digest::Digest;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::ExecutionProgram;
+use crate::library::Library;
 use crate::special::SpecialNode;
-use crate::value_codec::CustomValueRegistry;
 
 /// Where a node's outputs cache, and how a present blob is treated on store.
 #[derive(Debug)]
@@ -47,26 +48,29 @@ impl Target {
     }
 }
 
-/// Persists node outputs to files and hydrates them back. Holds the *one* codec
-/// registry (used by both policies) and the optional content-addressed store root.
-/// Default is empty ⇒ `persist` nodes are memory-only; `CachePassthrough` nodes
+/// Persists node outputs to files and hydrates them back. Holds a snapshot of the
+/// [`Library`] (its type table is the source of custom-value codecs, used by both
+/// policies) and the optional content-addressed store root. Default is an empty
+/// library ⇒ no codecs, `persist` nodes memory-only; `CachePassthrough` nodes
 /// always use their explicit path.
+///
+/// The snapshot is fine to hold across library swaps: codecs are registered once
+/// at assembly and never change (only subgraphs grow), so a held snapshot keeps
+/// every codec it will ever need.
 #[derive(Debug, Default)]
 pub struct OutputCache {
-    registry: CustomValueRegistry,
+    library: Arc<Library>,
     /// Root of the content-addressed store; `None` ⇒ `persist` nodes memory-only.
     disk_root: Option<PathBuf>,
 }
 
 impl OutputCache {
-    /// Build a cache with the codec `registry` (for custom output values) and an
-    /// optional content-addressed store `disk_root` (`None` ⇒ `persist` nodes are
-    /// memory-only; `CachePassthrough` nodes always use their explicit path).
-    pub fn new(registry: CustomValueRegistry, disk_root: Option<PathBuf>) -> Self {
-        Self {
-            registry,
-            disk_root,
-        }
+    /// Build a cache over `library` (its type table supplies the custom-value
+    /// codecs) and an optional content-addressed store `disk_root` (`None` ⇒
+    /// `persist` nodes are memory-only; `CachePassthrough` nodes always use their
+    /// explicit path).
+    pub fn new(library: Arc<Library>, disk_root: Option<PathBuf>) -> Self {
+        Self { library, disk_root }
     }
 
     /// The file node `idx` caches to, or `None` when it doesn't: a
@@ -104,7 +108,7 @@ impl OutputCache {
             let Some(digest) = cache.current_digest(idx) else {
                 continue;
             };
-            if let Some(values) = blob::read(target.path(), &self.registry) {
+            if let Some(values) = blob::read(target.path(), &self.library) {
                 cache.hydrate(idx, values, digest);
             }
         }
@@ -142,7 +146,7 @@ impl OutputCache {
             .collect();
         async move {
             for (target, outputs) in &pending {
-                if let Err(e) = blob::write(target.path(), outputs, &self.registry, ctx).await {
+                if let Err(e) = blob::write(target.path(), outputs, &self.library, ctx).await {
                     tracing::warn!(path = %target.path().display(), error = %e, "failed to write output cache");
                 }
             }

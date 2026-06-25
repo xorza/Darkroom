@@ -18,8 +18,8 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::data::DynamicValue;
 use crate::execution_stats::{ExecutionStats, FlattenMap, RunProgress};
-use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
+use crate::library::Library;
 use crate::prelude::FuncId;
 
 pub(crate) mod blob;
@@ -141,7 +141,8 @@ impl ExecutionEngine {
         self.cache.reset_states();
     }
 
-    /// Swap the [`OutputCache`] — the codec registry plus the optional
+    /// Swap the [`OutputCache`] — the library snapshot (its type table supplies
+    /// the custom-value codecs) plus the optional
     /// content-addressed store root. At the next `update`, `persist` (content-
     /// addressed) and `CachePassthrough` (explicit-path) outputs hydrate from their
     /// files on a hit (skipping recompute), and freshly-computed ones are stored
@@ -153,7 +154,7 @@ impl ExecutionEngine {
 
     // === Phase 1: compile ===
 
-    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> Result<()> {
+    pub fn update(&mut self, graph: &Graph, func_lib: &Library) -> Result<()> {
         // Validate the graph against the library before touching any state.
         // The graph+library pair is untrusted input here (a document can be
         // stale against an evolved library — a dropped func, a shrunk port

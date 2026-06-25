@@ -8,6 +8,7 @@ pub mod execution_stats;
 pub mod func_lambda;
 pub mod function;
 pub mod graph;
+pub mod library;
 pub mod macros;
 pub mod special;
 pub mod subgraph;
@@ -28,12 +29,13 @@ pub mod prelude {
         RunProgress,
     };
     pub use crate::func_lambda::{FuncLambda, InvokeError, InvokeInput, InvokeResult};
-    pub use crate::function::{Func, FuncBehavior, FuncId, FuncLib};
+    pub use crate::function::{Func, FuncBehavior, FuncId};
     pub use crate::graph::{
         Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort,
         Subscription,
     };
+    pub use crate::library::{Library, TypeDecl, TypeEntry};
     pub use crate::special::SpecialNode;
     pub use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
-    pub use crate::value_codec::{CustomValueCodec, CustomValueRegistry};
+    pub use crate::value_codec::CustomValueCodec;
 }

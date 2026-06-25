@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use scenarium::data::DataType;
 use scenarium::function::{FuncInput, FuncOutput};
 use scenarium::graph::{Binding, Graph, InputPort, NodeKind};
-use scenarium::prelude::{FuncLib, NodeId, SubgraphDef, SubgraphId};
+use scenarium::prelude::{Library, NodeId, SubgraphDef, SubgraphId};
 
 use crate::core::document::{Document, GraphRef};
 
@@ -41,7 +41,7 @@ struct SidePlan<T> {
 /// Reconcile one subgraph def's interface against its interior wiring.
 /// Entry point is [`Document::reconcile_boundaries`] (in `document.rs`),
 /// which loops this over every local def.
-pub(crate) fn reconcile_def(doc: &mut Document, def_id: SubgraphId, func_lib: &FuncLib) {
+pub(crate) fn reconcile_def(doc: &mut Document, def_id: SubgraphId, func_lib: &Library) {
     let (inputs, outputs) = {
         let Some(def) = doc.graph.subgraphs.by_key(&def_id) else {
             return;
@@ -89,7 +89,7 @@ pub(crate) fn reconcile_def(doc: &mut Document, def_id: SubgraphId, func_lib: &F
 /// names survive); a freshly-used slot is synthesized with the type of
 /// the interior port it now feeds. `None` when the interior has no
 /// `SubgraphInput` node (nothing to derive — leave `def.inputs` alone).
-fn plan_inputs(def: &SubgraphDef, func_lib: &FuncLib) -> Option<SidePlan<FuncInput>> {
+fn plan_inputs(def: &SubgraphDef, func_lib: &Library) -> Option<SidePlan<FuncInput>> {
     let interior = &def.graph;
     let boundary = interior
         .iter()
@@ -128,7 +128,7 @@ fn plan_inputs(def: &SubgraphDef, func_lib: &FuncLib) -> Option<SidePlan<FuncInp
 
 /// Plan the outputs side: one interface output per used `SubgraphOutput`
 /// input, compacted. Mirror of [`plan_inputs`].
-fn plan_outputs(def: &SubgraphDef, func_lib: &FuncLib) -> Option<SidePlan<FuncOutput>> {
+fn plan_outputs(def: &SubgraphDef, func_lib: &Library) -> Option<SidePlan<FuncOutput>> {
     let interior = &def.graph;
     let boundary = interior
         .iter()
@@ -243,7 +243,7 @@ fn synth_input(idx: usize, data_type: DataType) -> FuncInput {
 /// with no destination shouldn't reach here, but stay total).
 fn infer_used_input_type(
     interior: &Graph,
-    func_lib: &FuncLib,
+    func_lib: &Library,
     boundary: NodeId,
     old: usize,
 ) -> DataType {
@@ -261,7 +261,7 @@ fn infer_used_input_type(
 /// exposed output keeps the value's real type.
 fn infer_used_output_type(
     interior: &Graph,
-    func_lib: &FuncLib,
+    func_lib: &Library,
     boundary: NodeId,
     old: usize,
 ) -> DataType {

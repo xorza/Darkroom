@@ -454,7 +454,7 @@ mod tests {
             transport,
             action_tx,
             Arc::new(arc_swap::ArcSwap::from_pointee(
-                scenarium::prelude::FuncLib::default(),
+                scenarium::prelude::Library::default(),
             )),
             Arc::new(|| {}),
         );

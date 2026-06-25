@@ -43,7 +43,7 @@ pub struct SubgraphEvent {
 }
 
 /// Where a composite instance resolves its definition from. The variant *is*
-/// the linked/local distinction: `Linked` defs live in `FuncLib.subgraphs`
+/// the linked/local distinction: `Linked` defs live in `Library.subgraphs`
 /// (shared, edits propagate to every instance), `Local` defs live in the
 /// owning `Graph.subgraphs` (private to this graph, edits affect only it).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -186,8 +186,9 @@ impl KeyIndexKey<SubgraphId> for SubgraphDef {
 mod tests {
     use super::*;
     use crate::data::DataType;
-    use crate::function::{FuncId, FuncLib};
+    use crate::function::FuncId;
     use crate::graph::{Graph, InputPort, Node, NodeKind};
+    use crate::library::Library;
     use crate::testing::{TestFuncHooks, test_func_lib};
     use common::SerdeFormat;
 
@@ -200,7 +201,7 @@ mod tests {
     }
 
     /// `in(A, B) -> sum -> out(Sum)`.
-    fn wrap_sum(func_lib: &FuncLib) -> SubgraphDef {
+    fn wrap_sum(func_lib: &Library) -> SubgraphDef {
         let sum_id = func_lib.by_name("sum").unwrap().id;
 
         let in_node = Node::new(NodeKind::SubgraphInput);
@@ -368,12 +369,12 @@ mod tests {
     }
 
     /// A func with one event and no I/O, for exposed-event tests.
-    fn ticker_func_lib() -> (FuncLib, FuncId) {
+    fn ticker_func_lib() -> (Library, FuncId) {
         use crate::event_lambda::EventLambda;
         use crate::function::Func;
 
         let id = FuncId::unique();
-        let mut lib = FuncLib::default();
+        let mut lib = Library::default();
         lib.add(
             Func::new(id, "ticker")
                 .category("Test")

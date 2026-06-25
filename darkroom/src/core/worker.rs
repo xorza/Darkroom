@@ -14,7 +14,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use scenarium::execution::{ArgumentValues, Error as ExecError};
 use scenarium::execution_stats::{ExecutionStats, RunProgress};
-use scenarium::prelude::{FuncLib, Graph, NodeId, OutputCache};
+use scenarium::prelude::{Graph, Library, NodeId, OutputCache};
 use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
@@ -115,7 +115,7 @@ impl WorkerBridge {
     /// execute its terminals. One batched send so the worker commits
     /// both as a unit. A dropped send (worker already exited) is a
     /// harmless shutdown no-op.
-    pub(crate) fn run_once(&self, graph: Graph, func_lib: Arc<FuncLib>) {
+    pub(crate) fn run_once(&self, graph: Graph, func_lib: Arc<Library>) {
         let _ = self.worker.send_many([
             WorkerMessage::Update { graph, func_lib },
             WorkerMessage::ExecuteTerminals,

@@ -12,7 +12,7 @@
 //! [`App`]: crate::gui::app::App
 
 use palantir::Ui;
-use scenarium::prelude::{FuncLib, NodeId, SubgraphDef};
+use scenarium::prelude::{Library, NodeId, SubgraphDef};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::action_stack::ActionStack;
@@ -129,7 +129,7 @@ impl Editor {
     /// drain — e.g. a file-picker result `App` handles after the record.
     /// No-ops (and self-cancelling steps) are dropped, like the in-frame
     /// drain.
-    pub(crate) fn apply_edit(&mut self, intent: Intent, func_lib: &FuncLib) {
+    pub(crate) fn apply_edit(&mut self, intent: Intent, func_lib: &Library) {
         let target = self.document.active_target();
         self.commit_batch(target, func_lib, [intent]);
     }
@@ -139,7 +139,7 @@ impl Editor {
     /// analogue of [`Self::apply_edit`]. Used by `App` when draining the
     /// script inbound queue before the frame; the unconditional pre-prepass
     /// rebuild folds the edits in, so `scene_dirty` needn't be set here.
-    pub(crate) fn apply_external_intents(&mut self, intents: Vec<Intent>, func_lib: &FuncLib) {
+    pub(crate) fn apply_external_intents(&mut self, intents: Vec<Intent>, func_lib: &Library) {
         let target = self.document.active_target();
         self.commit_batch(target, func_lib, intents);
     }
@@ -153,7 +153,7 @@ impl Editor {
     fn commit_batch(
         &mut self,
         target: GraphRef,
-        func_lib: &FuncLib,
+        func_lib: &Library,
         intents: impl IntoIterator<Item = Intent>,
     ) -> bool {
         let mut batch = Vec::new();
@@ -195,7 +195,7 @@ impl Editor {
     pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
-        func_lib: &FuncLib,
+        func_lib: &Library,
         theme: &Theme,
         theme_choice: ThemeChoice,
         host: &HostHandle,
@@ -320,7 +320,7 @@ impl Editor {
     ///
     /// Done up front so the edit pipeline runs against a fixed target and
     /// a switched-to graph records in the same present's Pass A.
-    fn navigate(&mut self, ui: &mut Ui, func_lib: &FuncLib) {
+    fn navigate(&mut self, ui: &mut Ui, func_lib: &Library) {
         self.apply_undo_redo(ui);
         // Surface tab/open clicks from last frame's responses. `scene`
         // still holds the last-rendered graph here — exactly the one
@@ -364,7 +364,7 @@ impl Editor {
     /// structural edit, undo/redo, or document replacement since the last
     /// reconcile). Idle/selection/viewport frames skip it: the interface
     /// can't have changed, and reconcile is idempotent there anyway.
-    pub(crate) fn rebuild_scene(&mut self, target: GraphRef, func_lib: &FuncLib) {
+    pub(crate) fn rebuild_scene(&mut self, target: GraphRef, func_lib: &Library) {
         if self.needs_reconcile {
             self.document.reconcile_boundaries(func_lib);
             self.needs_reconcile = false;
@@ -389,7 +389,7 @@ impl Editor {
     /// one Cmd-Z. Marks the scene dirty when anything applied (so the
     /// pre-record rebuild folds the change in) and accumulates the
     /// relayout / reconcile signals onto the frame's fields.
-    fn drain_intents(&mut self, target: GraphRef, func_lib: &FuncLib) {
+    fn drain_intents(&mut self, target: GraphRef, func_lib: &Library) {
         // Move the scratch buffer out so it can drive `commit_batch` (which
         // borrows `self` mutably), then put the now-empty buffer back to
         // reuse its allocation next frame.
@@ -458,7 +458,7 @@ mod tests {
     fn open(editor: &mut Editor, target: GraphRef) {
         editor.open_graph(target);
         // `SwitchTab` is graph-agnostic, so the drain target is irrelevant.
-        editor.drain_intents(GraphRef::Main, &FuncLib::default());
+        editor.drain_intents(GraphRef::Main, &Library::default());
     }
 
     fn undo(editor: &mut Editor) -> bool {
@@ -518,8 +518,9 @@ mod tests {
     #[test]
     fn undo_of_a_passthrough_rewire_restores_the_severed_edge() {
         use scenarium::data::DataType;
-        use scenarium::function::{Func, FuncId, FuncInput, FuncLib};
+        use scenarium::function::{Func, FuncId, FuncInput};
         use scenarium::graph::{Binding, Graph, InputPort, Node, NodeKind};
+        use scenarium::library::Library;
         use scenarium::special::SpecialNode;
 
         let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
@@ -527,7 +528,7 @@ mod tests {
         let float_sink = Func::new(FuncId::unique(), "fsink")
             .input(FuncInput::required("x", DataType::Float))
             .output("o", DataType::Float);
-        let func_lib = FuncLib::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
+        let func_lib = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
 
         let mut graph = Graph::default();
         let fp = graph.add_func_node(&float_src);

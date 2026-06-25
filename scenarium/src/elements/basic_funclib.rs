@@ -5,7 +5,8 @@ use strum_macros::{Display, EnumIter};
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::func_lambda::InvokeInput;
-use crate::function::{Func, FuncInput, FuncLib, ValueVariant};
+use crate::function::{Func, FuncInput, ValueVariant};
+use crate::library::Library;
 
 #[repr(u32)]
 #[derive(Debug, Display, EnumIter, Copy, Clone)]
@@ -64,8 +65,8 @@ impl From<i64> for Math2ArgOp {
 }
 
 /// The built-in math / string / print nodes.
-pub fn basic_funclib() -> FuncLib {
-    let mut func_lib = FuncLib::default();
+pub fn basic_funclib() -> Library {
+    let mut func_lib = Library::default();
 
     // print: log the input string to the node log (info level), read
     // back by the editor. Sugar over `ContextManager::log`.

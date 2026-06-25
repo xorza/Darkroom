@@ -23,7 +23,8 @@ to the other:
 |------|------|
 | `graph.rs` | `Graph`, `Node`, `Binding`, `Subscription`, ports, `NodeKind`, `CachePersistence`. Authoring model + validation. |
 | `subgraph.rs` | `SubgraphDef`, `SubgraphRef` (Linked/Local), `SubgraphEvent`. Composite definitions and their exposed interface. |
-| `function.rs` | `Func` (definition), `FuncLib` (registry of funcs + shared subgraphs), `FuncInput`/`FuncOutput`, `FuncBehavior`. |
+| `function.rs` | `Func` (definition), `FuncInput`/`FuncOutput`, `FuncBehavior`. |
+| `library.rs` | `Library` (the registry: funcs + shared subgraphs + nominal types), `TypeDecl`/`TypeEntry` (type metadata + optional disk codec). |
 | `data.rs` | Value model: `StaticValue` (editor consts), `DynamicValue` (runtime), `DataType`, `CustomValue` trait, `TypeDef`/`EnumDef`. |
 | `context.rs` | `ContextManager` (per-run resource store + log sink + the run's cancel flag via `cancel_flag()`, which a lambda clones into off-thread work to bail early), `ContextType` (lazy-init type token). |
 | `func_lambda.rs` | `FuncLambda`: the async node-function signature + `InvokeInput`/`InvokeResult`/`InvokeError`. |
@@ -54,7 +55,7 @@ composite level with recursion guards.
 
 A **subgraph** (`subgraph.rs`) has a `SubgraphDef` whose interior `graph` may hold
 one `SubgraphInput` and one `SubgraphOutput` boundary node (routing only, not
-executable). `SubgraphRef` resolves either `Linked` (shared, in `FuncLib.subgraphs`)
+executable). `SubgraphRef` resolves either `Linked` (shared, in `Library.subgraphs`)
 or `Local` (private, in `Graph.subgraphs`). `SubgraphEvent` re-exposes an interior
 emitter's event outward so a parent can subscribe.
 
@@ -116,8 +117,10 @@ events, `required_contexts`, and a runtime-attached `lambda` skipped on serializ
 Build one with the fluent builder — `Func::new(id, name).category(..).pure()
 .input(FuncInput::required(name, ty)).output(name, ty).lambda(..)` — rather than a
 struct literal (`FuncInput::required`/`optional(..).default(v)`, `FuncOutput::new`;
-fields stay `pub` for serde + the editor). `FuncLib` (`function.rs:87`) registers
-funcs + shared subgraph defs. A node
+fields stay `pub` for serde + the editor). `Library` (`library.rs`) registers
+funcs + shared subgraph defs + nominal types (`Custom`/`Enum`, each with optional
+disk codec — `register_type`/`type_decl`/`codec`); the output cache's custom-value
+codecs live on its `types` table. A node
 function is a `FuncLambda` (`func_lambda.rs:62`): async
 `fn(&mut ContextManager, &mut AnyState, &SharedAnyState, &[InvokeInput], &[OutputUsage], &mut [DynamicValue]) -> InvokeResult<()>`.
 Build them with `async_lambda!` (`macros.rs`). `EventLambda` (`event_lambda.rs`)

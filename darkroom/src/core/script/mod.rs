@@ -181,7 +181,7 @@ pub enum ScriptMessage {
     /// peer addr at the tracing layer).
     Print { msg: String },
     /// A batch of graph mutations issued by a script. Built on the
-    /// executor side (which has the shared `FuncLib` cell and any other
+    /// executor side (which has the shared `Library` cell and any other
     /// inputs the actions need) and applied verbatim by the editor through the same
     /// intent/undo path the GUI uses — one batch is one undo entry. Keeps
     /// the script→graph boundary symmetric with the GUI→graph boundary,
@@ -452,7 +452,7 @@ fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
 
 /// `list_funcs()` → array of object-maps mirroring `Func`'s Serialize
 /// derive (id, name, category, inputs, outputs, …; `lambda` is
-/// `#[serde(skip)]`). Lets scripts query the live FuncLib without a
+/// `#[serde(skip)]`). Lets scripts query the live Library without a
 /// separate registry on this side.
 fn register_introspection(engine: &mut Engine, func_lib: SharedFuncLib) {
     engine.register_fn("list_funcs", move || -> Array {
@@ -474,7 +474,7 @@ fn register_introspection(engine: &mut Engine, func_lib: SharedFuncLib) {
 /// hand-building nested maps for the variants that carry a [`Vec2`]
 /// (whose serde shape the prelude shouldn't have to know):
 ///
-/// - `make_add_node(func_id, x, y)` — looks the func up in `FuncLib` and
+/// - `make_add_node(func_id, x, y)` — looks the func up in `Library` and
 ///   shapes a node from it (`From<&Func> for Node`), positioned at
 ///   `(x, y)`. Wrapped by `create_node` in `prelude.rhai`. Func nodes
 ///   only (`def: None`); subgraph instancing isn't scriptable yet.

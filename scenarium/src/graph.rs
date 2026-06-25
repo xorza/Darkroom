@@ -4,7 +4,8 @@ use common::{KeyIndexKey, KeyIndexVec};
 use serde::{Deserialize, Serialize};
 
 use crate::data::{DataType, StaticValue};
-use crate::function::{Func, FuncId, FuncInput, FuncLib, FuncOutput, OutputType};
+use crate::function::{Func, FuncId, FuncInput, FuncOutput, OutputType};
+use crate::library::Library;
 use crate::special::SpecialNode;
 use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use anyhow::{Context, ensure};
@@ -241,7 +242,7 @@ pub struct Graph {
     /// Local (per-instance) subgraph definitions referenced by this graph's
     /// `NodeKind::Subgraph(SubgraphRef::Local(_))` nodes. Editing one of
     /// these affects only this graph. Shared definitions live in
-    /// `FuncLib.subgraphs` instead. See `docs/subgraph-design.md` §4.4.
+    /// `Library.subgraphs` instead. See `docs/subgraph-design.md` §4.4.
     #[serde(default)]
     pub subgraphs: KeyIndexVec<SubgraphId, SubgraphDef>,
 }
@@ -380,14 +381,14 @@ impl Graph {
     /// per-port type here) or a missing func/def. The caller treats `None` as
     /// the polymorphic `Null`. The engine never type-checks, so only the editor
     /// calls this.
-    pub fn input_type(&self, func_lib: &FuncLib, port: InputPort) -> Option<DataType> {
+    pub fn input_type(&self, func_lib: &Library, port: InputPort) -> Option<DataType> {
         self.input_spec(func_lib, port).map(|i| i.data_type.clone())
     }
 
     /// The declared [`FuncInput`] of input `port` — its full spec (type +
     /// `value_variants` + flags), or `None` for a boundary / unresolved node.
     /// Resolution mirrors [`Self::input_type`].
-    fn input_spec<'a>(&'a self, func_lib: &'a FuncLib, port: InputPort) -> Option<&'a FuncInput> {
+    fn input_spec<'a>(&'a self, func_lib: &'a Library, port: InputPort) -> Option<&'a FuncInput> {
         let node = self.by_id(&port.node_id)?;
         let inputs = match &node.kind {
             NodeKind::Func(func_id) => &func_lib.by_id(func_id)?.inputs,
@@ -408,13 +409,13 @@ impl Graph {
     /// for a passthrough. Used by the editor for port-type display, connection
     /// compatibility, and subgraph-interface inference; the engine never
     /// type-checks, so it never calls this.
-    pub fn resolve_output_type(&self, func_lib: &FuncLib, port: OutputPort) -> DataType {
+    pub fn resolve_output_type(&self, func_lib: &Library, port: OutputPort) -> DataType {
         self.resolve_output_type_inner(func_lib, port, &mut HashSet::new())
     }
 
     fn resolve_output_type_inner(
         &self,
-        func_lib: &FuncLib,
+        func_lib: &Library,
         port: OutputPort,
         visiting: &mut HashSet<NodeId>,
     ) -> DataType {
@@ -466,7 +467,7 @@ impl Graph {
     /// def interface), or `None` for a boundary / unresolved node.
     fn node_outputs<'a>(
         &'a self,
-        func_lib: &'a FuncLib,
+        func_lib: &'a Library,
         node: &'a Node,
     ) -> Option<&'a [FuncOutput]> {
         match &node.kind {
@@ -482,7 +483,7 @@ impl Graph {
     /// [`Self::input_spec`].
     fn output_spec<'a>(
         &'a self,
-        func_lib: &'a FuncLib,
+        func_lib: &'a Library,
         port: OutputPort,
     ) -> Option<&'a FuncOutput> {
         let node = self.by_id(&port.node_id)?;
@@ -494,7 +495,7 @@ impl Graph {
     /// changes. Empty for an ordinary input or node.
     fn wildcard_outputs_mirroring(
         &self,
-        func_lib: &FuncLib,
+        func_lib: &Library,
         node_id: NodeId,
         input_idx: usize,
     ) -> Vec<OutputPort> {
@@ -524,7 +525,7 @@ impl Graph {
     /// type-checks, so only the editor calls this.
     pub fn edges_invalidated_by(
         &self,
-        func_lib: &FuncLib,
+        func_lib: &Library,
         changed_node: NodeId,
         changed_input: usize,
     ) -> Vec<InputPort> {
@@ -693,7 +694,7 @@ impl Graph {
     /// Structural validation of a (possibly untrusted) graph — runs in all
     /// builds and returns an error rather than panicking. `validate` below is
     /// the debug-only internal-invariant check; this is the load-path guard.
-    /// Port-index ranges need a `FuncLib`, so they're checked by
+    /// Port-index ranges need a `Library`, so they're checked by
     /// `validate_with`, not here.
     pub fn check(&self) -> Result<()> {
         for node in self.nodes.iter() {
@@ -760,11 +761,11 @@ impl Graph {
     }
 
     /// Resolve a `SubgraphRef` to its definition: `Local` from this graph's
-    /// own table, `Linked` from the shared `FuncLib`.
+    /// own table, `Linked` from the shared `Library`.
     pub fn resolve_def<'a>(
         &'a self,
         r: SubgraphRef,
-        func_lib: &'a FuncLib,
+        func_lib: &'a Library,
     ) -> Option<&'a SubgraphDef> {
         match r {
             SubgraphRef::Local(id) => self.subgraphs.by_key(&id),
@@ -787,7 +788,7 @@ impl Graph {
     /// panic so a graph the editor itself built wrong is caught loudly in
     /// development. The release-safe, error-returning gate is `check_with`,
     /// which `ExecutionEngine::update` runs in every build.
-    pub fn validate_with(&self, func_lib: &FuncLib) {
+    pub fn validate_with(&self, func_lib: &Library) {
         if !is_debug() {
             return;
         }
@@ -803,7 +804,7 @@ impl Graph {
     /// compile boundary (a document can be stale against an evolved library),
     /// so an invalid one is a recoverable error the caller surfaces — not a
     /// panic. With this passing, flattening resolves every reference infallibly.
-    pub fn check_with(&self, func_lib: &FuncLib) -> Result<()> {
+    pub fn check_with(&self, func_lib: &Library) -> Result<()> {
         self.check()?;
         let mut visited: HashSet<SubgraphId> = HashSet::new();
         self.check_level(func_lib, None, &mut visited)
@@ -816,7 +817,7 @@ impl Graph {
     /// recursion error.
     fn check_level(
         &self,
-        func_lib: &FuncLib,
+        func_lib: &Library,
         ctx_def: Option<&SubgraphDef>,
         visited: &mut HashSet<SubgraphId>,
     ) -> Result<()> {
@@ -963,7 +964,7 @@ impl Graph {
     /// may hold a `Const` literal but must not be wired to an upstream output.
     /// Boundary nodes route the interface (no literals), so they're never
     /// const-only. Resolution mirrors [`Self::input_count`].
-    fn input_is_const_only(&self, node: &Node, port_idx: usize, func_lib: &FuncLib) -> bool {
+    fn input_is_const_only(&self, node: &Node, port_idx: usize, func_lib: &Library) -> bool {
         let inputs = match &node.kind {
             NodeKind::Func(func_id) => &func_lib.by_id(func_id).unwrap().inputs,
             NodeKind::Subgraph(r) => &self.resolve_def(*r, func_lib).unwrap().inputs,
@@ -973,7 +974,7 @@ impl Graph {
         inputs.get(port_idx).is_some_and(|i| i.const_only)
     }
 
-    fn input_count(&self, node: &Node, func_lib: &FuncLib, ctx_def: Option<&SubgraphDef>) -> usize {
+    fn input_count(&self, node: &Node, func_lib: &Library, ctx_def: Option<&SubgraphDef>) -> usize {
         match &node.kind {
             NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().inputs.len(),
             NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().inputs.len(),
@@ -989,7 +990,7 @@ impl Graph {
     fn output_count(
         &self,
         node: &Node,
-        func_lib: &FuncLib,
+        func_lib: &Library,
         ctx_def: Option<&SubgraphDef>,
     ) -> usize {
         match &node.kind {
@@ -1007,7 +1008,7 @@ impl Graph {
     fn event_count(
         &self,
         node: &Node,
-        func_lib: &FuncLib,
+        func_lib: &Library,
         _ctx_def: Option<&SubgraphDef>,
     ) -> usize {
         match &node.kind {
@@ -1228,7 +1229,8 @@ mod tests {
 
     #[test]
     fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
-        use crate::function::{FuncId, FuncLib};
+        use crate::function::FuncId;
+        use crate::library::Library;
 
         // One Int-in / Int-out func, so a wire between two instances is otherwise
         // valid — only the `const_only` flag decides whether check accepts it.
@@ -1238,7 +1240,7 @@ mod tests {
             let func = Func::new(FuncId::unique(), "f")
                 .input(port)
                 .output("out", DataType::Int);
-            let mut func_lib = FuncLib::default();
+            let mut func_lib = Library::default();
             func_lib.funcs.add(func.clone());
 
             let mut graph = Graph::default();
@@ -1262,7 +1264,7 @@ mod tests {
     #[test]
     fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
         use crate::data::{DataType, StaticValue};
-        use crate::function::FuncLib;
+        use crate::library::Library;
         use crate::special::SpecialNode;
 
         // Int and String never coerce (numerics coerce among themselves, but a
@@ -1274,7 +1276,7 @@ mod tests {
         let int_sink = Func::new(FuncId::unique(), "int_sink")
             .input(FuncInput::required("x", DataType::Int))
             .output("o", DataType::Int);
-        let mut func_lib = FuncLib::default();
+        let mut func_lib = Library::default();
         func_lib.funcs.add(int_src.clone());
         func_lib.funcs.add(str_sink.clone());
         func_lib.funcs.add(int_sink.clone());
@@ -1355,13 +1357,13 @@ mod tests {
     #[test]
     fn resolve_output_type_follows_passthrough_chain() {
         use crate::data::{DataType, StaticValue};
-        use crate::function::FuncLib;
+        use crate::library::Library;
         use crate::special::SpecialNode;
 
         // Int-out producer → pass1 → pass2. Both passthroughs declare a `Null`
         // (wildcard) output, but the resolved type must be the producer's `Int`.
         let producer = Func::new(FuncId::unique(), "src").output("out", DataType::Int);
-        let mut func_lib = FuncLib::default();
+        let mut func_lib = Library::default();
         func_lib.funcs.add(producer.clone());
 
         let mut graph = Graph::default();
@@ -1426,7 +1428,7 @@ mod tests {
     #[test]
     fn edges_invalidated_by_follows_wildcard_chains() {
         use crate::data::DataType;
-        use crate::function::FuncLib;
+        use crate::library::Library;
         use crate::special::SpecialNode;
 
         let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
@@ -1434,7 +1436,7 @@ mod tests {
         let float_sink = Func::new(FuncId::unique(), "fsink")
             .input(FuncInput::required("x", DataType::Float))
             .output("o", DataType::Float);
-        let mut func_lib = FuncLib::default();
+        let mut func_lib = Library::default();
         func_lib.funcs.add(float_src.clone());
         func_lib.funcs.add(str_src.clone());
         func_lib.funcs.add(float_sink.clone());
@@ -1478,12 +1480,12 @@ mod tests {
     #[test]
     fn resolve_output_type_breaks_a_binding_cycle() {
         use crate::data::DataType;
-        use crate::function::FuncLib;
+        use crate::library::Library;
         use crate::special::SpecialNode;
 
         // A passthrough whose value input binds to its own output — a cycle the
         // editor can momentarily hold. Resolution must terminate as `Null`.
-        let func_lib = FuncLib::default();
+        let func_lib = Library::default();
         let mut graph = Graph::default();
         let pass = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
             bypass: false,
@@ -1501,12 +1503,12 @@ mod tests {
     #[test]
     fn input_type_resolves_declared_types_and_skips_boundaries() {
         use crate::data::DataType;
-        use crate::function::FuncLib;
+        use crate::library::Library;
 
         let consumer = Func::new(FuncId::unique(), "dst")
             .input(FuncInput::required("x", DataType::Float))
             .output("out", DataType::Float);
-        let mut func_lib = FuncLib::default();
+        let mut func_lib = Library::default();
         func_lib.funcs.add(consumer.clone());
 
         let mut graph = Graph::default();

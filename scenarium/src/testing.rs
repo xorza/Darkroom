@@ -8,8 +8,9 @@ use std::sync::Arc;
 
 use crate::async_lambda;
 use crate::data::DataType;
-use crate::function::{Func, FuncInput, FuncLib};
+use crate::function::{Func, FuncInput};
 use crate::graph::{Graph, InputPort, Node, NodeId};
+use crate::library::Library;
 
 pub struct TestFuncHooks {
     pub get_a: Arc<dyn Fn() -> anyhow::Result<i64> + Send + Sync + 'static>,
@@ -27,7 +28,7 @@ impl Default for TestFuncHooks {
     }
 }
 
-pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
+pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
     let TestFuncHooks {
         get_a,
         get_b,
