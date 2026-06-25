@@ -1,5 +1,6 @@
-use super::{LocalContrastConfig, build_tile_luts, enhance_local_contrast};
+use super::{LocalContrast, build_tile_luts};
 use crate::image_ops::deinterleave_f32;
+use crate::op::OpError;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
@@ -41,13 +42,12 @@ fn low_contrast(width: usize, height: usize) -> Vec<f32> {
 fn clahe_strength_zero_is_identity() {
     let px = low_contrast(64, 64);
     let mut img = gray(64, 64, px.clone());
-    enhance_local_contrast(
-        &mut img,
-        LocalContrastConfig {
-            strength: 0.0,
-            ..Default::default()
-        },
-    );
+    LocalContrast {
+        strength: 0.0,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap();
     assert_eq!(
         channel(&img, 0).to_vec(),
         px,
@@ -61,7 +61,7 @@ fn clahe_output_stays_in_range() {
         .map(|i| ((i as f32 * 0.013).sin() * 0.5 + 0.5).clamp(0.0, 1.0))
         .collect();
     let mut img = gray(96, 96, px);
-    enhance_local_contrast(&mut img, LocalContrastConfig::default());
+    LocalContrast::default().apply(&mut img).unwrap();
     for &v in &channel(&img, 0).to_vec() {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
     }
@@ -71,7 +71,7 @@ fn clahe_output_stays_in_range() {
 fn clahe_flat_region_not_blown_up() {
     // Contrast-limited: a flat field must stay put, not get stretched to full range.
     let mut img = gray(64, 64, vec![0.5; 64 * 64]);
-    enhance_local_contrast(&mut img, LocalContrastConfig::default());
+    LocalContrast::default().apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
     assert!(
         out.iter().all(|&v| (v - 0.5).abs() < 0.05),
@@ -86,14 +86,13 @@ fn clahe_increases_low_contrast() {
     let px = low_contrast(64, 64);
     let in_std = std_dev(&px);
     let mut img = gray(64, 64, px);
-    enhance_local_contrast(
-        &mut img,
-        LocalContrastConfig {
-            tiles: 4,
-            clip_limit: 4.0,
-            strength: 1.0,
-        },
-    );
+    LocalContrast {
+        tiles: 4,
+        clip_limit: 4.0,
+        strength: 1.0,
+    }
+    .apply(&mut img)
+    .unwrap();
     let out_std = std_dev(&channel(&img, 0));
     assert!(
         out_std > in_std,
@@ -127,7 +126,7 @@ fn clahe_is_color_preserving() {
     let i: Vec<f32> = low_contrast(w, h); // use as the green/blue level
     let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
     let mut img = rgb(w, h, r, i.clone(), i.clone());
-    enhance_local_contrast(&mut img, LocalContrastConfig::default());
+    LocalContrast::default().apply(&mut img).unwrap();
     let (ro, go, bo) = (
         channel(&img, 0).to_vec(),
         channel(&img, 1).to_vec(),
@@ -145,4 +144,19 @@ fn clahe_is_color_preserving() {
             );
         }
     }
+}
+
+#[test]
+fn rejects_clip_limit_below_one() {
+    let mut img = gray(8, 8, vec![0.5; 64]);
+    let err = LocalContrast {
+        clip_limit: 0.5,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap_err();
+    assert!(
+        matches!(&err, OpError::InvalidConfig(m) if m.contains("clip_limit must be ≥ 1")),
+        "expected an InvalidConfig clip_limit error, got {err:?}"
+    );
 }

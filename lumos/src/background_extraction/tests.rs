@@ -1,5 +1,6 @@
 use super::*;
 use crate::image_ops::deinterleave_f32;
+use crate::op::OpError;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn fill(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
@@ -69,14 +70,13 @@ fn subtract_removes_linear_gradient() {
     // a + b·x + c·y over [0.5, 0.5+0.16+0.096] — a pure additive plane, no signal.
     let plane = |x: usize, y: usize| 0.5 + 0.0008 * x as f32 + 0.0006 * y as f32;
     let mut img = gray(w, h, plane);
-    extract_background(
-        &mut img,
-        &BackgroundConfig {
-            degree: 1,
-            tile_size: 40,
-            ..Default::default()
-        },
-    );
+    ExtractBackground {
+        degree: 1,
+        tile_size: 40,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap();
     // A degree-1 surface represents the plane exactly; subtract leaves ≈ 0 everywhere.
     let m = max_abs(channel(&img, 0).pixels());
     assert!(m < 1e-3, "linear gradient removed to ~0, got max abs {m}");
@@ -93,14 +93,13 @@ fn subtract_removes_pedestal_keeps_stars() {
             if stars.contains(&(x, y)) { 0.95 } else { 0.3 }
         },
     );
-    extract_background(
-        &mut img,
-        &BackgroundConfig {
-            degree: 2,
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
+    ExtractBackground {
+        degree: 2,
+        tile_size: 32,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap();
     let out = channel(&img, 0);
     // Per-tile sigma-clip rejects the lone star pixel, so the modeled sky is the 0.3 pedestal:
     // background → ~0, the star (0.95 − 0.3 = 0.65) survives.
@@ -128,15 +127,14 @@ fn divide_corrects_quadratic_vignette() {
     };
     let signal = 0.5f32;
     let mut img = gray(w, h, |x, y| signal * vignette(x, y));
-    extract_background(
-        &mut img,
-        &BackgroundConfig {
-            degree: 2,
-            tile_size: 20,
-            mode: BackgroundMode::Divide,
-            ..Default::default()
-        },
-    );
+    ExtractBackground {
+        degree: 2,
+        tile_size: 20,
+        mode: BackgroundMode::Divide,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap();
     // The quadratic vignette is exactly degree-2; dividing by the normalized model flattens it to a
     // constant (= signal·mean(vignette)).
     let (lo, hi) = min_max(channel(&img, 0).pixels());
@@ -156,14 +154,13 @@ fn higher_degree_fits_cubic_better() {
     };
     let resid_energy = |degree| {
         let mut img = gray(w, h, cubic);
-        extract_background(
-            &mut img,
-            &BackgroundConfig {
-                degree,
-                tile_size: 20,
-                ..Default::default()
-            },
-        );
+        ExtractBackground {
+            degree,
+            tile_size: 20,
+            ..Default::default()
+        }
+        .apply(&mut img)
+        .unwrap();
         energy(channel(&img, 0).pixels())
     };
     let e1 = resid_energy(1);
@@ -194,14 +191,13 @@ fn removes_independent_per_channel_gradients() {
         Buffer2::new(w, h, g),
         Buffer2::new(w, h, b),
     ]));
-    extract_background(
-        &mut img,
-        &BackgroundConfig {
-            degree: 1,
-            tile_size: 20,
-            ..Default::default()
-        },
-    );
+    ExtractBackground {
+        degree: 1,
+        tile_size: 20,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap();
     for c in 0..3 {
         let m = max_abs(channel(&img, c).pixels());
         assert!(
@@ -209,4 +205,19 @@ fn removes_independent_per_channel_gradients() {
             "channel {c} gradient removed independently, max abs {m}"
         );
     }
+}
+
+#[test]
+fn rejects_degree_out_of_range() {
+    let mut img = gray(32, 32, |_, _| 0.5);
+    let err = ExtractBackground {
+        degree: 7,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap_err();
+    assert!(
+        matches!(&err, OpError::InvalidConfig(m) if m.contains("degree must be 1..=4")),
+        "expected an InvalidConfig degree error, got {err:?}"
+    );
 }

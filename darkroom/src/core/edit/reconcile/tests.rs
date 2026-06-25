@@ -9,13 +9,7 @@ fn lib() -> FuncLib {
 }
 
 fn int_input(name: &str) -> FuncInput {
-    FuncInput {
-        name: name.into(),
-        required: false,
-        data_type: DataType::Int,
-        default_value: None,
-        value_variants: Vec::new(),
-    }
+    FuncInput::optional(name, DataType::Int)
 }
 
 /// A subgraph def "S" whose interior is `SubgraphInput`, one `sum`
@@ -36,29 +30,18 @@ fn build_def(
     g.add(sgin);
     g.add(sum);
     g.add(sgout);
-    let def = SubgraphDef {
-        id: "00000000-0000-0000-0000-0000000000aa".into(),
-        name: "S".into(),
-        category: "Subgraph".into(),
-        graph: g,
-        inputs: authored_inputs,
-        outputs: authored_outputs,
-        events: vec![],
-        origin: None,
-    };
+    let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000aa", "S")
+        .category("Subgraph")
+        .graph(g)
+        .inputs(authored_inputs)
+        .outputs(authored_outputs);
     (def, sgin_id, sum_id_n, sgout_id)
 }
 
 fn bind(graph: &mut Graph, dst_node: NodeId, dst_idx: usize, src_node: NodeId, src_idx: usize) {
     graph.set_input_binding(
-        InputPort {
-            node_id: dst_node,
-            port_idx: dst_idx,
-        },
-        Binding::Bind(OutputPort {
-            node_id: src_node,
-            port_idx: src_idx,
-        }),
+        InputPort::new(dst_node, dst_idx),
+        Binding::bind(src_node, src_idx),
     );
 }
 
@@ -161,24 +144,15 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
     let inst = graph.add_subgraph_node(&def, SubgraphRef::Local(def_id));
     // Instance bindings on all three inputs, distinguishable by value.
     graph.set_input_binding(
-        InputPort {
-            node_id: inst,
-            port_idx: 0,
-        },
+        InputPort::new(inst, 0),
         Binding::Const(StaticValue::Int(10)),
     );
     graph.set_input_binding(
-        InputPort {
-            node_id: inst,
-            port_idx: 1,
-        },
+        InputPort::new(inst, 1),
         Binding::Const(StaticValue::Int(11)),
     );
     graph.set_input_binding(
-        InputPort {
-            node_id: inst,
-            port_idx: 2,
-        },
+        InputPort::new(inst, 2),
         Binding::Const(StaticValue::Int(12)),
     );
     let mut doc: Document = graph.into();
@@ -201,47 +175,26 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
     // (was 2).
     let interior = &doc.graph.subgraphs.by_key(&def_id).unwrap().graph;
     assert_eq!(
-        interior.input_binding(InputPort {
-            node_id: sum,
-            port_idx: 0
-        }),
-        Binding::Bind(OutputPort {
-            node_id: sgin,
-            port_idx: 0
-        }),
+        interior.input_binding(InputPort::new(sum, 0)),
+        Binding::bind(sgin, 0),
     );
     assert_eq!(
-        interior.input_binding(InputPort {
-            node_id: sum,
-            port_idx: 1
-        }),
-        Binding::Bind(OutputPort {
-            node_id: sgin,
-            port_idx: 1
-        }),
+        interior.input_binding(InputPort::new(sum, 1)),
+        Binding::bind(sgin, 1),
     );
 
     // Instance: old slot 0 stays (10), old slot 2 -> new slot 1 (12),
     // dropped slot 1 (11) is cleared.
     assert_eq!(
-        doc.graph.input_binding(InputPort {
-            node_id: inst,
-            port_idx: 0
-        }),
+        doc.graph.input_binding(InputPort::new(inst, 0)),
         Binding::Const(StaticValue::Int(10)),
     );
     assert_eq!(
-        doc.graph.input_binding(InputPort {
-            node_id: inst,
-            port_idx: 1
-        }),
+        doc.graph.input_binding(InputPort::new(inst, 1)),
         Binding::Const(StaticValue::Int(12)),
     );
     assert_eq!(
-        doc.graph.input_binding(InputPort {
-            node_id: inst,
-            port_idx: 2
-        }),
+        doc.graph.input_binding(InputPort::new(inst, 2)),
         Binding::None,
     );
 }
@@ -271,13 +224,7 @@ fn existing_port_type_is_rederived_from_wiring() {
     // `sum.in0` (Int): reconcile corrects the type to Int while keeping
     // the authored name.
     let func_lib = lib();
-    let stale = FuncInput {
-        name: "A".into(),
-        required: false,
-        data_type: DataType::Bool,
-        default_value: None,
-        value_variants: Vec::new(),
-    };
+    let stale = FuncInput::optional("A", DataType::Bool);
     let (mut def, sgin, sum, _sgout) = build_def(&func_lib, vec![stale], vec![]);
     bind(&mut def.graph, sum, 0, sgin, 0); // sgin.out0 -> sum.in0
     let def_id = def.id;
@@ -309,26 +256,10 @@ fn passthrough_ports_are_null_typed() {
     interior.add(sgin);
     interior.add(sgout);
     // sgout.in0 <- sgin.out0
-    interior.set_input_binding(
-        InputPort {
-            node_id: sgout_id,
-            port_idx: 0,
-        },
-        Binding::Bind(OutputPort {
-            node_id: sgin_id,
-            port_idx: 0,
-        }),
-    );
-    let def = SubgraphDef {
-        id: "00000000-0000-0000-0000-0000000000dd".into(),
-        name: "Pass".into(),
-        category: "Subgraph".into(),
-        graph: interior,
-        inputs: vec![],
-        outputs: vec![],
-        events: vec![],
-        origin: None,
-    };
+    interior.set_input_binding(InputPort::new(sgout_id, 0), Binding::bind(sgin_id, 0));
+    let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000dd", "Pass")
+        .category("Subgraph")
+        .graph(interior);
     let def_id = def.id;
     let mut graph = Graph::default();
     graph.subgraphs.add(def);

@@ -1,13 +1,13 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
-use common::Span;
+use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
 use scenarium::function::{FuncInput, FuncOutput, ValueVariant};
 use scenarium::prelude::{
-    Binding, FuncLib, Graph, NodeBehavior, NodeId, NodeKind, SubgraphDef, SubgraphRef,
+    Binding, CachePersistence, FuncLib, Graph, NodeId, NodeKind, SubgraphDef, SubgraphRef,
 };
 
 use crate::core::document::GraphView;
@@ -15,7 +15,10 @@ use crate::gui::run_state::{ExecStatus, RunState};
 
 #[derive(Debug)]
 pub struct Scene {
-    pub nodes: Vec<SceneNode>,
+    /// Insertion-ordered (draw order) with an `id → index` map, so per-frame
+    /// lookups by `NodeId` (`by_key`) are O(1) without losing the ordered
+    /// iteration the paint/z-order passes rely on.
+    pub nodes: KeyIndexVec<NodeId, SceneNode>,
     pub connections: Vec<SceneConnection>,
     /// One flat pool of [`SceneInput`] across every node, sliced by the single
     /// `SceneNode::inputs` span. A struct-per-port (not parallel columns) so the
@@ -67,7 +70,7 @@ impl From<&Binding> for InputBindingView {
 impl Default for Scene {
     fn default() -> Self {
         Self {
-            nodes: Vec::new(),
+            nodes: KeyIndexVec::default(),
             connections: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
@@ -94,6 +97,9 @@ pub struct SceneInput {
     /// A required input with no binding is a missing input — its port renders
     /// highlighted.
     pub required: bool,
+    /// Const-only inputs reject a wired binding: the connection gesture won't
+    /// snap to them, so they can only hold a literal.
+    pub const_only: bool,
     /// Span into [`Scene::value_variants_pool`] for this input's editor picker
     /// options. Empty = no options (the common case).
     pub value_variants: Span,
@@ -125,12 +131,17 @@ pub struct SceneNode {
     pub subgraph: Option<SubgraphRef>,
     /// Sink node (its func is `terminal` — no outputs feed downstream).
     pub terminal: bool,
-    /// Result is cached / computed once (`NodeBehavior::Once`). The
-    /// header badge toggles this via `Intent::SetCacheBehavior`.
-    pub cached: bool,
     /// Excluded from execution (`Node::disabled`). The header badge
     /// toggles this via `Intent::SetDisabled`; the body paints dimmed.
     pub disabled: bool,
+    /// `true` when this node's output is cached to disk
+    /// (`CachePersistence::Disk`), `false` for memory-only. The header `C`
+    /// badge toggles it via `Intent::SetPersist`.
+    pub persist: bool,
+    /// Suppresses the header's `C` (disk-cache/persist) badge. `true` for
+    /// self-caching nodes (the file-cache passthrough) and boundary/stub nodes
+    /// that have no output to persist.
+    pub uncacheable: bool,
     /// A `SubgraphInput`/`SubgraphOutput` interface boundary node. Its
     /// ports route the subgraph interface rather than carry literal
     /// values, so the const-value affordances (inline editor, "Set
@@ -141,6 +152,17 @@ pub struct SceneNode {
     /// `Executed`) the header time label; `None` (the default) paints
     /// no glow.
     pub exec_status: ExecStatus,
+    /// The node's func/subgraph def is absent from the library (e.g. a
+    /// document saved against an older library), so its interface can't be
+    /// resolved. Rendered as a portless error stub the user can still
+    /// select and delete — never silently dropped.
+    pub missing: bool,
+}
+
+impl KeyIndexKey<NodeId> for SceneNode {
+    fn key(&self) -> &NodeId {
+        &self.id
+    }
 }
 
 #[derive(Debug)]
@@ -197,6 +219,7 @@ impl Scene {
                     outputs: Cow::Borrowed(&f.outputs),
                     subgraph: None,
                     terminal: f.terminal,
+                    uncacheable: f.uncacheable,
                 }),
                 NodeKind::Subgraph(r) => graph.resolve_def(*r, func_lib).map(|d| NodeInterface {
                     kind_label: d.name.clone().into(),
@@ -207,7 +230,20 @@ impl Scene {
                     // time, not stored on the def; treat "no exposed
                     // outputs" as the visible sink signal.
                     terminal: d.outputs.is_empty(),
+                    uncacheable: false,
                 }),
+                // A built-in special node: its interface is the hardcoded spec.
+                NodeKind::Special(s) => {
+                    let f = s.func();
+                    Some(NodeInterface {
+                        kind_label: f.name.clone().into(),
+                        inputs: Cow::Borrowed(&f.inputs),
+                        outputs: Cow::Borrowed(&f.outputs),
+                        subgraph: None,
+                        terminal: f.terminal,
+                        uncacheable: f.uncacheable,
+                    })
+                }
                 // Inbound boundary: no inputs; one output per def input,
                 // plus a trailing placeholder output. Dragging from the
                 // placeholder commits a normal `SetInput` binding to its
@@ -223,6 +259,7 @@ impl Scene {
                         outputs: Cow::Owned(outputs),
                         subgraph: None,
                         terminal: false,
+                        uncacheable: true,
                     }
                 }),
                 // Outbound boundary: one input per def output (synthesized
@@ -238,11 +275,42 @@ impl Scene {
                         outputs: Cow::Borrowed(&[]),
                         subgraph: None,
                         terminal: false,
+                        uncacheable: true,
                     }
                 }),
             };
-            let Some(interface) = interface else {
-                continue;
+            // A Func/Subgraph node whose func/def is absent from the library
+            // has no interface to project. Dropping it would make it
+            // invisible — and so impossible to select and delete — silently
+            // corrupting the document. Render it as a portless error stub
+            // instead. Boundary nodes only fail to resolve when misplaced at
+            // the root (no enclosing `ctx_def`), which still skips.
+            let missing = interface.is_none();
+            let interface = match interface {
+                Some(interface) => interface,
+                None => {
+                    // Label the stub by what's missing — a func vs a subgraph
+                    // def. Boundary nodes only fail to resolve when misplaced
+                    // at the root (no enclosing `ctx_def`); nothing to render.
+                    let kind_label = match node.kind {
+                        NodeKind::Func(_) => "missing func",
+                        NodeKind::Subgraph(_) => "missing subgraph",
+                        // A special node's spec always resolves, so it never
+                        // reaches this `None` branch; boundary nodes only fail at
+                        // the root. Nothing to render either way.
+                        NodeKind::Special(_)
+                        | NodeKind::SubgraphInput
+                        | NodeKind::SubgraphOutput => continue,
+                    };
+                    NodeInterface {
+                        kind_label: kind_label.into(),
+                        inputs: Cow::Borrowed(&[]),
+                        outputs: Cow::Borrowed(&[]),
+                        subgraph: None,
+                        terminal: false,
+                        uncacheable: true,
+                    }
+                }
             };
             // One `SceneInput` per input port, sliced by the node's `inputs`
             // span. The bindings come from a parallel graph iterator; each
@@ -264,6 +332,7 @@ impl Scene {
                     binding: InputBindingView::from(&binding),
                     default: default_static_value(input),
                     required: input.required,
+                    const_only: input.const_only,
                     value_variants,
                 });
             }
@@ -285,7 +354,7 @@ impl Scene {
                 (NodeKind::SubgraphOutput, true) => "Outputs".into(),
                 _ => node.name.clone().into(),
             };
-            self.nodes.push(SceneNode {
+            self.nodes.add(SceneNode {
                 id: vn.id,
                 pos: vn.pos,
                 name,
@@ -294,13 +363,15 @@ impl Scene {
                 outputs,
                 subgraph: interface.subgraph,
                 terminal: interface.terminal,
-                cached: node.behavior == NodeBehavior::Once,
                 disabled: node.disabled,
+                persist: node.persist == CachePersistence::Disk,
+                uncacheable: interface.uncacheable,
                 boundary: matches!(
                     node.kind,
                     NodeKind::SubgraphInput | NodeKind::SubgraphOutput
                 ),
                 exec_status: run_state.status(vn.id),
+                missing,
             });
         }
 
@@ -346,6 +417,9 @@ struct NodeInterface<'a> {
     outputs: Cow<'a, [FuncOutput]>,
     subgraph: Option<SubgraphRef>,
     terminal: bool,
+    /// Node manages its own caching (or has no output to cache), so the editor's
+    /// disk-cache (persist) toggle is hidden — see [`SceneNode::uncacheable`].
+    uncacheable: bool,
 }
 
 /// The literal a port falls back to when given a const binding: its
@@ -365,31 +439,19 @@ fn default_static_value(input: &FuncInput) -> Option<StaticValue> {
 /// def output it mirrors — name + type carry over; it's not user-set, so
 /// it has no declared default and no value options.
 fn boundary_input(output: &FuncOutput) -> FuncInput {
-    FuncInput {
-        name: output.name.clone(),
-        required: false,
-        data_type: output.data_type.clone(),
-        default_value: None,
-        value_variants: Vec::new(),
-    }
+    FuncInput::optional(output.name.clone(), output.data_type.clone())
 }
 
 /// Synthesize a `FuncOutput` for a `SubgraphInput`'s output port from the
 /// def input it mirrors — name + type carry over.
 fn boundary_output(input: &FuncInput) -> FuncOutput {
-    FuncOutput {
-        name: input.name.clone(),
-        data_type: input.data_type.clone(),
-    }
+    FuncOutput::new(input.name.clone(), input.data_type.clone())
 }
 
 /// The trailing "connect here to add a port" placeholder output on the
 /// `SubgraphInput` boundary node: untyped until something connects.
 fn placeholder_output() -> FuncOutput {
-    FuncOutput {
-        name: PLACEHOLDER_PORT.to_string(),
-        data_type: DataType::default(),
-    }
+    FuncOutput::new(PLACEHOLDER_PORT, DataType::default())
 }
 
 /// Label for the trailing "connect here to add a port" placeholder on a
@@ -400,13 +462,7 @@ const PLACEHOLDER_PORT: &str = "+";
 /// until something connects (at which point reconcile materializes a real
 /// `def.outputs` entry from the wired producer's type).
 fn placeholder_input() -> FuncInput {
-    FuncInput {
-        name: PLACEHOLDER_PORT.to_string(),
-        required: false,
-        data_type: DataType::default(),
-        default_value: None,
-        value_variants: Vec::new(),
-    }
+    FuncInput::optional(PLACEHOLDER_PORT, DataType::default())
 }
 
 fn extend_pool<T>(pool: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Span {
@@ -422,13 +478,7 @@ mod tests {
     use scenarium::prelude::{InputPort, Node, SubgraphDef};
 
     fn finput(name: &str, ty: DataType) -> FuncInput {
-        FuncInput {
-            name: name.into(),
-            required: false,
-            data_type: ty,
-            default_value: None,
-            value_variants: Vec::new(),
-        }
+        FuncInput::optional(name, ty)
     }
 
     /// `def`: inputs A:Int, B:Float → outputs Sum:Int. Interior wires the
@@ -445,19 +495,11 @@ mod tests {
         inner.add(out_node);
         inner.set_input_binding(InputPort::new(out_id, 0), (in_id, 0).into());
 
-        let def = SubgraphDef {
-            id: "00000000-0000-0000-0000-000000000000".into(),
-            name: "Adder".into(),
-            category: "Subgraph".into(),
-            graph: inner,
-            inputs: vec![finput("A", DataType::Int), finput("B", DataType::Float)],
-            outputs: vec![FuncOutput {
-                name: "Sum".into(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-            origin: None,
-        };
+        let def = SubgraphDef::new("00000000-0000-0000-0000-000000000000", "Adder")
+            .category("Subgraph")
+            .graph(inner)
+            .inputs([finput("A", DataType::Int), finput("B", DataType::Float)])
+            .output(FuncOutput::new("Sum", DataType::Int));
         (def, in_id, out_id)
     }
 
@@ -551,5 +593,93 @@ mod tests {
         // The wire's endpoints aren't rendered, but `edges()` still yields
         // it; the draw layer skips wires whose ports don't resolve.
         assert_eq!(scene.connections.len(), 1);
+    }
+
+    #[test]
+    fn missing_func_and_subgraph_render_as_deletable_stubs() {
+        use scenarium::elements::basic_funclib::basic_funclib;
+        use scenarium::prelude::SubgraphRef;
+
+        // A resolvable func, plus two unresolvable nodes (e.g. a document
+        // saved against an older library): a func id and a linked subgraph
+        // def id the library no longer defines.
+        let func_lib = basic_funclib();
+        let mut graph = Graph::default();
+        let known: Node = func_lib.by_name("add").unwrap().into();
+        let known_id = known.id;
+        let mut ghost_func = Node::new(NodeKind::Func(
+            "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
+        ));
+        ghost_func.name = "astro_to_image".into();
+        let ghost_func_id = ghost_func.id;
+        let mut ghost_sub = Node::new(NodeKind::Subgraph(SubgraphRef::Linked(
+            "00000000-0000-0000-0000-0000000000ff".into(),
+        )));
+        ghost_sub.name = "removed_subgraph".into();
+        let ghost_sub_id = ghost_sub.id;
+        graph.add(known);
+        graph.add(ghost_func);
+        graph.add(ghost_sub);
+
+        let view = GraphView::for_graph(&graph);
+        let mut scene = Scene::default();
+        scene.rebuild(&graph, &view, &func_lib, None, &RunState::default());
+
+        // Every node renders, not silently dropped — so the unresolvable ones
+        // stay selectable and deletable to repair the document.
+        assert_eq!(scene.nodes.len(), 3, "all nodes render");
+        let known_node = scene.nodes.iter().find(|n| n.id == known_id).unwrap();
+        let ghost_func_node = scene.nodes.iter().find(|n| n.id == ghost_func_id).unwrap();
+        let ghost_sub_node = scene.nodes.iter().find(|n| n.id == ghost_sub_id).unwrap();
+
+        // The flag tracks resolution; the label names what's missing.
+        assert!(!known_node.missing, "a resolved func is not a stub");
+        assert!(ghost_func_node.missing && ghost_sub_node.missing);
+        assert_eq!(ghost_func_node.kind_label.as_str(""), "missing func");
+        assert_eq!(ghost_sub_node.kind_label.as_str(""), "missing subgraph");
+
+        // Both stubs keep their saved name and carry no ports — and the
+        // subgraph stub drops its `subgraph` ref so the "open in tab" action
+        // isn't offered for a def that isn't there.
+        assert_eq!(ghost_func_node.name.as_str(""), "astro_to_image");
+        assert_eq!(ghost_sub_node.name.as_str(""), "removed_subgraph");
+        assert!(ghost_sub_node.subgraph.is_none());
+        for stub in [ghost_func_node, ghost_sub_node] {
+            assert_eq!(scene.inputs(stub.inputs).len(), 0, "stub has no inputs");
+            assert_eq!(scene.outputs(stub.outputs).len(), 0, "stub has no outputs");
+        }
+
+        // The resolved node, by contrast, exposes its real ports.
+        assert!(
+            !scene.inputs(known_node.inputs).is_empty(),
+            "the resolved func still renders its interface"
+        );
+    }
+
+    #[test]
+    fn persist_flag_projects_disk_as_true_memory_as_false() {
+        use scenarium::elements::basic_funclib::basic_funclib;
+        use scenarium::prelude::CachePersistence;
+
+        // Two identical funcs differing only in cache policy: one default
+        // (Memory), one Disk. The projection must mirror each.
+        let func_lib = basic_funclib();
+        let mut graph = Graph::default();
+        let memory_node: Node = func_lib.by_name("add").unwrap().into();
+        let memory_id = memory_node.id;
+        graph.add(memory_node);
+        let mut disk_node: Node = func_lib.by_name("add").unwrap().into();
+        disk_node.persist = CachePersistence::Disk;
+        let disk_id = disk_node.id;
+        graph.add(disk_node);
+
+        let view = GraphView::for_graph(&graph);
+        let mut scene = Scene::default();
+        scene.rebuild(&graph, &view, &func_lib, None, &RunState::default());
+
+        let memory = scene.nodes.iter().find(|n| n.id == memory_id).unwrap();
+        let disk = scene.nodes.iter().find(|n| n.id == disk_id).unwrap();
+        assert!(!memory.persist, "default node projects memory-only");
+        assert!(disk.persist, "Disk-marked node projects persist=true");
     }
 }

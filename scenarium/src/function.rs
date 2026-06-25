@@ -3,7 +3,6 @@ use crate::context::ContextType;
 use crate::data::*;
 use crate::event_lambda::EventLambda;
 use crate::func_lambda::FuncLambda;
-use crate::graph::NodeBehavior;
 use crate::subgraph::{SubgraphDef, SubgraphId};
 use common::id_type;
 use common::{KeyIndexKey, KeyIndexVec};
@@ -30,6 +29,12 @@ pub struct FuncInput {
     pub name: String,
     pub required: bool,
     pub data_type: DataType,
+    /// When set, this input may only hold a `Const` literal — wiring an upstream
+    /// output into it (a `Bind`) is rejected by graph validation and blocked in
+    /// the editor. For inputs the engine reads as a constant (e.g. the file-cache
+    /// node's `path`), so a stray connection can't silently defeat that.
+    #[serde(default)]
+    pub const_only: bool,
     #[serde(default)]
     pub default_value: Option<StaticValue>,
     #[serde(default)]
@@ -43,6 +48,7 @@ impl FuncInput {
             name: name.into(),
             required: true,
             data_type,
+            const_only: false,
             default_value: None,
             value_variants: Vec::new(),
         }
@@ -55,6 +61,7 @@ impl FuncInput {
             name: name.into(),
             required: false,
             data_type,
+            const_only: false,
             default_value: None,
             value_variants: Vec::new(),
         }
@@ -63,6 +70,13 @@ impl FuncInput {
     /// Seed this input's const default value.
     pub fn default(mut self, value: impl Into<StaticValue>) -> Self {
         self.default_value = Some(value.into());
+        self
+    }
+
+    /// Restrict this input to a `Const` literal — no upstream `Bind`. See
+    /// [`FuncInput::const_only`].
+    pub fn const_only(mut self) -> Self {
+        self.const_only = true;
         self
     }
 
@@ -105,8 +119,21 @@ pub struct Func {
     pub category: String,
     pub terminal: bool,
 
+    /// Node manages its own output caching, so the editor's disk-cache (persist)
+    /// toggle is meaningless on it and hidden — e.g. the file-cache passthrough,
+    /// whose explicit-path store supersedes the generic content-addressed cache.
+    /// `false` (the default) means a normal node that offers the toggle.
+    #[serde(default)]
+    pub uncacheable: bool,
+
     pub behavior: FuncBehavior,
-    pub node_default_behavior: NodeBehavior,
+
+    /// Algorithm version, folded into the disk-cache content digest so a changed
+    /// implementation invalidates results computed by an older binary. Bump it
+    /// whenever the func's output for identical inputs changes. Pure cache
+    /// metadata — execution never reads it.
+    #[serde(default)]
+    pub version: u64,
 
     #[serde(default)]
     pub description: Option<String>,
@@ -141,9 +168,9 @@ pub struct FuncLib {
 }
 
 impl Func {
-    /// Start a func definition. Defaults: `Impure`, non-terminal,
-    /// `NodeBehavior::AsFunction`, empty category/inputs/outputs/events and a
-    /// `None` lambda — set the rest with the chained builders below.
+    /// Start a func definition. Defaults: `Impure`, non-terminal, empty
+    /// category/inputs/outputs/events and a `None` lambda — set the rest with the
+    /// chained builders below.
     pub fn new(id: impl Into<FuncId>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -162,21 +189,29 @@ impl Func {
         self
     }
 
+    /// Stamp the func's algorithm [`version`](Func::version). Bump when the
+    /// implementation changes its output for the same inputs, to invalidate
+    /// disk-cached results from older binaries.
+    pub fn version(mut self, version: u64) -> Self {
+        self.version = version;
+        self
+    }
+
     /// Mark the func `Pure` (same inputs → same outputs; cacheable).
     pub fn pure(mut self) -> Self {
         self.behavior = FuncBehavior::Pure;
         self
     }
 
-    /// Make freshly-dropped nodes default to `NodeBehavior::Once` (run a single
-    /// time rather than re-evaluating as a function).
-    pub fn run_once(mut self) -> Self {
-        self.node_default_behavior = NodeBehavior::Once;
+    pub fn terminal(mut self) -> Self {
+        self.terminal = true;
         self
     }
 
-    pub fn terminal(mut self) -> Self {
-        self.terminal = true;
+    /// Hide the editor's disk-cache (persist) toggle for this node — for nodes
+    /// that cache their output themselves. See [`Func::uncacheable`].
+    pub fn uncacheable(mut self) -> Self {
+        self.uncacheable = true;
         self
     }
 
@@ -285,8 +320,7 @@ where
 mod tests {
     use crate::context::ContextManager;
     use crate::data::{DynamicValue, StaticValue};
-    use crate::execution::OutputUsage;
-    use crate::func_lambda::InvokeInput;
+    use crate::func_lambda::{InvokeInput, OutputUsage};
     use crate::function::FuncLib;
     use crate::prelude::AnyState;
     use crate::testing::{TestFuncHooks, test_func_lib};
@@ -294,15 +328,33 @@ mod tests {
 
     #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        // Stamp a non-default version so the round-trip actually exercises the
+        // field rather than always serializing the `0` default.
+        func_lib.by_name_mut("sum").unwrap().version = 7;
 
         for format in SerdeFormat::all_formats_for_testing() {
             let serialized = func_lib.serialize(format)?;
             let deserialized = FuncLib::deserialize(&serialized, format)?;
+            assert_eq!(deserialized.by_name("sum").unwrap().version, 7);
             let serialized_again = deserialized.serialize(format)?;
             assert_eq!(serialized, serialized_again);
         }
 
+        Ok(())
+    }
+
+    #[test]
+    fn version_defaults_to_zero_for_legacy_documents() -> anyhow::Result<()> {
+        use crate::function::Func;
+        use common::deserialize;
+        // A document authored before `version` existed carries no such field;
+        // `#[serde(default)]` must fill it with 0 rather than fail to parse.
+        let legacy = r#"{ "id": "00000000-0000-0000-0000-000000000001", "name": "legacy",
+            "category": "", "terminal": false, "behavior": "Impure" }"#;
+        let func: Func = deserialize(legacy.as_bytes(), SerdeFormat::Json)?;
+        assert_eq!(func.version, 0);
+        assert_eq!(Func::default().version, 0);
         Ok(())
     }
 
@@ -315,11 +367,9 @@ mod tests {
         let mut node_state = AnyState::default();
         let mut inputs = vec![
             InvokeInput {
-                changed: true,
                 value: DynamicValue::Static(StaticValue::Int(2)),
             },
             InvokeInput {
-                changed: true,
                 value: DynamicValue::Static(StaticValue::Int(4)),
             },
         ];

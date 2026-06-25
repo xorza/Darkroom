@@ -1,6 +1,7 @@
-use super::{DenoiseConfig, Threshold, denoise};
+use super::{Denoise, Threshold};
 use crate::image_ops::deinterleave_f32;
-use imaginarium::{Buffer2, DeinterleavedImageData, Image};
+use crate::op::OpError;
+use imaginarium::{Buffer2, ColorFormat, DeinterleavedImageData, Image, ImageDesc};
 
 /// Deterministic xorshift64 + Box-Muller Gaussian, so noise tests are reproducible without a dep.
 struct Rng(u64);
@@ -88,7 +89,7 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
     let in_std = std_dev(&px);
 
     let mut img = gray(w, h, px);
-    denoise(&mut img, DenoiseConfig::default());
+    Denoise::default().apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
 
     let out_std = std_dev(&out);
@@ -109,20 +110,18 @@ fn higher_k_smooths_more() {
     let px = noisy(w, h, 0.5, 0.04, 7);
     let mut img2 = gray(w, h, px.clone());
     let mut img5 = gray(w, h, px);
-    denoise(
-        &mut img2,
-        DenoiseConfig {
-            k: 2.0,
-            ..Default::default()
-        },
-    );
-    denoise(
-        &mut img5,
-        DenoiseConfig {
-            k: 5.0,
-            ..Default::default()
-        },
-    );
+    Denoise {
+        k: 2.0,
+        ..Default::default()
+    }
+    .apply(&mut img2)
+    .unwrap();
+    Denoise {
+        k: 5.0,
+        ..Default::default()
+    }
+    .apply(&mut img5)
+    .unwrap();
     let s2 = std_dev(&channel(&img2, 0));
     let s5 = std_dev(&channel(&img5, 0));
     assert!(
@@ -138,13 +137,12 @@ fn strength_zero_is_identity_and_blends_between() {
 
     // strength 0 removes nothing — bit-for-bit identity.
     let mut img0 = gray(w, h, px.clone());
-    denoise(
-        &mut img0,
-        DenoiseConfig {
-            strength: 0.0,
-            ..Default::default()
-        },
-    );
+    Denoise {
+        strength: 0.0,
+        ..Default::default()
+    }
+    .apply(&mut img0)
+    .unwrap();
     assert_eq!(
         channel(&img0, 0).to_vec(),
         px,
@@ -154,14 +152,13 @@ fn strength_zero_is_identity_and_blends_between() {
     // Partial strength sits strictly between no-op and full denoise.
     let mut half = gray(w, h, px.clone());
     let mut full = gray(w, h, px.clone());
-    denoise(
-        &mut half,
-        DenoiseConfig {
-            strength: 0.5,
-            ..Default::default()
-        },
-    );
-    denoise(&mut full, DenoiseConfig::default());
+    Denoise {
+        strength: 0.5,
+        ..Default::default()
+    }
+    .apply(&mut half)
+    .unwrap();
+    Denoise::default().apply(&mut full).unwrap();
     let in_std = std_dev(&px);
     let half_std = std_dev(&channel(&half, 0));
     let full_std = std_dev(&channel(&full, 0));
@@ -177,20 +174,18 @@ fn hard_and_soft_thresholds_differ() {
     let px = noisy(w, h, 0.5, 0.05, 55);
     let mut hard = gray(w, h, px.clone());
     let mut soft = gray(w, h, px);
-    denoise(
-        &mut hard,
-        DenoiseConfig {
-            threshold: Threshold::Hard,
-            ..Default::default()
-        },
-    );
-    denoise(
-        &mut soft,
-        DenoiseConfig {
-            threshold: Threshold::Soft,
-            ..Default::default()
-        },
-    );
+    Denoise {
+        threshold: Threshold::Hard,
+        ..Default::default()
+    }
+    .apply(&mut hard)
+    .unwrap();
+    Denoise {
+        threshold: Threshold::Soft,
+        ..Default::default()
+    }
+    .apply(&mut soft)
+    .unwrap();
     let hv = channel(&hard, 0).to_vec();
     let sv = channel(&soft, 0).to_vec();
     assert!(hv != sv, "hard and soft produce different results");
@@ -215,7 +210,7 @@ fn denoise_preserves_bright_feature() {
         }
     }
     let mut img = gray(w, h, px);
-    denoise(&mut img, DenoiseConfig::default());
+    Denoise::default().apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
 
     // 4x4 interior of the block stays near 0.9.
@@ -248,7 +243,7 @@ fn denoise_is_per_channel_on_rgb() {
     let b = noisy(w, h, 0.5, 0.04, 6072);
     let in_std = [std_dev(&r), std_dev(&g), std_dev(&b)];
     let mut img = rgb(w, h, r, g, b);
-    denoise(&mut img, DenoiseConfig::default());
+    Denoise::default().apply(&mut img).unwrap();
     for (c, &expected) in in_std.iter().enumerate() {
         let out_std = std_dev(&channel(&img, c));
         assert!(
@@ -262,9 +257,9 @@ fn denoise_is_per_channel_on_rgb() {
 fn denoise_handles_images_smaller_than_the_kernel() {
     // Scale count clamps to the dimensions — these must not panic.
     let mut tiny = gray(3, 3, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]);
-    denoise(&mut tiny, DenoiseConfig::default());
+    Denoise::default().apply(&mut tiny).unwrap();
     let mut one = gray(1, 1, vec![0.42]);
-    denoise(&mut one, DenoiseConfig::default());
+    Denoise::default().apply(&mut one).unwrap();
     assert!(
         (channel(&one, 0).to_vec()[0] - 0.42).abs() < 1e-6,
         "1x1 has no detail to remove"
@@ -272,27 +267,46 @@ fn denoise_handles_images_smaller_than_the_kernel() {
 }
 
 #[test]
-#[should_panic(expected = "strength must be in")]
 fn validate_rejects_out_of_range_strength() {
     let mut img = gray(4, 4, vec![0.0; 16]);
-    denoise(
-        &mut img,
-        DenoiseConfig {
-            strength: 1.5,
-            ..Default::default()
-        },
+    let err = Denoise {
+        strength: 1.5,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap_err();
+    assert!(
+        matches!(&err, OpError::InvalidConfig(m) if m.contains("strength must be in")),
+        "expected an InvalidConfig strength error, got {err:?}"
     );
 }
 
 #[test]
-#[should_panic(expected = "k must")]
 fn validate_rejects_nonpositive_k() {
     let mut img = gray(4, 4, vec![0.0; 16]);
-    denoise(
-        &mut img,
-        DenoiseConfig {
-            k: 0.0,
-            ..Default::default()
-        },
+    let err = Denoise {
+        k: 0.0,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap_err();
+    assert!(
+        matches!(&err, OpError::InvalidConfig(m) if m.contains("k must")),
+        "expected an InvalidConfig k error, got {err:?}"
+    );
+}
+
+#[test]
+fn rejects_non_f32_master() {
+    // An 8-bit image is not a linear f32 master, so the op is rejected before running.
+    let mut img = Image::new_with_data(
+        ImageDesc::new(4, 4, ColorFormat::RGB_U8),
+        vec![0u8; 4 * 4 * 3],
+    )
+    .unwrap();
+    let err = Denoise::default().apply(&mut img).unwrap_err();
+    assert!(
+        matches!(err, OpError::UnsupportedFormat(ColorFormat::RGB_U8)),
+        "expected UnsupportedFormat(RGB_U8), got {err:?}"
     );
 }

@@ -14,7 +14,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use scenarium::execution::{ArgumentValues, Error as ExecError};
 use scenarium::execution_stats::{ExecutionStats, RunProgress};
-use scenarium::prelude::{FuncLib, Graph, NodeId};
+use scenarium::prelude::{FuncLib, Graph, NodeId, OutputCache};
 use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
@@ -75,16 +75,18 @@ impl std::fmt::Debug for WorkerBridge {
 }
 
 impl WorkerBridge {
-    /// Spin up the worker on a fresh multi-thread runtime. The callback
-    /// runs on a worker thread: it forwards the result over `tx` and
-    /// asks the host to paint, so the next frame drains it.
+    /// Spin up the worker on a fresh multi-thread runtime. Starts memory-only; the
+    /// host installs the codec registry via [`Self::set_value_registry`] and points
+    /// it at a document's store via [`Self::set_disk_root`]. The callback runs on a
+    /// worker thread: it forwards the result over `tx` and asks the host to paint,
+    /// so the next frame drains it.
     pub(crate) fn new(wake: Wake) -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .expect("build worker runtime");
         let (tx, rx) = channel::<WorkerEvent>();
-        // `Worker::new`'s `tokio::spawn` needs an ambient runtime.
+        // `Worker`'s `tokio::spawn` needs an ambient runtime.
         let worker = {
             let _guard = runtime.enter();
             let tx = tx.clone();
@@ -118,6 +120,13 @@ impl WorkerBridge {
             WorkerMessage::Update { graph, func_lib },
             WorkerMessage::ExecuteTerminals,
         ]);
+    }
+
+    /// Swap the engine's output cache (codec registry + content-addressed store
+    /// root) — e.g. to repoint at the active document's store. Takes effect before
+    /// the next run's compile. A dropped send (worker exited) is a harmless no-op.
+    pub(crate) fn set_output_cache(&self, cache: OutputCache) {
+        let _ = self.worker.send(WorkerMessage::SetOutputCache(cache));
     }
 
     /// Request cancellation of the in-flight run. Coarse: the running node

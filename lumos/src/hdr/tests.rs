@@ -1,5 +1,6 @@
-use super::{HdrConfig, compress_dynamic_range};
+use super::Hdr;
 use crate::image_ops::deinterleave_f32;
+use crate::op::OpError;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
@@ -31,13 +32,12 @@ fn dome(width: usize, height: usize) -> Vec<f32> {
 fn hdr_amount_zero_is_identity() {
     let px = dome(64, 64);
     let mut img = gray(64, 64, px.clone());
-    compress_dynamic_range(
-        &mut img,
-        HdrConfig {
-            scales: 3,
-            amount: 0.0,
-        },
-    );
+    Hdr {
+        scales: 3,
+        amount: 0.0,
+    }
+    .apply(&mut img)
+    .unwrap();
     for (a, b) in channel(&img, 0).to_vec().iter().zip(&px) {
         assert!((a - b).abs() < 1e-4, "amount 0 is the identity: {a} vs {b}");
     }
@@ -52,13 +52,12 @@ fn hdr_compresses_large_scale_contrast() {
     let ci = (h / 2) * w + w / 2;
     let in_contrast = px[ci] - px[0];
     let mut img = gray(w, h, px);
-    compress_dynamic_range(
-        &mut img,
-        HdrConfig {
-            scales: 3,
-            amount: 0.5,
-        },
-    );
+    Hdr {
+        scales: 3,
+        amount: 0.5,
+    }
+    .apply(&mut img)
+    .unwrap();
     let out = channel(&img, 0).to_vec();
     let out_contrast = out[ci] - out[0];
     assert!(
@@ -75,7 +74,7 @@ fn hdr_amount_controls_compression() {
     let ci = (h / 2) * w + w / 2;
     let contrast_at = |amount: f32| {
         let mut img = gray(w, h, px.clone());
-        compress_dynamic_range(&mut img, HdrConfig { scales: 3, amount });
+        Hdr { scales: 3, amount }.apply(&mut img).unwrap();
         let o = channel(&img, 0).to_vec();
         o[ci] - o[0]
     };
@@ -99,13 +98,12 @@ fn hdr_preserves_fine_detail() {
         };
     }
     let mut img = gray(w, h, px.clone());
-    compress_dynamic_range(
-        &mut img,
-        HdrConfig {
-            scales: 3,
-            amount: 0.6,
-        },
-    );
+    Hdr {
+        scales: 3,
+        amount: 0.6,
+    }
+    .apply(&mut img)
+    .unwrap();
     let out = channel(&img, 0).to_vec();
     // Adjacent-pixel contrast along a dark row (corner side, no clipping) is the fine texture.
     let tex_in: f32 = (0..w - 1).map(|x| (px[x + 1] - px[x]).abs()).sum();
@@ -119,8 +117,23 @@ fn hdr_preserves_fine_detail() {
 #[test]
 fn hdr_output_stays_in_range() {
     let mut img = gray(96, 96, dome(96, 96));
-    compress_dynamic_range(&mut img, HdrConfig::default());
+    Hdr::default().apply(&mut img).unwrap();
     for &v in &channel(&img, 0).to_vec() {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
     }
+}
+
+#[test]
+fn rejects_out_of_range_amount() {
+    let mut img = gray(8, 8, vec![0.5; 64]);
+    let err = Hdr {
+        scales: 6,
+        amount: 1.5,
+    }
+    .apply(&mut img)
+    .unwrap_err();
+    assert!(
+        matches!(&err, OpError::InvalidConfig(m) if m.contains("amount must be in")),
+        "expected an InvalidConfig amount error, got {err:?}"
+    );
 }

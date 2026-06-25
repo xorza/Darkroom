@@ -4,9 +4,12 @@
 //! orchestration on top — so the worker/script construction and the
 //! drain/run primitives live here once instead of in both shells.
 
-use scenarium::prelude::Graph;
+use std::path::Path;
 
-use crate::core::func_lib::{SharedFuncLib, runtime_func_lib};
+use scenarium::prelude::{Graph, OutputCache};
+
+use crate::core::func_lib::{SharedFuncLib, runtime_codec_registry, runtime_func_lib};
+use crate::core::io::cache::prepare_document_cache_root;
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::worker::{ValueRequest, WorkerBridge, WorkerEvent};
@@ -31,12 +34,25 @@ impl Engine {
     pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
         let func_lib = runtime_func_lib();
         let worker = WorkerBridge::new(wake.clone());
+        // Install the codec registry up front (memory-only until a document has a
+        // path); `set_document_cache` repoints the store root as documents open.
+        worker.set_output_cache(OutputCache::new(runtime_codec_registry(), None));
         let script = ScriptHost::start(script_cfg, func_lib.clone(), wake);
         Self {
             func_lib,
             worker,
             script,
         }
+    }
+
+    /// Point the content-addressed cache at `doc_path`'s project-local store
+    /// (`<stem>.darkroom-cache/` beside the file), so `persist` nodes reload across
+    /// sessions. `None` (an unsaved document) is memory-only. Explicit-path cache
+    /// nodes are unaffected — they always use their own path.
+    pub(crate) fn set_document_cache(&self, doc_path: Option<&Path>) {
+        let root = doc_path.map(prepare_document_cache_root);
+        self.worker
+            .set_output_cache(OutputCache::new(runtime_codec_registry(), root));
     }
 
     /// Send `graph` to the worker for one evaluation (paired with the

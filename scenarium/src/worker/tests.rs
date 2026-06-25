@@ -8,10 +8,10 @@ use crate::common::shared_any_state::SharedAnyState;
 use crate::elements::basic_funclib::basic_funclib;
 use crate::elements::worker_events_funclib::worker_events_funclib;
 use crate::event_lambda::EventLambda;
-use crate::execution::Result as ExecResult;
+use crate::execution::{Error, Result as ExecResult};
 use crate::execution_stats::{ExecutionStats, RunPhase};
 use crate::function::FuncLib;
-use crate::graph::{Graph, InputPort, Node, NodeId};
+use crate::graph::{Graph, InputPort, Node, NodeId, NodeKind};
 
 use crate::worker::{
     EventRef, EventTrigger, Worker, WorkerMessage, WorkerReport, scan, start_event_loop,
@@ -148,6 +148,50 @@ async fn test_worker() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[tokio::test]
+async fn update_with_missing_func_reports_error_then_recovers() {
+    let mut h = FrameHarness::new().await;
+
+    // A graph naming a func id the library doesn't define (e.g. a document
+    // saved against a library that has since dropped the func).
+    let mut bad_graph = Graph::default();
+    let mut ghost = Node::new(NodeKind::Func(
+        "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
+    ));
+    ghost.id = NodeId::unique();
+    bad_graph.add(ghost);
+
+    h.worker
+        .send_many([
+            WorkerMessage::Update {
+                graph: bad_graph,
+                func_lib: h.func_lib.clone(),
+            },
+            WorkerMessage::ExecuteTerminals,
+        ])
+        .unwrap();
+
+    // The compile failure surfaces as a Finished(Err(InvalidGraph)) — not a
+    // panic, and not a silently-dropped run.
+    let result = h.compute_rx.recv().await.expect("a Finished report");
+    assert!(
+        matches!(result, Err(Error::InvalidGraph { .. })),
+        "expected InvalidGraph, got {result:?}"
+    );
+
+    // The bad update doesn't wedge the worker: a good graph then runs fine.
+    h.worker
+        .send_many([h.update_msg(), h.inject_frame_event()])
+        .unwrap();
+    let stats = h
+        .compute_rx
+        .recv()
+        .await
+        .expect("a Finished report")
+        .expect("the recovered run succeeds");
+    assert_eq!(stats.executed_nodes.len(), 3);
 }
 
 #[tokio::test]
@@ -1507,5 +1551,118 @@ async fn drop_without_exit_shuts_down_cleanly() {
     assert_eq!(
         before, after,
         "no callbacks must fire after Worker is dropped"
+    );
+}
+
+/// The disk cache wires through both entry points and persists across worker
+/// restarts: a `persist` (Disk-marked) reproducible node's output, stored on a
+/// cold run, reloads on a fresh worker over the same store so its upstream never
+/// recomputes. The cache is set at runtime via a `SetOutputCache` message in the
+/// same batch as `Update` — exercising that it's applied before the compile
+/// hydrates.
+#[tokio::test]
+async fn disk_cache_persists_node_across_worker_restart() {
+    use std::path::Path;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    use crate::execution::output_cache::OutputCache;
+    use crate::graph::CachePersistence;
+    use crate::testing::{TestFuncHooks, test_func_lib};
+    use crate::value_codec::CustomValueRegistry;
+
+    /// A unique temp dir removed on drop, so the test doesn't collide or leak.
+    struct TempDir(std::path::PathBuf);
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let dir = {
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!(
+            "scenarium-worker-diskcache-{}-{n}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        TempDir(p)
+    };
+
+    // `get_a` recompute counter, shared across both worker incarnations.
+    let get_a_calls = Arc::new(AtomicUsize::new(0));
+    let make_lib = || {
+        let calls = get_a_calls.clone();
+        test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(7)
+            }),
+            get_b: Arc::new(move || 11),
+            print: Arc::new(move |_| {}),
+        })
+    };
+
+    // get_a (pure source) → mult (pure, persist Disk) → print (terminal).
+    let lib = make_lib();
+    let mut graph = Graph::default();
+    for name in ["get_a", "mult", "print"] {
+        let node: Node = lib.by_name(name).unwrap().into();
+        graph.add(node);
+    }
+    let get_a_id = graph.by_name("get_a").unwrap().id;
+    let mult_id = graph.by_name("mult").unwrap().id;
+    let print_id = graph.by_name("print").unwrap().id;
+    graph.by_id_mut(&mult_id).unwrap().persist = CachePersistence::Disk;
+    graph.set_input_binding(InputPort::new(mult_id, 0), (get_a_id, 0).into());
+    graph.set_input_binding(InputPort::new(mult_id, 1), (get_a_id, 0).into());
+    graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
+
+    async fn run(root: &Path, graph: Graph, func_lib: Arc<FuncLib>) -> ExecutionStats {
+        let (tx, mut rx) = mpsc::channel(4);
+        let worker = Worker::new(move |report| {
+            if let WorkerReport::Finished(result) = report {
+                tx.try_send(result).ok();
+            }
+        });
+        // SetOutputCache shares the batch with Update, proving it's applied before
+        // the compile hydrates.
+        let cache = OutputCache::new(CustomValueRegistry::default(), Some(root.to_path_buf()));
+        worker
+            .send_many([
+                WorkerMessage::SetOutputCache(cache),
+                WorkerMessage::Update { graph, func_lib },
+                WorkerMessage::ExecuteTerminals,
+            ])
+            .unwrap();
+        rx.recv()
+            .await
+            .expect("worker reports Finished")
+            .expect("run succeeds")
+    }
+
+    // Cold cache: all three nodes compute; mult is stored to disk.
+    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib())).await;
+    assert_eq!(
+        stats.executed_nodes.len(),
+        3,
+        "cold run computes every node"
+    );
+    assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
+
+    // Reopen on a fresh worker over the same store: mult loads from disk, so its
+    // sole-consumer upstream get_a is pruned and never recomputes.
+    let stats = run(&dir.0, graph.clone(), Arc::new(make_lib())).await;
+    assert_eq!(
+        get_a_calls.load(Ordering::SeqCst),
+        1,
+        "get_a must not recompute on the reopen"
+    );
+    assert!(
+        stats.cached_nodes.contains(&mult_id),
+        "mult is served from the disk cache"
+    );
+    assert!(
+        !stats.executed_nodes.iter().any(|n| n.node_id == get_a_id),
+        "mult's pruned upstream is not executed"
     );
 }

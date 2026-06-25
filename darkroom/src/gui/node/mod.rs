@@ -29,7 +29,7 @@ use std::sync::Arc;
 /// Read-only context the node-draw chain threads top to bottom: the
 /// theme, the scene being rendered, and last frame's port geometry.
 /// `Copy` (all shared refs), so it's passed by value — copying it while
-/// a `&rcx.scene.nodes[..]` borrow is live is fine, which keeps
+/// a `&rcx.scene.nodes` borrow is live is fine, which keeps
 /// `draw_all`'s node loop borrow-clean. The mutable sinks (`out`,
 /// `actions`) and the breaker `probe` stay separate params.
 #[derive(Clone, Copy)]
@@ -60,6 +60,10 @@ pub(crate) struct RecordCtx<'a> {
 #[derive(Default, Debug)]
 pub(crate) struct NodeUI {
     drag_anchor: Option<DragAnchor>,
+    /// Back-to-front node paint order (most-recently-selected on top). Reset
+    /// on tab switch with the rest of the gesture state, so it only ever
+    /// holds the active graph's nodes.
+    z_order: ZOrder,
 }
 
 #[derive(Clone, Debug)]
@@ -96,17 +100,35 @@ impl NodeUI {
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken_nodes.clear();
         }
-        for n in &rcx.scene.nodes {
+        // Paint back-to-front in selection-recency order — later draws sit
+        // on top, so the most recently selected node is frontmost.
+        let order = self.paint_order(rcx.scene);
+        for n in order {
             self.draw_one(ui, rcx, n, probe, out);
         }
         // Drop the anchor if its target node vanished from the graph
         // (mid-drag delete). Without this, the slot would linger and
         // could fire when a fresh node reused the id.
         if let Some(a) = &self.drag_anchor
-            && !rcx.scene.nodes.iter().any(|n| n.id == a.node_id)
+            && rcx.scene.nodes.by_key(&a.node_id).is_none()
         {
             self.drag_anchor = None;
         }
+    }
+
+    /// The scene's nodes in back-to-front paint order. Folds this frame's
+    /// committed selection into the recency [`Self::z_order`] (newly-selected
+    /// nodes rise to the top) and resolves it to `&SceneNode`s. Uses
+    /// `scene.selected_nodes` (committed), not the rubber-band preview, so
+    /// recency updates only when a selection commits — not every frame of a
+    /// band drag.
+    fn paint_order<'a>(&mut self, scene: &'a Scene) -> Vec<&'a SceneNode> {
+        let current: Vec<NodeId> = scene.nodes.iter().map(|n| n.id).collect();
+        let order = self.z_order.reconcile(&current, &scene.selected_nodes);
+        order
+            .iter()
+            .filter_map(|id| scene.nodes.by_key(id))
+            .collect()
     }
 
     fn draw_one(
@@ -154,6 +176,10 @@ impl NodeUI {
         let border_width = theme.node_border_width * 2.0;
         let border = if broken {
             theme.connection_broken
+        } else if node.missing {
+            // A stub for a node whose func is gone from the library: paint it
+            // in the error color so it reads as broken-but-deletable.
+            theme.exec_errored_glow
         } else if selected {
             theme.text_muted
         } else {
@@ -257,7 +283,7 @@ impl NodeUI {
         // emitted `MoveNodes` would target a missing node and panic in
         // `build_step`. `draw_all` also clears stale anchors, but only
         // after this prepass runs.
-        if !scene.nodes.iter().any(|n| n.id == node_id) {
+        if scene.nodes.by_key(&node_id).is_none() {
             self.drag_anchor = None;
             return;
         }
@@ -480,4 +506,121 @@ pub(crate) fn select_intent(shift: bool, scene: &Scene, node_id: NodeId) -> Inte
         to.insert(node_id);
     }
     Intent::SetSelection { to }
+}
+
+/// Back-to-front node paint order: most-recently-(committed-)selected nodes
+/// last, so they paint on top and *stay* raised until another node is
+/// selected. Reconciled against the live node set + selection each frame.
+#[derive(Default, Debug)]
+struct ZOrder {
+    order: Vec<NodeId>,
+    /// Last reconcile's selection, to spot nodes newly added to it.
+    prev_selected: BTreeSet<NodeId>,
+}
+
+impl ZOrder {
+    /// Fold this frame's committed `selected` set in — every id newly added
+    /// since the last call moves to the back (top) — then reconcile with the
+    /// live `current` id set (scene order): drop departed ids, append any not
+    /// yet ordered (freshly added) on top. Returns the resulting order.
+    fn reconcile(&mut self, current: &[NodeId], selected: &BTreeSet<NodeId>) -> &[NodeId] {
+        // Raise nodes newly added to the selection; re-selecting one already
+        // on top leaves it there. Iteration is BTreeSet order, which only
+        // matters when several commit at once (a rubber band) — recency among
+        // simultaneously-selected nodes isn't otherwise defined.
+        for id in selected {
+            if !self.prev_selected.contains(id) {
+                self.order.retain(|z| z != id);
+                self.order.push(*id);
+            }
+        }
+        self.prev_selected.clone_from(selected);
+        // Reconcile membership: drop departed nodes, then append freshly-added
+        // ones on top in scene order. Linear `contains` is fine — a graph
+        // holds at most a few hundred nodes.
+        self.order.retain(|id| current.contains(id));
+        for id in current {
+            if !self.order.contains(id) {
+                self.order.push(*id);
+            }
+        }
+        &self.order
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids(n: usize) -> Vec<NodeId> {
+        (0..n).map(|_| NodeId::unique()).collect()
+    }
+
+    #[test]
+    fn newly_selected_rises_to_top_and_stays_after_deselect() {
+        let n = ids(3);
+        let current = n.clone();
+        let mut z = ZOrder::default();
+
+        // First frame, nothing selected → order seeds in scene order.
+        z.reconcile(&current, &BTreeSet::new());
+        assert_eq!(z.order, vec![n[0], n[1], n[2]]);
+
+        // Select n[0] → it rises to the top (back of the list).
+        z.reconcile(&current, &BTreeSet::from([n[0]]));
+        assert_eq!(
+            z.order,
+            vec![n[1], n[2], n[0]],
+            "selected node moves to top"
+        );
+
+        // Deselect → order unchanged: the raise *persists* (recency stack).
+        z.reconcile(&current, &BTreeSet::new());
+        assert_eq!(
+            z.order,
+            vec![n[1], n[2], n[0]],
+            "stays raised after deselect"
+        );
+
+        // Select n[1] → above the previously-raised n[0].
+        z.reconcile(&current, &BTreeSet::from([n[1]]));
+        assert_eq!(z.order, vec![n[2], n[0], n[1]]);
+    }
+
+    #[test]
+    fn departed_nodes_drop_and_new_nodes_append_on_top() {
+        let n = ids(3);
+        let mut z = ZOrder {
+            order: vec![n[0], n[1], n[2]],
+            prev_selected: BTreeSet::new(),
+        };
+
+        // n[1] removed from the graph; a brand-new node appears.
+        let fresh = NodeId::unique();
+        let current = vec![n[0], n[2], fresh];
+        z.reconcile(&current, &BTreeSet::new());
+        assert_eq!(
+            z.order,
+            vec![n[0], n[2], fresh],
+            "removed node dropped; new node appended on top",
+        );
+    }
+
+    #[test]
+    fn reselecting_the_top_node_is_idempotent() {
+        let n = ids(2);
+        let current = n.clone();
+        let mut z = ZOrder {
+            order: vec![n[0], n[1]],
+            // n[1] was already selected last frame.
+            prev_selected: BTreeSet::from([n[1]]),
+        };
+
+        z.reconcile(&current, &BTreeSet::from([n[1]]));
+        assert_eq!(
+            z.order,
+            vec![n[0], n[1]],
+            "no churn when selection is unchanged"
+        );
+    }
 }

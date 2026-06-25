@@ -3,13 +3,10 @@
 //! on the **stretched** master to flatten the display-domain background, saving a viewable
 //! before/after. Gated behind the `real-data` feature.
 
-use crate::background_extraction::extract_background;
-use crate::color_calibration::{neutralize_background, scnr};
 use crate::image_ops::intensity_plane;
 use crate::math::statistics::median_f32_mut;
-use crate::stretching::stretch;
 use crate::testing::{calibration_dir, init_tracing, save_png};
-use crate::{AstroImage, BackgroundConfig, ScnrMethod, StretchConfig};
+use crate::{AstroImage, ExtractBackground, NeutralizeBackground, Scnr, Stretch};
 use imaginarium::Image;
 
 /// Max−min of the robust background level across the four corners of the intensity plane — a proxy
@@ -51,9 +48,9 @@ fn extract_flattens_background_on_stretched_master() {
     let mut img = Image::from(
         &AstroImage::from_file(calibration_dir().join("stacked_light.tiff")).expect("load"),
     );
-    neutralize_background(&mut img);
-    stretch(&mut img, StretchConfig::auto_stf());
-    scnr(&mut img, ScnrMethod::AverageNeutral);
+    NeutralizeBackground.apply(&mut img).unwrap();
+    Stretch::auto_stf().apply(&mut img).unwrap();
+    Scnr::average_neutral().apply(&mut img).unwrap();
     save_png(&img, "bg_extraction/stretched.png");
 
     let before = corner_background_spread(&img);
@@ -61,8 +58,8 @@ fn extract_flattens_background_on_stretched_master() {
     // Model and subtract the smooth background per channel, then re-neutralize so the now-flattened
     // background sits at a viewable level (subtraction pulls it toward zero).
     let mut extracted = img.clone();
-    extract_background(&mut extracted, &BackgroundConfig::default());
-    neutralize_background(&mut extracted);
+    ExtractBackground::default().apply(&mut extracted).unwrap();
+    NeutralizeBackground.apply(&mut extracted).unwrap();
     save_png(&extracted, "bg_extraction/extracted.png");
 
     let after = corner_background_spread(&extracted);

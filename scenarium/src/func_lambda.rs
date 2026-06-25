@@ -1,14 +1,24 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
     context::ContextManager,
     data::DynamicValue,
-    execution::OutputUsage,
     prelude::{AnyState, SharedAnyState},
 };
+
+/// How much of a node output a run actually needs, handed to the lambda so it can
+/// skip producing values nobody reads. Derived per-run by the executor from the
+/// plan's consumer counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OutputUsage {
+    Skip,
+    /// Number of executing consumers reading this output this run (always `> 0`).
+    Needed(u32),
+}
 
 #[derive(Debug, Error)]
 pub enum InvokeError {
@@ -27,7 +37,6 @@ pub type InvokeResult<T> = Result<T, InvokeError>;
 
 #[derive(Debug)]
 pub struct InvokeInput {
-    pub changed: bool,
     pub value: DynamicValue,
 }
 

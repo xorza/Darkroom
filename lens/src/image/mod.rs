@@ -3,6 +3,7 @@
 //! scenarium [`CustomValue`] with an async GPU thumbnail preview).
 
 mod blend_mode;
+pub(crate) mod codec;
 mod conversion_format;
 pub(crate) mod funclib;
 pub(crate) mod vision_ctx;

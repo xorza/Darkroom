@@ -10,6 +10,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::image_ops::remap_intensity;
+use crate::op::{OpError, ensure, require_f32_master};
 use imaginarium::Image;
 
 #[cfg(test)]
@@ -18,9 +19,12 @@ mod tests;
 /// Histogram resolution for the per-tile mappings.
 const N_BINS: usize = 256;
 
-/// Parameters for [`enhance_local_contrast`].
+/// Local contrast enhancement of a *stretched* (display-domain) image in place via CLAHE.
+///
+/// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
+/// the mapping directly.
 #[derive(Debug, Clone, Copy)]
-pub struct LocalContrastConfig {
+pub struct LocalContrast {
     /// Tile grid count per axis. Fewer/larger tiles = broader structure; ~8 is typical, lower for
     /// wide-field.
     pub tiles: usize,
@@ -31,7 +35,7 @@ pub struct LocalContrastConfig {
     pub strength: f32,
 }
 
-impl Default for LocalContrastConfig {
+impl Default for LocalContrast {
     fn default() -> Self {
         Self {
             tiles: 8,
@@ -41,35 +45,62 @@ impl Default for LocalContrastConfig {
     }
 }
 
-impl LocalContrastConfig {
-    /// Panic on out-of-range parameters (called by [`enhance_local_contrast`]).
-    pub fn validate(&self) {
-        assert!(self.tiles >= 1, "tiles must be ≥ 1, got {}", self.tiles);
-        assert!(
+impl LocalContrast {
+    /// Set the tile grid count per axis.
+    pub fn tiles(mut self, tiles: usize) -> Self {
+        self.tiles = tiles;
+        self
+    }
+
+    /// Set the histogram clip limit (`≥ 1`).
+    pub fn clip_limit(mut self, clip_limit: f32) -> Self {
+        self.clip_limit = clip_limit;
+        self
+    }
+
+    /// Set the CLAHE/original blend in `[0, 1]`.
+    pub fn strength(mut self, strength: f32) -> Self {
+        self.strength = strength;
+        self
+    }
+
+    /// Enhance the local contrast of `image` in place via CLAHE.
+    ///
+    /// # Errors
+    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32`; [`OpError::InvalidConfig`]
+    /// on out-of-range parameters.
+    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
+        self.validate()?;
+        require_f32_master(image)?;
+        remap_intensity(image, |intensity| clahe_map(intensity, self));
+        Ok(())
+    }
+
+    fn validate(&self) -> Result<(), OpError> {
+        ensure(self.tiles >= 1, || {
+            format!("local contrast tiles must be ≥ 1, got {}", self.tiles)
+        })?;
+        ensure(
             self.clip_limit >= 1.0 && self.clip_limit.is_finite(),
-            "clip_limit must be ≥ 1, got {}",
-            self.clip_limit
-        );
-        assert!(
-            (0.0..=1.0).contains(&self.strength),
-            "strength must be in [0, 1], got {}",
-            self.strength
-        );
+            || {
+                format!(
+                    "local contrast clip_limit must be ≥ 1, got {}",
+                    self.clip_limit
+                )
+            },
+        )?;
+        ensure((0.0..=1.0).contains(&self.strength), || {
+            format!(
+                "local contrast strength must be in [0, 1], got {}",
+                self.strength
+            )
+        })
     }
 }
 
-/// Enhance local contrast of a *stretched* (display-domain) image in place via CLAHE.
-///
-/// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
-/// the mapping directly.
-pub fn enhance_local_contrast(image: &mut Image, config: LocalContrastConfig) {
-    config.validate();
-    remap_intensity(image, |intensity| clahe_map(intensity, config));
-}
-
-/// The CLAHE mapping on the combined intensity plane; [`enhance_local_contrast`]
-/// computes the intensity, runs this, then remaps the image's channels to it.
-fn clahe_map(intensity: &Buffer2<f32>, config: LocalContrastConfig) -> Buffer2<f32> {
+/// The CLAHE mapping on the combined intensity plane; [`LocalContrast::apply`] computes the
+/// intensity, runs this, then remaps the image's channels to it.
+fn clahe_map(intensity: &Buffer2<f32>, config: &LocalContrast) -> Buffer2<f32> {
     // Keep each tile well-populated (≳ 4·N_BINS pixels) so the clipped-histogram CDF is meaningful;
     // on a small image this caps the requested tile count (a no-op on a real megapixel frame).
     let max_tiles = (((intensity.width() * intensity.height()) as f64 / (4 * N_BINS) as f64).sqrt()

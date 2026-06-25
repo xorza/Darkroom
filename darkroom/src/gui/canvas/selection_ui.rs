@@ -21,6 +21,11 @@ use crate::gui::scene::Scene;
 #[derive(Default, Debug)]
 pub(crate) struct SelectionUI {
     band: Option<RubberBand>,
+    /// Pre-drag selection captured at latch (empty unless Shift extends).
+    /// The swept set unions onto this each frame, so we never re-read
+    /// `scene.selected_nodes` mid-drag — no dependency on the document
+    /// staying untouched, and the additive base is fixed at latch.
+    base: BTreeSet<NodeId>,
     /// The swept set while a band is active, for node draw to highlight
     /// live. Owned here rather than written into `Scene::selected_nodes`
     /// so the projection stays a read-only mirror of `Document`. `None`
@@ -37,9 +42,6 @@ struct RubberBand {
     /// the pointer every frame.
     start: Vec2,
     current: Vec2,
-    /// Shift held when the drag latched → union with the existing
-    /// selection rather than replacing it.
-    additive: bool,
 }
 
 impl RubberBand {
@@ -66,10 +68,6 @@ impl SelectionUI {
     /// committing `SetSelection` emitted on release. Esc cancels without
     /// emitting.
     ///
-    /// The pre-drag selection (the additive base) needs no stored copy:
-    /// `Scene::rebuild` reseeds `selected_nodes` from `Document` at the
-    /// top of every frame, and the document stays untouched until
-    /// release, so `scene.selected_nodes` here is always the base.
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
@@ -83,12 +81,17 @@ impl SelectionUI {
             && let Some(p) = resp.pointer_local
         {
             let w = to_world(p, scene);
+            // Shift is a gesture *parameter* (extend vs replace), not
+            // arbitration — read it here, not in the classifier. Capture
+            // the base once so the per-frame union doesn't re-read the doc.
+            self.base = if ui.modifiers().shift {
+                scene.selected_nodes.clone()
+            } else {
+                BTreeSet::new()
+            };
             self.band = Some(RubberBand {
                 start: w,
                 current: w,
-                // Shift is a gesture *parameter* (extend vs replace), not
-                // arbitration — read it here, not in the classifier.
-                additive: ui.modifiers().shift,
             });
         }
         let Some(mut band) = self.band else {
@@ -107,11 +110,7 @@ impl SelectionUI {
             band.current = to_world(p, scene);
         }
         let rect = band.rect();
-        let mut selected: BTreeSet<NodeId> = if band.additive {
-            scene.selected_nodes.clone()
-        } else {
-            BTreeSet::new()
-        };
+        let mut selected: BTreeSet<NodeId> = self.base.clone();
         for n in &scene.nodes {
             // World body rect: `n.pos` is the node's pre-transform min
             // (fed to `Panel::position`), `layout_rect.size` is already

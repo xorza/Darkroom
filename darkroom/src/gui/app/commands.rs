@@ -197,9 +197,12 @@ impl App {
 
     /// Record `path` as both the dialog-anchor `current_path` and the
     /// persisted `config.document_path`, then write the config so the
-    /// next launch reopens this document.
+    /// next launch reopens this document. Also repoints the worker's disk
+    /// cache at the document's project-local store (or memory-only when the
+    /// path is cleared / never saved).
     fn set_document_path(&mut self, path: Option<PathBuf>) {
         self.current_path = path.clone();
+        self.engine.set_document_cache(self.current_path.as_deref());
         self.config.document_path = path;
         self.config.save();
     }
@@ -437,23 +440,16 @@ mod tests {
     }
 
     fn def(name: &str, origin: Option<SubgraphId>) -> SubgraphDef {
-        SubgraphDef {
-            id: SubgraphId::unique(),
-            name: name.into(),
-            origin,
-            ..Default::default()
-        }
+        let mut def = SubgraphDef::new(SubgraphId::unique(), name);
+        def.origin = origin;
+        def
     }
 
     #[test]
     fn publish_updates_linked_library_def_in_place() {
         let lib_id = SubgraphId::unique();
         let mut func_lib = FuncLib::default();
-        func_lib.add_subgraph(SubgraphDef {
-            id: lib_id,
-            name: "Old".into(),
-            ..Default::default()
-        });
+        func_lib.add_subgraph(SubgraphDef::new(lib_id, "Old"));
         let func_lib = ArcSwap::from_pointee(func_lib);
 
         // Local copy linked to that library def, with diverged content.

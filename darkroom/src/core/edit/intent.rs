@@ -19,12 +19,18 @@
 //!     undo-stack redo.
 //!   - [`revert_step`] — write the "from" half of an `UndoStep` to
 //!     `&mut Document`. Used during undo.
+//!
+//! [`commit_intent`] is the high-level entry the live frontends drive
+//! their per-intent loop through: build → no-op-filter → apply in one
+//! call, returning the committed step to record. The two halves stay
+//! public for undo-stack redo, which applies a *stored* step without
+//! rebuilding it.
 
 use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
 use scenarium::graph::{
-    Binding, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind, OutputPort, Subscription,
+    Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, Subscription,
 };
 use scenarium::prelude::{SubgraphDef, SubgraphId};
 use scenarium::subgraph::SubgraphRef;
@@ -105,15 +111,19 @@ pub enum Intent {
     SetSelection {
         to: BTreeSet<NodeId>,
     },
-    SetCacheBehavior {
-        node_id: NodeId,
-        to: NodeBehavior,
-    },
     /// Enable/disable a node for execution (`Node::disabled`). The header
     /// badge toggles it; a disabled node is skipped at flatten time.
     SetDisabled {
         node_id: NodeId,
         to: bool,
+    },
+    /// Set where a node's output is cached (`Node::persist` —
+    /// `Memory`/`Disk`). The header `C` badge toggles it; `Disk` persists the
+    /// output to the content-addressed store so a reproducible node reloads
+    /// instead of recomputing.
+    SetPersist {
+        node_id: NodeId,
+        to: CachePersistence,
     },
     /// Fork a private standalone copy of a `Subgraph(Local(_))` node's
     /// def and re-point the node at it (the S-badge "Detach" action).
@@ -237,15 +247,15 @@ pub enum GraphStep {
         from: BTreeSet<NodeId>,
         to: BTreeSet<NodeId>,
     },
-    SetCacheBehavior {
-        node_id: NodeId,
-        from: NodeBehavior,
-        to: NodeBehavior,
-    },
     SetDisabled {
         node_id: NodeId,
         from: bool,
         to: bool,
+    },
+    SetPersist {
+        node_id: NodeId,
+        from: CachePersistence,
+        to: CachePersistence,
     },
     /// Fork + re-point: `def` (a fresh standalone copy) joins the
     /// graph's local defs and the node swaps from `from_id` to `def.id`.
@@ -343,8 +353,8 @@ impl GraphStep {
             GraphStep::RenameNode { from, to, .. } => from == to,
             GraphStep::SetInput { from, to, .. } => from == to,
             GraphStep::SetSelection { from, to } => from == to,
-            GraphStep::SetCacheBehavior { from, to, .. } => from == to,
             GraphStep::SetDisabled { from, to, .. } => from == to,
+            GraphStep::SetPersist { from, to, .. } => from == to,
             GraphStep::SetViewport {
                 from_pan,
                 from_scale,
@@ -506,13 +516,13 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             from: view.selected_nodes.clone(),
             to,
         },
-        Intent::SetCacheBehavior { node_id, to } => GraphStep::SetCacheBehavior {
-            from: graph.by_id(&node_id)?.behavior,
+        Intent::SetDisabled { node_id, to } => GraphStep::SetDisabled {
+            from: graph.by_id(&node_id)?.disabled,
             node_id,
             to,
         },
-        Intent::SetDisabled { node_id, to } => GraphStep::SetDisabled {
-            from: graph.by_id(&node_id)?.disabled,
+        Intent::SetPersist { node_id, to } => GraphStep::SetPersist {
+            from: graph.by_id(&node_id)?.persist,
             node_id,
             to,
         },
@@ -539,23 +549,59 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
     Some(UndoStep::Graph(step))
 }
 
-/// Build an [`Intent::DuplicateNodes`] for `target`'s current selection:
-/// clone each selected node with a fresh id and an offset position, copy
-/// const-value bindings, and recreate the data + event connections whose
-/// *both* endpoints are selected (wires to unselected nodes are dropped).
-/// `None` when nothing is selected or the target doesn't resolve. Reads
-/// the document to assemble the intent — editor-operation construction,
-/// kept with the rest of the intent machinery rather than on the
-/// `Document` model.
+/// Build, no-op-filter, and apply one `intent` against `target` in a
+/// single call — the high-level entry both live frontends (the GUI
+/// [`crate::gui::app::editor::Editor`] and the headless
+/// [`crate::core::session::Session`]) drive their per-intent loop through.
+///
+/// Returns the committed [`UndoStep`] (the caller records it and reads its
+/// `requires_*` signals), or `None` when the intent was stale (anchor node
+/// gone) or a no-op — in both cases nothing was written. [`build_step`] /
+/// [`apply_step`] stay separate for the undo-stack redo path, which applies
+/// a stored step without rebuilding it.
+pub fn commit_intent(intent: Intent, doc: &mut Document, target: GraphRef) -> Option<UndoStep> {
+    let step = build_step(intent, doc, target)?;
+    if step.is_noop() {
+        return None;
+    }
+    apply_step(&step, doc, target);
+    Some(step)
+}
+
+/// Build an [`Intent::DuplicateNodes`] for `target`'s current selection.
+/// Thin wrapper over [`build_duplicate_intent_for`] with the selection as
+/// the node set and incoming (external) wires dropped — the Ctrl+D path.
 pub fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent> {
-    let EditScopeRef { graph, view } = doc.scope(target)?;
+    let EditScopeRef { view, .. } = doc.scope(target)?;
     if view.selected_nodes.is_empty() {
+        return None;
+    }
+    build_duplicate_intent_for(doc, target, &view.selected_nodes, false)
+}
+
+/// Build an [`Intent::DuplicateNodes`] cloning `node_ids` in `target`: each
+/// node gets a fresh id and an offset position, const-value bindings copy
+/// verbatim, and the data + event connections *among* `node_ids` are
+/// recreated against the clones. A `Bind` whose source is *outside* the set
+/// is dropped unless `include_incoming` is set, in which case the clone
+/// keeps the wire pointing at the original external producer. `None` when
+/// `node_ids` is empty or the target doesn't resolve. Reads the document to
+/// assemble the intent — editor-operation construction, kept with the rest
+/// of the intent machinery rather than on the `Document` model.
+pub fn build_duplicate_intent_for(
+    doc: &Document,
+    target: GraphRef,
+    node_ids: &BTreeSet<NodeId>,
+    include_incoming: bool,
+) -> Option<Intent> {
+    let EditScopeRef { graph, view } = doc.scope(target)?;
+    if node_ids.is_empty() {
         return None;
     }
 
     let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
     let mut nodes = Vec::new();
-    for old_id in &view.selected_nodes {
+    for old_id in node_ids {
         let Some(node) = graph.by_id(old_id) else {
             continue;
         };
@@ -563,25 +609,29 @@ pub fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent
         id_map.insert(*old_id, new_id);
         let mut clone = node.clone();
         clone.id = new_id;
-        let pos = view.view_nodes.by_key(old_id).unwrap().pos + DUPLICATE_OFFSET;
+        let pos = view
+            .view_nodes
+            .by_key(old_id)
+            .expect("view holds a position for every graph node")
+            .pos
+            + DUPLICATE_OFFSET;
         nodes.push((ViewNode { id: new_id, pos }, clone));
     }
 
-    // Each selected node's own input ports. Const/None copy verbatim;
-    // a `Bind` survives only if its source is also selected (remapped
-    // to the clone) — otherwise the wire is external and dropped.
+    // Each cloned node's own input ports. Const/None copy verbatim; a `Bind`
+    // to a source inside the set is remapped to that source's clone. A `Bind`
+    // to an *external* source is dropped — unless `include_incoming`, where
+    // the clone keeps the wire to the original producer.
     let mut bindings = Vec::new();
-    for old_id in &view.selected_nodes {
+    for old_id in node_ids {
         for (port, binding) in graph.bindings_touching(*old_id) {
             if port.node_id != *old_id {
                 continue;
             }
             let new_binding = match binding {
                 Binding::Bind(src) => match id_map.get(&src.node_id) {
-                    Some(&new_src) => Binding::Bind(OutputPort {
-                        node_id: new_src,
-                        port_idx: src.port_idx,
-                    }),
+                    Some(&new_src) => Binding::bind(new_src, src.port_idx),
+                    None if include_incoming => Binding::Bind(src),
                     None => continue,
                 },
                 other => other,
@@ -590,7 +640,7 @@ pub fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent
         }
     }
 
-    // Event subscriptions internal to the selection.
+    // Event subscriptions internal to the set.
     let mut subscriptions = Vec::new();
     for s in graph.subscriptions() {
         if let (Some(&emitter), Some(&subscriber)) =
@@ -752,11 +802,11 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetSelection { to, .. } => {
             scope.view.selected_nodes = to.clone();
         }
-        GraphStep::SetCacheBehavior { node_id, to, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().behavior = *to;
-        }
         GraphStep::SetDisabled { node_id, to, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().disabled = *to;
+        }
+        GraphStep::SetPersist { node_id, to, .. } => {
+            scope.graph.by_id_mut(node_id).unwrap().persist = *to;
         }
         GraphStep::DetachSubgraph { node_id, def, .. } => {
             scope.graph.subgraphs.add((**def).clone());
@@ -874,11 +924,11 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetSelection { from, .. } => {
             scope.view.selected_nodes = from.clone();
         }
-        GraphStep::SetCacheBehavior { node_id, from, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().behavior = *from;
-        }
         GraphStep::SetDisabled { node_id, from, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().disabled = *from;
+        }
+        GraphStep::SetPersist { node_id, from, .. } => {
+            scope.graph.by_id_mut(node_id).unwrap().persist = *from;
         }
         GraphStep::DetachSubgraph {
             node_id,
@@ -945,9 +995,10 @@ impl UndoStep {
                 matches!(from, Binding::Const(_)) != matches!(to, Binding::Const(_))
             }
             GraphStep::SetSelection { .. }
-            | GraphStep::SetCacheBehavior { .. }
             // Disabling only dims the body paint — same rect, no remeasure.
-            | GraphStep::SetDisabled { .. } => false,
+            | GraphStep::SetDisabled { .. }
+            // The cache toggle flips a badge fill — same rect, no remeasure.
+            | GraphStep::SetPersist { .. } => false,
         },
     }
     }
@@ -974,8 +1025,8 @@ impl UndoStep {
                 GraphStep::MoveNodes { .. }
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetSelection { .. }
-                | GraphStep::SetCacheBehavior { .. }
                 | GraphStep::SetDisabled { .. }
+                | GraphStep::SetPersist { .. }
                 | GraphStep::SetViewport { .. },
             )
             | UndoStep::Doc(_) => false,
@@ -1005,8 +1056,8 @@ impl UndoStep {
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetSelection { .. }
-                | GraphStep::SetCacheBehavior { .. }
                 | GraphStep::SetDisabled { .. }
+                | GraphStep::SetPersist { .. }
                 | GraphStep::DetachSubgraph { .. },
             )
             | UndoStep::Doc(
@@ -1103,7 +1154,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_intent_clones_internal_wiring_and_drops_external() {
+    fn duplicate_intent_drops_or_keeps_external_by_flag() {
         // a -> b (internal edge, both selected); c -> b (external, c not
         // selected). b also has a Const on input 1. Selecting {a, b} must
         // duplicate a' and b', keep a'->b' and the Const, drop c->b.
@@ -1174,6 +1225,36 @@ mod tests {
             !bindings.iter().any(|(port, _)| port.port_idx == 2),
             "external edge dropped"
         );
+
+        // With `include_incoming`, the same selection keeps the external
+        // c -> b edge, the clone's input still pointing at the original c.
+        // (Fresh build → fresh clone ids, so re-find b's clone by position.)
+        let Some(Intent::DuplicateNodes {
+            nodes: incoming_nodes,
+            bindings: incoming,
+            ..
+        }) = build_duplicate_intent_for(&doc, GraphRef::Main, &doc.main_view.selected_nodes, true)
+        else {
+            panic!("expected a DuplicateNodes intent");
+        };
+        assert_eq!(incoming.len(), 3, "internal + const + kept external");
+        let b_clone2 = incoming_nodes
+            .iter()
+            .find(|(vn, _)| vn.pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
+            .map(|(_, n)| n.id)
+            .unwrap();
+        let external = incoming
+            .iter()
+            .find(|(port, _)| port.port_idx == 2)
+            .expect("external edge kept");
+        assert_eq!(external.0.node_id, b_clone2, "edge sinks into b's clone");
+        match &external.1 {
+            Binding::Bind(src) => {
+                assert_eq!(src.node_id, c, "external source stays the original c");
+                assert_eq!(src.port_idx, 0);
+            }
+            other => panic!("expected Bind, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1181,5 +1262,60 @@ mod tests {
         let mut doc = Document::default();
         add_node_at(&mut doc, Vec2::ZERO);
         assert!(build_duplicate_intent(&doc, GraphRef::Main).is_none());
+    }
+
+    #[test]
+    fn set_persist_commits_and_reverts() {
+        let mut doc = Document::default();
+        let id = add_node_at(&mut doc, Vec2::ZERO);
+        // Fresh nodes default to memory-only.
+        assert_eq!(
+            doc.graph.by_id(&id).unwrap().persist,
+            CachePersistence::Memory
+        );
+
+        // Flip to Disk: the step applies and carries the prior value for revert.
+        let step = commit_intent(
+            Intent::SetPersist {
+                node_id: id,
+                to: CachePersistence::Disk,
+            },
+            &mut doc,
+            GraphRef::Main,
+        )
+        .expect("Memory → Disk is a real change, not a no-op");
+        assert_eq!(
+            doc.graph.by_id(&id).unwrap().persist,
+            CachePersistence::Disk
+        );
+        assert!(
+            !step.requires_relayout() && !step.requires_reconcile(),
+            "a cache toggle neither remeasures nor reshapes the interface"
+        );
+        assert!(
+            step.gesture_key().is_none(),
+            "each cache toggle is its own undo entry"
+        );
+
+        // Undo restores memory-only.
+        revert_step(&step, &mut doc, GraphRef::Main);
+        assert_eq!(
+            doc.graph.by_id(&id).unwrap().persist,
+            CachePersistence::Memory
+        );
+
+        // Setting it to the value it already holds is a no-op (no undo entry).
+        assert!(
+            commit_intent(
+                Intent::SetPersist {
+                    node_id: id,
+                    to: CachePersistence::Memory,
+                },
+                &mut doc,
+                GraphRef::Main,
+            )
+            .is_none(),
+            "Memory → Memory writes nothing"
+        );
     }
 }

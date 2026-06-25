@@ -29,6 +29,7 @@ use rayon::prelude::*;
 
 use crate::image_ops::{intensity_plane, par_map_pixels};
 use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
+use crate::op::{OpError, ensure, require_f32_master};
 use imaginarium::Image;
 
 #[cfg(test)]
@@ -83,12 +84,12 @@ pub enum ColorMode {
 
 /// A stretch to apply to a stacked image. Output is always clamped to `[0, 1]`.
 #[derive(Debug, Clone, Copy)]
-pub struct StretchConfig {
+pub struct Stretch {
     pub method: StretchMethod,
     pub color: ColorMode,
 }
 
-impl StretchConfig {
+impl Stretch {
     /// Color-preserving normalized-arcsinh auto-stretch — the recommended best-quality default.
     pub fn auto_asinh() -> Self {
         Self {
@@ -127,81 +128,80 @@ impl StretchConfig {
         }
     }
 
-    /// Panic if any parameter is out of range. Called by [`stretch`]; public so a caller can fail
-    /// fast before doing expensive work.
-    pub fn validate(&self) {
+    /// Set how the curve is applied across color channels.
+    pub fn color(mut self, color: ColorMode) -> Self {
+        self.color = color;
+        self
+    }
+
+    /// Apply this non-linear stretch to a stacked image in place.
+    ///
+    /// # Errors
+    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32`; [`OpError::InvalidConfig`]
+    /// on out-of-range parameters.
+    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
+        self.validate()?;
+        require_f32_master(image)?;
+        match self.color {
+            ColorMode::ColorPreserving => {
+                // Auto methods derive the curve from the combined intensity (one curve for the image).
+                let curve = explicit_curve(self.method).unwrap_or_else(|| {
+                    build_curve(&mut subsample(intensity_plane(image).pixels()), self.method)
+                });
+                apply_color_preserving_image(image, curve);
+            }
+            ColorMode::PerChannel => apply_per_channel_image(image, self.method),
+        }
+        Ok(())
+    }
+
+    fn validate(&self) -> Result<(), OpError> {
         match self.method {
             StretchMethod::AutoStf {
                 shadow_sigmas,
                 target_background,
             } => {
-                assert!(
-                    shadow_sigmas >= 0.0,
-                    "shadow_sigmas must be >= 0, got {shadow_sigmas}"
-                );
-                assert_target_background(target_background);
+                ensure(shadow_sigmas >= 0.0, || {
+                    format!("shadow_sigmas must be >= 0, got {shadow_sigmas}")
+                })?;
+                ensure_target_background(target_background)
             }
             StretchMethod::AutoAsinh { target_background } => {
-                assert_target_background(target_background)
+                ensure_target_background(target_background)
             }
             StretchMethod::Asinh { beta } => {
-                assert!(beta > 0.0, "asinh beta must be > 0, got {beta}")
+                ensure(beta > 0.0, || format!("asinh beta must be > 0, got {beta}"))
             }
             StretchMethod::Ghs { d, b, sp, lp, hp } => {
-                assert!(
-                    d >= 0.0 && d.is_finite(),
-                    "ghs d must be a finite value >= 0, got {d}"
-                );
-                assert!(b.is_finite(), "ghs b must be finite, got {b}");
-                assert!(
-                    (0.0..=1.0).contains(&sp),
-                    "ghs sp must be in [0, 1], got {sp}"
-                );
-                assert!(
-                    (0.0..=sp).contains(&lp),
-                    "ghs lp must be in [0, sp], got {lp}"
-                );
-                assert!(
-                    (sp..=1.0).contains(&hp),
-                    "ghs hp must be in [sp, 1], got {hp}"
-                );
+                ensure(d >= 0.0 && d.is_finite(), || {
+                    format!("ghs d must be a finite value >= 0, got {d}")
+                })?;
+                ensure(b.is_finite(), || format!("ghs b must be finite, got {b}"))?;
+                ensure((0.0..=1.0).contains(&sp), || {
+                    format!("ghs sp must be in [0, 1], got {sp}")
+                })?;
+                ensure((0.0..=sp).contains(&lp), || {
+                    format!("ghs lp must be in [0, sp], got {lp}")
+                })?;
+                ensure((sp..=1.0).contains(&hp), || {
+                    format!("ghs hp must be in [sp, 1], got {hp}")
+                })
             }
         }
     }
 }
 
-impl Default for StretchConfig {
+impl Default for Stretch {
     fn default() -> Self {
         Self::auto_asinh()
     }
 }
 
-fn assert_target_background(t: f32) {
-    assert!(
-        t > 0.0 && t < 1.0,
-        "target_background must be in (0, 1), got {t}"
-    );
-}
-
-/// Apply a non-linear stretch to a stacked image in place.
-///
-/// # Panics
-/// If `config` is out of range — see [`StretchConfig::validate`].
-pub fn stretch(image: &mut Image, config: StretchConfig) {
-    config.validate();
-    match config.color {
-        ColorMode::ColorPreserving => {
-            // Auto methods derive the curve from the combined intensity (one curve for the image).
-            let curve = explicit_curve(config.method).unwrap_or_else(|| {
-                build_curve(
-                    &mut subsample(intensity_plane(image).pixels()),
-                    config.method,
-                )
-            });
-            apply_color_preserving_image(image, curve);
-        }
-        ColorMode::PerChannel => apply_per_channel_image(image, config.method),
-    }
+/// `Ok(())` if `t` is a valid target background in `(0, 1)`.
+fn ensure_target_background(t: f32) -> Result<(), OpError> {
+    ensure(t > 0.0 && t < 1.0, || {
+        format!("target_background must be in (0, 1), got {t}")
+    })
 }
 
 /// Per-channel stretch on the interleaved image: each channel gets its own auto curve from its own

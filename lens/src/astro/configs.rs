@@ -10,9 +10,8 @@
 
 use common::{Introspect, IntrospectEnum};
 use lumos::{
-    BackgroundConfig, BackgroundMode, ColorMode, DenoiseConfig, HdrConfig, LocalContrastConfig,
-    RegistrationConfig, ScnrMethod, StackConfig, StarDetectionConfig, StretchConfig, StretchMethod,
-    Threshold,
+    BackgroundMode, ColorMode, Denoise, ExtractBackground, Hdr, LocalContrast, RegistrationConfig,
+    Scnr, StackConfig, StarDetectionConfig, Stretch, StretchMethod, Threshold,
 };
 use strum_macros::{Display, EnumString};
 
@@ -46,7 +45,7 @@ impl From<BackgroundMode> for BackgroundModeDef {
     }
 }
 
-/// Editable mirror of [`lumos::BackgroundConfig`].
+/// Editable mirror of [`lumos::ExtractBackground`].
 #[derive(Debug, Clone, Introspect)]
 pub struct BackgroundConfigDef {
     pub tile_size: usize,
@@ -59,12 +58,12 @@ pub struct BackgroundConfigDef {
 
 impl Default for BackgroundConfigDef {
     fn default() -> Self {
-        BackgroundConfig::default().into()
+        ExtractBackground::default().into()
     }
 }
 
-impl From<BackgroundConfig> for BackgroundConfigDef {
-    fn from(config: BackgroundConfig) -> Self {
+impl From<ExtractBackground> for BackgroundConfigDef {
+    fn from(config: ExtractBackground) -> Self {
         Self {
             tile_size: config.tile_size,
             degree: config.degree,
@@ -76,7 +75,7 @@ impl From<BackgroundConfig> for BackgroundConfigDef {
     }
 }
 
-impl From<BackgroundConfigDef> for BackgroundConfig {
+impl From<BackgroundConfigDef> for ExtractBackground {
     fn from(config: BackgroundConfigDef) -> Self {
         Self {
             tile_size: config.tile_size,
@@ -91,7 +90,7 @@ impl From<BackgroundConfigDef> for BackgroundConfig {
 
 impl NodeConfig for BackgroundConfigDef {
     const TYPE_ID: &'static str = "47a71876-5db9-45f9-a21d-cc2ce40a80f2";
-    const NAME: &'static str = "BackgroundConfig";
+    const NAME: &'static str = "ExtractBackground";
 }
 
 /// The most-tuned [`lumos::StarDetectionConfig`] knobs. Other fields take the
@@ -265,7 +264,7 @@ impl From<Threshold> for ThresholdDef {
     }
 }
 
-/// Editable mirror of [`lumos::DenoiseConfig`] (full wavelet-denoise knobs;
+/// Editable mirror of [`lumos::Denoise`] (full wavelet-denoise knobs;
 /// `denoise`'s inline `strength` covers the common case).
 #[derive(Debug, Clone, Introspect)]
 pub struct DenoiseConfigDef {
@@ -277,12 +276,12 @@ pub struct DenoiseConfigDef {
 
 impl Default for DenoiseConfigDef {
     fn default() -> Self {
-        DenoiseConfig::default().into()
+        Denoise::default().into()
     }
 }
 
-impl From<DenoiseConfig> for DenoiseConfigDef {
-    fn from(config: DenoiseConfig) -> Self {
+impl From<Denoise> for DenoiseConfigDef {
+    fn from(config: Denoise) -> Self {
         Self {
             scales: config.scales,
             k: config.k,
@@ -292,7 +291,7 @@ impl From<DenoiseConfig> for DenoiseConfigDef {
     }
 }
 
-impl From<DenoiseConfigDef> for DenoiseConfig {
+impl From<DenoiseConfigDef> for Denoise {
     fn from(mirror: DenoiseConfigDef) -> Self {
         Self {
             scales: mirror.scales,
@@ -305,10 +304,10 @@ impl From<DenoiseConfigDef> for DenoiseConfig {
 
 impl NodeConfig for DenoiseConfigDef {
     const TYPE_ID: &'static str = "ab942729-dc49-4518-aae4-9008bd33cea1";
-    const NAME: &'static str = "DenoiseConfig";
+    const NAME: &'static str = "Denoise";
 }
 
-/// Editable mirror of [`lumos::HdrConfig`] (`hdr_compress`'s inline `amount`
+/// Editable mirror of [`lumos::Hdr`] (`hdr_compress`'s inline `amount`
 /// covers the common case).
 #[derive(Debug, Clone, Introspect)]
 pub struct HdrConfigDef {
@@ -318,12 +317,12 @@ pub struct HdrConfigDef {
 
 impl Default for HdrConfigDef {
     fn default() -> Self {
-        HdrConfig::default().into()
+        Hdr::default().into()
     }
 }
 
-impl From<HdrConfig> for HdrConfigDef {
-    fn from(config: HdrConfig) -> Self {
+impl From<Hdr> for HdrConfigDef {
+    fn from(config: Hdr) -> Self {
         Self {
             scales: config.scales,
             amount: config.amount,
@@ -331,7 +330,7 @@ impl From<HdrConfig> for HdrConfigDef {
     }
 }
 
-impl From<HdrConfigDef> for HdrConfig {
+impl From<HdrConfigDef> for Hdr {
     fn from(mirror: HdrConfigDef) -> Self {
         Self {
             scales: mirror.scales,
@@ -342,10 +341,10 @@ impl From<HdrConfigDef> for HdrConfig {
 
 impl NodeConfig for HdrConfigDef {
     const TYPE_ID: &'static str = "36babf1d-0fda-4d5d-b4c6-ed4c13ebff6b";
-    const NAME: &'static str = "HdrConfig";
+    const NAME: &'static str = "Hdr";
 }
 
-/// Editable mirror of [`lumos::LocalContrastConfig`] (`local_contrast`'s inline
+/// Editable mirror of [`lumos::LocalContrast`] (`local_contrast`'s inline
 /// `strength` covers the common case).
 #[derive(Debug, Clone, Introspect)]
 pub struct LocalContrastConfigDef {
@@ -356,12 +355,12 @@ pub struct LocalContrastConfigDef {
 
 impl Default for LocalContrastConfigDef {
     fn default() -> Self {
-        LocalContrastConfig::default().into()
+        LocalContrast::default().into()
     }
 }
 
-impl From<LocalContrastConfig> for LocalContrastConfigDef {
-    fn from(config: LocalContrastConfig) -> Self {
+impl From<LocalContrast> for LocalContrastConfigDef {
+    fn from(config: LocalContrast) -> Self {
         Self {
             tiles: config.tiles,
             clip_limit: config.clip_limit,
@@ -370,7 +369,7 @@ impl From<LocalContrastConfig> for LocalContrastConfigDef {
     }
 }
 
-impl From<LocalContrastConfigDef> for LocalContrastConfig {
+impl From<LocalContrastConfigDef> for LocalContrast {
     fn from(mirror: LocalContrastConfigDef) -> Self {
         Self {
             tiles: mirror.tiles,
@@ -382,10 +381,10 @@ impl From<LocalContrastConfigDef> for LocalContrastConfig {
 
 impl NodeConfig for LocalContrastConfigDef {
     const TYPE_ID: &'static str = "eb0062ca-cef9-4fef-a52b-cf3e8e0fce3c";
-    const NAME: &'static str = "LocalContrastConfig";
+    const NAME: &'static str = "LocalContrast";
 }
 
-/// SCNR method (mirrors [`lumos::ScnrMethod`]'s variant choice; `amount` applies
+/// SCNR method (mirrors [`lumos::Scnr`]'s variant choice; `amount` applies
 /// to `additive_mask`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
 #[strum(serialize_all = "snake_case")]
@@ -396,7 +395,7 @@ pub enum ScnrMethodDef {
 }
 
 /// A SCNR config: method + the `additive_mask` blend `amount` (ignored by
-/// average-neutral). Builds the matching [`lumos::ScnrMethod`].
+/// average-neutral). Builds the matching [`lumos::Scnr`].
 #[derive(Debug, Clone, Introspect)]
 pub struct ScnrConfigDef {
     pub method: ScnrMethodDef,
@@ -412,13 +411,11 @@ impl Default for ScnrConfigDef {
     }
 }
 
-impl From<ScnrConfigDef> for ScnrMethod {
+impl From<ScnrConfigDef> for Scnr {
     fn from(mirror: ScnrConfigDef) -> Self {
         match mirror.method {
-            ScnrMethodDef::AverageNeutral => ScnrMethod::AverageNeutral,
-            ScnrMethodDef::AdditiveMask => ScnrMethod::AdditiveMask {
-                amount: mirror.amount,
-            },
+            ScnrMethodDef::AverageNeutral => Scnr::average_neutral(),
+            ScnrMethodDef::AdditiveMask => Scnr::additive_mask(mirror.amount),
         }
     }
 }
@@ -465,7 +462,7 @@ pub enum StretchMethodKindDef {
     AutoStf,
 }
 
-/// Curated mirror of [`lumos::StretchConfig`] for the two auto methods (what the
+/// Curated mirror of [`lumos::Stretch`] for the two auto methods (what the
 /// presets expose): `target_background` applies to both, `shadow_sigmas` only to
 /// `auto_stf`. Explicit asinh / GHS curves aren't surfaced as nodes.
 #[derive(Debug, Clone, Introspect)]
@@ -478,12 +475,12 @@ pub struct StretchConfigDef {
 
 impl Default for StretchConfigDef {
     fn default() -> Self {
-        StretchConfig::default().into()
+        Stretch::default().into()
     }
 }
 
-impl From<StretchConfig> for StretchConfigDef {
-    fn from(config: StretchConfig) -> Self {
+impl From<Stretch> for StretchConfigDef {
+    fn from(config: Stretch) -> Self {
         let (method, target_background, shadow_sigmas) = match config.method {
             StretchMethod::AutoAsinh { target_background } => {
                 (StretchMethodKindDef::AutoAsinh, target_background, 1.5)
@@ -510,7 +507,7 @@ impl From<StretchConfig> for StretchConfigDef {
     }
 }
 
-impl From<StretchConfigDef> for StretchConfig {
+impl From<StretchConfigDef> for Stretch {
     fn from(mirror: StretchConfigDef) -> Self {
         let method = match mirror.method {
             StretchMethodKindDef::AutoAsinh => StretchMethod::AutoAsinh {
@@ -521,7 +518,7 @@ impl From<StretchConfigDef> for StretchConfig {
                 target_background: mirror.target_background,
             },
         };
-        StretchConfig {
+        Stretch {
             method,
             color: mirror.color.into(),
         }
@@ -530,5 +527,5 @@ impl From<StretchConfigDef> for StretchConfig {
 
 impl NodeConfig for StretchConfigDef {
     const TYPE_ID: &'static str = "b08bb9a1-db12-43d4-aa57-fe3e3732e917";
-    const NAME: &'static str = "StretchConfig";
+    const NAME: &'static str = "Stretch";
 }

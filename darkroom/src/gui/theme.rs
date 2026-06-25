@@ -71,6 +71,7 @@ pub(crate) mod dark {
     // header badges
     pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x9adbfb);
     pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xff5e44);
+    // cache (persist-to-disk) chip — palette `warning` yellow.
     pub(crate) const BADGE_CACHE: Color = Color::hex(0xffd44a);
 
     // execution-status glow
@@ -121,7 +122,8 @@ pub(crate) mod light {
     // warning yellow (#f1ad49 was barely visible on a light surface).
     pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x3b9ee5);
     pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xef7271);
-    pub(crate) const BADGE_CACHE: Color = Color::hex(0xb87503);
+    // cache (persist-to-disk) chip — palette `warning` yellow.
+    pub(crate) const BADGE_CACHE: Color = Color::hex(0xf1ad49);
 
     // execution-status glow — success / accent / syn_keyword / error.
     pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0x85b304);
@@ -268,7 +270,7 @@ pub struct Theme {
     pub badge_subgraph: Color,
     /// Terminal (sink) chip — error red.
     pub badge_terminal: Color,
-    /// Cache (compute-once) chip — warning yellow.
+    /// Cache (persist-to-disk) chip — warning yellow.
     pub badge_cache: Color,
 
     // ── execution-status glow ────────────────────────────────────
@@ -904,6 +906,8 @@ mod tests {
         assert_eq!(theme.canvas_bg, Color::hex(0x1a1a1a));
         assert_eq!(theme.input_port, Color::hex(0xdaff58));
         assert_eq!(theme.output_port, Color::hex(0xffa63d));
+        // Cache (persist-to-disk) chip is the palette `warning` yellow.
+        assert_eq!(theme.badge_cache, Color::hex(0xffd44a));
         assert_eq!(theme.node_min_width, 160.0);
         assert!(theme.palantir_theme.tooltip.max_size.h.is_infinite());
         // The menu-bar font was shrunk from palantir's default to ours.

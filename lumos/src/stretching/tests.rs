@@ -1,6 +1,7 @@
 use super::*;
 use crate::image_ops::deinterleave_f32;
 use crate::math::statistics::median_f32_mut;
+use crate::op::OpError;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
@@ -265,7 +266,7 @@ fn ghs_end_to_end_lifts_background_and_stays_in_range() {
     let mut px: Vec<f32> = (0..90).map(|i| 0.04 + (i % 3) as f32 * 0.01).collect();
     px.extend(std::iter::repeat_n(0.8f32, 10));
     let mut img = gray(10, 10, px.clone());
-    stretch(&mut img, StretchConfig::ghs(5.0, 0.0, 0.1));
+    Stretch::ghs(5.0, 0.0, 0.1).apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
     for &v in &out {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
@@ -280,11 +281,11 @@ fn ghs_end_to_end_lifts_background_and_stays_in_range() {
 fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
     // Two pixels with a 2:1:1 R:G:B ratio; pixel 1 is bright enough to trip the highlight guard.
     let mut img = rgb(2, 1, vec![0.3, 0.9], vec![0.15, 0.45], vec![0.15, 0.45]);
-    let cfg = StretchConfig {
+    let cfg = Stretch {
         method: StretchMethod::Asinh { beta: 0.05 },
         color: ColorMode::ColorPreserving,
     };
-    stretch(&mut img, cfg);
+    cfg.apply(&mut img).unwrap();
     let r = channel(&img, 0).to_vec();
     let g = channel(&img, 1).to_vec();
     let b = channel(&img, 2).to_vec();
@@ -316,17 +317,16 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
     let mut linked = rgb(5, 1, r.clone(), g.clone(), b.clone());
     let mut unlinked = rgb(5, 1, r, g, b);
 
-    stretch(&mut linked, StretchConfig::auto_stf());
-    stretch(
-        &mut unlinked,
-        StretchConfig {
-            method: StretchMethod::AutoStf {
-                shadow_sigmas: 1.0,
-                target_background: 0.25,
-            },
-            color: ColorMode::PerChannel,
+    Stretch::auto_stf().apply(&mut linked).unwrap();
+    Stretch {
+        method: StretchMethod::AutoStf {
+            shadow_sigmas: 1.0,
+            target_background: 0.25,
         },
-    );
+        color: ColorMode::PerChannel,
+    }
+    .apply(&mut unlinked)
+    .unwrap();
 
     let lr = channel(&linked, 0).to_vec();
     let lg = channel(&linked, 1).to_vec();
@@ -361,7 +361,7 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
     let input_median = median_of(&px);
 
     let mut img = gray(10, 10, px);
-    stretch(&mut img, StretchConfig::auto_stf());
+    Stretch::auto_stf().apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
 
     for &v in &out {
@@ -382,7 +382,17 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
 
 #[test]
 fn default_config_is_color_preserving_auto_asinh() {
-    let cfg = StretchConfig::default();
+    let cfg = Stretch::default();
     assert_eq!(cfg.color, ColorMode::ColorPreserving);
     assert!(matches!(cfg.method, StretchMethod::AutoAsinh { .. }));
+}
+
+#[test]
+fn rejects_out_of_range_config() {
+    let mut img = gray(4, 4, vec![0.3; 16]);
+    let err = Stretch::ghs(-1.0, 0.0, 0.5).apply(&mut img).unwrap_err();
+    assert!(
+        matches!(&err, OpError::InvalidConfig(m) if m.contains("ghs d must be")),
+        "expected an InvalidConfig ghs error, got {err:?}"
+    );
 }

@@ -1,120 +1,75 @@
-//! Mutable execution-time state and the run loop. The `Executor` owns the
-//! per-node runtime `slots` (cache + per-run results), the shared
-//! `ctx_manager`, and the invoke scratch. Given an immutable
-//! [`ExecutionProgram`](crate::execution::program::ExecutionProgram) and a prepared
-//! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), [`Executor::run`] invokes
-//! each scheduled node's lambda and gathers stats.
+//! The run loop and its transient state. The `Executor` owns the shared
+//! `ctx_manager` and the invoke scratch; the per-node cross-run cache lives in
+//! the [`Cache`](crate::execution::cache::Cache). Given an immutable
+//! [`ExecutionProgram`](crate::execution::program::ExecutionProgram), a prepared
+//! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), and that `Cache`,
+//! [`Executor::run`] invokes each scheduled node's lambda and gathers stats.
+//! Per-run results (errors, timings) are columns local to the run, not cache.
 
 use std::time::Instant;
 
 use tokio::sync::mpsc::UnboundedSender;
 
-use common::{CancelToken, KeyIndexKey, KeyIndexVec};
+use common::CancelToken;
 
-use crate::common::shared_any_state::SharedAnyState;
 use crate::context::ContextManager;
 use crate::data::DynamicValue;
 use crate::execution_stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
-use crate::func_lambda::{InvokeError, InvokeInput};
-use crate::graph::{InputPort, NodeId};
-use crate::prelude::AnyState;
+use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage};
+use crate::graph::InputPort;
 
-use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
-use crate::execution::{Error, OutputUsage};
-
-/// Per-node runtime state, index-aligned to the program's `e_nodes`: the
-/// cross-run value cache (`state`, `event_state`, `output_values`) plus per-run
-/// results (`error`, `run_time`). Carries its own `id` so the cache can be
-/// reconciled by key on `update` (surviving node reorder/trim).
-#[derive(Default, Debug)]
-pub(crate) struct RuntimeSlot {
-    pub(crate) id: NodeId,
-    pub(crate) state: AnyState,
-    pub(crate) event_state: SharedAnyState,
-    pub(crate) output_values: Option<Vec<DynamicValue>>,
-    pub(crate) error: Option<Error>,
-    pub(crate) run_time: f64,
-}
-
-impl KeyIndexKey<NodeId> for RuntimeSlot {
-    fn key(&self) -> &NodeId {
-        &self.id
-    }
-}
-
-impl RuntimeSlot {
-    fn reset_state(&mut self) {
-        self.state = AnyState::default();
-        self.event_state = SharedAnyState::default();
-        self.output_values = None;
-    }
-}
+use crate::execution::Error;
+use crate::execution::cache::Cache;
+use crate::execution::plan::{ExecutionPlan, input_missing};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
-    /// Per-node runtime state, index-aligned to `program.e_nodes`.
-    pub(crate) slots: KeyIndexVec<NodeId, RuntimeSlot>,
     pub(crate) ctx_manager: ContextManager,
-    /// Cross-run per-input dirty bits, index-aligned to `program.inputs`. Set by
-    /// `flatten` when a binding changes at `update`, consumed/cleared here when
-    /// the owning node runs. Rebuilt positionally by each `flatten` so it tracks
-    /// the inputs pool; bridges update→run, unlike the per-run plan flags.
-    pub(crate) input_dirty: Vec<bool>,
     /// Per-node invoke scratch, refilled per executed node.
     inputs: Vec<InvokeInput>,
     output_usage: Vec<OutputUsage>,
+    /// Per-run result columns, indexed by `e_node_idx`. Reused across runs and
+    /// reset to node count at each run's start.
+    errors: Vec<Option<Error>>,
+    run_times: Vec<f64>,
 }
 
 impl Executor {
-    /// Rebuild `slots` in `e_nodes` order: preserve each surviving node's cache
-    /// by id, default new nodes, trim removed ones. Mirrors the `CompactInsert`
-    /// flatten runs over `e_nodes`, keeping `slots[i]` aligned to `e_nodes[i]`.
-    pub(crate) fn reconcile(&mut self, e_nodes: &KeyIndexVec<NodeId, ExecutionNode>) {
-        let mut compact = self.slots.compact_insert_start();
-        for e_node in e_nodes.iter() {
-            compact.insert_with(&e_node.id, || RuntimeSlot {
-                id: e_node.id,
-                ..Default::default()
-            });
-        }
-    }
-
-    pub(crate) fn reset_states(&mut self) {
-        for slot in self.slots.iter_mut() {
-            slot.reset_state();
-        }
-    }
-
     /// Execute every node in `plan.execute_order`, invoking its lambda with the
-    /// collected inputs. Mutates the runtime cache and clears each executed
-    /// node's per-input dirty bits in `input_dirty`. The `program` is read-only.
-    /// Returns per-run stats.
+    /// collected inputs. Mutates the `cache` (output values + digests) and stamps
+    /// each executed node's `output_digest` from its `current_digest`. The
+    /// `program` and `plan` are read-only. Returns per-run stats.
     pub(crate) async fn run(
         &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
+        cache: &mut Cache,
         flatten: &FlattenMap,
         progress: Option<&UnboundedSender<RunProgress>>,
         cancel: CancelToken,
     ) -> ExecutionStats {
         let start = Instant::now();
+        let n_nodes = program.e_nodes.len();
         // Hold the cancel flag on the context so lambdas can poll it inside
         // off-thread work, and so the loop-top / post-loop checks below read
         // one source.
         self.ctx_manager.cancel = cancel;
-
-        // Clear the previous run's per-run results.
-        for slot in self.slots.iter_mut() {
-            slot.run_time = 0.0;
-            slot.error = None;
-        }
         self.ctx_manager.logs.clear();
 
+        // Detach the scratch buffers from `self` so the run loop can mutate the
+        // context and these columns without aliasing `self`. The per-run result
+        // columns start fresh at the current node count.
         let mut inputs = std::mem::take(&mut self.inputs);
         let mut output_usage = std::mem::take(&mut self.output_usage);
+        let mut errors = std::mem::take(&mut self.errors);
+        let mut run_times = std::mem::take(&mut self.run_times);
+        errors.clear();
+        errors.resize(n_nodes, None);
+        run_times.clear();
+        run_times.resize(n_nodes, 0.0);
 
         // How far down `execute_order` the run got. Stays the full length on a
         // normal run; on cancel it's the count reached before bailing, so the
@@ -138,22 +93,21 @@ impl Executor {
 
             let func_id = program.e_nodes[e_node_idx].func_id;
 
-            if self.has_errored_dependency(program, e_node_idx) {
-                let slot = &mut self.slots[e_node_idx];
-                slot.output_values = None;
-                slot.error = Some(Error::Invoke {
+            if has_errored_dependency(program, &errors, e_node_idx) {
+                cache.slots[e_node_idx].output_values = None;
+                errors[e_node_idx] = Some(Error::Invoke {
                     func_id,
                     message: "Skipped due to upstream error".to_string(),
                 });
                 continue;
             }
 
-            self.collect_inputs(program, plan, e_node_idx, &mut inputs);
-            self.collect_output_usage(program, plan, e_node_idx, &mut output_usage);
+            collect_inputs(program, cache, e_node_idx, &mut inputs);
+            collect_output_usage(program, plan, e_node_idx, &mut output_usage);
 
             let output_count = program.e_nodes[e_node_idx].outputs.len as usize;
-            let event_state = self.slots[e_node_idx].event_state.clone();
-            assert!(self.slots[e_node_idx].error.is_none());
+            let event_state = cache.slots[e_node_idx].event_state.clone();
+            assert!(errors[e_node_idx].is_none());
 
             // Attribute any logs this node emits to it (read by
             // `ContextManager::log`).
@@ -168,7 +122,7 @@ impl Executor {
             }
             let result = {
                 let lambda = &program.e_nodes[e_node_idx].lambda;
-                let slot = &mut self.slots[e_node_idx];
+                let slot = &mut cache.slots[e_node_idx];
                 let outputs = slot
                     .output_values
                     .get_or_insert_with(|| vec![DynamicValue::Unbound; output_count]);
@@ -210,11 +164,17 @@ impl Executor {
             if cancelled {
                 cancelled_in_flight = Some(e_node_idx);
             }
-            let slot = &mut self.slots[e_node_idx];
-            slot.run_time = run_time;
-            if let Err(err) = result {
-                slot.error = Some(err);
-                slot.output_values = None;
+            run_times[e_node_idx] = run_time;
+            let slot = &mut cache.slots[e_node_idx];
+            match result {
+                // The fresh output now corresponds to this node's current digest;
+                // record it so the planner's next cache check is a RAM hit.
+                Ok(()) => slot.output_digest = slot.current_digest,
+                Err(err) => {
+                    errors[e_node_idx] = Some(err);
+                    slot.output_values = None;
+                    slot.output_digest = None;
+                }
             }
             // No `Finished` for the cancelled node — it didn't complete; the
             // consumer would otherwise paint it executed live.
@@ -226,151 +186,310 @@ impl Executor {
                     },
                 });
             }
-
-            let span = program.e_nodes[e_node_idx].inputs;
-            for dirty in &mut self.input_dirty[span.range()] {
-                *dirty = false;
-            }
         }
 
         self.ctx_manager.current_node = None;
-        let mut stats =
-            self.collect_execution_stats(program, plan, start, executed_count, cancelled_in_flight);
+        let mut stats = collect_execution_stats(
+            program,
+            plan,
+            &errors,
+            &run_times,
+            start,
+            executed_count,
+            cancelled_in_flight,
+        );
         stats.logs = std::mem::take(&mut self.ctx_manager.logs);
         stats.cancelled = self.ctx_manager.cancel.is_cancelled();
         self.inputs = inputs;
         self.output_usage = output_usage;
+        self.errors = errors;
+        self.run_times = run_times;
         stats
     }
+}
 
-    fn has_errored_dependency(&self, program: &ExecutionProgram, e_node_idx: usize) -> bool {
-        let span = program.e_nodes[e_node_idx].inputs;
-        program.inputs[span.range()].iter().any(|input| {
-            matches!(&input.binding, ExecutionBinding::Bind(addr) if self.slots[addr.target_idx].error.is_some())
+fn has_errored_dependency(
+    program: &ExecutionProgram,
+    errors: &[Option<Error>],
+    e_node_idx: usize,
+) -> bool {
+    let span = program.e_nodes[e_node_idx].inputs;
+    program.inputs[span.range()].iter().any(|input| {
+        matches!(&input.binding, ExecutionBinding::Bind(addr) if errors[addr.target_idx].is_some())
+    })
+}
+
+fn collect_inputs(
+    program: &ExecutionProgram,
+    cache: &Cache,
+    e_node_idx: usize,
+    inputs: &mut Vec<InvokeInput>,
+) {
+    inputs.clear();
+    let span = program.e_nodes[e_node_idx].inputs;
+    for input in &program.inputs[span.range()] {
+        let value = match &input.binding {
+            ExecutionBinding::None => DynamicValue::Unbound,
+            ExecutionBinding::Const(v) => v.into(),
+            ExecutionBinding::Bind(addr) => {
+                // Invariant: any node in `execute_order` has every bound upstream
+                // producing output — the planner gates a consumer
+                // (`missing_required_inputs`) whenever a bind target can't run,
+                // *including* optional binds, so a `None` here is a planner bug,
+                // not a graph the user can author.
+                let outputs = cache.slots[addr.target_idx]
+                    .output_values
+                    .as_ref()
+                    .expect("missing output values");
+                assert_eq!(
+                    outputs.len(),
+                    program.e_nodes[addr.target_idx].outputs.len as usize
+                );
+                outputs[addr.port_idx].clone()
+            }
+        };
+        inputs.push(InvokeInput { value });
+    }
+}
+
+fn collect_output_usage(
+    program: &ExecutionProgram,
+    plan: &ExecutionPlan,
+    e_node_idx: usize,
+    usage: &mut Vec<OutputUsage>,
+) {
+    usage.clear();
+    let span = program.e_nodes[e_node_idx].outputs;
+    usage.extend(plan.output_usage[span.range()].iter().map(|&c| {
+        if c == 0 {
+            OutputUsage::Skip
+        } else {
+            OutputUsage::Needed(c)
+        }
+    }));
+}
+
+fn collect_execution_stats(
+    program: &ExecutionProgram,
+    plan: &ExecutionPlan,
+    errors: &[Option<Error>],
+    run_times: &[f64],
+    start: Instant,
+    executed_count: usize,
+    cancelled_in_flight: Option<usize>,
+) -> ExecutionStats {
+    let mut executed_nodes = Vec::new();
+    let mut missing_inputs = Vec::new();
+    let mut cached_nodes = Vec::new();
+    let mut node_errors = Vec::new();
+
+    for &idx in &plan.execute_order[..executed_count] {
+        // The node interrupted mid-invoke by a cancel didn't complete — omit it
+        // so the consumer doesn't paint it as executed.
+        if Some(idx) == cancelled_in_flight {
+            continue;
+        }
+        let e = &program.e_nodes[idx];
+        executed_nodes.push(ExecutedNodeStats {
+            node_id: e.id,
+            elapsed_secs: run_times[idx],
+        });
+    }
+
+    for &idx in &plan.process_order {
+        let e = &program.e_nodes[idx];
+        let flags = plan.node_flags[idx];
+        if flags.missing_required_inputs {
+            // Recompute which ports are unsatisfied (shares `input_missing` with
+            // the planner) — only for the rare missing node, so it isn't worth a
+            // stored column.
+            for (i, pool_idx) in e.inputs.range().enumerate() {
+                if input_missing(&program.inputs[pool_idx], &plan.node_flags) {
+                    missing_inputs.push(InputPort::new(e.id, i));
+                }
+            }
+        }
+        if flags.cached {
+            cached_nodes.push(e.id);
+        }
+        if let Some(err) = &errors[idx] {
+            node_errors.push(NodeError {
+                node_id: e.id,
+                error: err.clone(),
+            });
+        }
+    }
+
+    ExecutionStats {
+        elapsed_secs: start.elapsed().as_secs_f64(),
+        executed_nodes,
+        missing_inputs,
+        cached_nodes,
+        triggered_events: Vec::default(),
+        node_errors,
+        // Filled by `run` from the context manager's per-run buffer.
+        logs: Vec::new(),
+        // Filled by `ExecutionEngine::execute` from the flatten pass; the executor
+        // doesn't know the authoring graph.
+        flatten: FlattenMap::default(),
+        // Set by `run` from the cancel flag after the loop.
+        cancelled: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::async_lambda;
+    use crate::data::StaticValue;
+    use crate::execution::cache::Cache;
+    use crate::execution::plan::NodeFlags;
+    use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
+    use crate::func_lambda::FuncLambda;
+    use crate::graph::NodeId;
+    use crate::prelude::FuncId;
+    use common::Span;
+
+    /// Hand-built program with real lambdas. Node `idx` gets id `from_u128(idx+1)`,
+    /// so `bind` lines up. Inputs are all optional here (the planner gates required
+    /// ones; these tests drive the executor directly).
+    #[derive(Default)]
+    struct Prog {
+        program: ExecutionProgram,
+    }
+
+    impl Prog {
+        fn node(&mut self, inputs: &[ExecutionBinding], outputs: u32, lambda: FuncLambda) -> usize {
+            let inputs_start = self.program.inputs.len() as u32;
+            for binding in inputs {
+                self.program.inputs.push(ExecutionInput {
+                    required: false,
+                    binding: binding.clone(),
+                });
+            }
+            let outputs_start = self.program.n_outputs as u32;
+            self.program.n_outputs += outputs as usize;
+            let idx = self.program.e_nodes.len();
+            self.program.e_nodes.add(ExecutionNode {
+                id: NodeId::from_u128(idx as u128 + 1),
+                inited: true,
+                func_id: FuncId::from_u128(idx as u128 + 1),
+                inputs: Span::new(inputs_start, inputs.len() as u32),
+                outputs: Span::new(outputs_start, outputs),
+                lambda,
+                ..Default::default()
+            });
+            idx
+        }
+    }
+
+    fn bind(idx: usize, port: usize) -> ExecutionBinding {
+        ExecutionBinding::Bind(ExecutionPortAddress {
+            target_id: NodeId::from_u128(idx as u128 + 1),
+            target_idx: idx,
+            port_idx: port,
         })
     }
 
-    fn collect_inputs(
-        &self,
-        program: &ExecutionProgram,
-        plan: &ExecutionPlan,
-        e_node_idx: usize,
-        inputs: &mut Vec<InvokeInput>,
-    ) {
-        inputs.clear();
-        let span = program.e_nodes[e_node_idx].inputs;
-        for (i, input) in program.inputs[span.range()].iter().enumerate() {
-            let value = match &input.binding {
-                ExecutionBinding::None => DynamicValue::Unbound,
-                ExecutionBinding::Const(v) => v.into(),
-                ExecutionBinding::Bind(addr) => {
-                    // Invariant: any node in `execute_order` has every bound
-                    // upstream producing output — the planner gates a consumer
-                    // (`missing_required_inputs`) whenever a bind target can't
-                    // run, *including* optional binds, so a `None` here is a
-                    // planner bug, not a graph the user can author.
-                    let outputs = self.slots[addr.target_idx]
-                        .output_values
-                        .as_ref()
-                        .expect("missing output values");
-                    assert_eq!(
-                        outputs.len(),
-                        program.e_nodes[addr.target_idx].outputs.len as usize
-                    );
-                    outputs[addr.port_idx].clone()
-                }
-            };
-            let pool_idx = span.start as usize + i;
-            let dependency_wants_execute = plan.input_flags[pool_idx].dependency_wants_execute;
-            inputs.push(InvokeInput {
-                changed: self.input_dirty[pool_idx] || dependency_wants_execute,
-                value,
-            });
+    /// A plan that runs every node in index order, each output marked needed.
+    fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
+        let n = program.e_nodes.len();
+        ExecutionPlan {
+            process_order: (0..n).collect(),
+            execute_order: (0..n).collect(),
+            node_flags: vec![
+                NodeFlags {
+                    wants_execute: true,
+                    cached: false,
+                    missing_required_inputs: false,
+                };
+                n
+            ],
+            output_usage: vec![1; program.n_outputs],
         }
     }
 
-    fn collect_output_usage(
-        &self,
-        program: &ExecutionProgram,
-        plan: &ExecutionPlan,
-        e_node_idx: usize,
-        usage: &mut Vec<OutputUsage>,
-    ) {
-        usage.clear();
-        let span = program.e_nodes[e_node_idx].outputs;
-        usage.extend(plan.output_usage[span.range()].iter().map(|&c| {
-            if c == 0 {
-                OutputUsage::Skip
-            } else {
-                OutputUsage::Needed(c)
-            }
-        }));
+    async fn run(program: &ExecutionProgram, plan: &ExecutionPlan) -> (Cache, ExecutionStats) {
+        let mut cache = Cache::default();
+        cache.reconcile(&program.e_nodes);
+        let mut executor = Executor::default();
+        let stats = executor
+            .run(
+                program,
+                plan,
+                &mut cache,
+                &FlattenMap::default(),
+                None,
+                CancelToken::never(),
+            )
+            .await;
+        (cache, stats)
     }
 
-    fn collect_execution_stats(
-        &self,
-        program: &ExecutionProgram,
-        plan: &ExecutionPlan,
-        start: Instant,
-        executed_count: usize,
-        cancelled_in_flight: Option<usize>,
-    ) -> ExecutionStats {
-        let mut executed_nodes = Vec::new();
-        let mut missing_inputs = Vec::new();
-        let mut cached_nodes = Vec::new();
-        let mut node_errors = Vec::new();
+    #[tokio::test]
+    async fn runs_in_order_resolving_binds_and_storing_outputs() {
+        let mut p = Prog::default();
+        let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _usage, outputs| {
+            outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+            Ok(())
+        });
+        let consumer = async_lambda!(|_ctx, _state, _ev, inputs, _usage, outputs| {
+            let v = inputs[0].value.as_i64().unwrap();
+            outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
+            Ok(())
+        });
+        let a = p.node(&[], 1, producer);
+        let b = p.node(&[bind(a, 0)], 1, consumer);
 
-        for &idx in &plan.execute_order[..executed_count] {
-            // The node interrupted mid-invoke by a cancel didn't complete —
-            // omit it so the consumer doesn't paint it as executed.
-            if Some(idx) == cancelled_in_flight {
-                continue;
-            }
-            let e = &program.e_nodes[idx];
-            executed_nodes.push(ExecutedNodeStats {
-                node_id: e.id,
-                elapsed_secs: self.slots[idx].run_time,
-            });
-        }
+        let plan = straight_plan(&p.program);
+        let (cache, stats) = run(&p.program, &plan).await;
 
-        for &idx in &plan.process_order {
-            let e = &program.e_nodes[idx];
-            let flags = plan.node_flags[idx];
-            if flags.missing_required_inputs {
-                for i in 0..e.inputs.len as usize {
-                    if plan.input_flags[e.inputs.start as usize + i].missing {
-                        missing_inputs.push(InputPort {
-                            node_id: e.id,
-                            port_idx: i,
-                        });
-                    }
-                }
-            }
-            if flags.cached {
-                cached_nodes.push(e.id);
-            }
-            if let Some(err) = &self.slots[idx].error {
-                node_errors.push(NodeError {
-                    node_id: e.id,
-                    error: err.clone(),
-                });
-            }
-        }
+        assert_eq!(
+            cache.slots[a].output_values.as_ref().unwrap()[0].as_i64(),
+            Some(7),
+            "producer wrote 7"
+        );
+        assert_eq!(
+            cache.slots[b].output_values.as_ref().unwrap()[0].as_i64(),
+            Some(8),
+            "consumer read 7 and wrote 7+1"
+        );
+        assert_eq!(stats.executed_nodes.len(), 2);
+        assert!(stats.node_errors.is_empty());
+    }
 
-        ExecutionStats {
-            elapsed_secs: start.elapsed().as_secs_f64(),
-            executed_nodes,
-            missing_inputs,
-            cached_nodes,
-            triggered_events: Vec::default(),
-            node_errors,
-            // Filled by `run` from the context manager's per-run buffer.
-            logs: Vec::new(),
-            // Filled by `ExecutionEngine::execute` from the flatten pass;
-            // the executor doesn't know the authoring graph.
-            flatten: FlattenMap::default(),
-            // Set by `run` from the cancel flag after the loop.
-            cancelled: false,
-        }
+    #[tokio::test]
+    async fn upstream_error_skips_dependents_and_clears_output() {
+        let mut p = Prog::default();
+        let failing = async_lambda!(|_ctx, _state, _ev, _inputs, _usage, _outputs| {
+            Err(anyhow::anyhow!("boom").into())
+        });
+        let downstream = async_lambda!(|_ctx, _state, _ev, _inputs, _usage, outputs| {
+            outputs[0] = DynamicValue::Static(StaticValue::Int(1));
+            Ok(())
+        });
+        let a = p.node(&[], 1, failing);
+        let b = p.node(&[bind(a, 0)], 1, downstream);
+
+        let plan = straight_plan(&p.program);
+        let (cache, stats) = run(&p.program, &plan).await;
+
+        assert!(
+            cache.slots[a].output_values.is_none(),
+            "an errored node's output is dropped (so it re-runs)"
+        );
+        assert!(
+            cache.slots[b].output_values.is_none(),
+            "the dependent is skipped, producing nothing"
+        );
+        let error_of = |idx: usize| {
+            stats
+                .node_errors
+                .iter()
+                .find(|e| e.node_id == NodeId::from_u128(idx as u128 + 1))
+                .map(|e| e.error.to_string())
+        };
+        assert!(error_of(a).unwrap().contains("boom"));
+        assert!(error_of(b).unwrap().contains("upstream error"));
     }
 }

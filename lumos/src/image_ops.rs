@@ -11,18 +11,8 @@
 //!   planes, process, and [`interleave_f32`] back.
 
 use common::Rgb;
-use imaginarium::{Buffer2, ChannelCount, ColorFormat, DeinterleavedImageData, Image};
+use imaginarium::{Buffer2, ChannelCount, DeinterleavedImageData, Image};
 use rayon::prelude::*;
-
-/// The display ops are defined on a linear f32 master in L or RGB; anything else
-/// (integer formats, RGBA) is a misuse here.
-fn assert_f32_master(image: &Image) {
-    let format = image.desc.color_format;
-    assert!(
-        format == ColorFormat::L_F32 || format == ColorFormat::RGB_F32,
-        "display ops require an L_F32 or RGB_F32 image, got {format}"
-    );
-}
 
 /// Per-pixel parallel in-place map over an f32 master: `mono` for L, `rgb` for RGB.
 pub(crate) fn par_map_pixels(
@@ -30,7 +20,6 @@ pub(crate) fn par_map_pixels(
     mono: impl Fn(f32) -> f32 + Sync,
     rgb: impl Fn(Rgb) -> Rgb + Sync,
 ) {
-    assert_f32_master(image);
     let is_rgb = image.desc.color_format.channel_count == ChannelCount::Rgb;
     let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
     if is_rgb {
@@ -52,7 +41,6 @@ pub(crate) fn par_map_pixels(
 /// Per-pixel combined intensity as a plane: the channel itself for L, `(r+g+b)/3`
 /// for RGB.
 pub(crate) fn intensity_plane(image: &Image) -> Buffer2<f32> {
-    assert_f32_master(image);
     let (width, height) = (image.desc.width, image.desc.height);
     let samples: &[f32] = bytemuck::cast_slice(image.bytes());
     if image.desc.color_format.channel_count == ChannelCount::Rgb {
@@ -87,7 +75,6 @@ pub(crate) fn remap_intensity(image: &mut Image, map: impl FnOnce(&Buffer2<f32>)
 /// `mapped` directly. Output clamped to `[0, 1]`. `intensity`/`mapped` must match the
 /// image's dimensions.
 fn apply_intensity_remap(image: &mut Image, intensity: &Buffer2<f32>, mapped: &Buffer2<f32>) {
-    assert_f32_master(image);
     let is_rgb = image.desc.color_format.channel_count == ChannelCount::Rgb;
     let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
     if is_rgb {
@@ -122,7 +109,6 @@ fn apply_intensity_remap(image: &mut Image, intensity: &Buffer2<f32>, mapped: &B
 
 /// Deinterleave an f32 master into its channel planes (1 for L, 3 for RGB).
 pub(crate) fn deinterleave_f32(image: &Image) -> Vec<Buffer2<f32>> {
-    assert_f32_master(image);
     match image.desc.color_format.channel_count {
         ChannelCount::L => {
             let planar: DeinterleavedImageData<1, f32> = image.try_into().unwrap();
@@ -163,7 +149,7 @@ pub(crate) fn interleave_f32(planes: Vec<Buffer2<f32>>) -> Image {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use imaginarium::ImageDesc;
+    use imaginarium::{ColorFormat, ImageDesc};
 
     fn rgb_f32(width: usize, height: usize, samples: Vec<f32>) -> Image {
         Image::new_with_data(

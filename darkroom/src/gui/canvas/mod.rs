@@ -1,8 +1,10 @@
+pub(crate) mod anchored_menu;
 pub(crate) mod background;
 pub(crate) mod breaker;
 pub(crate) mod connection_ui;
 pub(crate) mod inspector;
 pub(crate) mod new_node_ui;
+pub(crate) mod node_menu;
 pub(crate) mod pan_zoom;
 pub(crate) mod port_frame;
 pub(crate) mod selection_ui;
@@ -22,6 +24,7 @@ use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
+use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
@@ -75,6 +78,7 @@ struct Gestures {
     connection_ui: ConnectionUI,
     new_node_ui: NewNodeUi,
     subgraph_menu: SubgraphMenuUi,
+    node_menu: NodeMenuUi,
     selection_ui: SelectionUI,
     /// `Scene::pan` snapshot captured at the frame the active pan-drag
     /// latched. While the drag is active, `scene.pan = anchor +
@@ -99,6 +103,13 @@ impl GraphUI {
     /// request runtime values for.
     pub(crate) fn open_inspector_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.inspectors.open_nodes()
+    }
+
+    /// Take the node context-menu action picked this frame, if any. The
+    /// `Editor` resolves it against the live selection (it owns the
+    /// `Document` needed to build the duplicate / removal intents).
+    pub(crate) fn take_node_menu_action(&mut self) -> Option<NodeMenuAction> {
+        self.gestures.node_menu.take_action()
     }
 
     /// Pre-record pass — see
@@ -127,9 +138,12 @@ impl GraphUI {
         self.gestures.node_ui.prepass(ui, scene, out);
         emit_port_dblclicks(ui, scene, out);
         self.port_frame.rebuild(ui, scene);
+        // A node picked from a drop-spawned palette last frame re-floats its
+        // wire so the user clicks the exact port to land it.
+        let resume = self.gestures.new_node_ui.take_resume_floating();
         self.gestures
             .connection_ui
-            .apply(ui, scene, &self.port_frame, out);
+            .apply(ui, scene, &self.port_frame, resume, out);
     }
 
     pub(crate) fn frame(
@@ -162,10 +176,21 @@ impl GraphUI {
         // recorded yet. Reuse it here; no second rebuild needed.
         self.gestures.selection_ui.apply(ui, scene, gesture, out);
         self.gestures.breaker_ui.apply(ui, scene, gesture, out);
+        // A connection released over empty canvas (detected in `prepass`)
+        // opens the new-node popup; picking a node re-floats the wire.
+        let pending_connection = self.gestures.connection_ui.take_pending_connection();
+        // A right-click that just ended a floating wire shouldn't also open
+        // the palette — suppress the `NewNode` gesture for this frame.
+        let popup_gesture = if self.gestures.connection_ui.ended_on_secondary() {
+            None
+        } else {
+            gesture
+        };
         self.gestures
             .new_node_ui
-            .apply(ui, ctx, scene, gesture, out);
+            .apply(ui, ctx, scene, popup_gesture, pending_connection, out);
         self.gestures.subgraph_menu.apply(ui, scene, out, cmd);
+        self.gestures.node_menu.apply(ui, scene, out);
         // A click on an FsPath input's pick button surfaces a deferred
         // PickInputPath command (App opens the dialog outside the record).
         // The node UI returns a domain request; the canvas — which owns the
@@ -205,6 +230,7 @@ impl GraphUI {
                     connection_ui,
                     new_node_ui: _,
                     subgraph_menu: _,
+                    node_menu: _,
                     selection_ui,
                     pan_anchor: _,
                 },
@@ -311,7 +337,8 @@ pub(crate) enum CanvasGesture {
     /// that latched it, since the breaker polls that same button for
     /// continuation/release (a Cmd+LMB breaker must keep reading Left).
     Breaker(PointerButton),
-    /// RMB-click (no drag) → new-node popup.
+    /// RMB-click or LMB double-click on empty canvas (no drag) → new-node
+    /// popup.
     NewNode,
     /// LMB-click (no drag) → clear selection.
     Deselect,
@@ -322,6 +349,12 @@ pub(crate) enum CanvasGesture {
 /// reports `clicked`/`secondary_clicked` only on a release that *didn't*
 /// drag, but the explicit ordering keeps the precedence obvious). `None`
 /// when nothing latched — an idle canvas, or a press a node/port captured.
+///
+/// This only ever sees presses that *missed* every node and port: a
+/// node/badge widget captures its own press, so a right-click on a node
+/// body or `S` badge routes to `node_menu` / `subgraph_menu` (which read
+/// those widgets' `secondary_clicked` directly) and never reaches here —
+/// `NewNode` is therefore right-click-on-*empty*-canvas by construction.
 pub(crate) fn classify_canvas_gesture(ui: &Ui) -> Option<CanvasGesture> {
     let resp = ui.response_for(outer_canvas_widget_id());
     if resp.drag_started_by(PointerButton::Middle) {
@@ -337,7 +370,11 @@ pub(crate) fn classify_canvas_gesture(ui: &Ui) -> Option<CanvasGesture> {
             CanvasGesture::Select
         });
     }
-    if resp.secondary_clicked {
+    // A double-click sets `clicked` *and* `double_click` on the same frame,
+    // so this must precede the plain-click `Deselect` arm to win. The first
+    // click of the pair already ran its own `Deselect`, so the selection is
+    // clear by the time the popup opens.
+    if resp.secondary_clicked || resp.double_clicked_by(PointerButton::Left) {
         return Some(CanvasGesture::NewNode);
     }
     if resp.clicked {

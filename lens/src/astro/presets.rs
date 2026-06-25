@@ -1,15 +1,13 @@
 //! Dropdown presets for the astro nodes — small enums that map a
 //! human-readable variant onto a lumos config (`StarDetectionConfig` /
-//! `RegistrationConfig` / `StackConfig` / `StretchConfig` / `ScnrMethod`). Every
+//! `RegistrationConfig` / `StackConfig` / `Stretch` / `Scnr`). Every
 //! preset-consuming node offers these as a `value_variants` quick-pick on a
 //! config-typed input (a `build_*_config` node overrides it); the node reads the
 //! chosen variant back with `FromStr` and expands it with `config()`.
 
 use std::str::FromStr;
 
-use lumos::{
-    BackgroundMode, RegistrationConfig, ScnrMethod, StackConfig, StarDetectionConfig, StretchConfig,
-};
+use lumos::{BackgroundMode, RegistrationConfig, Scnr, StackConfig, StarDetectionConfig, Stretch};
 use scenarium::data::EnumVariants;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -106,11 +104,11 @@ preset_enum! {
 
 preset_enum! {
     /// Auto-stretch method preset (display-domain tone curve).
-    StretchPreset => StretchConfig,
+    StretchPreset => Stretch,
     display: "StretchPreset",
     variants: {
-        AutoAsinh = "auto_asinh" => StretchConfig::auto_asinh(),
-        AutoStf = "auto_stf" => StretchConfig::auto_stf(),
+        AutoAsinh = "auto_asinh" => Stretch::auto_asinh(),
+        AutoStf = "auto_stf" => Stretch::auto_stf(),
     }
 }
 
@@ -129,13 +127,11 @@ const SCNR_ADDITIVE_AMOUNT: f32 = 0.5;
 
 preset_enum! {
     /// SCNR (green-cast removal) method.
-    ScnrKind => ScnrMethod,
-    display: "ScnrMethod",
+    ScnrKind => Scnr,
+    display: "Scnr",
     variants: {
-        AverageNeutral = "average_neutral" => ScnrMethod::AverageNeutral,
-        AdditiveMask = "additive_mask" => ScnrMethod::AdditiveMask {
-            amount: SCNR_ADDITIVE_AMOUNT,
-        },
+        AverageNeutral = "average_neutral" => Scnr::average_neutral(),
+        AdditiveMask = "additive_mask" => Scnr::additive_mask(SCNR_ADDITIVE_AMOUNT),
     }
 }
 
@@ -185,7 +181,7 @@ mod tests {
         for v in StretchPreset::iter() {
             assert_eq!(StretchPreset::from_str(v.label()).unwrap(), v);
         }
-        let _cfg: StretchConfig = StretchPreset::AutoStf.config();
+        let _cfg: Stretch = StretchPreset::AutoStf.config();
     }
 
     #[test]
@@ -196,6 +192,6 @@ mod tests {
             ["average_neutral", "additive_mask"]
         );
         let _bg: BackgroundMode = BackgroundModeKind::Divide.config();
-        let _scnr: ScnrMethod = ScnrKind::AdditiveMask.config();
+        let _scnr: Scnr = ScnrKind::AdditiveMask.config();
     }
 }

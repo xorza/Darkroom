@@ -34,6 +34,7 @@ pub(crate) mod local_contrast;
 pub(crate) mod math;
 #[cfg(feature = "ml")]
 pub(crate) mod ml;
+pub(crate) mod op;
 pub(crate) mod stacking;
 pub(crate) mod stretching;
 pub(crate) mod wavelet;
@@ -88,17 +89,19 @@ pub use stacking::drizzle::{
     DrizzleAccumulator, DrizzleConfig, DrizzleKernel, DrizzleResult, drizzle_images, drizzle_stack,
 };
 
-pub use stretching::{ColorMode, StretchConfig, StretchMethod, stretch};
+pub use stretching::{ColorMode, Stretch, StretchMethod};
 
-pub use color_calibration::{ScnrMethod, neutralize_background, scnr};
+pub use color_calibration::{NeutralizeBackground, Scnr};
 
-pub use background_extraction::{BackgroundConfig, BackgroundMode, extract_background};
+pub use background_extraction::{BackgroundMode, ExtractBackground};
 
-pub use denoise::{DenoiseConfig, Threshold, denoise};
+pub use denoise::{Denoise, Threshold};
 
-pub use local_contrast::{LocalContrastConfig, enhance_local_contrast};
+pub use local_contrast::LocalContrast;
 
-pub use hdr::{HdrConfig, compress_dynamic_range};
+pub use hdr::Hdr;
+
+pub use op::OpError;
 
 #[cfg(feature = "ml")]
 pub use ml::backend::{MlError, TiledOnnxConfig};

@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use scenarium::prelude::Graph as CoreGraph;
 
 use crate::core::document::Document;
-use crate::core::edit::intent::{Intent, apply_step, build_step};
+use crate::core::edit::intent::{Intent, commit_intent};
 use crate::core::engine::Engine;
 use crate::core::io::config::AppConfig;
 use crate::core::io::persistence;
@@ -66,6 +66,11 @@ impl Session {
             },
             None => (empty_document(), None),
         };
+
+        // Point the worker at the document's project-local cache (memory-only
+        // for a never-saved doc). The session's path is fixed after startup, so
+        // this one call suffices.
+        engine.set_document_cache(current_path.as_deref());
 
         let mut session = Self {
             document,
@@ -194,14 +199,9 @@ fn apply_intents(document: &mut Document, intents: Vec<Intent>) -> bool {
     let target = document.active_target();
     let mut needs_reconcile = false;
     for intent in intents {
-        let Some(step) = build_step(intent, document, target) else {
-            continue;
-        };
-        if step.is_noop() {
-            continue;
+        if let Some(step) = commit_intent(intent, document, target) {
+            needs_reconcile |= step.requires_reconcile();
         }
-        apply_step(&step, document, target);
-        needs_reconcile |= step.requires_reconcile();
     }
     needs_reconcile
 }

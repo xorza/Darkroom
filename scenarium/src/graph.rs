@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
 use crate::function::{Func, FuncId, FuncLib};
+use crate::special::SpecialNode;
 use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
-use anyhow::ensure;
+use anyhow::{Context, ensure};
 use common::{Result, SerdeFormat, deserialize, serialize};
 use common::{id_type, is_debug};
 use hashbrown::HashSet;
@@ -21,6 +22,12 @@ id_type!(NodeId);
 pub struct OutputPort {
     pub node_id: NodeId,
     pub port_idx: usize,
+}
+
+impl OutputPort {
+    pub fn new(node_id: NodeId, port_idx: usize) -> Self {
+        Self { node_id, port_idx }
+    }
 }
 
 /// Address of a consumer node's input port. Keys a node's data binding in
@@ -98,21 +105,33 @@ mod binding_map_serde {
     }
 }
 
+/// Where a node's computed output is cached. `Memory` keeps it only in the live
+/// engine (dropped on reload); `Disk` also persists it to the content-addressed
+/// store, so an unchanged graph reloads the result instead of recomputing. `Disk`
+/// is a *request* honored only for reproducible nodes — a node with an impure node
+/// anywhere in its upstream cone has no content digest, so it's silently kept
+/// memory-only and never risks serving a stale value. The on-disk backend is wired
+/// only once a caller enables it (`ExecutionEngine::set_disk_cache`); until then
+/// every node is memory-only regardless. See `docs/disk-cache-design.md`.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
-pub enum NodeBehavior {
+pub enum CachePersistence {
     #[default]
-    AsFunction,
-    Once,
+    Memory,
+    Disk,
 }
 
 /// What a node *is*. A plain `Func` instance, a composite `Subgraph`
-/// instance, or one of the two interface boundary nodes that may appear
-/// only inside a `SubgraphDef.graph` (their port arity comes from the
-/// enclosing def's interface, not from a func).
+/// instance, a built-in [`SpecialNode`] (hardcoded declaration, recognized by
+/// the engine), or one of the two interface boundary nodes that may appear only
+/// inside a `SubgraphDef.graph` (their port arity comes from the enclosing def's
+/// interface, not from a func).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NodeKind {
     Func(FuncId),
     Subgraph(SubgraphRef),
+    /// A built-in special node; its interface comes from
+    /// [`SpecialNode::func`].
+    Special(SpecialNode),
     /// Inbound boundary: outputs = enclosing def's exposed inputs.
     SubgraphInput,
     /// Outbound boundary: inputs = enclosing def's exposed outputs.
@@ -128,14 +147,15 @@ pub struct Node {
     pub kind: NodeKind,
     pub name: String,
 
+    /// Where this node's output is cached. See [`CachePersistence`].
+    /// `#[serde(default)]` → `Memory` keeps pre-field documents memory-only.
     #[serde(default)]
-    pub behavior: NodeBehavior,
+    pub persist: CachePersistence,
 
     /// Disabled nodes are skipped at flatten time: they emit no execution
     /// node, and any binding resolving to one yields no producer, so a
     /// downstream consumer sees the wire as unbound (→ `MissingInputs` if
-    /// the input is required). Orthogonal to `behavior` (which only
-    /// matters for nodes that run). `#[serde(default)]` → `false` keeps
+    /// the input is required). `#[serde(default)]` → `false` keeps
     /// pre-field documents enabled.
     #[serde(default)]
     pub disabled: bool,
@@ -270,7 +290,7 @@ impl Graph {
         (0..arity).map(move |port_idx| {
             (
                 port_idx,
-                self.input_binding(InputPort { node_id, port_idx }),
+                self.input_binding(InputPort::new(node_id, port_idx)),
             )
         })
     }
@@ -296,15 +316,9 @@ impl Graph {
             .bindings
             .iter()
             .map(|(port, binding)| {
-                let port = InputPort {
-                    node_id: remap(port.node_id),
-                    port_idx: port.port_idx,
-                };
+                let port = InputPort::new(remap(port.node_id), port.port_idx);
                 let binding = match binding {
-                    Binding::Bind(op) => Binding::Bind(OutputPort {
-                        node_id: remap(op.node_id),
-                        port_idx: op.port_idx,
-                    }),
+                    Binding::Bind(op) => Binding::bind(remap(op.node_id), op.port_idx),
                     other => other.clone(),
                 };
                 (port, binding)
@@ -475,7 +489,9 @@ impl Graph {
                         );
                     }
                 }
-                NodeKind::SubgraphInput | NodeKind::SubgraphOutput => {}
+                // Special nodes carry no id to validate; their declaration is
+                // hardcoded and always resolves.
+                NodeKind::Special(_) | NodeKind::SubgraphInput | NodeKind::SubgraphOutput => {}
             }
         }
 
@@ -543,91 +559,171 @@ impl Graph {
         self.check().expect("graph structural invariant violated");
     }
 
+    /// Debug-only assert form of [`check_with`]: a violation surfaces as a
+    /// panic so a graph the editor itself built wrong is caught loudly in
+    /// development. The release-safe, error-returning gate is `check_with`,
+    /// which `ExecutionEngine::update` runs in every build.
     pub fn validate_with(&self, func_lib: &FuncLib) {
         if !is_debug() {
             return;
         }
-
-        self.validate();
-
-        let mut visited: HashSet<SubgraphId> = HashSet::new();
-        self.validate_level(func_lib, None, &mut visited);
+        self.check_with(func_lib)
+            .expect("graph structural invariant violated");
     }
 
-    /// Recursive per-level validation. `ctx_def` is the enclosing subgraph
-    /// definition when validating a def's interior (so boundary nodes can be
-    /// checked against the interface), `None` at the top level. `visited`
-    /// carries the descent path of `SubgraphId`s for the recursion guard.
-    fn validate_level(
+    /// Full structural validation against `func_lib`, in all builds. Extends
+    /// [`check`] (which can't see the library) with every func_lib-dependent
+    /// check: each func/subgraph reference resolves, no subgraph contains
+    /// itself, boundary nodes sit inside a def, and every binding/subscription
+    /// port index is in range. A graph+library is untrusted input at the
+    /// compile boundary (a document can be stale against an evolved library),
+    /// so an invalid one is a recoverable error the caller surfaces — not a
+    /// panic. With this passing, flattening resolves every reference infallibly.
+    pub fn check_with(&self, func_lib: &FuncLib) -> Result<()> {
+        self.check()?;
+        let mut visited: HashSet<SubgraphId> = HashSet::new();
+        self.check_level(func_lib, None, &mut visited)
+    }
+
+    /// Recursive per-level half of [`check_with`]. `ctx_def` is the enclosing
+    /// subgraph definition when checking a def's interior (so boundary nodes
+    /// can be checked against the interface), `None` at the top level.
+    /// `visited` is the descent path of `SubgraphId`s — re-entering one is the
+    /// recursion error.
+    fn check_level(
         &self,
         func_lib: &FuncLib,
         ctx_def: Option<&SubgraphDef>,
         visited: &mut HashSet<SubgraphId>,
-    ) {
-        // When validating a def's interior, each exposed event must name an
-        // interior emitter that actually exposes that event.
-        if let Some(def) = ctx_def {
-            for event in &def.events {
-                let emitter = self
-                    .by_id(&event.emitter)
-                    .expect("exposed event names a missing interior emitter");
-                assert!(event.emitter_event_idx < self.event_count(emitter, func_lib, ctx_def));
-            }
-        }
-
+    ) -> Result<()> {
+        // Resolve every node's func/def first (and recurse into composites):
+        // the port-count helpers below look funcs/defs up infallibly, so this
+        // pass must establish they all resolve before any count is taken.
         for node in self.nodes.iter() {
             match &node.kind {
                 NodeKind::Func(func_id) => {
-                    func_lib.by_id(func_id).unwrap();
+                    ensure!(
+                        func_lib.by_id(func_id).is_some(),
+                        "node {:?} references func {:?}, absent from the library",
+                        node.id,
+                        func_id
+                    );
                 }
                 NodeKind::Subgraph(r) => {
-                    let def = self
-                        .resolve_def(*r, func_lib)
-                        .expect("subgraph node references a missing definition");
-                    assert!(
+                    let def = self.resolve_def(*r, func_lib).with_context(|| {
+                        format!(
+                            "node {:?} references a missing subgraph definition",
+                            node.id
+                        )
+                    })?;
+                    ensure!(
                         visited.insert(def.id),
                         "subgraph {:?} is recursive (contains itself)",
                         def.id
                     );
-                    def.graph.validate_level(func_lib, Some(def), visited);
+                    def.graph.check_level(func_lib, Some(def), visited)?;
                     visited.remove(&def.id);
                 }
                 NodeKind::SubgraphInput => {
-                    assert!(
+                    ensure!(
                         ctx_def.is_some(),
                         "SubgraphInput node is only valid inside a subgraph"
                     );
                 }
                 NodeKind::SubgraphOutput => {
-                    ctx_def.expect("SubgraphOutput is only valid inside a subgraph");
+                    ensure!(
+                        ctx_def.is_some(),
+                        "SubgraphOutput is only valid inside a subgraph"
+                    );
                 }
+                // Hardcoded declaration — nothing to resolve or recurse into.
+                NodeKind::Special(_) => {}
+            }
+        }
+
+        // When checking a def's interior, each exposed event must name an
+        // interior emitter that actually exposes that event.
+        if let Some(def) = ctx_def {
+            for event in &def.events {
+                let emitter = self.by_id(&event.emitter).with_context(|| {
+                    format!("exposed event names missing emitter {:?}", event.emitter)
+                })?;
+                ensure!(
+                    event.emitter_event_idx < self.event_count(emitter, func_lib, ctx_def),
+                    "exposed event index {} out of range on {:?}",
+                    event.emitter_event_idx,
+                    event.emitter
+                );
             }
         }
 
         // Every binding addresses ports that exist on both ends.
         for (dst, binding) in self.bindings.iter() {
-            let consumer = self.by_id(&dst.node_id).unwrap();
-            assert!(dst.port_idx < self.input_count(consumer, func_lib, ctx_def));
+            let consumer = self
+                .by_id(&dst.node_id)
+                .with_context(|| format!("binding on missing node {:?}", dst.node_id))?;
+            ensure!(
+                dst.port_idx < self.input_count(consumer, func_lib, ctx_def),
+                "binding on node {:?} input {} is out of range",
+                dst.node_id,
+                dst.port_idx
+            );
             if let Binding::Bind(src) = binding {
-                let producer = self.by_id(&src.node_id).unwrap();
-                assert!(src.port_idx < self.output_count(producer, func_lib, ctx_def));
+                ensure!(
+                    !self.input_is_const_only(consumer, dst.port_idx, func_lib),
+                    "input {} on node {:?} is const-only and cannot be wired to an upstream output",
+                    dst.port_idx,
+                    dst.node_id
+                );
+                let producer = self
+                    .by_id(&src.node_id)
+                    .with_context(|| format!("binding from missing node {:?}", src.node_id))?;
+                ensure!(
+                    src.port_idx < self.output_count(producer, func_lib, ctx_def),
+                    "binding from node {:?} output {} is out of range",
+                    src.node_id,
+                    src.port_idx
+                );
             }
         }
 
         // Every subscription targets an event the emitter actually exposes.
         for s in self.subscriptions.iter() {
-            let emitter = self.by_id(&s.emitter).unwrap();
-            assert!(s.event_idx < self.event_count(emitter, func_lib, ctx_def));
+            let emitter = self
+                .by_id(&s.emitter)
+                .with_context(|| format!("subscription from missing emitter {:?}", s.emitter))?;
+            ensure!(
+                s.event_idx < self.event_count(emitter, func_lib, ctx_def),
+                "subscription event index {} out of range on {:?}",
+                s.event_idx,
+                s.emitter
+            );
         }
+        Ok(())
     }
 
     /// Number of input ports a node exposes — by kind. `ctx_def` is the
     /// enclosing def, needed only for `SubgraphOutput` (whose inputs are the
     /// def's exposed outputs).
+    /// Whether the consumer port `(node, port_idx)` is declared const-only — it
+    /// may hold a `Const` literal but must not be wired to an upstream output.
+    /// Boundary nodes route the interface (no literals), so they're never
+    /// const-only. Resolution mirrors [`Self::input_count`].
+    fn input_is_const_only(&self, node: &Node, port_idx: usize, func_lib: &FuncLib) -> bool {
+        let inputs = match &node.kind {
+            NodeKind::Func(func_id) => &func_lib.by_id(func_id).unwrap().inputs,
+            NodeKind::Subgraph(r) => &self.resolve_def(*r, func_lib).unwrap().inputs,
+            NodeKind::Special(s) => &s.func().inputs,
+            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => return false,
+        };
+        inputs.get(port_idx).is_some_and(|i| i.const_only)
+    }
+
     fn input_count(&self, node: &Node, func_lib: &FuncLib, ctx_def: Option<&SubgraphDef>) -> usize {
         match &node.kind {
             NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().inputs.len(),
             NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().inputs.len(),
+            NodeKind::Special(s) => s.func().inputs.len(),
             NodeKind::SubgraphInput => 0,
             NodeKind::SubgraphOutput => ctx_def.unwrap().outputs.len(),
         }
@@ -645,6 +741,7 @@ impl Graph {
         match &node.kind {
             NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().outputs.len(),
             NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().outputs.len(),
+            NodeKind::Special(s) => s.func().outputs.len(),
             NodeKind::SubgraphInput => ctx_def.unwrap().inputs.len(),
             NodeKind::SubgraphOutput => 0,
         }
@@ -662,6 +759,7 @@ impl Graph {
         match &node.kind {
             NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().events.len(),
             NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().events.len(),
+            NodeKind::Special(s) => s.func().events.len(),
             NodeKind::SubgraphInput => 1,
             NodeKind::SubgraphOutput => 0,
         }
@@ -678,7 +776,7 @@ impl Graph {
         for (port_idx, func_input) in func.inputs.iter().enumerate() {
             if let Some(default) = &func_input.default_value {
                 self.set_input_binding(
-                    InputPort { node_id, port_idx },
+                    InputPort::new(node_id, port_idx),
                     Binding::Const(default.clone()),
                 );
             }
@@ -695,7 +793,7 @@ impl Graph {
         for (port_idx, io) in def.inputs.iter().enumerate() {
             if let Some(default) = &io.default_value {
                 self.set_input_binding(
-                    InputPort { node_id, port_idx },
+                    InputPort::new(node_id, port_idx),
                     Binding::Const(default.clone()),
                 );
             }
@@ -714,7 +812,7 @@ impl Node {
             id: NodeId::unique(),
             kind,
             name: String::new(),
-            behavior: NodeBehavior::AsFunction,
+            persist: CachePersistence::Memory,
             disabled: false,
         }
     }
@@ -729,27 +827,32 @@ impl Node {
             id: NodeId::unique(),
             kind: NodeKind::Subgraph(r),
             name: def.name.clone(),
-            behavior: NodeBehavior::AsFunction,
+            persist: CachePersistence::Memory,
             disabled: false,
         }
     }
 }
 
 impl From<&Func> for Node {
-    /// A bare func instance (identity + name + default behavior). Default
-    /// input bindings are seeded by `Graph::add_func_node`.
+    /// A bare func instance (identity + name). Default input bindings are seeded
+    /// by `Graph::add_func_node`.
     fn from(func: &Func) -> Self {
         Node {
             id: NodeId::unique(),
             kind: NodeKind::Func(func.id),
             name: func.name.clone(),
-            behavior: func.node_default_behavior,
+            persist: CachePersistence::Memory,
             disabled: false,
         }
     }
 }
 
 impl Binding {
+    /// A data binding wired to producer `node_id`'s output port `port_idx`.
+    pub fn bind(node_id: NodeId, port_idx: usize) -> Self {
+        Binding::Bind(OutputPort::new(node_id, port_idx))
+    }
+
     pub fn as_output_binding(&self) -> Option<&OutputPort> {
         match self {
             Binding::Bind(output_binding) => Some(output_binding),
@@ -780,10 +883,7 @@ impl From<OutputPort> for Binding {
 
 impl From<(NodeId, usize)> for Binding {
     fn from((output_node_id, output_idx): (NodeId, usize)) -> Self {
-        Binding::Bind(OutputPort {
-            node_id: output_node_id,
-            port_idx: output_idx,
-        })
+        Binding::bind(output_node_id, output_idx)
     }
 }
 
@@ -799,21 +899,13 @@ impl From<i64> for Binding {
     }
 }
 
-impl NodeBehavior {
-    pub fn toggle(&mut self) {
-        match self {
-            NodeBehavior::AsFunction => *self = NodeBehavior::Once,
-            NodeBehavior::Once => *self = NodeBehavior::AsFunction,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::data::DataType;
-    use crate::function::{Func, FuncInput};
+    use crate::function::{Func, FuncId, FuncInput};
     use crate::graph::{
-        Binding, Graph, InputPort, Node, NodeBehavior, NodeId, NodeKind, OutputPort, Subscription,
+        Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort,
+        Subscription,
     };
     use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
     use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
@@ -843,6 +935,33 @@ mod tests {
     }
 
     #[test]
+    fn persist_round_trips_and_defaults_to_memory() {
+        use common::deserialize;
+        assert_eq!(CachePersistence::default(), CachePersistence::Memory);
+
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let mut graph = Graph::default();
+        let mut node: Node = func_lib.by_name("get_a").unwrap().into();
+        node.persist = CachePersistence::Disk;
+        graph.add(node);
+
+        for format in [SerdeFormat::Json, SerdeFormat::Bitcode] {
+            let bytes = graph.serialize(format).unwrap();
+            let back = Graph::deserialize(&bytes, format).unwrap();
+            assert_eq!(
+                back.by_name("get_a").unwrap().persist,
+                CachePersistence::Disk
+            );
+        }
+
+        // A node authored before `persist` existed deserializes as `Memory`.
+        let legacy = r#"{ "id": "00000000-0000-0000-0000-000000000001",
+            "kind": { "Func": "00000000-0000-0000-0000-000000000002" }, "name": "n" }"#;
+        let node: Node = deserialize(legacy.as_bytes(), SerdeFormat::Json).unwrap();
+        assert_eq!(node.persist, CachePersistence::Memory);
+    }
+
+    #[test]
     fn check_rejects_dangling_binding() {
         let mut graph = test_graph();
         let sum_id = graph.by_name("sum").unwrap().id;
@@ -851,6 +970,39 @@ mod tests {
 
         let err = graph.check().expect_err("dangling binding must fail check");
         assert!(err.to_string().contains("binds to missing node"));
+    }
+
+    #[test]
+    fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
+        use crate::function::{FuncId, FuncLib};
+
+        // One Int-in / Int-out func, so a wire between two instances is otherwise
+        // valid — only the `const_only` flag decides whether check accepts it.
+        let check = |const_only: bool| -> anyhow::Result<()> {
+            let port = FuncInput::required("locked", DataType::Int);
+            let port = if const_only { port.const_only() } else { port };
+            let func = Func::new(FuncId::unique(), "f")
+                .input(port)
+                .output("out", DataType::Int);
+            let mut func_lib = FuncLib::default();
+            func_lib.funcs.add(func.clone());
+
+            let mut graph = Graph::default();
+            let producer = graph.add_func_node(&func);
+            let consumer = graph.add_func_node(&func);
+            graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
+            graph.check_with(&func_lib)
+        };
+
+        assert!(
+            check(false).is_ok(),
+            "a normal input accepts a wired binding"
+        );
+        let err = check(true).expect_err("a const-only input must reject a wired binding");
+        assert!(
+            err.to_string().contains("const-only"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -915,10 +1067,7 @@ mod tests {
 
     #[test]
     fn binding_accessors() {
-        let out = OutputPort {
-            node_id: NodeId::unique(),
-            port_idx: 2,
-        };
+        let out = OutputPort::new(NodeId::unique(), 2);
         let bind = Binding::Bind(out);
         assert_eq!(bind.as_output_binding(), Some(&out));
         assert!(bind.is_some());
@@ -938,25 +1087,12 @@ mod tests {
     #[test]
     fn binding_conversions() {
         let nid = NodeId::unique();
-        let from_port: Binding = OutputPort {
-            node_id: nid,
-            port_idx: 1,
-        }
-        .into();
+        let from_port: Binding = OutputPort::new(nid, 1).into();
         let from_tuple: Binding = (nid, 1usize).into();
         assert_eq!(from_port, from_tuple);
         assert_eq!(from_port.as_output_binding().unwrap().port_idx, 1);
 
         assert_eq!(Binding::from(7i64), Binding::Const(7i64.into()));
-    }
-
-    #[test]
-    fn node_behavior_toggle_round_trips() {
-        let mut b = NodeBehavior::AsFunction;
-        b.toggle();
-        assert_eq!(b, NodeBehavior::Once);
-        b.toggle();
-        assert_eq!(b, NodeBehavior::AsFunction);
     }
 
     // === Data bindings ===
@@ -973,20 +1109,8 @@ mod tests {
         assert_eq!(
             bindings,
             vec![
-                (
-                    0,
-                    Binding::Bind(OutputPort {
-                        node_id: get_a_id,
-                        port_idx: 0
-                    })
-                ),
-                (
-                    1,
-                    Binding::Bind(OutputPort {
-                        node_id: get_b_id,
-                        port_idx: 0
-                    })
-                ),
+                (0, Binding::bind(get_a_id, 0)),
+                (1, Binding::bind(get_b_id, 0)),
                 (2, Binding::None),
             ]
         );
@@ -1085,17 +1209,8 @@ mod tests {
     // === Construction helpers seed default const bindings ===
 
     fn func_with_default(default: i64) -> Func {
-        Func {
-            name: "withdefault".into(),
-            inputs: vec![FuncInput {
-                name: "x".into(),
-                required: false,
-                data_type: DataType::Int,
-                default_value: Some(default.into()),
-                value_variants: vec![],
-            }],
-            ..Default::default()
-        }
+        Func::new(FuncId::unique(), "withdefault")
+            .input(FuncInput::optional("x", DataType::Int).default(default))
     }
 
     #[test]
@@ -1124,26 +1239,13 @@ mod tests {
 
     #[test]
     fn add_subgraph_node_seeds_default_const_binding() {
-        let mut input = FuncInput {
-            name: "A".into(),
-            required: false,
-            data_type: DataType::Int,
-            default_value: Some(3i64.into()),
-            value_variants: vec![],
-        };
-        let def = SubgraphDef {
-            id: SubgraphId::unique(),
-            name: "Def".into(),
-            category: "Test".into(),
-            graph: Graph::default(),
-            inputs: vec![input.clone(), {
+        let mut input = FuncInput::optional("A", DataType::Int).default(3i64);
+        let def = SubgraphDef::new(SubgraphId::unique(), "Def")
+            .category("Test")
+            .inputs([input.clone(), {
                 input.default_value = None;
                 input
-            }],
-            outputs: vec![],
-            events: vec![],
-            origin: None,
-        };
+            }]);
 
         let mut graph = Graph::default();
         let id = graph.add_subgraph_node(&def, SubgraphRef::Local(def.id));
@@ -1163,29 +1265,13 @@ mod tests {
         let mut func_lib = test_func_lib(TestFuncHooks::default());
 
         let linked_id = SubgraphId::unique();
-        func_lib.add_subgraph(SubgraphDef {
-            id: linked_id,
-            name: "Linked".into(),
-            category: "Test".into(),
-            graph: Graph::default(),
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![],
-            origin: None,
-        });
+        func_lib.add_subgraph(SubgraphDef::new(linked_id, "Linked").category("Test"));
 
         let mut graph = Graph::default();
         let local_id = SubgraphId::unique();
-        graph.subgraphs.add(SubgraphDef {
-            id: local_id,
-            name: "Local".into(),
-            category: "Test".into(),
-            graph: Graph::default(),
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![],
-            origin: None,
-        });
+        graph
+            .subgraphs
+            .add(SubgraphDef::new(local_id, "Local").category("Test"));
 
         assert_eq!(
             graph

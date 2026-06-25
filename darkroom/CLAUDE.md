@@ -62,7 +62,9 @@ everything else is grouped by responsibility:
   `action_stack/` (packed undo history), `reconcile/` (derived subgraph-
   interface reconciliation).
 - **`io/`** — `persistence.rs` (file-dialog + serde I/O), `config.rs`
-  (`AppConfig` session state), `library.rs` (shared subgraph library file).
+  (`AppConfig` session state), `library.rs` (shared subgraph library file),
+  `cache.rs` (per-document disk-cache root: `<stem>.darkroom-cache/` beside the
+  file, with a self-ignoring `.gitignore`).
 - **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/
   overlays/inspectors), `node/` (the node-body widget cluster), `widgets/`
   (reusable widgets like inline-rename), plus `main_window`, `menu_bar`,
@@ -172,7 +174,7 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   `SwitchTab`/`CloseTab` are graph-agnostic and special-cased ahead of the
   scope lookup. Adding a variant touches ~6 spots — the doc comment lists them.
 - Variants: `AddNode`, `DuplicateNodes`, `RemoveNode`, `MoveNodes`,
-  `RenameNode`, `SetInput`, `SetSelection`, `SetCacheBehavior`, `SetDisabled`,
+  `RenameNode`, `SetInput`, `SetSelection`, `SetDisabled`, `SetPersist`,
   `DetachSubgraph`, `SetViewport`, `RenameBoundaryPort`, `RenameSubgraph`,
   plus document-global `SwitchTab` / `CloseTab`.
 - `DuplicateNodes` is assembled from the current selection by
@@ -185,8 +187,10 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   coalesce in place (a node drag = many `MoveNodes` intents → one undo entry).
 - **`UiAction`** (`gui/mod.rs`) is the navigation-request transport from the
   UI layer to `Editor`: `ActivateTab`/`CloseTab` become undoable
-  `SwitchTab`/`CloseTab`; `OpenGraph` and `NewSubgraph` mutate the tab list
-  directly (opening/creating isn't undoable; switching and closing are).
+  `SwitchTab`/`CloseTab`. `OpenGraph`/`NewSubgraph` add the tab (and, for
+  `NewSubgraph`, the def + instance) to the document directly — that part
+  isn't undoable — but focus the tab through the same recorded `SwitchTab`,
+  so undo faithfully reverses focus while leaving the opened tab in place.
 - Per-step properties (`is_noop`, `requires_relayout`, `requires_reconcile`,
   `gesture_key`, `coalesce`) are methods on `UndoStep`, exhaustive over the
   variants so a new one won't compile until it declares its behavior.
@@ -223,6 +227,12 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   `Progress(RunProgress)` per node *as it runs*, then a final `Finished(stats)`.
   `WorkerBridge::deliver` maps these to `WorkerEvent::NodeProgress` /
   `ExecutionFinished` on the channel and pokes `host.request_repaint()`.
+- **Per-document disk cache.** The worker starts memory-only;
+  `Engine::set_document_cache` (called from `set_document_path` — i.e. on
+  open/save/new and startup restore) sends `WorkerMessage::SetDiskCache` pointing
+  it at `io::cache`'s `<stem>.darkroom-cache/` store. An unsaved doc stays
+  memory-only. So a node toggled to `CachePersistence::Disk` (header `C` chip)
+  reloads its output across sessions from a store beside the project file.
 - On-thread, `App::frame` drains the channel (`worker.drain()`, non-blocking).
   `NodeProgress` → `RunState::apply_progress` marks the active node
   `ExecStatus::Running(Instant)` (purple glow) live — carrying the start instant
@@ -272,8 +282,9 @@ the open-tab strip + "+" new-subgraph chip, emits `UiAction`s). The rest:
   inputs (live values when fetched, else static bindings), outputs, log tail.
 - **`gui/node/`** — the node-body widget: `mod.rs` is `NodeUI` (node bodies +
   drag; emits `MoveNodes`, subgraph-open requests, port-disconnect
-  double-clicks), with sub-widgets `header` (title + `S`/`T`/`C`/`i` badges:
-  subgraph / terminal / cache-behavior / inspect), `port_row` (the two port
+  double-clicks), with sub-widgets `header` (title + `S`/`T`/`D`/`C`/`i`
+  badges: subgraph / terminal / disable / cache / inspect; the `C` chip
+  toggles `Node::persist` Memory⇄Disk via `SetPersist`), `port_row` (the two port
   columns + circles + binding menu; a required input's port paints in the
   missing/warning color only once a run flagged its node `MissingInputs` —
   `SceneInput::required` + `node.exec_status` + `exec_missing_glow` — so the

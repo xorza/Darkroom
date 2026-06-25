@@ -185,7 +185,11 @@ fn input_label_cell(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            circle_frame(ui, theme, wid, fill, margin, &tip);
+            // A const-only input can't be wired, so it has no connection anchor
+            // — render just the label (+ its inline const editor).
+            if !input.const_only {
+                circle_frame(ui, theme, wid, fill, margin, &tip);
+            }
             port_label(ui, rcx, port, input.name.clone(), &tip, rename, out);
         });
     // Open on right-click anywhere on the cell — circle or label. The

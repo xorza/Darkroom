@@ -7,12 +7,11 @@
 //! 3. **execute** — the [`Executor`](executor::Executor) runs the plan,
 //!    invoking each scheduled node and updating its runtime cache.
 //!
-//! [`ExecutionEngine`] owns all four pieces (program, plan, planner, executor)
-//! and exposes `update` (phase 1) and `execute*` (phases 2–3, run back-to-back).
+//! [`ExecutionEngine`] owns every piece (program, plan, planner, the cross-run
+//! cache, and executor) and exposes `update` (phase 1) and `execute` (phases
+//! 2–3, run back-to-back).
 
 use common::CancelToken;
-use common::is_debug;
-use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
@@ -22,20 +21,29 @@ use crate::execution_stats::{ExecutionStats, FlattenMap, RunProgress};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use crate::prelude::FuncId;
-use crate::worker::{EventRef, EventTrigger};
 
+pub(crate) mod blob;
+pub(crate) mod cache;
+pub(crate) mod digest;
+pub(crate) mod event;
 pub(crate) mod executor;
 mod flatten;
+pub(crate) mod output_cache;
 pub(crate) mod plan;
 pub(crate) mod planner;
 pub(crate) mod program;
+mod query;
 #[cfg(test)]
 mod tests;
+pub(crate) mod validate;
 
+use cache::Cache;
+use event::EventRef;
 use executor::Executor;
+use output_cache::OutputCache;
 use plan::ExecutionPlan;
 use planner::Planner;
-use program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
+use program::{ExecutionNode, ExecutionProgram};
 
 // === Error Types ===
 
@@ -43,6 +51,8 @@ use program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
 pub enum Error {
     #[error("{message}")]
     Invoke { func_id: FuncId, message: String },
+    #[error("invalid graph: {message}")]
+    InvalidGraph { message: String },
     #[error("node {func_id:?} was cancelled before completing")]
     Cancelled { func_id: FuncId },
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
@@ -61,25 +71,27 @@ pub struct ArgumentValues {
     pub outputs: Vec<DynamicValue>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OutputUsage {
-    Skip,
-    /// Number of executing consumers reading this output this run (always `> 0`).
-    Needed(u32),
-}
-
-impl OutputUsage {
-    pub fn is_needed(&self) -> bool {
-        matches!(self, Self::Needed(_))
-    }
+/// What seeds a run's schedule — the roots the planner walks back from. The three
+/// are independent and combine: a run can target terminal nodes, the event loop's
+/// triggerable events, and/or a set of injected events, all at once.
+#[derive(Debug, Default, Clone)]
+pub struct RunSeeds {
+    /// Include all terminal nodes — the ordinary "produce the outputs" trigger.
+    pub terminals: bool,
+    /// Include every node owning a subscribed event — drives the event loop.
+    pub event_triggers: bool,
+    /// Run the subscribers of these specific fired events.
+    pub events: Vec<EventRef>,
 }
 
 // === Execution Engine ===
 
 /// The three-phase pipeline container. Owns the compiled `program`, the
-/// `flattener` (compile scratch), the reusable `plan` buffer, the `planner`
-/// (scheduling scratch), and the `executor` (runtime cache + context). Not
-/// serializable — the persistent form is the [`ExecutionProgram`] alone.
+/// `flattener` (compile scratch) and its `flatten` map (flat↔authoring ids), the
+/// reusable `plan` buffer, the `planner` (scheduling scratch), the cross-run
+/// `cache` (per-node outputs + state), the `executor` (run loop + context), and
+/// the `output_cache` (file persistence). Not serializable — the persistent form
+/// is the [`ExecutionProgram`] alone.
 #[derive(Debug, Default)]
 pub struct ExecutionEngine {
     pub(crate) program: ExecutionProgram,
@@ -89,11 +101,20 @@ pub struct ExecutionEngine {
     /// map). Rebuilt each compile, cloned into each run's `ExecutionStats`
     /// so the editor can project stats onto its nodes. Compile scratch,
     /// not part of the serialized program.
-    flatten: FlattenMap,
+    flatten_map: FlattenMap,
+    /// Per-node cross-run cache (output values, digests, node state), reconciled
+    /// to the node set at each `update`.
+    cache: Cache,
     executor: Executor,
     planner: Planner,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
+    /// Output cache: hydrates `persist` (content-addressed) and `CachePassthrough`
+    /// (explicit-path) node outputs into the RAM cache at `update`, and persists
+    /// fresh ones after a run. Holds the one codec registry and the optional disk
+    /// root; empty default is memory-only. Set via [`Self::set_disk_root`] /
+    /// [`Self::set_value_registry`].
+    output_cache: OutputCache,
 }
 
 impl ExecutionEngine {
@@ -112,18 +133,40 @@ impl ExecutionEngine {
     pub fn clear(&mut self) {
         self.program.clear();
         self.plan.clear();
-        self.executor.slots.clear();
-        self.executor.input_dirty.clear();
+        self.cache.clear();
+        self.flatten_map.reset();
     }
 
     pub fn reset_states(&mut self) {
-        self.executor.reset_states();
+        self.cache.reset_states();
+    }
+
+    /// Swap the [`OutputCache`] — the codec registry plus the optional
+    /// content-addressed store root. At the next `update`, `persist` (content-
+    /// addressed) and `CachePassthrough` (explicit-path) outputs hydrate from their
+    /// files on a hit (skipping recompute), and freshly-computed ones are stored
+    /// after a run. The RAM cache is keyed by node id + digest, independent of the
+    /// root, so swapping keeps any warm in-memory outputs.
+    pub fn set_output_cache(&mut self, cache: OutputCache) {
+        self.output_cache = cache;
     }
 
     // === Phase 1: compile ===
 
-    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
-        graph.validate_with(func_lib);
+    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> Result<()> {
+        // Validate the graph against the library before touching any state.
+        // The graph+library pair is untrusted input here (a document can be
+        // stale against an evolved library — a dropped func, a shrunk port
+        // list), so an invalid one is a recoverable error the caller
+        // surfaces, not a logic bug. Checking first leaves the prior program
+        // intact on error and lets the flatten pass resolve every reference
+        // infallibly.
+        if let Err(e) = graph.check_with(func_lib) {
+            tracing::error!(error = %e, "graph update rejected: invalid graph");
+            return Err(Error::InvalidGraph {
+                message: e.to_string(),
+            });
+        }
 
         self.plan.clear();
 
@@ -134,198 +177,77 @@ impl ExecutionEngine {
             flatten::Pools {
                 inputs: &mut self.program.inputs,
                 events: &mut self.program.events,
-                input_dirty: &mut self.executor.input_dirty,
             },
             graph,
             func_lib,
-            &mut self.flatten,
+            &mut self.flatten_map,
         ) as usize;
 
         // Realign the runtime cache to the rebuilt node set (preserve by id,
         // default new, trim gone).
-        self.executor.reconcile(&self.program.e_nodes);
+        self.cache.reconcile(&self.program.e_nodes);
 
-        self.validate_built(func_lib);
+        validate::compiled(&self.program, &self.cache, func_lib);
+
+        // A node's digest changes only at compile (consts/bindings/func versions
+        // are fixed between updates), so recompute it now and pull any disk-cached
+        // `persist` outputs into RAM — both off the per-execute path. The trade-off
+        // is that an external file change with no graph edit isn't noticed until
+        // the next update/reopen.
+        self.cache.recompute_digests(&self.program);
+        // Hydrate cached outputs (content-addressed `persist` + explicit-path
+        // `CachePassthrough`) into the RAM cache, so the planner prunes their cones.
+        self.output_cache.load_into(&self.program, &mut self.cache);
+        Ok(())
     }
 
     // === Phases 2–3: plan then execute ===
-
-    pub async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
-        self.execute(true, false, [], None, CancelToken::never())
-            .await
-    }
-
-    pub async fn execute_events<T: IntoIterator<Item = EventRef>>(
-        &mut self,
-        events: T,
-    ) -> Result<ExecutionStats> {
-        self.execute(false, false, events, None, CancelToken::never())
-            .await
-    }
 
     /// When `progress` is `Some`, a [`RunProgress`] is sent before and after
     /// each node's lambda runs, for live per-node feedback ahead of the final
     /// stats. When `cancel` is `Some` and gets set mid-run, scheduling stops
     /// after the in-flight node and the returned stats are marked `cancelled`.
-    pub async fn execute<T: IntoIterator<Item = EventRef>>(
+    pub async fn execute(
         &mut self,
-        terminals: bool,
-        event_triggers: bool,
-        events: T,
+        seeds: RunSeeds,
         progress: Option<&UnboundedSender<RunProgress>>,
         cancel: CancelToken,
     ) -> Result<ExecutionStats> {
-        let events: Vec<EventRef> = events.into_iter().collect();
-
-        // Phase 2: schedule into the reusable plan buffer.
-        self.planner.plan(
-            &self.program,
-            &self.executor,
-            terminals,
-            event_triggers,
-            &events,
-            &mut self.plan,
-        )?;
+        // Phase 2: schedule into the reusable plan buffer (node digests were
+        // recomputed at `update` time and persist across re-executes).
+        self.planner
+            .plan(&self.program, &self.cache, &seeds, &mut self.plan)?;
 
         // Phase 3: run the schedule.
         let mut stats = self
             .executor
-            .run(&self.program, &self.plan, &self.flatten, progress, cancel)
+            .run(
+                &self.program,
+                &self.plan,
+                &mut self.cache,
+                &self.flatten_map,
+                progress,
+                cancel,
+            )
             .await;
-        stats.triggered_events = events;
+
+        // Phase 3b: persist freshly-computed cache outputs to their files.
+        self.output_cache
+            .store(
+                &self.program,
+                &self.plan,
+                &self.cache,
+                &mut self.executor.ctx_manager,
+            )
+            .await;
+
+        stats.triggered_events = seeds.events;
         // Annotate with how the graph was flattened so the stats' flat ids
         // can be projected back onto authoring nodes (the executor itself
         // stays oblivious to the authoring graph).
-        stats.flatten = self.flatten.clone();
+        stats.flatten = self.flatten_map.clone();
 
         Ok(stats)
-    }
-
-    // === Query ===
-
-    pub fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-        let idx = self.program.e_nodes.index_of_key(node_id)?;
-        let e_node = &self.program.e_nodes[idx];
-
-        let inputs = self.program.inputs[e_node.inputs.range()]
-            .iter()
-            .map(|input| match &input.binding {
-                ExecutionBinding::None => None,
-                ExecutionBinding::Const(v) => Some(DynamicValue::from(v)),
-                ExecutionBinding::Bind(addr) => self.executor.slots[addr.target_idx]
-                    .output_values
-                    .as_ref()
-                    .and_then(|o| o.get(addr.port_idx))
-                    .cloned(),
-            })
-            .collect();
-
-        let outputs = self.executor.slots[idx]
-            .output_values
-            .as_ref()
-            .map(|o| o.to_vec())
-            .unwrap_or_default();
-
-        Some(ArgumentValues { inputs, outputs })
-    }
-
-    /// `get_argument_values` plus awaited preview resolution.
-    pub async fn get_argument_values_with_previews(
-        &mut self,
-        node_id: &NodeId,
-    ) -> Option<ArgumentValues> {
-        let mut values = self.get_argument_values(node_id)?;
-        let mut pending_previews = Vec::new();
-        for value in values
-            .inputs
-            .iter_mut()
-            .flatten()
-            .chain(values.outputs.iter_mut())
-        {
-            if let Some(pending) = value.gen_preview(&mut self.executor.ctx_manager) {
-                pending_previews.push(pending);
-            }
-        }
-        for pending in pending_previews {
-            pending.wait(&mut self.executor.ctx_manager).await;
-        }
-        Some(values)
-    }
-
-    /// Collect every (event → lambda → state) triple that is currently
-    /// "live" — node was executed or cached this run, the event has at
-    /// least one subscriber, and its lambda is populated. Used by the
-    /// worker to spawn the tasks that drive the event loop.
-    pub fn active_event_triggers(&self, stats: &ExecutionStats) -> Vec<EventTrigger> {
-        stats
-            .cached_nodes
-            .iter()
-            .copied()
-            .chain(stats.executed_nodes.iter().map(|n| n.node_id))
-            .flat_map(|node_id| {
-                let e_node = self.by_id(&node_id).unwrap();
-                let event_state = self
-                    .executor
-                    .slots
-                    .by_key(&node_id)
-                    .unwrap()
-                    .event_state
-                    .clone();
-                let id = e_node.id;
-                self.program.events[e_node.events.range()]
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
-                    .map(move |(event_idx, event)| EventTrigger {
-                        event: EventRef {
-                            node_id: id,
-                            event_idx,
-                        },
-                        lambda: event.lambda.clone(),
-                        state: event_state.clone(),
-                    })
-            })
-            .collect()
-    }
-
-    // === Validation ===
-
-    /// Self-consistency check of the compiled program against the `FuncLib`,
-    /// plus that the runtime slots stayed index-aligned to the nodes after
-    /// `reconcile`. The source graph is gone after flattening, so this
-    /// validates each `e_node` against its func and checks binding integrity.
-    fn validate_built(&self, func_lib: &FuncLib) {
-        if !is_debug() {
-            return;
-        }
-
-        // Runtime slots stay index-aligned to nodes after `reconcile`.
-        assert_eq!(self.executor.slots.len(), self.program.e_nodes.len());
-
-        let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.program.e_nodes.len());
-        for (idx, e_node) in self.program.e_nodes.iter().enumerate() {
-            assert!(seen_node_ids.insert(e_node.id));
-
-            let slot = &self.executor.slots[idx];
-            assert_eq!(slot.id, e_node.id);
-            if let Some(output_values) = slot.output_values.as_ref() {
-                assert_eq!(output_values.len(), e_node.outputs.len as usize);
-            }
-
-            let func = func_lib.by_id(&e_node.func_id).unwrap();
-            assert_eq!(e_node.inputs.len as usize, func.inputs.len());
-            assert_eq!(e_node.outputs.len as usize, func.outputs.len());
-            assert_eq!(e_node.events.len as usize, func.events.len());
-
-            for e_input in &self.program.inputs[e_node.inputs.range()] {
-                if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
-                    assert!(e_addr.target_idx < self.program.e_nodes.len());
-                    let target = &self.program.e_nodes[e_addr.target_idx];
-                    assert_eq!(e_addr.target_id, target.id);
-                    assert!(e_addr.port_idx < target.outputs.len as usize);
-                }
-            }
-        }
     }
 }
 
@@ -334,6 +256,33 @@ impl ExecutionEngine {
 /// executor reads it straight from the live `ExecutionPlan`.
 #[cfg(test)]
 impl ExecutionEngine {
+    pub(crate) async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
+        self.execute(
+            RunSeeds {
+                terminals: true,
+                ..Default::default()
+            },
+            None,
+            CancelToken::never(),
+        )
+        .await
+    }
+
+    pub(crate) async fn execute_events<T: IntoIterator<Item = EventRef>>(
+        &mut self,
+        events: T,
+    ) -> Result<ExecutionStats> {
+        self.execute(
+            RunSeeds {
+                events: events.into_iter().collect(),
+                ..Default::default()
+            },
+            None,
+            CancelToken::never(),
+        )
+        .await
+    }
+
     /// Run only the planning phase (no execution), leaving the schedule in
     /// `self.plan` for inspection.
     pub(crate) fn prepare_execution(
@@ -342,14 +291,13 @@ impl ExecutionEngine {
         event_triggers: bool,
         events: &[EventRef],
     ) -> Result<()> {
-        self.planner.plan(
-            &self.program,
-            &self.executor,
+        let seeds = RunSeeds {
             terminals,
             event_triggers,
-            events,
-            &mut self.plan,
-        )
+            events: events.to_vec(),
+        };
+        self.planner
+            .plan(&self.program, &self.cache, &seeds, &mut self.plan)
     }
 
     pub(crate) fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
@@ -360,7 +308,7 @@ impl ExecutionEngine {
     }
 
     pub(crate) fn node_inputs(&self, e_node: &ExecutionNode) -> &[program::ExecutionInput] {
-        &self.program.inputs[e_node.inputs.range()]
+        self.program.node_inputs(e_node)
     }
 
     pub(crate) fn node_events(&self, e_node: &ExecutionNode) -> &[program::ExecutionEvent] {
@@ -372,31 +320,29 @@ impl ExecutionEngine {
         self.plan.node_flags[idx]
     }
 
-    pub(crate) fn node_input_flags(&self, e_node: &ExecutionNode) -> &[plan::InputFlags] {
-        &self.plan.input_flags[e_node.inputs.range()]
-    }
-
-    /// Cross-run per-input dirty bits for a node, from the executor.
-    pub(crate) fn node_input_dirty(&self, e_node: &ExecutionNode) -> &[bool] {
-        &self.executor.input_dirty[e_node.inputs.range()]
-    }
-
     pub(crate) fn node_output_usage(&self, e_node: &ExecutionNode) -> &[u32] {
         &self.plan.output_usage[e_node.outputs.range()]
     }
 
-    pub(crate) fn runtime_slot(&self, e_node: &ExecutionNode) -> &executor::RuntimeSlot {
-        self.executor.slots.by_key(&e_node.id).unwrap()
+    pub(crate) fn runtime_slot(&self, e_node: &ExecutionNode) -> &cache::RuntimeSlot {
+        self.cache.slots.by_key(&e_node.id).unwrap()
     }
 
     /// Iterator over runtime slots, index-aligned to `e_nodes`.
-    pub(crate) fn runtime_slots(&self) -> std::slice::Iter<'_, executor::RuntimeSlot> {
-        self.executor.slots.iter()
+    pub(crate) fn runtime_slots(&self) -> std::slice::Iter<'_, cache::RuntimeSlot> {
+        self.cache.slots.iter()
     }
 
-    /// Seed a node's cached output (simulating a prior run).
+    /// Seed a node's cached output (simulating a prior run): set the value and
+    /// stamp `output_digest` from the current digest, so the planner sees a hit.
     pub(crate) fn set_output_values(&mut self, node_name: &str, values: Vec<DynamicValue>) {
-        let id = self.by_name(node_name).unwrap().id;
-        self.executor.slots.by_key_mut(&id).unwrap().output_values = Some(values);
+        let idx = self
+            .program
+            .e_nodes
+            .index_of_key(&self.by_name(node_name).unwrap().id);
+        let idx = idx.unwrap();
+        let slot = &mut self.cache.slots[idx];
+        slot.output_values = Some(values);
+        slot.output_digest = slot.current_digest;
     }
 }

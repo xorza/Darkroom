@@ -30,18 +30,8 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
     use scenarium::function::{Func, FuncId};
 
     let mut lib = FuncLib::default();
-    lib.add(Func {
-        id: FuncId::unique(),
-        name: "alpha".to_string(),
-        category: "math".to_string(),
-        ..Default::default()
-    });
-    lib.add(Func {
-        id: FuncId::unique(),
-        name: "beta".to_string(),
-        category: "io".to_string(),
-        ..Default::default()
-    });
+    lib.add(Func::new(FuncId::unique(), "alpha").category("math"));
+    lib.add(Func::new(FuncId::unique(), "beta").category("io"));
 
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, _rx) = test_inbound();
@@ -126,11 +116,7 @@ fn create_node_known_id_enqueues_add_node() {
 
     let alpha_id = FuncId::unique();
     let mut lib = FuncLib::default();
-    lib.add(Func {
-        id: alpha_id,
-        name: "alpha".to_string(),
-        ..Default::default()
-    });
+    lib.add(Func::new(alpha_id, "alpha"));
 
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();

@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -11,9 +10,9 @@ use common::CancelToken;
 use common::PauseGate;
 use common::ReadyState;
 
-use crate::common::shared_any_state::SharedAnyState;
-use crate::event_lambda::EventLambda;
-use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result};
+use crate::execution::event::{EventRef, EventTrigger};
+use crate::execution::output_cache::OutputCache;
+use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result, RunSeeds};
 use crate::execution_stats::{ExecutionStats, RunProgress};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
@@ -31,12 +30,6 @@ pub enum WorkerReport {
 /// The worker reads this channel directly and applies backpressure to
 /// lambdas when it can't keep up.
 const EVENT_LOOP_BACKPRESSURE: usize = 10;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EventRef {
-    pub node_id: NodeId,
-    pub event_idx: usize,
-}
 
 /// Command enum sent into the worker loop.
 ///
@@ -60,6 +53,10 @@ pub enum WorkerMessage {
         func_lib: Arc<FuncLib>,
     },
     Clear,
+    /// Swap the engine's output cache (codec registry + content-addressed store
+    /// root). Applied before any graph op in the same batch, so the next `Update`
+    /// hydrates from the new config — e.g. repointing at a per-document store dir.
+    SetOutputCache(OutputCache),
     ExecuteTerminals,
     StartEventLoop,
     StopEventLoop,
@@ -97,6 +94,9 @@ pub struct Worker {
 }
 
 impl Worker {
+    /// Spin up a worker. The engine starts memory-only; the host configures its
+    /// output cache via [`WorkerMessage::SetValueRegistry`] (once) and
+    /// [`WorkerMessage::SetDiskRoot`] (e.g. per active document).
     pub fn new<ExecutionCallback>(callback: ExecutionCallback) -> Self
     where
         ExecutionCallback: Fn(WorkerReport) + Send + 'static,
@@ -262,6 +262,7 @@ enum LoopCommand {
 /// | Slot                  | Variants that write it      | Rule          |
 /// | --------------------- | --------------------------- | ------------- |
 /// | `graph_state`         | Update, Clear               | last-write-wins |
+/// | `output_cache`        | SetOutputCache              | last-write-wins, applied pre-graph-op |
 /// | `loop_request`        | StartEventLoop, StopEventLoop | last-write-wins |
 /// | `execute_terminals`   | ExecuteTerminals            | idempotent flag |
 /// | `events`              | InjectEvents                | set union (dedup) |
@@ -271,20 +272,15 @@ enum LoopCommand {
 #[derive(Debug, Default)]
 struct BatchIntent {
     graph_state: Option<GraphOp>,
+    /// `Some` = a `SetOutputCache` was in this batch (the new cache). Applied
+    /// before `graph_state`, so a same-batch `Update` hydrates from it.
+    output_cache: Option<OutputCache>,
     loop_request: Option<LoopCommand>,
     execute_terminals: bool,
     exit: bool,
     events: HashSet<EventRef>,
     syncs: Vec<oneshot::Sender<()>>,
     argument_requests: Vec<(NodeId, oneshot::Sender<Option<ArgumentValues>>)>,
-}
-
-/// One `(event, lambda, state)` triple spawned as a looping task.
-#[derive(Debug)]
-pub struct EventTrigger {
-    pub event: EventRef,
-    pub lambda: EventLambda,
-    pub state: SharedAnyState,
 }
 
 /// Pure scan: folds a command batch into a `BatchIntent`. Exit
@@ -308,6 +304,7 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
                 intent.graph_state = Some(GraphOp::Replace(graph, func_lib));
             }
             WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
+            WorkerMessage::SetOutputCache(cache) => intent.output_cache = Some(cache),
             WorkerMessage::ExecuteTerminals => intent.execute_terminals = true,
             WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
             WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
@@ -396,14 +393,32 @@ async fn worker_loop<ExecutionCallback>(
             return;
         }
 
-        match intent.graph_state.take() {
-            Some(GraphOp::Clear) => execution_engine.clear(),
+        // Swap the output cache before any graph op, so a same-batch `Update`
+        // hydrates from the new config rather than the old.
+        if let Some(cache) = intent.output_cache.take() {
+            execution_engine.set_output_cache(cache);
+        }
+
+        let update_ok = match intent.graph_state.take() {
+            Some(GraphOp::Clear) => {
+                execution_engine.clear();
+                true
+            }
             Some(GraphOp::Replace(graph, func_lib)) => {
                 tracing::info!("Graph updated");
-                execution_engine.update(&graph, &func_lib);
+                match execution_engine.update(&graph, &func_lib) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        // Compile failed (e.g. a func missing from the lib):
+                        // report it like a run failure and skip execute —
+                        // the prior program is left untouched by `update`.
+                        (execution_callback)(WorkerReport::Finished(Err(e)));
+                        false
+                    }
+                }
             }
-            None => {}
-        }
+            None => true,
+        };
         let should_start_event_loop = match intent.loop_request {
             Some(LoopCommand::Start) => true,
             Some(LoopCommand::Stop) => false,
@@ -419,7 +434,7 @@ async fn worker_loop<ExecutionCallback>(
         // Empty graph is a normal state, not a failure: skip execute
         // silently. Events/terminals/StartEventLoop are no-ops until
         // a graph is loaded.
-        if needs_execute && !execution_engine.is_empty() {
+        if update_ok && needs_execute && !execution_engine.is_empty() {
             // Quiesce the event loop around execute(): closing the gate
             // stops lambdas from *starting a new iteration*. It does NOT
             // pause a lambda already inside `invoke()`, so this is not an
@@ -445,9 +460,11 @@ async fn worker_loop<ExecutionCallback>(
             let mut prog_buf: Vec<RunProgress> = Vec::new();
             let result = {
                 let run = execution_engine.execute(
-                    intent.execute_terminals,
-                    in_loop,
-                    intent.events.drain(),
+                    RunSeeds {
+                        terminals: intent.execute_terminals,
+                        event_triggers: in_loop,
+                        events: intent.events.drain().collect(),
+                    },
                     Some(&prog_tx),
                     cancel.clone(),
                 );
