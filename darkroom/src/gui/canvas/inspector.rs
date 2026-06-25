@@ -231,7 +231,7 @@ impl Inspectors {
                     line(ui, "Outputs", section_style(ui));
                     for (i, output) in outputs.iter().enumerate() {
                         let name = output.name.as_str("");
-                        let ty = Some(output.ty.data_type());
+                        let ty = Some(&output.ty);
                         match values.and_then(|v| v.outputs.get(i)) {
                             Some(pv) => {
                                 line(ui, &port_line(name, ty, Some(&pv.text)), body_style(ui));

@@ -168,7 +168,10 @@ impl App {
         for event in events {
             match event {
                 ScriptMessage::Print { msg } => eprintln!("script: {msg}"),
-                ScriptMessage::Apply(intents) => self.editor.apply_external_intents(intents),
+                ScriptMessage::Apply(intents) => {
+                    let func_lib = self.engine.func_lib.load();
+                    self.editor.apply_external_intents(intents, &func_lib);
+                }
                 ScriptMessage::RunOnce => run = true,
                 // Shutdown is terminal: quit and drop the rest of the batch
                 // (the app is closing, so any remaining edits/runs are moot).

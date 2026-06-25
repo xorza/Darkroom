@@ -140,9 +140,7 @@ impl ConnectionUI {
             DragMode::Held => {
                 self.resolve_held(ui, scene, port_frame, state.start, state.snap_end, out)
             }
-            DragMode::Floating => {
-                self.resolve_floating(ui, scene, state.start, state.snap_end, out)
-            }
+            DragMode::Floating => self.resolve_floating(ui, state.start, state.snap_end, out),
         }
     }
 
@@ -176,7 +174,7 @@ impl ConnectionUI {
             return;
         }
         if let Some(end) = snap_end {
-            commit_connection(start, end, scene, out);
+            commit_connection(start, end, out);
         } else if let Some(intent) = self.const_drop(ui, scene, start) {
             out.push(intent);
         } else if dropped_on_empty_canvas(ui, scene) {
@@ -196,7 +194,6 @@ impl ConnectionUI {
     fn resolve_floating(
         &mut self,
         ui: &mut Ui,
-        scene: &Scene,
         start: PortRef,
         snap_end: Option<PortRef>,
         out: &mut Vec<Intent>,
@@ -217,7 +214,7 @@ impl ConnectionUI {
         match ended {
             Some(PointerButton::Left) => {
                 if let Some(end) = snap_end {
-                    commit_connection(start, end, scene, out);
+                    commit_connection(start, end, out);
                 }
                 self.state = None;
             }
@@ -511,24 +508,18 @@ fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
     let node = scene.nodes.iter().find(|n| n.id == port.node_id)?;
     let ty = match port.kind {
         PortKind::Input => scene.inputs(node.inputs).get(port.port_idx)?.ty.clone(),
-        PortKind::Output => scene
-            .outputs(node.outputs)
-            .get(port.port_idx)?
-            .ty
-            .data_type()
-            .clone(),
+        PortKind::Output => scene.outputs(node.outputs).get(port.port_idx)?.ty.clone(),
     };
     Some(ty)
 }
 
 /// Convert a snapped `(start, end)` PortRef pair (one `Input`, one
 /// `Output` — caller-guaranteed by [`scan_snap_target`]) into an
-/// `Intent::SetInput` binding, plus — when the input feeds a *wildcard*
-/// output (a passthrough / reroute) — `SetInput(.., None)` intents that drop
-/// any downstream connection the new input type just invalidated. They land in
-/// the same edit batch, so undo restores the binding and the severed edges
-/// together. Cycle prevention is left to the intent apply layer.
-fn commit_connection(start: PortRef, end: PortRef, scene: &Scene, out: &mut Vec<Intent>) {
+/// `Intent::SetInput` binding. Cycle prevention is left to the intent apply
+/// layer; re-typing a wildcard output (passthrough / reroute) and dropping the
+/// downstream wires it invalidates is handled centrally when the batch commits
+/// (`commit_intent_cascading`), so this stays a plain binding.
+fn commit_connection(start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
     let (input, output) = match (start.kind, end.kind) {
         (PortKind::Input, PortKind::Output) => (start, end),
         (PortKind::Output, PortKind::Input) => (end, start),
@@ -539,154 +530,4 @@ fn commit_connection(start: PortRef, end: PortRef, scene: &Scene, out: &mut Vec<
         input_idx: input.port_idx,
         to: Binding::bind(output.node_id, output.port_idx),
     });
-    // A wildcard output mirrors this input, so its type becomes whatever the
-    // producer now feeds in; drop downstream edges that no longer accept it.
-    if let Some(new_type) = port_data_type(scene, output) {
-        sever_invalidated_wildcard_edges(scene, input, &new_type, out);
-    }
-}
-
-/// Push `SetInput(.., None)` for every existing connection from a wildcard
-/// output of `input`'s node (one mirroring `input.port_idx`) whose consumer
-/// can't accept `new_type` — the type the input now carries. This is what
-/// keeps a passthrough's output from silently changing a value's type: rewire
-/// its input to an incompatible type and the stale output wires are cut.
-fn sever_invalidated_wildcard_edges(
-    scene: &Scene,
-    input: PortRef,
-    new_type: &DataType,
-    out: &mut Vec<Intent>,
-) {
-    let Some(node) = scene.nodes.iter().find(|n| n.id == input.node_id) else {
-        return;
-    };
-    for (out_idx, output) in scene.outputs(node.outputs).iter().enumerate() {
-        if output.ty.mirrors() != Some(input.port_idx) {
-            continue;
-        }
-        for conn in scene
-            .connections
-            .iter()
-            .filter(|c| c.src_node == input.node_id && c.src_port == out_idx)
-        {
-            let consumer = PortRef {
-                node_id: conn.tgt_node,
-                kind: PortKind::Input,
-                port_idx: conn.tgt_port,
-            };
-            let incompatible =
-                port_data_type(scene, consumer).is_some_and(|ty| !ty.compatible_with(new_type));
-            if incompatible {
-                out.push(Intent::SetInput {
-                    node_id: conn.tgt_node,
-                    input_idx: conn.tgt_port,
-                    to: Binding::None,
-                });
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::document::GraphView;
-    use crate::gui::run_state::RunState;
-    use scenarium::function::{Func, FuncId, FuncInput, FuncLib};
-    use scenarium::graph::{Graph, Node, NodeKind};
-    use scenarium::prelude::NodeId;
-    use scenarium::special::SpecialNode;
-
-    fn out_port(node: NodeId, idx: usize) -> PortRef {
-        PortRef {
-            node_id: node,
-            kind: PortKind::Output,
-            port_idx: idx,
-        }
-    }
-    fn in_port(node: NodeId, idx: usize) -> PortRef {
-        PortRef {
-            node_id: node,
-            kind: PortKind::Input,
-            port_idx: idx,
-        }
-    }
-
-    fn passthrough(graph: &mut Graph) -> NodeId {
-        let node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
-            bypass: false,
-        }));
-        let id = node.id;
-        graph.add(node);
-        id
-    }
-
-    /// Float producer → cache passthrough → Float sink, then rewire the
-    /// passthrough's input to a String producer: the passthrough output becomes
-    /// String, so the now-incompatible sink edge is dropped in the same batch.
-    #[test]
-    fn rewiring_a_passthrough_input_severs_incompatible_output_edges() {
-        let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
-        let string_src = Func::new(FuncId::unique(), "ssrc").output("o", DataType::String);
-        let float_sink = Func::new(FuncId::unique(), "fsink")
-            .input(FuncInput::required("x", DataType::Float))
-            .output("o", DataType::Float);
-        let func_lib = FuncLib::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
-
-        let mut graph = Graph::default();
-        let fp = graph.add_func_node(&float_src);
-        let sp = graph.add_func_node(&string_src);
-        let pass = passthrough(&mut graph);
-        let sink = graph.add_func_node(&float_sink);
-        graph.set_input_binding(InputPort::new(pass, 0), Binding::bind(fp, 0));
-        graph.set_input_binding(InputPort::new(sink, 0), Binding::bind(pass, 0));
-
-        let view = GraphView::for_graph(&graph);
-        let mut scene = Scene::default();
-        scene.rebuild(&graph, &view, &func_lib, None, &RunState::default());
-
-        // String producer → passthrough.value.
-        let mut out = Vec::new();
-        commit_connection(out_port(sp, 0), in_port(pass, 0), &scene, &mut out);
-
-        assert_eq!(out.len(), 2, "the new binding plus one sever");
-        assert!(
-            matches!(&out[0], Intent::SetInput { node_id, input_idx: 0, to: Binding::Bind(src) }
-                if *node_id == pass && src.node_id == sp),
-            "first intent wires the passthrough input"
-        );
-        assert!(
-            out.iter().any(|i| matches!(i,
-                Intent::SetInput { node_id, input_idx: 0, to: Binding::None } if *node_id == sink)),
-            "the Float sink edge, now fed String, is severed"
-        );
-    }
-
-    /// Rewiring to a *compatible* type leaves the output edge intact.
-    #[test]
-    fn rewiring_a_passthrough_input_keeps_compatible_output_edges() {
-        let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
-        let float_sink = Func::new(FuncId::unique(), "fsink")
-            .input(FuncInput::required("x", DataType::Float))
-            .output("o", DataType::Float);
-        let func_lib = FuncLib::from([float_src.clone(), float_sink.clone()]);
-
-        let mut graph = Graph::default();
-        let fp = graph.add_func_node(&float_src);
-        let fp2 = graph.add_func_node(&float_src);
-        let pass = passthrough(&mut graph);
-        let sink = graph.add_func_node(&float_sink);
-        graph.set_input_binding(InputPort::new(pass, 0), Binding::bind(fp, 0));
-        graph.set_input_binding(InputPort::new(sink, 0), Binding::bind(pass, 0));
-
-        let view = GraphView::for_graph(&graph);
-        let mut scene = Scene::default();
-        scene.rebuild(&graph, &view, &func_lib, None, &RunState::default());
-
-        // Another Float producer → output stays Float, the sink edge survives.
-        let mut out = Vec::new();
-        commit_connection(out_port(fp2, 0), in_port(pass, 0), &scene, &mut out);
-
-        assert_eq!(out.len(), 1, "just the new binding; nothing severed");
-    }
 }

@@ -20,15 +20,17 @@
 //!   - [`revert_step`] — write the "from" half of an `UndoStep` to
 //!     `&mut Document`. Used during undo.
 //!
-//! [`commit_intent`] is the high-level entry the live frontends drive
-//! their per-intent loop through: build → no-op-filter → apply in one
-//! call, returning the committed step to record. The two halves stay
-//! public for undo-stack redo, which applies a *stored* step without
-//! rebuilding it.
+//! [`commit_intent_cascading`] is the high-level entry the live frontends
+//! drive their per-intent loop through: build → no-op-filter → apply, then
+//! cascade the edits an input change implies (a wildcard-output retype drops
+//! the wires it invalidated), returning the committed steps to record. The
+//! `build_step` / `apply_step` halves stay public for undo-stack redo, which
+//! applies a *stored* step without rebuilding it.
 
 use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
+use scenarium::function::FuncLib;
 use scenarium::graph::{
     Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, Subscription,
 };
@@ -549,23 +551,70 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
     Some(UndoStep::Graph(step))
 }
 
-/// Build, no-op-filter, and apply one `intent` against `target` in a
-/// single call — the high-level entry both live frontends (the GUI
-/// [`crate::gui::app::editor::Editor`] and the headless
-/// [`crate::core::session::Session`]) drive their per-intent loop through.
+/// Build, no-op-filter, and apply one `intent` against `target` in a single
+/// call. The per-intent core of [`commit_intent_cascading`] (the entry the
+/// frontends use); kept separate so the cascade can drive its own sever
+/// intents through the same path.
 ///
 /// Returns the committed [`UndoStep`] (the caller records it and reads its
 /// `requires_*` signals), or `None` when the intent was stale (anchor node
 /// gone) or a no-op — in both cases nothing was written. [`build_step`] /
 /// [`apply_step`] stay separate for the undo-stack redo path, which applies
 /// a stored step without rebuilding it.
-pub fn commit_intent(intent: Intent, doc: &mut Document, target: GraphRef) -> Option<UndoStep> {
+fn commit_intent(intent: Intent, doc: &mut Document, target: GraphRef) -> Option<UndoStep> {
     let step = build_step(intent, doc, target)?;
     if step.is_noop() {
         return None;
     }
     apply_step(&step, doc, target);
     Some(step)
+}
+
+/// [`commit_intent`], plus the cascaded edits an input change implies: when a
+/// `SetInput` retypes a node's *wildcard* output (a passthrough / reroute), every
+/// downstream wire that no longer typechecks is dropped — in the same batch, so
+/// undo restores the binding and the severed edges together. `func_lib` resolves
+/// the port types. Returns every committed step (the triggering one first), so
+/// the caller records / inspects them as one unit. Both the GUI editor and the
+/// headless session drive their forward-apply loop through this.
+pub fn commit_intent_cascading(
+    intent: Intent,
+    doc: &mut Document,
+    target: GraphRef,
+    func_lib: &FuncLib,
+) -> Vec<UndoStep> {
+    // Only a `SetInput` can retype a node's output, so only it can invalidate
+    // downstream wires. Capture which input changed before the intent is moved.
+    let retyped = match &intent {
+        Intent::SetInput {
+            node_id, input_idx, ..
+        } => Some((*node_id, *input_idx)),
+        _ => None,
+    };
+    let Some(step) = commit_intent(intent, doc, target) else {
+        return Vec::new();
+    };
+    let mut steps = vec![step];
+    if let Some((node, input_idx)) = retyped {
+        // The engine resolves which wires the retype invalidated (transitively,
+        // through any chain of wildcard outputs); drop each in the same batch.
+        let severed = doc
+            .graph_for(target)
+            .map(|graph| graph.edges_invalidated_by(func_lib, node, input_idx))
+            .unwrap_or_default();
+        for dst in severed {
+            steps.extend(commit_intent(
+                Intent::SetInput {
+                    node_id: dst.node_id,
+                    input_idx: dst.port_idx,
+                    to: Binding::None,
+                },
+                doc,
+                target,
+            ));
+        }
+    }
+    steps
 }
 
 /// Build an [`Intent::DuplicateNodes`] for `target`'s current selection.

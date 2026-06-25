@@ -80,11 +80,15 @@ impl App {
             return;
         };
         let value = StaticValue::FsPath(path.to_string_lossy().into_owned());
-        self.editor.apply_edit(Intent::SetInput {
-            node_id,
-            input_idx: port_idx,
-            to: Binding::Const(value),
-        });
+        let func_lib = self.engine.func_lib.load();
+        self.editor.apply_edit(
+            Intent::SetInput {
+                node_id,
+                input_idx: port_idx,
+                to: Binding::Const(value),
+            },
+            &func_lib,
+        );
     }
 
     /// Export a subgraph def to a file (its interior `Graph` carries any

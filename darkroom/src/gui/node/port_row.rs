@@ -279,11 +279,11 @@ fn output_cell(
     let theme = rcx.theme;
     let fill = port_color(
         theme,
-        output.ty.data_type(),
+        &output.ty,
         PortKind::Output,
         rcx.port_frame.is_hovered(port),
     );
-    let tip = type_label(output.ty.data_type());
+    let tip = type_label(&output.ty);
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     Panel::hstack()

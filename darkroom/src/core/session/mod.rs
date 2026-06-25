@@ -14,10 +14,11 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
+use scenarium::function::FuncLib;
 use scenarium::prelude::Graph as CoreGraph;
 
 use crate::core::document::Document;
-use crate::core::edit::intent::{Intent, commit_intent};
+use crate::core::edit::intent::{Intent, commit_intent_cascading};
 use crate::core::engine::Engine;
 use crate::core::io::config::AppConfig;
 use crate::core::io::persistence;
@@ -111,7 +112,8 @@ impl Session {
             match event {
                 ScriptMessage::Print { msg } => self.push_status(format!("script: {msg}")),
                 ScriptMessage::Apply(intents) => {
-                    self.needs_reconcile |= apply_intents(&mut self.document, intents);
+                    let func_lib = self.engine.func_lib.load();
+                    self.needs_reconcile |= apply_intents(&mut self.document, intents, &func_lib);
                 }
                 ScriptMessage::RunOnce => run = true,
                 ScriptMessage::Shutdown => self.quit = true,
@@ -194,12 +196,14 @@ fn empty_document() -> Document {
 /// whether any of them can change a subgraph's derived interface (so the
 /// caller reconciles before the next run / save). No undo — the non-GUI
 /// frontends don't expose it. No-op and stale intents (anchor node already
-/// gone) are dropped per-intent.
-fn apply_intents(document: &mut Document, intents: Vec<Intent>) -> bool {
+/// gone) are dropped per-intent; a `SetInput` that retypes a wildcard output
+/// cascades into dropping the now-incompatible downstream wires (`func_lib`
+/// resolves the types).
+fn apply_intents(document: &mut Document, intents: Vec<Intent>, func_lib: &FuncLib) -> bool {
     let target = document.active_target();
     let mut needs_reconcile = false;
     for intent in intents {
-        if let Some(step) = commit_intent(intent, document, target) {
+        for step in commit_intent_cascading(intent, document, target, func_lib) {
             needs_reconcile |= step.requires_reconcile();
         }
     }

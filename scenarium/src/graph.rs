@@ -462,6 +462,21 @@ impl Graph {
         resolved
     }
 
+    /// The output ports `node` declares (func / special spec, or subgraph
+    /// def interface), or `None` for a boundary / unresolved node.
+    fn node_outputs<'a>(
+        &'a self,
+        func_lib: &'a FuncLib,
+        node: &'a Node,
+    ) -> Option<&'a [FuncOutput]> {
+        match &node.kind {
+            NodeKind::Func(func_id) => func_lib.by_id(func_id).map(|f| f.outputs.as_slice()),
+            NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).map(|d| d.outputs.as_slice()),
+            NodeKind::Special(s) => Some(s.func().outputs.as_slice()),
+            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => None,
+        }
+    }
+
     /// The declared [`FuncOutput`] of output `port` — its name + [`OutputType`],
     /// or `None` for a boundary / unresolved node. The output-side mirror of
     /// [`Self::input_spec`].
@@ -471,13 +486,84 @@ impl Graph {
         port: OutputPort,
     ) -> Option<&'a FuncOutput> {
         let node = self.by_id(&port.node_id)?;
-        let outputs = match &node.kind {
-            NodeKind::Func(func_id) => &func_lib.by_id(func_id)?.outputs,
-            NodeKind::Subgraph(r) => &self.resolve_def(*r, func_lib)?.outputs,
-            NodeKind::Special(s) => &s.func().outputs,
-            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => return None,
+        self.node_outputs(func_lib, node)?.get(port.port_idx)
+    }
+
+    /// Output ports of `node_id` whose type *mirrors* input `input_idx` —
+    /// wildcard (passthrough / reroute) outputs that retype when that input
+    /// changes. Empty for an ordinary input or node.
+    fn wildcard_outputs_mirroring(
+        &self,
+        func_lib: &FuncLib,
+        node_id: NodeId,
+        input_idx: usize,
+    ) -> Vec<OutputPort> {
+        let Some(node) = self.by_id(&node_id) else {
+            return Vec::new();
         };
-        outputs.get(port.port_idx)
+        let Some(outputs) = self.node_outputs(func_lib, node) else {
+            return Vec::new();
+        };
+        outputs
+            .iter()
+            .enumerate()
+            .filter(
+                |(_, o)| matches!(o.ty, OutputType::Wildcard { mirrors } if mirrors == input_idx),
+            )
+            .map(|(i, _)| OutputPort::new(node_id, i))
+            .collect()
+    }
+
+    /// The input ports whose incoming `Bind` is no longer type-compatible once
+    /// input `changed_input` of `changed_node` changed — the wires the editor
+    /// drops to keep the graph well-typed. Follows wildcard outputs
+    /// *transitively*: a passthrough / reroute fed by the change retypes too, so
+    /// its now-incompatible consumers (any number of hops downstream) are
+    /// included. Empty when the change retypes nothing (an ordinary node's
+    /// input, or a wildcard input no output mirrors). The engine never
+    /// type-checks, so only the editor calls this.
+    pub fn edges_invalidated_by(
+        &self,
+        func_lib: &FuncLib,
+        changed_node: NodeId,
+        changed_input: usize,
+    ) -> Vec<InputPort> {
+        // Output ports whose resolved type just changed, grown forward from
+        // `changed_node`'s wildcard outputs through downstream wildcards. The
+        // set doubles as the cycle / re-visit guard.
+        let mut retyped: HashSet<OutputPort> = HashSet::new();
+        let mut frontier: Vec<OutputPort> = Vec::new();
+        for port in self.wildcard_outputs_mirroring(func_lib, changed_node, changed_input) {
+            if retyped.insert(port) {
+                frontier.push(port);
+            }
+        }
+
+        let mut invalidated = Vec::new();
+        while let Some(src) = frontier.pop() {
+            let source_ty = self.resolve_output_type(func_lib, src);
+            for (dst, edge_src) in self.edges() {
+                if edge_src != src {
+                    continue;
+                }
+                match self.input_type(func_lib, dst) {
+                    // The consumer can't accept the retyped value — drop the wire.
+                    Some(sink_ty) if !sink_ty.compatible_with(&source_ty) => invalidated.push(dst),
+                    // Kept: a wildcard output of the consumer mirroring this
+                    // input retypes too, so follow it further downstream.
+                    _ => {
+                        for port in
+                            self.wildcard_outputs_mirroring(func_lib, dst.node_id, dst.port_idx)
+                        {
+                            if retyped.insert(port) {
+                                frontier.push(port);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        invalidated
     }
 
     /// Every data edge as (consumer input ← producer output). Const bindings
@@ -1335,6 +1421,58 @@ mod tests {
             DataType::Bool,
             "the const's type propagates through the second passthrough too"
         );
+    }
+
+    #[test]
+    fn edges_invalidated_by_follows_wildcard_chains() {
+        use crate::data::DataType;
+        use crate::function::FuncLib;
+        use crate::special::SpecialNode;
+
+        let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
+        let str_src = Func::new(FuncId::unique(), "ssrc").output("o", DataType::String);
+        let float_sink = Func::new(FuncId::unique(), "fsink")
+            .input(FuncInput::required("x", DataType::Float))
+            .output("o", DataType::Float);
+        let mut func_lib = FuncLib::default();
+        func_lib.funcs.add(float_src.clone());
+        func_lib.funcs.add(str_src.clone());
+        func_lib.funcs.add(float_sink.clone());
+
+        let add_pass = |g: &mut Graph| {
+            let node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
+                bypass: false,
+            }));
+            let id = node.id;
+            g.add(node);
+            id
+        };
+
+        // Float producer → pass1 → pass2 → Float sink: a valid chain.
+        let mut g = Graph::default();
+        let fp = g.add_func_node(&float_src);
+        let sp = g.add_func_node(&str_src);
+        let p1 = add_pass(&mut g);
+        let p2 = add_pass(&mut g);
+        let sink = g.add_func_node(&float_sink);
+        g.set_input_binding(InputPort::new(p1, 0), Binding::bind(fp, 0));
+        g.set_input_binding(InputPort::new(p2, 0), Binding::bind(p1, 0));
+        g.set_input_binding(InputPort::new(sink, 0), Binding::bind(p2, 0));
+
+        // Rewire pass1's value input to the String producer: pass1.out and
+        // pass2.out both retype to String, so the *two-hops-down* sink edge is
+        // the one now incompatible — the chain must be followed to find it.
+        g.set_input_binding(InputPort::new(p1, 0), Binding::bind(sp, 0));
+        assert_eq!(
+            g.edges_invalidated_by(&func_lib, p1, 0),
+            vec![InputPort::new(sink, 0)],
+            "the edge two passthroughs downstream is flagged"
+        );
+
+        // Changing an ordinary node's input retypes nothing → no invalidations.
+        assert!(g.edges_invalidated_by(&func_lib, sink, 0).is_empty());
+        // Changing the passthrough's *path* input (no output mirrors it) → none.
+        assert!(g.edges_invalidated_by(&func_lib, p1, 1).is_empty());
     }
 
     #[test]
