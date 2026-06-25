@@ -406,10 +406,12 @@ impl Graph {
     /// outputs up the graph: a wildcard output (e.g. a `CachePassthrough` /
     /// reroute — see [`OutputType::Wildcard`](crate::function::OutputType))
     /// reports the resolved type of whatever feeds the input it mirrors, so a
-    /// value's type survives the hop. The walk dead-ends at the node's
-    /// *declared* type when the mirrored input is unbound/const, the producer is
-    /// a boundary or missing, or a binding cycle is hit — `Null` (polymorphic)
-    /// for a passthrough. Used by the editor for port-type display, connection
+    /// value's type survives the hop: a `Bind` follows the producer up, while a
+    /// `Const` takes the mirrored input's declared type (which carries the full
+    /// `FsPathConfig` / `Enum` id), or the const's own scalar type on a wildcard
+    /// (`Null`-declared) input. The walk dead-ends polymorphic (`Null`) when the
+    /// mirrored input is unbound, the producer is a boundary or missing, or a
+    /// binding cycle is hit. Used by the editor for port-type display, connection
     /// compatibility, and subgraph-interface inference; the engine never
     /// type-checks, so it never calls this.
     pub fn resolve_output_type(&self, library: &Library, port: OutputPort) -> DataType {
@@ -440,24 +442,26 @@ impl Graph {
         if !visiting.insert(port.node_id) {
             return DataType::Null;
         }
-        let resolved = match self.input_binding(InputPort::new(port.node_id, mirrors)) {
+        let mirror = InputPort::new(port.node_id, mirrors);
+        let resolved = match self.input_binding(mirror) {
             Binding::Bind(src) => self.resolve_output_type_inner(library, src, visiting),
-            // A const carries its own type for the scalar kinds, so the output
-            // *is* that type. A `Null` const stays polymorphic.
-            Binding::Const(v) => match v {
-                StaticValue::Float(_) => DataType::Float,
-                StaticValue::Int(_) => DataType::Int,
-                StaticValue::Bool(_) => DataType::Bool,
-                StaticValue::String(_) => DataType::String,
-                StaticValue::Null => DataType::Null,
-                // A bare `StaticValue` lacks the `FsPathConfig`/`EnumDef` those
-                // `DataType`s need, so the resolved type can't be reconstructed.
-                StaticValue::FsPath(_) | StaticValue::Enum(_) => {
-                    unimplemented!(
-                        "resolving a wildcard output through a const FsPath/Enum input \
-                         is unimplemented (no FsPathConfig/EnumDef on a bare StaticValue)"
-                    )
-                }
+            // The mirrored input's *declared* type already carries the full
+            // `FsPathConfig` / `Enum` id (and a `Custom` id for a preset port), so
+            // a const of any kind resolves to it. A wildcard (`Null`-declared)
+            // input instead takes the const's own, more specific scalar type; a
+            // bare path/enum/null const there isn't reconstructable from the
+            // value alone, so it stays polymorphic (`Null`).
+            Binding::Const(v) => match self.input_type(library, mirror) {
+                Some(declared) if !matches!(declared, DataType::Null) => declared,
+                _ => match v {
+                    StaticValue::Float(_) => DataType::Float,
+                    StaticValue::Int(_) => DataType::Int,
+                    StaticValue::Bool(_) => DataType::Bool,
+                    StaticValue::String(_) => DataType::String,
+                    StaticValue::Null | StaticValue::FsPath(_) | StaticValue::Enum(_) => {
+                        DataType::Null
+                    }
+                },
             },
             // Nothing wired in yet — polymorphic.
             Binding::None => DataType::Null,
@@ -1411,6 +1415,59 @@ mod tests {
             graph.resolve_output_type(&library, OutputPort::new(p2, 0)),
             DataType::Bool,
             "the const's type propagates through the second passthrough too"
+        );
+
+        // A const whose type can't be reconstructed from the value alone — an
+        // enum literal on a `Null` (wildcard) input — stays polymorphic rather
+        // than panicking. (The passthrough's value input is `Null`-declared.)
+        graph.set_input_binding(
+            InputPort::new(p1, 0),
+            Binding::Const(StaticValue::Enum("X".into())),
+        );
+        assert_eq!(
+            graph.resolve_output_type(&library, OutputPort::new(p1, 0)),
+            DataType::Null
+        );
+    }
+
+    #[test]
+    fn resolve_output_type_uses_declared_type_for_typed_const_input() {
+        use crate::data::{DataType, FsPathConfig, FsPathMode, StaticValue, TypeId};
+        use crate::library::Library;
+        use std::sync::Arc;
+
+        // A reroute func with *typed* inputs, each mirrored by a wildcard output.
+        let fs_ty = DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile)));
+        let enum_ty = DataType::Enum(TypeId::from_u128(0x5e));
+        let func = Func::new(FuncId::unique(), "reroute")
+            .input(FuncInput::required("path", fs_ty.clone()))
+            .input(FuncInput::required("mode", enum_ty.clone()))
+            .wildcard_output("path_out", 0)
+            .wildcard_output("mode_out", 1);
+        let mut library = Library::default();
+        library.funcs.add(func.clone());
+
+        let mut graph = Graph::default();
+        let n = graph.add_func_node(&func);
+
+        // A const FsPath / Enum on a typed input resolves to that input's
+        // *declared* type — which carries the full `FsPathConfig` / `Enum` id the
+        // bare `StaticValue` lacks (this is the case that used to be unimplemented).
+        graph.set_input_binding(
+            InputPort::new(n, 0),
+            Binding::Const(StaticValue::FsPath("/tmp/x".into())),
+        );
+        graph.set_input_binding(
+            InputPort::new(n, 1),
+            Binding::Const(StaticValue::Enum("A".into())),
+        );
+        assert_eq!(
+            graph.resolve_output_type(&library, OutputPort::new(n, 0)),
+            fs_ty
+        );
+        assert_eq!(
+            graph.resolve_output_type(&library, OutputPort::new(n, 1)),
+            enum_ty
         );
     }
 
