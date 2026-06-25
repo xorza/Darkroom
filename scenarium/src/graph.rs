@@ -439,17 +439,21 @@ impl Graph {
         let resolved = match self.input_binding(InputPort::new(port.node_id, mirrors)) {
             Binding::Bind(src) => self.resolve_output_type_inner(func_lib, src, visiting),
             // A const carries its own type for the scalar kinds, so the output
-            // *is* that type. `Null`/`FsPath`/`Enum` stay polymorphic: a bare
-            // `StaticValue` lacks the `FsPathConfig`/`EnumDef` those `DataType`s
-            // need, and fabricating a default would make the resolved type
-            // mismatch the real consumer's (compat compares config/type_id) —
-            // wrongly rejecting a valid wire, worse than the permissive `Null`.
+            // *is* that type. A `Null` const stays polymorphic.
             Binding::Const(v) => match v {
                 StaticValue::Float(_) => DataType::Float,
                 StaticValue::Int(_) => DataType::Int,
                 StaticValue::Bool(_) => DataType::Bool,
                 StaticValue::String(_) => DataType::String,
-                StaticValue::Null | StaticValue::FsPath(_) | StaticValue::Enum(_) => DataType::Null,
+                StaticValue::Null => DataType::Null,
+                // A bare `StaticValue` lacks the `FsPathConfig`/`EnumDef` those
+                // `DataType`s need, so the resolved type can't be reconstructed.
+                StaticValue::FsPath(_) | StaticValue::Enum(_) => {
+                    unimplemented!(
+                        "resolving a wildcard output through a const FsPath/Enum input \
+                         is unimplemented (no FsPathConfig/EnumDef on a bare StaticValue)"
+                    )
+                }
             },
             // Nothing wired in yet — polymorphic.
             Binding::None => DataType::Null,
@@ -1330,18 +1334,6 @@ mod tests {
             graph.resolve_output_type(&func_lib, OutputPort::new(p2, 0)),
             DataType::Bool,
             "the const's type propagates through the second passthrough too"
-        );
-
-        // FsPath/Enum consts can't reconstruct their full `DataType` (no
-        // config/EnumDef on a bare value), so they stay permissive `Null`
-        // rather than fabricate a mismatching type.
-        graph.set_input_binding(
-            InputPort::new(p1, 0),
-            Binding::Const(StaticValue::FsPath("frames/".into())),
-        );
-        assert_eq!(
-            graph.resolve_output_type(&func_lib, OutputPort::new(p1, 0)),
-            DataType::Null
         );
     }
 
