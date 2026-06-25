@@ -129,7 +129,7 @@ fn apply_intents_severs_incompatible_passthrough_output_edges() {
     let float_sink = Func::new(FuncId::unique(), "fsink")
         .input(FuncInput::required("x", DataType::Float))
         .output("o", DataType::Float);
-    let func_lib = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
+    let library = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
 
     let mut doc = empty_document();
     let fp = doc.graph.add_func_node(&float_src);
@@ -157,7 +157,7 @@ fn apply_intents_severs_incompatible_passthrough_output_edges() {
             input_idx: 0,
             to: Binding::bind(sp, 0),
         }],
-        &func_lib,
+        &library,
     );
 
     assert_eq!(
@@ -185,7 +185,7 @@ fn apply_intents_severs_through_a_passthrough_chain() {
     let float_sink = Func::new(FuncId::unique(), "fsink")
         .input(FuncInput::required("x", DataType::Float))
         .output("o", DataType::Float);
-    let func_lib = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
+    let library = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
 
     let add_pass = |doc: &mut Document| {
         let node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
@@ -218,7 +218,7 @@ fn apply_intents_severs_through_a_passthrough_chain() {
             input_idx: 0,
             to: Binding::bind(sp, 0),
         }],
-        &func_lib,
+        &library,
     );
 
     assert_eq!(

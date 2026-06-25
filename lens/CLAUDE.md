@@ -40,8 +40,8 @@ src/
 
 ## Key types
 
-- `image_funclib()` — builds a `FuncLib` of the imaginarium image nodes.
-- `astro_funclib()` — builds a `FuncLib` of the lumos astro nodes.
+- `image_funclib()` — builds a `Library` of the imaginarium image nodes.
+- `astro_funclib()` — builds a `Library` of the lumos astro nodes.
 - `Image` — wrapper around `imaginarium::ImageBuffer` implementing `CustomValue` (GPU thumbnail preview).
 - `AstroFrame` — wrapper around `lumos::AstroImage` implementing `CustomValue`; `gen_preview` builds a downscaled RGBA_U8 thumbnail on the CPU (planar channels sampled straight to RGBA, no display stretch — linear frames preview dark) and parks it in a `Slot`.
 - `Masters` — wrapper around `lumos::CalibrationMasters`.

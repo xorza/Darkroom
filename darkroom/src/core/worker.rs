@@ -115,9 +115,9 @@ impl WorkerBridge {
     /// execute its terminals. One batched send so the worker commits
     /// both as a unit. A dropped send (worker already exited) is a
     /// harmless shutdown no-op.
-    pub(crate) fn run_once(&self, graph: Graph, func_lib: Arc<Library>) {
+    pub(crate) fn run_once(&self, graph: Graph, library: Arc<Library>) {
         let _ = self.worker.send_many([
-            WorkerMessage::Update { graph, func_lib },
+            WorkerMessage::Update { graph, library },
             WorkerMessage::ExecuteTerminals,
         ]);
     }

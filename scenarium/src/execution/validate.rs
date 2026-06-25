@@ -17,7 +17,7 @@ use crate::library::Library;
 /// runtime cache stayed index-aligned to the nodes after `reconcile`. The source
 /// graph is gone after flattening, so this validates each `e_node` against its
 /// func and checks binding integrity.
-pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, func_lib: &Library) {
+pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, library: &Library) {
     if !is_debug() {
         return;
     }
@@ -38,7 +38,7 @@ pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, func_lib: &Lib
         // A special node's interface is its hardcoded spec, not a library func.
         let func = match e_node.special {
             Some(s) => s.func(),
-            None => func_lib.by_id(&e_node.func_id).unwrap(),
+            None => library.by_id(&e_node.func_id).unwrap(),
         };
         assert_eq!(e_node.inputs.len as usize, func.inputs.len());
         assert_eq!(e_node.outputs.len as usize, func.outputs.len());

@@ -50,7 +50,7 @@ pub enum WorkerMessage {
 
     Update {
         graph: Graph,
-        func_lib: Arc<Library>,
+        library: Arc<Library>,
     },
     Clear,
     /// Swap the engine's output cache (codec registry + content-addressed store
@@ -300,8 +300,8 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
                 };
             }
             WorkerMessage::InjectEvents { events } => intent.events.extend(events),
-            WorkerMessage::Update { graph, func_lib } => {
-                intent.graph_state = Some(GraphOp::Replace(graph, func_lib));
+            WorkerMessage::Update { graph, library } => {
+                intent.graph_state = Some(GraphOp::Replace(graph, library));
             }
             WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
             WorkerMessage::SetOutputCache(cache) => intent.output_cache = Some(cache),
@@ -404,9 +404,9 @@ async fn worker_loop<ExecutionCallback>(
                 execution_engine.clear();
                 true
             }
-            Some(GraphOp::Replace(graph, func_lib)) => {
+            Some(GraphOp::Replace(graph, library)) => {
                 tracing::info!("Graph updated");
-                match execution_engine.update(&graph, &func_lib) {
+                match execution_engine.update(&graph, &library) {
                     Ok(()) => true,
                     Err(e) => {
                         // Compile failed (e.g. a func missing from the lib):

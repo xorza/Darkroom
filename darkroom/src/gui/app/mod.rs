@@ -32,7 +32,7 @@ pub(crate) struct AppContext<'a> {
     /// so the Theme menu can mark the active choice. Distinct from
     /// `theme`, the concrete palette `System` resolved to.
     pub(crate) theme_choice: ThemeChoice,
-    pub(crate) func_lib: &'a Library,
+    pub(crate) library: &'a Library,
     /// Last run's per-node state (status, logs, fetched runtime values),
     /// keyed by authoring `NodeId`. Read by the inspection panel's Log and
     /// Inputs/Outputs sections.
@@ -50,7 +50,7 @@ pub(crate) struct AppContext<'a> {
 pub(crate) struct App {
     pub(crate) editor: Editor,
     /// Shared runtime services — func lib + evaluation worker + script host
-    /// — built at startup. The GUI loads an `engine.func_lib` snapshot each
+    /// — built at startup. The GUI loads an `engine.library` snapshot each
     /// frame and drains the worker/script queues through it. Off the
     /// serialized state.
     pub(crate) engine: Engine,
@@ -169,8 +169,8 @@ impl App {
             match event {
                 ScriptMessage::Print { msg } => eprintln!("script: {msg}"),
                 ScriptMessage::Apply(intents) => {
-                    let func_lib = self.engine.func_lib.load();
-                    self.editor.apply_external_intents(intents, &func_lib);
+                    let library = self.engine.library.load();
+                    self.editor.apply_external_intents(intents, &library);
                 }
                 ScriptMessage::RunOnce => run = true,
                 // Shutdown is terminal: quit and drop the rest of the batch
@@ -208,10 +208,10 @@ impl palantir::App for App {
 
         // One consistent library snapshot for the whole frame (cheap atomic
         // load); a mid-frame promote/publish swap takes effect next frame.
-        let func_lib = self.engine.func_lib.load();
+        let library = self.engine.library.load();
         let command = self.editor.frame(
             ui,
-            &func_lib,
+            &library,
             &self.theme,
             self.config.theme,
             &self.host_handle,

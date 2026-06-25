@@ -41,12 +41,12 @@ struct SidePlan<T> {
 /// Reconcile one subgraph def's interface against its interior wiring.
 /// Entry point is [`Document::reconcile_boundaries`] (in `document.rs`),
 /// which loops this over every local def.
-pub(crate) fn reconcile_def(doc: &mut Document, def_id: SubgraphId, func_lib: &Library) {
+pub(crate) fn reconcile_def(doc: &mut Document, def_id: SubgraphId, library: &Library) {
     let (inputs, outputs) = {
         let Some(def) = doc.graph.subgraphs.by_key(&def_id) else {
             return;
         };
-        (plan_inputs(def, func_lib), plan_outputs(def, func_lib))
+        (plan_inputs(def, library), plan_outputs(def, library))
     };
     let input_changed = inputs.as_ref().is_some_and(|p| p.changed);
     let output_changed = outputs.as_ref().is_some_and(|p| p.changed);
@@ -89,7 +89,7 @@ pub(crate) fn reconcile_def(doc: &mut Document, def_id: SubgraphId, func_lib: &L
 /// names survive); a freshly-used slot is synthesized with the type of
 /// the interior port it now feeds. `None` when the interior has no
 /// `SubgraphInput` node (nothing to derive — leave `def.inputs` alone).
-fn plan_inputs(def: &SubgraphDef, func_lib: &Library) -> Option<SidePlan<FuncInput>> {
+fn plan_inputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncInput>> {
     let interior = &def.graph;
     let boundary = interior
         .iter()
@@ -108,7 +108,7 @@ fn plan_inputs(def: &SubgraphDef, func_lib: &Library) -> Option<SidePlan<FuncInp
         // to a differently-typed node updates it); the name and any
         // authored fields are preserved. A passthrough / unwired-to-a-real
         // port resolves to `Null` (polymorphic — see `infer_used_input_type`).
-        let data_type = infer_used_input_type(interior, func_lib, boundary, old);
+        let data_type = infer_used_input_type(interior, library, boundary, old);
         interface.push(match def.inputs.get(old) {
             Some(existing) => FuncInput {
                 data_type,
@@ -128,7 +128,7 @@ fn plan_inputs(def: &SubgraphDef, func_lib: &Library) -> Option<SidePlan<FuncInp
 
 /// Plan the outputs side: one interface output per used `SubgraphOutput`
 /// input, compacted. Mirror of [`plan_inputs`].
-fn plan_outputs(def: &SubgraphDef, func_lib: &Library) -> Option<SidePlan<FuncOutput>> {
+fn plan_outputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncOutput>> {
     let interior = &def.graph;
     let boundary = interior
         .iter()
@@ -146,7 +146,7 @@ fn plan_outputs(def: &SubgraphDef, func_lib: &Library) -> Option<SidePlan<FuncOu
         remap.insert(old, new_idx);
         // Re-derive the type from the wired producer each pass; preserve
         // the name. Passthrough / unwired-to-a-real producer → `Null`.
-        let data_type = infer_used_output_type(interior, func_lib, boundary, old);
+        let data_type = infer_used_output_type(interior, library, boundary, old);
         let name = match def.outputs.get(old) {
             Some(existing) => existing.name.clone(),
             None => format!("output{new_idx}"),
@@ -243,14 +243,14 @@ fn synth_input(idx: usize, data_type: DataType) -> FuncInput {
 /// with no destination shouldn't reach here, but stay total).
 fn infer_used_input_type(
     interior: &Graph,
-    func_lib: &Library,
+    library: &Library,
     boundary: NodeId,
     old: usize,
 ) -> DataType {
     interior
         .edges()
         .find(|(_, src)| src.node_id == boundary && src.port_idx == old)
-        .and_then(|(tgt, _)| interior.input_type(func_lib, tgt))
+        .and_then(|(tgt, _)| interior.input_type(library, tgt))
         .unwrap_or_default()
 }
 
@@ -261,7 +261,7 @@ fn infer_used_input_type(
 /// exposed output keeps the value's real type.
 fn infer_used_output_type(
     interior: &Graph,
-    func_lib: &Library,
+    library: &Library,
     boundary: NodeId,
     old: usize,
 ) -> DataType {
@@ -272,7 +272,7 @@ fn infer_used_output_type(
             Binding::Bind(src) if port.node_id == boundary && port.port_idx == old => Some(src),
             _ => None,
         })
-        .map(|src| interior.resolve_output_type(func_lib, src))
+        .map(|src| interior.resolve_output_type(library, src))
         .unwrap_or_default()
 }
 

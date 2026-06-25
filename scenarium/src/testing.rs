@@ -111,7 +111,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
 }
 
 pub fn test_graph() -> Graph {
-    let func_lib = test_func_lib(TestFuncHooks::default());
+    let library = test_func_lib(TestFuncHooks::default());
 
     let mut graph = Graph::default();
 
@@ -121,11 +121,11 @@ pub fn test_graph() -> Graph {
     let sum_node_id: NodeId = "999c4d37-e0eb-4856-be3f-ad2090c84d8c".into();
     let print_node_id: NodeId = "b88ab7e2-17b7-46cb-bc8e-b428bb45141e".into();
 
-    let get_a_func = func_lib.by_name("get_a").unwrap();
-    let get_b_func = func_lib.by_name("get_b").unwrap();
-    let sum_func = func_lib.by_name("sum").unwrap();
-    let mult_func = func_lib.by_name("mult").unwrap();
-    let print_func = func_lib.by_name("print").unwrap();
+    let get_a_func = library.by_name("get_a").unwrap();
+    let get_b_func = library.by_name("get_b").unwrap();
+    let sum_func = library.by_name("sum").unwrap();
+    let mult_func = library.by_name("mult").unwrap();
+    let print_func = library.by_name("print").unwrap();
 
     let mut get_a_node: Node = get_a_func.into();
     get_a_node.id = get_a_node_id;

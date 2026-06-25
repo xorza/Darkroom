@@ -31,7 +31,7 @@ fn messages(stats: &ExecutionStats) -> Vec<String> {
 /// `EventRef`).
 struct FrameHarness {
     worker: Worker,
-    func_lib: Arc<Library>,
+    library: Arc<Library>,
     graph: Graph,
     frame_event_node_id: NodeId,
     compute_rx: mpsc::Receiver<ExecResult<ExecutionStats>>,
@@ -43,12 +43,12 @@ impl FrameHarness {
     }
 
     async fn with_callback_capacity(cap: usize) -> Self {
-        let mut func_lib = basic_funclib();
-        func_lib.merge(worker_events_funclib());
+        let mut library = basic_funclib();
+        library.merge(worker_events_funclib());
 
-        let graph = log_frame_no_graph(&func_lib);
+        let graph = log_frame_no_graph(&library);
         let frame_event_node_id = graph.by_name("frame event").unwrap().id;
-        let func_lib = Arc::new(func_lib);
+        let library = Arc::new(library);
 
         let (tx, compute_rx) = mpsc::channel(cap);
         let worker = Worker::new(move |report| {
@@ -60,7 +60,7 @@ impl FrameHarness {
 
         Self {
             worker,
-            func_lib,
+            library,
             graph,
             frame_event_node_id,
             compute_rx,
@@ -70,7 +70,7 @@ impl FrameHarness {
     fn update_msg(&self) -> WorkerMessage {
         WorkerMessage::Update {
             graph: self.graph.clone(),
-            func_lib: self.func_lib.clone(),
+            library: self.library.clone(),
         }
     }
 
@@ -88,16 +88,16 @@ impl FrameHarness {
     }
 }
 
-fn log_frame_no_graph(func_lib: &Library) -> Graph {
+fn log_frame_no_graph(library: &Library) -> Graph {
     let mut graph = Graph::default();
 
     let frame_event_node_id: NodeId = "e69c3f32-ac66-4447-a3f6-9e8528c5d830".into();
     let float_to_string_node_id: NodeId = "eb6590aa-229d-4874-abba-37c56f5b97fa".into();
     let print_node_id: NodeId = "8be72298-dece-4a5f-8a1d-d2dee1e791d3".into();
 
-    let frame_event_func = func_lib.by_name("frame event").unwrap();
-    let float_to_string_func = func_lib.by_name("float to string").unwrap();
-    let print_func = func_lib.by_name("print").unwrap();
+    let frame_event_func = library.by_name("frame event").unwrap();
+    let float_to_string_func = library.by_name("float to string").unwrap();
+    let print_func = library.by_name("print").unwrap();
 
     let mut frame_event_node: Node = frame_event_func.into();
     frame_event_node.id = frame_event_node_id;
@@ -167,7 +167,7 @@ async fn update_with_missing_func_reports_error_then_recovers() {
         .send_many([
             WorkerMessage::Update {
                 graph: bad_graph,
-                func_lib: h.func_lib.clone(),
+                library: h.library.clone(),
             },
             WorkerMessage::ExecuteTerminals,
         ])
@@ -427,11 +427,11 @@ async fn events_are_deduplicated() {
 async fn execute_terminals_triggers_terminal_nodes() {
     use crate::data::StaticValue;
 
-    let func_lib = basic_funclib();
+    let library = basic_funclib();
 
     // Simple single-terminal graph — doesn't use FrameHarness' frame-event setup.
     let mut graph = Graph::default();
-    let print_func = func_lib.by_name("print").unwrap();
+    let print_func = library.by_name("print").unwrap();
 
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
@@ -453,7 +453,7 @@ async fn execute_terminals_triggers_terminal_nodes() {
         .send_many([
             WorkerMessage::Update {
                 graph,
-                func_lib: Arc::new(func_lib),
+                library: Arc::new(library),
             },
             WorkerMessage::ExecuteTerminals,
         ])
@@ -473,9 +473,9 @@ async fn execute_terminals_triggers_terminal_nodes() {
 async fn worker_streams_node_progress_before_finished() {
     use crate::data::StaticValue;
 
-    let func_lib = basic_funclib();
+    let library = basic_funclib();
     let mut graph = Graph::default();
-    let print_func = func_lib.by_name("print").unwrap();
+    let print_func = library.by_name("print").unwrap();
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
     let print_node_id = print_node.id;
@@ -494,7 +494,7 @@ async fn worker_streams_node_progress_before_finished() {
         .send_many([
             WorkerMessage::Update {
                 graph,
-                func_lib: Arc::new(func_lib),
+                library: Arc::new(library),
             },
             WorkerMessage::ExecuteTerminals,
         ])
@@ -534,9 +534,9 @@ async fn worker_streams_node_progress_before_finished() {
 async fn stale_cancel_is_cleared_at_run_start() {
     use crate::data::StaticValue;
 
-    let func_lib = basic_funclib();
+    let library = basic_funclib();
     let mut graph = Graph::default();
-    let print_func = func_lib.by_name("print").unwrap();
+    let print_func = library.by_name("print").unwrap();
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
     let print_node_id = print_node.id;
@@ -560,7 +560,7 @@ async fn stale_cancel_is_cleared_at_run_start() {
         .send_many([
             WorkerMessage::Update {
                 graph,
-                func_lib: Arc::new(func_lib),
+                library: Arc::new(library),
             },
             WorkerMessage::ExecuteTerminals,
         ])
@@ -950,10 +950,10 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     // the loop never actually spawns. This removes lambda-driven
     // callbacks as a confounding factor while still exercising the
     // should_start_event_loop branch.
-    let func_lib = basic_funclib();
+    let library = basic_funclib();
 
     let mut graph = Graph::default();
-    let print_func = func_lib.by_name("print").unwrap();
+    let print_func = library.by_name("print").unwrap();
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
     let print_node_id = print_node.id;
@@ -974,7 +974,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
         .send_many([
             WorkerMessage::Update {
                 graph,
-                func_lib: Arc::new(func_lib),
+                library: Arc::new(library),
             },
             WorkerMessage::ExecuteTerminals,
             WorkerMessage::StartEventLoop,
@@ -1009,11 +1009,11 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
 async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     use crate::data::StaticValue;
 
-    let func_lib = basic_funclib();
+    let library = basic_funclib();
 
     // Terminal-only graph — one execute produces one line of output.
     let mut graph = Graph::default();
-    let print_func = func_lib.by_name("print").unwrap();
+    let print_func = library.by_name("print").unwrap();
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
     let print_node_id = print_node.id;
@@ -1035,7 +1035,7 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     worker
         .send_many([WorkerMessage::Update {
             graph,
-            func_lib: Arc::new(func_lib),
+            library: Arc::new(library),
         }])
         .unwrap();
     worker.send_many([WorkerMessage::ExecuteTerminals]).unwrap();
@@ -1163,7 +1163,7 @@ fn scan_exit_dominates_entire_batch() {
         WorkerMessage::StartEventLoop, // post-Exit: dropped
         WorkerMessage::Update {
             graph: Graph::default(),
-            func_lib: Arc::new(Library::default()),
+            library: Arc::new(Library::default()),
         },
     ]);
 
@@ -1191,16 +1191,16 @@ fn scan_update_overwrites_earlier_update_in_same_batch() {
     // implicit today (Option::replace) but worth pinning since
     // callers do send [Update(A), Update(B)] during rapid edits.
     let empty_graph = Graph::default();
-    let func_lib = Arc::new(Library::default());
+    let library = Arc::new(Library::default());
 
     let intent = scan(vec![
         WorkerMessage::Update {
             graph: empty_graph.clone(),
-            func_lib: func_lib.clone(),
+            library: library.clone(),
         },
         WorkerMessage::Update {
             graph: empty_graph.clone(),
-            func_lib: func_lib.clone(),
+            library: library.clone(),
         },
     ]);
 
@@ -1218,7 +1218,7 @@ fn scan_clear_then_update_yields_replace() {
         WorkerMessage::Clear,
         WorkerMessage::Update {
             graph: Graph::default(),
-            func_lib: Arc::new(Library::default()),
+            library: Arc::new(Library::default()),
         },
     ]);
     assert!(
@@ -1235,7 +1235,7 @@ fn scan_update_then_clear_yields_clear() {
     let intent = scan(vec![
         WorkerMessage::Update {
             graph: Graph::default(),
-            func_lib: Arc::new(Library::default()),
+            library: Arc::new(Library::default()),
         },
         WorkerMessage::Clear,
     ]);
@@ -1616,7 +1616,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     graph.set_input_binding(InputPort::new(mult_id, 1), (get_a_id, 0).into());
     graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
 
-    async fn run(root: &Path, graph: Graph, func_lib: Arc<Library>) -> ExecutionStats {
+    async fn run(root: &Path, graph: Graph, library: Arc<Library>) -> ExecutionStats {
         let (tx, mut rx) = mpsc::channel(4);
         let worker = Worker::new(move |report| {
             if let WorkerReport::Finished(result) = report {
@@ -1629,7 +1629,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
         worker
             .send_many([
                 WorkerMessage::SetOutputCache(cache),
-                WorkerMessage::Update { graph, func_lib },
+                WorkerMessage::Update { graph, library },
                 WorkerMessage::ExecuteTerminals,
             ])
             .unwrap();

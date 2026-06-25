@@ -15,10 +15,10 @@ use scenarium::library::Library;
 
 /// The imaginarium image-processing nodes (category `image`).
 pub fn image_funclib() -> Library {
-    let mut func_lib = Library::default();
+    let mut library = Library::default();
 
     // brightness_contrast
-    func_lib.add(
+    library.add(
         Func::new(
             "b8c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
             "brightness_contrast",
@@ -66,7 +66,7 @@ pub fn image_funclib() -> Library {
     );
 
     // load_image
-    func_lib.add(
+    library.add(
         Func::new("a4d9bf87-9d98-44f1-a162-7483c298be3d", "load_image")
             .description("Loads an image from file")
             .category("image")
@@ -95,7 +95,7 @@ pub fn image_funclib() -> Library {
     );
 
     // save_image
-    func_lib.add(
+    library.add(
         Func::new("0c17bcbe-d757-43be-b184-27b429e8b434", "save_image")
             .description("Saves an image to file")
             .category("image")
@@ -128,7 +128,7 @@ pub fn image_funclib() -> Library {
     );
 
     // convert
-    func_lib.add(
+    library.add(
         Func::new("80aa1ee7-3b75-4200-b480-b9db913bd6eb", "convert")
             .description("Converts image to a different color format")
             .category("image")
@@ -169,7 +169,7 @@ pub fn image_funclib() -> Library {
     );
 
     // blend
-    func_lib.add(
+    library.add(
         Func::new("975cc74b-8412-4293-b2cb-ef8d41fdd9b3", "blend")
             .description("Blends two images")
             .category("image")
@@ -215,7 +215,7 @@ pub fn image_funclib() -> Library {
     );
 
     // transform
-    func_lib.add(
+    library.add(
         Func::new("d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a", "transform")
             .description("Applies scale, rotation, and translation to an image")
             .category("image")
@@ -270,7 +270,7 @@ pub fn image_funclib() -> Library {
             )),
     );
 
-    func_lib.register_type(IMAGE_TYPE_DEF.type_id, image_type_entry());
+    library.register_type(IMAGE_TYPE_DEF.type_id, image_type_entry());
 
-    func_lib
+    library
 }

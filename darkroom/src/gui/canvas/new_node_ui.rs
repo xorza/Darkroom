@@ -24,7 +24,7 @@ struct ChosenNode {
 }
 
 /// Right-click or double-click on empty canvas → popup that lists every
-/// `Func` in `AppContext::func_lib` grouped by category. Clicking an entry
+/// `Func` in `AppContext::library` grouped by category. Clicking an entry
 /// emits an `Intent::AddNode` placed at the click's world position (inner-
 /// canvas pre-transform). Outside-click and Esc dismiss.
 #[derive(Default, Debug)]
@@ -111,7 +111,7 @@ impl NewNodeUi {
 /// stack constrains its children's main axis, so the cap flows down through
 /// the column stacks into each func wrap. Everything hugs, so the popup is
 /// only as wide/tall as its columns need. Funcs first, then this category's
-/// shared (`Linked`) subgraph defs. The pick is owned, holding no `func_lib`
+/// shared (`Linked`) subgraph defs. The pick is owned, holding no `library`
 /// borrow past the body.
 fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Option<ChosenNode> {
     let mut chosen: Option<ChosenNode> = None;
@@ -136,7 +136,7 @@ fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Optio
                             .line_gap(12.0)
                             .show(ui, |ui| {
                                 for func in
-                                    ctx.func_lib.funcs.iter().filter(|f| f.category == category)
+                                    ctx.library.funcs.iter().filter(|f| f.category == category)
                                 {
                                     if MenuItem::new(func.name.clone()).show(ui, popup).clicked() {
                                         let node: Node = func.into();
@@ -161,7 +161,7 @@ fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Optio
                                 // Shared (`Linked`) subgraph defs of this
                                 // category, after the funcs.
                                 for def in ctx
-                                    .func_lib
+                                    .library
                                     .subgraphs
                                     .iter()
                                     .filter(|d| d.category == category)
@@ -194,11 +194,11 @@ fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Optio
 /// deduped — one popup column each.
 fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
     let mut cats: Vec<&str> = ctx
-        .func_lib
+        .library
         .funcs
         .iter()
         .map(|f| f.category.as_str())
-        .chain(ctx.func_lib.subgraphs.iter().map(|d| d.category.as_str()))
+        .chain(ctx.library.subgraphs.iter().map(|d| d.category.as_str()))
         .chain(SPECIAL_NODES.iter().map(|s| s.func().category.as_str()))
         .collect();
     cats.sort();

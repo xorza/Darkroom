@@ -112,8 +112,8 @@ impl Session {
             match event {
                 ScriptMessage::Print { msg } => self.push_status(format!("script: {msg}")),
                 ScriptMessage::Apply(intents) => {
-                    let func_lib = self.engine.func_lib.load();
-                    self.needs_reconcile |= apply_intents(&mut self.document, intents, &func_lib);
+                    let library = self.engine.library.load();
+                    self.needs_reconcile |= apply_intents(&mut self.document, intents, &library);
                 }
                 ScriptMessage::RunOnce => run = true,
                 ScriptMessage::Shutdown => self.quit = true,
@@ -144,7 +144,7 @@ impl Session {
     fn reconcile_if_needed(&mut self) {
         if self.needs_reconcile {
             self.document
-                .reconcile_boundaries(&self.engine.func_lib.load());
+                .reconcile_boundaries(&self.engine.library.load());
             self.needs_reconcile = false;
         }
     }
@@ -197,13 +197,13 @@ fn empty_document() -> Document {
 /// caller reconciles before the next run / save). No undo — the non-GUI
 /// frontends don't expose it. No-op and stale intents (anchor node already
 /// gone) are dropped per-intent; a `SetInput` that retypes a wildcard output
-/// cascades into dropping the now-incompatible downstream wires (`func_lib`
+/// cascades into dropping the now-incompatible downstream wires (`library`
 /// resolves the types).
-fn apply_intents(document: &mut Document, intents: Vec<Intent>, func_lib: &Library) -> bool {
+fn apply_intents(document: &mut Document, intents: Vec<Intent>, library: &Library) -> bool {
     let target = document.active_target();
     let mut needs_reconcile = false;
     for intent in intents {
-        for step in commit_intent_cascading(intent, document, target, func_lib) {
+        for step in commit_intent_cascading(intent, document, target, library) {
             needs_reconcile |= step.requires_reconcile();
         }
     }

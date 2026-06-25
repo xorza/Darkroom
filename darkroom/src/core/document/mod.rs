@@ -512,13 +512,13 @@ impl Document {
     /// against its interior wiring — derived state, recomputed like the
     /// scene rather than stored as undo steps. See `crate::core::edit::reconcile` for
     /// the per-def logic and rationale (placeholder ports, compaction).
-    pub fn reconcile_boundaries(&mut self, func_lib: &Library) {
+    pub fn reconcile_boundaries(&mut self, library: &Library) {
         if self.graph.subgraphs.is_empty() {
             return;
         }
         let def_ids: Vec<SubgraphId> = self.graph.subgraphs.iter().map(|d| d.id).collect();
         for id in def_ids {
-            reconcile_def(self, id, func_lib);
+            reconcile_def(self, id, library);
         }
     }
 

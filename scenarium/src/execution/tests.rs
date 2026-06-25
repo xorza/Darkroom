@@ -29,8 +29,8 @@ fn default_hooks() -> TestFuncHooks {
 }
 
 /// Instantiate a `Node` for `func_name` with a fixed id; caller wires bindings.
-fn node(func_lib: &Library, func_name: &str, id: NodeId) -> Node {
-    let mut node: Node = func_lib.by_name(func_name).unwrap().into();
+fn node(library: &Library, func_name: &str, id: NodeId) -> Node {
+    let mut node: Node = library.by_name(func_name).unwrap().into();
     node.id = id;
     node
 }
@@ -167,16 +167,16 @@ mod cache_persistence {
     #[tokio::test]
     async fn impure_cone_persist_node_is_not_disk_cached() {
         let dir = TempDir::new("impure-cone");
-        let mut func_lib = test_func_lib(default_hooks());
-        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+        let mut library = test_func_lib(default_hooks());
+        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         // get_b (impure) → mult (persist) → print. mult's cone is impure.
         let mut graph = Graph::default();
-        graph.add(node(&func_lib, "get_b", NodeId::unique()));
-        let mut mult = node(&func_lib, "mult", NodeId::unique());
+        graph.add(node(&library, "get_b", NodeId::unique()));
+        let mut mult = node(&library, "mult", NodeId::unique());
         mult.persist = CachePersistence::Disk;
         graph.add(mult);
-        graph.add(node(&func_lib, "print", NodeId::unique()));
+        graph.add(node(&library, "print", NodeId::unique()));
         let get_b_id = graph.by_name("get_b").unwrap().id;
         let mult_id = graph.by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, (get_b_id, 0).into());
@@ -184,12 +184,12 @@ mod cache_persistence {
         bind(&mut graph, "print", 0, (mult_id, 0).into());
 
         let mut engine = disk_engine(&dir);
-        engine.update(&graph, &func_lib).unwrap();
+        engine.update(&graph, &library).unwrap();
         engine.execute_terminals().await.unwrap();
 
         // Reopen: mult must recompute — an impure cone can't be content-addressed.
         let mut engine = disk_engine(&dir);
-        engine.update(&graph, &func_lib).unwrap();
+        engine.update(&graph, &library).unwrap();
         let stats = engine.execute_terminals().await.unwrap();
         assert!(
             !stats.cached_nodes.contains(&mult_id),
@@ -206,13 +206,13 @@ mod cache_persistence {
     #[tokio::test]
     async fn memory_persistence_node_is_not_disk_cached() {
         let dir = TempDir::new("memory-persist");
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
 
         // get_a (pure) → mult (Memory, the default) → print.
         let mut graph = Graph::default();
-        graph.add(node(&func_lib, "get_a", NodeId::unique()));
-        graph.add(node(&func_lib, "mult", NodeId::unique()));
-        graph.add(node(&func_lib, "print", NodeId::unique()));
+        graph.add(node(&library, "get_a", NodeId::unique()));
+        graph.add(node(&library, "mult", NodeId::unique()));
+        graph.add(node(&library, "print", NodeId::unique()));
         let get_a_id = graph.by_name("get_a").unwrap().id;
         let mult_id = graph.by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, (get_a_id, 0).into());
@@ -220,12 +220,12 @@ mod cache_persistence {
         bind(&mut graph, "print", 0, (mult_id, 0).into());
 
         let mut engine = disk_engine(&dir);
-        engine.update(&graph, &func_lib).unwrap();
+        engine.update(&graph, &library).unwrap();
         engine.execute_terminals().await.unwrap();
 
         // Reopen: fresh RAM, nothing on disk for mult ⇒ it recomputes.
         let mut engine = disk_engine(&dir);
-        engine.update(&graph, &func_lib).unwrap();
+        engine.update(&graph, &library).unwrap();
         let stats = engine.execute_terminals().await.unwrap();
         assert!(
             !stats.cached_nodes.contains(&mult_id),
@@ -359,10 +359,10 @@ mod graph_structure {
     #[test]
     fn basic_run() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert_eq!(
@@ -408,10 +408,10 @@ mod graph_structure {
     #[test]
     fn updates_after_graph_change() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
 
         // Rewire mult to get_a and get_b directly (bypassing sum)
         let binding1: Binding = (graph.by_name("get_a").unwrap().id, 0).into();
@@ -419,7 +419,7 @@ mod graph_structure {
         bind(&mut graph, "mult", 0, binding1);
         bind(&mut graph, "mult", 1, binding2);
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         let get_a = execution_graph.by_name("get_a").unwrap();
@@ -442,11 +442,11 @@ mod graph_structure {
     #[test]
     fn update_rejects_func_missing_from_lib_and_keeps_prior_program() {
         let graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
 
         // A good compile establishes a program.
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         assert_eq!(execution_graph.program.e_nodes.len(), 5);
 
         // Re-compiling the same graph against a library that defines none of
@@ -470,10 +470,10 @@ mod graph_structure {
     #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
 
         // The compiled `ExecutionProgram` is the serializable artifact; the
         // engine itself is not serializable.
@@ -519,13 +519,13 @@ mod missing_inputs {
     #[test]
     fn required_missing_propagates_downstream() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
 
         // Remove sum's first input binding (required by default)
         bind(&mut graph, "sum", 0, Binding::None);
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         let get_b = execution_graph.by_name("get_b").unwrap();
@@ -554,14 +554,14 @@ mod missing_inputs {
     #[test]
     fn optional_bind_to_missing_propagates() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        let mut library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
 
         // sum missing-required; mult[0] stays bound to sum but is made optional.
         bind(&mut graph, "sum", 0, Binding::None);
-        func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
+        library.by_name_mut("mult").unwrap().inputs[0].required = false;
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         let sum = execution_graph.by_name("sum").unwrap();
@@ -585,14 +585,14 @@ mod missing_inputs {
     #[test]
     fn optional_unbound_does_not_propagate() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        let mut library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
 
         // mult[0] unbound + optional (not wired to anything).
         bind(&mut graph, "mult", 0, Binding::None);
-        func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
+        library.by_name_mut("mult").unwrap().inputs[0].required = false;
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         let mult = execution_graph.by_name("mult").unwrap();
@@ -612,7 +612,7 @@ mod missing_inputs {
     #[tokio::test(flavor = "multi_thread")]
     async fn optional_bind_to_gated_upstream_is_gated() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let mut func_lib = test_func_lib(default_hooks());
+        let mut library = test_func_lib(default_hooks());
 
         let get_b_id = graph.by_name("get_b").unwrap().id;
         let sum_id = graph.by_name("sum").unwrap().id;
@@ -624,10 +624,10 @@ mod missing_inputs {
         // propagation specifically. mult and print end up gated.
         bind(&mut graph, "mult", 0, (get_b_id, 0).into());
         bind(&mut graph, "mult", 1, (sum_id, 0).into());
-        func_lib.by_name_mut("mult").unwrap().inputs[1].required = false;
+        library.by_name_mut("mult").unwrap().inputs[1].required = false;
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         // Pre-fix, this panicked the worker; now the chain is gated and nothing runs.
         execution_graph.execute_terminals().await?;
 
@@ -651,13 +651,13 @@ mod disabled_nodes {
     #[test]
     fn disabled_node_skipped_and_breaks_downstream() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
 
         let sum_id = graph.by_name("sum").unwrap().id;
         graph.by_id_mut(&sum_id).unwrap().disabled = true;
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         // The disabled node emits no execution node at all.
@@ -685,14 +685,14 @@ mod disabled_nodes {
     #[test]
     fn disabled_upstream_with_optional_consumer_still_runs() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        let mut library = test_func_lib(TestFuncHooks::default());
 
         let sum_id = graph.by_name("sum").unwrap().id;
         graph.by_id_mut(&sum_id).unwrap().disabled = true;
-        func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
+        library.by_name_mut("mult").unwrap().inputs[0].required = false;
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert!(execution_graph.by_name("sum").is_none());
@@ -713,13 +713,13 @@ mod const_bindings {
     #[tokio::test(flavor = "multi_thread")]
     async fn const_binding_tracks_changes() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
         let mut execution_graph = ExecutionEngine::default();
 
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         // Only mult and print execute — the const binds detach mult from its
@@ -731,13 +731,13 @@ mod const_bindings {
 
         // Re-run with the same bindings: mult's digest is unchanged, so it's a
         // RAM cache hit; only print (impure terminal) re-executes.
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         // Change one const: mult's digest changes ⇒ cache miss ⇒ it re-executes.
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         let mult = execution_graph.by_name("mult").unwrap();
@@ -756,7 +756,7 @@ mod const_bindings {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn const_binding_invokes_only_once() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(TestFuncHooks {
+        let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || unreachable!()),
             get_b: Arc::new(move || unreachable!()),
             print: Arc::new(move |_| {}),
@@ -768,7 +768,7 @@ mod const_bindings {
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -778,14 +778,14 @@ mod const_bindings {
 
         // Same const value: no re-execution of mult
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         // Different const value: mult re-executes
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -794,7 +794,7 @@ mod const_bindings {
         );
 
         // Stable again
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
@@ -804,7 +804,7 @@ mod const_bindings {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn const_excludes_upstream_node() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
@@ -812,7 +812,7 @@ mod const_bindings {
         // Replace sum[0] (get_a) with a const — get_a is no longer needed
         bind(&mut graph, "sum", 0, Binding::Const(33.into()));
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -823,7 +823,7 @@ mod const_bindings {
         // Also unbind sum[1] — now sum has all const/none inputs, no upstream needed
         bind(&mut graph, "sum", 1, Binding::None);
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -836,7 +836,7 @@ mod const_bindings {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn change_from_const_to_bind_recomputes() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
@@ -844,7 +844,7 @@ mod const_bindings {
         let get_b_id = graph.by_name_mut("get_b").unwrap().id;
         bind(&mut graph, "sum", 0, Binding::Const(33.into()));
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -855,7 +855,7 @@ mod const_bindings {
         // Switch from const back to bind — sum must re-execute
         bind(&mut graph, "sum", 0, (get_b_id, 0).into());
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -868,19 +868,19 @@ mod const_bindings {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn optional_input_binding_change_recomputes() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         // Switch mult inputs to const/none
         bind(&mut graph, "mult", 0, Binding::Const(2.into()));
         bind(&mut graph, "mult", 1, Binding::None);
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -889,7 +889,7 @@ mod const_bindings {
         );
 
         // Stable on rerun
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
@@ -907,10 +907,10 @@ mod behavior {
     fn pure_node_skips_on_rerun() -> anyhow::Result<()> {
         // `get_b` is a pure source in the fixture, so a cached output lets it skip.
         let graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
@@ -918,7 +918,7 @@ mod behavior {
         // Simulate cached output — pure node should skip
         execution_graph.set_output_values("get_b", vec![DynamicValue::Static(StaticValue::Int(7))]);
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert!(!execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
@@ -929,10 +929,10 @@ mod behavior {
     #[tokio::test(flavor = "multi_thread")]
     async fn default_node_skips_on_rerun() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -963,9 +963,9 @@ mod behavior {
         use tokio::sync::mpsc::unbounded_channel;
 
         let graph = test_graph();
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         let (tx, mut rx) = unbounded_channel::<RunProgress>();
         let stats = eg
@@ -1025,9 +1025,9 @@ mod behavior {
         use common::CancelToken;
 
         let graph = test_graph();
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         // Pre-tripped: the executor breaks at the first loop-top check, so no
         // node runs and the run is flagged cancelled.
@@ -1090,7 +1090,7 @@ mod behavior {
 
         // Trips the cancel on its first invoke only, so the re-run completes.
         let cancel_first = Arc::new(AtomicBool::new(true));
-        let func_lib: Library = [Func::new("8400cb3a-a5d2-4fcd-a9d8-0ab4880c710f", "self_cancel")
+        let library: Library = [Func::new("8400cb3a-a5d2-4fcd-a9d8-0ab4880c710f", "self_cancel")
             .category("Debug")
             .pure()
             .terminal()
@@ -1109,13 +1109,13 @@ mod behavior {
 
         let mut graph = Graph::default();
         let node_id: NodeId = "acb11422-9951-4fc6-9696-53b1a6699120".into();
-        let mut node: Node = func_lib.by_name("self_cancel").unwrap().into();
+        let mut node: Node = library.by_name("self_cancel").unwrap().into();
         node.id = node_id;
         graph.add(node);
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         // Run 1: the node trips the cancel mid-invoke — it must not appear as
         // executed (it didn't complete), and the run is flagged cancelled.
@@ -1183,28 +1183,27 @@ mod behavior {
         use crate::graph::{Graph, NodeId};
         use crate::library::Library;
 
-        let func_lib: Library =
-            [
-                Func::new("8003e30b-0417-474d-a77f-1d3ea71ac6b3", "always_cancel")
-                    .category("Debug")
-                    .pure()
-                    .terminal()
-                    .output("out", DataType::Int)
-                    .lambda(async_lambda!(move |_, _, _, _, _, _| {
-                        Err(InvokeError::Cancelled)
-                    })),
-            ]
-            .into();
+        let library: Library = [
+            Func::new("8003e30b-0417-474d-a77f-1d3ea71ac6b3", "always_cancel")
+                .category("Debug")
+                .pure()
+                .terminal()
+                .output("out", DataType::Int)
+                .lambda(async_lambda!(move |_, _, _, _, _, _| {
+                    Err(InvokeError::Cancelled)
+                })),
+        ]
+        .into();
 
         let mut graph = Graph::default();
         let node_id: NodeId = "c791f8aa-3bf9-435d-8530-f3904b4b6a28".into();
-        let mut node: Node = func_lib.by_name("always_cancel").unwrap().into();
+        let mut node: Node = library.by_name("always_cancel").unwrap().into();
         node.id = node_id;
         graph.add(node);
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         let stats = eg
             .execute(
                 RunSeeds {
@@ -1235,16 +1234,16 @@ mod behavior {
     #[test]
     fn impure_node_always_invoked() -> anyhow::Result<()> {
         let graph = test_graph();
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        let mut library = test_func_lib(TestFuncHooks::default());
 
-        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
 
         // Even with cached output, impure node still wants to execute
         execution_graph.set_output_values("get_b", vec![DynamicValue::Static(StaticValue::Int(7))]);
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert_eq!(
@@ -1264,8 +1263,8 @@ mod composite_behavior {
     use crate::graph::NodeKind;
     use crate::subgraph::{SubgraphDef, SubgraphRef};
 
-    fn func_node(func_lib: &Library, func_name: &str, node_name: &str) -> Node {
-        let id = func_lib.by_name(func_name).unwrap().id;
+    fn func_node(library: &Library, func_name: &str, node_name: &str) -> Node {
+        let id = library.by_name(func_name).unwrap().id;
         let mut n = Node::new(NodeKind::Func(id));
         n.name = node_name.to_string();
         n
@@ -1277,13 +1276,8 @@ mod composite_behavior {
 
     /// A subgraph def with no inputs and one output, whose interior is the
     /// impure `get_b` (named `inner_name`) feeding `SubgraphOutput[0]`.
-    fn impure_output_def(
-        func_lib: &Library,
-        id: &str,
-        name: &str,
-        inner_name: &str,
-    ) -> SubgraphDef {
-        let inner = func_node(func_lib, "get_b", inner_name);
+    fn impure_output_def(library: &Library, id: &str, name: &str, inner_name: &str) -> SubgraphDef {
+        let inner = func_node(library, "get_b", inner_name);
         let inner_id = inner.id;
         let so = Node::new(NodeKind::SubgraphOutput);
         let so_id = so.id;
@@ -1297,12 +1291,12 @@ mod composite_behavior {
     }
 
     /// Main graph: one instance of `def` whose output feeds a terminal `print`.
-    fn main_with(func_lib: &Library, def: SubgraphDef) -> Graph {
+    fn main_with(library: &Library, def: SubgraphDef) -> Graph {
         let def_id = def.id;
         let mut graph = Graph::default();
         graph.subgraphs.add(def.clone());
         let inst = graph.add_subgraph_node(&def, SubgraphRef::Local(def_id));
-        let p = func_node(func_lib, "print", "p");
+        let p = func_node(library, "print", "p");
         let p_id = p.id;
         graph.add(p);
         graph.set_input_binding(InputPort::new(p_id, 0), (inst, 0).into());
@@ -1311,16 +1305,16 @@ mod composite_behavior {
 
     /// `(name in execute_order)` after a second prepare, with a cached
     /// output already present for that node — i.e. "would it re-run?".
-    fn reruns_with_cache(graph: &Graph, func_lib: &Library, name: &str) -> bool {
+    fn reruns_with_cache(graph: &Graph, library: &Library, name: &str) -> bool {
         let mut eg = ExecutionEngine::default();
-        eg.update(graph, func_lib).unwrap();
+        eg.update(graph, library).unwrap();
         eg.prepare_execution(true, false, &[]).unwrap();
         assert!(
             execution_node_names_in_order(&eg).contains(&name.to_string()),
             "{name} should run on the first prepare"
         );
         eg.set_output_values(name, vec![DynamicValue::Static(StaticValue::Int(11))]);
-        eg.update(graph, func_lib).unwrap();
+        eg.update(graph, library).unwrap();
         eg.prepare_execution(true, false, &[]).unwrap();
         execution_node_names_in_order(&eg).contains(&name.to_string())
     }
@@ -1329,17 +1323,17 @@ mod composite_behavior {
     fn composite_reruns_impure_interior() {
         // An impure interior recomputes across a composite boundary like any
         // impure node — flattening must preserve its impurity.
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
-        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+        let mut library = test_func_lib(TestFuncHooks::default());
+        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
         let def = impure_output_def(
-            &func_lib,
+            &library,
             "00000000-0000-0000-0000-0000000000a1",
             "S",
             "inner",
         );
-        let graph = main_with(&func_lib, def);
+        let graph = main_with(&library, def);
         assert!(
-            reruns_with_cache(&graph, &func_lib, "inner"),
+            reruns_with_cache(&graph, &library, "inner"),
             "impure interior recomputes through a composite"
         );
     }
@@ -1348,14 +1342,14 @@ mod composite_behavior {
     fn update_rejects_func_missing_inside_subgraph() {
         // The check descends composites: a func only the *interior*
         // references, absent from the lib, is still caught.
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
         let def = impure_output_def(
-            &func_lib,
+            &library,
             "00000000-0000-0000-0000-0000000000a1",
             "S",
             "inner",
         );
-        let graph = main_with(&func_lib, def);
+        let graph = main_with(&library, def);
 
         // A `Local` def resolves from the graph itself, so the walk reaches
         // the interior even with an empty library — and flags its `get_b`.
@@ -1364,7 +1358,7 @@ mod composite_behavior {
         let Error::InvalidGraph { message } = err else {
             panic!("expected InvalidGraph, got {err:?}");
         };
-        let get_b = func_lib.by_name("get_b").unwrap().id;
+        let get_b = library.by_name("get_b").unwrap().id;
         assert!(
             message.contains(&format!("{get_b:?}")),
             "message should name the interior's missing func, got: {message}"
@@ -1375,10 +1369,10 @@ mod composite_behavior {
     fn nested_impure_interior_reruns() {
         // A doubly-nested impure node recomputes — flattening preserves its
         // impurity through two composite levels.
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
-        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+        let mut library = test_func_lib(TestFuncHooks::default());
+        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
         let inner_def = impure_output_def(
-            &func_lib,
+            &library,
             "00000000-0000-0000-0000-0000000000b1",
             "Inner",
             "deep",
@@ -1394,9 +1388,9 @@ mod composite_behavior {
         let outer_def = SubgraphDef::new("00000000-0000-0000-0000-0000000000b2", "Outer")
             .graph(outer_interior)
             .output(int_output("Out"));
-        let graph = main_with(&func_lib, outer_def);
+        let graph = main_with(&library, outer_def);
         assert!(
-            reruns_with_cache(&graph, &func_lib, "deep"),
+            reruns_with_cache(&graph, &library, "deep"),
             "doubly-nested impure interior recomputes"
         );
     }
@@ -1410,14 +1404,14 @@ mod cycle_detection {
     #[test]
     fn returns_error_with_node_id() {
         let mut graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
 
         // Create cycle: sum[0] ← mult (mult already depends on sum)
         let mult_node_id = graph.by_name("mult").unwrap().id;
         bind(&mut graph, "sum", 0, (mult_node_id, 0).into());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
 
         let err = execution_graph
             .prepare_execution(true, false, &[])
@@ -1439,10 +1433,10 @@ mod invalidation {
     #[tokio::test(flavor = "multi_thread")]
     async fn clear_resets_graph() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert!(!execution_graph.program.e_nodes.is_empty());
@@ -1463,10 +1457,10 @@ mod invalidation {
     #[tokio::test(flavor = "multi_thread")]
     async fn reset_states_clears_outputs() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         // Verify outputs exist before reset
@@ -1526,7 +1520,7 @@ mod execution {
         let test_values_a = test_values.clone();
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
-        let mut func_lib = test_func_lib(TestFuncHooks {
+        let mut library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || Ok(test_values_a.try_lock().unwrap().a)),
             get_b: Arc::new(move || test_values_b.try_lock().unwrap().b),
             print: Arc::new(move |result| {
@@ -1537,7 +1531,7 @@ mod execution {
         let graph = test_graph();
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
         // sum = get_a + get_b = 2 + 5 = 7, mult = sum * get_b = 7 * 5 = 35
         assert_eq!(test_values.try_lock()?.result, 35);
@@ -1546,15 +1540,15 @@ mod execution {
         // is stable and the cached value stands.
         test_values.try_lock()?.b = 7;
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
         // Make get_b Impure: now it re-reads the value
-        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
         // sum = 2 + 7 = 9, mult = 9 * 7 = 63
         assert_eq!(test_values.try_lock()?.result, 63);
@@ -1564,7 +1558,7 @@ mod execution {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn required_none_binding_is_stable() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
@@ -1572,7 +1566,7 @@ mod execution {
         // Make sum's first input None (required) — sum and downstream shouldn't execute
         bind(&mut graph, "sum", 0, Binding::None);
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
 
         execution_graph.execute_terminals().await?;
         let order1 = execution_node_names_in_order(&execution_graph);
@@ -1592,10 +1586,10 @@ mod execution {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn schedule_stable_across_repeated_runs() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
         let graph = test_graph();
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         eg.execute_terminals().await?;
         let run1 = execution_node_names_in_order(&eg);
@@ -1624,19 +1618,19 @@ mod execution {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn cached_upstream_output_reused_after_rebinding() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         // Switch mult to const inputs
         bind(&mut graph, "mult", 0, Binding::Const(2.into()));
         bind(&mut graph, "mult", 1, Binding::Const(21.into()));
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -1648,7 +1642,7 @@ mod execution {
         let get_b_id = graph.by_name_mut("get_b").unwrap().id;
         bind(&mut graph, "mult", 0, (get_b_id, 0).into());
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         assert_eq!(
@@ -1668,10 +1662,10 @@ mod argument_values {
     #[test]
     fn nonexistent_node_returns_none() {
         let graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
 
         let nonexistent_id: NodeId = "00000000-0000-0000-0000-000000000000".into();
         assert!(
@@ -1683,7 +1677,7 @@ mod argument_values {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn with_const_bindings() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(TestFuncHooks {
+        let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || unreachable!()),
             get_b: Arc::new(move || unreachable!()),
             print: Arc::new(move |_| {}),
@@ -1696,7 +1690,7 @@ mod argument_values {
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
         let mult_id = graph.by_name("mult").unwrap().id;
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         let values = execution_graph.get_argument_values(&mult_id).unwrap();
@@ -1723,7 +1717,7 @@ mod argument_values {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn with_bound_outputs() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(TestFuncHooks {
+        let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || Ok(2)),
             get_b: Arc::new(move || 5),
             print: Arc::new(move |_| {}),
@@ -1732,7 +1726,7 @@ mod argument_values {
         let graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         // sum: inputs are get_a(2.0) and get_b(5.0), output is 2+5=7
@@ -1786,16 +1780,16 @@ mod argument_values {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn with_none_binding() -> anyhow::Result<()> {
-        let mut func_lib = test_func_lib(default_hooks());
+        let mut library = test_func_lib(default_hooks());
 
         let mut graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
 
-        func_lib.by_name_mut("mult").unwrap().inputs[1].required = false;
+        library.by_name_mut("mult").unwrap().inputs[1].required = false;
         bind(&mut graph, "mult", 1, Binding::None);
         let mult_id = graph.by_name("mult").unwrap().id;
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
         let values = execution_graph.get_argument_values(&mult_id).unwrap();
@@ -1811,10 +1805,10 @@ mod argument_values {
     #[test]
     fn before_execution() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionEngine::default();
 
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
 
         let sum_id = graph.by_name("sum").unwrap().id;
         let values = execution_graph.get_argument_values(&sum_id).unwrap();
@@ -1837,14 +1831,14 @@ mod error_propagation {
     #[tokio::test(flavor = "multi_thread")]
     async fn node_error_propagates_to_dependents() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks {
+        let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(|| Err(anyhow::anyhow!("Intentional failure in get_a"))),
             get_b: Arc::new(|| 42),
             print: Arc::new(|_| {}),
         });
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
 
         let stats = execution_graph.execute_terminals().await?;
 
@@ -1908,13 +1902,13 @@ mod stats {
     #[tokio::test(flavor = "multi_thread")]
     async fn missing_inputs_reported() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
 
         // Remove sum's first input (required)
         bind(&mut graph, "sum", 0, Binding::None);
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         let stats = execution_graph.execute_terminals().await?;
 
         // sum[0] should appear in missing_inputs
@@ -1934,10 +1928,10 @@ mod stats {
     #[tokio::test(flavor = "multi_thread")]
     async fn executed_nodes_reported() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
 
         let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &func_lib).unwrap();
+        execution_graph.update(&graph, &library).unwrap();
         let stats = execution_graph.execute_terminals().await?;
 
         // All 5 nodes should be reported as executed
@@ -1979,7 +1973,7 @@ mod events {
     const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);
 
     struct EventFixture {
-        func_lib: Library,
+        library: Library,
         graph: Graph,
         emit_id: NodeId,
         emit_calls: Arc<Mutex<i64>>,
@@ -1996,8 +1990,8 @@ mod events {
         let recv_values_l = recv_values.clone();
 
         // Both funcs are Impure non-terminals (the `Func::new` default).
-        let mut func_lib = Library::default();
-        func_lib.add(
+        let mut library = Library::default();
+        library.add(
             Func::new(EMIT_FUNC, "emit")
                 .output("out", DataType::Int)
                 .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
@@ -2010,7 +2004,7 @@ mod events {
                     }
                 )),
         );
-        func_lib.add(
+        library.add(
             Func::new(RECV_FUNC, "recv")
                 .input(FuncInput::required("in", DataType::Int))
                 .lambda(async_lambda!(
@@ -2025,14 +2019,14 @@ mod events {
         let recv_id = NodeId::unique();
 
         let mut graph = Graph::default();
-        graph.add(node(&func_lib, "emit", emit_id));
-        graph.add(node(&func_lib, "recv", recv_id));
+        graph.add(node(&library, "emit", emit_id));
+        graph.add(node(&library, "recv", recv_id));
         graph.subscribe(emit_id, 0, recv_id);
         graph.set_input_binding(InputPort::new(recv_id, 0), (emit_id, 0).into());
         graph.validate();
 
         EventFixture {
-            func_lib,
+            library,
             graph,
             emit_id,
             emit_calls,
@@ -2044,7 +2038,7 @@ mod events {
     async fn execute_events_runs_subscribers() -> anyhow::Result<()> {
         let f = build();
         let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.func_lib).unwrap();
+        eg.update(&f.graph, &f.library).unwrap();
 
         let stats = eg
             .execute_events([EventRef {
@@ -2070,7 +2064,7 @@ mod events {
     async fn event_triggers_collects_nodes_with_subscribers() -> anyhow::Result<()> {
         let f = build();
         let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.func_lib).unwrap();
+        eg.update(&f.graph, &f.library).unwrap();
 
         // terminals=false, event_triggers=true → emit (owns a subscribed event)
         // becomes a root; recv is downstream of emit, not a root.
@@ -2095,7 +2089,7 @@ mod events {
     async fn active_event_triggers_lists_live_events() -> anyhow::Result<()> {
         let f = build();
         let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.func_lib).unwrap();
+        eg.update(&f.graph, &f.library).unwrap();
 
         let stats = eg
             .execute(
@@ -2125,10 +2119,10 @@ mod events {
         let emit_id = f.emit_id;
         let recv_id = f.graph.by_name("recv").unwrap().id;
         f.graph.unsubscribe(emit_id, 0, recv_id);
-        f.func_lib.by_name_mut("emit").unwrap().terminal = true;
+        f.library.by_name_mut("emit").unwrap().terminal = true;
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.func_lib).unwrap();
+        eg.update(&f.graph, &f.library).unwrap();
         let stats = eg.execute_terminals().await?;
 
         // emit ran, but its event has no subscribers → no live triggers.
@@ -2157,8 +2151,8 @@ mod output_usage {
         let seen_usage: Arc<Mutex<Vec<OutputUsage>>> = Arc::new(Mutex::new(Vec::new()));
         let seen_usage_l = seen_usage.clone();
 
-        let mut func_lib = Library::default();
-        func_lib.add(
+        let mut library = Library::default();
+        library.add(
             Func::new(SPLIT_FUNC, "split")
                 .output("a", DataType::Int)
                 .output("b", DataType::Int)
@@ -2171,7 +2165,7 @@ mod output_usage {
                     }
                 )),
         );
-        func_lib.add(
+        library.add(
             Func::new(SINK_FUNC, "sink")
                 .terminal()
                 .input(FuncInput::required("in", DataType::Int))
@@ -2181,14 +2175,14 @@ mod output_usage {
         let split_id = NodeId::unique();
         let sink_id = NodeId::unique();
         let mut graph = Graph::default();
-        graph.add(node(&func_lib, "split", split_id));
-        graph.add(node(&func_lib, "sink", sink_id));
+        graph.add(node(&library, "split", split_id));
+        graph.add(node(&library, "sink", sink_id));
         // Consume only output 0; output 1 has no consumer.
         graph.set_input_binding(InputPort::new(sink_id, 0), (split_id, 0).into());
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         eg.execute_terminals().await?;
 
         let split = eg.by_name("split").unwrap();
@@ -2215,7 +2209,7 @@ mod topology {
     async fn removing_node_compacts_and_remaps() -> anyhow::Result<()> {
         let printed = Arc::new(Mutex::new(0i64));
         let printed_l = printed.clone();
-        let func_lib = test_func_lib(TestFuncHooks {
+        let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(|| Ok(2)),
             get_b: Arc::new(|| 5),
             print: Arc::new(move |v| *printed_l.try_lock().unwrap() = v),
@@ -2223,7 +2217,7 @@ mod topology {
 
         let mut graph = test_graph();
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         assert_eq!(eg.program.e_nodes.len(), 5);
 
         // Remove get_b — a middle node feeding sum[1] and mult[1] (both optional).
@@ -2232,7 +2226,7 @@ mod topology {
         graph.remove_by_id(get_b_id);
         graph.validate();
 
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         assert_eq!(eg.program.e_nodes.len(), 4);
         assert!(eg.by_name("get_b").is_none());
 
@@ -2259,10 +2253,10 @@ mod topology {
     #[tokio::test(flavor = "multi_thread")]
     async fn empty_graph_executes_cleanly() -> anyhow::Result<()> {
         let graph = Graph::default();
-        let func_lib = Library::default();
+        let library = Library::default();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         assert!(eg.is_empty());
 
@@ -2278,7 +2272,7 @@ mod topology {
     async fn multiple_terminals_all_execute() -> anyhow::Result<()> {
         let printed = Arc::new(Mutex::new(Vec::<i64>::new()));
         let printed_l = printed.clone();
-        let func_lib = test_func_lib(TestFuncHooks {
+        let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(|| Ok(2)),
             get_b: Arc::new(|| 5),
             print: Arc::new(move |v| printed_l.try_lock().unwrap().push(v)),
@@ -2291,16 +2285,16 @@ mod topology {
         let print2_id = NodeId::unique();
 
         let mut graph = Graph::default();
-        graph.add(node(&func_lib, "get_a", get_a_id));
-        graph.add(node(&func_lib, "get_b", get_b_id));
-        graph.add(node(&func_lib, "print", print1_id));
-        graph.add(node(&func_lib, "print", print2_id));
+        graph.add(node(&library, "get_a", get_a_id));
+        graph.add(node(&library, "get_b", get_b_id));
+        graph.add(node(&library, "print", print1_id));
+        graph.add(node(&library, "print", print2_id));
         graph.set_input_binding(InputPort::new(print1_id, 0), (get_a_id, 0).into());
         graph.set_input_binding(InputPort::new(print2_id, 0), (get_b_id, 0).into());
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         let stats = eg.execute_terminals().await?;
 
         // Both terminals plus both sources execute exactly once.
@@ -2321,7 +2315,7 @@ mod topology {
         // `compact_insert` reorder.
         let calls_a = Arc::new(Mutex::new(0));
         let calls_a_l = calls_a.clone();
-        let func_lib = test_func_lib(TestFuncHooks {
+        let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || {
                 *calls_a_l.try_lock().unwrap() += 1;
                 Ok(2)
@@ -2338,16 +2332,16 @@ mod topology {
         let print_a_id = NodeId::unique();
 
         let mut graph = Graph::default();
-        graph.add(node(&func_lib, "get_b", get_b_id));
-        graph.add(node(&func_lib, "print", print_b_id));
-        graph.add(node(&func_lib, "get_a", get_a_id));
-        graph.add(node(&func_lib, "print", print_a_id));
+        graph.add(node(&library, "get_b", get_b_id));
+        graph.add(node(&library, "print", print_b_id));
+        graph.add(node(&library, "get_a", get_a_id));
+        graph.add(node(&library, "print", print_a_id));
         graph.set_input_binding(InputPort::new(print_b_id, 0), (get_b_id, 0).into());
         graph.set_input_binding(InputPort::new(print_a_id, 0), (get_a_id, 0).into());
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         eg.execute_terminals().await?;
         assert_eq!(*calls_a.lock().await, 1); // get_a ran once
         let idx_before = eg.program.e_nodes.index_of_key(&get_a_id).unwrap();
@@ -2357,7 +2351,7 @@ mod topology {
         graph.remove_by_id(print_b_id);
         graph.validate();
 
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         let idx_after = eg.program.e_nodes.index_of_key(&get_a_id).unwrap();
         assert_ne!(idx_before, idx_after, "get_a should have been reordered");
 
@@ -2382,7 +2376,7 @@ mod topology {
         // updates (pools grow 2→4 then shrink 4→2 each round).
         let printed = Arc::new(Mutex::new(Vec::<i64>::new()));
         let p = printed.clone();
-        let func_lib = test_func_lib(TestFuncHooks {
+        let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(|| Ok(2)),
             get_b: Arc::new(|| 5),
             print: Arc::new(move |v| p.try_lock().unwrap().push(v)),
@@ -2391,24 +2385,24 @@ mod topology {
         let get_a_id = NodeId::unique();
         let print_a_id = NodeId::unique();
         let mut graph = Graph::default();
-        graph.add(node(&func_lib, "get_a", get_a_id));
-        graph.add(node(&func_lib, "print", print_a_id));
+        graph.add(node(&library, "get_a", get_a_id));
+        graph.add(node(&library, "print", print_a_id));
         graph.set_input_binding(InputPort::new(print_a_id, 0), (get_a_id, 0).into());
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         eg.execute_terminals().await?;
 
         for round in 0..3 {
             // Add a get_b → print chain.
             let gb = NodeId::unique();
             let pb = NodeId::unique();
-            graph.add(node(&func_lib, "get_b", gb));
-            graph.add(node(&func_lib, "print", pb));
+            graph.add(node(&library, "get_b", gb));
+            graph.add(node(&library, "print", pb));
             graph.set_input_binding(InputPort::new(pb, 0), (gb, 0).into());
             graph.validate();
-            eg.update(&graph, &func_lib).unwrap();
+            eg.update(&graph, &library).unwrap();
             assert_eq!(eg.program.e_nodes.len(), 4, "round {round} grow");
             printed.lock().await.clear();
             eg.execute_terminals().await?;
@@ -2420,7 +2414,7 @@ mod topology {
             graph.remove_by_id(gb);
             graph.remove_by_id(pb);
             graph.validate();
-            eg.update(&graph, &func_lib).unwrap();
+            eg.update(&graph, &library).unwrap();
             assert_eq!(eg.program.e_nodes.len(), 2, "round {round} shrink");
             printed.lock().await.clear();
             eg.execute_terminals().await?;
@@ -2442,7 +2436,7 @@ mod previews {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn previews_match_plain_argument_values() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(TestFuncHooks {
+        let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(|| Ok(2)),
             get_b: Arc::new(|| 5),
             print: Arc::new(|_| {}),
@@ -2450,7 +2444,7 @@ mod previews {
         let graph = test_graph();
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         eg.execute_terminals().await?;
 
         // For non-Custom values gen_preview is a no-op, so the preview variant
@@ -2488,8 +2482,8 @@ mod subgraph {
     use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
     use std::sync::Mutex as StdMutex;
 
-    fn fnode(func_lib: &Library, name: &str) -> Node {
-        func_lib.by_name(name).unwrap().into()
+    fn fnode(library: &Library, name: &str) -> Node {
+        library.by_name(name).unwrap().into()
     }
 
     fn int_out(name: &str) -> FuncOutput {
@@ -2497,10 +2491,10 @@ mod subgraph {
     }
 
     /// `in(A,B) -> sum -> out(Sum)`.
-    fn wrap_sum_def(func_lib: &Library) -> SubgraphDef {
+    fn wrap_sum_def(library: &Library) -> SubgraphDef {
         let in_node = Node::new(NodeKind::SubgraphInput);
         let in_id = in_node.id;
-        let sum = fnode(func_lib, "sum");
+        let sum = fnode(library, "sum");
         let sum_id = sum.id;
         let out = Node::new(NodeKind::SubgraphOutput);
         let out_id = out.id;
@@ -2533,15 +2527,15 @@ mod subgraph {
                 Arc::new(move |v| c.lock().unwrap().push(v))
             },
         };
-        let func_lib = test_func_lib(hooks);
-        let def = wrap_sum_def(&func_lib);
+        let library = test_func_lib(hooks);
+        let def = wrap_sum_def(&library);
 
-        let get_a = fnode(&func_lib, "get_a");
-        let get_b = fnode(&func_lib, "get_b");
+        let get_a = fnode(&library, "get_a");
+        let get_b = fnode(&library, "get_b");
         let (a_id, b_id) = (get_a.id, get_b.id);
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let print = fnode(&func_lib, "print");
+        let print = fnode(&library, "print");
         let print_id = print.id;
 
         let mut graph = Graph::default();
@@ -2555,7 +2549,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         eg.execute_terminals().await?;
 
         assert_eq!(*captured.lock().unwrap(), vec![6]); // 2 + 4
@@ -2575,11 +2569,11 @@ mod subgraph {
                 Arc::new(move |v| c.lock().unwrap().push(v))
             },
         };
-        let func_lib = test_func_lib(hooks);
+        let library = test_func_lib(hooks);
 
         // def TwoSources: get_a -> out0, get_b -> out1 (no inputs).
-        let src_a = fnode(&func_lib, "get_a");
-        let src_b = fnode(&func_lib, "get_b");
+        let src_a = fnode(&library, "get_a");
+        let src_b = fnode(&library, "get_b");
         let (sa, sb) = (src_a.id, src_b.id);
         let out = Node::new(NodeKind::SubgraphOutput);
         let out_id = out.id;
@@ -2597,7 +2591,7 @@ mod subgraph {
         // parent: C, print <- C.out0 (out1 unused).
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let print = fnode(&func_lib, "print");
+        let print = fnode(&library, "print");
         let print_id = print.id;
 
         let mut graph = Graph::default();
@@ -2607,7 +2601,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         eg.execute_terminals().await?;
 
         assert_eq!(*captured.lock().unwrap(), vec![7]); // get_a only; get_b pruned
@@ -2618,14 +2612,14 @@ mod subgraph {
     /// existing cycle detector once flattened.
     #[tokio::test(flavor = "multi_thread")]
     async fn cross_boundary_cycle_detected() {
-        let func_lib = test_func_lib(default_hooks());
-        let def = wrap_sum_def(&func_lib);
+        let library = test_func_lib(default_hooks());
+        let def = wrap_sum_def(&library);
 
         // C.in0 <- C.out0 (self-cycle through the composite); print <- C.out0
         // so the cyclic node is reachable from a terminal.
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let print = fnode(&func_lib, "print");
+        let print = fnode(&library, "print");
         let print_id = print.id;
 
         let mut graph = Graph::default();
@@ -2636,7 +2630,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         let result = eg.execute_terminals().await;
 
         assert!(
@@ -2657,15 +2651,15 @@ mod subgraph {
     #[test]
     fn composite_dissolves_into_leaf_edges() {
         // get_a, get_b -> C(WrapSum) -> print.
-        let func_lib = test_func_lib(TestFuncHooks::default());
-        let def = wrap_sum_def(&func_lib);
+        let library = test_func_lib(TestFuncHooks::default());
+        let def = wrap_sum_def(&library);
 
-        let get_a = fnode(&func_lib, "get_a");
-        let get_b = fnode(&func_lib, "get_b");
+        let get_a = fnode(&library, "get_a");
+        let get_b = fnode(&library, "get_b");
         let (a_id, b_id) = (get_a.id, get_b.id);
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let print = fnode(&func_lib, "print");
+        let print = fnode(&library, "print");
         let print_id = print.id;
 
         let mut graph = Graph::default();
@@ -2679,7 +2673,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(print_id, 0), (c_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         // get_a, get_b, sum (interior), print — no composite/boundary nodes.
         assert_eq!(eg.program.e_nodes.len(), 4);
@@ -2692,10 +2686,10 @@ mod subgraph {
     /// A func-only graph builds with the node ids unchanged (caches survive).
     #[test]
     fn top_level_func_nodes_keep_identity() {
-        let func_lib = test_func_lib(default_hooks());
+        let library = test_func_lib(default_hooks());
         let graph = test_graph();
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         assert_eq!(eg.program.e_nodes.len(), graph.len());
         for node in graph.iter() {
@@ -2706,13 +2700,13 @@ mod subgraph {
     /// Two instances of one def produce two distinct interior leaves.
     #[test]
     fn two_instances_get_distinct_leaf_ids() {
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
-        let def = wrap_sum_def(&func_lib);
+        let mut library = test_func_lib(TestFuncHooks::default());
+        let def = wrap_sum_def(&library);
         let def_id = def.id;
-        func_lib.add_subgraph(def);
+        library.add_subgraph(def);
 
         let mut graph = Graph::default();
-        let def_ref = func_lib.subgraph_by_id(&def_id).unwrap();
+        let def_ref = library.subgraph_by_id(&def_id).unwrap();
         graph.add(Node::subgraph_instance(
             def_ref,
             SubgraphRef::Linked(def_id),
@@ -2723,7 +2717,7 @@ mod subgraph {
         ));
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         let sums: Vec<NodeId> = eg
             .program
@@ -2743,12 +2737,12 @@ mod subgraph {
     /// and accumulate them onto the instance node.
     #[test]
     fn flatten_map_attributes_interior_to_authoring_ids() {
-        let func_lib = test_func_lib(TestFuncHooks::default());
-        let def = wrap_sum_def(&func_lib);
+        let library = test_func_lib(TestFuncHooks::default());
+        let def = wrap_sum_def(&library);
         // The id the editor knows the interior node by (in the def graph).
         let interior_sum_id = def.graph.iter().find(|n| n.name == "sum").unwrap().id;
 
-        let get_a = fnode(&func_lib, "get_a");
+        let get_a = fnode(&library, "get_a");
         let a_id = get_a.id;
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
@@ -2760,7 +2754,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(c_id, 0), (a_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         // Interior node: flattened id is remapped, but attribution points
         // back to the authoring interior id then the enclosing instance.
@@ -2778,8 +2772,8 @@ mod subgraph {
 
     /// Add a `ticker` func (one event, no I/O) usable as an interior or parent
     /// emitter; instantiate it by name with `fnode`.
-    fn add_ticker(func_lib: &mut Library) {
-        func_lib.add(
+    fn add_ticker(library: &mut Library) {
+        library.add(
             Func::new(FuncId::unique(), "ticker")
                 .category("Test")
                 .terminal()
@@ -2788,9 +2782,9 @@ mod subgraph {
     }
 
     fn func_lib_with_ticker() -> Library {
-        let mut func_lib = test_func_lib(default_hooks());
-        add_ticker(&mut func_lib);
-        func_lib
+        let mut library = test_func_lib(default_hooks());
+        add_ticker(&mut library);
+        library
     }
 
     fn subscriber_ids(eg: &ExecutionEngine, e: &ExecutionNode, event_idx: usize) -> Vec<NodeId> {
@@ -2801,11 +2795,11 @@ mod subgraph {
     /// flattened interior emitter.
     #[test]
     fn exposed_event_rewires_parent_subscriber_to_interior_emitter() {
-        let func_lib = func_lib_with_ticker();
+        let library = func_lib_with_ticker();
 
         // def: a single `ticker`, its `tick` event exposed as the composite's
         // event 0.
-        let emitter = fnode(&func_lib, "ticker");
+        let emitter = fnode(&library, "ticker");
         let emitter_id = emitter.id;
         let mut def_graph = Graph::default();
         def_graph.add(emitter);
@@ -2821,7 +2815,7 @@ mod subgraph {
         // parent: composite C, and `listener` subscribing to C's event 0.
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let listener = fnode(&func_lib, "print");
+        let listener = fnode(&library, "print");
         let listener_id = listener.id;
 
         let mut graph = Graph::default();
@@ -2831,7 +2825,7 @@ mod subgraph {
         graph.subscribe(c_id, 0, listener_id);
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         // The flattened interior `ticker` carries the rewired subscriber.
         let ticker_node = eg.by_name("ticker").unwrap();
@@ -2842,12 +2836,12 @@ mod subgraph {
     /// wired to its `SubgraphInput` trigger.
     #[test]
     fn triggering_composite_reaches_interior_subscribers() {
-        let func_lib = func_lib_with_ticker();
+        let library = func_lib_with_ticker();
 
         // def: SubgraphInput trigger → interior `print` subscribes to it.
         let si = Node::new(NodeKind::SubgraphInput);
         let si_id = si.id;
-        let reactor = fnode(&func_lib, "print");
+        let reactor = fnode(&library, "print");
         let reactor_id = reactor.id;
         let mut def_graph = Graph::default();
         def_graph.add(si);
@@ -2858,7 +2852,7 @@ mod subgraph {
             .graph(def_graph);
 
         // parent: `ticker` emits; composite C subscribes to it.
-        let emitter = fnode(&func_lib, "ticker");
+        let emitter = fnode(&library, "ticker");
         let emitter_id = emitter.id;
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
@@ -2870,7 +2864,7 @@ mod subgraph {
         graph.subscribe(emitter_id, 0, c_id);
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         // The interior `print` flat id is the one wired onto `ticker`'s event.
         let reactor_flat = eg.by_name("print").unwrap().id;
@@ -2891,18 +2885,18 @@ mod subgraph {
                 Arc::new(move |v| c.lock().unwrap().push(v))
             },
         };
-        let mut func_lib = test_func_lib(hooks);
-        let def = wrap_sum_def(&func_lib);
+        let mut library = test_func_lib(hooks);
+        let def = wrap_sum_def(&library);
         let def_id = def.id;
-        func_lib.add_subgraph(def);
+        library.add_subgraph(def);
 
         // Two linked instances with const inputs, each feeding a print.
-        let def_ref = func_lib.subgraph_by_id(&def_id).unwrap();
+        let def_ref = library.subgraph_by_id(&def_id).unwrap();
         let c1 = Node::subgraph_instance(def_ref, SubgraphRef::Linked(def_id));
         let c2 = Node::subgraph_instance(def_ref, SubgraphRef::Linked(def_id));
         let (c1_id, c2_id) = (c1.id, c2.id);
-        let p1 = fnode(&func_lib, "print");
-        let p2 = fnode(&func_lib, "print");
+        let p1 = fnode(&library, "print");
+        let p2 = fnode(&library, "print");
         let (p1_id, p2_id) = (p1.id, p2.id);
 
         let mut graph = Graph::default();
@@ -2918,7 +2912,7 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(p2_id, 0), (c2_id, 0).into());
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         eg.execute_terminals().await?;
 
         let mut got = captured.lock().unwrap().clone();
@@ -2944,7 +2938,7 @@ mod subgraph {
         // Edit the linked def: route the exposed output straight from input A
         // (passthrough) instead of `sum`. Affects both instances.
         {
-            let def = func_lib.subgraphs.by_key_mut(&def_id).unwrap();
+            let def = library.subgraphs.by_key_mut(&def_id).unwrap();
             let si = def
                 .graph
                 .iter()
@@ -2961,7 +2955,7 @@ mod subgraph {
                 .set_input_binding(InputPort::new(so, 0), (si, 0).into());
         }
 
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
         eg.execute_terminals().await?;
 
         let mut got = captured.lock().unwrap().clone();
@@ -2990,13 +2984,13 @@ mod subgraph {
             get_b: Arc::new(|| 0),
             print: Arc::new(|_| {}),
         };
-        let mut func_lib = test_func_lib(hooks);
-        add_ticker(&mut func_lib);
+        let mut library = test_func_lib(hooks);
+        add_ticker(&mut library);
 
         // def Reactor: SubgraphInput trigger → interior `get_a` subscribes.
         let si = Node::new(NodeKind::SubgraphInput);
         let si_id = si.id;
-        let reactor = fnode(&func_lib, "get_a");
+        let reactor = fnode(&library, "get_a");
         let reactor_id = reactor.id;
         let mut def_graph = Graph::default();
         def_graph.add(si);
@@ -3007,7 +3001,7 @@ mod subgraph {
             .graph(def_graph);
 
         // parent: `ticker` E; composite C subscribes to E's event.
-        let emitter = fnode(&func_lib, "ticker");
+        let emitter = fnode(&library, "ticker");
         let emitter_id = emitter.id;
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
@@ -3019,7 +3013,7 @@ mod subgraph {
         graph.subscribe(emitter_id, 0, c_id);
 
         let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &func_lib).unwrap();
+        eg.update(&graph, &library).unwrap();
 
         // Fire E's event (as the worker does) — the interior `get_a` runs.
         eg.execute_events([EventRef {

@@ -24,10 +24,10 @@ Run the ignored one-shot asset generator after changing the default look:
 
 ## Dependencies / boundaries
 
-- **`scenarium`** — headless core. Owns `Graph`, `Node`, `Binding`, `FuncLib`,
+- **`scenarium`** — headless core. Owns `Graph`, `Node`, `Binding`, `Library`,
   `SubgraphDef`, `StaticValue`, the headless `Worker` evaluator, serde formats.
   darkroom never reimplements graph semantics; it edits a `scenarium::Graph`,
-  resolves nodes against a `FuncLib`, and runs the graph through `Worker`.
+  resolves nodes against a `Library`, and runs the graph through `Worker`.
 - **`palantir`** — the GUI runtime. `App` implements `palantir::App::frame`;
   `WinitHost` (in `main.rs`) drives it. All widgets, input, layout, theming,
   texture upload come from here. Pre-1.0, breaks freely — coordinate changes
@@ -76,7 +76,7 @@ everything else is grouped by responsibility:
 (`src/app/editor/mod.rs`) is the **document + editing pipeline**. `App` holds:
 
 - `editor: Editor` — everything document-related and the per-frame pipeline.
-- `func_lib: Arc<FuncLib>` — shared runtime library (builtins + loaded library
+- `library: Arc<Library>` — shared runtime library (builtins + loaded library
   subgraph defs), built at startup.
 - `theme: Theme`, `config: AppConfig`, `current_path: Option<PathBuf>`.
 - `host_handle: HostHandle` — winit integration for file dialogs + repaints.
@@ -95,7 +95,7 @@ everything else is grouped by responsibility:
    `Run` execute *last*, outside the record, so the blocking dialog holds no
    frame borrows. `Run` calls `App::run_graph`.
 
-`AppContext<'a>` (`app/mod.rs`) threads `&Theme`, `&FuncLib`, and `&RunState`
+`AppContext<'a>` (`app/mod.rs`) threads `&Theme`, `&Library`, and `&RunState`
 down the UI tree so child widgets don't grow a parameter fan-out.
 
 ## Architecture: the per-frame edit pipeline (`Editor::frame`)
@@ -162,7 +162,7 @@ Everything else is editor view-state, split per graph:
   target, so an edit touches both atomically. Get them via
   `Document::scope_mut(target)` / `scope(target)`.
 
-`FuncLib` is *not* here — it's runtime-owned on `App` (built from builtins +
+`Library` is *not* here — it's runtime-owned on `App` (built from builtins +
 the library file at startup, shared across documents). Startup seeds an empty
 graph (`auto_layout_default`); there is no checked-in sample graph.
 
@@ -208,7 +208,7 @@ Idempotent — a no-op on an already-canonical document.
 
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-frame snapshot rebuilt from the *active* graph+view every frame
-(`Scene::rebuild(graph, view, func_lib, ctx_def, run_state)` — see
+(`Scene::rebuild(graph, view, library, ctx_def, run_state)` — see
 `Editor::rebuild_scene`). Port names live in palantir's per-frame text arena,
 so it *must* be rebuilt before any widget reads it. Port names, types, and
 input-binding snapshots are flattened into pooled `Vec`s sliced per node (zero
@@ -221,7 +221,7 @@ the active `GraphView` each rebuild; the gesture writes back via intents.
 Execution is **decoupled from the UI thread**. `WorkerBridge` owns a tokio
 multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 
-- `App::run_graph` clones the active graph + func_lib and sends an
+- `App::run_graph` clones the active graph + library and sends an
   `[Update, ExecuteTerminals]` batch to the worker. The worker evaluates on its
   runtime and replies via callback with a `scenarium::WorkerReport`: a live
   `Progress(RunProgress)` per node *as it runs*, then a final `Finished(stats)`.
@@ -317,7 +317,7 @@ Key cross-cutting mechanisms:
 coupling — `commands.rs` orchestrates. Documents round-trip through any
 `SerdeFormat` (Rhai is canonical). `library.rs` reads/writes the shared
 subgraph library (`darkroom.library.rhai`): a set of `SubgraphDef`s loaded into
-`FuncLib` at startup and grown by the **promote/publish** menu commands. Local
+`Library` at startup and grown by the **promote/publish** menu commands. Local
 subgraph defs track lineage via an `origin` field — "Publish" updates the
 linked library entry in place, else creates a new one.
 

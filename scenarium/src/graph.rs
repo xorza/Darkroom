@@ -381,18 +381,18 @@ impl Graph {
     /// per-port type here) or a missing func/def. The caller treats `None` as
     /// the polymorphic `Null`. The engine never type-checks, so only the editor
     /// calls this.
-    pub fn input_type(&self, func_lib: &Library, port: InputPort) -> Option<DataType> {
-        self.input_spec(func_lib, port).map(|i| i.data_type.clone())
+    pub fn input_type(&self, library: &Library, port: InputPort) -> Option<DataType> {
+        self.input_spec(library, port).map(|i| i.data_type.clone())
     }
 
     /// The declared [`FuncInput`] of input `port` — its full spec (type +
     /// `value_variants` + flags), or `None` for a boundary / unresolved node.
     /// Resolution mirrors [`Self::input_type`].
-    fn input_spec<'a>(&'a self, func_lib: &'a Library, port: InputPort) -> Option<&'a FuncInput> {
+    fn input_spec<'a>(&'a self, library: &'a Library, port: InputPort) -> Option<&'a FuncInput> {
         let node = self.by_id(&port.node_id)?;
         let inputs = match &node.kind {
-            NodeKind::Func(func_id) => &func_lib.by_id(func_id)?.inputs,
-            NodeKind::Subgraph(r) => &self.resolve_def(*r, func_lib)?.inputs,
+            NodeKind::Func(func_id) => &library.by_id(func_id)?.inputs,
+            NodeKind::Subgraph(r) => &self.resolve_def(*r, library)?.inputs,
             NodeKind::Special(s) => &s.func().inputs,
             NodeKind::SubgraphInput | NodeKind::SubgraphOutput => return None,
         };
@@ -409,17 +409,17 @@ impl Graph {
     /// for a passthrough. Used by the editor for port-type display, connection
     /// compatibility, and subgraph-interface inference; the engine never
     /// type-checks, so it never calls this.
-    pub fn resolve_output_type(&self, func_lib: &Library, port: OutputPort) -> DataType {
-        self.resolve_output_type_inner(func_lib, port, &mut HashSet::new())
+    pub fn resolve_output_type(&self, library: &Library, port: OutputPort) -> DataType {
+        self.resolve_output_type_inner(library, port, &mut HashSet::new())
     }
 
     fn resolve_output_type_inner(
         &self,
-        func_lib: &Library,
+        library: &Library,
         port: OutputPort,
         visiting: &mut HashSet<NodeId>,
     ) -> DataType {
-        let Some(out) = self.output_spec(func_lib, port) else {
+        let Some(out) = self.output_spec(library, port) else {
             return DataType::Null;
         };
 
@@ -438,7 +438,7 @@ impl Graph {
             return DataType::Null;
         }
         let resolved = match self.input_binding(InputPort::new(port.node_id, mirrors)) {
-            Binding::Bind(src) => self.resolve_output_type_inner(func_lib, src, visiting),
+            Binding::Bind(src) => self.resolve_output_type_inner(library, src, visiting),
             // A const carries its own type for the scalar kinds, so the output
             // *is* that type. A `Null` const stays polymorphic.
             Binding::Const(v) => match v {
@@ -467,12 +467,12 @@ impl Graph {
     /// def interface), or `None` for a boundary / unresolved node.
     fn node_outputs<'a>(
         &'a self,
-        func_lib: &'a Library,
+        library: &'a Library,
         node: &'a Node,
     ) -> Option<&'a [FuncOutput]> {
         match &node.kind {
-            NodeKind::Func(func_id) => func_lib.by_id(func_id).map(|f| f.outputs.as_slice()),
-            NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).map(|d| d.outputs.as_slice()),
+            NodeKind::Func(func_id) => library.by_id(func_id).map(|f| f.outputs.as_slice()),
+            NodeKind::Subgraph(r) => self.resolve_def(*r, library).map(|d| d.outputs.as_slice()),
             NodeKind::Special(s) => Some(s.func().outputs.as_slice()),
             NodeKind::SubgraphInput | NodeKind::SubgraphOutput => None,
         }
@@ -481,13 +481,9 @@ impl Graph {
     /// The declared [`FuncOutput`] of output `port` — its name + [`OutputType`],
     /// or `None` for a boundary / unresolved node. The output-side mirror of
     /// [`Self::input_spec`].
-    fn output_spec<'a>(
-        &'a self,
-        func_lib: &'a Library,
-        port: OutputPort,
-    ) -> Option<&'a FuncOutput> {
+    fn output_spec<'a>(&'a self, library: &'a Library, port: OutputPort) -> Option<&'a FuncOutput> {
         let node = self.by_id(&port.node_id)?;
-        self.node_outputs(func_lib, node)?.get(port.port_idx)
+        self.node_outputs(library, node)?.get(port.port_idx)
     }
 
     /// Output ports of `node_id` whose type *mirrors* input `input_idx` —
@@ -495,14 +491,14 @@ impl Graph {
     /// changes. Empty for an ordinary input or node.
     fn wildcard_outputs_mirroring(
         &self,
-        func_lib: &Library,
+        library: &Library,
         node_id: NodeId,
         input_idx: usize,
     ) -> Vec<OutputPort> {
         let Some(node) = self.by_id(&node_id) else {
             return Vec::new();
         };
-        let Some(outputs) = self.node_outputs(func_lib, node) else {
+        let Some(outputs) = self.node_outputs(library, node) else {
             return Vec::new();
         };
         outputs
@@ -525,7 +521,7 @@ impl Graph {
     /// type-checks, so only the editor calls this.
     pub fn edges_invalidated_by(
         &self,
-        func_lib: &Library,
+        library: &Library,
         changed_node: NodeId,
         changed_input: usize,
     ) -> Vec<InputPort> {
@@ -534,7 +530,7 @@ impl Graph {
         // set doubles as the cycle / re-visit guard.
         let mut retyped: HashSet<OutputPort> = HashSet::new();
         let mut frontier: Vec<OutputPort> = Vec::new();
-        for port in self.wildcard_outputs_mirroring(func_lib, changed_node, changed_input) {
+        for port in self.wildcard_outputs_mirroring(library, changed_node, changed_input) {
             if retyped.insert(port) {
                 frontier.push(port);
             }
@@ -542,19 +538,19 @@ impl Graph {
 
         let mut invalidated = Vec::new();
         while let Some(src) = frontier.pop() {
-            let source_ty = self.resolve_output_type(func_lib, src);
+            let source_ty = self.resolve_output_type(library, src);
             for (dst, edge_src) in self.edges() {
                 if edge_src != src {
                     continue;
                 }
-                match self.input_type(func_lib, dst) {
+                match self.input_type(library, dst) {
                     // The consumer can't accept the retyped value — drop the wire.
                     Some(sink_ty) if !sink_ty.compatible_with(&source_ty) => invalidated.push(dst),
                     // Kept: a wildcard output of the consumer mirroring this
                     // input retypes too, so follow it further downstream.
                     _ => {
                         for port in
-                            self.wildcard_outputs_mirroring(func_lib, dst.node_id, dst.port_idx)
+                            self.wildcard_outputs_mirroring(library, dst.node_id, dst.port_idx)
                         {
                             if retyped.insert(port) {
                                 frontier.push(port);
@@ -765,11 +761,11 @@ impl Graph {
     pub fn resolve_def<'a>(
         &'a self,
         r: SubgraphRef,
-        func_lib: &'a Library,
+        library: &'a Library,
     ) -> Option<&'a SubgraphDef> {
         match r {
             SubgraphRef::Local(id) => self.subgraphs.by_key(&id),
-            SubgraphRef::Linked(id) => func_lib.subgraphs.by_key(&id),
+            SubgraphRef::Linked(id) => library.subgraphs.by_key(&id),
         }
     }
 
@@ -788,26 +784,26 @@ impl Graph {
     /// panic so a graph the editor itself built wrong is caught loudly in
     /// development. The release-safe, error-returning gate is `check_with`,
     /// which `ExecutionEngine::update` runs in every build.
-    pub fn validate_with(&self, func_lib: &Library) {
+    pub fn validate_with(&self, library: &Library) {
         if !is_debug() {
             return;
         }
-        self.check_with(func_lib)
+        self.check_with(library)
             .expect("graph structural invariant violated");
     }
 
-    /// Full structural validation against `func_lib`, in all builds. Extends
-    /// [`check`] (which can't see the library) with every func_lib-dependent
+    /// Full structural validation against `library`, in all builds. Extends
+    /// [`check`] (which can't see the library) with every library-dependent
     /// check: each func/subgraph reference resolves, no subgraph contains
     /// itself, boundary nodes sit inside a def, and every binding/subscription
     /// port index is in range. A graph+library is untrusted input at the
     /// compile boundary (a document can be stale against an evolved library),
     /// so an invalid one is a recoverable error the caller surfaces — not a
     /// panic. With this passing, flattening resolves every reference infallibly.
-    pub fn check_with(&self, func_lib: &Library) -> Result<()> {
+    pub fn check_with(&self, library: &Library) -> Result<()> {
         self.check()?;
         let mut visited: HashSet<SubgraphId> = HashSet::new();
-        self.check_level(func_lib, None, &mut visited)
+        self.check_level(library, None, &mut visited)
     }
 
     /// Recursive per-level half of [`check_with`]. `ctx_def` is the enclosing
@@ -817,7 +813,7 @@ impl Graph {
     /// recursion error.
     fn check_level(
         &self,
-        func_lib: &Library,
+        library: &Library,
         ctx_def: Option<&SubgraphDef>,
         visited: &mut HashSet<SubgraphId>,
     ) -> Result<()> {
@@ -828,14 +824,14 @@ impl Graph {
             match &node.kind {
                 NodeKind::Func(func_id) => {
                     ensure!(
-                        func_lib.by_id(func_id).is_some(),
+                        library.by_id(func_id).is_some(),
                         "node {:?} references func {:?}, absent from the library",
                         node.id,
                         func_id
                     );
                 }
                 NodeKind::Subgraph(r) => {
-                    let def = self.resolve_def(*r, func_lib).with_context(|| {
+                    let def = self.resolve_def(*r, library).with_context(|| {
                         format!(
                             "node {:?} references a missing subgraph definition",
                             node.id
@@ -846,7 +842,7 @@ impl Graph {
                         "subgraph {:?} is recursive (contains itself)",
                         def.id
                     );
-                    def.graph.check_level(func_lib, Some(def), visited)?;
+                    def.graph.check_level(library, Some(def), visited)?;
                     visited.remove(&def.id);
                 }
                 NodeKind::SubgraphInput => {
@@ -874,7 +870,7 @@ impl Graph {
                     format!("exposed event names missing emitter {:?}", event.emitter)
                 })?;
                 ensure!(
-                    event.emitter_event_idx < self.event_count(emitter, func_lib, ctx_def),
+                    event.emitter_event_idx < self.event_count(emitter, library, ctx_def),
                     "exposed event index {} out of range on {:?}",
                     event.emitter_event_idx,
                     event.emitter
@@ -888,14 +884,14 @@ impl Graph {
                 .by_id(&dst.node_id)
                 .with_context(|| format!("binding on missing node {:?}", dst.node_id))?;
             ensure!(
-                dst.port_idx < self.input_count(consumer, func_lib, ctx_def),
+                dst.port_idx < self.input_count(consumer, library, ctx_def),
                 "binding on node {:?} input {} is out of range",
                 dst.node_id,
                 dst.port_idx
             );
             if let Binding::Bind(src) = binding {
                 ensure!(
-                    !self.input_is_const_only(consumer, dst.port_idx, func_lib),
+                    !self.input_is_const_only(consumer, dst.port_idx, library),
                     "input {} on node {:?} is const-only and cannot be wired to an upstream output",
                     dst.port_idx,
                     dst.node_id
@@ -904,7 +900,7 @@ impl Graph {
                     .by_id(&src.node_id)
                     .with_context(|| format!("binding from missing node {:?}", src.node_id))?;
                 ensure!(
-                    src.port_idx < self.output_count(producer, func_lib, ctx_def),
+                    src.port_idx < self.output_count(producer, library, ctx_def),
                     "binding from node {:?} output {} is out of range",
                     src.node_id,
                     src.port_idx
@@ -915,8 +911,8 @@ impl Graph {
                 // a node function, so lambdas may trust their input types. Edges
                 // touching a boundary node have no concrete port type here
                 // (`None`/`Null`), so they're skipped — the interface types them.
-                if let Some(sink_ty) = self.input_type(func_lib, *dst) {
-                    let source_ty = self.resolve_output_type(func_lib, *src);
+                if let Some(sink_ty) = self.input_type(library, *dst) {
+                    let source_ty = self.resolve_output_type(library, *src);
                     ensure!(
                         sink_ty.compatible_with(&source_ty),
                         "node {:?} input {} expects {:?} but is wired from an incompatible {:?}",
@@ -930,7 +926,7 @@ impl Graph {
             // A `Const` literal must fit the port too, so a lambda can trust the
             // type of a constant input as much as a wired one.
             if let Binding::Const(value) = binding
-                && let Some(spec) = self.input_spec(func_lib, *dst)
+                && let Some(spec) = self.input_spec(library, *dst)
             {
                 ensure!(
                     const_satisfies(spec, value),
@@ -948,7 +944,7 @@ impl Graph {
                 .by_id(&s.emitter)
                 .with_context(|| format!("subscription from missing emitter {:?}", s.emitter))?;
             ensure!(
-                s.event_idx < self.event_count(emitter, func_lib, ctx_def),
+                s.event_idx < self.event_count(emitter, library, ctx_def),
                 "subscription event index {} out of range on {:?}",
                 s.event_idx,
                 s.emitter
@@ -964,20 +960,20 @@ impl Graph {
     /// may hold a `Const` literal but must not be wired to an upstream output.
     /// Boundary nodes route the interface (no literals), so they're never
     /// const-only. Resolution mirrors [`Self::input_count`].
-    fn input_is_const_only(&self, node: &Node, port_idx: usize, func_lib: &Library) -> bool {
+    fn input_is_const_only(&self, node: &Node, port_idx: usize, library: &Library) -> bool {
         let inputs = match &node.kind {
-            NodeKind::Func(func_id) => &func_lib.by_id(func_id).unwrap().inputs,
-            NodeKind::Subgraph(r) => &self.resolve_def(*r, func_lib).unwrap().inputs,
+            NodeKind::Func(func_id) => &library.by_id(func_id).unwrap().inputs,
+            NodeKind::Subgraph(r) => &self.resolve_def(*r, library).unwrap().inputs,
             NodeKind::Special(s) => &s.func().inputs,
             NodeKind::SubgraphInput | NodeKind::SubgraphOutput => return false,
         };
         inputs.get(port_idx).is_some_and(|i| i.const_only)
     }
 
-    fn input_count(&self, node: &Node, func_lib: &Library, ctx_def: Option<&SubgraphDef>) -> usize {
+    fn input_count(&self, node: &Node, library: &Library, ctx_def: Option<&SubgraphDef>) -> usize {
         match &node.kind {
-            NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().inputs.len(),
-            NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().inputs.len(),
+            NodeKind::Func(func_id) => library.by_id(func_id).unwrap().inputs.len(),
+            NodeKind::Subgraph(r) => self.resolve_def(*r, library).unwrap().inputs.len(),
             NodeKind::Special(s) => s.func().inputs.len(),
             NodeKind::SubgraphInput => 0,
             NodeKind::SubgraphOutput => ctx_def.unwrap().outputs.len(),
@@ -987,15 +983,10 @@ impl Graph {
     /// Number of output ports a node exposes — by kind. `ctx_def` is the
     /// enclosing definition, needed only for `SubgraphInput` (whose outputs
     /// are the def's exposed inputs).
-    fn output_count(
-        &self,
-        node: &Node,
-        func_lib: &Library,
-        ctx_def: Option<&SubgraphDef>,
-    ) -> usize {
+    fn output_count(&self, node: &Node, library: &Library, ctx_def: Option<&SubgraphDef>) -> usize {
         match &node.kind {
-            NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().outputs.len(),
-            NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().outputs.len(),
+            NodeKind::Func(func_id) => library.by_id(func_id).unwrap().outputs.len(),
+            NodeKind::Subgraph(r) => self.resolve_def(*r, library).unwrap().outputs.len(),
             NodeKind::Special(s) => s.func().outputs.len(),
             NodeKind::SubgraphInput => ctx_def.unwrap().inputs.len(),
             NodeKind::SubgraphOutput => 0,
@@ -1005,15 +996,10 @@ impl Graph {
     /// Number of events a node exposes. `SubgraphInput` exposes exactly one —
     /// the trigger that interior nodes subscribe to so they fire when the
     /// enclosing composite is triggered.
-    fn event_count(
-        &self,
-        node: &Node,
-        func_lib: &Library,
-        _ctx_def: Option<&SubgraphDef>,
-    ) -> usize {
+    fn event_count(&self, node: &Node, library: &Library, _ctx_def: Option<&SubgraphDef>) -> usize {
         match &node.kind {
-            NodeKind::Func(func_id) => func_lib.by_id(func_id).unwrap().events.len(),
-            NodeKind::Subgraph(r) => self.resolve_def(*r, func_lib).unwrap().events.len(),
+            NodeKind::Func(func_id) => library.by_id(func_id).unwrap().events.len(),
+            NodeKind::Subgraph(r) => self.resolve_def(*r, library).unwrap().events.len(),
             NodeKind::Special(s) => s.func().events.len(),
             NodeKind::SubgraphInput => 1,
             NodeKind::SubgraphOutput => 0,
@@ -1194,9 +1180,9 @@ mod tests {
         use common::deserialize;
         assert_eq!(CachePersistence::default(), CachePersistence::Memory);
 
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let library = test_func_lib(TestFuncHooks::default());
         let mut graph = Graph::default();
-        let mut node: Node = func_lib.by_name("get_a").unwrap().into();
+        let mut node: Node = library.by_name("get_a").unwrap().into();
         node.persist = CachePersistence::Disk;
         graph.add(node);
 
@@ -1240,14 +1226,14 @@ mod tests {
             let func = Func::new(FuncId::unique(), "f")
                 .input(port)
                 .output("out", DataType::Int);
-            let mut func_lib = Library::default();
-            func_lib.funcs.add(func.clone());
+            let mut library = Library::default();
+            library.funcs.add(func.clone());
 
             let mut graph = Graph::default();
             let producer = graph.add_func_node(&func);
             let consumer = graph.add_func_node(&func);
             graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-            graph.check_with(&func_lib)
+            graph.check_with(&library)
         };
 
         assert!(
@@ -1276,10 +1262,10 @@ mod tests {
         let int_sink = Func::new(FuncId::unique(), "int_sink")
             .input(FuncInput::required("x", DataType::Int))
             .output("o", DataType::Int);
-        let mut func_lib = Library::default();
-        func_lib.funcs.add(int_src.clone());
-        func_lib.funcs.add(str_sink.clone());
-        func_lib.funcs.add(int_sink.clone());
+        let mut library = Library::default();
+        library.funcs.add(int_src.clone());
+        library.funcs.add(str_sink.clone());
+        library.funcs.add(int_sink.clone());
 
         let pass = || {
             Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
@@ -1293,7 +1279,7 @@ mod tests {
         let f = g.add_func_node(&str_sink);
         g.set_input_binding(InputPort::new(f, 0), Binding::bind(s, 0));
         let err = g
-            .check_with(&func_lib)
+            .check_with(&library)
             .expect_err("Int into a String input must be rejected");
         assert!(
             err.to_string().contains("incompatible"),
@@ -1305,7 +1291,7 @@ mod tests {
         let s = g.add_func_node(&int_src);
         let i = g.add_func_node(&int_sink);
         g.set_input_binding(InputPort::new(i, 0), Binding::bind(s, 0));
-        assert!(g.check_with(&func_lib).is_ok());
+        assert!(g.check_with(&library).is_ok());
 
         // The check resolves *through* a passthrough: Int → pass → Int is fine,
         // Int → pass → String is rejected (the wildcard carries the real type).
@@ -1318,7 +1304,7 @@ mod tests {
         let i = g.add_func_node(&int_sink);
         g.set_input_binding(InputPort::new(i, 0), Binding::bind(pid, 0));
         assert!(
-            g.check_with(&func_lib).is_ok(),
+            g.check_with(&library).is_ok(),
             "Int through a passthrough into Int is compatible"
         );
 
@@ -1326,7 +1312,7 @@ mod tests {
         let f = g.add_func_node(&str_sink);
         g.set_input_binding(InputPort::new(f, 0), Binding::bind(pid, 0));
         assert!(
-            g.check_with(&func_lib)
+            g.check_with(&library)
                 .is_err_and(|e| e.to_string().contains("incompatible")),
             "Int through a passthrough into String must be rejected"
         );
@@ -1340,7 +1326,7 @@ mod tests {
             Binding::Const(StaticValue::String("x".into())),
         );
         assert!(
-            g.check_with(&func_lib)
+            g.check_with(&library)
                 .is_err_and(|e| e.to_string().contains("incompatible")),
             "a String constant on an Int input must be rejected"
         );
@@ -1349,7 +1335,7 @@ mod tests {
             Binding::Const(StaticValue::Float(2.5)),
         );
         assert!(
-            g.check_with(&func_lib).is_ok(),
+            g.check_with(&library).is_ok(),
             "a numeric constant satisfies a numeric input"
         );
     }
@@ -1363,8 +1349,8 @@ mod tests {
         // Int-out producer → pass1 → pass2. Both passthroughs declare a `Null`
         // (wildcard) output, but the resolved type must be the producer's `Int`.
         let producer = Func::new(FuncId::unique(), "src").output("out", DataType::Int);
-        let mut func_lib = Library::default();
-        func_lib.funcs.add(producer.clone());
+        let mut library = Library::default();
+        library.funcs.add(producer.clone());
 
         let mut graph = Graph::default();
         let src = graph.add_func_node(&producer);
@@ -1382,16 +1368,16 @@ mod tests {
 
         // The producer reports its own declared type.
         assert_eq!(
-            graph.resolve_output_type(&func_lib, OutputPort::new(src, 0)),
+            graph.resolve_output_type(&library, OutputPort::new(src, 0)),
             DataType::Int
         );
         // Each passthrough mirrors what flows through, transitively.
         assert_eq!(
-            graph.resolve_output_type(&func_lib, OutputPort::new(p1, 0)),
+            graph.resolve_output_type(&library, OutputPort::new(p1, 0)),
             DataType::Int
         );
         assert_eq!(
-            graph.resolve_output_type(&func_lib, OutputPort::new(p2, 0)),
+            graph.resolve_output_type(&library, OutputPort::new(p2, 0)),
             DataType::Int
         );
 
@@ -1399,12 +1385,12 @@ mod tests {
         // so its output accepts any consumer again.
         graph.set_input_binding(InputPort::new(p1, 0), Binding::None);
         assert_eq!(
-            graph.resolve_output_type(&func_lib, OutputPort::new(p1, 0)),
+            graph.resolve_output_type(&library, OutputPort::new(p1, 0)),
             DataType::Null
         );
         // The taint flows downstream: pass2 now reads pass1's `Null`.
         assert_eq!(
-            graph.resolve_output_type(&func_lib, OutputPort::new(p2, 0)),
+            graph.resolve_output_type(&library, OutputPort::new(p2, 0)),
             DataType::Null
         );
 
@@ -1415,11 +1401,11 @@ mod tests {
             Binding::Const(StaticValue::Bool(true)),
         );
         assert_eq!(
-            graph.resolve_output_type(&func_lib, OutputPort::new(p1, 0)),
+            graph.resolve_output_type(&library, OutputPort::new(p1, 0)),
             DataType::Bool
         );
         assert_eq!(
-            graph.resolve_output_type(&func_lib, OutputPort::new(p2, 0)),
+            graph.resolve_output_type(&library, OutputPort::new(p2, 0)),
             DataType::Bool,
             "the const's type propagates through the second passthrough too"
         );
@@ -1436,10 +1422,10 @@ mod tests {
         let float_sink = Func::new(FuncId::unique(), "fsink")
             .input(FuncInput::required("x", DataType::Float))
             .output("o", DataType::Float);
-        let mut func_lib = Library::default();
-        func_lib.funcs.add(float_src.clone());
-        func_lib.funcs.add(str_src.clone());
-        func_lib.funcs.add(float_sink.clone());
+        let mut library = Library::default();
+        library.funcs.add(float_src.clone());
+        library.funcs.add(str_src.clone());
+        library.funcs.add(float_sink.clone());
 
         let add_pass = |g: &mut Graph| {
             let node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
@@ -1466,15 +1452,15 @@ mod tests {
         // the one now incompatible — the chain must be followed to find it.
         g.set_input_binding(InputPort::new(p1, 0), Binding::bind(sp, 0));
         assert_eq!(
-            g.edges_invalidated_by(&func_lib, p1, 0),
+            g.edges_invalidated_by(&library, p1, 0),
             vec![InputPort::new(sink, 0)],
             "the edge two passthroughs downstream is flagged"
         );
 
         // Changing an ordinary node's input retypes nothing → no invalidations.
-        assert!(g.edges_invalidated_by(&func_lib, sink, 0).is_empty());
+        assert!(g.edges_invalidated_by(&library, sink, 0).is_empty());
         // Changing the passthrough's *path* input (no output mirrors it) → none.
-        assert!(g.edges_invalidated_by(&func_lib, p1, 1).is_empty());
+        assert!(g.edges_invalidated_by(&library, p1, 1).is_empty());
     }
 
     #[test]
@@ -1485,7 +1471,7 @@ mod tests {
 
         // A passthrough whose value input binds to its own output — a cycle the
         // editor can momentarily hold. Resolution must terminate as `Null`.
-        let func_lib = Library::default();
+        let library = Library::default();
         let mut graph = Graph::default();
         let pass = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
             bypass: false,
@@ -1495,7 +1481,7 @@ mod tests {
         graph.set_input_binding(InputPort::new(id, 0), Binding::bind(id, 0));
 
         assert_eq!(
-            graph.resolve_output_type(&func_lib, OutputPort::new(id, 0)),
+            graph.resolve_output_type(&library, OutputPort::new(id, 0)),
             DataType::Null
         );
     }
@@ -1508,23 +1494,23 @@ mod tests {
         let consumer = Func::new(FuncId::unique(), "dst")
             .input(FuncInput::required("x", DataType::Float))
             .output("out", DataType::Float);
-        let mut func_lib = Library::default();
-        func_lib.funcs.add(consumer.clone());
+        let mut library = Library::default();
+        library.funcs.add(consumer.clone());
 
         let mut graph = Graph::default();
         let dst = graph.add_func_node(&consumer);
         assert_eq!(
-            graph.input_type(&func_lib, InputPort::new(dst, 0)),
+            graph.input_type(&library, InputPort::new(dst, 0)),
             Some(DataType::Float)
         );
         // Out-of-range port → None.
-        assert_eq!(graph.input_type(&func_lib, InputPort::new(dst, 9)), None);
+        assert_eq!(graph.input_type(&library, InputPort::new(dst, 9)), None);
 
         // A boundary node carries no per-port type here → None (caller's Null).
         let boundary = Node::new(NodeKind::SubgraphInput);
         let b = boundary.id;
         graph.add(boundary);
-        assert_eq!(graph.input_type(&func_lib, InputPort::new(b, 0)), None);
+        assert_eq!(graph.input_type(&library, InputPort::new(b, 0)), None);
     }
 
     #[test]
@@ -1750,8 +1736,8 @@ mod tests {
 
     #[test]
     fn add_func_node_leaves_defaultless_inputs_unbound() {
-        let func_lib = test_func_lib(TestFuncHooks::default());
-        let sum = func_lib.by_name("sum").unwrap(); // inputs have no defaults
+        let library = test_func_lib(TestFuncHooks::default());
+        let sum = library.by_name("sum").unwrap(); // inputs have no defaults
         let mut graph = Graph::default();
         let id = graph.add_func_node(sum);
 
@@ -1784,10 +1770,10 @@ mod tests {
 
     #[test]
     fn resolve_def_picks_local_or_linked_source() {
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        let mut library = test_func_lib(TestFuncHooks::default());
 
         let linked_id = SubgraphId::unique();
-        func_lib.add_subgraph(SubgraphDef::new(linked_id, "Linked").category("Test"));
+        library.add_subgraph(SubgraphDef::new(linked_id, "Linked").category("Test"));
 
         let mut graph = Graph::default();
         let local_id = SubgraphId::unique();
@@ -1797,22 +1783,22 @@ mod tests {
 
         assert_eq!(
             graph
-                .resolve_def(SubgraphRef::Local(local_id), &func_lib)
+                .resolve_def(SubgraphRef::Local(local_id), &library)
                 .unwrap()
                 .name,
             "Local"
         );
         assert_eq!(
             graph
-                .resolve_def(SubgraphRef::Linked(linked_id), &func_lib)
+                .resolve_def(SubgraphRef::Linked(linked_id), &library)
                 .unwrap()
                 .name,
             "Linked"
         );
-        // A local ref whose id only exists in the func_lib does not resolve.
+        // A local ref whose id only exists in the library does not resolve.
         assert!(
             graph
-                .resolve_def(SubgraphRef::Local(linked_id), &func_lib)
+                .resolve_def(SubgraphRef::Local(linked_id), &library)
                 .is_none()
         );
     }

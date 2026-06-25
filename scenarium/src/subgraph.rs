@@ -201,8 +201,8 @@ mod tests {
     }
 
     /// `in(A, B) -> sum -> out(Sum)`.
-    fn wrap_sum(func_lib: &Library) -> SubgraphDef {
-        let sum_id = func_lib.by_name("sum").unwrap().id;
+    fn wrap_sum(library: &Library) -> SubgraphDef {
+        let sum_id = library.by_name("sum").unwrap().id;
 
         let in_node = Node::new(NodeKind::SubgraphInput);
         let in_id = in_node.id;
@@ -230,8 +230,8 @@ mod tests {
 
     #[test]
     fn fresh_copy_remaps_interior_ids_and_preserves_wiring() {
-        let func_lib = test_func_lib(TestFuncHooks::default());
-        let def = wrap_sum(&func_lib);
+        let library = test_func_lib(TestFuncHooks::default());
+        let def = wrap_sum(&library);
         let copy = def.fresh_copy();
 
         // Fresh def id; same interface.
@@ -258,8 +258,8 @@ mod tests {
 
     #[test]
     fn local_subgraph_validates_and_roundtrips() {
-        let func_lib = test_func_lib(TestFuncHooks::default());
-        let def = wrap_sum(&func_lib);
+        let library = test_func_lib(TestFuncHooks::default());
+        let def = wrap_sum(&library);
 
         let mut parent = Graph::default();
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
@@ -268,7 +268,7 @@ mod tests {
         parent.subgraphs.add(def);
         parent.add(inst);
 
-        parent.validate_with(&func_lib);
+        parent.validate_with(&library);
 
         for format in SerdeFormat::all_formats_for_testing() {
             let bytes = parent.serialize(format).unwrap();
@@ -279,24 +279,24 @@ mod tests {
 
     #[test]
     fn linked_subgraph_resolves_from_funclib() {
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
-        let def = wrap_sum(&func_lib);
+        let mut library = test_func_lib(TestFuncHooks::default());
+        let def = wrap_sum(&library);
         let def_id = def.id;
-        func_lib.add_subgraph(def);
+        library.add_subgraph(def);
 
         let mut parent = Graph::default();
-        let def_ref = func_lib.subgraph_by_id(&def_id).unwrap();
+        let def_ref = library.subgraph_by_id(&def_id).unwrap();
         let inst = Node::subgraph_instance(def_ref, SubgraphRef::Linked(def_id));
         parent.add(inst);
 
-        parent.validate_with(&func_lib);
+        parent.validate_with(&library);
     }
 
     #[test]
     fn zero_input_subgraph_omits_input_boundary() {
         // `get_a` (0 inputs, 1 output) -> out(Val). No SubgraphInput node.
-        let func_lib = test_func_lib(TestFuncHooks::default());
-        let get_a_id = func_lib.by_name("get_a").unwrap().id;
+        let library = test_func_lib(TestFuncHooks::default());
+        let get_a_id = library.by_name("get_a").unwrap().id;
 
         let src = Node::new(NodeKind::Func(get_a_id));
         let src_id = src.id;
@@ -319,14 +319,14 @@ mod tests {
         parent.subgraphs.add(def);
         parent.add(inst);
 
-        parent.validate_with(&func_lib);
+        parent.validate_with(&library);
     }
 
     #[test]
     fn zero_output_subgraph_omits_output_boundary() {
         // in(msg) -> print (terminal). No SubgraphOutput node.
-        let func_lib = test_func_lib(TestFuncHooks::default());
-        let print_id = func_lib.by_name("print").unwrap().id;
+        let library = test_func_lib(TestFuncHooks::default());
+        let print_id = library.by_name("print").unwrap().id;
 
         let in_node = Node::new(NodeKind::SubgraphInput);
         let in_id = in_node.id;
@@ -349,23 +349,23 @@ mod tests {
         parent.subgraphs.add(def);
         parent.add(inst);
 
-        parent.validate_with(&func_lib);
+        parent.validate_with(&library);
     }
 
     #[test]
     #[should_panic(expected = "recursive")]
     fn recursive_subgraph_rejected() {
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        let mut library = test_func_lib(TestFuncHooks::default());
 
         // A's interior contains a node instancing A again (mutual self-reference).
         let a_id = SubgraphId::unique();
         let mut inner = Graph::default();
         inner.add(Node::new(NodeKind::Subgraph(SubgraphRef::Linked(a_id))));
-        func_lib.add_subgraph(SubgraphDef::new(a_id, "A").category("Test").graph(inner));
+        library.add_subgraph(SubgraphDef::new(a_id, "A").category("Test").graph(inner));
 
         let mut parent = Graph::default();
         parent.add(Node::new(NodeKind::Subgraph(SubgraphRef::Linked(a_id))));
-        parent.validate_with(&func_lib); // panics: recursion guard
+        parent.validate_with(&library); // panics: recursion guard
     }
 
     /// A func with one event and no I/O, for exposed-event tests.
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn exposed_event_maps_to_interior_emitter() {
-        let (func_lib, ticker) = ticker_func_lib();
+        let (library, ticker) = ticker_func_lib();
 
         // def interior: a single `ticker` whose `tick` event is exposed.
         let emitter = Node::new(NodeKind::Func(ticker));
@@ -409,6 +409,6 @@ mod tests {
         parent.subgraphs.add(def);
         parent.add(inst);
 
-        parent.validate_with(&func_lib);
+        parent.validate_with(&library);
     }
 }

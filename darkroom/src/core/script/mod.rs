@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::document::view_node::ViewNode;
 use crate::core::edit::intent::Intent;
-use crate::core::func_lib::SharedFuncLib;
+use crate::core::library::SharedLibrary;
 use crate::core::wake::Wake;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, oneshot};
@@ -276,7 +276,7 @@ impl ScriptExecutor {
     pub fn new(
         transport: tcp::TcpTransport,
         action_tx: mpsc::UnboundedSender<ScriptMessage>,
-        func_lib: SharedFuncLib,
+        library: SharedLibrary,
         notify: Wake,
     ) -> Self {
         let inbound = InboundSender {
@@ -289,7 +289,7 @@ impl ScriptExecutor {
         let cancel = CancellationToken::new();
         let cancel_task = cancel.clone();
         let task = tokio::spawn(async move {
-            run_executor(rx, cancel_task, inbound, func_lib).await;
+            run_executor(rx, cancel_task, inbound, library).await;
         });
 
         Self {
@@ -313,10 +313,10 @@ async fn run_executor(
     mut rx: mpsc::Receiver<ScriptRequest>,
     cancel: CancellationToken,
     inbound: InboundSender,
-    func_lib: SharedFuncLib,
+    library: SharedLibrary,
 ) {
     let state: StdoutBuffer = Arc::new(Mutex::new(String::new()));
-    let engine = build_engine(state.clone(), inbound, func_lib);
+    let engine = build_engine(state.clone(), inbound, library);
     let mut sessions = SessionStore::default();
 
     loop {
@@ -343,15 +343,15 @@ async fn run_executor(
     }
 }
 
-fn build_engine(stdout: StdoutBuffer, inbound: InboundSender, func_lib: SharedFuncLib) -> Engine {
+fn build_engine(stdout: StdoutBuffer, inbound: InboundSender, library: SharedLibrary) -> Engine {
     let mut engine = Engine::new();
     configure_caps(&mut engine);
     wire_print_hook(&mut engine, stdout, inbound.clone());
     register_run(&mut engine, inbound.clone());
     register_shutdown(&mut engine, inbound.clone());
     register_mutations(&mut engine, inbound);
-    register_introspection(&mut engine, func_lib.clone());
-    register_host_helpers(&mut engine, func_lib);
+    register_introspection(&mut engine, library.clone());
+    register_host_helpers(&mut engine, library);
     wire_debug_hook(&mut engine);
     install_prelude(&mut engine);
     engine
@@ -454,12 +454,12 @@ fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
 /// derive (id, name, category, inputs, outputs, …; `lambda` is
 /// `#[serde(skip)]`). Lets scripts query the live Library without a
 /// separate registry on this side.
-fn register_introspection(engine: &mut Engine, func_lib: SharedFuncLib) {
+fn register_introspection(engine: &mut Engine, library: SharedLibrary) {
     engine.register_fn("list_funcs", move || -> Array {
         // `load` per call so promote/publish growth is visible to scripts.
         // Skip (don't panic on) any func that fails to serialize, so a bad
         // entry can't take down the executor task mid-eval.
-        func_lib
+        library
             .load()
             .funcs
             .iter()
@@ -486,7 +486,7 @@ fn register_introspection(engine: &mut Engine, func_lib: SharedFuncLib) {
 /// bare-name surface. Keep this module small: prefer script-side helpers
 /// in `prelude.rhai` when a thing can be expressed via `apply` + the
 /// already-shaped maps.
-fn register_host_helpers(engine: &mut Engine, func_lib: SharedFuncLib) {
+fn register_host_helpers(engine: &mut Engine, library: SharedLibrary) {
     let mut module = rhai::Module::new();
     module.set_native_fn(
         "make_add_node",
@@ -498,7 +498,7 @@ fn register_host_helpers(engine: &mut Engine, func_lib: SharedFuncLib) {
                 .parse()
                 .map_err(|e| format!("invalid func id {id:?}: {e}"))?;
             // `load` per call so a func added since startup still resolves.
-            let lib = func_lib.load();
+            let lib = library.load();
             let func = lib
                 .by_id(&func_id)
                 .ok_or_else(|| format!("unknown func id: {id}"))?;
@@ -651,10 +651,10 @@ impl ScriptHost {
     /// Bind the TCP listener (when `cfg.tcp` is set), spin up a runtime,
     /// and start the executor on it. Returns `None` when scripting is off
     /// or the bind failed (logged here) — the normal case, not an error.
-    /// `func_lib` is the shared swappable library cell; the executor `load`s
+    /// `library` is the shared swappable library cell; the executor `load`s
     /// it per call, so promote/publish growth from the GUI is reflected in
     /// running scripts on their next access.
-    pub fn start(cfg: &ScriptConfig, func_lib: SharedFuncLib, wake: Wake) -> Option<Self> {
+    pub fn start(cfg: &ScriptConfig, library: SharedLibrary, wake: Wake) -> Option<Self> {
         let tcp_cfg = cfg.tcp.as_ref()?;
         let (transport, report) = match tcp::start(tcp_cfg) {
             Ok(pair) => pair,
@@ -679,7 +679,7 @@ impl ScriptHost {
         // tasks, so it needs an ambient runtime.
         let executor = {
             let _guard = runtime.enter();
-            ScriptExecutor::new(transport, tx, func_lib, wake)
+            ScriptExecutor::new(transport, tx, library, wake)
         };
         Some(Self {
             executor,

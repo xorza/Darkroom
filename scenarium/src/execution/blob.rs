@@ -29,7 +29,7 @@ pub(crate) enum Error {
 /// unreadable, or no longer decodes (corrupt / a custom type whose codec is gone).
 /// All mean "recompute" to the caller. A transient read error is logged but, like
 /// the rest, treated as a miss.
-pub(crate) fn read(path: &Path, func_lib: &Library) -> Option<Vec<DynamicValue>> {
+pub(crate) fn read(path: &Path, library: &Library) -> Option<Vec<DynamicValue>> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return None,
@@ -38,7 +38,7 @@ pub(crate) fn read(path: &Path, func_lib: &Library) -> Option<Vec<DynamicValue>>
             return None;
         }
     };
-    match deserialize_outputs(bytes, func_lib) {
+    match deserialize_outputs(bytes, library) {
         Ok(values) => Some(values),
         Err(e) => {
             tracing::warn!(path = %path.display(), error = %e, "cached outputs failed to decode; recomputing");
@@ -54,10 +54,10 @@ pub(crate) fn read(path: &Path, func_lib: &Library) -> Option<Vec<DynamicValue>>
 pub(crate) async fn write(
     path: &Path,
     outputs: &[DynamicValue],
-    func_lib: &Library,
+    library: &Library,
     ctx: &mut ContextManager,
 ) -> Result<bool, Error> {
-    let bytes = match serialize_outputs(outputs, func_lib, ctx).await {
+    let bytes = match serialize_outputs(outputs, library, ctx).await {
         Ok(bytes) => bytes,
         Err(value_codec::Error::UnknownType(_)) => return Ok(false),
         Err(e) => return Err(Error::Encode(e)),
@@ -121,7 +121,7 @@ mod tests {
         )))
     }
 
-    fn func_lib() -> Library {
+    fn library() -> Library {
         Library::default()
     }
 
@@ -136,14 +136,14 @@ mod tests {
         let wrote = write(
             &file.0,
             &outputs,
-            &func_lib(),
+            &library(),
             &mut ContextManager::default(),
         )
         .await
         .unwrap();
         assert!(wrote, "plain values are written");
 
-        let back = read(&file.0, &func_lib()).expect("hit");
+        let back = read(&file.0, &library()).expect("hit");
         assert_eq!(back.len(), 3);
         assert!(matches!(back[0], DynamicValue::Unbound));
         assert_eq!(back[1].as_i64(), Some(7));
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn read_missing_is_none() {
         let file = temp_file("missing");
-        assert!(read(&file.0, &func_lib()).is_none());
+        assert!(read(&file.0, &library()).is_none());
     }
 
     /// A custom value with no registered codec — never cacheable.
@@ -186,7 +186,7 @@ mod tests {
         let wrote = write(
             &file.0,
             &outputs,
-            &func_lib(),
+            &library(),
             &mut ContextManager::default(),
         )
         .await

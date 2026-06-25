@@ -17,11 +17,11 @@ fn int_input(name: &str) -> FuncInput {
 /// def (interior unwired) plus the three node ids so each test wires
 /// it as needed. `authored_inputs`/`outputs` seed the def interface.
 fn build_def(
-    func_lib: &Library,
+    library: &Library,
     authored_inputs: Vec<FuncInput>,
     authored_outputs: Vec<FuncOutput>,
 ) -> (SubgraphDef, NodeId, NodeId, NodeId) {
-    let sum_id = func_lib.by_name("sum").unwrap().id;
+    let sum_id = library.by_name("sum").unwrap().id;
     let sgin = Node::new(NodeKind::SubgraphInput);
     let sum = Node::new(NodeKind::Func(sum_id));
     let sgout = Node::new(NodeKind::SubgraphOutput);
@@ -49,16 +49,16 @@ fn bind(graph: &mut Graph, dst_node: NodeId, dst_idx: usize, src_node: NodeId, s
 fn connecting_placeholder_grows_input_with_inferred_type() {
     // Interior wires sum.in0 <- (SubgraphInput, 0) while def.inputs is
     // empty — the transient state right after a placeholder connect.
-    let func_lib = lib();
-    let (mut def, sgin, sum, _sgout) = build_def(&func_lib, vec![], vec![]);
+    let library = lib();
+    let (mut def, sgin, sum, _sgout) = build_def(&library, vec![], vec![]);
     bind(&mut def.graph, sum, 0, sgin, 0);
-    let want_ty = func_lib.by_name("sum").unwrap().inputs[0].data_type.clone();
+    let want_ty = library.by_name("sum").unwrap().inputs[0].data_type.clone();
     let def_id = def.id;
     let mut graph = Graph::default();
     graph.subgraphs.add(def);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&func_lib);
+    doc.reconcile_boundaries(&library);
 
     let def = doc.graph.subgraphs.by_key(&def_id).unwrap();
     assert_eq!(def.inputs.len(), 1, "placeholder use materialized a slot");
@@ -72,16 +72,16 @@ fn connecting_placeholder_grows_input_with_inferred_type() {
 #[test]
 fn connecting_placeholder_grows_output_with_inferred_type() {
     // (SubgraphOutput, 0) <- sum.out0, def.outputs empty.
-    let func_lib = lib();
-    let (mut def, _sgin, sum, sgout) = build_def(&func_lib, vec![], vec![]);
+    let library = lib();
+    let (mut def, _sgin, sum, sgout) = build_def(&library, vec![], vec![]);
     bind(&mut def.graph, sgout, 0, sum, 0);
-    let want_ty = func_lib.by_name("sum").unwrap().outputs[0].ty.declared();
+    let want_ty = library.by_name("sum").unwrap().outputs[0].ty.declared();
     let def_id = def.id;
     let mut graph = Graph::default();
     graph.subgraphs.add(def);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&func_lib);
+    doc.reconcile_boundaries(&library);
 
     let def = doc.graph.subgraphs.by_key(&def_id).unwrap();
     assert_eq!(def.outputs.len(), 1);
@@ -93,9 +93,9 @@ fn connecting_placeholder_grows_output_with_inferred_type() {
 fn fully_wired_interface_is_preserved_and_idempotent() {
     // Authored names A,B both used → reconcile must not rename or
     // resize, and a second pass must be a no-op.
-    let func_lib = lib();
+    let library = lib();
     let (mut def, sgin, sum, _sgout) =
-        build_def(&func_lib, vec![int_input("A"), int_input("B")], vec![]);
+        build_def(&library, vec![int_input("A"), int_input("B")], vec![]);
     bind(&mut def.graph, sum, 0, sgin, 0);
     bind(&mut def.graph, sum, 1, sgin, 1);
     let def_id = def.id;
@@ -103,7 +103,7 @@ fn fully_wired_interface_is_preserved_and_idempotent() {
     graph.subgraphs.add(def);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&func_lib);
+    doc.reconcile_boundaries(&library);
     let names: Vec<String> = doc
         .graph
         .subgraphs
@@ -117,7 +117,7 @@ fn fully_wired_interface_is_preserved_and_idempotent() {
 
     // Idempotent: a second pass changes nothing.
     let before = doc.graph.subgraphs.by_key(&def_id).unwrap().inputs.clone();
-    doc.reconcile_boundaries(&func_lib);
+    doc.reconcile_boundaries(&library);
     let after = doc.graph.subgraphs.by_key(&def_id).unwrap().inputs.clone();
     assert_eq!(before, after);
 }
@@ -127,9 +127,9 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
     // Authored [A,B,C]; interior uses SubgraphInput outputs {0,2}
     // (slot 1 = B is unused). reconcile drops B and renumbers 2 -> 1,
     // rewriting the interior binding AND the instance's bindings.
-    let func_lib = lib();
+    let library = lib();
     let (mut def, sgin, sum, _sgout) = build_def(
-        &func_lib,
+        &library,
         vec![int_input("A"), int_input("B"), int_input("C")],
         vec![],
     );
@@ -155,7 +155,7 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
     );
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&func_lib);
+    doc.reconcile_boundaries(&library);
 
     // Interface compacted to [A, C].
     let names: Vec<String> = doc
@@ -200,16 +200,16 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
 #[test]
 fn unused_subgraph_input_shrinks_interface() {
     // Authored [A,B] but only output 0 is wired → B is dropped.
-    let func_lib = lib();
+    let library = lib();
     let (mut def, sgin, sum, _sgout) =
-        build_def(&func_lib, vec![int_input("A"), int_input("B")], vec![]);
+        build_def(&library, vec![int_input("A"), int_input("B")], vec![]);
     bind(&mut def.graph, sum, 0, sgin, 0);
     let def_id = def.id;
     let mut graph = Graph::default();
     graph.subgraphs.add(def);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&func_lib);
+    doc.reconcile_boundaries(&library);
 
     let inputs = &doc.graph.subgraphs.by_key(&def_id).unwrap().inputs;
     assert_eq!(inputs.len(), 1);
@@ -221,16 +221,16 @@ fn existing_port_type_is_rederived_from_wiring() {
     // An existing slot authored with a stale type (Bool) but wired to
     // `sum.in0` (Int): reconcile corrects the type to Int while keeping
     // the authored name.
-    let func_lib = lib();
+    let library = lib();
     let stale = FuncInput::optional("A", DataType::Bool);
-    let (mut def, sgin, sum, _sgout) = build_def(&func_lib, vec![stale], vec![]);
+    let (mut def, sgin, sum, _sgout) = build_def(&library, vec![stale], vec![]);
     bind(&mut def.graph, sum, 0, sgin, 0); // sgin.out0 -> sum.in0
     let def_id = def.id;
     let mut graph = Graph::default();
     graph.subgraphs.add(def);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&func_lib);
+    doc.reconcile_boundaries(&library);
 
     let input = &doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[0];
     assert_eq!(input.name, "A", "authored name preserved");
@@ -246,7 +246,7 @@ fn passthrough_ports_are_null_typed() {
     // `SubgraphInput.out0` wired straight to `SubgraphOutput.in0` — no
     // real func between. Both boundary ports are polymorphic, so their
     // derived type is `Null`.
-    let func_lib = lib();
+    let library = lib();
     let sgin = Node::new(NodeKind::SubgraphInput);
     let sgout = Node::new(NodeKind::SubgraphOutput);
     let (sgin_id, sgout_id) = (sgin.id, sgout.id);
@@ -263,7 +263,7 @@ fn passthrough_ports_are_null_typed() {
     graph.subgraphs.add(def);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&func_lib);
+    doc.reconcile_boundaries(&library);
 
     let def = doc.graph.subgraphs.by_key(&def_id).unwrap();
     assert_eq!(def.inputs.len(), 1);
@@ -285,9 +285,9 @@ fn passthrough_in_subgraph_exposes_the_resolved_output_type() {
     // exposed subgraph output must report `sum`'s real output type, resolved
     // through it — otherwise wrapping a value in a file-cache would erase its
     // type for the whole composite.
-    let func_lib = lib();
-    let sum_id = func_lib.by_name("sum").unwrap().id;
-    let want_ty = func_lib.by_name("sum").unwrap().outputs[0].ty.declared();
+    let library = lib();
+    let sum_id = library.by_name("sum").unwrap().id;
+    let want_ty = library.by_name("sum").unwrap().outputs[0].ty.declared();
     assert_ne!(
         want_ty,
         DataType::Null,
@@ -321,7 +321,7 @@ fn passthrough_in_subgraph_exposes_the_resolved_output_type() {
     graph.subgraphs.add(def);
     let mut doc: Document = graph.into();
 
-    doc.reconcile_boundaries(&func_lib);
+    doc.reconcile_boundaries(&library);
 
     let def = doc.graph.subgraphs.by_key(&def_id).unwrap();
     assert_eq!(def.outputs.len(), 1);

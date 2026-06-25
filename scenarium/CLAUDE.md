@@ -50,7 +50,7 @@ port Vecs; wiring lives flat at graph level:
 (Func / Subgraph / SubgraphInput / SubgraphOutput), `name`,
 `persist: CachePersistence` (`Memory | Disk`), `disabled: bool`. Port arity
 derives from `kind`. `Binding` (`graph.rs:48`) is `None` (unbound) /
-`Const(StaticValue)` / `Bind(OutputPort)`. `validate_with(func_lib)` recurses per
+`Const(StaticValue)` / `Bind(OutputPort)`. `validate_with(library)` recurses per
 composite level with recursion guards.
 
 A **subgraph** (`subgraph.rs`) has a `SubgraphDef` whose interior `graph` may hold
@@ -131,7 +131,7 @@ funclibs.
 
 `Worker` (`worker/mod.rs:79`) wraps a tokio task fed by `UnboundedSender<Vec<WorkerMessage>>`.
 A `Vec<WorkerMessage>` is **one atomic commit unit** — no partial batches.
-`WorkerMessage` covers `Update{graph, func_lib}`, `Clear`, `ExecuteTerminals`,
+`WorkerMessage` covers `Update{graph, library}`, `Clear`, `ExecuteTerminals`,
 `InjectEvents`, `Start/StopEventLoop`, `Sync`, `RequestArgumentValues`,
 `SetDiskCache(Option<DiskCache>)` (swap the engine's disk cache — applied before
 any same-batch graph op so the next `Update` hydrates from the new store),

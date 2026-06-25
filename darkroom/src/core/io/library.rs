@@ -2,7 +2,7 @@
 //! runtime `Library` (where `SubgraphRef::Linked` resolves) rather than in
 //! any one document, so they're reusable across documents. Persisted in
 //! the working dir as Rhai, like the config — loaded into
-//! `func_lib.subgraphs` at startup, saved when "promote" grows it.
+//! `library.subgraphs` at startup, saved when "promote" grows it.
 
 use std::path::PathBuf;
 

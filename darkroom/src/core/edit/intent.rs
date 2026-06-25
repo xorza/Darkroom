@@ -573,7 +573,7 @@ fn commit_intent(intent: Intent, doc: &mut Document, target: GraphRef) -> Option
 /// [`commit_intent`], plus the cascaded edits an input change implies: when a
 /// `SetInput` retypes a node's *wildcard* output (a passthrough / reroute), every
 /// downstream wire that no longer typechecks is dropped — in the same batch, so
-/// undo restores the binding and the severed edges together. `func_lib` resolves
+/// undo restores the binding and the severed edges together. `library` resolves
 /// the port types. Returns every committed step (the triggering one first), so
 /// the caller records / inspects them as one unit. Both the GUI editor and the
 /// headless session drive their forward-apply loop through this.
@@ -581,7 +581,7 @@ pub fn commit_intent_cascading(
     intent: Intent,
     doc: &mut Document,
     target: GraphRef,
-    func_lib: &Library,
+    library: &Library,
 ) -> Vec<UndoStep> {
     // Only a `SetInput` can retype a node's output, so only it can invalidate
     // downstream wires. Capture which input changed before the intent is moved.
@@ -600,7 +600,7 @@ pub fn commit_intent_cascading(
         // through any chain of wildcard outputs); drop each in the same batch.
         let severed = doc
             .graph_for(target)
-            .map(|graph| graph.edges_invalidated_by(func_lib, node, input_idx))
+            .map(|graph| graph.edges_invalidated_by(library, node, input_idx))
             .unwrap_or_default();
         for dst in severed {
             steps.extend(commit_intent(

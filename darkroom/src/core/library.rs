@@ -10,24 +10,24 @@ use scenarium::prelude::Library;
 
 use crate::core::io::library;
 
-/// The runtime library behind a swappable cell (see [`Engine::func_lib`]).
+/// The runtime library behind a swappable cell (see [`Engine::library`]).
 /// The `ArcSwap` lets promote/publish atomically swap in a grown copy that
 /// every holder picks up on its next `load`; the outer `Arc` shares the
 /// *same* slot with the script host rather than a frozen snapshot.
-pub(crate) type SharedFuncLib = Arc<ArcSwap<Library>>;
+pub(crate) type SharedLibrary = Arc<ArcSwap<Library>>;
 
 /// Assemble the runtime function library — builtins plus the on-disk
 /// subgraph library — into the shared swappable cell. Builtins carry no
-/// subgraph defs, so `func_lib.subgraphs` *is* the shared subgraph library:
+/// subgraph defs, so `library.subgraphs` *is* the shared subgraph library:
 /// loaded from the library file here at startup, grown by "promote".
-pub(crate) fn runtime_func_lib() -> SharedFuncLib {
-    let mut func_lib = Library::default();
-    func_lib.merge(basic_funclib());
-    func_lib.merge(worker_events_funclib());
-    func_lib.merge(image_funclib());
-    func_lib.merge(astro_funclib());
+pub(crate) fn runtime_func_lib() -> SharedLibrary {
+    let mut library = Library::default();
+    library.merge(basic_funclib());
+    library.merge(worker_events_funclib());
+    library.merge(image_funclib());
+    library.merge(astro_funclib());
     for def in library::load_library() {
-        func_lib.add_subgraph(def);
+        library.add_subgraph(def);
     }
-    Arc::new(ArcSwap::from_pointee(func_lib))
+    Arc::new(ArcSwap::from_pointee(library))
 }

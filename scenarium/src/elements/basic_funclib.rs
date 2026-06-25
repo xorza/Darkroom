@@ -66,11 +66,11 @@ impl From<i64> for Math2ArgOp {
 
 /// The built-in math / string / print nodes.
 pub fn basic_funclib() -> Library {
-    let mut func_lib = Library::default();
+    let mut library = Library::default();
 
     // print: log the input string to the node log (info level), read
     // back by the editor. Sugar over `ContextManager::log`.
-    func_lib.add(
+    library.add(
         Func::new("01896910-0790-AD1B-AA12-3F1437196789", "print")
             .description("Logs a string value to the node log")
             .category("math")
@@ -85,7 +85,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // math two argument operation
-    func_lib.add(
+    library.add(
         Func::new("01896910-4BC9-77AA-6973-64CC1C56B9CE", "2 arg math")
             .description(
                 "Performs a two-argument math operation (add, subtract, multiply, divide, modulo, \
@@ -115,7 +115,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // to string
-    func_lib.add(
+    library.add(
         Func::new("01896a88-bf15-dead-4a15-5969da5a9e65", "float to string")
             .description("Converts a float value to its string representation")
             .category("math")
@@ -135,7 +135,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // random
-    func_lib.add(
+    library.add(
         Func::new("01897928-66cd-52cb-abeb-a5bfd7f3763e", "random")
             .description("Generates a random float between min and max values")
             .category("math")
@@ -160,7 +160,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // add
-    func_lib.add(
+    library.add(
         Func::new("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee", "add")
             .description("Adds two float values (a + b)")
             .category("math")
@@ -182,7 +182,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // subtract
-    func_lib.add(
+    library.add(
         Func::new("01897c50-229e-f5e4-1c60-7f1e14531da2", "subtract")
             .description("Subtracts the second value from the first (a - b)")
             .category("math")
@@ -204,7 +204,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // multiply
-    func_lib.add(
+    library.add(
         Func::new("01897c50-d510-55bf-8cb9-545a62cc76cc", "multiply")
             .description("Multiplies two float values (a * b)")
             .category("math")
@@ -226,7 +226,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // divide
-    func_lib.add(
+    library.add(
         Func::new("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b", "divide")
             .description("Divides the first value by the second, outputs both quotient and modulo")
             .category("math")
@@ -251,7 +251,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // power
-    func_lib.add(
+    library.add(
         Func::new("01897c52-ac50-733e-aeeb-7018fd84c264", "power")
             .description("Raises the first value to the power of the second (a^b)")
             .category("math")
@@ -273,7 +273,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // sqrt
-    func_lib.add(
+    library.add(
         Func::new("01897c53-a3d7-e716-b80a-0ba98661413a", "sqrt")
             .description("Calculates the square root of a value")
             .category("math")
@@ -293,7 +293,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // sin
-    func_lib.add(
+    library.add(
         Func::new("01897c54-8671-5d7c-db4c-aca72865a5a6", "sin")
             .description("Calculates the sine of an angle in radians")
             .category("math")
@@ -313,7 +313,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // cos
-    func_lib.add(
+    library.add(
         Func::new("01897c54-ceb5-e603-ebde-c6904a8ef6e5", "cos")
             .description("Calculates the cosine of an angle in radians")
             .category("math")
@@ -333,7 +333,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // tan
-    func_lib.add(
+    library.add(
         Func::new("01897c55-1fda-2837-f4bd-75bea812a70e", "tan")
             .description("Calculates the tangent of an angle in radians")
             .category("math")
@@ -353,7 +353,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // asin
-    func_lib.add(
+    library.add(
         Func::new("01897c55-6920-1641-593c-5a1d91c033cb", "asin")
             .description("Calculates the arc sine (inverse sine), returns angle in radians")
             .category("math")
@@ -373,7 +373,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // acos
-    func_lib.add(
+    library.add(
         Func::new("01897c55-a3ef-681e-6fbb-5133c96f720c", "acos")
             .description("Calculates the arc cosine (inverse cosine), returns angle in radians")
             .category("math")
@@ -393,7 +393,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // atan
-    func_lib.add(
+    library.add(
         Func::new("01897c55-e6f4-726c-5d4e-a2f90c4fc43b", "atan")
             .description("Calculates the arc tangent (inverse tangent), returns angle in radians")
             .category("math")
@@ -413,7 +413,7 @@ pub fn basic_funclib() -> Library {
     );
 
     // log
-    func_lib.add(
+    library.add(
         Func::new("01897c56-8dde-c5f3-a389-f326fdf81b3a", "log")
             .description("Calculates the logarithm of a value with the given base")
             .category("math")
@@ -434,5 +434,5 @@ pub fn basic_funclib() -> Library {
             })),
     );
 
-    func_lib
+    library
 }

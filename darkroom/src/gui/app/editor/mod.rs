@@ -129,9 +129,9 @@ impl Editor {
     /// drain — e.g. a file-picker result `App` handles after the record.
     /// No-ops (and self-cancelling steps) are dropped, like the in-frame
     /// drain.
-    pub(crate) fn apply_edit(&mut self, intent: Intent, func_lib: &Library) {
+    pub(crate) fn apply_edit(&mut self, intent: Intent, library: &Library) {
         let target = self.document.active_target();
-        self.commit_batch(target, func_lib, [intent]);
+        self.commit_batch(target, library, [intent]);
     }
 
     /// Apply a batch of externally-sourced `intents` (e.g. from a script)
@@ -139,9 +139,9 @@ impl Editor {
     /// analogue of [`Self::apply_edit`]. Used by `App` when draining the
     /// script inbound queue before the frame; the unconditional pre-prepass
     /// rebuild folds the edits in, so `scene_dirty` needn't be set here.
-    pub(crate) fn apply_external_intents(&mut self, intents: Vec<Intent>, func_lib: &Library) {
+    pub(crate) fn apply_external_intents(&mut self, intents: Vec<Intent>, library: &Library) {
         let target = self.document.active_target();
-        self.commit_batch(target, func_lib, intents);
+        self.commit_batch(target, library, intents);
     }
 
     /// Build, apply, and record `intents` against `target` as one undo
@@ -153,14 +153,14 @@ impl Editor {
     fn commit_batch(
         &mut self,
         target: GraphRef,
-        func_lib: &Library,
+        library: &Library,
         intents: impl IntoIterator<Item = Intent>,
     ) -> bool {
         let mut batch = Vec::new();
         for intent in intents {
             // A `SetInput` that retypes a wildcard output cascades into dropping
             // the now-incompatible downstream wires — all one undo entry.
-            for step in commit_intent_cascading(intent, &mut self.document, target, func_lib) {
+            for step in commit_intent_cascading(intent, &mut self.document, target, library) {
                 self.needs_relayout |= step.requires_relayout();
                 self.needs_reconcile |= step.requires_reconcile();
                 batch.push(step);
@@ -184,7 +184,7 @@ impl Editor {
     }
 
     /// Run one frame of the edit pipeline against the borrowed runtime
-    /// context (`func_lib`, `theme`, `host`), returning the [`MenuCommand`]
+    /// context (`library`, `theme`, `host`), returning the [`MenuCommand`]
     /// the frame surfaced (if any) for `App` to action outside the record.
     ///
     /// The frame splits into a **navigation phase** (settle *which* graph
@@ -195,7 +195,7 @@ impl Editor {
     pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
-        func_lib: &Library,
+        library: &Library,
         theme: &Theme,
         theme_choice: ThemeChoice,
         host: &HostHandle,
@@ -210,7 +210,7 @@ impl Editor {
         // reads *last* frame's `scene` to resolve tab/chip clicks, so it
         // must run before this frame's rebuild. After it, `target` is
         // fixed for the rest of the frame.
-        self.navigate(ui, func_lib);
+        self.navigate(ui, library);
         let target = self.document.active_target();
         self.sync_target(target);
 
@@ -221,7 +221,7 @@ impl Editor {
         // Unconditional: `Scene` re-interns port names into palantir's
         // per-frame text arena, which clears each `Ui::frame`, so the
         // projection must be regenerated every frame regardless.
-        self.rebuild_scene(target, func_lib);
+        self.rebuild_scene(target, library);
         self.scene_dirty = false;
 
         // ── Edit phase ───────────────────────────────────────────────
@@ -230,7 +230,7 @@ impl Editor {
         // the settled doc. It reads everything off `Scene`, so it takes
         // neither the func lib nor the full `AppContext`.
         self.main_window.prepass(ui, &self.scene, &mut self.intents);
-        self.drain_intents(target, func_lib);
+        self.drain_intents(target, library);
         self.apply_canvas_shortcuts(ui, target);
 
         let command_from_shortcut = self.menu_shortcut(ui);
@@ -240,13 +240,13 @@ impl Editor {
         // bare tab switch leaves `scene_dirty` false and skips it, so the
         // tab-switch frame rebuilds once, not twice.
         if self.scene_dirty {
-            self.rebuild_scene(target, func_lib);
+            self.rebuild_scene(target, library);
             self.scene_dirty = false;
         }
         let ctx = AppContext {
             theme,
             theme_choice,
-            func_lib,
+            library,
             run_state: &self.run_state,
         };
         let command = self
@@ -272,7 +272,7 @@ impl Editor {
         // Post-record drain — graph edits the record surfaced (node
         // select, cache toggle, const edit). Navigation is fully settled
         // in the navigation phase, so nothing here moves the active tab.
-        self.drain_intents(target, func_lib);
+        self.drain_intents(target, library);
 
         // Single consumption point for the frame's accumulated relayout
         // signal (edits, tab switch, undo/redo). A menu side effect adds
@@ -320,7 +320,7 @@ impl Editor {
     ///
     /// Done up front so the edit pipeline runs against a fixed target and
     /// a switched-to graph records in the same present's Pass A.
-    fn navigate(&mut self, ui: &mut Ui, func_lib: &Library) {
+    fn navigate(&mut self, ui: &mut Ui, library: &Library) {
         self.apply_undo_redo(ui);
         // Surface tab/open clicks from last frame's responses. `scene`
         // still holds the last-rendered graph here — exactly the one
@@ -332,7 +332,7 @@ impl Editor {
         // steps are graph-agnostic, so the target passed here doesn't
         // matter).
         self.apply_view_actions();
-        self.drain_intents(self.document.active_target(), func_lib);
+        self.drain_intents(self.document.active_target(), library);
         // A closed/deleted target can't be active; fall back to Main.
         self.document.ensure_valid_active();
     }
@@ -364,9 +364,9 @@ impl Editor {
     /// structural edit, undo/redo, or document replacement since the last
     /// reconcile). Idle/selection/viewport frames skip it: the interface
     /// can't have changed, and reconcile is idempotent there anyway.
-    pub(crate) fn rebuild_scene(&mut self, target: GraphRef, func_lib: &Library) {
+    pub(crate) fn rebuild_scene(&mut self, target: GraphRef, library: &Library) {
         if self.needs_reconcile {
-            self.document.reconcile_boundaries(func_lib);
+            self.document.reconcile_boundaries(library);
             self.needs_reconcile = false;
         }
         let graph = self
@@ -379,7 +379,7 @@ impl Editor {
             GraphRef::Local(id) => self.document.graph.subgraphs.by_key(&id),
         };
         self.scene
-            .rebuild(graph, view, func_lib, ctx_def, &self.run_state);
+            .rebuild(graph, view, library, ctx_def, &self.run_state);
     }
 
     /// Drain `intents`, applying each non-no-op intent to `document`,
@@ -389,12 +389,12 @@ impl Editor {
     /// one Cmd-Z. Marks the scene dirty when anything applied (so the
     /// pre-record rebuild folds the change in) and accumulates the
     /// relayout / reconcile signals onto the frame's fields.
-    fn drain_intents(&mut self, target: GraphRef, func_lib: &Library) {
+    fn drain_intents(&mut self, target: GraphRef, library: &Library) {
         // Move the scratch buffer out so it can drive `commit_batch` (which
         // borrows `self` mutably), then put the now-empty buffer back to
         // reuse its allocation next frame.
         let mut scratch = std::mem::take(&mut self.intents);
-        if self.commit_batch(target, func_lib, scratch.drain(..)) {
+        if self.commit_batch(target, library, scratch.drain(..)) {
             self.scene_dirty = true;
         }
         self.intents = scratch;
@@ -528,7 +528,7 @@ mod tests {
         let float_sink = Func::new(FuncId::unique(), "fsink")
             .input(FuncInput::required("x", DataType::Float))
             .output("o", DataType::Float);
-        let func_lib = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
+        let library = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
 
         let mut graph = Graph::default();
         let fp = graph.add_func_node(&float_src);
@@ -555,7 +555,7 @@ mod tests {
                 input_idx: 0,
                 to: Binding::bind(sp, 0),
             },
-            &func_lib,
+            &library,
         );
         assert_eq!(
             editor.document.graph.input_binding(InputPort::new(sink, 0)),

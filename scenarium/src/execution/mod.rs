@@ -154,7 +154,7 @@ impl ExecutionEngine {
 
     // === Phase 1: compile ===
 
-    pub fn update(&mut self, graph: &Graph, func_lib: &Library) -> Result<()> {
+    pub fn update(&mut self, graph: &Graph, library: &Library) -> Result<()> {
         // Validate the graph against the library before touching any state.
         // The graph+library pair is untrusted input here (a document can be
         // stale against an evolved library — a dropped func, a shrunk port
@@ -162,7 +162,7 @@ impl ExecutionEngine {
         // surfaces, not a logic bug. Checking first leaves the prior program
         // intact on error and lets the flatten pass resolve every reference
         // infallibly.
-        if let Err(e) = graph.check_with(func_lib) {
+        if let Err(e) = graph.check_with(library) {
             tracing::error!(error = %e, "graph update rejected: invalid graph");
             return Err(Error::InvalidGraph {
                 message: e.to_string(),
@@ -180,7 +180,7 @@ impl ExecutionEngine {
                 events: &mut self.program.events,
             },
             graph,
-            func_lib,
+            library,
             &mut self.flatten_map,
         ) as usize;
 
@@ -188,7 +188,7 @@ impl ExecutionEngine {
         // default new, trim gone).
         self.cache.reconcile(&self.program.e_nodes);
 
-        validate::compiled(&self.program, &self.cache, func_lib);
+        validate::compiled(&self.program, &self.cache, library);
 
         // A node's digest changes only at compile (consts/bindings/func versions
         // are fixed between updates), so recompute it now and pull any disk-cached

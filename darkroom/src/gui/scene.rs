@@ -191,7 +191,7 @@ impl Scene {
         &mut self,
         graph: &Graph,
         view: &GraphView,
-        func_lib: &Library,
+        library: &Library,
         ctx_def: Option<&SubgraphDef>,
         run_state: &RunState,
     ) {
@@ -218,7 +218,7 @@ impl Scene {
             // def's interior; they carry no func, so their port arity is
             // mirrored from the enclosing `ctx_def`'s interface.
             let interface = match &node.kind {
-                NodeKind::Func(func_id) => func_lib.by_id(func_id).map(|f| NodeInterface {
+                NodeKind::Func(func_id) => library.by_id(func_id).map(|f| NodeInterface {
                     kind_label: f.name.clone().into(),
                     inputs: Cow::Borrowed(&f.inputs),
                     outputs: Cow::Borrowed(&f.outputs),
@@ -226,7 +226,7 @@ impl Scene {
                     terminal: f.terminal,
                     uncacheable: f.uncacheable,
                 }),
-                NodeKind::Subgraph(r) => graph.resolve_def(*r, func_lib).map(|d| NodeInterface {
+                NodeKind::Subgraph(r) => graph.resolve_def(*r, library).map(|d| NodeInterface {
                     kind_label: d.name.clone().into(),
                     inputs: Cow::Borrowed(&d.inputs),
                     outputs: Cow::Borrowed(&d.outputs),
@@ -360,7 +360,7 @@ impl Scene {
                         // its declared type.
                         ty: match &o.ty {
                             OutputType::Wildcard { .. } => {
-                                graph.resolve_output_type(func_lib, OutputPort::new(node.id, i))
+                                graph.resolve_output_type(library, OutputPort::new(node.id, i))
                             }
                             OutputType::Fixed(dt) => dt.clone(),
                         },
@@ -622,9 +622,9 @@ mod tests {
         // A resolvable func, plus two unresolvable nodes (e.g. a document
         // saved against an older library): a func id and a linked subgraph
         // def id the library no longer defines.
-        let func_lib = basic_funclib();
+        let library = basic_funclib();
         let mut graph = Graph::default();
-        let known: Node = func_lib.by_name("add").unwrap().into();
+        let known: Node = library.by_name("add").unwrap().into();
         let known_id = known.id;
         let mut ghost_func = Node::new(NodeKind::Func(
             "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
@@ -642,7 +642,7 @@ mod tests {
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
-        scene.rebuild(&graph, &view, &func_lib, None, &RunState::default());
+        scene.rebuild(&graph, &view, &library, None, &RunState::default());
 
         // Every node renders, not silently dropped — so the unresolvable ones
         // stay selectable and deletable to repair the document.
@@ -682,19 +682,19 @@ mod tests {
 
         // Two identical funcs differing only in cache policy: one default
         // (Memory), one Disk. The projection must mirror each.
-        let func_lib = basic_funclib();
+        let library = basic_funclib();
         let mut graph = Graph::default();
-        let memory_node: Node = func_lib.by_name("add").unwrap().into();
+        let memory_node: Node = library.by_name("add").unwrap().into();
         let memory_id = memory_node.id;
         graph.add(memory_node);
-        let mut disk_node: Node = func_lib.by_name("add").unwrap().into();
+        let mut disk_node: Node = library.by_name("add").unwrap().into();
         disk_node.persist = CachePersistence::Disk;
         let disk_id = disk_node.id;
         graph.add(disk_node);
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
-        scene.rebuild(&graph, &view, &func_lib, None, &RunState::default());
+        scene.rebuild(&graph, &view, &library, None, &RunState::default());
 
         let memory = scene.nodes.iter().find(|n| n.id == memory_id).unwrap();
         let disk = scene.nodes.iter().find(|n| n.id == disk_id).unwrap();

@@ -20,9 +20,9 @@ struct FpsEventState {
 
 /// The worker frame / fps event-source nodes.
 pub fn worker_events_funclib() -> Library {
-    let mut func_lib = Library::default();
+    let mut library = Library::default();
 
-    func_lib.add(
+    library.add(
         Func::new(FRAME_EVENT_FUNC_ID, "frame event")
             .category("Timers")
             .input(FuncInput::required("frequency", DataType::Float).default(1.0))
@@ -111,7 +111,7 @@ pub fn worker_events_funclib() -> Library {
             )),
     );
 
-    func_lib
+    library
 }
 
 impl Default for FpsEventState {

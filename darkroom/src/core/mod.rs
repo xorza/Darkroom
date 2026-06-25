@@ -7,7 +7,7 @@
 pub(crate) mod document;
 pub(crate) mod edit;
 pub(crate) mod engine;
-pub(crate) mod func_lib;
+pub(crate) mod library;
 pub(crate) mod io;
 pub(crate) mod script;
 pub(crate) mod session;

@@ -96,7 +96,7 @@ enum CachedValue {
 /// [`Error::Encode`] is a real encode failure (e.g. a GPU readback error).
 pub(crate) async fn serialize_outputs(
     outputs: &[DynamicValue],
-    func_lib: &Library,
+    library: &Library,
     ctx: &mut ContextManager,
 ) -> Result<Vec<u8>> {
     let mut cached = Vec::with_capacity(outputs.len());
@@ -106,9 +106,7 @@ pub(crate) async fn serialize_outputs(
             DynamicValue::Static(value) => CachedValue::Static(value.clone()),
             DynamicValue::Custom(value) => {
                 let type_id = value.type_def().type_id;
-                let codec = func_lib
-                    .codec(&type_id)
-                    .ok_or(Error::UnknownType(type_id))?;
+                let codec = library.codec(&type_id).ok_or(Error::UnknownType(type_id))?;
                 let blob = codec
                     .encode(value.as_ref(), ctx)
                     .await
@@ -124,7 +122,7 @@ pub(crate) async fn serialize_outputs(
 /// Decode outputs previously written by [`serialize_outputs`], rebuilding custom
 /// values through `registry`. Errors on malformed bytes or an unregistered type.
 /// Consumes `bytes` (the blob is moved into the deserializer, not borrowed).
-pub(crate) fn deserialize_outputs(bytes: Vec<u8>, func_lib: &Library) -> Result<Vec<DynamicValue>> {
+pub(crate) fn deserialize_outputs(bytes: Vec<u8>, library: &Library) -> Result<Vec<DynamicValue>> {
     let cached: Vec<CachedValue> =
         deserialize(&bytes, SerdeFormat::Bitcode).map_err(|e| Error::Frame(e.to_string()))?;
     cached
@@ -134,9 +132,7 @@ pub(crate) fn deserialize_outputs(bytes: Vec<u8>, func_lib: &Library) -> Result<
                 CachedValue::Unbound => DynamicValue::Unbound,
                 CachedValue::Static(value) => DynamicValue::Static(value),
                 CachedValue::Custom { type_id, blob } => {
-                    let codec = func_lib
-                        .codec(&type_id)
-                        .ok_or(Error::UnknownType(type_id))?;
+                    let codec = library.codec(&type_id).ok_or(Error::UnknownType(type_id))?;
                     let value = codec
                         .decode(blob)
                         .map_err(|source| Error::Decoder { type_id, source })?;
@@ -243,12 +239,12 @@ mod tests {
     }
 
     fn blob_func_lib() -> Library {
-        let mut func_lib = Library::default();
-        func_lib.register_type(
+        let mut library = Library::default();
+        library.register_type(
             BLOB_TYPE,
             TypeEntry::custom_with_codec("Blob", Arc::new(BlobCodec)),
         );
-        func_lib
+        library
     }
 
     #[tokio::test]
@@ -310,13 +306,13 @@ mod tests {
 
     #[tokio::test]
     async fn encode_failure_propagates_as_error() {
-        let mut func_lib = Library::default();
-        func_lib.register_type(
+        let mut library = Library::default();
+        library.register_type(
             OPAQUE_TYPE,
             TypeEntry::custom_with_codec("Opaque", Arc::new(FailingCodec)),
         );
         let outputs = vec![DynamicValue::from_custom(Opaque)];
-        let result = serialize_outputs(&outputs, &func_lib, &mut ContextManager::default()).await;
+        let result = serialize_outputs(&outputs, &library, &mut ContextManager::default()).await;
         assert!(matches!(result, Err(Error::Encode { .. })));
     }
 
@@ -334,12 +330,12 @@ mod tests {
     #[test]
     #[should_panic(expected = "duplicate type registration")]
     fn duplicate_registration_panics() {
-        let mut func_lib = Library::default();
-        func_lib.register_type(
+        let mut library = Library::default();
+        library.register_type(
             BLOB_TYPE,
             TypeEntry::custom_with_codec("Blob", Arc::new(BlobCodec)),
         );
-        func_lib.register_type(
+        library.register_type(
             BLOB_TYPE,
             TypeEntry::custom_with_codec("Blob", Arc::new(BlobCodec)),
         );

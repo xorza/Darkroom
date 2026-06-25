@@ -68,10 +68,10 @@ pub static ASTRO_DIR_DATA_TYPE: LazyLock<DataType> =
 
 /// The lumos-backed astro nodes (category `astro`).
 pub fn astro_funclib() -> Library {
-    let mut func_lib = Library::default();
+    let mut library = Library::default();
 
     // load_astro_image
-    func_lib.add(
+    library.add(
         Func::new("fbcc8899-efc3-40e0-a6fd-8743f86edbd3", "load_astro_image")
             .description("Loads a FITS/RAW/standard astronomical image")
             .category("astro")
@@ -104,7 +104,7 @@ pub fn astro_funclib() -> Library {
     );
 
     // build_masters
-    func_lib.add(
+    library.add(
         Func::new("f2f6f1ff-5b10-409c-900f-d6b48750a529", "build_masters")
             .description(
                 "Stacks raw calibration frames (darks/flats/bias/flat-darks) into calibration \
@@ -159,7 +159,7 @@ pub fn astro_funclib() -> Library {
     );
 
     // stack_lights
-    func_lib.add(
+    library.add(
         Func::new("b02f5c42-7bda-48f6-81dd-81338efbb126", "stack_lights")
             .description("Calibrates, aligns and stacks a folder of light frames into one image")
             .category("astro")
@@ -286,7 +286,7 @@ pub fn astro_funclib() -> Library {
     );
 
     // auto_stretch
-    func_lib.add(
+    library.add(
         Func::new("c15248e0-006a-4a4a-9aae-b1fc7886dea1", "auto_stretch")
             .description("Auto-stretches a linear frame to a viewable image (display tone curve)")
             .category("astro")
@@ -327,7 +327,7 @@ pub fn astro_funclib() -> Library {
 
     // build_background_config: expose every ExtractBackground field as an input,
     // output a detailed config to wire into background_extract.
-    func_lib.add(config_builder_func::<BackgroundConfigDef>(
+    library.add(config_builder_func::<BackgroundConfigDef>(
         "9cda0462-1b8e-4c50-83d6-4db470df22d9",
         "build_background_config",
         "Builds a detailed background-extraction config",
@@ -336,17 +336,17 @@ pub fn astro_funclib() -> Library {
     // build_detection_config / build_registration_config / build_combine_config:
     // detailed overrides for stack_lights' detection / registration / combine
     // preset dropdowns.
-    func_lib.add(config_builder_func::<DetectionConfigDef>(
+    library.add(config_builder_func::<DetectionConfigDef>(
         "6c6f92e7-0f74-454c-acc4-68691cb8462f",
         "build_detection_config",
         "Builds a detailed star-detection config",
     ));
-    func_lib.add(config_builder_func::<RegistrationConfigDef>(
+    library.add(config_builder_func::<RegistrationConfigDef>(
         "adf216fe-baa9-4abd-8c4a-bfb98bb60fbc",
         "build_registration_config",
         "Builds a detailed registration config",
     ));
-    func_lib.add(config_builder_func::<CombineConfigDef>(
+    library.add(config_builder_func::<CombineConfigDef>(
         "05313ceb-a3b2-4488-92af-c9e228bb1789",
         "build_combine_config",
         "Builds a detailed frame-combination config",
@@ -354,17 +354,17 @@ pub fn astro_funclib() -> Library {
 
     // build_denoise_config / build_hdr_config / build_local_contrast_config:
     // full configs for the per-frame nodes whose inline param is one scalar.
-    func_lib.add(config_builder_func::<DenoiseConfigDef>(
+    library.add(config_builder_func::<DenoiseConfigDef>(
         "77693298-3531-4858-89ce-03cb347dc3f2",
         "build_denoise_config",
         "Builds a detailed wavelet-denoise config",
     ));
-    func_lib.add(config_builder_func::<HdrConfigDef>(
+    library.add(config_builder_func::<HdrConfigDef>(
         "dc82d7a9-b7a7-460b-a86d-5dc9055e0d18",
         "build_hdr_config",
         "Builds a detailed HDR dynamic-range-compression config",
     ));
-    func_lib.add(config_builder_func::<LocalContrastConfigDef>(
+    library.add(config_builder_func::<LocalContrastConfigDef>(
         "f9ebdedf-38e3-4a74-8c74-eb207903d327",
         "build_local_contrast_config",
         "Builds a detailed local-contrast config",
@@ -372,12 +372,12 @@ pub fn astro_funclib() -> Library {
 
     // build_stretch_config / build_scnr_config: detailed overrides for the
     // auto_stretch / scnr preset quick-picks.
-    func_lib.add(config_builder_func::<StretchConfigDef>(
+    library.add(config_builder_func::<StretchConfigDef>(
         "82f271d4-d047-459a-83aa-0bf8288787cf",
         "build_stretch_config",
         "Builds a detailed display-stretch config",
     ));
-    func_lib.add(config_builder_func::<ScnrConfigDef>(
+    library.add(config_builder_func::<ScnrConfigDef>(
         "d07742d1-4469-4739-b2ff-78b4dcf64132",
         "build_scnr_config",
         "Builds a detailed SCNR (green-removal) config",
@@ -387,7 +387,7 @@ pub fn astro_funclib() -> Library {
 
     // background_extract: a quick `mode` preset, or a `config` wired from
     // build_background_config (which overrides the preset when present).
-    func_lib.add(processing_func(
+    library.add(processing_func(
         "e27c2a02-ec2a-4c6d-afea-60d1276ff8e1",
         "background_extract",
         "Fits and removes a smooth sky-background gradient",
@@ -425,7 +425,7 @@ pub fn astro_funclib() -> Library {
     ));
 
     // denoise
-    func_lib.add(processing_func(
+    library.add(processing_func(
         "61c17dfa-8369-446b-b6e7-d91d62d344ee",
         "denoise",
         "Wavelet denoise (starlet coefficient thresholding)",
@@ -459,7 +459,7 @@ pub fn astro_funclib() -> Library {
     ));
 
     // scnr
-    func_lib.add(processing_func(
+    library.add(processing_func(
         "ef0c2661-8553-4302-9251-95b2d383af19",
         "scnr",
         "Removes the residual green cast (SCNR)",
@@ -490,7 +490,7 @@ pub fn astro_funclib() -> Library {
     ));
 
     // neutralize_background
-    func_lib.add(processing_func(
+    library.add(processing_func(
         "5a8c9043-61ca-4a5a-8e55-ce27c804e84b",
         "neutralize_background",
         "Shifts each channel so the background reads neutral gray",
@@ -505,7 +505,7 @@ pub fn astro_funclib() -> Library {
     ));
 
     // hdr_compress
-    func_lib.add(processing_func(
+    library.add(processing_func(
         "300a2ec5-0ccd-47ec-b282-030eea41441c",
         "hdr_compress",
         "Compresses large-scale dynamic range (multiscale HDR)",
@@ -539,7 +539,7 @@ pub fn astro_funclib() -> Library {
     ));
 
     // local_contrast
-    func_lib.add(processing_func(
+    library.add(processing_func(
         "6a28b732-2704-454b-8afd-0a91d385458a",
         "local_contrast",
         "Local contrast enhancement (CLAHE)",
@@ -573,7 +573,7 @@ pub fn astro_funclib() -> Library {
     ));
 
     // star_detect → star count
-    func_lib.add(
+    library.add(
         Func::new("eb93559d-370c-4bea-aef0-c43897f3416a", "star_detect")
             .description("Detects stars and outputs the count")
             .category("astro")
@@ -619,7 +619,7 @@ pub fn astro_funclib() -> Library {
             })),
     );
 
-    func_lib
+    library
 }
 
 /// A single config input that's a config `T`'s wire (so a `build_*_config` node

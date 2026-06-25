@@ -78,7 +78,7 @@ impl Flattener {
         e_nodes: &mut KeyIndexVec<NodeId, ExecutionNode>,
         pools: Pools<'_>,
         root: &Graph,
-        func_lib: &Library,
+        library: &Library,
         flatten: &mut FlattenMap,
     ) -> u32 {
         self.path.clear();
@@ -97,7 +97,7 @@ impl Flattener {
         {
             let mut run = Run {
                 root,
-                func_lib,
+                library,
                 path: &mut self.path,
                 scope_stack: &mut self.scope_stack,
                 flatten,
@@ -135,7 +135,7 @@ impl Flattener {
 
 /// The graph at the level addressed by `path` — descend from `root`, resolving
 /// each composite instance through its (linked or local) definition.
-fn graph_at<'a>(root: &'a Graph, func_lib: &'a Library, path: &[NodeId]) -> &'a Graph {
+fn graph_at<'a>(root: &'a Graph, library: &'a Library, path: &[NodeId]) -> &'a Graph {
     let mut graph = root;
     for id in path {
         let r = graph
@@ -145,7 +145,7 @@ fn graph_at<'a>(root: &'a Graph, func_lib: &'a Library, path: &[NodeId]) -> &'a 
             .as_subgraph()
             .expect("descent path id must be a composite");
         graph = &graph
-            .resolve_def(r, func_lib)
+            .resolve_def(r, library)
             .expect("subgraph node references a missing definition")
             .graph;
     }
@@ -180,10 +180,10 @@ enum Source {
 }
 
 /// One flattening pass. Borrows the reusable `path` buffer from `Flattener`;
-/// the current graph at each level is `graph_at(root, func_lib, path)`.
+/// the current graph at each level is `graph_at(root, library, path)`.
 struct Run<'a> {
     root: &'a Graph,
-    func_lib: &'a Library,
+    library: &'a Library,
     path: &'a mut Vec<NodeId>,
     /// Scope indices parallel to `path` (the emit descent). `last()` is the
     /// scope the current level's nodes live in.
@@ -209,7 +209,7 @@ struct Run<'a> {
 
 impl<'a> Run<'a> {
     fn current(&self) -> &'a Graph {
-        graph_at(self.root, self.func_lib, self.path.as_slice())
+        graph_at(self.root, self.library, self.path.as_slice())
     }
 
     /// Descend one composite level. The depth cap is a backstop for the
@@ -238,12 +238,12 @@ impl<'a> Run<'a> {
             }
             // A subgraph recurses; boundary nodes emit nothing. A func or a
             // special node both resolve to a `&Func` spec and emit one leaf —
-            // the spec is the only difference (`func_lib` vs. the hardcoded
+            // the spec is the only difference (`library` vs. the hardcoded
             // `SpecialNode::func`), so the emit body below is shared.
-            let func_lib = self.func_lib;
+            let library = self.library;
             let (func, special): (&Func, Option<SpecialNode>) = match &node.kind {
                 NodeKind::Func(func_id) => (
-                    func_lib
+                    library
                         .by_id(func_id)
                         .expect("func resolved by update's check_with pre-check"),
                     None,
@@ -394,7 +394,7 @@ impl<'a> Run<'a> {
                 Some((flatten_id(self.path.as_slice(), node_id), event_idx))
             }
             NodeKind::Subgraph(r) => {
-                let def = graph.resolve_def(*r, self.func_lib)?;
+                let def = graph.resolve_def(*r, self.library)?;
                 let exposed = def.events.get(event_idx)?;
                 let (interior, interior_idx) = (exposed.emitter, exposed.emitter_event_idx);
                 self.push_level(node_id);
@@ -422,7 +422,7 @@ impl<'a> Run<'a> {
                 self.push_edge(emitter, event_idx, flat);
             }
             Some(NodeKind::Subgraph(r)) => {
-                let Some(def) = graph.resolve_def(*r, self.func_lib) else {
+                let Some(def) = graph.resolve_def(*r, self.library) else {
                     return;
                 };
                 let Some(trigger) = def
@@ -498,7 +498,7 @@ impl<'a> Run<'a> {
             // SubgraphOutput node's input `port_idx`.
             NodeKind::Subgraph(r) => {
                 let def = graph
-                    .resolve_def(*r, self.func_lib)
+                    .resolve_def(*r, self.library)
                     .expect("subgraph node references a missing definition");
                 let Some(so) = def
                     .graph
