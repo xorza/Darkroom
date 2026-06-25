@@ -469,7 +469,7 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
                 // pointer, so a reject here falls through to `None` (drop)
                 // rather than snapping elsewhere.
                 let compatible = match (&start_type, port_data_type(scene, port)) {
-                    (Some(a), Some(b)) => types_compatible(a, &b),
+                    (Some(a), Some(b)) => a.compatible_with(&b),
                     // Missing type info (port not in the scene this frame)
                     // — don't block; let the intent layer decide.
                     _ => true,
@@ -513,14 +513,6 @@ fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
     Some(ty)
 }
 
-/// Whether an output↔input link is allowed by type. Equal types connect;
-/// `Null` is a wildcard on either side, because the default type and the
-/// boundary "+" placeholder are `Null` and must accept any producer so
-/// wiring one grows the interface from the connected type.
-fn types_compatible(a: &DataType, b: &DataType) -> bool {
-    matches!(a, DataType::Null) || matches!(b, DataType::Null) || a == b
-}
-
 /// Convert a snapped `(start, end)` PortRef pair (one `Input`, one
 /// `Output` — caller-guaranteed by [`scan_snap_target`]) into an
 /// `Intent::SetInput` binding. Cycle prevention is left to the intent
@@ -537,42 +529,4 @@ fn commit_connection(start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
         input_idx: input.port_idx,
         to: Binding::bind(output.node_id, output.port_idx),
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use scenarium::data::{TypeDef, TypeId};
-
-    use super::*;
-
-    fn custom(id: u128) -> DataType {
-        DataType::Custom(Arc::new(TypeDef {
-            type_id: TypeId::from_u128(id),
-            display_name: "X".into(),
-        }))
-    }
-
-    #[test]
-    fn matching_scalar_types_connect_mismatched_do_not() {
-        assert!(types_compatible(&DataType::Float, &DataType::Float));
-        assert!(types_compatible(&DataType::String, &DataType::String));
-        assert!(!types_compatible(&DataType::Float, &DataType::Int));
-        assert!(!types_compatible(&DataType::String, &DataType::Bool));
-    }
-
-    #[test]
-    fn null_is_a_wildcard_both_directions() {
-        assert!(types_compatible(&DataType::Null, &DataType::Float));
-        assert!(types_compatible(&DataType::Float, &DataType::Null));
-        assert!(types_compatible(&DataType::Null, &DataType::Null));
-    }
-
-    #[test]
-    fn custom_types_match_by_id() {
-        assert!(types_compatible(&custom(1), &custom(1)));
-        assert!(!types_compatible(&custom(1), &custom(2)));
-        assert!(!types_compatible(&custom(1), &DataType::Float));
-    }
 }

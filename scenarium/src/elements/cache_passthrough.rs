@@ -57,8 +57,9 @@ pub(crate) fn file_cache_digest(node_inputs: &[ExecutionInput]) -> Option<Digest
 const CACHE_PASSTHROUGH_FUNC_ID: &str = "2a969ecc-92b7-4136-9c4a-86491c9621d3";
 
 /// The hardcoded interface + passthrough lambda for `CachePassthrough`, built once.
-/// The value port is `Null` — a wildcard, since graph validation doesn't type-check
-/// bindings — so any type passes through.
+/// The value output is a *wildcard* mirroring the value input (see
+/// [`Func::wildcard_output`]), so any type passes through and the editor reports
+/// the output as whatever concrete type is wired in.
 pub(crate) fn cache_passthrough_func() -> &'static Func {
     static F: OnceLock<Func> = OnceLock::new();
     F.get_or_init(build_func)
@@ -89,7 +90,7 @@ fn build_func() -> Func {
             // path editor right away; an empty path just means "not caching yet".
             .default(StaticValue::FsPath(String::new())),
         )
-        .output("value", DataType::Null)
+        .wildcard_output("value", 0)
         .lambda(crate::async_lambda!(|_, _, _, inputs, _, outputs| {
             // The engine does the path-keyed file I/O; the node is a plain
             // passthrough of `input[0]`.

@@ -277,3 +277,60 @@ fn passthrough_ports_are_null_typed() {
     );
     assert_eq!(def.outputs[0].data_type, DataType::Null);
 }
+
+#[test]
+fn passthrough_in_subgraph_exposes_the_resolved_output_type() {
+    use scenarium::special::SpecialNode;
+
+    // Interior: SubgraphInput → sum → CachePassthrough → SubgraphOutput. The
+    // passthrough's output statically declares the wildcard `Null`, but the
+    // exposed subgraph output must report `sum`'s real output type, resolved
+    // through it — otherwise wrapping a value in a file-cache would erase its
+    // type for the whole composite.
+    let func_lib = lib();
+    let sum_id = func_lib.by_name("sum").unwrap().id;
+    let want_ty = func_lib.by_name("sum").unwrap().outputs[0]
+        .data_type
+        .clone();
+    assert_ne!(
+        want_ty,
+        DataType::Null,
+        "fixture sanity: sum has a concrete output type"
+    );
+
+    let sgin = Node::new(NodeKind::SubgraphInput);
+    let sum = Node::new(NodeKind::Func(sum_id));
+    let pass = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
+        bypass: false,
+    }));
+    let sgout = Node::new(NodeKind::SubgraphOutput);
+    let (sgin_id, sum_n, pass_id, sgout_id) = (sgin.id, sum.id, pass.id, sgout.id);
+    let mut interior = Graph::default();
+    interior.add(sgin);
+    interior.add(sum);
+    interior.add(pass);
+    interior.add(sgout);
+    // sum reads the two boundary inputs; the passthrough caches sum's output;
+    // the boundary output exposes the passthrough.
+    bind(&mut interior, sum_n, 0, sgin_id, 0);
+    bind(&mut interior, sum_n, 1, sgin_id, 1);
+    bind(&mut interior, pass_id, 0, sum_n, 0);
+    bind(&mut interior, sgout_id, 0, pass_id, 0);
+
+    let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000ee", "PassSum")
+        .category("Subgraph")
+        .graph(interior);
+    let def_id = def.id;
+    let mut graph = Graph::default();
+    graph.subgraphs.add(def);
+    let mut doc: Document = graph.into();
+
+    doc.reconcile_boundaries(&func_lib);
+
+    let def = doc.graph.subgraphs.by_key(&def_id).unwrap();
+    assert_eq!(def.outputs.len(), 1);
+    assert_eq!(
+        def.outputs[0].data_type, want_ty,
+        "the exposed output must keep the type resolved through the passthrough"
+    );
+}

@@ -91,6 +91,16 @@ impl FuncInput {
 pub struct FuncOutput {
     pub name: String,
     pub data_type: DataType,
+
+    /// A *wildcard* output whose type mirrors the resolved type of input
+    /// `mirrors` — a polymorphic passthrough / reroute port. `data_type` is the
+    /// fallback (`Null`) shown until something concrete is wired through; the
+    /// editor resolves the real type by following the wire (see
+    /// [`Graph::resolve_output_type`](crate::graph::Graph::resolve_output_type)).
+    /// `None` is an ordinary fixed-type output. The engine never type-checks, so
+    /// it ignores this.
+    #[serde(default)]
+    pub wildcard_mirror: Option<usize>,
 }
 
 impl FuncOutput {
@@ -98,6 +108,7 @@ impl FuncOutput {
         Self {
             name: name.into(),
             data_type,
+            wildcard_mirror: None,
         }
     }
 }
@@ -227,6 +238,18 @@ impl Func {
 
     pub fn output(mut self, name: impl Into<String>, data_type: DataType) -> Self {
         self.outputs.push(FuncOutput::new(name, data_type));
+        self
+    }
+
+    /// Add a *wildcard* output that mirrors input `mirrors_input`'s resolved
+    /// type — a polymorphic passthrough / reroute port (its declared type is the
+    /// `Null` wildcard). See [`FuncOutput::wildcard_mirror`].
+    pub fn wildcard_output(mut self, name: impl Into<String>, mirrors_input: usize) -> Self {
+        self.outputs.push(FuncOutput {
+            name: name.into(),
+            data_type: DataType::Null,
+            wildcard_mirror: Some(mirrors_input),
+        });
         self
     }
 

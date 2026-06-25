@@ -452,6 +452,36 @@ impl Display for DataType {
     }
 }
 
+impl DataType {
+    /// Whether a value of type `source` may feed a port of type `self`. The
+    /// single rule the editor uses to gate connections and
+    /// [`Graph::check_with`](crate::graph::Graph::check_with) uses to validate
+    /// wired bindings at the compile boundary, so it must permit exactly what
+    /// the engine can execute:
+    /// - `Null` is the wildcard — a polymorphic passthrough / reroute port (see
+    ///   [`FuncOutput::wildcard_mirror`](crate::function::FuncOutput::wildcard_mirror))
+    ///   — and matches anything on either side.
+    /// - the scalar numerics (`Float`/`Int`/`Bool`) coerce among themselves at
+    ///   runtime (`DynamicValue::as_f64`/`as_i64`/`as_bool` all accept the three),
+    ///   so they're mutually compatible.
+    /// - everything else must match exactly (`Custom`/`Enum` by id, `FsPath` by
+    ///   config — see the `PartialEq` impl).
+    pub fn compatible_with(&self, source: &DataType) -> bool {
+        if matches!(self, DataType::Null) || matches!(source, DataType::Null) {
+            return true;
+        }
+        if self.is_numeric_scalar() && source.is_numeric_scalar() {
+            return true;
+        }
+        self == source
+    }
+
+    /// One of the runtime-coercible scalar numerics (`Float`/`Int`/`Bool`).
+    fn is_numeric_scalar(&self) -> bool {
+        matches!(self, DataType::Float | DataType::Int | DataType::Bool)
+    }
+}
+
 impl FromStr for DataType {
     type Err = ();
 
@@ -512,6 +542,40 @@ mod tests {
             StaticValue::FsPath("/tmp/x".into()).as_fs_path(),
             Some("/tmp/x")
         );
+    }
+
+    #[test]
+    fn data_type_compatibility_is_wildcard_aware_and_otherwise_exact() {
+        let custom = |id: u128| {
+            DataType::Custom(Arc::new(TypeDef {
+                type_id: TypeId::from_u128(id),
+                display_name: "X".into(),
+            }))
+        };
+
+        // Exact matches connect.
+        assert!(DataType::Float.compatible_with(&DataType::Float));
+        assert!(DataType::String.compatible_with(&DataType::String));
+
+        // The scalar numerics coerce among themselves (matching the runtime), so
+        // any pair of Float/Int/Bool is compatible…
+        assert!(DataType::Float.compatible_with(&DataType::Int));
+        assert!(DataType::Int.compatible_with(&DataType::Float));
+        assert!(DataType::Bool.compatible_with(&DataType::Int));
+        // …but a non-numeric never coerces to/from a numeric or another kind.
+        assert!(!DataType::String.compatible_with(&DataType::Bool));
+        assert!(!DataType::String.compatible_with(&DataType::Float));
+
+        // `Null` is the wildcard on either side (the polymorphic passthrough port
+        // and the default both read as `Null`).
+        assert!(DataType::Null.compatible_with(&DataType::Float));
+        assert!(DataType::Float.compatible_with(&DataType::Null));
+        assert!(DataType::Null.compatible_with(&DataType::Null));
+
+        // Custom types match by id, not by being "custom"; never to a scalar.
+        assert!(custom(1).compatible_with(&custom(1)));
+        assert!(!custom(1).compatible_with(&custom(2)));
+        assert!(!custom(1).compatible_with(&DataType::Float));
     }
 
     #[test]

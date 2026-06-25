@@ -212,7 +212,7 @@ pub fn astro_funclib() -> FuncLib {
                                 .and_then(|s| DetectionPreset::from_str(s).ok())
                                 .map(|preset| preset.config())
                         })
-                        .expect("detection is required");
+                        .expect("detection config is validated at the compile boundary");
                     let registration = inputs[3]
                         .value
                         .as_custom::<ConfigValue<RegistrationConfigDef>>()
@@ -224,7 +224,7 @@ pub fn astro_funclib() -> FuncLib {
                                 .and_then(|s| RegistrationPreset::from_str(s).ok())
                                 .map(|preset| preset.config())
                         })
-                        .expect("registration is required");
+                        .expect("registration config is validated at the compile boundary");
                     let stack = inputs[4]
                         .value
                         .as_custom::<ConfigValue<CombineConfigDef>>()
@@ -236,7 +236,7 @@ pub fn astro_funclib() -> FuncLib {
                                 .and_then(|s| CombinePreset::from_str(s).ok())
                                 .map(|preset| preset.config())
                         })
-                        .expect("combine is required");
+                        .expect("combine config is validated at the compile boundary");
                     // `reference` is required + seeded to -1 (auto); >= 0 selects a frame.
                     let reference = match inputs[5].value.as_i64().expect("reference is required") {
                         index if index >= 0 => Reference::Index(index as usize),
@@ -313,7 +313,7 @@ pub fn astro_funclib() -> FuncLib {
                                 .and_then(|s| StretchPreset::from_str(s).ok())
                                 .map(|preset| preset.config())
                         })
-                        .expect("method is required");
+                        .expect("stretch method is validated at the compile boundary");
                     let value = inputs[0].value.clone();
                     outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
 
@@ -415,7 +415,7 @@ pub fn astro_funclib() -> FuncLib {
                                 ..Default::default()
                             })
                     })
-                    .expect("config is required");
+                    .expect("background config is validated at the compile boundary");
                 let value = inputs[0].value.clone();
                 outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
                 Ok(())
@@ -480,7 +480,7 @@ pub fn astro_funclib() -> FuncLib {
                             .and_then(|s| ScnrKind::from_str(s).ok())
                             .map(|preset| preset.config())
                     })
-                    .expect("method is required");
+                    .expect("scnr method is validated at the compile boundary");
                 let value = inputs[0].value.clone();
                 outputs[0] = run_frame_op(value, move |img| method.apply(img)).await?;
                 Ok(())
@@ -600,7 +600,7 @@ pub fn astro_funclib() -> FuncLib {
                                 .and_then(|s| DetectionPreset::from_str(s).ok())
                                 .map(|preset| preset.config())
                         })
-                        .expect("detection is required");
+                        .expect("detection config is validated at the compile boundary");
                     // Star detection works on planar channels, so bring the
                     // image back to a CPU `AstroImage` for the detector.
                     let cpu = image_to_cpu(&inputs[0].value)?;
@@ -712,7 +712,9 @@ where
 
 /// Extract an owned CPU `imaginarium::Image` from a node's `Image` input.
 fn image_to_cpu(value: &DynamicValue) -> anyhow::Result<RawImage> {
-    let image = value.as_custom::<Image>().expect("image input is an Image");
+    let image = value
+        .as_custom::<Image>()
+        .expect("image input type is validated at the compile boundary");
     let cpu = ProcessingContext::cpu_only();
     Ok(image
         .buffer

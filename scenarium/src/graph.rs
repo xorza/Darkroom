@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use common::{KeyIndexKey, KeyIndexVec};
 use serde::{Deserialize, Serialize};
 
-use crate::data::StaticValue;
-use crate::function::{Func, FuncId, FuncLib};
+use crate::data::{DataType, StaticValue};
+use crate::function::{Func, FuncId, FuncInput, FuncLib, FuncOutput};
 use crate::special::SpecialNode;
 use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use anyhow::{Context, ensure};
@@ -79,6 +79,37 @@ fn binding_touches(port: InputPort, binding: &Binding, node_id: NodeId) -> bool 
 /// True when `s` references `node_id` as emitter or subscriber.
 fn subscription_touches(s: &Subscription, node_id: NodeId) -> bool {
     s.emitter == node_id || s.subscriber == node_id
+}
+
+/// Whether a `Const` literal `value` may sit on `input` — the `Const` half of
+/// the compile-boundary type check (the `Bind` half uses
+/// [`DataType::compatible_with`]). Matched directly rather than via
+/// `compatible_with` because a bare `StaticValue` can't be turned back into a
+/// `DataType` (it lacks the `FsPathConfig` / `EnumDef`).
+///
+/// An input carrying `value_variants` is a *pick-or-wire* port (e.g. lens's
+/// preset-or-config inputs, which are `Custom`-typed for the wired case yet
+/// hold an `Enum` preset literal): its constant must be exactly one of the
+/// offered picks. Otherwise the literal must match the declared type — scalar
+/// numerics coerce, an `Enum` literal must name a declared variant, and a
+/// `Custom` port has no literal form.
+fn const_satisfies(input: &FuncInput, value: &StaticValue) -> bool {
+    if !input.value_variants.is_empty() {
+        return input.value_variants.iter().any(|v| v.value == *value);
+    }
+    match &input.data_type {
+        DataType::Null => true,
+        DataType::Float | DataType::Int | DataType::Bool => matches!(
+            value,
+            StaticValue::Float(_) | StaticValue::Int(_) | StaticValue::Bool(_)
+        ),
+        DataType::String => matches!(value, StaticValue::String(_)),
+        DataType::FsPath(_) => matches!(value, StaticValue::FsPath(_)),
+        DataType::Enum(def) => {
+            matches!(value, StaticValue::Enum(name) if def.variants.contains(name))
+        }
+        DataType::Custom(_) => false,
+    }
 }
 
 /// Serialize `bindings` as a `(port, binding)` sequence: struct keys can't be
@@ -340,6 +371,110 @@ impl Graph {
             subgraphs: self.subgraphs.clone(),
         };
         FreshGraph { graph, id_map }
+    }
+
+    // === Port type resolution (editor type display / connection checks) ===
+
+    /// The declared type of input `port`, or `None` when it can't be resolved —
+    /// a boundary node (its arity mirrors the enclosing interface, with no
+    /// per-port type here) or a missing func/def. The caller treats `None` as
+    /// the polymorphic `Null`. The engine never type-checks, so only the editor
+    /// calls this.
+    pub fn input_type(&self, func_lib: &FuncLib, port: InputPort) -> Option<DataType> {
+        self.input_spec(func_lib, port).map(|i| i.data_type.clone())
+    }
+
+    /// The declared [`FuncInput`] of input `port` — its full spec (type +
+    /// `value_variants` + flags), or `None` for a boundary / unresolved node.
+    /// Resolution mirrors [`Self::input_type`].
+    fn input_spec<'a>(&'a self, func_lib: &'a FuncLib, port: InputPort) -> Option<&'a FuncInput> {
+        let node = self.by_id(&port.node_id)?;
+        let inputs = match &node.kind {
+            NodeKind::Func(func_id) => &func_lib.by_id(func_id)?.inputs,
+            NodeKind::Subgraph(r) => &self.resolve_def(*r, func_lib)?.inputs,
+            NodeKind::Special(s) => &s.func().inputs,
+            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => return None,
+        };
+        inputs.get(port.port_idx)
+    }
+
+    /// The effective type produced at output `port`, following *wildcard*
+    /// outputs up the graph: a wildcard output (e.g. a `CachePassthrough` /
+    /// reroute — see [`FuncOutput::wildcard_mirror`](crate::function::FuncOutput::wildcard_mirror))
+    /// reports the resolved type of whatever feeds the input it mirrors, so a
+    /// value's type survives the hop. The walk dead-ends at the node's
+    /// *declared* type when the mirrored input is unbound/const, the producer is
+    /// a boundary or missing, or a binding cycle is hit — `Null` (polymorphic)
+    /// for a passthrough. Used by the editor for port-type display, connection
+    /// compatibility, and subgraph-interface inference; the engine never
+    /// type-checks, so it never calls this.
+    pub fn resolve_output_type(&self, func_lib: &FuncLib, port: OutputPort) -> DataType {
+        self.resolve_output_type_inner(func_lib, port, &mut HashSet::new())
+    }
+
+    fn resolve_output_type_inner(
+        &self,
+        func_lib: &FuncLib,
+        port: OutputPort,
+        visiting: &mut HashSet<NodeId>,
+    ) -> DataType {
+        let Some(out) = self.output_spec(func_lib, port) else {
+            return DataType::Null;
+        };
+
+        // A wildcard output reports the type of whatever feeds the input it
+        // mirrors — any func/special node can declare one.
+        if let Some(src_input) = out.wildcard_mirror {
+            // A binding cycle can momentarily exist in the editor graph (flatten
+            // and the planner reject it later) — break it as polymorphic rather
+            // than recurse forever.
+            if !visiting.insert(port.node_id) {
+                return DataType::Null;
+            }
+            let resolved = match self.input_binding(InputPort::new(port.node_id, src_input)) {
+                Binding::Bind(src) => self.resolve_output_type_inner(func_lib, src, visiting),
+                // A const carries its own type for the scalar kinds, so the
+                // output *is* that type. `Null`/`FsPath`/`Enum` stay polymorphic:
+                // a bare `StaticValue` lacks the `FsPathConfig`/`EnumDef` those
+                // `DataType`s need, and fabricating a default would make the
+                // resolved type mismatch the real consumer's (compat compares
+                // config/type_id) — wrongly rejecting a valid wire, worse than
+                // the permissive `Null`.
+                Binding::Const(v) => match v {
+                    StaticValue::Float(_) => DataType::Float,
+                    StaticValue::Int(_) => DataType::Int,
+                    StaticValue::Bool(_) => DataType::Bool,
+                    StaticValue::String(_) => DataType::String,
+                    StaticValue::Null | StaticValue::FsPath(_) | StaticValue::Enum(_) => {
+                        DataType::Null
+                    }
+                },
+                // Nothing wired in yet — polymorphic.
+                Binding::None => DataType::Null,
+            };
+            visiting.remove(&port.node_id);
+            return resolved;
+        }
+
+        out.data_type.clone()
+    }
+
+    /// The declared [`FuncOutput`] of output `port` — its full spec (type +
+    /// `wildcard_mirror`), or `None` for a boundary / unresolved node. The
+    /// output-side mirror of [`Self::input_spec`].
+    fn output_spec<'a>(
+        &'a self,
+        func_lib: &'a FuncLib,
+        port: OutputPort,
+    ) -> Option<&'a FuncOutput> {
+        let node = self.by_id(&port.node_id)?;
+        let outputs = match &node.kind {
+            NodeKind::Func(func_id) => &func_lib.by_id(func_id)?.outputs,
+            NodeKind::Subgraph(r) => &self.resolve_def(*r, func_lib)?.outputs,
+            NodeKind::Special(s) => &s.func().outputs,
+            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => return None,
+        };
+        outputs.get(port.port_idx)
     }
 
     /// Every data edge as (consumer input ← producer output). Const bindings
@@ -684,6 +819,36 @@ impl Graph {
                     src.node_id,
                     src.port_idx
                 );
+                // Types on both ends must be compatible (`Null` is the wildcard —
+                // a passthrough/reroute port). This is the engine-side boundary
+                // check: with it a wired binding can't deliver the wrong type to
+                // a node function, so lambdas may trust their input types. Edges
+                // touching a boundary node have no concrete port type here
+                // (`None`/`Null`), so they're skipped — the interface types them.
+                if let Some(sink_ty) = self.input_type(func_lib, *dst) {
+                    let source_ty = self.resolve_output_type(func_lib, *src);
+                    ensure!(
+                        sink_ty.compatible_with(&source_ty),
+                        "node {:?} input {} expects {:?} but is wired from an incompatible {:?}",
+                        dst.node_id,
+                        dst.port_idx,
+                        sink_ty,
+                        source_ty
+                    );
+                }
+            }
+            // A `Const` literal must fit the port too, so a lambda can trust the
+            // type of a constant input as much as a wired one.
+            if let Binding::Const(value) = binding
+                && let Some(spec) = self.input_spec(func_lib, *dst)
+            {
+                ensure!(
+                    const_satisfies(spec, value),
+                    "node {:?} input {} holds a constant incompatible with its type {:?}",
+                    dst.node_id,
+                    dst.port_idx,
+                    spec.data_type
+                );
             }
         }
 
@@ -1003,6 +1168,232 @@ mod tests {
             err.to_string().contains("const-only"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
+        use crate::data::{DataType, StaticValue};
+        use crate::function::FuncLib;
+        use crate::special::SpecialNode;
+
+        // Int and String never coerce (numerics coerce among themselves, but a
+        // string is a distinct kind), so this pair exercises a real rejection.
+        let int_src = Func::new(FuncId::unique(), "int_src").output("o", DataType::Int);
+        let str_sink = Func::new(FuncId::unique(), "str_sink")
+            .input(FuncInput::required("x", DataType::String))
+            .output("o", DataType::String);
+        let int_sink = Func::new(FuncId::unique(), "int_sink")
+            .input(FuncInput::required("x", DataType::Int))
+            .output("o", DataType::Int);
+        let mut func_lib = FuncLib::default();
+        func_lib.funcs.add(int_src.clone());
+        func_lib.funcs.add(str_sink.clone());
+        func_lib.funcs.add(int_sink.clone());
+
+        let pass = || {
+            Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
+                bypass: false,
+            }))
+        };
+
+        // Direct Int → String is rejected at the compile boundary.
+        let mut g = Graph::default();
+        let s = g.add_func_node(&int_src);
+        let f = g.add_func_node(&str_sink);
+        g.set_input_binding(InputPort::new(f, 0), Binding::bind(s, 0));
+        let err = g
+            .check_with(&func_lib)
+            .expect_err("Int into a String input must be rejected");
+        assert!(
+            err.to_string().contains("incompatible"),
+            "unexpected: {err}"
+        );
+
+        // Direct Int → Int is accepted.
+        let mut g = Graph::default();
+        let s = g.add_func_node(&int_src);
+        let i = g.add_func_node(&int_sink);
+        g.set_input_binding(InputPort::new(i, 0), Binding::bind(s, 0));
+        assert!(g.check_with(&func_lib).is_ok());
+
+        // The check resolves *through* a passthrough: Int → pass → Int is fine,
+        // Int → pass → String is rejected (the wildcard carries the real type).
+        let mut g = Graph::default();
+        let s = g.add_func_node(&int_src);
+        let p = pass();
+        let pid = p.id;
+        g.add(p);
+        g.set_input_binding(InputPort::new(pid, 0), Binding::bind(s, 0));
+        let i = g.add_func_node(&int_sink);
+        g.set_input_binding(InputPort::new(i, 0), Binding::bind(pid, 0));
+        assert!(
+            g.check_with(&func_lib).is_ok(),
+            "Int through a passthrough into Int is compatible"
+        );
+
+        g.set_input_binding(InputPort::new(i, 0), Binding::None);
+        let f = g.add_func_node(&str_sink);
+        g.set_input_binding(InputPort::new(f, 0), Binding::bind(pid, 0));
+        assert!(
+            g.check_with(&func_lib)
+                .is_err_and(|e| e.to_string().contains("incompatible")),
+            "Int through a passthrough into String must be rejected"
+        );
+
+        // Constants are type-checked too: a String literal can't satisfy an Int
+        // input, but a numeric literal can (the scalar coercion).
+        let mut g = Graph::default();
+        let i = g.add_func_node(&int_sink);
+        g.set_input_binding(
+            InputPort::new(i, 0),
+            Binding::Const(StaticValue::String("x".into())),
+        );
+        assert!(
+            g.check_with(&func_lib)
+                .is_err_and(|e| e.to_string().contains("incompatible")),
+            "a String constant on an Int input must be rejected"
+        );
+        g.set_input_binding(
+            InputPort::new(i, 0),
+            Binding::Const(StaticValue::Float(2.5)),
+        );
+        assert!(
+            g.check_with(&func_lib).is_ok(),
+            "a numeric constant satisfies a numeric input"
+        );
+    }
+
+    #[test]
+    fn resolve_output_type_follows_passthrough_chain() {
+        use crate::data::{DataType, StaticValue};
+        use crate::function::FuncLib;
+        use crate::special::SpecialNode;
+
+        // Int-out producer → pass1 → pass2. Both passthroughs declare a `Null`
+        // (wildcard) output, but the resolved type must be the producer's `Int`.
+        let producer = Func::new(FuncId::unique(), "src").output("out", DataType::Int);
+        let mut func_lib = FuncLib::default();
+        func_lib.funcs.add(producer.clone());
+
+        let mut graph = Graph::default();
+        let src = graph.add_func_node(&producer);
+        let pass1 = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
+            bypass: false,
+        }));
+        let pass2 = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
+            bypass: false,
+        }));
+        let (p1, p2) = (pass1.id, pass2.id);
+        graph.add(pass1);
+        graph.add(pass2);
+        graph.set_input_binding(InputPort::new(p1, 0), Binding::bind(src, 0));
+        graph.set_input_binding(InputPort::new(p2, 0), Binding::bind(p1, 0));
+
+        // The producer reports its own declared type.
+        assert_eq!(
+            graph.resolve_output_type(&func_lib, OutputPort::new(src, 0)),
+            DataType::Int
+        );
+        // Each passthrough mirrors what flows through, transitively.
+        assert_eq!(
+            graph.resolve_output_type(&func_lib, OutputPort::new(p1, 0)),
+            DataType::Int
+        );
+        assert_eq!(
+            graph.resolve_output_type(&func_lib, OutputPort::new(p2, 0)),
+            DataType::Int
+        );
+
+        // An unbound value input leaves the passthrough polymorphic (`Null`),
+        // so its output accepts any consumer again.
+        graph.set_input_binding(InputPort::new(p1, 0), Binding::None);
+        assert_eq!(
+            graph.resolve_output_type(&func_lib, OutputPort::new(p1, 0)),
+            DataType::Null
+        );
+        // The taint flows downstream: pass2 now reads pass1's `Null`.
+        assert_eq!(
+            graph.resolve_output_type(&func_lib, OutputPort::new(p2, 0)),
+            DataType::Null
+        );
+
+        // A scalar const carries its type, so the output resolves to it (and
+        // propagates downstream) — a const isn't "no type".
+        graph.set_input_binding(
+            InputPort::new(p1, 0),
+            Binding::Const(StaticValue::Bool(true)),
+        );
+        assert_eq!(
+            graph.resolve_output_type(&func_lib, OutputPort::new(p1, 0)),
+            DataType::Bool
+        );
+        assert_eq!(
+            graph.resolve_output_type(&func_lib, OutputPort::new(p2, 0)),
+            DataType::Bool,
+            "the const's type propagates through the second passthrough too"
+        );
+
+        // FsPath/Enum consts can't reconstruct their full `DataType` (no
+        // config/EnumDef on a bare value), so they stay permissive `Null`
+        // rather than fabricate a mismatching type.
+        graph.set_input_binding(
+            InputPort::new(p1, 0),
+            Binding::Const(StaticValue::FsPath("frames/".into())),
+        );
+        assert_eq!(
+            graph.resolve_output_type(&func_lib, OutputPort::new(p1, 0)),
+            DataType::Null
+        );
+    }
+
+    #[test]
+    fn resolve_output_type_breaks_a_binding_cycle() {
+        use crate::data::DataType;
+        use crate::function::FuncLib;
+        use crate::special::SpecialNode;
+
+        // A passthrough whose value input binds to its own output — a cycle the
+        // editor can momentarily hold. Resolution must terminate as `Null`.
+        let func_lib = FuncLib::default();
+        let mut graph = Graph::default();
+        let pass = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
+            bypass: false,
+        }));
+        let id = pass.id;
+        graph.add(pass);
+        graph.set_input_binding(InputPort::new(id, 0), Binding::bind(id, 0));
+
+        assert_eq!(
+            graph.resolve_output_type(&func_lib, OutputPort::new(id, 0)),
+            DataType::Null
+        );
+    }
+
+    #[test]
+    fn input_type_resolves_declared_types_and_skips_boundaries() {
+        use crate::data::DataType;
+        use crate::function::FuncLib;
+
+        let consumer = Func::new(FuncId::unique(), "dst")
+            .input(FuncInput::required("x", DataType::Float))
+            .output("out", DataType::Float);
+        let mut func_lib = FuncLib::default();
+        func_lib.funcs.add(consumer.clone());
+
+        let mut graph = Graph::default();
+        let dst = graph.add_func_node(&consumer);
+        assert_eq!(
+            graph.input_type(&func_lib, InputPort::new(dst, 0)),
+            Some(DataType::Float)
+        );
+        // Out-of-range port → None.
+        assert_eq!(graph.input_type(&func_lib, InputPort::new(dst, 9)), None);
+
+        // A boundary node carries no per-port type here → None (caller's Null).
+        let boundary = Node::new(NodeKind::SubgraphInput);
+        let b = boundary.id;
+        graph.add(boundary);
+        assert_eq!(graph.input_type(&func_lib, InputPort::new(b, 0)), None);
     }
 
     #[test]

@@ -7,7 +7,8 @@ use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
 use scenarium::function::{FuncInput, FuncOutput, ValueVariant};
 use scenarium::prelude::{
-    Binding, CachePersistence, FuncLib, Graph, NodeId, NodeKind, SubgraphDef, SubgraphRef,
+    Binding, CachePersistence, FuncLib, Graph, NodeId, NodeKind, OutputPort, SubgraphDef,
+    SubgraphRef,
 };
 
 use crate::core::document::GraphView;
@@ -233,6 +234,8 @@ impl Scene {
                     uncacheable: false,
                 }),
                 // A built-in special node: its interface is the hardcoded spec.
+                // Any wildcard output it declares is resolved below, with every
+                // other node's, in one place.
                 NodeKind::Special(s) => {
                     let f = s.func();
                     Some(NodeInterface {
@@ -342,10 +345,21 @@ impl Scene {
             );
             let outputs = extend_pool(
                 &mut self.outputs,
-                interface.outputs.iter().map(|o| SceneOutput {
-                    name: o.name.clone().into(),
-                    ty: o.data_type.clone(),
-                }),
+                interface
+                    .outputs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, o)| SceneOutput {
+                        name: o.name.clone().into(),
+                        // A wildcard output (passthrough / reroute) reports the type
+                        // resolved through the input it mirrors; ordinary outputs use
+                        // their declared type.
+                        ty: if o.wildcard_mirror.is_some() {
+                            graph.resolve_output_type(func_lib, OutputPort::new(node.id, i))
+                        } else {
+                            o.data_type.clone()
+                        },
+                    }),
             );
             // Boundary nodes carry no name in the model; label them by
             // role so the interior header isn't a blank bar.

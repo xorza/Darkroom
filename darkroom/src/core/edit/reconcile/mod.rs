@@ -250,12 +250,15 @@ fn infer_used_input_type(
     interior
         .edges()
         .find(|(_, src)| src.node_id == boundary && src.port_idx == old)
-        .and_then(|(tgt, _)| port_type(interior, func_lib, tgt.node_id, tgt.port_idx, Dir::Input))
+        .and_then(|(tgt, _)| interior.input_type(func_lib, tgt))
         .unwrap_or_default()
 }
 
 /// Type of subgraph output `old`: the type of the interior producer bound
-/// into `SubgraphOutput` input `old`.
+/// into `SubgraphOutput` input `old`. Resolved via
+/// [`Graph::resolve_output_type`], so a producing `CachePassthrough` reports
+/// the type wired through it rather than its wildcard `Null` — the composite's
+/// exposed output keeps the value's real type.
 fn infer_used_output_type(
     interior: &Graph,
     func_lib: &FuncLib,
@@ -269,50 +272,8 @@ fn infer_used_output_type(
             Binding::Bind(src) if port.node_id == boundary && port.port_idx == old => Some(src),
             _ => None,
         })
-        .and_then(|src| port_type(interior, func_lib, src.node_id, src.port_idx, Dir::Output))
+        .map(|src| interior.resolve_output_type(func_lib, src))
         .unwrap_or_default()
-}
-
-enum Dir {
-    Input,
-    Output,
-}
-
-/// Resolve a Func / Subgraph-instance node port's declared type. Boundary
-/// nodes (chained interfaces) aren't resolved here — an uncommon case
-/// that falls back to the caller's `Null`.
-fn port_type(
-    graph: &Graph,
-    func_lib: &FuncLib,
-    node_id: NodeId,
-    port_idx: usize,
-    dir: Dir,
-) -> Option<DataType> {
-    let node = graph.by_id(&node_id)?;
-    match &node.kind {
-        NodeKind::Func(func_id) => {
-            let f = func_lib.by_id(func_id)?;
-            match dir {
-                Dir::Input => f.inputs.get(port_idx).map(|i| i.data_type.clone()),
-                Dir::Output => f.outputs.get(port_idx).map(|o| o.data_type.clone()),
-            }
-        }
-        NodeKind::Subgraph(r) => {
-            let d = graph.resolve_def(*r, func_lib)?;
-            match dir {
-                Dir::Input => d.inputs.get(port_idx).map(|i| i.data_type.clone()),
-                Dir::Output => d.outputs.get(port_idx).map(|o| o.data_type.clone()),
-            }
-        }
-        NodeKind::Special(s) => {
-            let f = s.func();
-            match dir {
-                Dir::Input => f.inputs.get(port_idx).map(|i| i.data_type.clone()),
-                Dir::Output => f.outputs.get(port_idx).map(|o| o.data_type.clone()),
-            }
-        }
-        NodeKind::SubgraphInput | NodeKind::SubgraphOutput => None,
-    }
 }
 
 #[cfg(test)]
