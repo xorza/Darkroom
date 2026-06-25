@@ -51,10 +51,6 @@ impl PendingPreview for ImagePendingPreview {
 pub static IMAGE_TYPE_ID: LazyLock<TypeId> =
     LazyLock::new(|| "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into());
 
-/// Display name for the `Image` nominal type, registered on the library by
-/// [`image_library`](crate::image_library).
-pub(crate) const IMAGE_TYPE_NAME: &str = "Image";
-
 pub static IMAGE_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| DataType::Custom(*IMAGE_TYPE_ID));
 
 const PREVIEW_SIZE: usize = 256;

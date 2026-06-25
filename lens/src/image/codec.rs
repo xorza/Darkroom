@@ -12,8 +12,8 @@ use scenarium::data::CustomValue;
 use scenarium::library::TypeEntry;
 use scenarium::value_codec::CustomValueCodec;
 
+use super::Image;
 use super::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
-use super::{IMAGE_TYPE_NAME, Image};
 
 /// On-disk layout version for an image blob. Bump on any layout change.
 const VERSION: u8 = 1;
@@ -60,7 +60,7 @@ impl CustomValueCodec for ImageCodec {
 /// `image_library` to register via `Library::register_type`. Keeps the codec
 /// (a private ZST) owned here; the caller supplies only `IMAGE_TYPE_ID`.
 pub(crate) fn image_type_entry() -> TypeEntry {
-    TypeEntry::custom_with_codec(IMAGE_TYPE_NAME, Arc::new(ImageCodec))
+    TypeEntry::custom_with_codec("Image", Arc::new(ImageCodec))
 }
 
 fn encode_image(image: &imaginarium::Image) -> Vec<u8> {

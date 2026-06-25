@@ -29,7 +29,7 @@ use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,
     LocalContrastConfigDef, RegistrationConfigDef, ScnrConfigDef, StretchConfigDef,
 };
-use crate::astro::masters::{MASTERS_DATA_TYPE, MASTERS_TYPE_ID, MASTERS_TYPE_NAME, Masters};
+use crate::astro::masters::{MASTERS_DATA_TYPE, MASTERS_TYPE_ID, Masters};
 use crate::astro::presets::{
     BackgroundModeKind, CombinePreset, DetectionPreset, RegistrationPreset, ScnrKind, StretchPreset,
 };
@@ -70,7 +70,7 @@ pub static ASTRO_DIR_DATA_TYPE: LazyLock<DataType> =
 pub fn astro_library() -> Library {
     let mut library = Library::default();
 
-    library.register_type(*MASTERS_TYPE_ID, TypeEntry::custom(MASTERS_TYPE_NAME));
+    library.register_type(*MASTERS_TYPE_ID, TypeEntry::custom("Masters"));
 
     // load_astro_image
     library.add(
