@@ -106,11 +106,43 @@ pub struct SceneInput {
     pub value_variants: Span,
 }
 
+/// An output port's resolved type in the projection: a fixed type, or a
+/// *wildcard* (passthrough / reroute) carrying both the input it mirrors and
+/// the type currently resolved through it. The projection-side counterpart of
+/// `FuncOutput`'s [`OutputType`], with the resolved type baked in (the
+/// projection has already followed the wire).
+#[derive(Debug)]
+pub enum SceneOutputType {
+    Fixed(DataType),
+    Wildcard { mirrors: usize, resolved: DataType },
+}
+
+impl SceneOutputType {
+    /// The resolved port type — for a wildcard, the type flowing through it (or
+    /// `Null` when nothing is wired in yet).
+    pub fn data_type(&self) -> &DataType {
+        match self {
+            SceneOutputType::Fixed(ty) => ty,
+            SceneOutputType::Wildcard { resolved, .. } => resolved,
+        }
+    }
+
+    /// The input index a wildcard output mirrors, so the connection layer can
+    /// re-validate downstream wires when that input changes; `None` for a fixed
+    /// output.
+    pub fn mirrors(&self) -> Option<usize> {
+        match self {
+            SceneOutputType::Wildcard { mirrors, .. } => Some(*mirrors),
+            SceneOutputType::Fixed(_) => None,
+        }
+    }
+}
+
 /// One output port in the per-frame projection.
 #[derive(Debug)]
 pub struct SceneOutput {
     pub name: InternedStr,
-    pub ty: DataType,
+    pub ty: SceneOutputType,
 }
 
 #[derive(Debug)]
@@ -351,14 +383,16 @@ impl Scene {
                     .enumerate()
                     .map(|(i, o)| SceneOutput {
                         name: o.name.clone().into(),
-                        // A wildcard output (passthrough / reroute) reports the type
-                        // resolved through the input it mirrors; a fixed output uses
-                        // its declared type.
+                        // A wildcard output (passthrough / reroute) carries the
+                        // input it mirrors plus the type resolved through it; a
+                        // fixed output is just its declared type.
                         ty: match &o.ty {
-                            OutputType::Wildcard { .. } => {
-                                graph.resolve_output_type(func_lib, OutputPort::new(node.id, i))
-                            }
-                            OutputType::Fixed(dt) => dt.clone(),
+                            OutputType::Wildcard { mirrors } => SceneOutputType::Wildcard {
+                                mirrors: *mirrors,
+                                resolved: graph
+                                    .resolve_output_type(func_lib, OutputPort::new(node.id, i)),
+                            },
+                            OutputType::Fixed(dt) => SceneOutputType::Fixed(dt.clone()),
                         },
                     }),
             );
@@ -543,10 +577,10 @@ mod tests {
         // plus the untyped "+" placeholder — types align with names.
         let in_outs = scene.outputs(input_node.outputs);
         assert_eq!(in_outs.len(), 3, "two def inputs + placeholder");
-        assert!(matches!(in_outs[0].ty, DataType::Int));
-        assert!(matches!(in_outs[1].ty, DataType::Float));
+        assert!(matches!(in_outs[0].ty.data_type(), DataType::Int));
+        assert!(matches!(in_outs[1].ty.data_type(), DataType::Float));
         assert!(
-            matches!(in_outs[2].ty, DataType::Null),
+            matches!(in_outs[2].ty.data_type(), DataType::Null),
             "placeholder untyped"
         );
 
