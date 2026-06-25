@@ -5,7 +5,7 @@ use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
-use scenarium::function::{FuncInput, FuncOutput, ValueVariant};
+use scenarium::function::{FuncInput, FuncOutput, OutputType, ValueVariant};
 use scenarium::prelude::{
     Binding, CachePersistence, FuncLib, Graph, NodeId, NodeKind, OutputPort, SubgraphDef,
     SubgraphRef,
@@ -352,12 +352,13 @@ impl Scene {
                     .map(|(i, o)| SceneOutput {
                         name: o.name.clone().into(),
                         // A wildcard output (passthrough / reroute) reports the type
-                        // resolved through the input it mirrors; ordinary outputs use
-                        // their declared type.
-                        ty: if o.wildcard_mirror.is_some() {
-                            graph.resolve_output_type(func_lib, OutputPort::new(node.id, i))
-                        } else {
-                            o.data_type.clone()
+                        // resolved through the input it mirrors; a fixed output uses
+                        // its declared type.
+                        ty: match &o.ty {
+                            OutputType::Wildcard { .. } => {
+                                graph.resolve_output_type(func_lib, OutputPort::new(node.id, i))
+                            }
+                            OutputType::Fixed(dt) => dt.clone(),
                         },
                     }),
             );
@@ -453,7 +454,7 @@ fn default_static_value(input: &FuncInput) -> Option<StaticValue> {
 /// def output it mirrors — name + type carry over; it's not user-set, so
 /// it has no declared default and no value options.
 fn boundary_input(output: &FuncOutput) -> FuncInput {
-    FuncInput::optional(output.name.clone(), output.data_type.clone())
+    FuncInput::optional(output.name.clone(), output.ty.declared())
 }
 
 /// Synthesize a `FuncOutput` for a `SubgraphInput`'s output port from the

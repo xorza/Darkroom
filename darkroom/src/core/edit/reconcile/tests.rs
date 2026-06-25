@@ -75,9 +75,7 @@ fn connecting_placeholder_grows_output_with_inferred_type() {
     let func_lib = lib();
     let (mut def, _sgin, sum, sgout) = build_def(&func_lib, vec![], vec![]);
     bind(&mut def.graph, sgout, 0, sum, 0);
-    let want_ty = func_lib.by_name("sum").unwrap().outputs[0]
-        .data_type
-        .clone();
+    let want_ty = func_lib.by_name("sum").unwrap().outputs[0].ty.declared();
     let def_id = def.id;
     let mut graph = Graph::default();
     graph.subgraphs.add(def);
@@ -88,7 +86,7 @@ fn connecting_placeholder_grows_output_with_inferred_type() {
     let def = doc.graph.subgraphs.by_key(&def_id).unwrap();
     assert_eq!(def.outputs.len(), 1);
     assert_eq!(def.outputs[0].name, "output0");
-    assert_eq!(def.outputs[0].data_type, want_ty);
+    assert_eq!(def.outputs[0].ty.declared(), want_ty);
 }
 
 #[test]
@@ -275,7 +273,7 @@ fn passthrough_ports_are_null_typed() {
         DataType::Null,
         "a passthrough subgraph input is polymorphic (Null)"
     );
-    assert_eq!(def.outputs[0].data_type, DataType::Null);
+    assert_eq!(def.outputs[0].ty.declared(), DataType::Null);
 }
 
 #[test]
@@ -289,9 +287,7 @@ fn passthrough_in_subgraph_exposes_the_resolved_output_type() {
     // type for the whole composite.
     let func_lib = lib();
     let sum_id = func_lib.by_name("sum").unwrap().id;
-    let want_ty = func_lib.by_name("sum").unwrap().outputs[0]
-        .data_type
-        .clone();
+    let want_ty = func_lib.by_name("sum").unwrap().outputs[0].ty.declared();
     assert_ne!(
         want_ty,
         DataType::Null,
@@ -330,7 +326,8 @@ fn passthrough_in_subgraph_exposes_the_resolved_output_type() {
     let def = doc.graph.subgraphs.by_key(&def_id).unwrap();
     assert_eq!(def.outputs.len(), 1);
     assert_eq!(
-        def.outputs[0].data_type, want_ty,
+        def.outputs[0].ty.declared(),
+        want_ty,
         "the exposed output must keep the type resolved through the passthrough"
     );
 }

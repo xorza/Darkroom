@@ -4,7 +4,7 @@ use common::{KeyIndexKey, KeyIndexVec};
 use serde::{Deserialize, Serialize};
 
 use crate::data::{DataType, StaticValue};
-use crate::function::{Func, FuncId, FuncInput, FuncLib, FuncOutput};
+use crate::function::{Func, FuncId, FuncInput, FuncLib, FuncOutput, OutputType};
 use crate::special::SpecialNode;
 use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use anyhow::{Context, ensure};
@@ -400,7 +400,7 @@ impl Graph {
 
     /// The effective type produced at output `port`, following *wildcard*
     /// outputs up the graph: a wildcard output (e.g. a `CachePassthrough` /
-    /// reroute — see [`FuncOutput::wildcard_mirror`](crate::function::FuncOutput::wildcard_mirror))
+    /// reroute — see [`OutputType::Wildcard`](crate::function::OutputType))
     /// reports the resolved type of whatever feeds the input it mirrors, so a
     /// value's type survives the hop. The walk dead-ends at the node's
     /// *declared* type when the mirrored input is unbound/const, the producer is
@@ -422,46 +422,45 @@ impl Graph {
             return DataType::Null;
         };
 
-        // A wildcard output reports the type of whatever feeds the input it
-        // mirrors — any func/special node can declare one.
-        if let Some(src_input) = out.wildcard_mirror {
-            // A binding cycle can momentarily exist in the editor graph (flatten
-            // and the planner reject it later) — break it as polymorphic rather
-            // than recurse forever.
-            if !visiting.insert(port.node_id) {
-                return DataType::Null;
-            }
-            let resolved = match self.input_binding(InputPort::new(port.node_id, src_input)) {
-                Binding::Bind(src) => self.resolve_output_type_inner(func_lib, src, visiting),
-                // A const carries its own type for the scalar kinds, so the
-                // output *is* that type. `Null`/`FsPath`/`Enum` stay polymorphic:
-                // a bare `StaticValue` lacks the `FsPathConfig`/`EnumDef` those
-                // `DataType`s need, and fabricating a default would make the
-                // resolved type mismatch the real consumer's (compat compares
-                // config/type_id) — wrongly rejecting a valid wire, worse than
-                // the permissive `Null`.
-                Binding::Const(v) => match v {
-                    StaticValue::Float(_) => DataType::Float,
-                    StaticValue::Int(_) => DataType::Int,
-                    StaticValue::Bool(_) => DataType::Bool,
-                    StaticValue::String(_) => DataType::String,
-                    StaticValue::Null | StaticValue::FsPath(_) | StaticValue::Enum(_) => {
-                        DataType::Null
-                    }
-                },
-                // Nothing wired in yet — polymorphic.
-                Binding::None => DataType::Null,
-            };
-            visiting.remove(&port.node_id);
-            return resolved;
-        }
+        // A fixed output is just its declared type; a wildcard reports the type
+        // of whatever feeds the input it mirrors (any func/special node can
+        // declare one).
+        let OutputType::Wildcard { mirrors } = &out.ty else {
+            return out.ty.declared();
+        };
+        let mirrors = *mirrors;
 
-        out.data_type.clone()
+        // A binding cycle can momentarily exist in the editor graph (flatten and
+        // the planner reject it later) — break it as polymorphic rather than
+        // recurse forever.
+        if !visiting.insert(port.node_id) {
+            return DataType::Null;
+        }
+        let resolved = match self.input_binding(InputPort::new(port.node_id, mirrors)) {
+            Binding::Bind(src) => self.resolve_output_type_inner(func_lib, src, visiting),
+            // A const carries its own type for the scalar kinds, so the output
+            // *is* that type. `Null`/`FsPath`/`Enum` stay polymorphic: a bare
+            // `StaticValue` lacks the `FsPathConfig`/`EnumDef` those `DataType`s
+            // need, and fabricating a default would make the resolved type
+            // mismatch the real consumer's (compat compares config/type_id) —
+            // wrongly rejecting a valid wire, worse than the permissive `Null`.
+            Binding::Const(v) => match v {
+                StaticValue::Float(_) => DataType::Float,
+                StaticValue::Int(_) => DataType::Int,
+                StaticValue::Bool(_) => DataType::Bool,
+                StaticValue::String(_) => DataType::String,
+                StaticValue::Null | StaticValue::FsPath(_) | StaticValue::Enum(_) => DataType::Null,
+            },
+            // Nothing wired in yet — polymorphic.
+            Binding::None => DataType::Null,
+        };
+        visiting.remove(&port.node_id);
+        resolved
     }
 
-    /// The declared [`FuncOutput`] of output `port` — its full spec (type +
-    /// `wildcard_mirror`), or `None` for a boundary / unresolved node. The
-    /// output-side mirror of [`Self::input_spec`].
+    /// The declared [`FuncOutput`] of output `port` — its name + [`OutputType`],
+    /// or `None` for a boundary / unresolved node. The output-side mirror of
+    /// [`Self::input_spec`].
     fn output_spec<'a>(
         &'a self,
         func_lib: &'a FuncLib,

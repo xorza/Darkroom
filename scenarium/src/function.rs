@@ -87,28 +87,43 @@ impl FuncInput {
     }
 }
 
+/// An output port's type: either a fixed [`DataType`], or a *wildcard* that
+/// mirrors an input. A sum type (rather than a `DataType` + an
+/// `Option<mirror>`) so a wildcard can't carry a stray concrete type.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum OutputType {
+    /// A fixed, declared output type.
+    Fixed(DataType),
+    /// A polymorphic passthrough / reroute output whose type mirrors the
+    /// resolved type of input `mirrors` (e.g. the file-cache node). It reads as
+    /// the wildcard `Null` until the editor resolves it by following the wire
+    /// (see [`Graph::resolve_output_type`](crate::graph::Graph::resolve_output_type));
+    /// the engine never type-checks, so it ignores the distinction.
+    Wildcard { mirrors: usize },
+}
+
+impl OutputType {
+    /// The fixed type, or `Null` for an (unresolved) wildcard — the declared
+    /// fallback the editor shows before resolving the wire.
+    pub fn declared(&self) -> DataType {
+        match self {
+            OutputType::Fixed(ty) => ty.clone(),
+            OutputType::Wildcard { .. } => DataType::Null,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FuncOutput {
     pub name: String,
-    pub data_type: DataType,
-
-    /// A *wildcard* output whose type mirrors the resolved type of input
-    /// `mirrors` — a polymorphic passthrough / reroute port. `data_type` is the
-    /// fallback (`Null`) shown until something concrete is wired through; the
-    /// editor resolves the real type by following the wire (see
-    /// [`Graph::resolve_output_type`](crate::graph::Graph::resolve_output_type)).
-    /// `None` is an ordinary fixed-type output. The engine never type-checks, so
-    /// it ignores this.
-    #[serde(default)]
-    pub wildcard_mirror: Option<usize>,
+    pub ty: OutputType,
 }
 
 impl FuncOutput {
     pub fn new(name: impl Into<String>, data_type: DataType) -> Self {
         Self {
             name: name.into(),
-            data_type,
-            wildcard_mirror: None,
+            ty: OutputType::Fixed(data_type),
         }
     }
 }
@@ -242,13 +257,14 @@ impl Func {
     }
 
     /// Add a *wildcard* output that mirrors input `mirrors_input`'s resolved
-    /// type — a polymorphic passthrough / reroute port (its declared type is the
-    /// `Null` wildcard). See [`FuncOutput::wildcard_mirror`].
+    /// type — a polymorphic passthrough / reroute port. See
+    /// [`OutputType::Wildcard`].
     pub fn wildcard_output(mut self, name: impl Into<String>, mirrors_input: usize) -> Self {
         self.outputs.push(FuncOutput {
             name: name.into(),
-            data_type: DataType::Null,
-            wildcard_mirror: Some(mirrors_input),
+            ty: OutputType::Wildcard {
+                mirrors: mirrors_input,
+            },
         });
         self
     }

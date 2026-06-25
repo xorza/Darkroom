@@ -37,7 +37,7 @@ fn load_astro_image_node_is_registered() {
     assert_eq!(f.inputs.len(), 1);
     assert_eq!(f.outputs.len(), 1);
     assert_eq!(f.inputs[0].data_type, *ASTRO_IMAGE_PATH_DATA_TYPE);
-    assert_eq!(f.outputs[0].data_type, *IMAGE_DATA_TYPE);
+    assert_eq!(f.outputs[0].ty.declared(), *IMAGE_DATA_TYPE);
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn build_masters_node_is_registered() {
     let f = func(&lib, "build_masters");
     assert_eq!(f.category, "astro");
     assert_eq!(f.outputs.len(), 1);
-    assert_eq!(f.outputs[0].data_type, *MASTERS_DATA_TYPE);
+    assert_eq!(f.outputs[0].ty.declared(), *MASTERS_DATA_TYPE);
 
     // Four optional calibration-frame folders, then sigma, then cache.
     assert_eq!(f.inputs.len(), 6);
@@ -134,7 +134,7 @@ fn stack_lights_node_is_registered() {
     let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["image", "coverage", "weight"]);
     for out in &f.outputs {
-        assert_eq!(out.data_type, *IMAGE_DATA_TYPE);
+        assert_eq!(out.ty.declared(), *IMAGE_DATA_TYPE);
     }
 }
 
@@ -165,7 +165,7 @@ fn auto_stretch_node_is_registered() {
         Some(StaticValue::Enum("auto_asinh".to_string())),
     );
     assert_eq!(f.outputs.len(), 1);
-    assert_eq!(f.outputs[0].data_type, *IMAGE_DATA_TYPE);
+    assert_eq!(f.outputs[0].ty.declared(), *IMAGE_DATA_TYPE);
 }
 
 #[test]
@@ -186,14 +186,18 @@ fn processing_nodes_are_registered() {
         assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE, "{name} in type");
         assert!(f.inputs[0].required, "{name} image required");
         assert_eq!(f.outputs.len(), 1, "{name} one output");
-        assert_eq!(f.outputs[0].data_type, *IMAGE_DATA_TYPE, "{name} out type");
+        assert_eq!(
+            f.outputs[0].ty.declared(),
+            *IMAGE_DATA_TYPE,
+            "{name} out type"
+        );
     }
     // star_detect analyzes the frame and outputs a count.
     let sd = func(&lib, "star_detect");
     assert_eq!(sd.inputs[0].data_type, *IMAGE_DATA_TYPE);
     assert_eq!(sd.outputs.len(), 1);
     assert_eq!(sd.outputs[0].name, "count");
-    assert_eq!(sd.outputs[0].data_type, DataType::Int);
+    assert_eq!(sd.outputs[0].ty.declared(), DataType::Int);
 }
 
 #[test]
@@ -228,7 +232,7 @@ fn scalar_per_frame_nodes_take_optional_config_overrides() {
         // The builder node emits that same config type.
         let b = func(&lib, builder);
         assert_eq!(b.category, "astro");
-        assert_eq!(b.outputs[0].data_type, ty, "{builder} output type");
+        assert_eq!(b.outputs[0].ty.declared(), ty, "{builder} output type");
         assert!(
             b.inputs.iter().all(|i| i.required),
             "{builder} fields required"
@@ -288,7 +292,7 @@ fn preset_nodes_use_value_variant_picks_with_build_overrides() {
         );
         // The matching build node exists and emits the same config type.
         let b = func(&lib, builder);
-        assert_eq!(b.outputs[0].data_type, ty, "{builder} output type");
+        assert_eq!(b.outputs[0].ty.declared(), ty, "{builder} output type");
     }
 }
 
@@ -314,7 +318,7 @@ fn build_background_config_reflects_fields_and_feeds_background_extract() {
     assert!(builder.inputs.iter().all(|i| i.required));
     assert_eq!(builder.outputs[0].name, "config");
     assert_eq!(
-        builder.outputs[0].data_type,
+        builder.outputs[0].ty.declared(),
         config_data_type::<BackgroundConfigDef>()
     );
 
