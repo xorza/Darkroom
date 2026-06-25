@@ -23,6 +23,7 @@ use palantir::{
 };
 use scenarium::data::{DataType, StaticValue};
 use scenarium::function::ValueVariant;
+use scenarium::library::Library;
 
 use crate::gui::theme::StaticValueEditorTheme;
 
@@ -38,6 +39,7 @@ struct EditBuffer {
 pub(crate) fn show(
     ui: &mut Ui,
     theme: &StaticValueEditorTheme,
+    library: &Library,
     id: WidgetId,
     value: &StaticValue,
     data_type: &DataType,
@@ -112,15 +114,19 @@ pub(crate) fn show(
             None
         }
         StaticValue::Enum(current) => {
-            // A dropdown over the port's declared variants. The variant
-            // list + type identity live on `DataType::Enum`, not on the
-            // value — without that we can't populate the menu, so fall
-            // back to a read-only label (shouldn't happen: an `Enum`
-            // value always rides an `Enum`-typed port).
-            let DataType::Enum(def) = data_type else {
+            // A dropdown over the port's registered variants. The variant
+            // list lives on the library's `Enum` type entry, not on the value
+            // or the id-only `DataType` — without it (a non-`Enum` port, or an
+            // unregistered type) we can't populate the menu, so fall back to a
+            // read-only label (shouldn't happen: an `Enum` value always rides a
+            // registered `Enum`-typed port).
+            let DataType::Enum(type_id) = data_type else {
                 return read_only_label(ui, id, value, width);
             };
-            let options: Vec<&str> = def.variants.iter().map(String::as_str).collect();
+            let Some(variants) = library.enum_variants(type_id) else {
+                return read_only_label(ui, id, value, width);
+            };
+            let options: Vec<&str> = variants.iter().map(String::as_str).collect();
             let before = options.iter().position(|v| *v == current).unwrap_or(0);
             let mut idx = before;
             ComboBox::new(&mut idx, &options)

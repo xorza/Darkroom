@@ -6,20 +6,20 @@
 //! which masters the bundle carries.
 
 use std::any::Any;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
 use lumos::CalibrationMasters;
-use scenarium::data::{CustomValue, DataType, TypeDef, TypeId};
+use scenarium::data::{CustomValue, DataType, TypeId};
 
-pub static MASTERS_TYPE_DEF: LazyLock<Arc<TypeDef>> = LazyLock::new(|| {
-    Arc::new(TypeDef {
-        type_id: "db1bc978-1d0b-4ffc-9a74-6220eff8908e".into(),
-        display_name: "Masters".to_string(),
-    })
-});
+pub static MASTERS_TYPE_ID: LazyLock<TypeId> =
+    LazyLock::new(|| "db1bc978-1d0b-4ffc-9a74-6220eff8908e".into());
+
+/// Display name for the `Masters` nominal type, registered on the library by
+/// [`astro_library`](crate::astro_library).
+pub(crate) const MASTERS_TYPE_NAME: &str = "Masters";
 
 pub static MASTERS_DATA_TYPE: LazyLock<DataType> =
-    LazyLock::new(|| DataType::Custom(MASTERS_TYPE_DEF.clone()));
+    LazyLock::new(|| DataType::Custom(*MASTERS_TYPE_ID));
 
 /// Calibration masters carried through the node graph.
 #[derive(Debug)]
@@ -35,7 +35,7 @@ impl Masters {
 
 impl CustomValue for Masters {
     fn type_id(&self) -> TypeId {
-        MASTERS_TYPE_DEF.type_id
+        *MASTERS_TYPE_ID
     }
 
     fn as_any(&self) -> &dyn Any {

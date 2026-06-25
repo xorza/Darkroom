@@ -1,4 +1,4 @@
-//! Registration tests for the astro funclib.
+//! Registration tests for the astro library.
 
 use scenarium::data::StaticValue;
 
@@ -31,7 +31,7 @@ fn astro_dir_is_an_existing_directory_picker() {
 
 #[test]
 fn load_astro_image_node_is_registered() {
-    let lib = astro_funclib();
+    let lib = astro_library();
     let f = func(&lib, "load_astro_image");
     assert_eq!(f.category, "astro");
     assert_eq!(f.inputs.len(), 1);
@@ -42,7 +42,7 @@ fn load_astro_image_node_is_registered() {
 
 #[test]
 fn build_masters_node_is_registered() {
-    let lib = astro_funclib();
+    let lib = astro_library();
     let f = func(&lib, "build_masters");
     assert_eq!(f.category, "astro");
     assert_eq!(f.outputs.len(), 1);
@@ -70,7 +70,7 @@ fn build_masters_node_is_registered() {
 
 #[test]
 fn stack_lights_node_is_registered() {
-    let lib = astro_funclib();
+    let lib = astro_library();
     let f = func(&lib, "stack_lights");
     assert_eq!(f.category, "astro");
 
@@ -140,7 +140,7 @@ fn stack_lights_node_is_registered() {
 
 #[test]
 fn auto_stretch_node_is_registered() {
-    let lib = astro_funclib();
+    let lib = astro_library();
     let f = func(&lib, "auto_stretch");
     assert_eq!(f.category, "astro");
     assert_eq!(f.inputs.len(), 2);
@@ -170,7 +170,7 @@ fn auto_stretch_node_is_registered() {
 
 #[test]
 fn processing_nodes_are_registered() {
-    let lib = astro_funclib();
+    let lib = astro_library();
     // Each in-place op: a required `image` Image in, an Image out.
     for name in [
         "background_extract",
@@ -202,7 +202,7 @@ fn processing_nodes_are_registered() {
 
 #[test]
 fn scalar_per_frame_nodes_take_optional_config_overrides() {
-    let lib = astro_funclib();
+    let lib = astro_library();
     // denoise / hdr_compress / local_contrast keep their inline scalar and
     // gain an optional `config` override fed by the matching build node.
     let cases: [(&str, &str, DataType); 3] = [
@@ -242,7 +242,7 @@ fn scalar_per_frame_nodes_take_optional_config_overrides() {
 
 #[test]
 fn preset_nodes_use_value_variant_picks_with_build_overrides() {
-    let lib = astro_funclib();
+    let lib = astro_library();
     // Every preset node is consistent: a config-typed input whose `value_variants`
     // are the preset names (seeded to the first), overridable by a build node.
     // (node, input name, input index, config type, build node, first preset)
@@ -298,7 +298,7 @@ fn preset_nodes_use_value_variant_picks_with_build_overrides() {
 
 #[test]
 fn build_background_config_reflects_fields_and_feeds_background_extract() {
-    let lib = astro_funclib();
+    let lib = astro_library();
     // The builder exposes one labeled input per BackgroundConfig field, in
     // struct order; all required (none are `Option`s).
     let builder = func(&lib, "build_background_config");

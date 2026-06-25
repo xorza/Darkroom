@@ -19,7 +19,7 @@ struct FpsEventState {
 }
 
 /// The worker frame / fps event-source nodes.
-pub fn worker_events_funclib() -> Library {
+pub fn worker_events_library() -> Library {
     let mut library = Library::default();
 
     library.add(

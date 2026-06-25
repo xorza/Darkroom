@@ -25,12 +25,12 @@ to the other:
 | `subgraph.rs` | `SubgraphDef`, `SubgraphRef` (Linked/Local), `SubgraphEvent`. Composite definitions and their exposed interface. |
 | `function.rs` | `Func` (definition), `FuncInput`/`FuncOutput`, `FuncBehavior`. |
 | `library.rs` | `Library` (the registry: funcs + shared subgraphs + nominal types), `TypeDecl`/`TypeEntry` (type metadata + optional disk codec). |
-| `data.rs` | Value model: `StaticValue` (editor consts), `DynamicValue` (runtime), `DataType`, `CustomValue` trait, `TypeDef`/`EnumDef`. |
+| `data.rs` | Value model: `StaticValue` (editor consts), `DynamicValue` (runtime), `DataType` (`Custom`/`Enum` carry only a `TypeId`; metadata lives on `Library`), `CustomValue` trait. |
 | `context.rs` | `ContextManager` (per-run resource store + log sink + the run's cancel flag via `cancel_flag()`, which a lambda clones into off-thread work to bail early), `ContextType` (lazy-init type token). |
 | `func_lambda.rs` | `FuncLambda`: the async node-function signature + `InvokeInput`/`InvokeResult`/`InvokeError`. |
 | `event_lambda.rs` | `EventLambda`: async event-handler signature. |
 | `macros.rs` | `async_lambda!` — ergonomic `FuncLambda` construction. |
-| `elements/` | Built-in funclibs: `basic_funclib.rs` (math/string/print), `worker_events_funclib.rs` (frame/fps events). |
+| `elements/` | Built-in node libraries: `basic_library.rs` (math/string/print), `worker_events_library.rs` (frame/fps events). |
 | `execution/` | The compile→plan→execute pipeline (see below). |
 | `execution_stats.rs` | `ExecutionStats` per-run summary + `FlattenMap` (flat id → authoring attribution), `LogEntry`. |
 | `common/` | `AnyState` (per-node mutable state), `SharedAnyState` (concurrent event state). |
@@ -63,7 +63,7 @@ emitter's event outward so a parent can subscribe.
 
 - `StaticValue` (`data.rs:118`) — serializable editor constants (Null/Float/Int/Bool/String/FsPath/Enum), NaN-aware equality.
 - `DynamicValue` (`data.rs:173`) — runtime values, adds `None` (unbound) and `Custom(Arc<dyn CustomValue>)`; coercions `as_f64`/`as_i64`/`as_bool`.
-- `DataType` (`data.rs:105`) — port type spec; `CustomValue` (`data.rs:36`) is the app-extension trait (`type_def`, async `gen_preview`, `as_any`).
+- `DataType` (`data.rs`) — port type spec; `Custom`/`Enum` reference a registered nominal type by `TypeId` (name/variants/codec live on `Library`), `FsPath` stays inline. `CustomValue` (`data.rs`) is the app-extension trait (`type_id`, async `gen_preview`, `as_any`).
 
 ## Execution pipeline (`execution/`)
 
@@ -125,7 +125,7 @@ function is a `FuncLambda` (`func_lambda.rs:62`): async
 `fn(&mut ContextManager, &mut AnyState, &SharedAnyState, &[InvokeInput], &[OutputUsage], &mut [DynamicValue]) -> InvokeResult<()>`.
 Build them with `async_lambda!` (`macros.rs`). `EventLambda` (`event_lambda.rs`)
 is the async `fn(SharedAnyState)` event handler. `elements/` ships the built-in
-funclibs.
+node libraries.
 
 ## Worker (`worker/mod.rs`)
 

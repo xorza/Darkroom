@@ -1,9 +1,10 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::data::TypeId;
+use crate::data::{DataType, EnumVariants, TypeId};
 use crate::function::{Func, FuncId};
 use crate::subgraph::{SubgraphDef, SubgraphId};
 use crate::value_codec::CustomValueCodec;
@@ -25,6 +26,22 @@ pub enum TypeDecl {
     },
 }
 
+impl TypeDecl {
+    pub fn display_name(&self) -> &str {
+        match self {
+            TypeDecl::Custom { display_name } | TypeDecl::Enum { display_name, .. } => display_name,
+        }
+    }
+
+    /// The variant names for an `Enum` decl; `None` for a `Custom` type.
+    pub fn variants(&self) -> Option<&[String]> {
+        match self {
+            TypeDecl::Enum { variants, .. } => Some(variants),
+            TypeDecl::Custom { .. } => None,
+        }
+    }
+}
+
 /// A registered type: its serializable [`TypeDecl`] plus the optional runtime
 /// [`CustomValueCodec`] that makes its values disk-cacheable. The codec is
 /// `#[serde(skip)]` and re-attached when the library is assembled in-process —
@@ -38,6 +55,16 @@ pub struct TypeEntry {
 }
 
 impl TypeEntry {
+    /// A custom type with no disk codec (not cacheable).
+    pub fn custom(display_name: impl Into<String>) -> Self {
+        Self {
+            decl: TypeDecl::Custom {
+                display_name: display_name.into(),
+            },
+            codec: None,
+        }
+    }
+
     /// A custom type with a disk codec.
     pub fn custom_with_codec(
         display_name: impl Into<String>,
@@ -48,6 +75,23 @@ impl TypeEntry {
                 display_name: display_name.into(),
             },
             codec: Some(codec),
+        }
+    }
+
+    /// An enum type with the variant names taken from `E` (via strum).
+    pub fn enum_of<E: EnumVariants>(display_name: impl Into<String>) -> Self {
+        Self::enum_with_variants(display_name, E::variant_names())
+    }
+
+    /// An enum type with an explicit variant list (for runtime-discovered enums
+    /// where the concrete type isn't available — see `lens`'s config builders).
+    pub fn enum_with_variants(display_name: impl Into<String>, variants: Vec<String>) -> Self {
+        Self {
+            decl: TypeDecl::Enum {
+                display_name: display_name.into(),
+                variants,
+            },
+            codec: None,
         }
     }
 }
@@ -123,6 +167,31 @@ impl Library {
     pub fn type_decl(&self, type_id: &TypeId) -> Option<&TypeDecl> {
         assert!(!type_id.is_nil());
         self.types.get(type_id).map(|entry| &entry.decl)
+    }
+
+    /// The variant names of a registered `Enum` type — for the editor's enum
+    /// picker and the const type-check. `None` if `type_id` is unregistered or
+    /// names a non-enum type.
+    pub fn enum_variants(&self, type_id: &TypeId) -> Option<&[String]> {
+        self.type_decl(type_id)?.variants()
+    }
+
+    /// A short human-readable name for `ty`: the scalar keyword, `"path"`, or a
+    /// registered `Custom`/`Enum` type's display name (its raw id if the type
+    /// isn't registered in this process).
+    pub fn type_name(&self, ty: &DataType) -> Cow<'_, str> {
+        match ty {
+            DataType::Null => Cow::Borrowed("null"),
+            DataType::Float => Cow::Borrowed("float"),
+            DataType::Int => Cow::Borrowed("int"),
+            DataType::Bool => Cow::Borrowed("bool"),
+            DataType::String => Cow::Borrowed("string"),
+            DataType::FsPath(_) => Cow::Borrowed("path"),
+            DataType::Custom(id) | DataType::Enum(id) => self
+                .type_decl(id)
+                .map(|decl| Cow::Borrowed(decl.display_name()))
+                .unwrap_or_else(|| Cow::Owned(id.to_string())),
+        }
     }
 
     /// The disk codec registered for `type_id`, if any. Used by the output

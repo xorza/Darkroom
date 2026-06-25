@@ -16,12 +16,12 @@
 use std::any::Any;
 use std::fmt;
 use std::hash::Hasher;
-use std::sync::Arc;
 
 use common::{FieldKind, FieldValue, FnvHasher, Introspect};
-use scenarium::data::{CustomValue, DataType, DynamicValue, EnumDef, StaticValue, TypeId};
+use scenarium::data::{CustomValue, DataType, DynamicValue, EnumVariants, StaticValue, TypeId};
 use scenarium::func_lambda::FuncLambda;
 use scenarium::function::{Func, FuncInput};
+use scenarium::library::{Library, TypeEntry};
 
 /// A config type that can back a config-builder node: introspectable, plus a
 /// stable identity for the value it travels on.
@@ -57,26 +57,35 @@ impl<T: NodeConfig> fmt::Display for ConfigValue<T> {
 /// The custom [`DataType`] a `T` config travels on (distinct per `T`, so wiring
 /// is type-checked).
 pub(crate) fn config_data_type<T: NodeConfig>() -> DataType {
-    DataType::from_custom(T::TYPE_ID, T::NAME)
+    DataType::Custom(T::TYPE_ID.into())
 }
 
-/// A required enum/preset dropdown input seeded to the datatype's first variant.
-/// Shared by both funclibs: the default keeps a fresh node valid, while clearing
-/// it surfaces as a missing input.
-pub(crate) fn enum_input(name: &str, datatype: &DataType) -> FuncInput {
+/// A required enum/preset dropdown input seeded to `E`'s first variant. Shared by
+/// both libraries: the default keeps a fresh node valid, while clearing it
+/// surfaces as a missing input. (The first-variant default is read from `E`
+/// directly, so this needs no library handle.)
+pub(crate) fn enum_input<E: EnumVariants>(name: &str, datatype: &DataType) -> FuncInput {
     let mut input = FuncInput::required(name, datatype.clone());
-    input.default_value = datatype.default_value();
+    input.default_value = E::variant_names().into_iter().next().map(StaticValue::Enum);
     input
 }
 
-/// Build a config-builder `Func` for `T`: one labeled input per introspected
-/// field, a single `config` output of [`config_data_type::<T>`].
-pub(crate) fn config_builder_func<T: NodeConfig>(
+/// Build a config-builder `Func` for `T` — one labeled input per introspected
+/// field, a single `config` output of [`config_data_type::<T>`] — and add it to
+/// `library`, registering `T`'s output type and any enum field types so the
+/// editor can render them. Adds internally (rather than returning the `Func`) so
+/// the caller needn't borrow `library` twice.
+pub(crate) fn add_config_builder<T: NodeConfig>(
+    library: &mut Library,
     node_id: &str,
     node_name: &str,
     description: &str,
-) -> Func {
+) {
     let fields = T::fields();
+    library.register_type(T::TYPE_ID, TypeEntry::custom(T::NAME));
+    for field in &fields {
+        register_field_enum(library, &field.kind);
+    }
     let mut func = Func::new(node_id, node_name)
         .category("astro")
         .description(description)
@@ -92,7 +101,8 @@ pub(crate) fn config_builder_func<T: NodeConfig>(
     }
     // The lambda needs each field's kind to read its input value back.
     let kinds: Vec<FieldKind> = fields.iter().map(|f| f.kind.clone()).collect();
-    func.output("config", config_data_type::<T>())
+    let func = func
+        .output("config", config_data_type::<T>())
         .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             let kinds = kinds.clone();
             Box::pin(async move {
@@ -104,26 +114,44 @@ pub(crate) fn config_builder_func<T: NodeConfig>(
                 outputs[0] = DynamicValue::from_custom(ConfigValue(T::from_fields(&values)));
                 Ok(())
             })
-        }))
+        }));
+    library.add(func);
 }
 
-/// Map an introspected field kind to a scenarium port type.
+/// Map an introspected field kind to a scenarium port type. Enum fields map to
+/// `DataType::Enum(id)`; their metadata is registered separately by
+/// [`register_field_enum`].
 fn data_type(kind: &FieldKind) -> DataType {
     match kind {
         FieldKind::Int => DataType::Int,
         FieldKind::Float => DataType::Float,
         FieldKind::Bool => DataType::Bool,
         FieldKind::Str => DataType::String,
+        FieldKind::Enum { type_name, .. } => DataType::Enum(stable_type_id(type_name)),
+        // An `Option<T>` port is `T`'s type; optionality is the input's `required` flag.
+        FieldKind::Option(inner) => data_type(inner),
+    }
+}
+
+/// Register the enum type(s) a `kind` references on `library`. Idempotent — a
+/// mirror enum can appear across several config builders, so a second
+/// registration of the same id is a no-op rather than a panic.
+fn register_field_enum(library: &mut Library, kind: &FieldKind) {
+    match kind {
         FieldKind::Enum {
             type_name,
             variants,
-        } => DataType::Enum(Arc::new(EnumDef {
-            type_id: stable_type_id(type_name),
-            display_name: type_name.clone(),
-            variants: variants.clone(),
-        })),
-        // An `Option<T>` port is `T`'s type; optionality is the input's `required` flag.
-        FieldKind::Option(inner) => data_type(inner),
+        } => {
+            let id = stable_type_id(type_name);
+            if library.type_decl(&id).is_none() {
+                library.register_type(
+                    id,
+                    TypeEntry::enum_with_variants(type_name, variants.clone()),
+                );
+            }
+        }
+        FieldKind::Option(inner) => register_field_enum(library, inner),
+        _ => {}
     }
 }
 
@@ -191,14 +219,21 @@ mod tests {
             data_type(&FieldKind::Option(Box::new(FieldKind::Float))),
             DataType::Float
         ));
-        let DataType::Enum(def) = data_type(&FieldKind::Enum {
+        let kind = FieldKind::Enum {
             type_name: "Mode".to_string(),
             variants: vec!["a".to_string(), "b".to_string()],
-        }) else {
-            panic!("enum kind should map to an Enum data type");
         };
-        assert_eq!(def.display_name, "Mode");
-        assert_eq!(def.variants, ["a", "b"]);
+        assert_eq!(data_type(&kind), DataType::Enum(stable_type_id("Mode")));
+
+        // Registration records the enum's name + variants under that id.
+        let mut library = Library::default();
+        register_field_enum(&mut library, &kind);
+        let decl = library.type_decl(&stable_type_id("Mode")).unwrap();
+        assert_eq!(decl.display_name(), "Mode");
+        assert_eq!(
+            decl.variants(),
+            Some(["a".to_string(), "b".to_string()].as_slice())
+        );
     }
 
     #[test]

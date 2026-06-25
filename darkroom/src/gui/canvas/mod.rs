@@ -300,6 +300,7 @@ impl GraphUI {
                             connection_ui.draw(ui, ctx, scene, port_frame, &mut probe);
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
+                                library: ctx.library,
                                 scene,
                                 selected,
                                 port_frame,
@@ -311,7 +312,7 @@ impl GraphUI {
                         // they sit on top and win clicks over the nodes
                         // beneath; positioned in world coords, so they ride
                         // the inner-canvas transform.
-                        inspectors.draw_panels(ui, ctx.theme, scene, ctx.run_state);
+                        inspectors.draw_panels(ui, ctx.theme, ctx.library, scene, ctx.run_state);
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);
                     });

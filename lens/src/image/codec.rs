@@ -13,7 +13,7 @@ use scenarium::library::TypeEntry;
 use scenarium::value_codec::CustomValueCodec;
 
 use super::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
-use super::{IMAGE_TYPE_DEF, Image};
+use super::{IMAGE_TYPE_NAME, Image};
 
 /// On-disk layout version for an image blob. Bump on any layout change.
 const VERSION: u8 = 1;
@@ -57,10 +57,10 @@ impl CustomValueCodec for ImageCodec {
 }
 
 /// The [`Image`] type's registry entry (display name + disk codec), for
-/// `image_funclib` to register via [`Library::register_type`]. Keeps the codec
-/// (a private ZST) owned here; the caller supplies only [`IMAGE_TYPE_DEF`]'s id.
+/// `image_library` to register via `Library::register_type`. Keeps the codec
+/// (a private ZST) owned here; the caller supplies only `IMAGE_TYPE_ID`.
 pub(crate) fn image_type_entry() -> TypeEntry {
-    TypeEntry::custom_with_codec(IMAGE_TYPE_DEF.display_name.clone(), Arc::new(ImageCodec))
+    TypeEntry::custom_with_codec(IMAGE_TYPE_NAME, Arc::new(ImageCodec))
 }
 
 fn encode_image(image: &imaginarium::Image) -> Vec<u8> {
@@ -182,8 +182,9 @@ mod tests {
     #[test]
     fn register_image_type_wires_the_codec() {
         use scenarium::library::Library;
+        let id = *crate::image::IMAGE_TYPE_ID;
         let mut library = Library::default();
-        library.register_type(IMAGE_TYPE_DEF.type_id, image_type_entry());
-        assert!(library.type_decl(&IMAGE_TYPE_DEF.type_id).is_some());
+        library.register_type(id, image_type_entry());
+        assert!(library.type_decl(&id).is_some());
     }
 }

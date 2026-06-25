@@ -53,8 +53,7 @@ fn type_hue(preset: ThemePreset, ty: &DataType) -> Color {
         DataType::Float => p.float,
         DataType::String => p.string,
         DataType::FsPath(_) => p.path,
-        DataType::Custom(def) => ramp_pick(p.ramp, def.type_id.as_u128()),
-        DataType::Enum(def) => ramp_pick(p.ramp, def.type_id.as_u128()),
+        DataType::Custom(id) | DataType::Enum(id) => ramp_pick(p.ramp, id.as_u128()),
         DataType::Null => unreachable!("Null handled by fallback in port_color"),
     };
     Color::hex(hex)
@@ -120,17 +119,12 @@ const LIGHT: TypePalette = TypePalette {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use scenarium::data::{TypeDef, TypeId};
+    use scenarium::data::TypeId;
 
     use super::*;
 
     fn custom(id: u128) -> DataType {
-        DataType::Custom(Arc::new(TypeDef {
-            type_id: TypeId::from_u128(id),
-            display_name: "X".into(),
-        }))
+        DataType::Custom(TypeId::from_u128(id))
     }
 
     #[test]

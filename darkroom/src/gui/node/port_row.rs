@@ -13,6 +13,7 @@ use palantir::{
 use scenarium::data::{DataType, FsPathMode, StaticValue};
 use scenarium::function::ValueVariant;
 use scenarium::graph::Binding;
+use scenarium::library::Library;
 use scenarium::prelude::NodeId;
 
 use crate::core::document::BoundarySide;
@@ -92,7 +93,7 @@ fn input_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<
         input_label_cell(ui, rcx, port, node, input, rename, out);
         if allow_const && let InputBindingView::Const(value) = &input.binding {
             let variants = rcx.scene.value_variants(input.value_variants);
-            value_cell(ui, rcx.theme, port, value, &input.ty, variants, out);
+            value_cell(ui, rcx, port, value, &input.ty, variants, out);
         }
     }
 }
@@ -154,7 +155,7 @@ fn input_label_cell(
 ) {
     let theme = rcx.theme;
     let allow_const = !node.boundary;
-    let tip = type_label(&input.ty);
+    let tip = type_label(rcx.library, &input.ty);
     // Flag a required input's port only once a run actually failed on it (the
     // node is `MissingInputs`) — not on every unbound edit — so the port keeps
     // its data-type color while editing instead of flipping as you bind/unbind.
@@ -235,7 +236,7 @@ fn input_label_cell(
 /// hug-sized column, so every editor starts at the same x.
 fn value_cell(
     ui: &mut Ui,
-    theme: &Theme,
+    rcx: RecordCtx<'_>,
     port: PortRef,
     value: &StaticValue,
     data_type: &DataType,
@@ -254,7 +255,8 @@ fn value_cell(
         .show(ui, |ui| {
             value_editor::show(
                 ui,
-                &theme.static_value_editor,
+                &rcx.theme.static_value_editor,
+                rcx.library,
                 editor_id,
                 value,
                 data_type,
@@ -283,7 +285,7 @@ fn output_cell(
         PortKind::Output,
         rcx.port_frame.is_hovered(port),
     );
-    let tip = type_label(&output.ty);
+    let tip = type_label(rcx.library, &output.ty);
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     Panel::hstack()
@@ -358,11 +360,12 @@ fn circle_frame(
     }
 }
 
-/// Human-readable type for a port tooltip. Mirrors `DataType`'s `Display`
-/// for the scalars, names the picker mode for paths, and reads `Null`
-/// (the untyped boundary placeholder) as "any".
-fn type_label(ty: &DataType) -> String {
+/// Human-readable type for a port tooltip: scalar names, the picker mode for
+/// paths, `Null` (the untyped boundary placeholder) as "any", and a registered
+/// `Custom`/`Enum` type's display name (the raw id if it isn't registered).
+fn type_label(library: &Library, ty: &DataType) -> String {
     match ty {
+        // The untyped boundary placeholder reads as "any" here, not "null".
         DataType::Null => "any".to_owned(),
         DataType::FsPath(cfg) => {
             let mode = match cfg.mode {
@@ -376,6 +379,6 @@ fn type_label(ty: &DataType) -> String {
                 format!("path · {mode} ({})", cfg.extensions.join(", "))
             }
         }
-        other => other.to_string(),
+        _ => library.type_name(ty).into_owned(),
     }
 }

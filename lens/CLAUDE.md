@@ -6,7 +6,7 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 ## Layout
 
 Two domains as folders + a shared bridge at the root. Modules are private;
-`lib.rs` publishes only `AstroFrame`, `Image`, `astro_funclib`, `image_funclib`
+`lib.rs` publishes only `AstroFrame`, `Image`, `astro_library`, `image_library`
 (everything else — config mirrors, presets, datatypes, the bridge — is
 crate-internal).
 
@@ -16,11 +16,11 @@ src/
 ├── config_node.rs      shared Introspect → config-builder bridge
 ├── image/              imaginarium adapter
 │   ├── mod.rs          Image (CustomValue, async GPU thumbnail) + submodules
-│   ├── funclib.rs      image_funclib() — category `image`
+│   ├── library.rs      image_library() — category `image`
 │   ├── blend_mode.rs · conversion_format.rs · vision_ctx.rs
 └── astro/              lumos adapter
     ├── mod.rs          AstroFrame (CustomValue, CPU thumbnail) + submodules
-    ├── funclib/        astro_funclib() — category `astro` (mod.rs + tests.rs)
+    ├── library/        astro_library() — category `astro` (mod.rs + tests.rs)
     ├── configs.rs      mirror config structs (Introspect)
     ├── presets.rs      preset_enum! dropdown enums → lumos stage configs
     └── masters.rs      Masters (CalibrationMasters CustomValue)
@@ -29,10 +29,10 @@ src/
 | Module | Role |
 |--------|------|
 | `image/mod.rs` | `Image` — `imaginarium::ImageBuffer` as a `CustomValue` (async GPU thumbnail). |
-| `image/funclib.rs` | `image_funclib()` — imaginarium nodes (category `image`). |
+| `image/library.rs` | `image_library()` — imaginarium nodes (category `image`). |
 | `image/{blend_mode,conversion_format,vision_ctx}.rs` | `BlendMode`/`ColorFormat` datatypes; `VisionCtx` (GPU/CPU `ProcessingContext`). |
 | `astro/mod.rs` | `AstroFrame` — `lumos::AstroImage` as a `CustomValue` (CPU thumbnail preview). |
-| `astro/funclib/` | `astro_funclib()` — lumos nodes (category `astro`); tests in `tests.rs`. |
+| `astro/library/` | `astro_library()` — lumos nodes (category `astro`); tests in `tests.rs`. |
 | `astro/masters.rs` | `Masters` — `lumos::CalibrationMasters` as a `CustomValue`. |
 | `astro/presets.rs` | `preset_enum!` macro + preset enums → lumos stage configs. Each enum gives a `variant_names()` list (the node's `value_variants` quick-pick) + `FromStr`/`config()`. No `DataType` handles — every preset node is a config-typed input with a `build_*_config` override. |
 | `config_node.rs` | Scenarium bridge over `common`'s struct introspection: `config_builder_func::<T: NodeConfig>()` maps a `common::Introspect` type's `FieldDesc`s → a `Func` with one input per field (`FieldKind`→`DataType`, `FieldValue`↔`StaticValue`/`DynamicValue`) → a wireable `ConfigValue<T>`. `NodeConfig` = `Introspect` + a stable wire `TYPE_ID`/`NAME`. Inputs required unless the field is `Option<_>`; enum `type_id`s via `common::FnvHasher`. Also home of the shared `enum_input` FuncInput helper. |
@@ -40,8 +40,8 @@ src/
 
 ## Key types
 
-- `image_funclib()` — builds a `Library` of the imaginarium image nodes.
-- `astro_funclib()` — builds a `Library` of the lumos astro nodes.
+- `image_library()` — builds a `Library` of the imaginarium image nodes.
+- `astro_library()` — builds a `Library` of the lumos astro nodes.
 - `Image` — wrapper around `imaginarium::ImageBuffer` implementing `CustomValue` (GPU thumbnail preview).
 - `AstroFrame` — wrapper around `lumos::AstroImage` implementing `CustomValue`; `gen_preview` builds a downscaled RGBA_U8 thumbnail on the CPU (planar channels sampled straight to RGBA, no display stretch — linear frames preview dark) and parks it in a `Slot`.
 - `Masters` — wrapper around `lumos::CalibrationMasters`.

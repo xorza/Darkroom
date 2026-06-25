@@ -29,6 +29,7 @@ use palantir::{
     Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
+use scenarium::library::Library;
 use scenarium::prelude::{LogLevel, NodeId};
 
 use crate::gui::canvas::outer_canvas_widget_id;
@@ -60,6 +61,7 @@ pub(crate) struct Inspectors {
 /// takes a context rather than a fistful of loose arguments.
 struct PanelDraw<'a> {
     theme: &'a Theme,
+    library: &'a Library,
     scene: &'a Scene,
     run_state: &'a RunState,
 }
@@ -135,11 +137,13 @@ impl Inspectors {
         &self,
         ui: &mut Ui,
         theme: &Theme,
+        library: &Library,
         scene: &Scene,
         run_state: &RunState,
     ) {
         let ctx = PanelDraw {
             theme,
+            library,
             scene,
             run_state,
         };
@@ -215,12 +219,20 @@ impl Inspectors {
                         // fall back to the static binding.
                         match values.and_then(|v| v.inputs.get(i)) {
                             Some(pv) => {
-                                line(ui, &port_line(name, ty, Some(&pv.text)), body_style(ui));
+                                line(
+                                    ui,
+                                    &port_line(ctx.library, name, ty, Some(&pv.text)),
+                                    body_style(ui),
+                                );
                                 draw_preview(ui, node.id, "in", i, pv);
                             }
                             None => {
                                 let val = value_str(&input.binding);
-                                line(ui, &port_line(name, ty, Some(val.as_str())), body_style(ui));
+                                line(
+                                    ui,
+                                    &port_line(ctx.library, name, ty, Some(val.as_str())),
+                                    body_style(ui),
+                                );
                             }
                         }
                     }
@@ -234,10 +246,16 @@ impl Inspectors {
                         let ty = Some(&output.ty);
                         match values.and_then(|v| v.outputs.get(i)) {
                             Some(pv) => {
-                                line(ui, &port_line(name, ty, Some(&pv.text)), body_style(ui));
+                                line(
+                                    ui,
+                                    &port_line(ctx.library, name, ty, Some(&pv.text)),
+                                    body_style(ui),
+                                );
                                 draw_preview(ui, node.id, "out", i, pv);
                             }
-                            None => line(ui, &port_line(name, ty, None), body_style(ui)),
+                            None => {
+                                line(ui, &port_line(ctx.library, name, ty, None), body_style(ui))
+                            }
                         }
                     }
                 }
@@ -378,14 +396,16 @@ fn body_style(ui: &Ui) -> TextStyle {
 /// Format one port row. Path-typed ports show `name: value` (the value
 /// already conveys "path"); other ports show `name: type = value`, or
 /// `name: type` when no value is available.
-fn port_line(name: &str, ty: Option<&DataType>, val: Option<&str>) -> String {
+fn port_line(library: &Library, name: &str, ty: Option<&DataType>, val: Option<&str>) -> String {
     if matches!(ty, Some(DataType::FsPath(_))) {
         match val {
             Some(v) => format!("{name}: {v}"),
             None => format!("{name}: path"),
         }
     } else {
-        let ty = ty.map(|t| format!("{t}")).unwrap_or_default();
+        let ty = ty
+            .map(|t| library.type_name(t).into_owned())
+            .unwrap_or_default();
         match val {
             Some(v) => format!("{name}: {ty} = {v}"),
             None => format!("{name}: {ty}"),

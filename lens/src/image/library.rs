@@ -2,19 +2,21 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::config_node::enum_input;
-use crate::image::blend_mode::BLENDMODE_DATATYPE;
+use crate::image::blend_mode::{BLENDMODE_DATATYPE, BLENDMODE_TYPE_ID};
 use crate::image::codec::image_type_entry;
-use crate::image::conversion_format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
+use crate::image::conversion_format::{
+    CONVERSION_FORMAT_DATATYPE, CONVERSION_FORMAT_TYPE_ID, ConversionFormat,
+};
 use crate::image::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
-use crate::image::{IMAGE_DATA_TYPE, IMAGE_TYPE_DEF, Image};
+use crate::image::{IMAGE_DATA_TYPE, IMAGE_TYPE_ID, Image};
 use imaginarium::{Blend, BlendMode, ContrastBrightness, SUPPORTED_EXTENSIONS, Transform, Vec2};
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::func_lambda::FuncLambda;
 use scenarium::function::{Func, FuncInput};
-use scenarium::library::Library;
+use scenarium::library::{Library, TypeEntry};
 
 /// The imaginarium image-processing nodes (category `image`).
-pub fn image_funclib() -> Library {
+pub fn image_library() -> Library {
     let mut library = Library::default();
 
     // brightness_contrast
@@ -135,7 +137,10 @@ pub fn image_funclib() -> Library {
             .pure()
             .context(VISION_CTX_TYPE.clone())
             .input(FuncInput::required("image", IMAGE_DATA_TYPE.clone()))
-            .input(enum_input("format", &CONVERSION_FORMAT_DATATYPE))
+            .input(enum_input::<ConversionFormat>(
+                "format",
+                &CONVERSION_FORMAT_DATATYPE,
+            ))
             .output("image", IMAGE_DATA_TYPE.clone())
             .lambda(FuncLambda::new(
                 move |ctx_manager, _, _, inputs, _, outputs| {
@@ -177,7 +182,7 @@ pub fn image_funclib() -> Library {
             .context(VISION_CTX_TYPE.clone())
             .input(FuncInput::required("source", IMAGE_DATA_TYPE.clone()))
             .input(FuncInput::required("destination", IMAGE_DATA_TYPE.clone()))
-            .input(enum_input("mode", &BLENDMODE_DATATYPE))
+            .input(enum_input::<BlendMode>("mode", &BLENDMODE_DATATYPE))
             .input(FuncInput::required("alpha", DataType::Float).default(1.0))
             .output("image", IMAGE_DATA_TYPE.clone())
             .lambda(FuncLambda::new(
@@ -270,7 +275,15 @@ pub fn image_funclib() -> Library {
             )),
     );
 
-    library.register_type(IMAGE_TYPE_DEF.type_id, image_type_entry());
+    library.register_type(*IMAGE_TYPE_ID, image_type_entry());
+    library.register_type(
+        *BLENDMODE_TYPE_ID,
+        TypeEntry::enum_of::<BlendMode>("BlendMode"),
+    );
+    library.register_type(
+        *CONVERSION_FORMAT_TYPE_ID,
+        TypeEntry::enum_of::<ConversionFormat>("ConversionFormat"),
+    );
 
     library
 }

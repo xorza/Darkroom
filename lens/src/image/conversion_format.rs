@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use imaginarium::ColorFormat;
-use scenarium::data::{DataType, EnumVariants};
+use scenarium::data::{DataType, EnumVariants, TypeId};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -57,9 +57,8 @@ impl FromStr for ConversionFormat {
     }
 }
 
-pub static CONVERSION_FORMAT_DATATYPE: LazyLock<DataType> = LazyLock::new(|| {
-    DataType::from_enum::<ConversionFormat>(
-        "6d9db73e-5c92-4332-af0d-b2eb7c95acd0",
-        "ConversionFormat",
-    )
-});
+pub static CONVERSION_FORMAT_TYPE_ID: LazyLock<TypeId> =
+    LazyLock::new(|| "6d9db73e-5c92-4332-af0d-b2eb7c95acd0".into());
+
+pub static CONVERSION_FORMAT_DATATYPE: LazyLock<DataType> =
+    LazyLock::new(|| DataType::Enum(*CONVERSION_FORMAT_TYPE_ID));

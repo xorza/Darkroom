@@ -9,6 +9,6 @@ mod image;
 
 // Published surface — only what darkroom consumes. Everything else (config
 // mirrors, presets, datatypes, the config bridge) stays crate-internal.
-pub use astro::funclib::astro_funclib;
+pub use astro::library::astro_library;
 pub use image::Image;
-pub use image::funclib::image_funclib;
+pub use image::library::image_library;

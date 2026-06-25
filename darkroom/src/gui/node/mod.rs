@@ -22,6 +22,7 @@ use palantir::{
 };
 use scenarium::data::{DataType, FsPathConfig, StaticValue};
 use scenarium::graph::Binding;
+use scenarium::library::Library;
 use scenarium::prelude::{NodeId, SubgraphRef};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -35,6 +36,9 @@ use std::sync::Arc;
 #[derive(Clone, Copy)]
 pub(crate) struct RecordCtx<'a> {
     pub(crate) theme: &'a Theme,
+    /// The runtime library, for resolving a port's registered type metadata
+    /// (display name, enum variants) — `DataType` carries only the id.
+    pub(crate) library: &'a Library,
     pub(crate) scene: &'a Scene,
     /// Effective selection to paint: the committed set
     /// (`scene.selected_nodes`) or, mid-rubber-band, the live swept

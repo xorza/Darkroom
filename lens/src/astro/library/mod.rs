@@ -1,4 +1,4 @@
-//! `astro_funclib()` — the `lumos`-backed node library (category `astro`):
+//! `astro_library()` — the `lumos`-backed node library (category `astro`):
 //! `load_astro_image` (decode), `build_masters` (calibration masters),
 //! `stack_lights` (calibrate + align + stack), and per-frame processing
 //! nodes like `auto_stretch`. Heavy work runs off the worker via
@@ -23,17 +23,17 @@ use scenarium::data::{
 };
 use scenarium::func_lambda::{FuncLambda, InvokeError, InvokeResult};
 use scenarium::function::{Func, FuncInput, ValueVariant};
-use scenarium::library::Library;
+use scenarium::library::{Library, TypeEntry};
 
 use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,
     LocalContrastConfigDef, RegistrationConfigDef, ScnrConfigDef, StretchConfigDef,
 };
-use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
+use crate::astro::masters::{MASTERS_DATA_TYPE, MASTERS_TYPE_ID, MASTERS_TYPE_NAME, Masters};
 use crate::astro::presets::{
     BackgroundModeKind, CombinePreset, DetectionPreset, RegistrationPreset, ScnrKind, StretchPreset,
 };
-use crate::config_node::{ConfigValue, NodeConfig, config_builder_func, config_data_type};
+use crate::config_node::{ConfigValue, NodeConfig, add_config_builder, config_data_type};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use imaginarium::ProcessingContext;
 
@@ -67,8 +67,10 @@ pub static ASTRO_DIR_DATA_TYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::Directory))));
 
 /// The lumos-backed astro nodes (category `astro`).
-pub fn astro_funclib() -> Library {
+pub fn astro_library() -> Library {
     let mut library = Library::default();
+
+    library.register_type(*MASTERS_TYPE_ID, TypeEntry::custom(MASTERS_TYPE_NAME));
 
     // load_astro_image
     library.add(
@@ -327,61 +329,70 @@ pub fn astro_funclib() -> Library {
 
     // build_background_config: expose every ExtractBackground field as an input,
     // output a detailed config to wire into background_extract.
-    library.add(config_builder_func::<BackgroundConfigDef>(
+    add_config_builder::<BackgroundConfigDef>(
+        &mut library,
         "9cda0462-1b8e-4c50-83d6-4db470df22d9",
         "build_background_config",
         "Builds a detailed background-extraction config",
-    ));
+    );
 
     // build_detection_config / build_registration_config / build_combine_config:
     // detailed overrides for stack_lights' detection / registration / combine
     // preset dropdowns.
-    library.add(config_builder_func::<DetectionConfigDef>(
+    add_config_builder::<DetectionConfigDef>(
+        &mut library,
         "6c6f92e7-0f74-454c-acc4-68691cb8462f",
         "build_detection_config",
         "Builds a detailed star-detection config",
-    ));
-    library.add(config_builder_func::<RegistrationConfigDef>(
+    );
+    add_config_builder::<RegistrationConfigDef>(
+        &mut library,
         "adf216fe-baa9-4abd-8c4a-bfb98bb60fbc",
         "build_registration_config",
         "Builds a detailed registration config",
-    ));
-    library.add(config_builder_func::<CombineConfigDef>(
+    );
+    add_config_builder::<CombineConfigDef>(
+        &mut library,
         "05313ceb-a3b2-4488-92af-c9e228bb1789",
         "build_combine_config",
         "Builds a detailed frame-combination config",
-    ));
+    );
 
     // build_denoise_config / build_hdr_config / build_local_contrast_config:
     // full configs for the per-frame nodes whose inline param is one scalar.
-    library.add(config_builder_func::<DenoiseConfigDef>(
+    add_config_builder::<DenoiseConfigDef>(
+        &mut library,
         "77693298-3531-4858-89ce-03cb347dc3f2",
         "build_denoise_config",
         "Builds a detailed wavelet-denoise config",
-    ));
-    library.add(config_builder_func::<HdrConfigDef>(
+    );
+    add_config_builder::<HdrConfigDef>(
+        &mut library,
         "dc82d7a9-b7a7-460b-a86d-5dc9055e0d18",
         "build_hdr_config",
         "Builds a detailed HDR dynamic-range-compression config",
-    ));
-    library.add(config_builder_func::<LocalContrastConfigDef>(
+    );
+    add_config_builder::<LocalContrastConfigDef>(
+        &mut library,
         "f9ebdedf-38e3-4a74-8c74-eb207903d327",
         "build_local_contrast_config",
         "Builds a detailed local-contrast config",
-    ));
+    );
 
     // build_stretch_config / build_scnr_config: detailed overrides for the
     // auto_stretch / scnr preset quick-picks.
-    library.add(config_builder_func::<StretchConfigDef>(
+    add_config_builder::<StretchConfigDef>(
+        &mut library,
         "82f271d4-d047-459a-83aa-0bf8288787cf",
         "build_stretch_config",
         "Builds a detailed display-stretch config",
-    ));
-    library.add(config_builder_func::<ScnrConfigDef>(
+    );
+    add_config_builder::<ScnrConfigDef>(
+        &mut library,
         "d07742d1-4469-4739-b2ff-78b4dcf64132",
         "build_scnr_config",
         "Builds a detailed SCNR (green-removal) config",
-    ));
+    );
 
     // --- per-frame processing nodes (Image → Image) ---
 

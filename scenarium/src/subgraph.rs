@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn linked_subgraph_resolves_from_funclib() {
+    fn linked_subgraph_resolves_from_library() {
         let mut library = test_func_lib(TestFuncHooks::default());
         let def = wrap_sum(&library);
         let def_id = def.id;

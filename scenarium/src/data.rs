@@ -46,35 +46,6 @@ pub trait CustomValue: Send + Sync + Display + 'static {
     fn as_any(&self) -> &dyn Any;
 }
 
-/// Definition of a custom type for `DataType::Custom`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TypeDef {
-    pub type_id: TypeId,
-    // display_name is not included in the hash or equality check
-    pub display_name: String,
-}
-
-/// Definition of an enum type for `DataType::Enum`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct EnumDef {
-    pub type_id: TypeId,
-    pub display_name: String,
-    pub variants: Vec<String>,
-}
-
-impl EnumDef {
-    pub fn from_enum<E: EnumVariants>(
-        type_id: impl Into<TypeId>,
-        display_name: impl Into<String>,
-    ) -> Self {
-        Self {
-            type_id: type_id.into(),
-            display_name: display_name.into(),
-            variants: E::variant_names(),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FsPathMode {
     #[default]
@@ -102,7 +73,11 @@ impl FsPathConfig {
     }
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+/// A port's type. `Custom`/`Enum` reference a *registered* nominal type by
+/// [`TypeId`] — the metadata (display name, enum variants, disk codec) lives on
+/// the [`Library`](crate::library::Library) type table, not inline. `FsPath` is
+/// structural config (not a nominal type), so it stays inline.
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DataType {
     #[default]
     Null,
@@ -111,8 +86,8 @@ pub enum DataType {
     Bool,
     String,
     FsPath(Arc<FsPathConfig>),
-    Custom(Arc<TypeDef>),
-    Enum(Arc<EnumDef>),
+    Custom(TypeId),
+    Enum(TypeId),
 }
 
 /// An authored constant: the serializable value form persisted in the graph
@@ -402,22 +377,11 @@ impl From<bool> for DynamicValue {
 }
 
 impl DataType {
-    pub fn from_custom(type_id: impl Into<TypeId>, display_name: impl Into<String>) -> Self {
-        DataType::Custom(Arc::new(TypeDef {
-            type_id: type_id.into(),
-            display_name: display_name.into(),
-        }))
-    }
-
-    pub fn from_enum<E: EnumVariants>(
-        type_id: impl Into<TypeId>,
-        display_name: impl Into<String>,
-    ) -> Self {
-        DataType::Enum(Arc::new(EnumDef::from_enum::<E>(type_id, display_name)))
-    }
-
-    /// The zero/default constant for this type, or `None` for `Custom` (custom
-    /// types have no authorable literal).
+    /// The zero/default constant for this type. `None` for `Custom` (no
+    /// authorable literal) and `Enum` (the first-variant default needs the
+    /// library's registered variant list — see
+    /// [`Library`](crate::library::Library)); callers that have an enum's
+    /// variants seed the default themselves.
     pub fn default_value(&self) -> Option<StaticValue> {
         Some(match self {
             DataType::Null => StaticValue::Null,
@@ -426,8 +390,7 @@ impl DataType {
             DataType::Bool => StaticValue::Bool(false),
             DataType::String => StaticValue::String(String::new()),
             DataType::FsPath(_) => StaticValue::FsPath(String::new()),
-            DataType::Enum(enum_def) => StaticValue::Enum(enum_def.variants[0].clone()),
-            DataType::Custom(_) => return None,
+            DataType::Custom(_) | DataType::Enum(_) => return None,
         })
     }
 }
@@ -438,21 +401,6 @@ impl Display for DynamicValue {
             DynamicValue::Unbound => write!(f, "-"),
             DynamicValue::Static(value) => write!(f, "{value}"),
             DynamicValue::Custom(data) => write!(f, "{data}"),
-        }
-    }
-}
-
-impl Display for DataType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self {
-            DataType::Null => write!(f, "null"),
-            DataType::Float => write!(f, "float"),
-            DataType::Int => write!(f, "int"),
-            DataType::Bool => write!(f, "bool"),
-            DataType::String => write!(f, "string"),
-            DataType::FsPath(_) => write!(f, "path"),
-            DataType::Custom(def) => write!(f, "{}", def.display_name),
-            DataType::Enum(def) => write!(f, "{}", def.display_name),
         }
     }
 }
@@ -469,8 +417,8 @@ impl DataType {
     /// - the scalar numerics (`Float`/`Int`/`Bool`) coerce among themselves at
     ///   runtime (`DynamicValue::as_f64`/`as_i64`/`as_bool` all accept the three),
     ///   so they're mutually compatible.
-    /// - everything else must match exactly (`Custom`/`Enum` by id, `FsPath` by
-    ///   config — see the `PartialEq` impl).
+    /// - everything else must match exactly (derived `PartialEq`: `Custom`/`Enum`
+    ///   by id, `FsPath` by config).
     pub fn compatible_with(&self, source: &DataType) -> bool {
         if matches!(self, DataType::Null) || matches!(source, DataType::Null) {
             return true;
@@ -501,24 +449,6 @@ impl FromStr for DataType {
         }
     }
 }
-
-impl PartialEq for DataType {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (DataType::Null, DataType::Null) => true,
-            (DataType::Float, DataType::Float) => true,
-            (DataType::Int, DataType::Int) => true,
-            (DataType::Bool, DataType::Bool) => true,
-            (DataType::String, DataType::String) => true,
-            (DataType::FsPath(config_a), DataType::FsPath(config_b)) => config_a == config_b,
-            (DataType::Custom(def1), DataType::Custom(def2)) => def1.type_id == def2.type_id,
-            (DataType::Enum(def_a), DataType::Enum(def_b)) => def_a.type_id == def_b.type_id,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for DataType {}
 
 #[cfg(test)]
 mod tests {
@@ -551,12 +481,7 @@ mod tests {
 
     #[test]
     fn data_type_compatibility_is_wildcard_aware_and_otherwise_exact() {
-        let custom = |id: u128| {
-            DataType::Custom(Arc::new(TypeDef {
-                type_id: TypeId::from_u128(id),
-                display_name: "X".into(),
-            }))
-        };
+        let custom = |id: u128| DataType::Custom(TypeId::from_u128(id));
 
         // Exact matches connect.
         assert!(DataType::Float.compatible_with(&DataType::Float));
@@ -628,8 +553,14 @@ mod tests {
             DataType::String.default_value(),
             Some(StaticValue::String(String::new()))
         );
-        // Custom has no authorable literal.
-        assert_eq!(DataType::from_custom(1u128, "Img").default_value(), None);
+        assert_eq!(
+            DataType::FsPath(Arc::new(FsPathConfig::default())).default_value(),
+            Some(StaticValue::FsPath(String::new()))
+        );
+        // Custom has no authorable literal; an enum's first-variant default needs
+        // the library's variant list, so the bare type yields `None` here too.
+        assert_eq!(DataType::Custom(TypeId::from_u128(1)).default_value(), None);
+        assert_eq!(DataType::Enum(TypeId::from_u128(2)).default_value(), None);
     }
 
     #[test]

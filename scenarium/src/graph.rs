@@ -86,15 +86,16 @@ fn subscription_touches(s: &Subscription, node_id: NodeId) -> bool {
 /// the compile-boundary type check (the `Bind` half uses
 /// [`DataType::compatible_with`]). Matched directly rather than via
 /// `compatible_with` because a bare `StaticValue` can't be turned back into a
-/// `DataType` (it lacks the `FsPathConfig` / `EnumDef`).
+/// `DataType` (it lacks the `FsPathConfig`, and the enum's variant list lives in
+/// `library`).
 ///
 /// An input carrying `value_variants` is a *pick-or-wire* port (e.g. lens's
 /// preset-or-config inputs, which are `Custom`-typed for the wired case yet
 /// hold an `Enum` preset literal): its constant must be exactly one of the
 /// offered picks. Otherwise the literal must match the declared type — scalar
-/// numerics coerce, an `Enum` literal must name a declared variant, and a
+/// numerics coerce, an `Enum` literal must name a registered variant, and a
 /// `Custom` port has no literal form.
-fn const_satisfies(input: &FuncInput, value: &StaticValue) -> bool {
+fn const_satisfies(library: &Library, input: &FuncInput, value: &StaticValue) -> bool {
     if !input.value_variants.is_empty() {
         return input.value_variants.iter().any(|v| v.value == *value);
     }
@@ -106,9 +107,11 @@ fn const_satisfies(input: &FuncInput, value: &StaticValue) -> bool {
         ),
         DataType::String => matches!(value, StaticValue::String(_)),
         DataType::FsPath(_) => matches!(value, StaticValue::FsPath(_)),
-        DataType::Enum(def) => {
-            matches!(value, StaticValue::Enum(name) if def.variants.contains(name))
-        }
+        DataType::Enum(type_id) => matches!(
+            value,
+            StaticValue::Enum(name)
+                if library.enum_variants(type_id).is_some_and(|vs| vs.iter().any(|v| v == name))
+        ),
         DataType::Custom(_) => false,
     }
 }
@@ -929,7 +932,7 @@ impl Graph {
                 && let Some(spec) = self.input_spec(library, *dst)
             {
                 ensure!(
-                    const_satisfies(spec, value),
+                    const_satisfies(library, spec, value),
                     "node {:?} input {} holds a constant incompatible with its type {:?}",
                     dst.node_id,
                     dst.port_idx,

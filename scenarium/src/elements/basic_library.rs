@@ -65,7 +65,7 @@ impl From<i64> for Math2ArgOp {
 }
 
 /// The built-in math / string / print nodes.
-pub fn basic_funclib() -> Library {
+pub fn basic_library() -> Library {
     let mut library = Library::default();
 
     // print: log the input string to the node log (info level), read

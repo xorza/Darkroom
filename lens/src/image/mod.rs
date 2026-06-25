@@ -5,7 +5,7 @@
 mod blend_mode;
 pub(crate) mod codec;
 mod conversion_format;
-pub(crate) mod funclib;
+pub(crate) mod library;
 pub(crate) mod vision_ctx;
 
 use std::any::Any;
@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 use common::Slot;
 use imaginarium::{ColorFormat, ImageBuffer, ImageDesc, Transform, Vec2};
 use scenarium::context::ContextManager;
-use scenarium::data::{CustomValue, DataType, PendingPreview, TypeDef, TypeId};
+use scenarium::data::{CustomValue, DataType, PendingPreview, TypeId};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
@@ -48,15 +48,14 @@ impl PendingPreview for ImagePendingPreview {
     }
 }
 
-pub static IMAGE_TYPE_DEF: LazyLock<Arc<TypeDef>> = LazyLock::new(|| {
-    Arc::new(TypeDef {
-        type_id: "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into(),
-        display_name: "Image".to_string(),
-    })
-});
+pub static IMAGE_TYPE_ID: LazyLock<TypeId> =
+    LazyLock::new(|| "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into());
 
-pub static IMAGE_DATA_TYPE: LazyLock<DataType> =
-    LazyLock::new(|| DataType::Custom(IMAGE_TYPE_DEF.clone()));
+/// Display name for the `Image` nominal type, registered on the library by
+/// [`image_library`](crate::image_library).
+pub(crate) const IMAGE_TYPE_NAME: &str = "Image";
+
+pub static IMAGE_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| DataType::Custom(*IMAGE_TYPE_ID));
 
 const PREVIEW_SIZE: usize = 256;
 
@@ -89,7 +88,7 @@ impl Image {
 
 impl CustomValue for Image {
     fn type_id(&self) -> TypeId {
-        IMAGE_TYPE_DEF.type_id
+        *IMAGE_TYPE_ID
     }
 
     fn as_any(&self) -> &dyn Any {
