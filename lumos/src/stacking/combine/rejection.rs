@@ -337,29 +337,20 @@ impl WinsorizedClipConfig {
             return values.len();
         }
 
-        let low_threshold = self.sigma_low * sigma;
-        let high_threshold = self.sigma_high * sigma;
-
-        let mut write_idx = 0;
-        for read_idx in 0..values.len() {
-            let diff = values[read_idx] - center;
-            let keep = if diff < 0.0 {
-                -diff <= low_threshold
-            } else {
-                diff <= high_threshold
-            };
-            if keep {
-                values[write_idx] = values[read_idx];
-                scratch.indices[write_idx] = scratch.indices[read_idx];
-                write_idx += 1;
-            }
-        }
-
-        write_idx
+        let n = values.len();
+        compact_within(
+            values,
+            &mut scratch.indices,
+            n,
+            self.sigma_low * sigma,
+            self.sigma_high * sigma,
+            |_| center,
+        )
     }
 }
 
-/// Compute standard deviation from mean (not MAD) for Winsorized values.
+/// Sample standard deviation of `values` about the given `center` (not MAD) — the spread estimate
+/// the Winsorized robust loop iterates on.
 fn winsorized_stddev(values: &[f32], center: f32) -> f32 {
     let n = values.len() as f32;
     if n <= 1.0 {
@@ -450,28 +441,17 @@ impl LinearFitClipConfig {
                     break;
                 }
 
-                let low_threshold = self.sigma_low * sigma;
-                let high_threshold = self.sigma_high * sigma;
-
-                let mut write_idx = 0;
-                for read_idx in 0..len {
-                    let diff = values[read_idx] - center;
-                    let keep = if diff < 0.0 {
-                        -diff <= low_threshold
-                    } else {
-                        diff <= high_threshold
-                    };
-                    if keep {
-                        values[write_idx] = values[read_idx];
-                        scratch.indices[write_idx] = scratch.indices[read_idx];
-                        write_idx += 1;
-                    }
-                }
-
                 // No early break when the seed pass rejects nothing: the linear-fit passes below
                 // must still run. A trend-hidden outlier (the case LinearFit targets) sits within
                 // sigma·MAD here — it's only exposed after fitting out the trend.
-                len = write_idx;
+                len = compact_within(
+                    values,
+                    &mut scratch.indices,
+                    len,
+                    self.sigma_low * sigma,
+                    self.sigma_high * sigma,
+                    |_| center,
+                );
             } else {
                 // Subsequent passes: linear fit rejection
 
@@ -520,25 +500,15 @@ impl LinearFitClipConfig {
                     break;
                 }
 
-                let low_threshold = self.sigma_low * sigma;
-                let high_threshold = self.sigma_high * sigma;
-
-                // Reject each pixel against its own fitted value
-                let mut write_idx = 0;
-                for read_idx in 0..len {
-                    let fitted = a + b * read_idx as f32;
-                    let diff = values[read_idx] - fitted;
-                    let keep = if diff < 0.0 {
-                        -diff <= low_threshold
-                    } else {
-                        diff <= high_threshold
-                    };
-                    if keep {
-                        values[write_idx] = values[read_idx];
-                        scratch.indices[write_idx] = scratch.indices[read_idx];
-                        write_idx += 1;
-                    }
-                }
+                // Reject each pixel against its own fitted value.
+                let write_idx = compact_within(
+                    values,
+                    &mut scratch.indices,
+                    len,
+                    self.sigma_low * sigma,
+                    self.sigma_high * sigma,
+                    |i| a + b * i as f32,
+                );
 
                 if write_idx == len {
                     break;
@@ -846,6 +816,41 @@ fn reset_indices(indices: &mut Vec<usize>, n: usize) {
     indices.extend(0..n);
 }
 
+/// Keep predicate for asymmetric sigma rejection: `diff = value − reference`, kept when it lies
+/// within `[−low, high]` (the low- and high-side thresholds are applied separately).
+#[inline]
+fn within_threshold(diff: f32, low: f32, high: f32) -> bool {
+    if diff < 0.0 {
+        -diff <= low
+    } else {
+        diff <= high
+    }
+}
+
+/// Compact in place the first `count` values (with their co-`indices`) whose deviation from
+/// `reference(i)` stays within the asymmetric band `[−low, high]`, returning the survivor count.
+/// Survivors keep their relative order and stay paired with their indices. `reference` is the
+/// per-element comparison point — a constant `center` for sigma/winsorized clipping, or the fitted
+/// `a + b·i` for linear-fit clipping.
+fn compact_within(
+    values: &mut [f32],
+    indices: &mut [usize],
+    count: usize,
+    low: f32,
+    high: f32,
+    reference: impl Fn(usize) -> f32,
+) -> usize {
+    let mut write = 0;
+    for read in 0..count {
+        if within_threshold(values[read] - reference(read), low, high) {
+            values[write] = values[read];
+            indices[write] = indices[read];
+            write += 1;
+        }
+    }
+    write
+}
+
 /// Sort `values[..n]` and `indices[..n]` together by value.
 /// Uses insertion sort for small N (optimal for typical 10–50 frame stacks)
 /// and introsort via `sort_unstable_by` for large N to avoid O(N^2).
@@ -999,16 +1004,16 @@ impl Rejection {
 
     /// Partition values by rejection algorithm, returning the number of survivors.
     ///
-    /// After return, `values[..remaining]` contains surviving values.
-    /// For `Winsorized`, no partitioning occurs (returns `values.len()`).
+    /// After return, `values[..remaining]` holds the surviving values and `scratch.indices`
+    /// their original frame indices (kept paired). `None` does no work and returns `values.len()`.
     pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         match self {
             Rejection::None => values.len(),
             Rejection::SigmaClip(c) => c.reject(values, scratch),
             Rejection::Winsorized(c) => c.reject(values, scratch),
             Rejection::LinearFit(c) => c.reject(values, scratch),
-            Rejection::Gesd(c) => c.reject(values, scratch),
             Rejection::Percentile(c) => c.reject(values, scratch),
+            Rejection::Gesd(c) => c.reject(values, scratch),
         }
     }
 
