@@ -416,12 +416,6 @@ fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<PortRef> {
     None
 }
 
-/// Port currently under the pointer that is a compatible target for
-/// `start` — opposite kind and a different node. Uses a geometry test
-/// against the cached `screen_rect` rather than `response.hovered`:
-/// palantir suppresses `hovered` on every widget except the
-/// LMB-capture owner during a drag, so while the start port owns the
-/// capture no other port can ever read `hovered = true`.
 /// Whether `port` is a const-only input — one that rejects a wired binding, so a
 /// dragged wire must never snap to it or start a bind from it.
 fn input_const_only(scene: &Scene, port: PortRef) -> bool {
@@ -446,7 +440,7 @@ fn forms_cycle(connections: &[SceneConnection], producer: NodeId, consumer: Node
     if producer == consumer {
         return true;
     }
-    // BFS downstream from `consumer`; reaching `producer` means the new edge
+    // Walk downstream from `consumer`; reaching `producer` means the new edge
     // would close the loop. `seen` bounds the walk on graphs with shared paths.
     let mut stack = vec![consumer];
     let mut seen = HashSet::from([consumer]);
@@ -463,6 +457,12 @@ fn forms_cycle(connections: &[SceneConnection], producer: NodeId, consumer: Node
     false
 }
 
+/// Port currently under the pointer that is a compatible target for `start` —
+/// opposite kind, a different node, type-compatible, and not cycle-forming.
+/// Uses a geometry test against the cached port rect rather than
+/// `response.hovered`: palantir suppresses `hovered` on every widget except the
+/// LMB-capture owner during a drag, so while the start port owns the capture no
+/// other port can ever read `hovered = true`.
 fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -> Option<PortRef> {
     let want_kind = start.kind.opposite();
     let pointer = ui.pointer_pos()?;
