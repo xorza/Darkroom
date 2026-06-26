@@ -33,6 +33,8 @@ use crate::op::{OpError, ensure, require_f32_master};
 use imaginarium::Image;
 
 #[cfg(test)]
+mod bench;
+#[cfg(test)]
 mod tests;
 
 /// Midtones balance is clamped away from the degenerate endpoints `0`/`1`, where the MTF

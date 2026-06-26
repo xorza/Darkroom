@@ -1089,6 +1089,8 @@ pub fn drizzle_images(
 }
 
 #[cfg(test)]
+mod bench;
+#[cfg(test)]
 mod synthetic_tests;
 #[cfg(test)]
 mod tests;
