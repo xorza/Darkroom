@@ -116,6 +116,45 @@ fn const_satisfies(library: &Library, input: &FuncInput, value: &StaticValue) ->
     }
 }
 
+/// Whether adding a data edge `producer → consumer` (producer's output feeding
+/// consumer's input) would close a directed cycle: `producer`'s node is already
+/// reachable from `consumer`'s node along the existing edges. `edges` yields
+/// every data edge as `(producer_node, consumer_node)`.
+///
+/// The free function so the editor's snap pre-filter can reuse it over its own
+/// per-frame edge mirror (a render projection, not a `Graph`);
+/// [`Graph::would_create_cycle`] is the wrapper for callers holding a `Graph`.
+/// Either way the execution planner is the authoritative backstop
+/// (`Error::CycleDetected`).
+pub fn closes_data_cycle(
+    edges: impl Iterator<Item = (NodeId, NodeId)>,
+    producer: NodeId,
+    consumer: NodeId,
+) -> bool {
+    if producer == consumer {
+        return true;
+    }
+    // One pass builds the producer→consumers adjacency; then walk it downstream
+    // from `consumer`. Reaching `producer` means the new edge closes the loop.
+    let mut adjacency: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+    for (src, dst) in edges {
+        adjacency.entry(src).or_default().push(dst);
+    }
+    let mut stack = vec![consumer];
+    let mut seen: HashSet<NodeId> = [consumer].into_iter().collect();
+    while let Some(node) = stack.pop() {
+        for &next in adjacency.get(&node).into_iter().flatten() {
+            if next == producer {
+                return true;
+            }
+            if seen.insert(next) {
+                stack.push(next);
+            }
+        }
+    }
+    false
+}
+
 /// Serialize `bindings` as a `(port, binding)` sequence: struct keys can't be
 /// map keys in string-keyed formats (JSON/TOML/Rhai). Order is deterministic
 /// because the source is a `BTreeMap`.
@@ -579,6 +618,19 @@ impl Graph {
                 Binding::Bind(src) => Some((*dst, *src)),
                 _ => None,
             })
+    }
+
+    /// Whether binding `consumer`'s input to `producer`'s output would close a
+    /// directed data cycle. Convenience wrapper over [`closes_data_cycle`] for
+    /// callers holding a `Graph` (the editor's intent layer, which rejects such
+    /// a bind before it commits). The planner remains the authoritative
+    /// backstop (`Error::CycleDetected`).
+    pub fn would_create_cycle(&self, producer: NodeId, consumer: NodeId) -> bool {
+        closes_data_cycle(
+            self.edges().map(|(dst, src)| (src.node_id, dst.node_id)),
+            producer,
+            consumer,
+        )
     }
 
     // === Event subscriptions ===
@@ -1153,7 +1205,7 @@ mod tests {
     use crate::function::{Func, FuncId, FuncInput};
     use crate::graph::{
         Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort,
-        Subscription,
+        Subscription, closes_data_cycle,
     };
     use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
     use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
@@ -1521,6 +1573,44 @@ mod tests {
         assert!(g.edges_invalidated_by(&library, sink, 0).is_empty());
         // Changing the passthrough's *path* input (no output mirrors it) → none.
         assert!(g.edges_invalidated_by(&library, p1, 1).is_empty());
+    }
+
+    #[test]
+    fn would_create_cycle_detects_direct_and_transitive_loops() {
+        // A relay func (one input, one output) lets a node be both producer and
+        // consumer. Chain a → b → c via binds; d is an unconnected sink.
+        let relay = Func::new(FuncId::unique(), "relay")
+            .input(FuncInput::required("x", DataType::Int))
+            .output("o", DataType::Int);
+        let mut g = Graph::default();
+        let a = g.add_func_node(&relay);
+        let b = g.add_func_node(&relay);
+        let c = g.add_func_node(&relay);
+        let d = g.add_func_node(&relay);
+        g.set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
+        g.set_input_binding(InputPort::new(c, 0), Binding::bind(b, 0));
+
+        // Back-edges close a loop: the producer is reachable from the consumer.
+        assert!(g.would_create_cycle(b, a), "b → a closes a → b");
+        assert!(
+            g.would_create_cycle(c, a),
+            "c → a closes a → b → c transitively"
+        );
+        // A node wired to itself is a self-cycle.
+        assert!(g.would_create_cycle(a, a));
+
+        // Forward / sideways edges are fine — a second a → c path is a DAG
+        // diamond, and a fresh sink is reachable from nothing.
+        assert!(!g.would_create_cycle(a, c));
+        assert!(!g.would_create_cycle(c, d));
+        assert!(!g.would_create_cycle(a, d));
+
+        // The free core matches the wrapper on a raw `(producer, consumer)` edge
+        // list — the path the editor's scene-based pre-filter takes.
+        let edges = [(a, b), (b, c)];
+        assert!(closes_data_cycle(edges.into_iter(), c, a));
+        assert!(!closes_data_cycle(edges.into_iter(), a, c));
+        assert!(closes_data_cycle(edges.into_iter(), a, a));
     }
 
     #[test]

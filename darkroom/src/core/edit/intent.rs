@@ -558,10 +558,26 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
 ///
 /// Returns the committed [`UndoStep`] (the caller records it and reads its
 /// `requires_*` signals), or `None` when the intent was stale (anchor node
-/// gone) or a no-op — in both cases nothing was written. [`build_step`] /
-/// [`apply_step`] stay separate for the undo-stack redo path, which applies
-/// a stored step without rebuilding it.
+/// gone), a no-op, or a bind that would close a data cycle — in all cases
+/// nothing was written. [`build_step`] / [`apply_step`] stay separate for the
+/// undo-stack redo path, which applies a stored step without rebuilding it
+/// (a redo replays already-valid history, so it needs no cycle check).
 fn commit_intent(intent: Intent, doc: &mut Document, target: GraphRef) -> Option<UndoStep> {
+    // Reject a bind that would close a data cycle: the planner rejects a cyclic
+    // graph outright (`Error::CycleDetected`), so the edit must never land. The
+    // GUI snap filter normally stops this earlier; this is the authoritative
+    // guard covering every binding path, including any that bypass the canvas.
+    if let Intent::SetInput {
+        node_id,
+        to: Binding::Bind(src),
+        ..
+    } = &intent
+        && doc
+            .graph_for(target)
+            .is_some_and(|g| g.would_create_cycle(src.node_id, *node_id))
+    {
+        return None;
+    }
     let step = build_step(intent, doc, target)?;
     if step.is_noop() {
         return None;
@@ -1365,6 +1381,63 @@ mod tests {
             )
             .is_none(),
             "Memory → Memory writes nothing"
+        );
+    }
+
+    #[test]
+    fn commit_intent_rejects_cycle_forming_bind() {
+        // a → b (b's input 0 bound to a's output 0).
+        let mut doc = Document::default();
+        let a = add_node_at(&mut doc, Vec2::ZERO);
+        let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
+        let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
+        doc.graph
+            .set_input_binding(InputPort::new(b, 0), (a, 0).into());
+
+        // Wiring a's input back to b's output would close the a → b loop:
+        // rejected, nothing written, the existing edge untouched.
+        assert!(
+            commit_intent(
+                Intent::SetInput {
+                    node_id: a,
+                    input_idx: 0,
+                    to: Binding::bind(b, 0),
+                },
+                &mut doc,
+                GraphRef::Main,
+            )
+            .is_none(),
+            "a bind that closes a cycle is rejected"
+        );
+        assert_eq!(
+            doc.graph.input_binding(InputPort::new(a, 0)),
+            Binding::None,
+            "the rejected bind left a's input unbound"
+        );
+        assert_eq!(
+            doc.graph.input_binding(InputPort::new(b, 0)),
+            Binding::bind(a, 0),
+            "the existing a → b edge is untouched"
+        );
+
+        // A bind that keeps the graph acyclic still commits: c's input ← b's
+        // output extends the chain into a → b → c.
+        assert!(
+            commit_intent(
+                Intent::SetInput {
+                    node_id: c,
+                    input_idx: 0,
+                    to: Binding::bind(b, 0),
+                },
+                &mut doc,
+                GraphRef::Main,
+            )
+            .is_some(),
+            "an acyclic bind commits"
+        );
+        assert_eq!(
+            doc.graph.input_binding(InputPort::new(c, 0)),
+            Binding::bind(b, 0),
         );
     }
 }

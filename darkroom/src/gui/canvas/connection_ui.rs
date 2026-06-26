@@ -1,12 +1,10 @@
-use std::collections::HashSet;
-
 use glam::Vec2;
 use palantir::{
     Brush, Color, LineCap, LinearGradient, PointerButton, PointerEvent, PointerSense, Shape, Stop,
     Ui,
 };
 use scenarium::data::DataType;
-use scenarium::graph::{Binding, InputPort, NodeId};
+use scenarium::graph::{Binding, InputPort, closes_data_cycle};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
@@ -15,7 +13,7 @@ use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::{node_ports, outer_canvas_widget_id, to_world};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
-use crate::gui::scene::{InputBindingView, Scene, SceneConnection};
+use crate::gui::scene::{InputBindingView, Scene};
 use crate::gui::{PortKind, PortRef};
 
 /// Minimum horizontal length of a connection's bezier control handles,
@@ -429,34 +427,6 @@ fn input_const_only(scene: &Scene, port: PortRef) -> bool {
         .is_some_and(|i| i.const_only)
 }
 
-/// Whether wiring `producer`'s output into `consumer`'s input would close a
-/// directed data-flow cycle: `producer`'s node is already reachable from
-/// `consumer`'s node by following existing producer→consumer edges. Walks the
-/// scene's connection mirror (each [`SceneConnection`] is a `src_node → tgt_node`
-/// data edge). The execution planner is the authoritative cycle check
-/// (`Error::CycleDetected`); this only stops the editor from drawing a wire the
-/// run would reject.
-fn forms_cycle(connections: &[SceneConnection], producer: NodeId, consumer: NodeId) -> bool {
-    if producer == consumer {
-        return true;
-    }
-    // Walk downstream from `consumer`; reaching `producer` means the new edge
-    // would close the loop. `seen` bounds the walk on graphs with shared paths.
-    let mut stack = vec![consumer];
-    let mut seen = HashSet::from([consumer]);
-    while let Some(node) = stack.pop() {
-        for c in connections.iter().filter(|c| c.src_node == node) {
-            if c.tgt_node == producer {
-                return true;
-            }
-            if seen.insert(c.tgt_node) {
-                stack.push(c.tgt_node);
-            }
-        }
-    }
-    false
-}
-
 /// Port currently under the pointer that is a compatible target for `start` —
 /// opposite kind, a different node, type-compatible, and not cycle-forming.
 /// Uses a geometry test against the cached port rect rather than
@@ -505,14 +475,18 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
                     _ => true,
                 };
                 // ...and reject a drop that would close a data-flow cycle: the
-                // planner rejects a cyclic graph outright (`CycleDetected`), so
-                // the wire must never latch. `start.kind` fixes which side is
-                // the producer (output) and which is the consumer (input).
+                // planner rejects a cyclic graph outright (`CycleDetected`) and
+                // the intent layer refuses to commit one, so the wire must never
+                // latch. `start.kind` fixes which side is the producer (output)
+                // and which the consumer (input). `scene.connections` is the
+                // active graph's edge mirror, fed to the same scenarium check
+                // the intent layer uses.
                 let (producer, consumer) = match start.kind {
                     PortKind::Output => (start.node_id, port.node_id),
                     PortKind::Input => (port.node_id, start.node_id),
                 };
-                if compatible && !forms_cycle(&scene.connections, producer, consumer) {
+                let edges = scene.connections.iter().map(|c| (c.src_node, c.tgt_node));
+                if compatible && !closes_data_cycle(edges, producer, consumer) {
                     return Some(port);
                 }
             }
@@ -554,11 +528,11 @@ fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
 /// Convert a snapped `(start, end)` PortRef pair (one `Input`, one
 /// `Output` — caller-guaranteed by [`scan_snap_target`]) into an
 /// `Intent::SetInput` binding. A cycle-forming pair never reaches here —
-/// [`scan_snap_target`] refuses to snap one (the planner is the authoritative
-/// backstop, `Error::CycleDetected`). Re-typing a wildcard output (passthrough /
-/// reroute) and dropping the downstream wires it invalidates is handled centrally
-/// when the batch commits (`commit_intent_cascading`), so this stays a plain
-/// binding.
+/// [`scan_snap_target`] refuses to snap one, and `commit_intent` rejects any
+/// cycle-forming bind that slips through (the planner is the final backstop,
+/// `Error::CycleDetected`). Re-typing a wildcard output (passthrough / reroute)
+/// and dropping the downstream wires it invalidates is handled centrally when the
+/// batch commits (`commit_intent_cascading`), so this stays a plain binding.
 fn commit_connection(start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
     let (input, output) = match (start.kind, end.kind) {
         (PortKind::Input, PortKind::Output) => (start, end),
@@ -570,49 +544,4 @@ fn commit_connection(start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
         input_idx: input.port_idx,
         to: Binding::bind(output.node_id, output.port_idx),
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn edge(src: NodeId, tgt: NodeId) -> SceneConnection {
-        SceneConnection {
-            src_node: src,
-            src_port: 0,
-            tgt_node: tgt,
-            tgt_port: 0,
-        }
-    }
-
-    #[test]
-    fn forms_cycle_detects_direct_and_transitive_loops() {
-        let (a, b, c, d) = (
-            NodeId::unique(),
-            NodeId::unique(),
-            NodeId::unique(),
-            NodeId::unique(),
-        );
-        // Chain a → b → c (data flows producer→consumer along src→tgt).
-        let chain = vec![edge(a, b), edge(b, c)];
-
-        // No edges yet, distinct nodes: nothing to loop through.
-        assert!(!forms_cycle(&[], a, b));
-        // A port wired to its own node is a self-cycle regardless of edges.
-        assert!(forms_cycle(&chain, a, a));
-
-        // Closing the chain back to its head loops: producer = c, consumer = a,
-        // and a already reaches c transitively (a → b → c).
-        assert!(forms_cycle(&chain, c, a));
-        // Direct back-edge b → a: producer = b, consumer = a; a → b exists.
-        assert!(forms_cycle(&chain, b, a));
-
-        // Forward / sideways edges are fine — a second path a → c is a DAG
-        // diamond, not a loop (c has no outgoing edge to reach a).
-        assert!(!forms_cycle(&chain, a, c));
-        // A fresh sink d is reachable from nothing, so wiring into it is safe
-        // from any producer in the chain.
-        assert!(!forms_cycle(&chain, c, d));
-        assert!(!forms_cycle(&chain, a, d));
-    }
 }
