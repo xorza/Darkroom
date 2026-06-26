@@ -337,7 +337,7 @@ impl Scene {
                     name: input.name.clone().into(),
                     ty: input.data_type.clone(),
                     binding: InputBindingView::from(&binding),
-                    default: default_static_value(input),
+                    default: default_static_value(library, input),
                     required: input.required,
                     const_only: input.const_only,
                     value_variants,
@@ -441,17 +441,22 @@ struct NodeInterface<'a> {
     uncacheable: bool,
 }
 
-/// The literal a port falls back to when given a const binding: its
-/// declared default, else the zero value for its data type. `None` for a
-/// `Custom` type — there is no `StaticValue` for it, so the port can't be
-/// given an inline const (and `StaticValue::from` would panic).
-fn default_static_value(input: &FuncInput) -> Option<StaticValue> {
-    // Explicit default if any, else the type's zero value (`None` for custom
-    // types, which have no authorable literal).
-    input
-        .default_value
-        .clone()
-        .or_else(|| input.data_type.default_value())
+/// The literal a port falls back to when given a const binding: its declared
+/// default, else the zero value for its data type. `None` for a `Custom` type —
+/// there is no `StaticValue` for it, so the port can't be given an inline const.
+fn default_static_value(library: &Library, input: &FuncInput) -> Option<StaticValue> {
+    input.default_value.clone().or_else(|| {
+        // An enum's first-variant default needs the library's registered variant
+        // list — the bare `DataType::Enum(id)` doesn't carry it, so resolve it
+        // here so an enum port gets the same const affordance as a scalar.
+        match &input.data_type {
+            DataType::Enum(id) => library
+                .enum_variants(id)
+                .and_then(|variants| variants.first())
+                .map(|first| StaticValue::Enum(first.clone())),
+            ty => ty.default_value(),
+        }
+    })
 }
 
 /// Synthesize a `FuncInput` for a `SubgraphOutput`'s input port from the
