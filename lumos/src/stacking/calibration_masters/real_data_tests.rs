@@ -22,7 +22,9 @@ use common::file_utils::files_with_extensions;
 use quickbench::quick_bench;
 
 use crate::testing::{calibration_dir, init_tracing};
-use crate::{CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, StackConfig};
+use crate::{
+    CalibrationFrames, CalibrationMasters, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig,
+};
 
 use super::stack_cfa_master;
 
@@ -95,25 +97,43 @@ fn builds_full_master_set() {
 
     // Masters are calibration-normalized CFA data: `(value - black) * inv_range`, deliberately
     // *unclamped* (unlike the light path) so master dark/bias keep their signed noise
-    // distribution — a few pixels can dip just below 0 or above 1. The hard invariant is
-    // finiteness (the combine reducers assume it); the mean must still land inside the
-    // normalized band, confirming the stack produced sensible data rather than garbage.
-    for (name, m) in [("dark", dark), ("flat", flat), ("bias", bias)] {
+    // distribution — black-level subtraction centers an unilluminated frame near 0, so a few
+    // pixels dip just below it. Hard invariants: every pixel finite (the combine reducers
+    // assume it), each master non-degenerate (real variation, not a flat buffer), and all
+    // values within a sane normalized envelope.
+    let mean_of = |m: &CfaImage, name: &str| -> f32 {
         let px = m.data.pixels();
         assert!(
             px.iter().all(|v| v.is_finite()),
             "{name} master has non-finite pixels"
         );
-        let (min, max) = px.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &v| {
-            (lo.min(v), hi.max(v))
-        });
+        let (min, max) = px
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
         let mean = px.iter().sum::<f32>() / px.len() as f32;
         println!("  master {name}: min {min:.4}, mean {mean:.4}, max {max:.4}");
+        assert!(max > min, "{name} master is degenerate (constant buffer)");
         assert!(
-            mean.is_finite() && mean > 0.0 && mean < 1.0,
-            "{name} master mean {mean} outside the normalized band"
+            (-0.5..=2.0).contains(&min) && (-0.5..=2.0).contains(&max),
+            "{name} master values outside sane envelope [{min}, {max}]"
         );
-    }
+        mean
+    };
+    let dark_mean = mean_of(dark, "dark");
+    let flat_mean = mean_of(flat, "flat");
+    let bias_mean = mean_of(bias, "bias");
+
+    // The flat is the one *illuminated* master, so it must be meaningfully brighter than the
+    // unilluminated dark/bias (whose black-subtracted means sit near 0). This cross-checks that
+    // each frame set was routed to the right master rather than swapped.
+    assert!(
+        flat_mean > 0.05,
+        "flat master mean {flat_mean} too dark to be an illuminated flat"
+    );
+    assert!(
+        flat_mean > dark_mean && flat_mean > bias_mean,
+        "flat ({flat_mean}) should outshine dark ({dark_mean}) and bias ({bias_mean})"
+    );
 }
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
