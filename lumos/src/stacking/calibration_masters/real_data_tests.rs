@@ -93,11 +93,25 @@ fn builds_full_master_set() {
         "defect map should be derived from dark + flat"
     );
 
-    // Masters are normalized CFA data — every pixel must stay finite and in range.
+    // Masters are calibration-normalized CFA data: `(value - black) * inv_range`, deliberately
+    // *unclamped* (unlike the light path) so master dark/bias keep their signed noise
+    // distribution — a few pixels can dip just below 0 or above 1. The hard invariant is
+    // finiteness (the combine reducers assume it); the mean must still land inside the
+    // normalized band, confirming the stack produced sensible data rather than garbage.
     for (name, m) in [("dark", dark), ("flat", flat), ("bias", bias)] {
+        let px = m.data.pixels();
         assert!(
-            m.data.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)),
-            "{name} master has out-of-range or non-finite pixels"
+            px.iter().all(|v| v.is_finite()),
+            "{name} master has non-finite pixels"
+        );
+        let (min, max) = px.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &v| {
+            (lo.min(v), hi.max(v))
+        });
+        let mean = px.iter().sum::<f32>() / px.len() as f32;
+        println!("  master {name}: min {min:.4}, mean {mean:.4}, max {max:.4}");
+        assert!(
+            mean.is_finite() && mean > 0.0 && mean < 1.0,
+            "{name} master mean {mean} outside the normalized band"
         );
     }
 }
