@@ -38,26 +38,6 @@ fn list_image_files(dir: &std::path::Path) -> Vec<PathBuf> {
     files
 }
 
-/// Load one calibrated light frame (the first one).
-/// Returns None if there are no lights.
-fn load_first_calibrated_light() -> Option<AstroImage> {
-    let cal_dir = calibration_dir();
-    let lights_dir = cal_dir.join("calibrated_lights");
-    if !lights_dir.exists() {
-        eprintln!("calibrated_lights directory not found, skipping");
-        return None;
-    }
-
-    let files = list_image_files(&lights_dir);
-    if files.is_empty() {
-        eprintln!("No calibrated lights found, skipping");
-        return None;
-    }
-
-    let img = AstroImage::from_file(&files[0]).expect("Failed to load first light frame");
-    Some(img)
-}
-
 /// Load the first and last calibrated light frames from the sample data directory.
 /// Returns None if there are fewer than 2 lights.
 fn load_two_calibrated_lights() -> Option<(AstroImage, AstroImage)> {
@@ -349,19 +329,6 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
 // Benchmarks
 // ============================================================================
 
-#[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_star_detection_calibrated_light(b: ::quickbench::Bencher) {
-    let Some(image) = load_first_calibrated_light() else {
-        eprintln!("No calibration data available, skipping benchmark");
-        return;
-    };
-
-    let config = Config::default();
-    let mut detector = StarDetector::from_config(config);
-
-    b.bench(|| black_box(detector.detect(black_box(&image))));
-}
-
 #[quick_bench(warmup_iters = 3, iters = 30)]
 fn bench_register_stars(b: ::quickbench::Bencher) {
     let Some((img1, img2)) = load_two_calibrated_lights() else {
@@ -383,32 +350,6 @@ fn bench_register_stars(b: ::quickbench::Bencher) {
             black_box(&result2.stars),
             &reg_config,
         ))
-    });
-}
-
-#[quick_bench(warmup_iters = 1, iters = 5)]
-fn bench_warp(b: ::quickbench::Bencher) {
-    let Some((img1, img2)) = load_two_calibrated_lights() else {
-        eprintln!("No calibration data available, skipping benchmark");
-        return;
-    };
-
-    // Pre-detect stars and register (not part of the benchmark)
-    let star_config = Config::default();
-    let mut detector = StarDetector::from_config(star_config);
-    let result1 = detector.detect(&img1);
-    let result2 = detector.detect(&img2);
-
-    let reg_config = RegistrationConfig::default();
-    let registration =
-        register(&result1.stars, &result2.stars, &reg_config).expect("Registration should succeed");
-
-    b.bench(|| {
-        warp(
-            black_box(&img2),
-            black_box(&registration.warp_transform()),
-            black_box(&reg_config),
-        )
     });
 }
 
