@@ -66,65 +66,90 @@ impl SigmaClipConfig {
     /// After return, `values[..remaining]` contains surviving values and
     /// `indices[..remaining]` contains their original frame indices.
     /// Supports both symmetric (`sigma_low == sigma_high`) and asymmetric thresholds.
+    ///
+    /// When rejection is actually warranted, `values` (with its co-indices) is sorted **once**.
+    /// Each iteration rejects a `[center − kσ, center + kσ]` band, which on sorted data is a
+    /// *contiguous* slice — so the active window shrinks from both ends (binary-searched bounds)
+    /// and stays sorted. The median is then the middle element (O(1)) and the MAD a single bitonic
+    /// scan ([`sorted_mad`]), replacing the two per-iteration quickselects. Survivors are compacted
+    /// to the front only at the end. Sorting keeps `values[i]` paired with `indices[i]` throughout
+    /// (the previous quickselect reordered values without their indices, mis-pairing weights in the
+    /// weighted combine); the survivor *set* — hence count and unweighted mean — is unchanged.
+    ///
+    /// The cheap `no_outliers_possible` screen runs **before** sorting: clean pixels (the majority
+    /// in a smooth flat/light) can't reject anything, so they skip the sort entirely.
     pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         debug_assert!(!values.is_empty());
 
         reset_indices(&mut scratch.indices, values.len());
 
-        if values.len() <= 2 {
-            return values.len();
+        let n0 = values.len();
+        if n0 <= 2 {
+            return n0;
         }
 
-        let mut len = values.len();
         let min_sigma = self.sigma_low.min(self.sigma_high);
 
+        // Fast path: if no value can exceed the threshold, nothing is rejected — return without
+        // paying for the sort. (Order-independent, so it's valid on the unsorted input.)
+        if Self::no_outliers_possible(values, min_sigma) {
+            return n0;
+        }
+
+        sort_with_indices(
+            values,
+            &mut scratch.indices,
+            &mut scratch.floats_b,
+            &mut scratch.usize_a,
+            &mut scratch.usize_b,
+            n0,
+        );
+
+        // Active survivors are the sorted, contiguous window `values[lo..hi]`.
+        let mut lo = 0usize;
+        let mut hi = n0;
+
         for _ in 0..self.max_iterations {
+            let len = hi - lo;
             if len <= 2 {
                 break;
             }
 
-            // Early exit: cheap mean+stddev check to skip expensive median+MAD
-            // when no outlier can possibly exceed the rejection threshold.
-            // For clean pixels (majority), this avoids two quickselect calls entirely.
-            if Self::no_outliers_possible(&values[..len], min_sigma) {
+            let active = &values[lo..hi];
+
+            // Re-screen the shrunken window: once it's clean, no further iteration can reject.
+            if Self::no_outliers_possible(active, min_sigma) {
                 break;
             }
 
-            let active = &mut values[..len];
-
-            let center = median_f32_fast(active);
-            let mad = mad_f32_fast(&values[..len], center, &mut scratch.floats_a);
-            let sigma = mad_to_sigma(mad);
+            let center = active[len / 2];
+            let sigma = mad_to_sigma(sorted_mad(active, center));
 
             if sigma < f32::EPSILON {
                 break;
             }
 
-            let low_threshold = self.sigma_low * sigma;
-            let high_threshold = self.sigma_high * sigma;
+            // Keep `center − sigma_low·σ <= v <= center + sigma_high·σ`. On sorted data this is a
+            // contiguous run; binary-search its inclusive bounds.
+            let low_cut = center - self.sigma_low * sigma;
+            let high_cut = center + self.sigma_high * sigma;
+            let new_lo = lo + active.partition_point(|&v| v < low_cut);
+            let new_hi = lo + active.partition_point(|&v| v <= high_cut);
 
-            let mut write_idx = 0;
-            for read_idx in 0..len {
-                let diff = values[read_idx] - center;
-                let keep = if diff < 0.0 {
-                    -diff <= low_threshold
-                } else {
-                    diff <= high_threshold
-                };
-                if keep {
-                    values[write_idx] = values[read_idx];
-                    scratch.indices[write_idx] = scratch.indices[read_idx];
-                    write_idx += 1;
-                }
+            if new_lo == lo && new_hi == hi {
+                break; // nothing rejected
             }
-
-            if write_idx == len {
-                break;
-            }
-            len = write_idx;
+            lo = new_lo;
+            hi = new_hi;
         }
 
-        len
+        // Compact survivors to the front (the documented `[..remaining]` contract).
+        let remaining = hi - lo;
+        if lo > 0 {
+            values.copy_within(lo..hi, 0);
+            scratch.indices.copy_within(lo..hi, 0);
+        }
+        remaining
     }
 
     /// Check if no point can be rejected, using a cheap range-based estimate.
@@ -861,6 +886,45 @@ fn sort_with_indices(
     }
 }
 
+/// MAD (median absolute deviation from `center`) of an **ascending-sorted** slice, without a
+/// scratch buffer or quickselect. The absolute deviations split into two ascending runs — the
+/// elements below `center` read backwards, and those at/above `center` read forwards — so a
+/// two-pointer merge yields them in global ascending order. Advancing to rank `len/2` reproduces
+/// `median_f32_fast` of the deviations exactly (the same upper-middle order statistic).
+fn sorted_mad(sorted: &[f32], center: f32) -> f32 {
+    let m = sorted.len();
+    debug_assert!(m > 0);
+    let split = sorted.partition_point(|&v| v < center);
+    let mut l = split; // left run consumes sorted[l - 1] going down
+    let mut r = split; // right run consumes sorted[r] going up
+    let target = m / 2;
+    let mut dev = 0.0f32;
+    for _ in 0..=target {
+        let left = (l > 0).then(|| center - sorted[l - 1]);
+        let right = (r < m).then(|| sorted[r] - center);
+        dev = match (left, right) {
+            (Some(ld), Some(rd)) if ld <= rd => {
+                l -= 1;
+                ld
+            }
+            (Some(_), Some(rd)) => {
+                r += 1;
+                rd
+            }
+            (Some(ld), None) => {
+                l -= 1;
+                ld
+            }
+            (None, Some(rd)) => {
+                r += 1;
+                rd
+            }
+            (None, None) => break,
+        };
+    }
+    dev
+}
+
 // ============================================================================
 // Rejection Enum — dispatches to algorithm implementations above
 // ============================================================================
@@ -1161,6 +1225,66 @@ mod tests {
         assert!(
             (crate::math::sum::mean_f32(&v1[..r1]) - crate::math::sum::mean_f32(&v2[..r2])).abs()
                 < 1e-6,
+        );
+    }
+
+    #[test]
+    fn test_sorted_mad_matches_mad_f32_fast() {
+        // `sorted_mad` must reproduce `mad_f32_fast` (the function the sort-once reject replaced)
+        // exactly — same upper-middle order statistic of the absolute deviations. Cover odd/even
+        // lengths, center inside/outside the data, duplicates, and a heavy outlier.
+        let cases: &[&[f32]] = &[
+            &[1.0, 2.0, 3.0, 4.0, 100.0],         // odd, outlier
+            &[1.0, 2.0, 3.0, 4.0],                // even
+            &[-5.0, 0.0, 0.0, 0.0, 1.0, 2.0],     // duplicates at center
+            &[10.0, 10.0, 10.0],                  // constant → MAD 0
+            &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], // odd, spread
+        ];
+        let mut buf = vec![];
+        for sorted in cases {
+            // Reject always calls it at the median; also probe a couple of off-median centers.
+            let mid = sorted[sorted.len() / 2];
+            for &center in &[mid, sorted[0], mid + 0.05] {
+                let expected = mad_f32_fast(sorted, center, &mut buf);
+                let got = sorted_mad(sorted, center);
+                assert_eq!(
+                    got, expected,
+                    "sorted_mad({sorted:?}, {center}) = {got}, expected {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_sigma_clip_survivor_indices_pair_with_values() {
+        // After rejection, `indices[..remaining]` must be the original frame indices of the
+        // surviving values, i.e. `values[i] == original[indices[i]]`. Regression for the prior
+        // quickselect that reordered values without their co-indices, mis-pairing per-frame
+        // weights in the noise-weighted (light) combine.
+        let original = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
+        let mut values = original.clone();
+        let mut sc = scratch();
+        let remaining = SigmaClipConfig::new(2.0, 3).reject(&mut values, &mut sc);
+
+        assert!(
+            remaining < original.len(),
+            "the 100.0 outlier should be rejected"
+        );
+        for (i, (&val, &idx)) in values[..remaining]
+            .iter()
+            .zip(&sc.indices[..remaining])
+            .enumerate()
+        {
+            assert_eq!(
+                val, original[idx],
+                "survivor {i}: value {val} must equal original[{idx}] = {}",
+                original[idx]
+            );
+        }
+        // Frame 7 (value 100.0) is the outlier — its index must not survive.
+        assert!(
+            !sc.indices[..remaining].contains(&7),
+            "rejected outlier's index leaked into the survivors"
         );
     }
 
