@@ -15,9 +15,9 @@
 
 use std::any::Any;
 use std::fmt;
-use std::hash::Hasher;
+use std::sync::LazyLock;
 
-use common::{FieldKind, FieldValue, FnvHasher, Introspect};
+use common::{FieldKind, FieldValue, Introspect};
 use scenarium::data::{CustomValue, DataType, DynamicValue, EnumVariants, StaticValue, TypeId};
 use scenarium::func_lambda::FuncLambda;
 use scenarium::function::{Func, FuncInput};
@@ -196,15 +196,20 @@ fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
     }
 }
 
-/// A stable, content-derived [`TypeId`] for a generated enum datatype, via
-/// `common`'s deterministic [`FnvHasher`] (fixed seed — unlike `DefaultHasher`,
-/// stable across runs). Not a `uuidgen` literal: these datatypes are generated,
-/// not persisted as a shared identity (bindings serialize the variant name only).
+/// A stable [`TypeId`] for a reflected enum datatype, as a UUIDv5 of the enum's
+/// name under [`ENUM_TYPE_NAMESPACE`] — deterministic across runs, full-width and
+/// collision-resistant. These types are generated from introspection, not
+/// authored, so they carry no `uuidgen` literal of their own (bindings serialize
+/// the variant name only); the namespace literal supplies the entropy.
 fn stable_type_id(name: &str) -> TypeId {
-    let mut hasher = FnvHasher::default();
-    hasher.write(name.as_bytes());
-    TypeId::from_u128(hasher.finish() as u128)
+    TypeId::from_name(*ENUM_TYPE_NAMESPACE, name)
 }
+
+/// Fixed namespace for [`stable_type_id`]'s UUIDv5 enum-type ids (a `uuidgen`
+/// literal). Distinct from any authored type id, so a reflected enum can't
+/// collide with a hand-minted one.
+static ENUM_TYPE_NAMESPACE: LazyLock<TypeId> =
+    LazyLock::new(|| "48cbf7b0-f118-4ad8-a3c7-c2f71e8e555e".into());
 
 #[cfg(test)]
 mod tests {

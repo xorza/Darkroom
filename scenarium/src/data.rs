@@ -24,6 +24,18 @@ impl<T: VariantNames> EnumVariants for T {
 
 id_type!(TypeId);
 
+impl TypeId {
+    /// A deterministic id derived from `name` within `namespace` (UUIDv5). For
+    /// nominal types discovered at runtime — e.g. an enum reflected from a config
+    /// struct — where a `uuidgen` literal isn't possible: the same name always
+    /// yields the same id (so it's stable across runs), and the `namespace` keeps
+    /// these from colliding with ids minted for other purposes. Use a `uuidgen`
+    /// literal for the `namespace`.
+    pub fn from_name(namespace: TypeId, name: &str) -> Self {
+        uuid::Uuid::new_v5(&namespace.as_uuid(), name.as_bytes()).into()
+    }
+}
+
 /// Trait for pending preview generation that requires polling to complete.
 #[async_trait::async_trait]
 pub trait PendingPreview: Send {
@@ -105,8 +117,8 @@ pub enum StaticValue {
     /// A filesystem path. The path string only — the `FsPathConfig` (picker
     /// mode + extensions) is type-level metadata and lives on `DataType::FsPath`.
     FsPath(String),
-    /// An enum variant by name. The variant list and type identity are
-    /// type-level metadata and live on `DataType::Enum(EnumDef)`.
+    /// An enum variant by name. The variant list is type-level metadata, keyed
+    /// by the `DataType::Enum(TypeId)` id in the [`Library`](crate::library::Library).
     Enum(String),
 }
 
@@ -453,6 +465,34 @@ impl FromStr for DataType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn type_id_from_name_is_deterministic_namespaced_and_v5() {
+        let ns1 = TypeId::from_u128(0x11);
+        let ns2 = TypeId::from_u128(0x22);
+
+        // Same (namespace, name) → same id, every run.
+        assert_eq!(
+            TypeId::from_name(ns1, "Mode"),
+            TypeId::from_name(ns1, "Mode")
+        );
+        // The name discriminates.
+        assert_ne!(
+            TypeId::from_name(ns1, "Mode"),
+            TypeId::from_name(ns1, "Other")
+        );
+        // The namespace discriminates (same name, different namespace).
+        assert_ne!(
+            TypeId::from_name(ns1, "Mode"),
+            TypeId::from_name(ns2, "Mode")
+        );
+
+        // It's a real UUIDv5 — the version nibble (hex digit 12) is 5 and the
+        // upper bits are populated, unlike the old `u64`-widened hash.
+        let id = TypeId::from_name(ns1, "Mode");
+        assert_eq!((id.as_u128() >> 76) & 0xf, 5, "version nibble must be 5");
+        assert_ne!(id.as_u128() >> 64, 0, "high 64 bits must carry entropy");
+    }
 
     #[test]
     fn static_value_coercions() {
