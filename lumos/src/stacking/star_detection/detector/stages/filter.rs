@@ -2,6 +2,12 @@
 //!
 //! Applies quality filters, removes duplicates, and sorts by flux.
 
+use std::collections::HashMap;
+use std::hash::BuildHasherDefault;
+
+use common::FnvHasher;
+use smallvec::SmallVec;
+
 use crate::math::statistics::{mad_floored, median_and_mad_f32_mut};
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::Diagnostics;
@@ -116,51 +122,34 @@ pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32)
     }
 
     let min_sep_sq = (min_separation * min_separation) as f64;
-
-    let mut min_x = f64::MAX;
-    let mut min_y = f64::MAX;
-    let mut max_x = f64::MIN;
-    let mut max_y = f64::MIN;
-    for star in stars.iter() {
-        min_x = min_x.min(star.pos.x);
-        min_y = min_y.min(star.pos.y);
-        max_x = max_x.max(star.pos.x);
-        max_y = max_y.max(star.pos.y);
-    }
-
     let cell_size = min_separation as f64;
-    let grid_width = ((max_x - min_x) / cell_size).ceil() as usize + 1;
-    let grid_height = ((max_y - min_y) / cell_size).ceil() as usize + 1;
 
-    let mut grid: Vec<smallvec::SmallVec<[usize; 4]>> =
-        vec![smallvec::SmallVec::new(); grid_width * grid_height];
-
+    // Sparse spatial hash keyed by integer cell coordinate: only cells that actually hold a star
+    // are allocated, so memory and time are O(stars). A dense grid is O(field_area / min_sep²) —
+    // a 6k×6k field with a few thousand stars otherwise allocates (and zeroes) millions of empty
+    // cells, which dominated the cost. A star is a duplicate of an earlier *kept* star within
+    // `min_separation`; the grid only ever holds kept stars, so this matches the old behaviour.
+    let mut grid: HashMap<(i64, i64), SmallVec<[usize; 4]>, BuildHasherDefault<FnvHasher>> =
+        HashMap::default();
     let mut kept = vec![true; stars.len()];
 
     for i in 0..stars.len() {
         let star = &stars[i];
-        let cell_x = ((star.pos.x - min_x) / cell_size) as usize;
-        let cell_y = ((star.pos.y - min_y) / cell_size) as usize;
+        let cell_x = (star.pos.x / cell_size).floor() as i64;
+        let cell_y = (star.pos.y / cell_size).floor() as i64;
 
         let mut is_duplicate = false;
-        'outer: for dy in 0..3 {
-            let ny = cell_y.wrapping_add(dy).wrapping_sub(1);
-            if ny >= grid_height {
-                continue;
-            }
-            for dx in 0..3 {
-                let nx = cell_x.wrapping_add(dx).wrapping_sub(1);
-                if nx >= grid_width {
-                    continue;
-                }
-                let cell_idx = ny * grid_width + nx;
-                for &other_idx in &grid[cell_idx] {
-                    let other = &stars[other_idx];
-                    let ddx = star.pos.x - other.pos.x;
-                    let ddy = star.pos.y - other.pos.y;
-                    if ddx * ddx + ddy * ddy < min_sep_sq {
-                        is_duplicate = true;
-                        break 'outer;
+        'outer: for dy in -1..=1 {
+            for dx in -1..=1 {
+                if let Some(cell) = grid.get(&(cell_x + dx, cell_y + dy)) {
+                    for &other_idx in cell {
+                        let other = &stars[other_idx];
+                        let ddx = star.pos.x - other.pos.x;
+                        let ddy = star.pos.y - other.pos.y;
+                        if ddx * ddx + ddy * ddy < min_sep_sq {
+                            is_duplicate = true;
+                            break 'outer;
+                        }
                     }
                 }
             }
@@ -169,8 +158,7 @@ pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32)
         if is_duplicate {
             kept[i] = false;
         } else {
-            let cell_idx = cell_y * grid_width + cell_x;
-            grid[cell_idx].push(i);
+            grid.entry((cell_x, cell_y)).or_default().push(i);
         }
     }
 
