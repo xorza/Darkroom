@@ -14,8 +14,9 @@ use crate::stacking::star_detection::detector::Diagnostics;
 use crate::stacking::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
 use crate::stacking::star_detection::star::{SATURATION_PEAK, Star};
 
-/// Below this star count, use O(n²) brute-force duplicate removal
-/// instead of spatial hashing. Determined by benchmark crossover point.
+/// Below this star count, dedup with the O(n²) brute force instead of the sparse spatial hash.
+/// For a handful of stars the brute force is trivial and skips the hash's per-call allocation; the
+/// crossover is conservative — the spatial hash is O(stars) and competitive well below this.
 const SPATIAL_HASH_CROSSOVER: usize = 100;
 
 /// Statistics from quality filtering (for diagnostics).
@@ -99,7 +100,8 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
         return 0;
     }
 
-    let reference_count = (stars.len() / 2).max(5).min(stars.len());
+    // `stars.len() >= 5` past the early return, so `max(len/2, 5) <= len` — no upper clamp needed.
+    let reference_count = (stars.len() / 2).max(5);
     let mut fwhms: Vec<f32> = stars.iter().take(reference_count).map(|s| s.fwhm).collect();
     let (median_fwhm, mad) = median_and_mad_f32_mut(&mut fwhms);
 
