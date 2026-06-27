@@ -427,7 +427,6 @@ unsafe fn hsum_ps(v: __m128) -> f32 {
 mod tests {
     use super::*;
     use crate::testing::synthetic::patterns;
-    use common::Vec2us;
     #[cfg(target_arch = "x86_64")]
     use common::cpu_features;
     use imaginarium::Buffer2;

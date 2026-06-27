@@ -140,6 +140,7 @@ impl DefectMap {
             .cfa_type
             .as_ref()
             .expect("image must have CFA type for defect correction");
+        let neighbors = SameColorMedian::new(cfa_type);
 
         // Mask every defect so each repair draws only on GOOD neighbours. Without it, a clustered
         // defect (hot column, adjacent same-color pixels) pulls a neighbour's bad/half-corrected
@@ -153,7 +154,7 @@ impl DefectMap {
         for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
             let x = idx % width;
             let y = idx / width;
-            image.data[idx] = median_same_color_neighbors(&image.data, x, y, cfa_type, Some(&mask));
+            image.data[idx] = neighbors.at(&image.data, x, y, Some(&mask));
         }
     }
 }
@@ -217,6 +218,7 @@ fn detect_cold_pixels(image: &CfaImage, dead_fraction: f32, cancel: &CancelToken
     let width = data.width();
     let total = width * data.height();
     let cfa = image.metadata.cfa_type.clone().unwrap_or(CfaType::Mono);
+    let neighbors = SameColorMedian::new(&cfa);
 
     (0..total)
         .into_par_iter()
@@ -225,7 +227,7 @@ fn detect_cold_pixels(image: &CfaImage, dead_fraction: f32, cancel: &CancelToken
             if cancel.is_cancelled() {
                 return false;
             }
-            let local = median_same_color_neighbors(data, i % width, i / width, &cfa, None);
+            let local = neighbors.at(data, i % width, i / width, None);
             data[i] < dead_fraction * local
         })
         .collect()
@@ -361,22 +363,43 @@ fn median_of_neighbors_raw(
     median_f32_mut(&mut neighbors[..count])
 }
 
-/// Find same-color CFA neighbors and return their median.
-///
-/// For Bayer patterns, same-color neighbors are at stride-2 offsets.
-/// For X-Trans, searches within a radius of 2*period.
-/// For Mono, uses standard 8-connected neighbors.
-fn median_same_color_neighbors(
-    pixels: &Buffer2<f32>,
-    x: usize,
-    y: usize,
-    pattern: &CfaType,
-    defect_mask: Option<&BitBuffer2>,
-) -> f32 {
-    match pattern {
-        CfaType::Mono => median_of_neighbors_raw(pixels, x, y, defect_mask),
-        CfaType::Bayer(_) => bayer_same_color_median(pixels, x, y, defect_mask),
-        CfaType::XTrans(_) => xtrans_same_color_median(pixels, x, y, pattern, defect_mask),
+/// Same-color CFA neighbour median strategy, built once per master so the per-pixel scan stays
+/// cheap. The X-Trans variant precomputes its neighbour geometry up front (see [`XTransOffsets`]);
+/// Mono and Bayer carry no state because their offsets are fixed.
+#[derive(Debug)]
+enum SameColorMedian {
+    /// Mono: 8-connected neighbours.
+    Mono,
+    /// Bayer: same-color neighbours at stride 2 (true for every 2×2 Bayer phase).
+    Bayer,
+    /// X-Trans: same-color offsets precomputed per 6×6 phase. Boxed — the 36-phase table dwarfs the
+    /// other (zero-size) variants, and the strategy is built once per master, not per pixel.
+    XTrans(Box<XTransOffsets>),
+}
+
+impl SameColorMedian {
+    fn new(cfa: &CfaType) -> Self {
+        match cfa {
+            CfaType::Mono => Self::Mono,
+            CfaType::Bayer(_) => Self::Bayer,
+            CfaType::XTrans(pattern) => Self::XTrans(Box::new(XTransOffsets::new(pattern))),
+        }
+    }
+
+    /// Median of `(x, y)`'s same-color neighbours, skipping any flagged in `defect_mask` so a defect
+    /// is never repaired from another defect.
+    fn at(
+        &self,
+        pixels: &Buffer2<f32>,
+        x: usize,
+        y: usize,
+        defect_mask: Option<&BitBuffer2>,
+    ) -> f32 {
+        match self {
+            Self::Mono => median_of_neighbors_raw(pixels, x, y, defect_mask),
+            Self::Bayer => bayer_same_color_median(pixels, x, y, defect_mask),
+            Self::XTrans(offsets) => offsets.median(pixels, x, y, defect_mask),
+        }
     }
 }
 
@@ -420,62 +443,91 @@ fn bayer_same_color_median(
     median_f32_mut(&mut buf[..count])
 }
 
-/// X-Trans same-color neighbor median.
-/// Searches within radius of 6 (one full period) for same-color pixels.
-/// Collects all same-color neighbors, sorts by Manhattan distance, and takes
-/// the closest 24 to avoid directional bias.
-fn xtrans_same_color_median(
-    pixels: &Buffer2<f32>,
-    x: usize,
-    y: usize,
-    pattern: &CfaType,
-    defect_mask: Option<&BitBuffer2>,
-) -> f32 {
-    let width = pixels.width();
-    let height = pixels.height();
-    let my_color = pattern.color_at(x, y);
+/// Search radius (in pixels) for X-Trans same-color neighbours — one full pattern period.
+const XTRANS_RADIUS: i32 = 6;
 
-    let radius = 6i32;
+/// Same-color neighbours used for the X-Trans median: ≈4 per cardinal/diagonal direction in the
+/// 6×6 pattern — enough for a robust median without directional bias.
+const XTRANS_NEIGHBORS: usize = 24;
 
-    // Collect all same-color neighbors with their Manhattan distance
-    let mut candidates: ArrayVec<(i32, f32), 169> = ArrayVec::new(); // 13×13 = 169 max
+/// Precomputed X-Trans same-color neighbour offsets, indexed by the pixel's 6×6 phase.
+///
+/// The X-Trans pattern is periodic with period 6, so for a given phase `(x % 6, y % 6)` the set of
+/// same-color neighbours within the search window — and their Manhattan distances — is fixed. The
+/// old path recomputed this on every pixel: a 13×13 `color_at` sweep plus a per-pixel distance
+/// sort, which dominated the cold-pixel scan of a full X-Trans master. Precomputing it once turns
+/// the per-pixel work into a bounded gather + median over the nearest valid neighbours.
+#[derive(Debug)]
+struct XTransOffsets {
+    /// `per_phase[(y % 6) * 6 + (x % 6)]` = same-color `(dx, dy)` offsets, nearest-first by
+    /// Manhattan distance (ties broken by scan order: `dy` then `dx`).
+    per_phase: [Vec<(i32, i32)>; 36],
+}
 
-    for dy in -radius..=radius {
-        for dx in -radius..=radius {
-            if dx == 0 && dy == 0 {
-                continue;
+impl XTransOffsets {
+    fn new(pattern: &[[u8; 6]; 6]) -> Self {
+        let per_phase = std::array::from_fn(|phase| {
+            let px = (phase % 6) as i32;
+            let py = (phase / 6) as i32;
+            let my_color = pattern[py as usize][px as usize];
+
+            let mut candidates: Vec<(i32, (i32, i32))> = Vec::new();
+            for dy in -XTRANS_RADIUS..=XTRANS_RADIUS {
+                for dx in -XTRANS_RADIUS..=XTRANS_RADIUS {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    // The pattern is globally periodic, so a neighbour's color depends only on its
+                    // phase; `rem_euclid` keeps that correct for negative offsets.
+                    let cy = (py + dy).rem_euclid(6) as usize;
+                    let cx = (px + dx).rem_euclid(6) as usize;
+                    if pattern[cy][cx] == my_color {
+                        candidates.push((dx.abs() + dy.abs(), (dx, dy)));
+                    }
+                }
+            }
+            // Stable sort: equal-distance neighbours keep scan order.
+            candidates.sort_by_key(|&(dist, _)| dist);
+            candidates.into_iter().map(|(_, off)| off).collect()
+        });
+        Self { per_phase }
+    }
+
+    /// Median of the nearest valid same-color neighbours of `(x, y)`. Walks the precomputed
+    /// nearest-first offsets, skipping out-of-bounds and `defect_mask`ed positions, and stops once
+    /// [`XTRANS_NEIGHBORS`] valid samples are gathered — equivalent to "closest-N valid neighbours".
+    fn median(
+        &self,
+        pixels: &Buffer2<f32>,
+        x: usize,
+        y: usize,
+        defect_mask: Option<&BitBuffer2>,
+    ) -> f32 {
+        let width = pixels.width() as i32;
+        let height = pixels.height() as i32;
+        let mut buf = [0.0f32; XTRANS_NEIGHBORS];
+        let mut count = 0;
+        for &(dx, dy) in &self.per_phase[(y % 6) * 6 + (x % 6)] {
+            if count == XTRANS_NEIGHBORS {
+                break;
             }
             let nx = x as i32 + dx;
             let ny = y as i32 + dy;
-            if nx < 0 || ny < 0 || nx >= width as i32 || ny >= height as i32 {
+            if nx < 0 || ny < 0 || nx >= width || ny >= height {
                 continue;
             }
-            let nx = nx as usize;
-            let ny = ny as usize;
+            let (nx, ny) = (nx as usize, ny as usize);
             if defect_mask.is_some_and(|m| m.get_xy(nx, ny)) {
                 continue;
             }
-            if pattern.color_at(nx, ny) == my_color {
-                let dist = dx.abs() + dy.abs();
-                candidates.push((dist, *pixels.get(nx, ny)));
-            }
+            buf[count] = *pixels.get(nx, ny);
+            count += 1;
         }
+        if count == 0 {
+            return *pixels.get(x, y);
+        }
+        median_f32_mut(&mut buf[..count])
     }
-
-    if candidates.is_empty() {
-        return pixels.row(y)[x];
-    }
-
-    // Sort by Manhattan distance, take closest 24.
-    // 24 ≈ 4 per cardinal/diagonal direction in the 6×6 X-Trans pattern,
-    // enough for a robust median without directional bias.
-    candidates.sort_unstable_by_key(|&(dist, _)| dist);
-    let n = candidates.len().min(24);
-    let mut neighbors = [0.0f32; 24];
-    for (i, &(_, val)) in candidates[..n].iter().enumerate() {
-        neighbors[i] = val;
-    }
-    median_f32_mut(&mut neighbors[..n])
 }
 
 /// Per-class defect counts, used only by tests to assert detection behavior.
@@ -906,6 +958,122 @@ mod tests {
         assert_eq!(defect_map.count(), 2);
         assert!(is_hot(&defect_map, 0));
         assert!(is_cold(&defect_map, 5));
+    }
+
+    /// A representative non-trivial X-Trans pattern (R=0, G=1, B=2) reused by the X-Trans tests.
+    const XTRANS_PATTERN: [[u8; 6]; 6] = [
+        [1, 0, 1, 1, 2, 1],
+        [2, 1, 2, 0, 1, 0],
+        [1, 2, 1, 1, 0, 1],
+        [1, 2, 1, 1, 0, 1],
+        [0, 1, 0, 2, 1, 2],
+        [1, 0, 1, 1, 2, 1],
+    ];
+
+    /// Reference X-Trans same-color median: collect every in-bounds, unmasked same-color neighbour
+    /// in the radius-6 window, take the closest `XTRANS_NEIGHBORS` by Manhattan distance (ties in
+    /// scan order), median them. The precomputed [`XTransOffsets`] must reproduce this exactly.
+    fn brute_force_xtrans_median(
+        pixels: &Buffer2<f32>,
+        x: usize,
+        y: usize,
+        pattern: &CfaType,
+    ) -> f32 {
+        let (w, h) = (pixels.width() as i32, pixels.height() as i32);
+        let my_color = pattern.color_at(x, y);
+        let mut cands: Vec<(i32, f32)> = Vec::new();
+        for dy in -XTRANS_RADIUS..=XTRANS_RADIUS {
+            for dx in -XTRANS_RADIUS..=XTRANS_RADIUS {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                if nx < 0 || ny < 0 || nx >= w || ny >= h {
+                    continue;
+                }
+                if pattern.color_at(nx as usize, ny as usize) == my_color {
+                    cands.push((dx.abs() + dy.abs(), *pixels.get(nx as usize, ny as usize)));
+                }
+            }
+        }
+        cands.sort_by_key(|&(dist, _)| dist);
+        let n = cands.len().min(XTRANS_NEIGHBORS);
+        let mut vals: Vec<f32> = cands[..n].iter().map(|&(_, v)| v).collect();
+        median_f32_mut(&mut vals)
+    }
+
+    /// The precomputed X-Trans offsets must reproduce the brute-force closest-N same-color median at
+    /// every pixel — including borders (fewer neighbours) and interior (the N-cutoff is exercised).
+    #[test]
+    fn xtrans_offsets_match_brute_force() {
+        let pattern = CfaType::XTrans(XTRANS_PATTERN);
+        let (w, h) = (29usize, 23usize); // not a multiple of 6, so all 36 phases hit the borders
+        // Deterministic, well-spread values so medians are sensitive to which neighbours are chosen.
+        let px: Vec<f32> = (0..w * h)
+            .map(|i| ((i.wrapping_mul(2_654_435_761) >> 8) % 1000) as f32 / 1000.0)
+            .collect();
+        let pixels = Buffer2::new(w, h, px);
+        let offsets = XTransOffsets::new(&XTRANS_PATTERN);
+
+        for y in 0..h {
+            for x in 0..w {
+                let got = offsets.median(&pixels, x, y, None);
+                let want = brute_force_xtrans_median(&pixels, x, y, &pattern);
+                assert_eq!(
+                    got, want,
+                    "X-Trans median mismatch at ({x},{y}): precomputed {got} vs brute-force {want}"
+                );
+            }
+        }
+    }
+
+    /// X-Trans same-color selection: with each color held at a distinct constant, an interior
+    /// pixel's same-color median is exactly its own color's value (a wrong-color pick would mix them).
+    #[test]
+    fn xtrans_median_selects_same_color() {
+        let pattern = CfaType::XTrans(XTRANS_PATTERN);
+        let (w, h) = (24usize, 24usize);
+        let color_val = |c: u8| 0.1 * (c + 1) as f32; // R→0.1, G→0.2, B→0.3
+        let px: Vec<f32> = (0..w * h)
+            .map(|i| color_val(pattern.color_at(i % w, i / w)))
+            .collect();
+        let pixels = Buffer2::new(w, h, px);
+        let neighbors = SameColorMedian::new(&pattern);
+
+        // Interior pixels (≥6 from every border) of each color — all 24 nearest same-color in-bounds.
+        for &(x, y) in &[(13usize, 12usize), (12, 12), (14, 13)] {
+            let c = pattern.color_at(x, y);
+            let got = neighbors.at(&pixels, x, y, None);
+            assert!(
+                (got - color_val(c)).abs() < f32::EPSILON,
+                "({x},{y}) color {c}: expected {} got {got}",
+                color_val(c)
+            );
+        }
+    }
+
+    /// X-Trans cold detection: a dead pixel reads below half its same-color neighbourhood and is the
+    /// only one flagged; a normal pixel (value == its neighbourhood median) is not.
+    #[test]
+    fn xtrans_cold_pixel_detected() {
+        let pattern = CfaType::XTrans(XTRANS_PATTERN);
+        let (w, h) = (24usize, 24usize);
+        let color_val = |c: u8| 0.1 * (c + 1) as f32;
+        let mut px: Vec<f32> = (0..w * h)
+            .map(|i| color_val(pattern.color_at(i % w, i / w)))
+            .collect();
+        let dead = 12 * w + 12; // interior G pixel: 0.0 < 0.5 · 0.2 neighbourhood median
+        assert_eq!(pattern.color_at(12, 12), 1, "(12,12) is green");
+        px[dead] = 0.0;
+        let flat = make_cfa(w, h, px, pattern);
+
+        let defect_map = DefectMap::default().detect_cold(&flat, &CancelToken::never());
+
+        assert_eq!(defect_map.cold_count(), 1, "only the dead pixel is cold");
+        assert_eq!(defect_map.hot_count(), 0, "detect_cold sets no hot pixels");
+        assert!(is_cold(&defect_map, dead));
+        // A normal R neighbour: one dead neighbour can't drag its 24-sample median below half.
+        assert!(!is_cold(&defect_map, 12 * w + 13));
     }
 
     #[test]
