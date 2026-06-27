@@ -221,11 +221,8 @@ fn noise_map(data: &[f32], m5: &[f32], noise: &NoiseEstimation) -> Vec<f32> {
             let bg = median_f32_mut(&mut tmp);
             let mut scratch = Vec::new();
             let sigma_bg = mad_to_sigma(mad_f32_fast(data, bg, &mut scratch)).max(1e-9);
-            let sigma2 = sigma_bg * sigma_bg;
-            // Poisson slope anchored at the background: N = σ_bg·√(signal/bg) above sky.
-            let slope = sigma2 / bg.max(sigma_bg);
             m5.iter()
-                .map(|&s| (sigma2 + (s - bg).max(0.0) * slope).sqrt())
+                .map(|&s| empirical_noise(s, bg, sigma_bg))
                 .collect()
         }
         NoiseEstimation::Parametric {
@@ -234,6 +231,16 @@ fn noise_map(data: &[f32], m5: &[f32], noise: &NoiseEstimation) -> Vec<f32> {
             full_scale,
         } => parametric_noise(m5, gain, read_noise, full_scale),
     }
+}
+
+/// Empirical per-pixel noise: a read-noise floor `σ` plus a sky-anchored Poisson term that rises as
+/// `σ²·(signal−bg)/max(bg,σ)` above the background. Shared by the mono (whole-image `bg,σ`) and
+/// X-Trans (per-color `bg,σ`) paths so the model can't drift between them.
+#[inline]
+fn empirical_noise(signal: f32, bg: f32, sigma: f32) -> f32 {
+    let sigma2 = sigma * sigma;
+    let slope = sigma2 / bg.max(sigma);
+    (sigma2 + (signal - bg).max(0.0) * slope).sqrt()
 }
 
 /// Poisson + read noise per pixel from a CR-free signal estimate, in normalized units:
@@ -543,9 +550,7 @@ fn xtrans_noise(
                     let p = Vec2us::from_index(i, size.x);
                     let c = (cfa.color_at(p.x, p.y) as usize).min(2);
                     let (bg, sigma) = stats[c];
-                    let sigma2 = sigma * sigma;
-                    let slope = sigma2 / bg.max(sigma);
-                    (sigma2 + (signal[i] - bg).max(0.0) * slope).sqrt()
+                    empirical_noise(signal[i], bg, sigma)
                 })
                 .collect()
         }
