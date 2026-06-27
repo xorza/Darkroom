@@ -180,8 +180,10 @@ impl StackConfig {
 
     /// Preset for flat frames: σ-clip σ=2.5, multiplicative normalization.
     pub fn flat() -> Self {
+        // σ=3.0 matches the dark/bias preset and ccdproc's `combine` default (3σ low/high); flats are
+        // smooth, so a permissive cut just trims clear outliers (dust shadows move between flats).
         Self {
-            method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
+            method: CombineMethod::Mean(Rejection::sigma_clip(3.0)),
             normalization: Normalization::Multiplicative,
             ..Default::default()
         }
@@ -354,7 +356,7 @@ mod tests {
         assert!(matches!(
             config.method,
             CombineMethod::Mean(Rejection::SigmaClip(c))
-                if (c.sigma_low - 2.5).abs() < f32::EPSILON
+                if (c.sigma_low - 3.0).abs() < f32::EPSILON
         ));
         assert_eq!(config.normalization, Normalization::Multiplicative);
     }

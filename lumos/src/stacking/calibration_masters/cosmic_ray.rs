@@ -14,6 +14,13 @@
 //! Dispatches per CFA type: **Mono** = textbook subsampled L.A.Cosmic; **Bayer** = deinterleave the
 //! four 2×2 phases and reuse the mono detector per dense same-color plane; **X-Trans** = same-color
 //! stencils on the mosaic via `color_at` (no dense same-color sub-lattice exists there).
+//!
+//! **CFA caveat:** L.A.Cosmic assumes a PSF-sampled image, but a Bayer phase plane is half-resolution
+//! — a tight star (FWHM ≲ 2–3 px in the mosaic) becomes ~1 px there, where the CR-vs-star
+//! fine-structure test weakens. This per-frame rejection is therefore best for **short, un-dithered**
+//! sequences; for dithered sets prefer dither + stack-time σ/winsor rejection, which out-votes CRs
+//! without a per-frame discriminator. (`xtrans_removes_cosmic_ray...` / `bayer_tight_star...` tests
+//! pin the tight-star behavior.)
 
 use common::Vec2us;
 use imaginarium::Buffer2;
@@ -803,6 +810,53 @@ mod tests {
             out[24 * w + 24]
         );
         assert!((4..=24).contains(&count), "unexpected CR count: {count}");
+    }
+
+    #[test]
+    fn bayer_tight_star_eaten_is_a_known_limitation() {
+        // CR-2 characterization (not a goal — a documented limitation). A *tight* star (FWHM≈2.35 px
+        // in the mosaic → ~1.2 px in each half-res Bayer phase plane) is undersampled there: median₃
+        // erases its core exactly like a cosmic ray, so the fine-structure test F→0 and L.A.Cosmic
+        // *cannot* tell the core from a CR at any `objlim`. The per-phase detector therefore eats it.
+        // This is why the module doc steers tight / dithered OSC data to stack-time σ-rejection
+        // instead of per-frame CFA L.A.Cosmic. The test pins the behavior so a future fix
+        // (e.g. mosaic-level detection) flips it loudly. Contrast `bayer_removes_cosmic_rays_...`,
+        // which uses a *well-sampled* FWHM≈5.9 px star that survives.
+        let (w, h) = (48, 48);
+        let mut data = vec![0.05f32; w * h];
+        let mut rng = TestRng::new(13);
+        for v in data.iter_mut() {
+            *v += rng.next_gaussian_f32() * 0.003;
+        }
+        add_gaussian(&mut data, w, h, 24.0, 24.0, 0.6, 1.0); // σ=1.0 → FWHM≈2.35 px in the mosaic
+        let crs = [(8usize, 8usize), (37, 37)];
+        for &(x, y) in &crs {
+            data[y * w + x] = 0.95;
+        }
+        let mut img = CfaImage {
+            data: Buffer2::new(w, h, data),
+            metadata: AstroImageMetadata {
+                cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
+                ..Default::default()
+            },
+        };
+        reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
+        let out = img.data.pixels();
+        // CR rejection still works — the injected CRs are removed.
+        for &(x, y) in &crs {
+            assert!(
+                out[y * w + x] < 0.2,
+                "Bayer CR ({x},{y}) not removed: {}",
+                out[y * w + x]
+            );
+        }
+        // Known limitation: the tight star core is also gutted (flagged as a CR).
+        assert!(
+            out[24 * w + 24] < 0.2,
+            "tight star core unexpectedly survived ({}) — if per-phase Bayer CR detection was \
+             fixed, update this characterization test",
+            out[24 * w + 24]
+        );
     }
 
     #[test]

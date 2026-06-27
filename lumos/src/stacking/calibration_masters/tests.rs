@@ -39,6 +39,47 @@ fn weighted_budget_never_overcommits() {
 }
 
 #[test]
+fn small_stack_config_keeps_winsorized_drops_sigma() {
+    use crate::stacking::calibration_masters::small_stack_config;
+    use crate::stacking::combine::config::{CombineMethod, StackConfig};
+    use crate::stacking::combine::rejection::Rejection;
+
+    // < 8 frames: σ-methods that need many frames fall to median; small-N-stable methods stay.
+    let dark = StackConfig::dark(); // Mean(Winsorized) — small-N-stable
+    let flat = StackConfig::flat(); // Mean(SigmaClip) — needs many frames
+
+    assert!(
+        matches!(
+            small_stack_config(dark.clone(), 5).method,
+            CombineMethod::Mean(Rejection::Winsorized(_))
+        ),
+        "winsorized dark at N=5 keeps its winsorized mean"
+    );
+    assert!(
+        matches!(
+            small_stack_config(flat.clone(), 5).method,
+            CombineMethod::Median
+        ),
+        "sigma-clip flat at N=5 falls back to median"
+    );
+    // The flat keeps its normalization through the downgrade.
+    assert_eq!(
+        small_stack_config(flat.clone(), 5).normalization,
+        flat.normalization
+    );
+
+    // ≥ 8 frames: both pass through unchanged.
+    assert!(matches!(
+        small_stack_config(dark, 8).method,
+        CombineMethod::Mean(Rejection::Winsorized(_))
+    ));
+    assert!(matches!(
+        small_stack_config(flat, 8).method,
+        CombineMethod::Mean(Rejection::SigmaClip(_))
+    ));
+}
+
+#[test]
 #[should_panic(expected = "already-calibrated frame")]
 fn test_calibrate_twice_panics() {
     // A second calibrate() would subtract the dark / divide the flat twice — must crash, not

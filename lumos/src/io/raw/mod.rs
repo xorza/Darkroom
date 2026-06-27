@@ -376,13 +376,23 @@ impl UnpackedRaw {
             )
         };
 
-        // Pass 2: Per-channel black delta correction (no WB)
+        // Pass 2: per-channel black delta correction (no WB). The `fc()` macro inside
+        // `apply_channel_corrections` is Bayer-only, so this is skipped for X-Trans — which would
+        // need the 6×6 pattern to index same-color stencils, and whose sensors report a uniform
+        // black anyway (delta ≈ 0). Applying the Bayer macro there would correct wrong positions and
+        // make the calibration and display decode paths disagree.
+        let is_xtrans = matches!(self.sensor_type, SensorType::XTrans);
         let has_delta = self
             .black_level
             .channel_delta_norm
             .iter()
             .any(|&d| d.abs() > f32::EPSILON);
-        if has_delta {
+        if has_delta && is_xtrans {
+            tracing::debug!(
+                "X-Trans per-channel black delta present but unsupported; applying common black only"
+            );
+        }
+        if has_delta && !is_xtrans {
             let delta = &self.black_level.channel_delta_norm;
             let wb = &[1.0; 4]; // No WB for calibration path
             if CLAMP {
