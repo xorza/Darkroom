@@ -1,36 +1,41 @@
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::stacking::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
-use crate::stacking::calibration_masters::role_memory_budget;
+use crate::stacking::calibration_masters::weighted_budget;
 use crate::testing::constant_cfa;
 use crate::{AstroImageMetadata, CalibrationFrames, CalibrationImages, CalibrationMasters};
 use common::CancelToken;
 use imaginarium::Buffer2;
 
 #[test]
-fn role_memory_budget_never_overcommits() {
-    // The even split is the memory-safety guarantee for concurrent role loading: the per-role
-    // shares must sum to at most the whole budget, a lone role must get everything, and more roles
-    // must mean a strictly smaller share.
+fn weighted_budget_never_overcommits() {
+    // The frame-weighted split is the memory-safety guarantee for concurrent role loading: the
+    // per-role shares must sum to at most the whole budget, a bigger role must get a bigger share,
+    // an empty role nothing, and a degenerate total the whole budget (no divide-by-zero).
     let avail = 30_000_000_000u64;
-    assert_eq!(
-        role_memory_budget(avail, 1),
-        avail,
-        "a single role gets the whole budget"
-    );
-    for active in 1..=4usize {
-        let share = role_memory_budget(avail, active);
-        assert!(
-            share * active as u64 <= avail,
-            "{active} roles overcommit: {share} * {active} > {avail}"
-        );
-    }
+    let counts = [15usize, 15, 20, 0];
+    let total: usize = counts.iter().sum();
+
+    let sum: u64 = counts
+        .iter()
+        .map(|&n| weighted_budget(avail, n, total))
+        .sum();
+    assert!(sum <= avail, "weighted shares overcommit: {sum} > {avail}");
+
     assert!(
-        role_memory_budget(avail, 1) > role_memory_budget(avail, 3),
-        "more roles → smaller share"
+        weighted_budget(avail, 20, total) > weighted_budget(avail, 15, total),
+        "more frames → larger share"
     );
-    // `active == 0` (no non-empty roles) is clamped to 1, never divides by zero.
-    assert_eq!(role_memory_budget(avail, 0), avail);
+    assert_eq!(
+        weighted_budget(avail, 0, total),
+        0,
+        "empty role gets nothing"
+    );
+    assert_eq!(
+        weighted_budget(avail, 5, 0),
+        avail,
+        "degenerate total → whole budget"
+    );
 }
 
 #[test]

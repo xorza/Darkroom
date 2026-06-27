@@ -19,7 +19,7 @@ use rayon::prelude::*;
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::io::astro_image::sensor::{SensorType, detect_sensor_type};
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
-use common::CancelToken;
+use common::{CancelToken, Vec2us};
 use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use demosaic::xtrans::process_xtrans;
 use imaginarium::Buffer2;
@@ -861,6 +861,46 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
 ///
 /// For Unknown sensor types, falls back to `load_raw()` then wraps
 /// the demosaiced result as a Mono CfaImage.
+/// Read just the output pixel dimensions of a RAW file from its header — `libraw_open_buffer`
+/// without the expensive `libraw_unpack`. Returns the same `width × height` [`load_raw_cfa`]
+/// produces, so `w · h · size_of::<f32>()` is the in-memory CFA frame footprint. Cheap enough to
+/// size a memory budget before committing to full decodes.
+pub(crate) fn raw_dimensions(path: &Path) -> Result<Vec2us, ImageError> {
+    let buf = fs::read(path).map_err(|e| ImageError::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+
+    // SAFETY: libraw_init returns a valid pointer or null on failure.
+    let inner = unsafe { sys::libraw_init(0) };
+    if inner.is_null() {
+        return Err(raw_err(path, "libraw: Failed to initialize"));
+    }
+    // Drops (frees libraw state) on every return path.
+    let _guard = LibrawGuard(inner);
+
+    // SAFETY: inner is valid; buf is valid for the duration of this call. `sizes` is populated by
+    // open (metadata parse), so no unpack/decode is needed for the dimensions.
+    let ret = unsafe { sys::libraw_open_buffer(inner, buf.as_ptr() as *const _, buf.len()) };
+    if ret != 0 {
+        return Err(raw_err(
+            path,
+            format!("libraw: Failed to open buffer, error code: {ret}"),
+        ));
+    }
+
+    // SAFETY: open_buffer succeeded → the sizes struct is initialized.
+    let width = unsafe { (*inner).sizes.width } as usize;
+    let height = unsafe { (*inner).sizes.height } as usize;
+    if width == 0 || height == 0 {
+        return Err(raw_err(
+            path,
+            format!("libraw: Invalid output dimensions: {width}x{height}"),
+        ));
+    }
+    Ok(Vec2us::new(width, height))
+}
+
 pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
     let raw = open_raw(path)?;
 

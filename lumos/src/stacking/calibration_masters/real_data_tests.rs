@@ -54,6 +54,25 @@ fn calibration_paths() -> Option<CalibrationPaths> {
 
 #[test]
 #[cfg_attr(not(feature = "real-data"), ignore)]
+fn raw_dimensions_matches_full_decode() {
+    // `from_files` sizes its in-memory-vs-disk decision from `raw_dimensions` (a header peek, no
+    // decode). That peek must report exactly the dims a full decode produces, or the memory budget
+    // would be wrong.
+    let Some(paths) = calibration_paths() else {
+        panic!("calibration frames missing — run scripts/fetch-test-data.sh");
+    };
+    let path = &paths.darks[0];
+    let peeked = crate::io::raw::raw_dimensions(path).expect("peek dims");
+    let loaded = crate::io::raw::load_raw_cfa(path).expect("full decode");
+    assert_eq!(
+        (peeked.x, peeked.y),
+        (loaded.data.width(), loaded.data.height()),
+        "peeked header dims must match the decoded frame"
+    );
+}
+
+#[test]
+#[cfg_attr(not(feature = "real-data"), ignore)]
 fn builds_full_master_set() {
     init_tracing();
     let Some(paths) = calibration_paths() else {

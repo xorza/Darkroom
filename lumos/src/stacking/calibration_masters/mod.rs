@@ -17,7 +17,9 @@ use std::path::Path;
 use common::CancelToken;
 
 use crate::io::astro_image::cfa::CfaImage;
+use crate::io::raw::raw_dimensions;
 use crate::stacking::combine::cache::CfaCache;
+use crate::stacking::combine::cache_config::fits_in_memory;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::progress::ProgressCallback;
@@ -86,12 +88,40 @@ pub struct CalibrationMasters {
     pub defect_map: Option<DefectMap>,
 }
 
-/// Per-role share of the memory budget when [`CalibrationMasters::from_files`] loads the roles
-/// concurrently: an even split across the `active` (non-empty) roles. Flooring guarantees the
-/// shares sum to at most `available`, so the concurrent loads can't overcommit RAM. A lone role
-/// (or `active == 0`) gets the whole budget.
-fn role_memory_budget(available: u64, active: usize) -> u64 {
-    available / active.max(1) as u64
+/// Frame-weighted share of the memory budget for one role when [`CalibrationMasters::from_files`]
+/// loads the roles concurrently: proportional to the role's frame count. Two properties matter — the
+/// shares sum to at most `available` (flooring, so concurrent loads can't overcommit RAM), and a
+/// role fits its share *exactly* when the whole set fits the budget (so no role is pushed to disk
+/// while the total fits). An empty role gets nothing; a degenerate `total == 0` gets the whole
+/// budget (no divide-by-zero).
+fn weighted_budget(available: u64, role_frames: usize, total: usize) -> u64 {
+    if total == 0 {
+        return available;
+    }
+    // `available · role_frames` can't overflow u64 for any real RAM size × frame count.
+    available * role_frames as u64 / total as u64
+}
+
+/// Whether all of `frames`' roles fit in RAM at once — the in-memory-vs-disk decision for the whole
+/// set. The per-frame footprint is peeked from one frame's header (all calibration frames share a
+/// sensor) without a full decode. No frames, or a peek failure, returns `true`: per-role tiering is
+/// memory-safe regardless, so this only governs whether to *optimize* for staying in RAM.
+fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
+    frames: &CalibrationFrames<'_, P>,
+    total_frames: usize,
+    available: u64,
+) -> bool {
+    let Some(first) = [frames.darks, frames.flats, frames.bias, frames.flat_darks]
+        .into_iter()
+        .find(|paths| !paths.is_empty())
+        .map(|paths| &paths[0])
+    else {
+        return true;
+    };
+    match raw_dimensions(first.as_ref()) {
+        Ok(dims) => fits_in_memory(dims.x * dims.y * size_of::<f32>(), total_frames, available),
+        Err(_) => true,
+    }
 }
 
 /// Stack one calibration role's raw CFA frames into a single master, using that
@@ -190,62 +220,85 @@ impl CalibrationMasters {
     /// `sigma_threshold` controls defect detection sensitivity (see
     /// [`DEFAULT_SIGMA_THRESHOLD`]).
     ///
-    /// The roles are independent stacks, so they run **concurrently** to fill cores left idle by
-    /// any one role's serial phases (first-frame decode, stats/reference selection). To stay
-    /// memory-safe, the RAM budget is split evenly across the non-empty roles: each role's tiering
-    /// and decode concurrency size against its share, so the concurrent loads provably can't
-    /// collectively overcommit (the per-role peaks sum to at most the whole usable budget).
+    /// The roles are independent stacks. When the whole set **fits in RAM** they run
+    /// **concurrently** to fill cores left idle by any one role's serial phases (first-frame decode,
+    /// stats/reference selection), with the budget split per role (frame-weighted) so the concurrent
+    /// loads provably can't overcommit — the per-role peaks sum to at most the usable budget.
+    ///
+    /// When the set does **not** fit in RAM, splitting the budget would force roles to disk-tier;
+    /// running them **sequentially with the full budget each** (freed between roles) keeps every
+    /// role that individually fits in RAM, which beats parallel-on-disk. The fit check peeks one
+    /// frame's header for the per-frame footprint (all calibration frames share a sensor).
     pub fn from_files<P: AsRef<Path> + Sync>(
         frames: CalibrationFrames<'_, P>,
         sigma_threshold: f32,
     ) -> Result<Self, Error> {
-        let mut dark_cfg = StackConfig::dark();
-        let mut flat_cfg = StackConfig::flat();
-        let mut bias_cfg = StackConfig::bias();
-        let mut flat_dark_cfg = StackConfig::dark();
+        let counts = [
+            frames.darks.len(),
+            frames.flats.len(),
+            frames.bias.len(),
+            frames.flat_darks.len(),
+        ];
+        let total_frames: usize = counts.iter().sum();
+        let available = StackConfig::dark().cache.get_available_memory();
 
-        // Split the live RAM budget across the non-empty roles (empty ones do no work and return
-        // `None`). Querying once and dividing — rather than letting each concurrent role query the
-        // live free memory and each see the whole of it — is what keeps the split honest.
-        let active = [frames.darks, frames.flats, frames.bias, frames.flat_darks]
-            .iter()
-            .filter(|paths| !paths.is_empty())
-            .count();
-        let budget = role_memory_budget(dark_cfg.cache.get_available_memory(), active);
-        for cfg in [
-            &mut dark_cfg,
-            &mut flat_cfg,
-            &mut bias_cfg,
-            &mut flat_dark_cfg,
-        ] {
-            cfg.cache.available_memory = Some(budget);
-        }
+        let (dark, flat, bias, flat_dark) =
+            if frames_fit_in_memory(&frames, total_frames, available) {
+                // Concurrent: frame-weighted budget per role keeps each in RAM (the whole set fits)
+                // while bounding the combined in-flight decode footprint.
+                let mut dark_cfg = StackConfig::dark();
+                let mut flat_cfg = StackConfig::flat();
+                let mut bias_cfg = StackConfig::bias();
+                let mut flat_dark_cfg = StackConfig::dark();
+                dark_cfg.cache.available_memory =
+                    Some(weighted_budget(available, counts[0], total_frames));
+                flat_cfg.cache.available_memory =
+                    Some(weighted_budget(available, counts[1], total_frames));
+                bias_cfg.cache.available_memory =
+                    Some(weighted_budget(available, counts[2], total_frames));
+                flat_dark_cfg.cache.available_memory =
+                    Some(weighted_budget(available, counts[3], total_frames));
 
-        // Independent stacks on the shared rayon pool — work-stealing interleaves their parallel
-        // sections, filling the gaps a single sequential role would leave idle.
-        let ((dark, flat), (bias, flat_dark)) = rayon::join(
-            move || {
-                rayon::join(
-                    move || stack_cfa_master(frames.darks, dark_cfg, CancelToken::never()),
-                    move || stack_cfa_master(frames.flats, flat_cfg, CancelToken::never()),
-                )
-            },
-            move || {
-                rayon::join(
-                    move || stack_cfa_master(frames.bias, bias_cfg, CancelToken::never()),
+                // Independent stacks on the shared rayon pool — work-stealing interleaves their
+                // parallel sections, filling the gaps a single sequential role would leave idle.
+                let ((dark, flat), (bias, flat_dark)) = rayon::join(
                     move || {
-                        stack_cfa_master(frames.flat_darks, flat_dark_cfg, CancelToken::never())
+                        rayon::join(
+                            move || stack_cfa_master(frames.darks, dark_cfg, CancelToken::never()),
+                            move || stack_cfa_master(frames.flats, flat_cfg, CancelToken::never()),
+                        )
                     },
+                    move || {
+                        rayon::join(
+                            move || stack_cfa_master(frames.bias, bias_cfg, CancelToken::never()),
+                            move || {
+                                stack_cfa_master(
+                                    frames.flat_darks,
+                                    flat_dark_cfg,
+                                    CancelToken::never(),
+                                )
+                            },
+                        )
+                    },
+                );
+                (dark?, flat?, bias?, flat_dark?)
+            } else {
+                // Sequential, full budget each (each role's cache frees before the next loads), so a
+                // role that fits the whole budget stays in RAM instead of being forced to disk.
+                (
+                    stack_cfa_master(frames.darks, StackConfig::dark(), CancelToken::never())?,
+                    stack_cfa_master(frames.flats, StackConfig::flat(), CancelToken::never())?,
+                    stack_cfa_master(frames.bias, StackConfig::bias(), CancelToken::never())?,
+                    stack_cfa_master(frames.flat_darks, StackConfig::dark(), CancelToken::never())?,
                 )
-            },
-        );
+            };
 
         Ok(Self::from_images(
             CalibrationImages {
-                dark: dark?,
-                flat: flat?,
-                bias: bias?,
-                flat_dark: flat_dark?,
+                dark,
+                flat,
+                bias,
+                flat_dark,
             },
             sigma_threshold,
             CancelToken::never(),
