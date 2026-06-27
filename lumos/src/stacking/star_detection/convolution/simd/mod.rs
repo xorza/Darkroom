@@ -6,6 +6,7 @@
 //! - Scalar fallback on other platforms
 
 use common::{cfg_aarch64, cfg_x86_64};
+use rayon::prelude::*;
 
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;
@@ -114,10 +115,9 @@ pub(crate) fn convolve_row_scalar(
     }
 }
 
-/// Convolve columns using direct SIMD when available.
-///
-/// Falls back to scalar implementation on unsupported platforms.
-#[inline]
+/// Column (vertical) convolution over the whole image. Each output row depends on input rows
+/// `[y-radius, y+radius]` (mirror edges), so rows are independent and computed in parallel across
+/// rayon workers — one row per chunk, SIMD across the columns within a row.
 pub(crate) fn convolve_cols_direct(
     input: &[f32],
     output: &mut [f32],
@@ -126,17 +126,36 @@ pub(crate) fn convolve_cols_direct(
     kernel: &[f32],
     radius: usize,
 ) {
+    output
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, out_row)| {
+            convolve_cols_row(input, out_row, width, height, y, kernel, radius);
+        });
+}
+
+/// Convolve one output column-row `y` with the 1D kernel (mirror edges), SIMD when available.
+#[inline]
+pub(crate) fn convolve_cols_row(
+    input: &[f32],
+    out_row: &mut [f32],
+    width: usize,
+    height: usize,
+    y: usize,
+    kernel: &[f32],
+    radius: usize,
+) {
     #[cfg(target_arch = "x86_64")]
     {
         if cpu_features::has_avx2_fma() {
             unsafe {
-                sse::convolve_cols_avx2(input, output, width, height, kernel, radius);
+                sse::convolve_cols_row_avx2(input, out_row, width, height, y, kernel, radius);
             }
             return;
         }
         if cpu_features::has_sse4_1() {
             unsafe {
-                sse::convolve_cols_sse41(input, output, width, height, kernel, radius);
+                sse::convolve_cols_row_sse41(input, out_row, width, height, y, kernel, radius);
             }
             return;
         }
@@ -145,38 +164,33 @@ pub(crate) fn convolve_cols_direct(
     #[cfg(target_arch = "aarch64")]
     {
         unsafe {
-            neon::convolve_cols_neon(input, output, width, height, kernel, radius);
+            neon::convolve_cols_row_neon(input, out_row, width, height, y, kernel, radius);
         }
         return;
     }
 
-    // Scalar fallback
     #[allow(unreachable_code)]
-    convolve_cols_scalar(input, output, width, height, kernel, radius);
+    convolve_cols_row_scalar(input, out_row, width, height, y, kernel, radius);
 }
 
-/// Scalar implementation of column convolution.
+/// Scalar single column-row convolution.
 #[inline]
-pub(crate) fn convolve_cols_scalar(
+pub(crate) fn convolve_cols_row_scalar(
     input: &[f32],
-    output: &mut [f32],
+    out_row: &mut [f32],
     width: usize,
     height: usize,
+    y: usize,
     kernel: &[f32],
     radius: usize,
 ) {
-    // Row-major traversal: y outer loop ensures sequential writes to output
-    // and mostly-sequential reads from input (kernel rows are close in memory).
-    for y in 0..height {
-        for x in 0..width {
-            let mut sum = 0.0f32;
-            for (k, &kval) in kernel.iter().enumerate() {
-                let sy = y as isize + k as isize - radius as isize;
-                let sy = mirror_index(sy, height);
-                sum += input[sy * width + x] * kval;
-            }
-            output[y * width + x] = sum;
+    for (x, out) in out_row.iter_mut().enumerate() {
+        let mut sum = 0.0f32;
+        for (k, &kval) in kernel.iter().enumerate() {
+            let sy = mirror_index(y as isize + k as isize - radius as isize, height);
+            sum += input[sy * width + x] * kval;
         }
+        *out = sum;
     }
 }
 

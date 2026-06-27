@@ -133,111 +133,88 @@ pub unsafe fn convolve_row_sse41(input: &[f32], output: &mut [f32], kernel: &[f3
     }
 }
 
-/// Convolve columns directly using AVX2 intrinsics.
+/// Convolve one output column-row `y` (8 columns at a time, AVX2+FMA).
 ///
-/// Processes rows in order for cache locality, with 8 columns at a time using SIMD.
-/// Uses row-major traversal: for each row, process all column groups.
+/// The production column pass calls this per row across rayon workers; `out_row` is the single
+/// output row (length `width`), `y` its absolute row index for mirror-edge input addressing.
 ///
 /// # Safety
-/// Caller must ensure AVX2 and FMA are available.
+/// Caller must ensure AVX2+FMA is available.
 #[target_feature(enable = "avx2,fma")]
-pub unsafe fn convolve_cols_avx2(
+pub unsafe fn convolve_cols_row_avx2(
     input: &[f32],
-    output: &mut [f32],
+    out_row: &mut [f32],
     width: usize,
     height: usize,
+    y: usize,
     kernel: &[f32],
     radius: usize,
 ) {
     unsafe {
         use crate::stacking::star_detection::convolution::simd::mirror_index;
 
-        // Process row by row for cache locality
-        for y in 0..height {
-            let out_row_offset = y * width;
-
-            // Process 8 columns at a time with SIMD
-            let mut x = 0;
-            while x + 8 <= width {
-                let mut sum = _mm256_setzero_ps();
-
-                for (k, &kval) in kernel.iter().enumerate() {
-                    let sy = y as isize + k as isize - radius as isize;
-                    let sy = mirror_index(sy, height);
-
-                    let vals = _mm256_loadu_ps(input.as_ptr().add(sy * width + x));
-                    sum = _mm256_fmadd_ps(vals, _mm256_set1_ps(kval), sum);
-                }
-
-                _mm256_storeu_ps(output.as_mut_ptr().add(out_row_offset + x), sum);
-                x += 8;
+        let mut x = 0;
+        while x + 8 <= width {
+            let mut sum = _mm256_setzero_ps();
+            for (k, &kval) in kernel.iter().enumerate() {
+                let sy = mirror_index(y as isize + k as isize - radius as isize, height);
+                let vals = _mm256_loadu_ps(input.as_ptr().add(sy * width + x));
+                sum = _mm256_fmadd_ps(vals, _mm256_set1_ps(kval), sum);
             }
+            _mm256_storeu_ps(out_row.as_mut_ptr().add(x), sum);
+            x += 8;
+        }
 
-            // Handle remaining columns with scalar
-            while x < width {
-                let mut sum = 0.0f32;
-                for (k, &kval) in kernel.iter().enumerate() {
-                    let sy = y as isize + k as isize - radius as isize;
-                    let sy = mirror_index(sy, height);
-                    sum += input[sy * width + x] * kval;
-                }
-                output[out_row_offset + x] = sum;
-                x += 1;
+        while x < width {
+            let mut sum = 0.0f32;
+            for (k, &kval) in kernel.iter().enumerate() {
+                let sy = mirror_index(y as isize + k as isize - radius as isize, height);
+                sum += input[sy * width + x] * kval;
             }
+            out_row[x] = sum;
+            x += 1;
         }
     }
 }
 
-/// Convolve columns directly using SSE4.1 intrinsics.
-///
-/// Processes rows in order for cache locality, with 4 columns at a time using SIMD.
+/// Convolve one output column-row `y` (4 columns at a time, SSE4.1). See
+/// [`convolve_cols_row_avx2`] for the per-row contract.
 ///
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
-pub unsafe fn convolve_cols_sse41(
+pub unsafe fn convolve_cols_row_sse41(
     input: &[f32],
-    output: &mut [f32],
+    out_row: &mut [f32],
     width: usize,
     height: usize,
+    y: usize,
     kernel: &[f32],
     radius: usize,
 ) {
     unsafe {
         use crate::stacking::star_detection::convolution::simd::mirror_index;
 
-        // Process row by row for cache locality
-        for y in 0..height {
-            let out_row_offset = y * width;
-
-            // Process 4 columns at a time with SIMD
-            let mut x = 0;
-            while x + 4 <= width {
-                let mut sum = _mm_setzero_ps();
-
-                for (k, &kval) in kernel.iter().enumerate() {
-                    let sy = y as isize + k as isize - radius as isize;
-                    let sy = mirror_index(sy, height);
-
-                    let vals = _mm_loadu_ps(input.as_ptr().add(sy * width + x));
-                    sum = _mm_add_ps(sum, _mm_mul_ps(vals, _mm_set1_ps(kval)));
-                }
-
-                _mm_storeu_ps(output.as_mut_ptr().add(out_row_offset + x), sum);
-                x += 4;
+        let mut x = 0;
+        while x + 4 <= width {
+            let mut sum = _mm_setzero_ps();
+            for (k, &kval) in kernel.iter().enumerate() {
+                let sy = mirror_index(y as isize + k as isize - radius as isize, height);
+                let vals = _mm_loadu_ps(input.as_ptr().add(sy * width + x));
+                sum = _mm_add_ps(sum, _mm_mul_ps(vals, _mm_set1_ps(kval)));
             }
+            _mm_storeu_ps(out_row.as_mut_ptr().add(x), sum);
+            x += 4;
+        }
 
-            // Handle remaining columns with scalar
-            while x < width {
-                let mut sum = 0.0f32;
-                for (k, &kval) in kernel.iter().enumerate() {
-                    let sy = y as isize + k as isize - radius as isize;
-                    let sy = mirror_index(sy, height);
-                    sum += input[sy * width + x] * kval;
-                }
-                output[out_row_offset + x] = sum;
-                x += 1;
+        while x < width {
+            let mut sum = 0.0f32;
+            for (k, &kval) in kernel.iter().enumerate() {
+                let sy = mirror_index(y as isize + k as isize - radius as isize, height);
+                sum += input[sy * width + x] * kval;
             }
+            out_row[x] = sum;
+            x += 1;
         }
     }
 }
@@ -491,7 +468,17 @@ mod tests {
         let mut output_scalar = vec![0.0f32; width * height];
 
         unsafe {
-            convolve_cols_avx2(&input, &mut output_avx2, width, height, &kernel, radius);
+            for y in 0..height {
+                convolve_cols_row_avx2(
+                    &input,
+                    &mut output_avx2[y * width..(y + 1) * width],
+                    width,
+                    height,
+                    y,
+                    &kernel,
+                    radius,
+                );
+            }
         }
 
         // Scalar reference
@@ -537,7 +524,17 @@ mod tests {
         let mut output_scalar = vec![0.0f32; width * height];
 
         unsafe {
-            convolve_cols_sse41(&input, &mut output_sse, width, height, &kernel, radius);
+            for y in 0..height {
+                convolve_cols_row_sse41(
+                    &input,
+                    &mut output_sse[y * width..(y + 1) * width],
+                    width,
+                    height,
+                    y,
+                    &kernel,
+                    radius,
+                );
+            }
         }
 
         // Scalar reference

@@ -9,6 +9,8 @@
 
 use rayon::prelude::*;
 
+#[cfg(target_arch = "x86_64")]
+mod avx2;
 #[cfg(target_arch = "aarch64")]
 mod neon;
 #[cfg(target_arch = "x86_64")]
@@ -95,6 +97,22 @@ pub(crate) fn process_words<const WITH_BG: bool>(
 
     #[cfg(target_arch = "x86_64")]
     {
+        if cpu_features::has_avx2() {
+            // SAFETY: AVX2 availability checked above.
+            unsafe {
+                avx2::process_words_avx2::<WITH_BG>(
+                    pixels,
+                    bg,
+                    noise,
+                    sigma_threshold,
+                    words,
+                    pixel_offset,
+                    pixel_end,
+                );
+            }
+            return;
+        }
+
         if cpu_features::has_sse4_1() {
             // SAFETY: SSE4.1 availability checked above.
             unsafe {

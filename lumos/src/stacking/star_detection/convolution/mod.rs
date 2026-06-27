@@ -241,10 +241,7 @@ pub(crate) fn convolve_rows_parallel(
         });
 }
 
-/// Convolve all columns in parallel using direct SIMD.
-///
-/// Processes multiple columns simultaneously using SIMD vectors.
-/// Each SIMD lane handles a different column with row-major traversal for cache locality.
+/// Convolve all columns: rayon-parallel over output rows, SIMD across the columns within each row.
 pub(crate) fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
     let width = input.width();
     let height = input.height();

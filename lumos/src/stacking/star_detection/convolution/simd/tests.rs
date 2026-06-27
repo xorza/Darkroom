@@ -1,9 +1,32 @@
 //! Tests for SIMD convolution implementations.
 
 use crate::stacking::star_detection::convolution::simd::{
-    convolve_2d_row, convolve_2d_row_scalar, convolve_cols_direct, convolve_cols_scalar,
+    convolve_2d_row, convolve_2d_row_scalar, convolve_cols_direct, convolve_cols_row_scalar,
     convolve_row, convolve_row_scalar, mirror_index,
 };
+
+/// Whole-image scalar column convolution — a parity oracle for [`convolve_cols_direct`] (production
+/// uses the parallel path; this serial loop over `convolve_cols_row_scalar` is the reference).
+fn convolve_cols_scalar_ref(
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    kernel: &[f32],
+    radius: usize,
+) {
+    for y in 0..height {
+        convolve_cols_row_scalar(
+            input,
+            &mut output[y * width..(y + 1) * width],
+            width,
+            height,
+            y,
+            kernel,
+            radius,
+        );
+    }
+}
 
 #[test]
 fn test_convolve_row_scalar_identity() {
@@ -436,7 +459,7 @@ fn test_convolve_cols_matches_scalar() {
     let mut output_scalar = vec![0.0f32; width * height];
 
     convolve_cols_direct(&input, &mut output_simd, width, height, &kernel, radius);
-    convolve_cols_scalar(&input, &mut output_scalar, width, height, &kernel, radius);
+    convolve_cols_scalar_ref(&input, &mut output_scalar, width, height, &kernel, radius);
 
     for i in 0..width * height {
         assert!(
@@ -524,7 +547,7 @@ fn test_convolve_cols_various_sizes() {
         let mut output_scalar = vec![0.0f32; width * height];
 
         convolve_cols_direct(&input, &mut output_simd, width, height, &kernel, radius);
-        convolve_cols_scalar(&input, &mut output_scalar, width, height, &kernel, radius);
+        convolve_cols_scalar_ref(&input, &mut output_scalar, width, height, &kernel, radius);
 
         for i in 0..width * height {
             assert!(

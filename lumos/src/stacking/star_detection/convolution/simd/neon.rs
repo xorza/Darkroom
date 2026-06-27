@@ -72,55 +72,43 @@ pub unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel: &[f32
     }
 }
 
-/// Convolve columns directly using NEON intrinsics.
-///
-/// Processes rows in order for cache locality, with 4 columns at a time using SIMD.
+/// Convolve one output column-row `y` (4 columns at a time, NEON). See
+/// `convolve_cols_row_avx2` for the per-row contract.
 ///
 /// # Safety
 /// Caller must ensure running on aarch64.
-pub unsafe fn convolve_cols_neon(
+pub unsafe fn convolve_cols_row_neon(
     input: &[f32],
-    output: &mut [f32],
+    out_row: &mut [f32],
     width: usize,
     height: usize,
+    y: usize,
     kernel: &[f32],
     radius: usize,
 ) {
     unsafe {
         use crate::stacking::star_detection::convolution::simd::mirror_index;
 
-        // Process row by row for cache locality
-        for y in 0..height {
-            let out_row_offset = y * width;
-
-            // Process 4 columns at a time with SIMD
-            let mut x = 0;
-            while x + 4 <= width {
-                let mut sum = vdupq_n_f32(0.0);
-
-                for (k, &kval) in kernel.iter().enumerate() {
-                    let sy = y as isize + k as isize - radius as isize;
-                    let sy = mirror_index(sy, height);
-
-                    let vals = vld1q_f32(input.as_ptr().add(sy * width + x));
-                    sum = vfmaq_f32(sum, vals, vdupq_n_f32(kval));
-                }
-
-                vst1q_f32(output.as_mut_ptr().add(out_row_offset + x), sum);
-                x += 4;
+        let mut x = 0;
+        while x + 4 <= width {
+            let mut sum = vdupq_n_f32(0.0);
+            for (k, &kval) in kernel.iter().enumerate() {
+                let sy = mirror_index(y as isize + k as isize - radius as isize, height);
+                let vals = vld1q_f32(input.as_ptr().add(sy * width + x));
+                sum = vfmaq_f32(sum, vals, vdupq_n_f32(kval));
             }
+            vst1q_f32(out_row.as_mut_ptr().add(x), sum);
+            x += 4;
+        }
 
-            // Handle remaining columns with scalar
-            while x < width {
-                let mut sum = 0.0f32;
-                for (k, &kval) in kernel.iter().enumerate() {
-                    let sy = y as isize + k as isize - radius as isize;
-                    let sy = mirror_index(sy, height);
-                    sum += input[sy * width + x] * kval;
-                }
-                output[out_row_offset + x] = sum;
-                x += 1;
+        while x < width {
+            let mut sum = 0.0f32;
+            for (k, &kval) in kernel.iter().enumerate() {
+                let sy = mirror_index(y as isize + k as isize - radius as isize, height);
+                sum += input[sy * width + x] * kval;
             }
+            out_row[x] = sum;
+            x += 1;
         }
     }
 }
