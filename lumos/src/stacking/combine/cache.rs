@@ -37,7 +37,7 @@ use crate::io::astro_image::cfa::CfaImage;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
 use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
 use crate::stacking::combine::cache_config::{
-    CacheConfig, MEMORY_PERCENT, compute_load_concurrency, compute_optimal_chunk_rows_with_memory,
+    CacheConfig, compute_load_concurrency, compute_optimal_chunk_rows_with_memory, fits_in_memory,
 };
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::progress::{ProgressCallback, StackingStage, report_progress};
@@ -279,19 +279,6 @@ struct ChunkContext<'a> {
     pixel_offset: usize,
 }
 
-impl CacheCore {
-    /// Check if images would fit in memory given available memory.
-    ///
-    /// Returns true if total image size fits within usable memory (75% of available).
-    fn fits_in_memory(bytes_per_image: usize, frame_count: usize, available_memory: u64) -> bool {
-        let Some(total_bytes) = bytes_per_image.checked_mul(frame_count) else {
-            return false;
-        };
-        let usable_memory = available_memory * MEMORY_PERCENT / 100;
-        (total_bytes as u64) <= usable_memory
-    }
-}
-
 /// Load `paths` into tiered plain [`Frame`]s plus an assembled [`CacheCore`], choosing in-memory vs
 /// disk-backed (mmap) storage by whether the set fits ~75% of RAM. Shared by both caches'
 /// `from_paths`; the image type `I` only governs decoding.
@@ -314,8 +301,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     let metadata = first_image.metadata().clone();
 
     let available_memory = config.get_available_memory();
-    let use_in_memory =
-        CacheCore::fits_in_memory(first_image.size_in_bytes(), paths.len(), available_memory);
+    let use_in_memory = fits_in_memory(first_image.size_in_bytes(), paths.len(), available_memory);
 
     tracing::info!(
         frame_count = paths.len(),
@@ -563,11 +549,13 @@ impl CacheCore {
         let frame_count = frames.len();
         let width = dims.size.x;
         let height = dims.size.y;
-        let available_memory = self.config.get_available_memory();
 
+        // Whole-plane chunks in RAM; for disk-backed stacks size chunks to the memory budget
+        // (queried only here, where it's used — an in-memory stack skips the sysinfo read).
         let chunk_rows = if self.cache_dir.is_none() {
             height
         } else {
+            let available_memory = self.config.get_available_memory();
             compute_optimal_chunk_rows_with_memory(width, 1, frame_count, available_memory)
         };
 
@@ -1361,48 +1349,6 @@ pub(crate) mod tests {
     }
 
     // ========== Storage Type Selection Tests ==========
-
-    #[test]
-    fn test_fits_in_memory() {
-        // Test basic fit: 10 images of 1000x1000x3 = 120MB, 1GB available (750MB usable)
-        assert!(CacheCore::fits_in_memory(
-            1000 * 1000 * 3 * 4,
-            10,
-            1024 * 1024 * 1024
-        ));
-
-        // Test doesn't fit: 100 images of 6000x4000x3 = 28.8GB, 16GB available (12GB usable)
-        assert!(!CacheCore::fits_in_memory(
-            6000 * 4000 * 3 * 4,
-            100,
-            16 * 1024 * 1024 * 1024
-        ));
-
-        // Test boundary: exactly at 75% threshold
-        let bytes_per_image = 1000 * 1000 * 4;
-        let frame_count = 10;
-        let bytes_needed = (bytes_per_image * frame_count) as u64;
-        let available_at_boundary = (bytes_needed * 100).div_ceil(75);
-        assert!(CacheCore::fits_in_memory(
-            bytes_per_image,
-            frame_count,
-            available_at_boundary
-        ));
-        assert!(!CacheCore::fits_in_memory(
-            bytes_per_image,
-            frame_count,
-            available_at_boundary - 2
-        ));
-
-        // Test grayscale vs RGB with same memory
-        let available = 4 * 1024 * 1024 * 1024u64; // 4GB (3GB usable)
-        assert!(CacheCore::fits_in_memory(6000 * 4000 * 4, 20, available)); // Grayscale: 1.92GB
-        assert!(!CacheCore::fits_in_memory(
-            6000 * 4000 * 3 * 4,
-            20,
-            available
-        )); // RGB: 5.76GB
-    }
 
     // ========== Cache File Tests ==========
 

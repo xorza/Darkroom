@@ -31,7 +31,13 @@ pub const MIN_CHUNK_ROWS: usize = 64;
 /// Set to 75% to balance performance (larger chunks = less I/O) against system
 /// stability (leave headroom for OS and other applications). See module docs
 /// for detailed rationale.
-pub const MEMORY_PERCENT: u64 = 75;
+const MEMORY_PERCENT: u64 = 75;
+
+/// Bytes of `available_memory` the cache may use ([`MEMORY_PERCENT`] of it). The single place the
+/// budget fraction is applied — every tier calculator sizes against this.
+fn memory_budget(available_memory: u64) -> u64 {
+    available_memory * MEMORY_PERCENT / 100
+}
 
 /// Common configuration for cache-based stacking methods (median, sigma-clipped).
 #[derive(Clone, Debug, PartialEq)]
@@ -113,8 +119,7 @@ pub fn compute_optimal_chunk_rows_with_memory(
     frame_count: usize,
     available_memory: u64,
 ) -> usize {
-    // Use up to 75% of available memory for chunk processing
-    let usable_memory = available_memory * MEMORY_PERCENT / 100;
+    let usable_memory = memory_budget(available_memory);
 
     // Bytes per row = width * channels * sizeof(f32) * frame_count
     // Use checked arithmetic to handle overflow gracefully
@@ -164,7 +169,7 @@ pub fn compute_load_concurrency(
     available_memory: u64,
     max_workers: usize,
 ) -> usize {
-    let usable = available_memory * MEMORY_PERCENT / 100;
+    let usable = memory_budget(available_memory);
     let bytes_per_frame = (bytes_per_frame as u64).max(1);
     let resident = bytes_per_frame.saturating_mul(resident_frames as u64);
     // Memory left for in-flight decode transients beyond the resident set. Charging a full frame
@@ -172,6 +177,15 @@ pub fn compute_load_concurrency(
     let headroom = usable.saturating_sub(resident);
     let mem_limit = (headroom / bytes_per_frame).max(1) as usize;
     mem_limit.min(max_workers.max(1))
+}
+
+/// Whether `frame_count` frames of `bytes_per_image` each fit within the usable memory budget — the
+/// in-memory vs disk-backed tier decision. Overflow in the size product means "far too big" → false.
+pub fn fits_in_memory(bytes_per_image: usize, frame_count: usize, available_memory: u64) -> bool {
+    let Some(total_bytes) = bytes_per_image.checked_mul(frame_count) else {
+        return false;
+    };
+    total_bytes as u64 <= memory_budget(available_memory)
 }
 
 #[cfg(test)]
@@ -243,6 +257,40 @@ mod tests {
             1,
             "zero workers → at least 1"
         );
+    }
+
+    #[test]
+    fn test_fits_in_memory() {
+        // Test basic fit: 10 images of 1000x1000x3 = 120MB, 1GB available (750MB usable)
+        assert!(fits_in_memory(1000 * 1000 * 3 * 4, 10, 1024 * 1024 * 1024));
+
+        // Test doesn't fit: 100 images of 6000x4000x3 = 28.8GB, 16GB available (12GB usable)
+        assert!(!fits_in_memory(
+            6000 * 4000 * 3 * 4,
+            100,
+            16 * 1024 * 1024 * 1024
+        ));
+
+        // Test boundary: exactly at 75% threshold
+        let bytes_per_image = 1000 * 1000 * 4;
+        let frame_count = 10;
+        let bytes_needed = (bytes_per_image * frame_count) as u64;
+        let available_at_boundary = (bytes_needed * 100).div_ceil(75);
+        assert!(fits_in_memory(
+            bytes_per_image,
+            frame_count,
+            available_at_boundary
+        ));
+        assert!(!fits_in_memory(
+            bytes_per_image,
+            frame_count,
+            available_at_boundary - 2
+        ));
+
+        // Test grayscale vs RGB with same memory
+        let available = 4 * 1024 * 1024 * 1024u64; // 4GB (3GB usable)
+        assert!(fits_in_memory(6000 * 4000 * 4, 20, available)); // Grayscale: 1.92GB
+        assert!(!fits_in_memory(6000 * 4000 * 3 * 4, 20, available)); // RGB: 5.76GB
     }
 
     #[test]
