@@ -123,6 +123,14 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     fn metadata(&self) -> &AstroImageMetadata;
     fn load(path: &Path) -> Result<Self, Error>;
 
+    /// Pixel dimensions from the file header alone, *without* a full decode, when the format allows
+    /// it. Lets the loader size its tier and decode every frame in parallel instead of decoding
+    /// frame 0 serially just for its dimensions. `None` (the default) → the loader falls back to a
+    /// full first-frame decode.
+    fn peek_dimensions(_path: &Path) -> Option<ImageDimensions> {
+        None
+    }
+
     /// Consume the image, moving its channel planes out (no copy) — one `Buffer2` per channel in
     /// channel order. Populates the in-memory cache tier as [`Plane::Memory`].
     fn into_planes(self) -> ArrayVec<Buffer2<f32>, 3>;
@@ -133,11 +141,12 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
         metadata: AstroImageMetadata,
         dimensions: ImageDimensions,
     ) -> Self;
+}
 
-    /// In-memory size of this image's pixel data in bytes.
-    fn size_in_bytes(&self) -> usize {
-        self.dimensions().sample_count() * size_of::<f32>()
-    }
+/// In-memory byte footprint of one frame's pixel data (planes are `f32`). Drives the tier decision
+/// and the decode-concurrency budget.
+fn frame_bytes(dimensions: ImageDimensions) -> usize {
+    dimensions.sample_count() * size_of::<f32>()
 }
 
 /// Generate a cache filename from the hash of the source path.
@@ -244,12 +253,13 @@ pub(crate) struct LightCache {
     pub(crate) core: CacheCore,
 }
 
-/// Tier-loader output: the stored [`Frame`]s plus the disk cache dir (`Some` if memory-mapped) and
-/// per-frame stats. Assembled into a [`CacheCore`] by [`load_tiered`].
+/// Tier-loader output: the stored [`Frame`]s plus the disk cache dir (`Some` if memory-mapped),
+/// per-frame stats, and frame 0's metadata. Assembled into a [`CacheCore`] by [`load_tiered`].
 struct LoadedTier {
     frames: Vec<Frame>,
     cache_dir: Option<PathBuf>,
     channel_stats: Vec<FrameStats>,
+    metadata: AstroImageMetadata,
 }
 
 /// [`load_tiered`] output: the loaded plain frames plus the assembled [`CacheCore`].
@@ -294,14 +304,20 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
 
     report_progress(&progress, 0, paths.len(), StackingStage::Loading);
 
-    // Load first image to get dimensions.
     let first_path = paths[0].as_ref();
-    let first_image = I::load(first_path)?;
-    let dimensions = first_image.dimensions();
-    let metadata = first_image.metadata().clone();
-
     let available_memory = config.get_available_memory();
-    let use_in_memory = fits_in_memory(first_image.size_in_bytes(), paths.len(), available_memory);
+
+    // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
+    // the format allows it (RAW), so the in-memory path can decode every frame in parallel rather
+    // than decoding frame 0 serially first; otherwise decode frame 0 and reuse it below.
+    let (dimensions, first_image) = match I::peek_dimensions(first_path) {
+        Some(dims) => (dims, None),
+        None => {
+            let img = I::load(first_path)?;
+            (img.dimensions(), Some(img))
+        }
+    };
+    let use_in_memory = fits_in_memory(frame_bytes(dimensions), paths.len(), available_memory);
 
     tracing::info!(
         frame_count = paths.len(),
@@ -315,6 +331,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         frames,
         cache_dir,
         channel_stats,
+        metadata,
     } = if use_in_memory {
         load_in_memory::<I, P>(
             paths,
@@ -325,12 +342,18 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             &cancel,
         )?
     } else {
+        // Disk tier (large stacks): the serial-first-frame path. If the header was peeked we
+        // haven't decoded frame 0 yet, so decode it now — rare, since calibration fits in RAM.
+        let first = match first_image {
+            Some(img) => img,
+            None => I::load(first_path)?,
+        };
         load_to_disk::<I, P>(
             paths,
             config,
             &progress,
             dimensions,
-            first_image,
+            first,
             available_memory,
             &cancel,
         )?
@@ -400,34 +423,34 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     paths: &[P],
     progress: &ProgressCallback,
     dimensions: ImageDimensions,
-    first_image: I,
+    first: Option<I>,
     available_memory: u64,
     cancel: &CancelToken,
 ) -> Result<LoadedTier, Error> {
-    let first_stats = compute_frame_stats(&first_image);
-    let first_frame = image_to_frame(first_image);
-    report_progress(progress, 1, paths.len(), StackingStage::Loading);
-
     // Decode is CPU-bound, so fan out to the worker count, bounded by RAM headroom — every frame
     // stays resident in this tier, so only the budget left over feeds in-flight decode transients.
     let concurrency = compute_load_concurrency(
-        dimensions.sample_count() * size_of::<f32>(),
+        frame_bytes(dimensions),
         paths.len(),
         available_memory,
         rayon::current_num_threads(),
     );
-    let indexed_paths: Vec<(usize, &P)> = paths[1..]
+
+    // When the header couldn't be peeked the caller pre-loaded frame 0, so the batch starts at
+    // frame 1 and reuses it; otherwise every frame (frame 0 included) decodes in parallel. Frame 0
+    // supplies the stack metadata either way.
+    let start = if first.is_some() { 1 } else { 0 };
+    let indexed_paths: Vec<(usize, &P)> = paths[start..]
         .iter()
         .enumerate()
-        .map(|(i, p)| (i + 1, p))
+        .map(|(i, p)| (i + start, p))
         .collect();
-    let remaining = try_par_map_limited(&indexed_paths, concurrency, |&(idx, path)| {
+    let loaded = try_par_map_limited(&indexed_paths, concurrency, |&(idx, path)| {
         // Cancelled: stop decoding further frames (the slow phase).
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        let path_ref = path.as_ref();
-        let image = I::load(path_ref)?;
+        let image = I::load(path.as_ref())?;
         if image.dimensions() != dimensions {
             return Err(Error::DimensionMismatch {
                 index: idx,
@@ -435,16 +458,23 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
                 actual: image.dimensions(),
             });
         }
+        let metadata = (idx == 0).then(|| image.metadata().clone());
         let stats = compute_frame_stats(&image);
-        Ok((image_to_frame(image), stats))
+        Ok((image_to_frame(image), stats, metadata))
     })?;
 
-    // Build final vectors
     let mut frames = Vec::with_capacity(paths.len());
     let mut all_stats = Vec::with_capacity(paths.len());
-    frames.push(first_frame);
-    all_stats.push(first_stats);
-    for (frame, stats) in remaining {
+    let mut metadata = None;
+    if let Some(first_image) = first {
+        metadata = Some(first_image.metadata().clone());
+        all_stats.push(compute_frame_stats(&first_image));
+        frames.push(image_to_frame(first_image));
+    }
+    for (frame, stats, meta) in loaded {
+        if meta.is_some() {
+            metadata = meta;
+        }
         frames.push(frame);
         all_stats.push(stats);
     }
@@ -456,6 +486,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         frames,
         cache_dir: None,
         channel_stats: all_stats,
+        metadata: metadata.expect("frame 0 provides metadata"),
     })
 }
 
@@ -477,8 +508,8 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         source: e,
     })?;
 
-    // Cache first image and compute stats
-    // (frame 0 is always loaded fresh in load_tiered for dimensions, so no sidecars needed)
+    // Cache first image and compute stats. Frame 0 carries the stack metadata.
+    let metadata = first_image.metadata().clone();
     let first_stats = compute_frame_stats(&first_image);
     let first_path = paths[0].as_ref();
     let base_filename = cache_filename_for_path(first_path);
@@ -489,7 +520,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     // each decoded frame to its own file and drops it, so nothing stays resident (`0`) — only the
     // in-flight decodes occupy memory. Each frame writes unique files, so there's no contention.
     let concurrency = compute_load_concurrency(
-        dimensions.sample_count() * size_of::<f32>(),
+        frame_bytes(dimensions),
         0,
         available_memory,
         rayon::current_num_threads(),
@@ -532,6 +563,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         frames,
         cache_dir: Some(cache_dir.to_path_buf()),
         channel_stats: all_stats,
+        metadata,
     })
 }
 

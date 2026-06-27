@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
 use crate::io::raw::demosaic::Cancelled;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::io::raw::load_raw_cfa;
+use crate::io::raw::{load_raw_cfa, raw_dimensions};
 use crate::stacking::combine::cache::StackableImage;
 use crate::stacking::combine::error::Error;
 use common::CancelToken;
@@ -76,6 +76,13 @@ impl StackableImage for CfaImage {
             path: path.to_path_buf(),
             source: std::io::Error::other(e),
         })
+    }
+
+    /// CFA frames are always RAW, so the dimensions come straight from the RAW header — no decode.
+    fn peek_dimensions(path: &std::path::Path) -> Option<ImageDimensions> {
+        raw_dimensions(path)
+            .ok()
+            .map(|size| ImageDimensions::new(size, 1))
     }
 
     fn from_stacked(
