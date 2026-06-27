@@ -38,7 +38,7 @@
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::{MAD_TO_SIGMA, median_f32_mut};
 use common::BitBuffer2;
 use common::CancelToken;
 use common::Vec2us;
@@ -140,7 +140,7 @@ impl DefectMap {
             .cfa_type
             .as_ref()
             .expect("image must have CFA type for defect correction");
-        let neighbors = SameColorMedian::new(cfa_type);
+        let neighbors = SameColorMedian::new(Some(cfa_type));
 
         // Mask every defect so each repair draws only on GOOD neighbours. Without it, a clustered
         // defect (hot column, adjacent same-color pixels) pulls a neighbour's bad/half-corrected
@@ -161,8 +161,6 @@ impl DefectMap {
 
 /// Maximum number of samples per color channel for median estimation.
 const MAX_MEDIAN_SAMPLES: usize = 100_000;
-
-use crate::math::statistics::MAD_TO_SIGMA;
 
 /// Get CFA color index at (x, y). Returns 0 for Mono (None CFA type).
 fn cfa_color_at(cfa_type: Option<&CfaType>, x: usize, y: usize) -> u8 {
@@ -203,7 +201,7 @@ fn detect_hot_pixels(image: &CfaImage, sigma_threshold: f32, cancel: &CancelToke
                 return false;
             }
             let color = cfa_color_at(cfa_type, i % width, i / width) as usize;
-            let (median, sigma) = stats[color];
+            let ColorStats { median, sigma } = stats[color];
             data[i] > median + sigma_threshold * sigma
         })
         .collect()
@@ -217,8 +215,7 @@ fn detect_cold_pixels(image: &CfaImage, dead_fraction: f32, cancel: &CancelToken
     let data = &image.data;
     let width = data.width();
     let total = width * data.height();
-    let cfa = image.metadata.cfa_type.clone().unwrap_or(CfaType::Mono);
-    let neighbors = SameColorMedian::new(&cfa);
+    let neighbors = SameColorMedian::new(image.metadata.cfa_type.as_ref());
 
     (0..total)
         .into_par_iter()
@@ -233,7 +230,16 @@ fn detect_cold_pixels(image: &CfaImage, dead_fraction: f32, cancel: &CancelToken
         .collect()
 }
 
-/// Per-CFA-color robust `(median, sigma)`, indexed by color (0=R/mono, 1=G, 2=B).
+/// Per-CFA-color robust background statistics used to threshold hot pixels.
+#[derive(Debug, Clone, Copy)]
+struct ColorStats {
+    /// Median pixel value for the color.
+    median: f32,
+    /// Robust σ (`MAD · 1.4826`, floored). A color with no samples gets `∞` so it never flags.
+    sigma: f32,
+}
+
+/// Per-CFA-color robust stats, indexed by color (0=R/mono, 1=G, 2=B).
 ///
 /// `sigma` is `MAD · 1.4826` with two floors that keep a clean (near-uniform) master from
 /// flagging its own noise tail: an absolute floor (`5e-4`, ~33 ADU in 16-bit) and a relative
@@ -241,7 +247,7 @@ fn detect_cold_pixels(image: &CfaImage, dead_fraction: f32, cancel: &CancelToken
 fn compute_per_color_stats(
     data: &Buffer2<f32>,
     cfa_type: Option<&CfaType>,
-) -> ArrayVec<(f32, f32), 3> {
+) -> ArrayVec<ColorStats, 3> {
     let num_colors = cfa_type.map_or(1, |c| c.num_colors());
     let mut stats = ArrayVec::new();
 
@@ -249,7 +255,10 @@ fn compute_per_color_stats(
         let mut samples = collect_color_samples(data, cfa_type, color);
 
         if samples.is_empty() {
-            stats.push((0.0, f32::INFINITY));
+            stats.push(ColorStats {
+                median: 0.0,
+                sigma: f32::INFINITY,
+            });
             continue;
         }
 
@@ -264,7 +273,7 @@ fn compute_per_color_stats(
         tracing::debug!(
             "Defect stats color={color}: median={median:.6}, MAD={mad:.6}, sigma={sigma:.6}"
         );
-        stats.push((median, sigma));
+        stats.push(ColorStats { median, sigma });
     }
 
     stats
@@ -378,11 +387,12 @@ enum SameColorMedian {
 }
 
 impl SameColorMedian {
-    fn new(cfa: &CfaType) -> Self {
+    /// `None` (no CFA metadata) is treated as Mono, matching [`cfa_color_at`].
+    fn new(cfa: Option<&CfaType>) -> Self {
         match cfa {
-            CfaType::Mono => Self::Mono,
-            CfaType::Bayer(_) => Self::Bayer,
-            CfaType::XTrans(pattern) => Self::XTrans(Box::new(XTransOffsets::new(pattern))),
+            None | Some(CfaType::Mono) => Self::Mono,
+            Some(CfaType::Bayer(_)) => Self::Bayer,
+            Some(CfaType::XTrans(pattern)) => Self::XTrans(Box::new(XTransOffsets::new(pattern))),
         }
     }
 
@@ -1038,7 +1048,7 @@ mod tests {
             .map(|i| color_val(pattern.color_at(i % w, i / w)))
             .collect();
         let pixels = Buffer2::new(w, h, px);
-        let neighbors = SameColorMedian::new(&pattern);
+        let neighbors = SameColorMedian::new(Some(&pattern));
 
         // Interior pixels (≥6 from every border) of each color — all 24 nearest same-color in-bounds.
         for &(x, y) in &[(13usize, 12usize), (12, 12), (14, 13)] {
