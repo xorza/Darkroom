@@ -86,6 +86,14 @@ pub struct CalibrationMasters {
     pub defect_map: Option<DefectMap>,
 }
 
+/// Per-role share of the memory budget when [`CalibrationMasters::from_files`] loads the roles
+/// concurrently: an even split across the `active` (non-empty) roles. Flooring guarantees the
+/// shares sum to at most `available`, so the concurrent loads can't overcommit RAM. A lone role
+/// (or `active == 0`) gets the whole budget.
+fn role_memory_budget(available: u64, active: usize) -> u64 {
+    available / active.max(1) as u64
+}
+
 /// Stack one calibration role's raw CFA frames into a single master, using that
 /// role's preset `config` (`StackConfig::dark()` / `flat()` / `bias()`).
 ///
@@ -181,21 +189,63 @@ impl CalibrationMasters {
     ///
     /// `sigma_threshold` controls defect detection sensitivity (see
     /// [`DEFAULT_SIGMA_THRESHOLD`]).
+    ///
+    /// The roles are independent stacks, so they run **concurrently** to fill cores left idle by
+    /// any one role's serial phases (first-frame decode, stats/reference selection). To stay
+    /// memory-safe, the RAM budget is split evenly across the non-empty roles: each role's tiering
+    /// and decode concurrency size against its share, so the concurrent loads provably can't
+    /// collectively overcommit (the per-role peaks sum to at most the whole usable budget).
     pub fn from_files<P: AsRef<Path> + Sync>(
         frames: CalibrationFrames<'_, P>,
         sigma_threshold: f32,
     ) -> Result<Self, Error> {
-        let dark = stack_cfa_master(frames.darks, StackConfig::dark(), CancelToken::never())?;
-        let flat = stack_cfa_master(frames.flats, StackConfig::flat(), CancelToken::never())?;
-        let bias = stack_cfa_master(frames.bias, StackConfig::bias(), CancelToken::never())?;
-        let flat_dark =
-            stack_cfa_master(frames.flat_darks, StackConfig::dark(), CancelToken::never())?;
+        let mut dark_cfg = StackConfig::dark();
+        let mut flat_cfg = StackConfig::flat();
+        let mut bias_cfg = StackConfig::bias();
+        let mut flat_dark_cfg = StackConfig::dark();
+
+        // Split the live RAM budget across the non-empty roles (empty ones do no work and return
+        // `None`). Querying once and dividing — rather than letting each concurrent role query the
+        // live free memory and each see the whole of it — is what keeps the split honest.
+        let active = [frames.darks, frames.flats, frames.bias, frames.flat_darks]
+            .iter()
+            .filter(|paths| !paths.is_empty())
+            .count();
+        let budget = role_memory_budget(dark_cfg.cache.get_available_memory(), active);
+        for cfg in [
+            &mut dark_cfg,
+            &mut flat_cfg,
+            &mut bias_cfg,
+            &mut flat_dark_cfg,
+        ] {
+            cfg.cache.available_memory = Some(budget);
+        }
+
+        // Independent stacks on the shared rayon pool — work-stealing interleaves their parallel
+        // sections, filling the gaps a single sequential role would leave idle.
+        let ((dark, flat), (bias, flat_dark)) = rayon::join(
+            move || {
+                rayon::join(
+                    move || stack_cfa_master(frames.darks, dark_cfg, CancelToken::never()),
+                    move || stack_cfa_master(frames.flats, flat_cfg, CancelToken::never()),
+                )
+            },
+            move || {
+                rayon::join(
+                    move || stack_cfa_master(frames.bias, bias_cfg, CancelToken::never()),
+                    move || {
+                        stack_cfa_master(frames.flat_darks, flat_dark_cfg, CancelToken::never())
+                    },
+                )
+            },
+        );
+
         Ok(Self::from_images(
             CalibrationImages {
-                dark,
-                flat,
-                bias,
-                flat_dark,
+                dark: dark?,
+                flat: flat?,
+                bias: bias?,
+                flat_dark: flat_dark?,
             },
             sigma_threshold,
             CancelToken::never(),

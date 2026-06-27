@@ -1,10 +1,37 @@
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::stacking::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
+use crate::stacking::calibration_masters::role_memory_budget;
 use crate::testing::constant_cfa;
 use crate::{AstroImageMetadata, CalibrationFrames, CalibrationImages, CalibrationMasters};
 use common::CancelToken;
 use imaginarium::Buffer2;
+
+#[test]
+fn role_memory_budget_never_overcommits() {
+    // The even split is the memory-safety guarantee for concurrent role loading: the per-role
+    // shares must sum to at most the whole budget, a lone role must get everything, and more roles
+    // must mean a strictly smaller share.
+    let avail = 30_000_000_000u64;
+    assert_eq!(
+        role_memory_budget(avail, 1),
+        avail,
+        "a single role gets the whole budget"
+    );
+    for active in 1..=4usize {
+        let share = role_memory_budget(avail, active);
+        assert!(
+            share * active as u64 <= avail,
+            "{active} roles overcommit: {share} * {active} > {avail}"
+        );
+    }
+    assert!(
+        role_memory_budget(avail, 1) > role_memory_budget(avail, 3),
+        "more roles → smaller share"
+    );
+    // `active == 0` (no non-empty roles) is clamped to 1, never divides by zero.
+    assert_eq!(role_memory_budget(avail, 0), avail);
+}
 
 #[test]
 #[should_panic(expected = "already-calibrated frame")]
