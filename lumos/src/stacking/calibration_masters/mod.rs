@@ -20,7 +20,7 @@ use crate::io::astro_image::cfa::CfaImage;
 use crate::io::raw::raw_dimensions;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::cache_config::fits_in_memory;
-use crate::stacking::combine::config::{CombineMethod, StackConfig};
+use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::combine::stack::run_stacking;
@@ -124,29 +124,12 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
     }
 }
 
-/// The effective config for a small calibration role (see [`stack_cfa_master`]): below 8 frames the
-/// σ-rejection statistics are shaky, so methods that genuinely *need* many frames
-/// (`SigmaClip`/`LinearFit`/`Gesd`) fall back to the median quality-floor. Small-N-stable methods
-/// (`Winsorized`/`Percentile`) keep running, so a 5–7 frame dark/bias retains its winsorized mean
-/// (~20% less noisy than the median) instead of being needlessly downgraded. The library's
-/// `MIN_FRAMES_FOR_REJECTION` floor still catches the genuinely-unsound N≤4 σ case.
-fn small_stack_config(config: StackConfig, frame_count: usize) -> StackConfig {
-    let needs_many = matches!(config.method, CombineMethod::Mean(r) if r.needs_many_frames());
-    if frame_count < 8 && needs_many {
-        StackConfig {
-            normalization: config.normalization,
-            ..StackConfig::median()
-        }
-    } else {
-        config
-    }
-}
-
 /// Stack one calibration role's raw CFA frames into a single master, using that
 /// role's preset `config` (`StackConfig::dark()` / `flat()` / `bias()`).
 ///
-/// Below 8 frames the config is adjusted by [`small_stack_config`] (σ-methods that need many frames
-/// fall to median; Winsorized/Percentile stay). Returns `None` if `paths` is empty.
+/// The preset carries its own small-frame fallback (`StackConfig::small_n`): the combine engine
+/// downgrades to the median below the preset's `min_frames` (e.g. `flat()` below 8), so no
+/// frame-count special-casing is needed here. Returns `None` if `paths` is empty.
 ///
 /// The per-role half of [`CalibrationMasters::from_files`], public so a caller
 /// can stack/cache each role independently and assemble the set with
@@ -159,8 +142,6 @@ pub fn stack_cfa_master(
     if paths.is_empty() {
         return Ok(None);
     }
-
-    let config = small_stack_config(config, paths.len());
 
     // `cancel` rides on the cache from construction, so the RAW-decode load loop
     // polls it too (not just the combine).

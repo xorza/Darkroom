@@ -988,20 +988,6 @@ impl Rejection {
         Self::Gesd(GesdConfig::new(0.05, None))
     }
 
-    /// `true` for rejection methods whose scale/trend estimate is only
-    /// trustworthy with enough samples — sigma-clip, linear-fit, GESD. With too
-    /// few frames their σ is dominated by noise and they over- or under-reject,
-    /// so the caller falls back to the median (see
-    /// `stack::effective_combine_method`). `Winsorized` is designed for small
-    /// stacks and `Percentile` clips a fixed fraction, so both stay stable at
-    /// small N; `None` does no rejection.
-    pub(crate) fn needs_many_frames(&self) -> bool {
-        matches!(
-            self,
-            Rejection::SigmaClip(_) | Rejection::LinearFit(_) | Rejection::Gesd(_)
-        )
-    }
-
     /// Partition values by rejection algorithm, returning the number of survivors.
     ///
     /// After return, `values[..remaining]` holds the surviving values and `scratch.indices`

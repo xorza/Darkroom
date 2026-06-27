@@ -17,6 +17,61 @@ pub enum CombineMethod {
     Median,
 }
 
+/// Default frames below which σ-based rejection (sigma-clip / linear-fit / GESD) is too unreliable
+/// to trust and the combine falls back to the median. Winsorized/Percentile are stable at smaller N.
+const MIN_FRAMES_FOR_REJECTION: usize = 5;
+
+/// Small-stack fallback policy for [`StackConfig`]. When a stack has fewer than `min_frames` frames
+/// the configured [`StackConfig::method`]'s rejection statistics are unreliable, so the combine uses
+/// `fallback` instead. This makes the fallback an explicit, inspectable part of the config rather
+/// than a runtime transformation. `fallback` must be rejection-free (`Median` or `Mean(None)`) so it
+/// never needs a fallback of its own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SmallN {
+    /// Frames below which `fallback` replaces the configured method.
+    pub min_frames: usize,
+    /// The combine method used below `min_frames`.
+    pub fallback: CombineMethod,
+}
+
+impl SmallN {
+    /// No fallback — the method is reliable at any frame count (Winsorized, Percentile, Median,
+    /// plain mean).
+    pub fn none() -> Self {
+        Self {
+            min_frames: 0,
+            fallback: CombineMethod::Median,
+        }
+    }
+
+    /// Fall back to the median below `min_frames` frames.
+    pub fn median_below(min_frames: usize) -> Self {
+        Self {
+            min_frames,
+            fallback: CombineMethod::Median,
+        }
+    }
+
+    /// The combine method to use for `frame_count` frames: `fallback` when there are too few for the
+    /// configured `method`, else `method`. Warns on a real downgrade.
+    pub(crate) fn resolve(&self, method: CombineMethod, frame_count: usize) -> CombineMethod {
+        // A plain mean (no rejection) has nothing to fall back *from* — only a `Mean` with an actual
+        // rejection method is downgraded. (An explicit `Median` is excluded by `!= self.fallback`.)
+        // This keeps a method override inherited with a default `min_frames` from spuriously
+        // turning a plain mean into a median at small N.
+        let does_rejection = !matches!(method, CombineMethod::Mean(Rejection::None));
+        if does_rejection && frame_count < self.min_frames && method != self.fallback {
+            tracing::warn!(
+                frame_count,
+                min_frames = self.min_frames,
+                "too few frames for the configured rejection; combining with the fallback instead",
+            );
+            return self.fallback;
+        }
+        method
+    }
+}
+
 /// Frame weighting strategy.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum Weighting {
@@ -76,6 +131,8 @@ pub struct StackConfig {
     pub weighting: Weighting,
     /// Frame normalization before stacking.
     pub normalization: Normalization,
+    /// Combine method used when there are too few frames for `method`'s rejection (see [`SmallN`]).
+    pub small_n: SmallN,
     /// Cache/memory behavior.
     pub cache: CacheConfig,
 }
@@ -86,6 +143,8 @@ impl Default for StackConfig {
             method: CombineMethod::Mean(Rejection::default()),
             weighting: Weighting::Equal,
             normalization: Normalization::None,
+            // Default method is σ-clip, so the default fallback is the library σ-floor.
+            small_n: SmallN::median_below(MIN_FRAMES_FOR_REJECTION),
             cache: CacheConfig::default(),
         }
     }
@@ -106,6 +165,7 @@ impl StackConfig {
     pub fn median() -> Self {
         Self {
             method: CombineMethod::Median,
+            small_n: SmallN::none(),
             ..Default::default()
         }
     }
@@ -114,6 +174,7 @@ impl StackConfig {
     pub fn mean() -> Self {
         Self {
             method: CombineMethod::Mean(Rejection::None),
+            small_n: SmallN::none(),
             ..Default::default()
         }
     }
@@ -130,6 +191,8 @@ impl StackConfig {
     pub fn winsorized(sigma: f32) -> Self {
         Self {
             method: CombineMethod::Mean(Rejection::winsorized(sigma)),
+            // Winsorized is stable at small N — no median fallback.
+            small_n: SmallN::none(),
             ..Default::default()
         }
     }
@@ -146,6 +209,8 @@ impl StackConfig {
     pub fn percentile(percent: f32) -> Self {
         Self {
             method: CombineMethod::Mean(Rejection::percentile(percent)),
+            // Percentile clips a fixed fraction — stable at small N, no median fallback.
+            small_n: SmallN::none(),
             ..Default::default()
         }
     }
@@ -165,6 +230,7 @@ impl StackConfig {
         Self {
             method: CombineMethod::Mean(Rejection::winsorized(3.0)),
             normalization: Normalization::None,
+            small_n: SmallN::none(),
             ..Default::default()
         }
     }
@@ -174,17 +240,21 @@ impl StackConfig {
         Self {
             method: CombineMethod::Mean(Rejection::winsorized(3.0)),
             normalization: Normalization::None,
+            small_n: SmallN::none(),
             ..Default::default()
         }
     }
 
-    /// Preset for flat frames: σ-clip σ=2.5, multiplicative normalization.
+    /// Preset for flat frames: σ-clip σ=3.0, multiplicative normalization.
     pub fn flat() -> Self {
         // σ=3.0 matches the dark/bias preset and ccdproc's `combine` default (3σ low/high); flats are
         // smooth, so a permissive cut just trims clear outliers (dust shadows move between flats).
         Self {
             method: CombineMethod::Mean(Rejection::sigma_clip(3.0)),
             normalization: Normalization::Multiplicative,
+            // Stricter quality floor than the library default: a master flat from < 8 frames uses the
+            // median, since σ-clip statistics on so few smooth flats aren't worth the noise.
+            small_n: SmallN::median_below(8),
             ..Default::default()
         }
     }
@@ -257,6 +327,30 @@ impl StackConfig {
 mod tests {
     use super::*;
     use crate::stacking::combine::rejection::{PercentileClipConfig, SigmaClipConfig};
+
+    #[test]
+    fn small_n_resolve_downgrades_below_min_frames() {
+        let sigma = CombineMethod::Mean(Rejection::sigma_clip(2.5));
+        let floor5 = SmallN::median_below(5);
+        // Below the floor → fallback (median); at/above → the configured method.
+        assert_eq!(floor5.resolve(sigma, 4), CombineMethod::Median);
+        assert_eq!(floor5.resolve(sigma, 5), sigma);
+        assert_eq!(floor5.resolve(sigma, 50), sigma);
+        // `none()` never downgrades, even at N=2.
+        let win = CombineMethod::Mean(Rejection::winsorized(3.0));
+        assert_eq!(SmallN::none().resolve(win, 2), win);
+        // A method that already equals the fallback is returned unchanged (no spurious downgrade).
+        assert_eq!(
+            floor5.resolve(CombineMethod::Median, 1),
+            CombineMethod::Median
+        );
+        // The flat preset's stricter floor of 8 is honoured.
+        assert_eq!(
+            StackConfig::flat().small_n.resolve(sigma, 7),
+            CombineMethod::Median
+        );
+        assert_eq!(StackConfig::flat().small_n.resolve(sigma, 8), sigma);
+    }
 
     #[test]
     fn test_default_config() {
