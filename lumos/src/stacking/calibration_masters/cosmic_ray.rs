@@ -22,9 +22,14 @@ use rayon::prelude::*;
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
 
-/// `F` is floored to this (in normalized pixel units) so the CR-to-fine-structure contrast test
-/// `L⁺ > objlim·F` stays well-defined where the object fine structure is ~0 (i.e. at a CR).
+/// `F` is floored to this (in normalized pixel units) so it stays non-negative where the object fine
+/// structure is ~0 (i.e. at a CR).
 const FINE_STRUCTURE_FLOOR: f32 = 1e-6;
+
+/// Floor for the **noise-normalized** fine structure `F/noise` in the contrast test (in σ units).
+/// Matches astroscrappy's `f.clip(min=0.01)` — bounds the `S'/(F/noise)` ratio where fine structure
+/// is ~0 so a CR (F→0) doesn't divide by zero.
+const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 
 /// Laplacian-edge cosmic-ray detection parameters. Defaults match ccdproc/astroscrappy.
 #[derive(Debug, Clone)]
@@ -132,7 +137,7 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
         let s_med5 = median_window(&s, w, h, 2);
         let sprime: Vec<f32> = s.iter().zip(&s_med5).map(|(&a, &b)| a - b).collect();
 
-        let flags = detect_and_grow(&lplus, &sprime, &f, &mask, w, h, config);
+        let flags = detect_and_grow(&sprime, &f, &noise, &mask, w, h, config);
 
         let mut newly = 0usize;
         for (m, &flag) in mask.iter_mut().zip(&flags) {
@@ -256,19 +261,27 @@ fn parametric_noise(signal: &[f32], gain: f32, read_noise: f32, full_scale: f32)
         .collect()
 }
 
-/// Flag CRs: `S' > sigclip` **and** `L⁺ > objlim·F`, then grow onto neighbors that clear the lowered
-/// threshold `sigclip·sigfrac` and the same contrast test (a flagged CR's fainter wings).
+/// Flag CRs: `S' > sigclip` **and** the fine-structure contrast `S' > objlim·(F/noise)`, then grow
+/// onto neighbors clearing the lowered threshold `sigclip·sigfrac` and the same contrast test (a
+/// flagged CR's fainter wings).
+///
+/// The contrast is van Dokkum's `L⁺/F > objlim` written in astroscrappy's noise-normalized form:
+/// comparing the significance image `S'` against `objlim·(F/noise)` (rather than raw `L⁺` against
+/// `objlim·F`) puts `F` in the same units as `S'`, so the `objlim` default carries the same
+/// star-core protection as astroscrappy/ccdproc. (Raw `L⁺ > objlim·F` is ~2× more aggressive.)
 fn detect_and_grow(
-    lplus: &[f32],
     significance: &[f32],
     f: &[f32],
+    noise: &[f32],
     mask: &[bool],
     w: usize,
     h: usize,
     cfg: &CosmicRayConfig,
 ) -> Vec<bool> {
-    let passes_contrast =
-        |i: usize, sig_thresh: f32| significance[i] > sig_thresh && lplus[i] > cfg.objlim * f[i];
+    let passes_contrast = |i: usize, sig_thresh: f32| {
+        let f_norm = (f[i] / noise[i]).max(FINE_STRUCTURE_SIGMA_FLOOR);
+        significance[i] > sig_thresh && significance[i] > cfg.objlim * f_norm
+    };
     let primary: Vec<bool> = (0..w * h)
         .map(|i| !mask[i] && passes_contrast(i, cfg.sigclip))
         .collect();
@@ -402,7 +415,7 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
         let noise = xtrans_noise(pix, size, cfa, &signal, &config.noise);
         let s: Vec<f32> = lplus.iter().zip(&noise).map(|(&l, &nz)| l / nz).collect();
 
-        let flags = detect_and_grow(&lplus, &s, &f, &mask, size.x, size.y, config);
+        let flags = detect_and_grow(&s, &f, &noise, &mask, size.x, size.y, config);
 
         let mut newly = 0usize;
         for (m, &flag) in mask.iter_mut().zip(&flags) {

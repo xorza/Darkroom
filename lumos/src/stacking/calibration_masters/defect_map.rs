@@ -192,7 +192,11 @@ fn detect_hot_pixels(image: &CfaImage, sigma_threshold: f32, cancel: &CancelToke
     let stats = compute_per_color_stats(data, cfa_type);
 
     // Parallel like `detect_cold_pixels`: indexed `collect` keeps the result ascending, preserving
-    // the `binary_search` invariant the map relies on.
+    // the `binary_search` invariant the map relies on. The center is the global per-color median
+    // (not a local neighbour median): a local center can't detect dense hot-pixel *clusters* — each
+    // pixel's same-color neighbours are themselves hot, so the local median rises to the hot value.
+    // (A gradient-/glow-robust *and* cluster-robust center would need large-box background
+    // subtraction, à la IRAF `ccdmask` — deferred.)
     (0..total)
         .into_par_iter()
         .filter(|&i| {
@@ -233,7 +237,7 @@ fn detect_cold_pixels(image: &CfaImage, dead_fraction: f32, cancel: &CancelToken
 /// Per-CFA-color robust background statistics used to threshold hot pixels.
 #[derive(Debug, Clone, Copy)]
 struct ColorStats {
-    /// Median pixel value for the color.
+    /// Median pixel value for the color (the hot-detection center).
     median: f32,
     /// Robust σ (`MAD · 1.4826`, floored). A color with no samples gets `∞` so it never flags.
     sigma: f32,
@@ -241,9 +245,11 @@ struct ColorStats {
 
 /// Per-CFA-color robust stats, indexed by color (0=R/mono, 1=G, 2=B).
 ///
-/// `sigma` is `MAD · 1.4826` with two floors that keep a clean (near-uniform) master from
-/// flagging its own noise tail: an absolute floor (`5e-4`, ~33 ADU in 16-bit) and a relative
-/// floor (`median · 0.1`). A color with no samples gets `sigma = ∞` so it never flags.
+/// `sigma` is `MAD · 1.4826` floored only at an absolute `5e-4` (~33 ADU/16-bit) so a clean
+/// near-uniform master can't flag its own noise tail. (A former relative floor `median · 0.1` was
+/// dropped: it capped sensitivity at ~1.5× the median, hiding warm pixels at 1.1–1.4× median, and
+/// has no precedent in PixInsight/Siril/APP/ccdmask. The absolute floor alone is the standard
+/// guard.) A color with no samples gets `sigma = ∞` so it never flags.
 fn compute_per_color_stats(
     data: &Buffer2<f32>,
     cfa_type: Option<&CfaType>,
@@ -267,8 +273,7 @@ fn compute_per_color_stats(
             *v = (*v - median).abs();
         }
         let mad = median_f32_mut(&mut samples);
-
-        let sigma = (mad * MAD_TO_SIGMA).max(median * 0.1).max(5e-4);
+        let sigma = (mad * MAD_TO_SIGMA).max(5e-4);
 
         tracing::debug!(
             "Defect stats color={color}: median={median:.6}, MAD={mad:.6}, sigma={sigma:.6}"

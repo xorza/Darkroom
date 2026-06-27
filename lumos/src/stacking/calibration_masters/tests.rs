@@ -295,13 +295,16 @@ fn test_calibrate_full_pipeline() {
 
 #[test]
 fn test_sigma_threshold_affects_detection() {
-    // 6×6 mono dark: background=100.0, one "warm" pixel at 250.0.
-    // Per-color stats (mono, all same channel):
-    //   median ≈ 100.0, MAD ≈ 0.0 → floored sigma = max(0.0, 100*0.1, 5e-4) = 10.0
-    //   upper(sigma=3) = 100 + 3×10 = 130 → 250 > 130 → detected
-    //   upper(sigma=20) = 100 + 20×10 = 300 → 250 < 300 → NOT detected
-    let mut pixels = vec![100.0f32; 36];
-    pixels[14] = 250.0; // warm pixel at index 14
+    // 6×6 mono dark with *real* noise so σ genuinely scales the threshold: 18 px at 90, 18 at 110
+    // (one of the 110s replaced by a warm 400). Per-color stats (mono): median ≈ 100, MAD ≈ 10 →
+    // sigma ≈ 10·1.4826 ≈ 14.8.
+    //   sigma=3:  threshold ≈ 100 + 3·14.8  ≈ 145 → 400 > 145 (only the warm px) → 1 detected
+    //   sigma=40: threshold ≈ 100 + 40·14.8 ≈ 693 → 400 < 693                    → 0 detected
+    // (No relative σ floor: detectability scales with the real noise, not a fraction of the median.)
+    let mut pixels: Vec<f32> = (0..36)
+        .map(|i| if i % 2 == 0 { 90.0 } else { 110.0 })
+        .collect();
+    pixels[15] = 400.0; // index 15 is odd → was 110
 
     let dark_strict = constant_cfa(6, 6, 0.0, CfaType::Mono);
     let dark_loose = constant_cfa(6, 6, 0.0, CfaType::Mono);
@@ -329,17 +332,17 @@ fn test_sigma_threshold_affects_detection() {
             dark: Some(dark_loose),
             ..Default::default()
         },
-        20.0,
+        40.0,
         CancelToken::never(),
     );
 
     let strict_count = masters_strict.defect_map.as_ref().unwrap().hot_count();
     let loose_count = masters_loose.defect_map.as_ref().unwrap().hot_count();
 
-    // sigma=3: 250 > 130, warm pixel detected as hot
-    assert_eq!(strict_count, 1, "sigma=3 should detect the warm pixel");
-    // sigma=20: 250 < 300, warm pixel NOT detected
-    assert_eq!(loose_count, 0, "sigma=20 should not detect the warm pixel");
+    // sigma=3: 1000 > 199, the very-hot pixel is detected
+    assert_eq!(strict_count, 1, "sigma=3 should detect the hot pixel");
+    // sigma=40: 1000 < 1296, the hot pixel is below threshold
+    assert_eq!(loose_count, 0, "sigma=40 should not detect the hot pixel");
 }
 
 #[test]
