@@ -37,7 +37,7 @@ use crate::io::astro_image::cfa::CfaImage;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
 use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
 use crate::stacking::combine::cache_config::{
-    CacheConfig, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
+    CacheConfig, MEMORY_PERCENT, compute_load_concurrency, compute_optimal_chunk_rows_with_memory,
 };
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::progress::{ProgressCallback, StackingStage, report_progress};
@@ -330,9 +330,24 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         cache_dir,
         channel_stats,
     } = if use_in_memory {
-        load_in_memory::<I, P>(paths, &progress, dimensions, first_image, &cancel)?
+        load_in_memory::<I, P>(
+            paths,
+            &progress,
+            dimensions,
+            first_image,
+            available_memory,
+            &cancel,
+        )?
     } else {
-        load_to_disk::<I, P>(paths, config, &progress, dimensions, first_image, &cancel)?
+        load_to_disk::<I, P>(
+            paths,
+            config,
+            &progress,
+            dimensions,
+            first_image,
+            available_memory,
+            &cancel,
+        )?
     };
 
     Ok(LoadedCache {
@@ -400,19 +415,27 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     progress: &ProgressCallback,
     dimensions: ImageDimensions,
     first_image: I,
+    available_memory: u64,
     cancel: &CancelToken,
 ) -> Result<LoadedTier, Error> {
     let first_stats = compute_frame_stats(&first_image);
     let first_frame = image_to_frame(first_image);
     report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
-    // Load remaining images in parallel, at most 3 at a time to cap memory/IO pressure
+    // Decode is CPU-bound, so fan out to the worker count, bounded by RAM headroom — every frame
+    // stays resident in this tier, so only the budget left over feeds in-flight decode transients.
+    let concurrency = compute_load_concurrency(
+        dimensions.sample_count() * size_of::<f32>(),
+        paths.len(),
+        available_memory,
+        rayon::current_num_threads(),
+    );
     let indexed_paths: Vec<(usize, &P)> = paths[1..]
         .iter()
         .enumerate()
         .map(|(i, p)| (i + 1, p))
         .collect();
-    let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, path)| {
+    let remaining = try_par_map_limited(&indexed_paths, concurrency, |&(idx, path)| {
         // Cancelled: stop decoding further frames (the slow phase).
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
@@ -459,6 +482,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     progress: &ProgressCallback,
     dimensions: ImageDimensions,
     first_image: I,
+    available_memory: u64,
     cancel: &CancelToken,
 ) -> Result<LoadedTier, Error> {
     let cache_dir = &config.cache_dir;
@@ -475,14 +499,21 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     let first_cached = cache_image_channels(cache_dir, &base_filename, &first_image, dimensions)?;
     report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
-    // Process remaining images in parallel, at most 3 at a time to cap memory/IO pressure
-    // Each frame writes to unique files (based on path hash), so no contention
+    // Decode is CPU-bound, so fan out to the worker count, bounded by RAM. The disk tier streams
+    // each decoded frame to its own file and drops it, so nothing stays resident (`0`) — only the
+    // in-flight decodes occupy memory. Each frame writes unique files, so there's no contention.
+    let concurrency = compute_load_concurrency(
+        dimensions.sample_count() * size_of::<f32>(),
+        0,
+        available_memory,
+        rayon::current_num_threads(),
+    );
     let indexed_paths: Vec<(usize, &P)> = paths[1..]
         .iter()
         .enumerate()
         .map(|(i, p)| (i + 1, p))
         .collect();
-    let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, ref path)| {
+    let remaining = try_par_map_limited(&indexed_paths, concurrency, |&(idx, ref path)| {
         // Cancelled: stop decoding further frames (the slow phase).
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
