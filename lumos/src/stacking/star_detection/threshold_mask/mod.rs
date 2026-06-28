@@ -28,12 +28,16 @@ use imaginarium::Buffer2;
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;
 
+/// Per-pixel noise floor: the noise estimate is clamped to this before forming the threshold so a
+/// zero or negative σ can't collapse it. Every backend reads this same constant so the SIMD and
+/// scalar paths stay bit-exact.
+const MIN_NOISE: f32 = 1e-6;
+
 /// Scalar packed threshold kernel. With `WITH_BG` the threshold is `bg + σ·noise`; otherwise it is
 /// `σ·noise` (matched-filter case — background already subtracted), and `bg` is unused and may be
-/// empty.
+/// empty. Also serves as the shared partial-word tail for every SIMD backend.
 #[cfg_attr(not(test), inline)]
-#[cfg(any(test, target_arch = "x86_64", not(target_arch = "aarch64")))]
-pub(crate) fn process_words_scalar<const WITH_BG: bool>(
+fn process_words_scalar<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
@@ -53,7 +57,7 @@ pub(crate) fn process_words_scalar<const WITH_BG: bool>(
             }
 
             let px = pixels[px_idx];
-            let mut threshold = sigma_threshold * noise[px_idx].max(1e-6);
+            let mut threshold = sigma_threshold * noise[px_idx].max(MIN_NOISE);
             if WITH_BG {
                 threshold += bg[px_idx];
             }
@@ -70,7 +74,7 @@ pub(crate) fn process_words_scalar<const WITH_BG: bool>(
 /// Dispatch the packed threshold kernel to the best available backend. See `process_words_scalar`
 /// for the `WITH_BG` meaning; pass an empty `bg` when `WITH_BG` is false.
 #[cfg_attr(not(test), inline)]
-pub(crate) fn process_words<const WITH_BG: bool>(
+fn process_words<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
@@ -172,12 +176,14 @@ pub(crate) fn create_threshold_mask(
 ) {
     let width = mask.width();
     let height = mask.height();
-    debug_assert_eq!(width, pixels.width());
-    debug_assert_eq!(height, pixels.height());
-    debug_assert_eq!(width, bg.width());
-    debug_assert_eq!(height, bg.height());
-    debug_assert_eq!(width, noise.width());
-    debug_assert_eq!(height, noise.height());
+    // Release asserts, not debug: the SIMD kernels do unchecked loads off these dims, so a mismatch
+    // is out-of-bounds UB rather than a wrong pixel. The check is O(1) per whole-image call.
+    assert_eq!(width, pixels.width());
+    assert_eq!(height, pixels.height());
+    assert_eq!(width, bg.width());
+    assert_eq!(height, bg.height());
+    assert_eq!(width, noise.width());
+    assert_eq!(height, noise.height());
 
     let words_per_row = mask.words_per_row();
     let pixels = pixels.pixels();
@@ -216,10 +222,11 @@ pub(crate) fn create_threshold_mask_filtered(
 ) {
     let width = mask.width();
     let height = mask.height();
-    debug_assert_eq!(width, filtered.width());
-    debug_assert_eq!(height, filtered.height());
-    debug_assert_eq!(width, noise.width());
-    debug_assert_eq!(height, noise.height());
+    // Release asserts (see `create_threshold_mask`): these dims drive unchecked SIMD loads.
+    assert_eq!(width, filtered.width());
+    assert_eq!(height, filtered.height());
+    assert_eq!(width, noise.width());
+    assert_eq!(height, noise.height());
 
     let words_per_row = mask.words_per_row();
     let filtered = filtered.pixels();

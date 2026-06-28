@@ -2,11 +2,13 @@
 
 use std::arch::aarch64::*;
 
+use crate::stacking::star_detection::threshold_mask::{MIN_NOISE, process_words_scalar};
+
 /// NEON packed threshold kernel. `WITH_BG` selects `bg + σ·noise` vs `σ·noise` (filtered); `bg` is
 /// unused and may be empty when `WITH_BG` is false.
 #[cfg(target_arch = "aarch64")]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub unsafe fn process_words_neon<const WITH_BG: bool>(
+pub(crate) unsafe fn process_words_neon<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
@@ -16,7 +18,7 @@ pub unsafe fn process_words_neon<const WITH_BG: bool>(
     pixel_end: usize,
 ) {
     let sigma_vec = vdupq_n_f32(sigma_threshold);
-    let min_noise_vec = vdupq_n_f32(1e-6);
+    let min_noise_vec = vdupq_n_f32(MIN_NOISE);
 
     let pixels_ptr = pixels.as_ptr();
     let bg_ptr = bg.as_ptr();
@@ -54,24 +56,16 @@ pub unsafe fn process_words_neon<const WITH_BG: bool>(
 
             *word = bits;
         } else {
-            let mut bits = 0u64;
-            for bit in 0..64 {
-                let px_idx = base_pixel + bit;
-                if px_idx >= pixel_end {
-                    break;
-                }
-
-                let px = pixels[px_idx];
-                let mut threshold = sigma_threshold * noise[px_idx].max(1e-6);
-                if WITH_BG {
-                    threshold += bg[px_idx];
-                }
-
-                if px > threshold {
-                    bits |= 1u64 << bit;
-                }
-            }
-            *word = bits;
+            // Partial trailing word — defer to the shared scalar kernel for this one word.
+            process_words_scalar::<WITH_BG>(
+                pixels,
+                bg,
+                noise,
+                sigma_threshold,
+                std::slice::from_mut(word),
+                base_pixel,
+                pixel_end,
+            );
         }
     }
 }

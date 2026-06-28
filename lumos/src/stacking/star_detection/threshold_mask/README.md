@@ -13,10 +13,11 @@ This module creates binary masks marking pixels above a sigma threshold relative
 
 ```
 threshold_mask/
-├── mod.rs       # Public API and dispatch logic
+├── mod.rs       # Public API, dispatch, and scalar kernel
+├── avx2.rs      # x86_64 AVX2 SIMD implementation (preferred on x86_64)
 ├── sse.rs       # x86_64 SSE4.1 SIMD implementation
 ├── neon.rs      # ARM64 NEON SIMD implementation
-├── tests.rs     # Unit tests (33 tests)
+├── tests.rs     # Unit tests
 ├── bench.rs     # Performance benchmarks
 └── README.md    # This file
 ```
@@ -35,13 +36,8 @@ create_threshold_mask(pixels, bg, noise, sigma, mask);
 create_threshold_mask_filtered(filtered, noise, sigma, mask);
 ```
 
-### Adaptive Per-Pixel Threshold
-```rust
-// pixel > background + adaptive_sigma[i] * noise
-create_adaptive_threshold_mask(pixels, bg, noise, adaptive_sigma, mask);
-```
-
-Adaptive thresholding uses per-pixel sigma values computed from local contrast (coefficient of variation). Higher sigma in nebulous regions suppresses false detections; lower sigma in uniform sky enables faint star detection.
+Both variants share one kernel via a `WITH_BG` const generic, so the background-load branch is
+compiled out for the filtered path (which passes an empty `bg` slice).
 
 ## Implementation Details
 
@@ -51,14 +47,16 @@ Uses `BitBuffer2` for memory efficiency - 1 bit per pixel instead of 1 byte (8x 
 
 ### SIMD Strategy
 
-The implementation processes 64 pixels per word, using 16 groups of 4 pixels each (matching SSE/NEON 128-bit register width).
+The implementation processes 64 pixels per word. SSE4.1/NEON use 16 groups of 4 pixels each (128-bit register width); AVX2 uses 8 groups of 8 pixels (256-bit), packing each group's 8-bit `_mm256_movemask_ps` result directly — half the iterations and no per-lane extract.
 
 ```
-Word (64 bits) = 16 groups × 4 pixels/group
+Word (64 bits) = 16 groups × 4 pixels/group   (SSE4.1 / NEON)
+               = 8 groups × 8 pixels/group     (AVX2)
                  ↓
-         [group0][group1]...[group15]
-            4b      4b         4b
+         [group0][group1]...
 ```
+
+The trailing partial word (when a row's width isn't a multiple of 64) is handled by the shared scalar kernel (`process_words_scalar`), keeping the boundary semantics in one place across all backends.
 
 **Per-group processing:**
 1. Load 4 pixels, background, noise values
@@ -71,11 +69,14 @@ Word (64 bits) = 16 groups × 4 pixels/group
 
 | Platform | Implementation | Key Instructions |
 |----------|----------------|------------------|
-| x86_64   | SSE4.1         | `_mm_cmpgt_ps`, `_mm_movemask_ps` |
+| x86_64   | AVX2 (preferred) | `_mm256_cmp_ps`, `_mm256_movemask_ps` |
+| x86_64   | SSE4.1 (fallback) | `_mm_cmpgt_ps`, `_mm_movemask_ps` |
 | ARM64    | NEON           | `vcgtq_f32`, `vgetq_lane_u32` |
 | Other    | Scalar         | Bit-by-bit loop |
 
-**SSE4.1 advantage**: `_mm_movemask_ps` directly extracts comparison results as a 4-bit integer, enabling efficient bit packing.
+Backend selection on x86_64 is runtime feature detection (AVX2 → SSE4.1 → scalar).
+
+**movemask advantage**: `_mm256_movemask_ps` / `_mm_movemask_ps` directly extract comparison results as an 8-bit / 4-bit integer, enabling efficient bit packing.
 
 **NEON approach**: Extracts individual lane bits via `vgetq_lane_u32` since NEON lacks a direct movemask equivalent.
 
@@ -85,7 +86,7 @@ Row-based parallel processing via Rayon. Each thread processes disjoint rows, wr
 
 ### Noise Floor Handling
 
-Noise values are clamped to minimum `1e-6` to prevent division-by-zero-like artifacts when noise estimate is zero or negative.
+Noise values are clamped to minimum `MIN_NOISE` (`1e-6`) to prevent division-by-zero-like artifacts when the noise estimate is zero or negative. The constant lives in `mod.rs` and is shared by every backend so they stay bit-exact.
 
 ## Performance
 
@@ -95,9 +96,8 @@ Benchmark results on 4K×4K image (16.7M pixels):
 |---------|------|--------|---------|
 | Standard | 6.0ms | 19.3ms | 3.2× |
 | Filtered | 4.3ms | 15.8ms | 3.7× |
-| Adaptive | 7.8ms | 22.6ms | 2.9× |
 
-Filtered is fastest (no background array access). Adaptive has ~30% overhead vs standard due to per-pixel sigma lookup.
+Filtered is fastest (no background array access). Figures predate the AVX2 backend (SSE4.1-era).
 
 ## Best Practices Applied
 
