@@ -23,7 +23,7 @@ use common::cpu_features;
 /// * `tx_step` - t increment per pixel
 #[allow(clippy::too_many_arguments)]
 #[inline]
-pub fn interpolate_segment_cubic_simd(
+pub(crate) fn interpolate_segment_cubic_simd(
     bg_out: &mut [f32],
     noise_out: &mut [f32],
     bg_f0: f32,
