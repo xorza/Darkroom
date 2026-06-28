@@ -6,7 +6,6 @@ use crate::stacking::star_detection::threshold_mask::{MIN_NOISE, process_words_s
 
 /// SSE4.1 packed threshold kernel. `WITH_BG` selects `bg + σ·noise` vs `σ·noise` (filtered); `bg`
 /// is unused and may be empty when `WITH_BG` is false.
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 #[allow(unsafe_op_in_unsafe_fn)]
 pub(crate) unsafe fn process_words_sse<const WITH_BG: bool>(

@@ -5,8 +5,8 @@ use std::arch::aarch64::*;
 use crate::stacking::star_detection::threshold_mask::{MIN_NOISE, process_words_scalar};
 
 /// NEON packed threshold kernel. `WITH_BG` selects `bg + σ·noise` vs `σ·noise` (filtered); `bg` is
-/// unused and may be empty when `WITH_BG` is false.
-#[cfg(target_arch = "aarch64")]
+/// unused and may be empty when `WITH_BG` is false. Uses unfused multiply-then-add (not `vfmaq_f32`)
+/// to stay bit-exact with the scalar / AVX2 / SSE backends at the `px == threshold` boundary.
 #[allow(unsafe_op_in_unsafe_fn)]
 pub(crate) unsafe fn process_words_neon<const WITH_BG: bool>(
     pixels: &[f32],
@@ -39,7 +39,7 @@ pub(crate) unsafe fn process_words_neon<const WITH_BG: bool>(
 
                 let threshold_vec = if WITH_BG {
                     let bg_vec = vld1q_f32(bg_ptr.add(px_idx));
-                    vmlaq_f32(bg_vec, sigma_vec, effective_noise)
+                    vaddq_f32(bg_vec, vmulq_f32(sigma_vec, effective_noise))
                 } else {
                     vmulq_f32(sigma_vec, effective_noise)
                 };

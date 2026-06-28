@@ -9,7 +9,6 @@ use crate::stacking::star_detection::threshold_mask::{MIN_NOISE, process_words_s
 /// Uses unfused mul+add (not FMA) to stay bit-exact with the scalar / SSE backends at the
 /// `px == threshold` boundary. `WITH_BG` selects `bg + σ·noise` vs `σ·noise`; `bg` may be empty when
 /// false. See `process_words_scalar`.
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[allow(unsafe_op_in_unsafe_fn)]
 pub(crate) unsafe fn process_words_avx2<const WITH_BG: bool>(

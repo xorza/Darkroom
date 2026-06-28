@@ -162,7 +162,7 @@ fn process_words<const WITH_BG: bool>(
 ///
 /// Sets bit `i` to 1 where `pixels[i] > background[i] + sigma * noise[i]`.
 ///
-/// Uses SIMD acceleration when available (SSE4.1 on x86_64, NEON on aarch64).
+/// Uses SIMD acceleration when available (AVX2/SSE4.1 on x86_64, NEON on aarch64).
 /// Writes directly to packed u64 words for better memory efficiency.
 ///
 /// Note: All input buffers must have the same dimensions as the mask.
