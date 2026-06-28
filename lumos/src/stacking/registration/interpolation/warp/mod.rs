@@ -3,9 +3,11 @@
 //! Runtime dispatch to the best available implementation:
 //! - **Bilinear**: AVX2/SSE4.1 on x86_64, NEON on aarch64, scalar with incremental stepping
 //!   elsewhere
-//! - **Lanczos2/3/4**: Scalar with incremental stepping, fast-path interior bounds skipping,
-//!   const-generic deringing, and a 128-bit SIMD interior kernel — x86_64 AVX2/FMA and aarch64
-//!   NEON, all Lanczos sizes, with the deringing soft-clamp vectorized too
+//! - **Lanczos2/3/4**: incremental stepping, fast-path interior bounds skipping, const-generic
+//!   deringing, and a SIMD interior kernel — x86_64 AVX2/FMA and aarch64 NEON, with the deringing
+//!   soft-clamp vectorized too. On x86 the Lanczos3/4 (SIZE=6/8) kernel is 256-bit (one `__m256`
+//!   load/accumulate per row) and the per-pixel tap weights come from a vector `i32gather` of the
+//!   LUT; SIZE=4 and aarch64 use the 128-bit kernel and scalar weight lookups.
 //!
 //! When SIP distortion correction is active, incremental stepping is disabled
 //! (SIP is nonlinear) and SIMD paths fall back to scalar.
@@ -19,26 +21,20 @@ pub mod sse;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 
+#[cfg(target_arch = "x86_64")]
+use crate::stacking::registration::interpolation::LANCZOS_LUT_RESOLUTION;
+use crate::stacking::registration::interpolation::LanczosLut;
 use crate::stacking::registration::interpolation::WarpParams;
-use crate::stacking::registration::interpolation::get_lanczos_lut;
+use crate::stacking::registration::interpolation::{
+    bilinear_sample, fast_floor_i32, get_lanczos_lut,
+};
 use crate::stacking::registration::transform::WarpTransform;
-use common::Vec2us;
-use glam::{DVec2, IVec2, Vec2};
+use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 
-/// Fast inline floor-to-i32, avoiding libc `floorf` function call.
-///
-/// Truncates toward zero then corrects for negative values.
-/// For `x = -0.5`: `i = 0`, `x < 0.0` is true, result = `-1`. Correct.
-#[inline(always)]
-fn fast_floor_i32(x: f32) -> i32 {
-    let i = x as i32;
-    i - (x < i as f32) as i32
-}
-
-/// Positive/negative weighted contribution accumulators for soft clamping.
-#[allow(dead_code)] // constructed only by the SIMD kernels (x86_64 SSE/AVX, aarch64 NEON)
-#[derive(Debug, Clone, Copy)]
+/// Positive/negative weighted contribution accumulators for soft clamping. Built either by the SIMD
+/// kernels (vectorized) or tap-by-tap via [`SoftClampAccum::accumulate`] in the scalar paths.
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct SoftClampAccum {
     /// Sum of positive weighted values (pixel * weight where result >= 0)
     pub sp: f32,
@@ -48,6 +44,27 @@ pub(crate) struct SoftClampAccum {
     pub wp: f32,
     /// Sum of weights for negative contributions
     pub wn: f32,
+}
+
+impl SoftClampAccum {
+    /// Fold one tap (`v · weight`) into the accumulators. With `DERINGING`, splits by sign for the
+    /// soft clamp; without it, only `sp` (the plain weighted sum) is tracked. Single source of the
+    /// per-tap split shared by both scalar paths (the SIMD kernels vectorize the same logic).
+    #[inline]
+    fn accumulate<const DERINGING: bool>(&mut self, v: f32, weight: f32) {
+        let s = v * weight;
+        if DERINGING {
+            if s < 0.0 {
+                self.sn -= s;
+                self.wn -= weight;
+            } else {
+                self.sp += s;
+                self.wp += weight;
+            }
+        } else {
+            self.sp += s;
+        }
+    }
 }
 
 /// Inverse-map one output row to source coordinates and fill it via `sample`.
@@ -144,30 +161,6 @@ pub(crate) fn warp_row_bilinear_scalar(
     });
 }
 
-use crate::stacking::registration::interpolation::sample_pixel;
-
-/// Bilinear sampling at a single point (f32 coordinates).
-#[inline]
-pub(crate) fn bilinear_sample(input: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
-    let (x, y) = (pos.x, pos.y);
-    let pixels = input.pixels();
-    let dims = Vec2us::new(input.width(), input.height());
-
-    let x0 = fast_floor_i32(x);
-    let y0 = fast_floor_i32(y);
-    let fx = x - x0 as f32;
-    let fy = y - y0 as f32;
-
-    let p00 = sample_pixel(pixels, dims, IVec2::new(x0, y0), border_value);
-    let p10 = sample_pixel(pixels, dims, IVec2::new(x0 + 1, y0), border_value);
-    let p01 = sample_pixel(pixels, dims, IVec2::new(x0, y0 + 1), border_value);
-    let p11 = sample_pixel(pixels, dims, IVec2::new(x0 + 1, y0 + 1), border_value);
-
-    let top = p00 + fx * (p10 - p00);
-    let bottom = p01 + fx * (p11 - p01);
-    top + fy * (bottom - top)
-}
-
 /// PixInsight-style soft clamping for Lanczos deringing.
 ///
 /// Tracks positive (`sp`) and negative (`sn`) weighted contributions separately.
@@ -202,8 +195,9 @@ fn soft_clamp(sp: f32, sn: f32, wp: f32, wn: f32, th: f32, th_inv: f32) -> f32 {
 /// 2. PixInsight-style soft clamping (positive/negative contribution tracking)
 /// 3. Incremental source coordinate stepping (avoid per-pixel matrix multiply)
 /// 4. Fast-path for interior pixels (skip bounds checks, use direct row pointers)
-/// 5. `lookup_positive()` — skips abs() and bounds check in LUT lookup
-/// 6. 128-bit SIMD interior fast path: x86_64 AVX2/FMA, aarch64 NEON (all Lanczos sizes)
+/// 5. SIMD tap-weight computation: x86 gathers the LUT for Lanczos3/4; otherwise scalar lookups
+/// 6. SIMD interior fast path: x86_64 AVX2/FMA (256-bit for Lanczos3/4, 128-bit for Lanczos2),
+///    aarch64 NEON (128-bit, all sizes)
 pub(crate) fn warp_row_lanczos(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
@@ -229,6 +223,25 @@ pub(crate) fn warp_row_lanczos(
     }
 }
 
+/// Scalar Lanczos tap weights for fractional offset `frac` (non-x86 / no-AVX2 fallback for
+/// [`sse::lanczos_weights_gather`]). Same distance convention as the gather helper.
+#[inline]
+fn lanczos_weights_scalar<const A: usize, const SIZE: usize>(
+    lut: &LanczosLut,
+    a_minus_1: i32,
+    frac: f32,
+) -> [f32; SIZE] {
+    let mut w = [0.0f32; SIZE];
+    for (i, wi) in w.iter_mut().enumerate() {
+        *wi = if i < A {
+            lut.lookup_positive((a_minus_1 - i as i32) as f32 + frac)
+        } else {
+            lut.lookup_positive((i as i32 - a_minus_1) as f32 - frac)
+        };
+    }
+    w
+}
+
 fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bool>(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
@@ -248,6 +261,24 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
 
     #[cfg(target_arch = "x86_64")]
     let use_fma = cpu_features::has_avx2_fma();
+
+    // Per-tap distance affine `dist[i] = base[i] + sign[i]·frac` for the SIMD weight gather (x86).
+    // Lanes `SIZE..8` stay zero → index 0 (in-bounds dummy). Loop-invariant in A/SIZE — built once.
+    #[cfg(target_arch = "x86_64")]
+    let (lut_base, lut_sign) = {
+        let mut base = [0.0f32; 8];
+        let mut sign = [0.0f32; 8];
+        for i in 0..SIZE {
+            if i < A {
+                base[i] = (a_minus_1 - i as i32) as f32;
+                sign[i] = 1.0;
+            } else {
+                base[i] = (i as i32 - a_minus_1) as f32;
+                sign[i] = -1.0;
+            }
+        }
+        (base, sign)
+    };
 
     // Pre-compute clamping threshold parameters (only used when DERINGING=true)
     let clamp_th = params.method.deringing().clamp(0.0, 1.0);
@@ -284,36 +315,38 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
         let kx0 = x0 - a_minus_1;
         let ky0 = y0 - a_minus_1;
 
-        // Compute kernel weights using lookup_positive() (no abs, no bounds check).
-        // For i < A: distance = (A-1-i) + fx ∈ [0, A), non-negative
-        // For i ≥ A: distance = (i - A+1) + (1-fx) ∈ (0, A], non-negative
-        let mut wx = [0.0f32; SIZE];
-        let mut wy = [0.0f32; SIZE];
-        for i in 0..SIZE {
-            wx[i] = if i < A {
-                lut.lookup_positive((a_minus_1 - i as i32) as f32 + fx)
-            } else {
-                lut.lookup_positive((i as i32 - a_minus_1) as f32 - fx)
-            };
-            wy[i] = if i < A {
-                lut.lookup_positive((a_minus_1 - i as i32) as f32 + fy)
-            } else {
-                lut.lookup_positive((i as i32 - a_minus_1) as f32 - fy)
-            };
-        }
+        // Kernel weights. For i < A: distance = (A-1-i) + frac ∈ [0, A); for i ≥ A:
+        // distance = (i - A+1) - frac ∈ (0, A] — both non-negative, so `lookup_positive`.
+        // Gather pays off only when ≥ 6 taps amortize the 8-wide gather; SIZE=4 (Lanczos2) stays
+        // scalar (the gather measured ~6% slower there). `SIZE > 4` is const.
+        #[cfg(target_arch = "x86_64")]
+        let (wx, wy): ([f32; SIZE], [f32; SIZE]) = if use_fma && SIZE > 4 {
+            let res = LANCZOS_LUT_RESOLUTION as f32;
+            let ptr = lut.values.as_ptr();
+            unsafe {
+                (
+                    sse::lanczos_weights_gather::<SIZE>(ptr, &lut_base, &lut_sign, res, fx),
+                    sse::lanczos_weights_gather::<SIZE>(ptr, &lut_base, &lut_sign, res, fy),
+                )
+            }
+        } else {
+            (
+                lanczos_weights_scalar::<A, SIZE>(lut, a_minus_1, fx),
+                lanczos_weights_scalar::<A, SIZE>(lut, a_minus_1, fy),
+            )
+        };
+        #[cfg(not(target_arch = "x86_64"))]
+        let (wx, wy): ([f32; SIZE], [f32; SIZE]) = (
+            lanczos_weights_scalar::<A, SIZE>(lut, a_minus_1, fx),
+            lanczos_weights_scalar::<A, SIZE>(lut, a_minus_1, fy),
+        );
 
         // Only the non-deringing path divides by the full-kernel weight; deringing normalizes
         // inside `soft_clamp`. `DERINGING` is const, so this block vanishes when it's true.
         let inv_total = if DERINGING {
             1.0 // unused
         } else {
-            let mut wx_sum = 0.0f32;
-            let mut wy_sum = 0.0f32;
-            for i in 0..SIZE {
-                wx_sum += wx[i];
-                wy_sum += wy[i];
-            }
-            let total_sum = wx_sum * wy_sum;
+            let total_sum = wx.iter().sum::<f32>() * wy.iter().sum::<f32>();
             if total_sum.abs() > 1e-10 {
                 1.0 / total_sum
             } else {
@@ -321,10 +354,10 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
             }
         };
 
-        // SIMD fast path (x86_64 AVX2+FMA / aarch64 NEON — both 128-bit, 4-wide): needs all SIZE
-        // rows and enough columns for the 128-bit loads.
-        // SIZE=4: reads 4 floats/row (one vector), needs kx0 + 3 < iw
-        // SIZE=6/8: reads 8 floats/row (two vectors, SIZE=6 zero-pads 2), needs kx0 + 7 < iw
+        // SIMD fast path (x86_64 AVX2+FMA / aarch64 NEON): needs all SIZE rows and enough columns for
+        // the loads. x86 Lanczos3/4 uses one 256-bit (8-wide) load/row; SIZE=4 and NEON use 128-bit.
+        // SIZE=4: reads 4 floats/row, needs kx0 + 3 < iw
+        // SIZE=6/8: reads 8 floats/row (SIZE=6 zero-pads 2), needs kx0 + 7 < iw
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         {
             let simd_cols: i32 = if SIZE > 4 { 8 } else { SIZE as i32 };
@@ -381,33 +414,18 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
             let ky = ky0 as usize;
             let w = input_width;
 
-            let mut sp = 0.0f32;
-            let mut sn = 0.0f32;
-            let mut wp = 0.0f32;
-            let mut wn = 0.0f32;
+            let mut acc = SoftClampAccum::default();
             for (j, &wyj) in wy.iter().enumerate() {
                 let row_off = (ky + j) * w + kx;
                 for (k, &wxk) in wx.iter().enumerate() {
                     let v = unsafe { *pixels.get_unchecked(row_off + k) };
-                    let weight = wxk * wyj;
-                    let s = v * weight;
-                    if DERINGING {
-                        if s < 0.0 {
-                            sn -= s;
-                            wn -= weight;
-                        } else {
-                            sp += s;
-                            wp += weight;
-                        }
-                    } else {
-                        sp += s;
-                    }
+                    acc.accumulate::<DERINGING>(v, wxk * wyj);
                 }
             }
             *out_pixel = if DERINGING {
-                soft_clamp(sp, sn, wp, wn, clamp_th, clamp_th_inv)
+                soft_clamp(acc.sp, acc.sn, acc.wp, acc.wn, clamp_th, clamp_th_inv)
             } else {
-                sp * inv_total
+                acc.sp * inv_total
             };
         } else {
             // Slow path: border pixels. Out-of-bounds taps are dropped (not substituted
@@ -415,10 +433,7 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
             // edge pixels get the true in-bounds weighted average instead of being darkened
             // by the missing taps. `inv_total` (the full-kernel reciprocal) is wrong here
             // because it divides by the out-of-bounds weight too.
-            let mut sp = 0.0f32;
-            let mut sn = 0.0f32;
-            let mut wp = 0.0f32;
-            let mut wn = 0.0f32;
+            let mut acc = SoftClampAccum::default();
             let mut w_in = 0.0f32;
             for (j, &wyj) in wy.iter().enumerate() {
                 let py = ky0 + j as i32;
@@ -434,26 +449,15 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
                     let v = unsafe { *pixels.get_unchecked(row_off + px as usize) };
                     let weight = wxi * wyj;
                     w_in += weight;
-                    let s = v * weight;
-                    if DERINGING {
-                        if s < 0.0 {
-                            sn -= s;
-                            wn -= weight;
-                        } else {
-                            sp += s;
-                            wp += weight;
-                        }
-                    } else {
-                        sp += s;
-                    }
+                    acc.accumulate::<DERINGING>(v, weight);
                 }
             }
             *out_pixel = if w_in.abs() < 1e-10 {
                 border_value
             } else if DERINGING {
-                soft_clamp(sp, sn, wp, wn, clamp_th, clamp_th_inv)
+                soft_clamp(acc.sp, acc.sn, acc.wp, acc.wn, clamp_th, clamp_th_inv)
             } else {
-                sp / w_in
+                acc.sp / w_in
             };
         }
 

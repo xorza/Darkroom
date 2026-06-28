@@ -1,9 +1,10 @@
 //! ARM NEON implementations of the bilinear + Lanczos row-warp kernels.
 //!
-//! 128-bit (4-wide f32) twins of the AVX2/SSE kernels in [`crate::stacking::registration::interpolation::warp::sse`]. The Lanczos kernel mirrors
-//! [`crate::stacking::registration::interpolation::warp::sse::lanczos_kernel_fma`] almost 1:1 — that "FMA" path is itself 128-bit SSE, so NEON's
-//! `float32x4_t` + `vfmaq_f32` + horizontal `vaddvq_f32` map directly. NEON is mandatory on
-//! aarch64, so these need no runtime feature check; the caller dispatches on `cfg(target_arch)`.
+//! 128-bit (4-wide f32) counterparts of the x86 kernels in
+//! [`crate::stacking::registration::interpolation::warp::sse`]. For SIZE>4 the x86 Lanczos kernel is
+//! 256-bit (one `__m256`/row); NEON has no 256-bit, so it processes the same window as a 128-bit
+//! lo+hi pair (`float32x4_t` + `vfmaq_f32` + horizontal `vaddvq_f32`). NEON is mandatory on aarch64,
+//! so these need no runtime feature check; the caller dispatches on `cfg(target_arch)`.
 
 #![allow(clippy::needless_range_loop)] // indices drive pointer arithmetic over the pixel window
 
@@ -13,8 +14,8 @@ use common::Vec2us;
 use glam::{DVec2, IVec2, Vec2};
 use imaginarium::Buffer2;
 
-use crate::stacking::registration::interpolation::sample_pixel;
-use crate::stacking::registration::interpolation::warp::{SoftClampAccum, bilinear_sample};
+use crate::stacking::registration::interpolation::warp::SoftClampAccum;
+use crate::stacking::registration::interpolation::{bilinear_sample, sample_pixel};
 use crate::stacking::registration::transform::Transform;
 
 /// Warp a row using NEON bilinear interpolation, 4 output pixels at a time.
@@ -107,8 +108,9 @@ pub unsafe fn warp_row_bilinear_neon(
     }
 }
 
-/// NEON twin of [`crate::stacking::registration::interpolation::warp::sse::lanczos_kernel_fma`]: separable Lanczos over a `SIZE×SIZE` window with
-/// optional PixInsight-style soft-clamp deringing (positive/negative contributions split).
+/// NEON counterpart of [`crate::stacking::registration::interpolation::warp::sse::lanczos_kernel_fma`]:
+/// separable Lanczos over a `SIZE×SIZE` window with optional PixInsight-style soft-clamp deringing
+/// (positive/negative contributions split). 128-bit lo+hi where the x86 kernel is 256-bit (SIZE>4).
 ///
 /// # Safety
 /// - Caller must be on aarch64.

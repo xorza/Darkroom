@@ -58,7 +58,7 @@ fn lanczos_kernel_compute(x: f32, a: f32) -> f32 {
 
 #[derive(Debug)]
 pub(crate) struct LanczosLut {
-    values: Vec<f32>,
+    pub(crate) values: Vec<f32>,
     a: usize,
 }
 
@@ -149,25 +149,29 @@ pub(crate) fn sample_pixel(data: &[f32], dims: Vec2us, coord: IVec2, border_valu
     }
 }
 
-#[inline]
-fn interpolate_nearest(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
-    sample_pixel(
-        data.pixels(),
-        Vec2us::new(data.width(), data.height()),
-        IVec2::new(pos.x.round() as i32, pos.y.round() as i32),
-        border_value,
-    )
+/// Fast inline floor-to-i32, avoiding a libc `floorf` call.
+///
+/// Truncates toward zero then corrects for negatives: for `x = -0.5`, `i = 0`, `x < 0.0` so result
+/// `-1`. Correct for the finite source coordinates the warp paths produce.
+#[inline(always)]
+pub(crate) fn fast_floor_i32(x: f32) -> i32 {
+    let i = x as i32;
+    i - (x < i as f32) as i32
 }
 
+/// Bilinear sample at a single point. The per-pixel primitive shared by the scalar bilinear row path,
+/// the SIMD bilinear backends' border/tail handling, and the test oracle.
 #[inline]
-fn interpolate_bilinear(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
+pub(crate) fn bilinear_sample(input: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
     let (x, y) = (pos.x, pos.y);
-    let x0 = x.floor() as i32;
-    let y0 = y.floor() as i32;
+    let pixels = input.pixels();
+    let dims = Vec2us::new(input.width(), input.height());
+
+    let x0 = fast_floor_i32(x);
+    let y0 = fast_floor_i32(y);
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
-    let (pixels, dims) = (data.pixels(), Vec2us::new(data.width(), data.height()));
     let p00 = sample_pixel(pixels, dims, IVec2::new(x0, y0), border_value);
     let p10 = sample_pixel(pixels, dims, IVec2::new(x0 + 1, y0), border_value);
     let p01 = sample_pixel(pixels, dims, IVec2::new(x0, y0 + 1), border_value);
@@ -176,6 +180,16 @@ fn interpolate_bilinear(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f3
     let top = p00 + fx * (p10 - p00);
     let bottom = p01 + fx * (p11 - p01);
     top + fy * (bottom - top)
+}
+
+#[inline]
+fn interpolate_nearest(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
+    sample_pixel(
+        data.pixels(),
+        Vec2us::new(data.width(), data.height()),
+        IVec2::new(pos.x.round() as i32, pos.y.round() as i32),
+        border_value,
+    )
 }
 
 fn interpolate_bicubic(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
@@ -218,6 +232,9 @@ fn interpolate_bicubic(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32
     }
 }
 
+/// Per-pixel Lanczos sampler. The production warp uses the optimized row path
+/// ([`warp::warp_row_lanczos`]); this is the readable reference the row path is validated against.
+#[cfg(test)]
 #[inline]
 fn interpolate_lanczos(data: &Buffer2<f32>, pos: Vec2, a: usize, border_value: f32) -> f32 {
     match a {
@@ -228,6 +245,7 @@ fn interpolate_lanczos(data: &Buffer2<f32>, pos: Vec2, a: usize, border_value: f
     }
 }
 
+#[cfg(test)]
 #[inline]
 fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
     data: &Buffer2<f32>,
@@ -281,11 +299,14 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
     }
 }
 
-#[inline]
+/// Per-pixel sampler for any method — the reference oracle the optimized row paths
+/// ([`warp_image`]) are validated against. Production samples Nearest/Bicubic directly and uses the
+/// SIMD row paths for Bilinear/Lanczos, so this dispatcher itself is test-only.
+#[cfg(test)]
 fn interpolate(data: &Buffer2<f32>, pos: Vec2, params: &WarpParams) -> f32 {
     match params.method {
         InterpolationMethod::Nearest => interpolate_nearest(data, pos, params.border_value),
-        InterpolationMethod::Bilinear => interpolate_bilinear(data, pos, params.border_value),
+        InterpolationMethod::Bilinear => bilinear_sample(data, pos, params.border_value),
         InterpolationMethod::Bicubic => interpolate_bicubic(data, pos, params.border_value),
         InterpolationMethod::Lanczos2 { .. } => {
             interpolate_lanczos(data, pos, 2, params.border_value)
@@ -436,9 +457,19 @@ pub(crate) fn warp_image(
             } else if params.method.lanczos_param().is_some() {
                 warp::warp_row_lanczos(input, row, y, warp_transform, params);
             } else {
-                warp::warp_row_with(y, warp_transform, row, |pos| {
-                    interpolate(input, pos, params)
-                });
+                // Nearest / Bicubic have no dedicated row path. Dispatch once per row (not per pixel)
+                // and sample point-by-point; Bilinear and Lanczos are handled above.
+                let border = params.border_value;
+                match params.method {
+                    InterpolationMethod::Bicubic => {
+                        warp::warp_row_with(y, warp_transform, row, |pos| {
+                            interpolate_bicubic(input, pos, border)
+                        })
+                    }
+                    _ => warp::warp_row_with(y, warp_transform, row, |pos| {
+                        interpolate_nearest(input, pos, border)
+                    }),
+                }
             }
         });
 }

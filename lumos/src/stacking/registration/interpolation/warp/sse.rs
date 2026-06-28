@@ -147,11 +147,7 @@ pub unsafe fn warp_row_bilinear_avx2(
         let remainder_start = chunks * 8;
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
-            output_row[x] = crate::stacking::registration::interpolation::warp::bilinear_sample(
-                input,
-                Vec2::new(src.x as f32, src.y as f32),
-                0.0,
-            );
+            output_row[x] = bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }
@@ -275,23 +271,19 @@ pub unsafe fn warp_row_bilinear_sse(
         let remainder_start = chunks * 4;
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
-            output_row[x] = crate::stacking::registration::interpolation::warp::bilinear_sample(
-                input,
-                Vec2::new(src.x as f32, src.y as f32),
-                0.0,
-            );
+            output_row[x] = bilinear_sample(input, Vec2::new(src.x as f32, src.y as f32), 0.0);
         }
     }
 }
 
-use crate::stacking::registration::interpolation::sample_pixel;
+use crate::stacking::registration::interpolation::{bilinear_sample, sample_pixel};
 
 /// Compute the Lanczos SIZE×SIZE weighted sum for a single pixel using SSE FMA.
 ///
 /// Generic over kernel size: Lanczos2 (SIZE=4), Lanczos3 (SIZE=6), Lanczos4 (SIZE=8).
 /// - SIZE=4: single `__m128` (4 weights), one 128-bit load per row
-/// - SIZE=6: two `__m128` (4+2 weights, 2 zero-padded), two 128-bit loads per row
-/// - SIZE=8: two `__m128` (4+4 weights), two 128-bit loads per row
+/// - SIZE=6: one `__m256` (6 weights + 2 zero-padded lanes), one 256-bit load per row
+/// - SIZE=8: one `__m256` (8 weights), one 256-bit load per row
 ///
 /// When `DERINGING=true`, tracks positive and negative weighted contributions
 /// separately for PixInsight-style soft clamping.
@@ -313,101 +305,147 @@ pub unsafe fn lanczos_kernel_fma<const A: usize, const SIZE: usize, const DERING
     wx: &[f32; SIZE],
     wy: &[f32; SIZE],
 ) -> SoftClampAccum {
-    // Pre-load wx weights into SSE registers (constant across all rows)
+    // SIZE > 4 (Lanczos3=6, Lanczos4=8): one 256-bit (8-wide) load + accumulate per row. SIZE=6
+    // zero-pads the top 2 lanes of wx, so their products contribute 0 to every accumulator. SIZE=4
+    // stays 128-bit below — 256-bit would waste half the register. `SIZE > 4` is const, so the dead
+    // branch is eliminated.
+    if SIZE > 4 {
+        let wx_lo = _mm_loadu_ps(wx.as_ptr());
+        let wx_hi = if SIZE == 8 {
+            _mm_loadu_ps(wx.as_ptr().add(4))
+        } else {
+            _mm_setr_ps(wx[4], wx[5], 0.0, 0.0)
+        };
+        let wx256 = _mm256_insertf128_ps(_mm256_castps128_ps256(wx_lo), wx_hi, 1);
+
+        let zero = _mm256_setzero_ps();
+        let mut acc = zero;
+        let (mut sp, mut sn, mut wp, mut wn) = (zero, zero, zero, zero);
+
+        for j in 0..SIZE {
+            let row_ptr = pixels.as_ptr().add((ky + j) * input_width + kx);
+            let src = _mm256_loadu_ps(row_ptr);
+            let wyj = _mm256_set1_ps(wy[j]);
+
+            if DERINGING {
+                let w = _mm256_mul_ps(wx256, wyj);
+                let s = _mm256_mul_ps(src, w);
+                // For finite `s`, `s < 0` is exactly `!(s >= 0)`, so the negative lanes are
+                // `andnot(pos, ·)` — one compare/row instead of two (matches the NEON kernel).
+                let pos = _mm256_cmp_ps::<_CMP_GE_OQ>(s, zero);
+                sp = _mm256_add_ps(sp, _mm256_and_ps(pos, s));
+                wp = _mm256_add_ps(wp, _mm256_and_ps(pos, w));
+                sn = _mm256_sub_ps(sn, _mm256_andnot_ps(pos, s));
+                wn = _mm256_sub_ps(wn, _mm256_andnot_ps(pos, w));
+            } else {
+                let sx = _mm256_mul_ps(src, wx256);
+                acc = _mm256_fmadd_ps(sx, wyj, acc);
+            }
+        }
+
+        return if DERINGING {
+            SoftClampAccum {
+                sp: hsum256_ps(sp),
+                sn: hsum256_ps(sn),
+                wp: hsum256_ps(wp),
+                wn: hsum256_ps(wn),
+            }
+        } else {
+            SoftClampAccum {
+                sp: hsum256_ps(acc),
+                sn: 0.0,
+                wp: 0.0,
+                wn: 0.0,
+            }
+        };
+    }
+
+    // SIZE = 4 (Lanczos2): single 128-bit load + accumulate per row.
     let wx_lo = _mm_loadu_ps(wx.as_ptr());
-    let wx_hi = if SIZE == 8 {
-        _mm_loadu_ps(wx.as_ptr().add(4))
-    } else if SIZE == 6 {
-        _mm_setr_ps(wx[4], wx[5], 0.0, 0.0)
-    } else {
-        _mm_setzero_ps()
-    };
-
     let zero = _mm_setzero_ps();
-    let mut acc_lo = zero;
-    let mut acc_hi = zero;
-
-    // Positive/negative contribution accumulators for soft clamping
-    let mut sp_lo = zero;
-    let mut sp_hi = zero;
-    let mut sn_lo = zero;
-    let mut sn_hi = zero;
-    let mut wp_lo = zero;
-    let mut wp_hi = zero;
-    let mut wn_lo = zero;
-    let mut wn_hi = zero;
+    let mut acc = zero;
+    let (mut sp, mut sn, mut wp, mut wn) = (zero, zero, zero, zero);
 
     for j in 0..SIZE {
         let row_ptr = pixels.as_ptr().add((ky + j) * input_width + kx);
-        let src_lo = _mm_loadu_ps(row_ptr);
+        let src = _mm_loadu_ps(row_ptr);
         let wyj = _mm_set1_ps(wy[j]);
 
         if DERINGING {
-            let w_lo = _mm_mul_ps(wx_lo, wyj);
-            let s_lo = _mm_mul_ps(src_lo, w_lo);
-
-            let pos_lo = _mm_cmpge_ps(s_lo, zero);
-            let neg_lo = _mm_cmplt_ps(s_lo, zero);
-            sp_lo = _mm_add_ps(sp_lo, _mm_and_ps(pos_lo, s_lo));
-            wp_lo = _mm_add_ps(wp_lo, _mm_and_ps(pos_lo, w_lo));
-            sn_lo = _mm_sub_ps(sn_lo, _mm_and_ps(neg_lo, s_lo));
-            wn_lo = _mm_sub_ps(wn_lo, _mm_and_ps(neg_lo, w_lo));
-
-            if SIZE > 4 {
-                let src_hi = _mm_loadu_ps(row_ptr.add(4));
-                let w_hi = _mm_mul_ps(wx_hi, wyj);
-                let s_hi = _mm_mul_ps(src_hi, w_hi);
-
-                let pos_hi = _mm_cmpge_ps(s_hi, zero);
-                let neg_hi = _mm_cmplt_ps(s_hi, zero);
-                sp_hi = _mm_add_ps(sp_hi, _mm_and_ps(pos_hi, s_hi));
-                wp_hi = _mm_add_ps(wp_hi, _mm_and_ps(pos_hi, w_hi));
-                sn_hi = _mm_sub_ps(sn_hi, _mm_and_ps(neg_hi, s_hi));
-                wn_hi = _mm_sub_ps(wn_hi, _mm_and_ps(neg_hi, w_hi));
-            }
+            let w = _mm_mul_ps(wx_lo, wyj);
+            let s = _mm_mul_ps(src, w);
+            // Negative lanes via `andnot(pos, ·)` — one compare/row (see the 256-bit path above).
+            let pos = _mm_cmpge_ps(s, zero);
+            sp = _mm_add_ps(sp, _mm_and_ps(pos, s));
+            wp = _mm_add_ps(wp, _mm_and_ps(pos, w));
+            sn = _mm_sub_ps(sn, _mm_andnot_ps(pos, s));
+            wn = _mm_sub_ps(wn, _mm_andnot_ps(pos, w));
         } else {
-            let sx_lo = _mm_mul_ps(src_lo, wx_lo);
-            acc_lo = _mm_fmadd_ps(sx_lo, wyj, acc_lo);
-
-            if SIZE > 4 {
-                let src_hi = _mm_loadu_ps(row_ptr.add(4));
-                let sx_hi = _mm_mul_ps(src_hi, wx_hi);
-                acc_hi = _mm_fmadd_ps(sx_hi, wyj, acc_hi);
-            }
+            let sx = _mm_mul_ps(src, wx_lo);
+            acc = _mm_fmadd_ps(sx, wyj, acc);
         }
     }
 
     if DERINGING {
-        if SIZE > 4 {
-            SoftClampAccum {
-                sp: hsum_ps(_mm_add_ps(sp_lo, sp_hi)),
-                sn: hsum_ps(_mm_add_ps(sn_lo, sn_hi)),
-                wp: hsum_ps(_mm_add_ps(wp_lo, wp_hi)),
-                wn: hsum_ps(_mm_add_ps(wn_lo, wn_hi)),
-            }
-        } else {
-            SoftClampAccum {
-                sp: hsum_ps(sp_lo),
-                sn: hsum_ps(sn_lo),
-                wp: hsum_ps(wp_lo),
-                wn: hsum_ps(wn_lo),
-            }
-        }
-    } else if SIZE > 4 {
         SoftClampAccum {
-            sp: hsum_ps(_mm_add_ps(acc_lo, acc_hi)),
-            sn: 0.0,
-            wp: 0.0,
-            wn: 0.0,
+            sp: hsum_ps(sp),
+            sn: hsum_ps(sn),
+            wp: hsum_ps(wp),
+            wn: hsum_ps(wn),
         }
     } else {
         SoftClampAccum {
-            sp: hsum_ps(acc_lo),
+            sp: hsum_ps(acc),
             sn: 0.0,
             wp: 0.0,
             wn: 0.0,
         }
     }
+}
+
+/// Horizontal sum of 8 floats in an AVX register.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[inline]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn hsum256_ps(v: __m256) -> f32 {
+    let lo = _mm256_castps256_ps128(v);
+    let hi = _mm256_extractf128_ps::<1>(v);
+    hsum_ps(_mm_add_ps(lo, hi))
+}
+
+/// Compute the `SIZE` separable Lanczos tap weights for fractional offset `frac` via one SIMD
+/// distance/index calc + a single `i32gather` from the LUT, replacing `SIZE` scalar `lookup_positive`
+/// calls. `base`/`sign` encode the per-tap distance affine `dist[i] = base[i] + sign[i]·frac` (lanes
+/// `SIZE..8` are zeroed → index 0, an in-bounds dummy gather). Bit-exact with `lookup_positive`:
+/// `cvtt(dist·RES + 0.5)` truncates exactly as `(x·RES + 0.5) as usize`.
+///
+/// # Safety
+/// AVX2 must be available. `lut_values` must point to a LUT with `≥ A·RES + 1` entries (so every
+/// real lane's index `∈ [0, A·RES]` is in bounds).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[inline]
+#[allow(unsafe_op_in_unsafe_fn)]
+pub unsafe fn lanczos_weights_gather<const SIZE: usize>(
+    lut_values: *const f32,
+    base: &[f32; 8],
+    sign: &[f32; 8],
+    resolution: f32,
+    frac: f32,
+) -> [f32; SIZE] {
+    let base_v = _mm256_loadu_ps(base.as_ptr());
+    let sign_v = _mm256_loadu_ps(sign.as_ptr());
+    let dist = _mm256_fmadd_ps(sign_v, _mm256_set1_ps(frac), base_v);
+    let scaled = _mm256_fmadd_ps(dist, _mm256_set1_ps(resolution), _mm256_set1_ps(0.5));
+    let idx = _mm256_cvttps_epi32(scaled);
+    let gathered = _mm256_i32gather_ps::<4>(lut_values, idx);
+
+    let mut tmp = [0.0f32; 8];
+    _mm256_storeu_ps(tmp.as_mut_ptr(), gathered);
+    let mut out = [0.0f32; SIZE];
+    out.copy_from_slice(&tmp[..SIZE]);
+    out
 }
 
 /// Horizontal sum of 4 floats in an SSE register.
