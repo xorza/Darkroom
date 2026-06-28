@@ -28,9 +28,9 @@ use common::Rgb;
 use rayon::prelude::*;
 
 use crate::image_ops::op::{OpError, ensure, require_f32_master};
-use crate::image_ops::{intensity_plane, par_map_pixels};
+use crate::image_ops::par_map_pixels;
 use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
-use imaginarium::Image;
+use imaginarium::{ChannelCount, Image};
 
 #[cfg(test)]
 mod bench;
@@ -147,9 +147,8 @@ impl Stretch {
         match self.color {
             ColorMode::ColorPreserving => {
                 // Auto methods derive the curve from the combined intensity (one curve for the image).
-                let curve = explicit_curve(self.method).unwrap_or_else(|| {
-                    build_curve(&mut subsample(intensity_plane(image).pixels()), self.method)
-                });
+                let curve = explicit_curve(self.method)
+                    .unwrap_or_else(|| build_curve(&mut subsample_intensity(image), self.method));
                 apply_color_preserving_image(image, curve);
             }
             ColorMode::PerChannel => apply_per_channel_image(image, self.method),
@@ -248,9 +247,29 @@ fn explicit_curve(method: StretchMethod) -> Option<Curve> {
 /// and avoids two full-resolution quickselects (matches `color_calibration` / `denoise`).
 const MAX_STRETCH_SAMPLES: usize = 1_000_000;
 
-fn subsample(pixels: &[f32]) -> Vec<f32> {
-    let stride = (pixels.len() / MAX_STRETCH_SAMPLES).max(1);
-    pixels.iter().step_by(stride).copied().collect()
+/// Uniform-stride subsample of the combined intensity `I = (r+g+b)/3` (the sample itself for mono),
+/// computed directly from the interleaved image — never materializing the full intensity plane just
+/// to throw all but every `stride`-th value away. Identical samples to subsampling [`intensity_plane`].
+fn subsample_intensity(image: &Image) -> Vec<f32> {
+    let samples: &[f32] = bytemuck::cast_slice(image.bytes());
+    if image.desc.color_format.channel_count == ChannelCount::Rgb {
+        let stride = (samples.len() / 3 / MAX_STRETCH_SAMPLES).max(1);
+        samples
+            .chunks_exact(3)
+            .step_by(stride)
+            .map(|px| {
+                Rgb {
+                    r: px[0],
+                    g: px[1],
+                    b: px[2],
+                }
+                .intensity()
+            })
+            .collect()
+    } else {
+        let stride = (samples.len() / MAX_STRETCH_SAMPLES).max(1);
+        samples.iter().step_by(stride).copied().collect()
+    }
 }
 
 /// A prepared tone curve, selected once from the [`StretchMethod`]. Implementors clamp their
