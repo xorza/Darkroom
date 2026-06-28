@@ -32,7 +32,7 @@ use imaginarium::Buffer2;
 
 /// Configuration for Moffat profile fitting.
 #[derive(Debug, Clone)]
-pub struct MoffatFitConfig {
+pub(crate) struct MoffatFitConfig {
     /// L-M optimization parameters.
     pub lm: LMConfig,
     /// Fixed Moffat β (wing-slope) used for the fit.
@@ -50,7 +50,7 @@ impl Default for MoffatFitConfig {
 
 /// Result of 2D Moffat profile fitting.
 #[derive(Debug, Clone, Copy)]
-pub struct MoffatFitResult {
+pub(crate) struct MoffatFitResult {
     /// Position of profile center (sub-pixel).
     pub pos: Vec2,
     /// Amplitude of profile.
@@ -396,13 +396,13 @@ fn validate_position(result_pos: Vec2, input_pos: Vec2, alpha: f32, stamp_radius
 /// Convert Moffat alpha and beta to FWHM.
 /// FWHM = 2 * alpha * sqrt(2^(1/beta) - 1)
 #[inline]
-pub fn alpha_beta_to_fwhm(alpha: f32, beta: f32) -> f32 {
+pub(crate) fn alpha_beta_to_fwhm(alpha: f32, beta: f32) -> f32 {
     2.0 * alpha * (2.0f32.powf(1.0 / beta) - 1.0).sqrt()
 }
 
 /// Convert FWHM and beta to Moffat alpha.
 /// alpha = FWHM / (2 * sqrt(2^(1/beta) - 1))
 #[inline]
-pub fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
+pub(crate) fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
     fwhm / (2.0 * (2.0f32.powf(1.0 / beta) - 1.0).sqrt())
 }
