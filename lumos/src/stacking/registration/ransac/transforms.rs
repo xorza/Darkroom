@@ -118,23 +118,22 @@ pub(crate) fn estimate_similarity(
     let ref_centroid = centroid(ref_points);
     let tar_centroid = centroid(target_points);
 
-    // Center the points
-    let ref_centered: Vec<DVec2> = ref_points.iter().map(|p| *p - ref_centroid).collect();
-    let tar_centered: Vec<DVec2> = target_points.iter().map(|p| *p - tar_centroid).collect();
-
-    // Compute covariance terms
+    // Cross-covariance terms + ref variance, centering inline (no scratch Vecs — this runs once per
+    // RANSAC iteration). Same accumulation as `estimate_euclidean`, plus `ref_var` for the scale fit.
     let mut sxx = 0.0;
     let mut sxy = 0.0;
     let mut syx = 0.0;
     let mut syy = 0.0;
     let mut ref_var = 0.0;
 
-    for (r, t) in ref_centered.iter().zip(tar_centered.iter()) {
-        sxx += r.x * t.x;
-        sxy += r.x * t.y;
-        syx += r.y * t.x;
-        syy += r.y * t.y;
-        ref_var += r.length_squared();
+    for (r, t) in ref_points.iter().zip(target_points.iter()) {
+        let rc = *r - ref_centroid;
+        let tc = *t - tar_centroid;
+        sxx += rc.x * tc.x;
+        sxy += rc.x * tc.y;
+        syx += rc.y * tc.x;
+        syy += rc.y * tc.y;
+        ref_var += rc.length_squared();
     }
 
     if ref_var < 1e-10 {

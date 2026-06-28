@@ -504,7 +504,8 @@ fn weighted_sample_into<R: Rng>(
     // `scratch` is reused across iterations to avoid a per-iteration allocation.
     scratch.clear();
     scratch.extend(pool.iter().map(|&idx| {
-        let w = weights.get(idx).copied().unwrap_or(1.0).max(0.001);
+        // `weights` has one entry per point and `idx` indexes the same `0..n` pool, so it can't miss.
+        let w = weights[idx].max(0.001);
         let u: f64 = rng.random();
         let key = u.powf(1.0 / w); // Higher weight = higher expected key
         (idx, key)
