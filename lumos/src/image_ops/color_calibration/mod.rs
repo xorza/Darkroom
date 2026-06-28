@@ -9,9 +9,9 @@
 use common::Rgb;
 use imaginarium::{ChannelCount, Image};
 
+use crate::image_ops::op::{OpError, ensure, require_f32_master};
 use crate::image_ops::par_map_pixels;
 use crate::math::statistics::sigma_clipped_median_mad;
-use crate::op::{OpError, ensure, require_f32_master};
 
 #[cfg(test)]
 mod tests;

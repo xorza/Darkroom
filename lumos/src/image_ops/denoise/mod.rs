@@ -12,10 +12,10 @@
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
+use crate::image_ops::op::{OpError, ensure, require_f32_master};
 use crate::image_ops::process_planes;
+use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
-use crate::op::{OpError, ensure, require_f32_master};
-use crate::wavelet::{atrous_smooth, max_scales};
 use imaginarium::Image;
 
 #[cfg(test)]

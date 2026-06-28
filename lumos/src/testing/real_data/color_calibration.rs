@@ -4,7 +4,7 @@
 
 use common::Rgb;
 
-use crate::color_calibration::channel_backgrounds;
+use crate::image_ops::color_calibration::channel_backgrounds;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{AstroImage, NeutralizeBackground, Scnr, Stretch};
 use imaginarium::Image;

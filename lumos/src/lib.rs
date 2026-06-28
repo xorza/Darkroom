@@ -22,22 +22,12 @@
 //! println!("Found {} stars", result.stars.len());
 //! ```
 
-pub(crate) mod background_extraction;
 pub(crate) mod background_mesh;
-pub(crate) mod color_calibration;
 pub(crate) mod concurrency;
-pub(crate) mod denoise;
-pub(crate) mod hdr;
 pub(crate) mod image_ops;
 pub(crate) mod io;
-pub(crate) mod local_contrast;
 pub(crate) mod math;
-#[cfg(feature = "ml")]
-pub(crate) mod ml;
-pub(crate) mod op;
 pub(crate) mod stacking;
-pub(crate) mod stretching;
-pub(crate) mod wavelet;
 
 #[cfg(test)]
 pub mod testing;
@@ -89,23 +79,23 @@ pub use stacking::drizzle::{
     DrizzleAccumulator, DrizzleConfig, DrizzleKernel, DrizzleResult, drizzle_images, drizzle_stack,
 };
 
-pub use stretching::{ColorMode, Stretch, StretchMethod};
+pub use image_ops::stretching::{ColorMode, Stretch, StretchMethod};
 
-pub use color_calibration::{NeutralizeBackground, Scnr};
+pub use image_ops::color_calibration::{NeutralizeBackground, Scnr};
 
-pub use background_extraction::{BackgroundMode, ExtractBackground};
+pub use image_ops::background_extraction::{BackgroundMode, ExtractBackground};
 
-pub use denoise::{Denoise, Threshold};
+pub use image_ops::denoise::{Denoise, Threshold};
 
-pub use local_contrast::LocalContrast;
+pub use image_ops::local_contrast::LocalContrast;
 
-pub use hdr::Hdr;
+pub use image_ops::hdr::Hdr;
 
-pub use op::OpError;
+pub use image_ops::op::OpError;
 
 #[cfg(feature = "ml")]
-pub use ml::backend::{MlError, TiledOnnxConfig};
+pub use image_ops::ml::backend::{MlError, TiledOnnxConfig};
 #[cfg(feature = "ml")]
-pub use ml::denoise::ml_denoise;
+pub use image_ops::ml::denoise::ml_denoise;
 #[cfg(feature = "ml")]
-pub use ml::star_removal::{StarRemovalResult, remove_stars};
+pub use image_ops::ml::star_removal::{StarRemovalResult, remove_stars};

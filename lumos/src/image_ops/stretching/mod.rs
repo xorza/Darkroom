@@ -27,9 +27,9 @@
 use common::Rgb;
 use rayon::prelude::*;
 
+use crate::image_ops::op::{OpError, ensure, require_f32_master};
 use crate::image_ops::{intensity_plane, par_map_pixels};
 use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
-use crate::op::{OpError, ensure, require_f32_master};
 use imaginarium::Image;
 
 #[cfg(test)]

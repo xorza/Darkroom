@@ -9,8 +9,8 @@
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
+use crate::image_ops::op::{OpError, ensure, require_f32_master};
 use crate::image_ops::remap_intensity;
-use crate::op::{OpError, ensure, require_f32_master};
 use imaginarium::Image;
 
 #[cfg(test)]

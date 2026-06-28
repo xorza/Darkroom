@@ -1,6 +1,6 @@
 use super::*;
 use crate::image_ops::deinterleave_f32;
-use crate::op::OpError;
+use crate::image_ops::op::OpError;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Image {

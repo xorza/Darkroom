@@ -25,19 +25,25 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 
 ## Crate layout
 
-`src/lib.rs` is the only place that `pub use`s — no intermediate re-exports. Source is organized as **features** (`stacking/`, `stretching/`) over shared **foundation** modules (`io/`, `math/`, `concurrency`), so `src/` reads as a short list of top-level concerns and new features drop in as siblings:
+`src/lib.rs` is the only place that `pub use`s — no intermediate re-exports. Source is organized as **features** (`stacking/`, `image_ops/`) over shared **foundation** modules (`io/`, `math/`, `background_mesh/`, `concurrency`), so `src/` reads as a short list of top-level concerns and new features drop in as siblings:
 
 ```
 src/
 ├── stacking/   feature: load → calibrate → detect → register → combine into a stacked master
 │   ├── calibration_masters/   star_detection/   registration/
 │   └── combine/   drizzle/   pipeline/
-├── stretching/ feature: post-stack display — linear master → viewable image (MTF/STF, arcsinh)
+├── image_ops/  feature: in-place display/processing ops on a linear f32 master (imaginarium Image)
+│   ├── mod.rs (par_map_pixels / intensity / interleave helpers)   op.rs (OpError contract)   wavelet/
+│   ├── stretching/ (post-stack display: MTF/STF, arcsinh)   denoise/   hdr/   local_contrast/
+│   └── color_calibration/ (Scnr, NeutralizeBackground)   background_extraction/   ml/ (feature-gated)
 ├── io/         astro_image (container + FITS/standard load) · raw (libraw decode + demosaic)
 ├── math/       robust stats, SIMD sum, DMat3, bbox
+├── background_mesh/  shared SExtractor-style TileGrid (used by star_detection + background_extraction)
 ├── concurrency.rs  UnsafeSendPtr (send raw pointers across rayon closures)
 └── testing/    #[cfg(test)] forward-model synthetic generator + real_data fixtures
 ```
+
+Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hdr`, `LocalContrast`, `ExtractBackground`, `Scnr`, `NeutralizeBackground`, ML denoise/star-removal) with `Default` + builder methods + an in-place `apply(&mut Image) -> Result<(), OpError>`; they share the `op` contract (format/config validation) and the `mod.rs` per-pixel helpers, and the spatial ones lean on `wavelet` (à-trous starlet). The public types are `pub use`d from `lib.rs` unchanged (`lumos::Stretch`, `lumos::Denoise`, …).
 
 | Module | Vis | Role |
 |--------|-----|------|
@@ -48,7 +54,10 @@ src/
 | `stacking::combine` | `pub(crate)` | Multi-frame combination with rejection / normalization / weighting + cache tiers. (Was the old top-level `stacking`.) |
 | `stacking::drizzle` | `pub(crate)` | Fruchter & Hook variable-pixel reconstruction. |
 | `stacking::pipeline` | `pub(crate)` | End-to-end orchestration: `align_and_stack`, `calibrate_align_stack`. |
-| `stretching` | `pub(crate)` (types re-exported) | Post-stack non-linear display stretch: MTF/STF and color-preserving arcsinh. |
+| `image_ops` | `pub(crate)` (types re-exported) | Umbrella for in-place display/processing ops on a linear f32 master; holds the `op` contract, per-pixel/interleave helpers, and `wavelet`. |
+| `image_ops::stretching` | `pub(crate)` (types re-exported) | Post-stack non-linear display stretch: MTF/STF and color-preserving arcsinh. |
+| `image_ops::{denoise, hdr, local_contrast, color_calibration, background_extraction}` | `pub(crate)` (types re-exported) | Wavelet denoise, HDR tone-compression, local contrast, SCNR/background neutralization, gradient background extraction. |
+| `image_ops::ml` | `pub(crate)`, `#[cfg(feature = "ml")]` | ONNX-backed ML denoise + star removal (tiled inference). |
 | `io::astro_image` | `pub(crate)` (types re-exported) | `AstroImage` container, FITS/standard loading, metadata, CFA, sensor detection. |
 | `io::raw` | `pub(crate)` | libraw RAW decode + Bayer (RCD) / X-Trans (Markesteijn) demosaicing. |
 | `math` | `pub(crate)` | `DMat3`, `Aabb`/`BBox`, compensated SIMD `sum`, robust statistics. (`Vec2us` lives in the workspace `common` crate.) |
@@ -135,9 +144,9 @@ src/
 - `DrizzleKernel` (`mod.rs:61`): `Square` (exact polygon clipping via Green's theorem `boxer`/`sgarea`), `Turbo` (axis-aligned, default), `Point`, `Gaussian`, `Lanczos` (valid only at pixfrac=scale=1).
 - `DrizzleAccumulator` (`mod.rs:169`): per-channel flux `Buffer2` (`Σ fluxᵢ·wᵢ`) plus a single shared `weight` (`Σwᵢ`) and `weight_sq` (`Σwᵢ²`) `Buffer2` — the weight is geometric, so it's channel-independent. `add_image` maps each input pixel via `Transform`, distributes flux over the drop footprint with a local Jacobian; `finalize` normalizes `data/weight` against `min_coverage` and emits the coverage/weight/variance maps. Pure CPU + rayon-parallel finalize.
 
-## stretching — non-linear display stretch
+## image_ops::stretching — non-linear display stretch
 
-`Stretch { method, color }.apply(&mut imaginarium::Image) -> Result<(), OpError>` (`stretching/mod.rs`) maps a *linear* stacked master to a display image. Every display/processing op follows this imaginarium-style shape — an op-named config struct (`Stretch`, `Denoise`, `Hdr`, `LocalContrast`, `ExtractBackground`, `Scnr`, `NeutralizeBackground`) with `Default` + builder methods + an `apply(&mut Image)` that validates config + format and operates in place via `image_ops`. `apply` returns [`OpError`] (`UnsupportedFormat` unless `L_F32`/`RGB_F32`; `InvalidConfig` on out-of-range params) instead of panicking. Input may exceed `[0,1]` (a raw stack's bright stars do); every curve clamps, so output is always `[0,1]`. Runs strictly after the linear-domain work (background extraction, color calibration). Algorithm derivations live in `docs/image-stretching.md`.
+`Stretch { method, color }.apply(&mut imaginarium::Image) -> Result<(), OpError>` (`image_ops/stretching/mod.rs`) maps a *linear* stacked master to a display image. Every display/processing op follows this imaginarium-style shape — an op-named config struct (`Stretch`, `Denoise`, `Hdr`, `LocalContrast`, `ExtractBackground`, `Scnr`, `NeutralizeBackground`) with `Default` + builder methods + an `apply(&mut Image)` that validates config + format and operates in place via `image_ops`. `apply` returns [`OpError`] (`UnsupportedFormat` unless `L_F32`/`RGB_F32`; `InvalidConfig` on out-of-range params) instead of panicking. Input may exceed `[0,1]` (a raw stack's bright stars do); every curve clamps, so output is always `[0,1]`. Runs strictly after the linear-domain work (background extraction, color calibration). Algorithm derivations live in `docs/image-stretching.md`.
 
 - `StretchMethod`: `AutoStf{shadow_sigmas, target_background}` (MTF/STF screen-stretch — black point `median − k·σ`, midtones from the MTF self-inverse identity so the rescaled median lands on the target), `AutoAsinh{target_background}` (normalized arcsinh, `β` solved by log-space bisection so the background median maps to the target), `Asinh{beta}` (explicit); constructors `Stretch::{auto_stf, auto_asinh, ghs}`. `Stretch::apply` validates and returns `OpError::InvalidConfig` on out-of-range params.
 - `ColorMode`: `ColorPreserving` (default — stretch the combined intensity `I=(r+g+b)/3`, scale every channel by `f(I)/I` with a hue-preserving highlight cap, so star color survives) or `PerChannel` (independent per-channel auto-stretch — auto-grays the background but ties color to brightness). No effect on grayscale.

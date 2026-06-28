@@ -1,6 +1,6 @@
 use super::*;
 use crate::image_ops::deinterleave_f32;
-use crate::op::OpError;
+use crate::image_ops::op::OpError;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn fill(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {

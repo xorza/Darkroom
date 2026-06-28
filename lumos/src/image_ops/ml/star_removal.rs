@@ -4,8 +4,8 @@
 //! feather-blended) and recovers the stars layer by **unscreen**. A **display-domain** operation:
 //! StarNet expects stretched data in `[0, 1]`, so run it after the stretch.
 
+use crate::image_ops::ml::backend::{MlError, TiledOnnxConfig, run_tiled};
 use crate::image_ops::{deinterleave_f32, interleave_f32};
-use crate::ml::backend::{MlError, TiledOnnxConfig, run_tiled};
 use imaginarium::{Buffer2, Image};
 
 /// The two layers from a star-removal pass.

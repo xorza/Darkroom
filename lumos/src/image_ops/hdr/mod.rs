@@ -3,13 +3,13 @@
 //! Reveal detail in an overexposed bright region (galaxy/nebula cores, Milky-Way star clouds) by
 //! compressing the **large-scale** brightness while preserving fine detail: à trous starlet
 //! decomposition, attenuate the coarse residual toward its mean, leave the detail layers, recombine.
-//! A **display-domain** (post-stretch) operation. Reuses [`crate::wavelet::StarletTransform`].
+//! A **display-domain** (post-stretch) operation. Reuses [`crate::image_ops::wavelet::StarletTransform`].
 
 use rayon::prelude::*;
 
+use crate::image_ops::op::{OpError, ensure, require_f32_master};
 use crate::image_ops::remap_intensity;
-use crate::op::{OpError, ensure, require_f32_master};
-use crate::wavelet::{StarletTransform, max_scales};
+use crate::image_ops::wavelet::{StarletTransform, max_scales};
 use imaginarium::{Buffer2, Image};
 
 #[cfg(test)]

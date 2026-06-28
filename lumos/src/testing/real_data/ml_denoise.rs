@@ -1,7 +1,7 @@
 use super::ml_support::{onnx_weights, stretched_master};
 use crate::image_ops::intensity_plane;
-use crate::ml::backend::TiledOnnxConfig;
-use crate::ml::denoise::ml_denoise;
+use crate::image_ops::ml::backend::TiledOnnxConfig;
+use crate::image_ops::ml::denoise::ml_denoise;
 use crate::testing::{init_tracing, save_png};
 use imaginarium::Image;
 

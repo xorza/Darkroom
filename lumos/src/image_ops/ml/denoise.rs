@@ -5,7 +5,7 @@
 //! data, so feed the stretched `[0,1]` image — mirroring how NoiseXTerminator / GraXpert AI denoise
 //! are applied (after the stretch / channel combination).
 
-use crate::ml::backend::{MlError, TiledOnnxConfig, run_tiled};
+use crate::image_ops::ml::backend::{MlError, TiledOnnxConfig, run_tiled};
 use imaginarium::Image;
 
 /// Denoise a *stretched* (display-domain, `[0, 1]`) image with a caller-supplied ONNX denoiser.

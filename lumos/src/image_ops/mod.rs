@@ -4,11 +4,26 @@
 //! - per-pixel ops and per-channel ops with no 2D structure stay interleaved —
 //!   [`par_map_pixels`] over the samples, an intensity-domain remap
 //!   ([`remap_intensity`]), or a per-channel reduction/curve applied in place (e.g.
-//!   [`crate::color_calibration::neutralize_background`], per-channel
-//!   [`crate::stretching`]);
-//! - only ops with genuine per-channel 2D structure ([`crate::denoise`]'s wavelets,
-//!   [`crate::background_extraction`]'s surface fit) [`deinterleave_f32`] to channel
+//!   [`crate::image_ops::color_calibration::neutralize_background`], per-channel
+//!   [`crate::image_ops::stretching`]);
+//! - only ops with genuine per-channel 2D structure ([`crate::image_ops::denoise`]'s wavelets,
+//!   [`crate::image_ops::background_extraction`]'s surface fit) [`deinterleave_f32`] to channel
 //!   planes, process, and [`interleave_f32`] back.
+//!
+//! The submodules below are the image operations themselves (each an op-named config struct with an
+//! in-place `apply`), plus their shared support: [`op`] (the `OpError` contract) and [`wavelet`]
+//! (the multiscale primitive `denoise`/`hdr` build on).
+
+pub(crate) mod background_extraction;
+pub(crate) mod color_calibration;
+pub(crate) mod denoise;
+pub(crate) mod hdr;
+pub(crate) mod local_contrast;
+#[cfg(feature = "ml")]
+pub(crate) mod ml;
+pub(crate) mod op;
+pub(crate) mod stretching;
+pub(crate) mod wavelet;
 
 use common::Rgb;
 use imaginarium::{Buffer2, ChannelCount, DeinterleavedImageData, Image};
@@ -63,7 +78,7 @@ pub(crate) fn intensity_plane(image: &Image) -> Buffer2<f32> {
 
 /// Enhance an image in its intensity (luminance) domain: take the combined intensity, transform it
 /// with `map`, then rescale every channel hue-preservingly so the new intensity matches. The shape
-/// shared by the display enhancers ([`crate::hdr`], [`crate::local_contrast`]).
+/// shared by the display enhancers ([`crate::image_ops::hdr`], [`crate::image_ops::local_contrast`]).
 pub(crate) fn remap_intensity(image: &mut Image, map: impl FnOnce(&Buffer2<f32>) -> Buffer2<f32>) {
     let intensity = intensity_plane(image);
     let mapped = map(&intensity);
@@ -123,8 +138,8 @@ pub(crate) fn deinterleave_f32(image: &Image) -> Vec<Buffer2<f32>> {
 }
 
 /// Run a per-channel operation that needs contiguous 2D planes: deinterleave the channels, process
-/// them in place, and re-interleave. For the spatial ops ([`crate::denoise`],
-/// [`crate::background_extraction`]) whose per-channel 2D work is cache-friendly on planar data.
+/// them in place, and re-interleave. For the spatial ops ([`crate::image_ops::denoise`],
+/// [`crate::image_ops::background_extraction`]) whose per-channel 2D work is cache-friendly on planar data.
 pub(crate) fn process_planes(image: &mut Image, process: impl FnOnce(&mut [Buffer2<f32>])) {
     let mut planes = deinterleave_f32(image);
     process(&mut planes);

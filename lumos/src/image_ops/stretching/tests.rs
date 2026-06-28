@@ -1,7 +1,7 @@
 use super::*;
 use crate::image_ops::deinterleave_f32;
+use crate::image_ops::op::OpError;
 use crate::math::statistics::median_f32_mut;
-use crate::op::OpError;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {

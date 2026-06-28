@@ -16,9 +16,9 @@ use imaginarium::Buffer2;
 use nalgebra::{DMatrix, DVector};
 
 use crate::background_mesh::TileGrid;
+use crate::image_ops::op::{OpError, ensure, require_f32_master};
 use crate::image_ops::process_planes;
 use crate::math::statistics::MAD_TO_SIGMA;
-use crate::op::{OpError, ensure, require_f32_master};
 use imaginarium::Image;
 
 /// Sigma-clip passes for the per-tile sky estimate (matches the detector's tiled-background default).

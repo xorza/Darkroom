@@ -1,6 +1,6 @@
 use super::{LocalContrast, build_tile_luts};
 use crate::image_ops::deinterleave_f32;
-use crate::op::OpError;
+use crate::image_ops::op::OpError;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
