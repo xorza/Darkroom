@@ -50,11 +50,11 @@ use glam::Vec2;
 use imaginarium::Buffer2;
 
 /// Configuration for Gaussian fitting.
-pub type GaussianFitConfig = LMConfig;
+pub(crate) type GaussianFitConfig = LMConfig;
 
 /// Result of 2D Gaussian fitting.
 #[derive(Debug, Clone, Copy)]
-pub struct GaussianFitResult {
+pub(crate) struct GaussianFitResult {
     /// Position of Gaussian center (sub-pixel).
     pub pos: Vec2,
     /// Amplitude of Gaussian.
