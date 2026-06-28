@@ -296,6 +296,12 @@ pub fn align_and_stack(
 /// within a batch, so the cap costs little throughput.
 const MAX_CONCURRENT_LIGHTS: usize = 4;
 
+/// Rough per-frame working-set estimate, in f32 planes, for memory budgeting: a calibrated/warped
+/// frame plus its in-flight scratch (detection buffers, or a warp's input+output). Used both to
+/// reserve RAM-path scratch headroom in the tier decision and to bound the streaming concurrency.
+/// (Excludes the transient ~10-plane demosaic arena — step 1 of the streaming path can exceed this.)
+const PER_FRAME_WORKING_PLANES: usize = 8;
+
 /// Calibrate, align, and stack raw light frames end to end — the full pipeline in one call.
 ///
 /// For each raw light (in parallel): load it as a `CfaImage`, apply `masters`
@@ -325,13 +331,13 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     })?;
     let plane_bytes = sensor.x * sensor.y * std::mem::size_of::<f32>();
     let warped_bytes = 4 * plane_bytes; // resident warped frame: 3 channels + coverage
-    // The RAM path runs detection/warp at full core count, each concurrent frame holding ~7 planes
-    // of scratch (detection buffers, or a warp's in-flight input+output). Reserve that worst case so
-    // the RAM path is only taken when the *frames and the scratch* fit — otherwise stream, which is
-    // memory-bounded (validated flat-in-N). This prevents a scratch overshoot from OOMing a stack
-    // whose frames alone would fit, on a high-core machine.
+    // The RAM path runs detection/warp at full core count, each concurrent frame holding the
+    // per-frame working set of scratch. Reserve that worst case so the RAM path is only taken when
+    // the *frames and the scratch* fit — otherwise stream, which is memory-bounded (validated
+    // flat-in-N). This prevents a scratch overshoot from OOMing a stack whose frames alone would fit,
+    // on a high-core machine.
     let concurrent = total.min(rayon::current_num_threads());
-    let scratch_reserve = (7 * plane_bytes * concurrent) as u64;
+    let scratch_reserve = (PER_FRAME_WORKING_PLANES * plane_bytes * concurrent) as u64;
     let available = config.stack.cache.get_available_memory();
     let frame_budget = available.saturating_sub(scratch_reserve);
     if !fits_in_memory(warped_bytes, total, frame_budget) {
@@ -465,7 +471,8 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     })?;
     // ~8 planes/frame covers the heaviest in-flight working set (decode + detect scratch); cap the
     // fan-out to that, so a low-RAM machine serialises rather than OOMs.
-    let in_flight_bytes = 8 * sensor.x * sensor.y * std::mem::size_of::<f32>();
+    let in_flight_bytes =
+        PER_FRAME_WORKING_PLANES * sensor.x * sensor.y * std::mem::size_of::<f32>();
     let concurrency =
         compute_load_concurrency(in_flight_bytes, 0, available, rayon::current_num_threads());
 
@@ -538,7 +545,7 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
                 return Ok(None);
             }
             let d = &detected[idx];
-            let calib = image_from_spilled_channels(&d.calibrated, dimensions, &metadata);
+            let calib = image_from_spilled_channels(&d.calibrated, dimensions);
             let base = format!("warped_{idx}");
             let spilled = if idx == reference {
                 // Reference goes in unwarped → fully covered (`coverage: None`).

@@ -1331,13 +1331,12 @@ pub(crate) fn spill_weighted_frame(
 pub(crate) fn image_from_spilled_channels(
     channels: &[Plane],
     dimensions: ImageDimensions,
-    metadata: &AstroImageMetadata,
 ) -> AstroImage {
     let n = dimensions.size.x * dimensions.size.y;
     let planes = channels.iter().map(|p| p.chunk(0, n).to_vec());
-    let mut image = AstroImage::from_planar_channels(dimensions, planes);
-    image.metadata = metadata.clone();
-    image
+    // Metadata stays at the default: this image is only warped then re-spilled, and the spill keeps
+    // channels only — the stacked master's metadata is supplied separately to the combine.
+    AstroImage::from_planar_channels(dimensions, planes)
 }
 
 /// Delete a calibrated frame's spilled channel files once its warp has consumed it (keeps peak temp
