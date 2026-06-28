@@ -14,6 +14,7 @@
 
 use imaginarium::Buffer2;
 use nalgebra::{DMatrix, DVector};
+use rayon::prelude::*;
 
 use crate::background_mesh::TileGrid;
 use crate::image_ops::op::{OpError, ensure, require_f32_master};
@@ -140,9 +141,11 @@ fn extract_background_core(planes: &mut [Buffer2<f32>], config: &ExtractBackgrou
         let model = model_channel(plane, config);
         match config.mode {
             BackgroundMode::Subtract => {
-                for (p, &m) in plane.pixels_mut().iter_mut().zip(model.pixels()) {
-                    *p -= m;
-                }
+                plane
+                    .pixels_mut()
+                    .par_iter_mut()
+                    .zip(model.pixels().par_iter())
+                    .for_each(|(p, &m)| *p -= m);
             }
             BackgroundMode::Divide => {
                 let mean = mean_of(model.pixels());
@@ -150,9 +153,11 @@ fn extract_background_core(planes: &mut [Buffer2<f32>], config: &ExtractBackgrou
                     continue; // degenerate model (all ≤ 0) — leave the channel untouched
                 }
                 let floor = config.divide_floor;
-                for (p, &m) in plane.pixels_mut().iter_mut().zip(model.pixels()) {
-                    *p /= (m / mean).max(floor);
-                }
+                plane
+                    .pixels_mut()
+                    .par_iter_mut()
+                    .zip(model.pixels().par_iter())
+                    .for_each(|(p, &m)| *p /= (m / mean).max(floor));
             }
         }
     }
@@ -310,17 +315,48 @@ fn median_f64(v: &mut [f64]) -> f64 {
     }
 }
 
-/// Render the fitted polynomial to a full-resolution plane.
+/// Render the fitted polynomial to a full-resolution plane, parallel over rows.
+///
+/// Rather than re-evaluate the bivariate polynomial per pixel (a `powi` per term), the coefficients
+/// are packed into a `(degree+1)²` matrix `C[i][j]`. For each row `y` the powers `y^j` collapse `C`
+/// into a 1-D polynomial in `x` (`b[i] = Σ_j C[i][j]·y^j`), which every pixel in the row evaluates by
+/// Horner — `degree` fused multiply-adds, no `powi`.
 fn evaluate_plane(coeffs: &DVector<f64>, terms: &[(u32, u32)], w: usize, h: usize) -> Buffer2<f32> {
-    let mut px = vec![0.0f32; w * h];
-    for y in 0..h {
-        let ny = norm(y as f64, h);
-        let row = y * w;
-        for x in 0..w {
-            let nx = norm(x as f64, w);
-            px[row + x] = eval(coeffs, terms, nx, ny) as f32;
-        }
+    let degree = terms
+        .iter()
+        .map(|&(i, j)| (i + j) as usize)
+        .max()
+        .unwrap_or(0);
+    // `effective_degree` caps the surface at 4, so `degree + 1 ≤ 5` rows/cols fit fixed buffers.
+    assert!(degree <= 4, "background surface degree {degree} exceeds 4");
+    let d1 = degree + 1;
+    let mut c_mat = [0.0f64; 25]; // (degree+1)² ≤ 25, row-major `[i*d1 + j]`
+    for (&(i, j), &c) in terms.iter().zip(coeffs.iter()) {
+        c_mat[i as usize * d1 + j as usize] = c;
     }
+
+    let mut px = vec![0.0f32; w * h];
+    px.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        let ny = norm(y as f64, h);
+        let mut yp = [0.0f64; 5];
+        yp[0] = 1.0;
+        for j in 1..d1 {
+            yp[j] = yp[j - 1] * ny;
+        }
+        // Collapse the y dimension: b[i] = Σ_j C[i][j]·y^j.
+        let mut b = [0.0f64; 5];
+        for i in 0..d1 {
+            b[i] = (0..d1).map(|j| c_mat[i * d1 + j] * yp[j]).sum();
+        }
+        for (x, p) in row.iter_mut().enumerate() {
+            let nx = norm(x as f64, w);
+            let mut acc = b[degree];
+            for i in (0..degree).rev() {
+                acc = acc * nx + b[i];
+            }
+            *p = acc as f32;
+        }
+    });
     Buffer2::new(w, h, px)
 }
 
