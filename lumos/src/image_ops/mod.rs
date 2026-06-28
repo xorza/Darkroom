@@ -32,7 +32,13 @@ use common::Rgb;
 use imaginarium::{Buffer2, ChannelCount, DeinterleavedImageData, Image};
 use rayon::prelude::*;
 
-/// Per-pixel parallel in-place map over an f32 master: `mono` for L, `rgb` for RGB.
+/// Pixels per rayon work item. Parallelizing per pixel (`par_chunks_mut(3)`) drowns a cheap
+/// per-pixel op in rayon's recursive split/join overhead (it dominated SCNR); a coarse block
+/// amortizes that while staying load-balanced and letting the inner loop auto-vectorize.
+const PIXELS_PER_BLOCK: usize = 8192;
+
+/// Per-pixel parallel in-place map over an f32 master: `mono` for L, `rgb` for RGB. Parallel over
+/// blocks of [`PIXELS_PER_BLOCK`] pixels, each block mapped serially.
 pub(crate) fn par_map_pixels(
     image: &mut Image,
     mono: impl Fn(f32) -> f32 + Sync,
@@ -41,18 +47,26 @@ pub(crate) fn par_map_pixels(
     let is_rgb = image.desc.color_format.channel_count == ChannelCount::Rgb;
     let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
     if is_rgb {
-        samples.par_chunks_mut(3).for_each(|px| {
-            let out = rgb(Rgb {
-                r: px[0],
-                g: px[1],
-                b: px[2],
+        samples
+            .par_chunks_mut(3 * PIXELS_PER_BLOCK)
+            .for_each(|block| {
+                for px in block.chunks_exact_mut(3) {
+                    let out = rgb(Rgb {
+                        r: px[0],
+                        g: px[1],
+                        b: px[2],
+                    });
+                    px[0] = out.r;
+                    px[1] = out.g;
+                    px[2] = out.b;
+                }
             });
-            px[0] = out.r;
-            px[1] = out.g;
-            px[2] = out.b;
-        });
     } else {
-        samples.par_iter_mut().for_each(|v| *v = mono(*v));
+        samples.par_chunks_mut(PIXELS_PER_BLOCK).for_each(|block| {
+            for v in block {
+                *v = mono(*v);
+            }
+        });
     }
 }
 
