@@ -7,6 +7,8 @@ pub mod rejection;
 pub(crate) mod stack;
 
 #[cfg(test)]
+mod bench;
+#[cfg(test)]
 mod real_data_tests;
 #[cfg(test)]
 mod synthetic_tests;
