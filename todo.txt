@@ -1,3 +1,9 @@
 comments in theme file
 
 paralleel detection memory usage
+
+dont load caches for inactiva nodes
+
+clean output values for scheduled to invoke nodes
+
+save cache on button click not after successfull execute
