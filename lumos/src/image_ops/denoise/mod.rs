@@ -163,7 +163,7 @@ struct DenoiseScratch {
     c_curr: Buffer2<f32>,
     /// Next smooth `c_{j+1}`.
     c_next: Buffer2<f32>,
-    /// Separable-convolution intermediate, reused to hold the wavelet plane `w_j = c_j − c_{j+1}`.
+    /// Separable-convolution horizontal-pass intermediate for [`atrous_smooth`].
     tmp: Buffer2<f32>,
     /// Subsampled coefficients for the per-scale noise estimate.
     samples: Vec<f32>,
@@ -207,32 +207,38 @@ fn denoise_plane(
         let step = 1usize << j;
         atrous_smooth(c_curr, c_next, tmp, step); // c_next = c_{j+1}
 
-        // Wavelet plane w_j = c_j − c_{j+1}, parked in tmp.
-        tmp.pixels_mut()
-            .par_iter_mut()
-            .zip(c_curr.pixels().par_iter())
-            .zip(c_next.pixels().par_iter())
-            .for_each(|((w, &cc), &cn)| *w = cc - cn);
-
-        let sigma = estimate_sigma(tmp.pixels(), samples, dev);
+        // The detail plane w_j = c_j − c_{j+1} is never materialized: its noise σ comes from a
+        // strided subsample, and the threshold-removed part is recomputed inline below — saving a
+        // full read+write pass over the plane each scale.
+        let sigma = estimate_sigma(c_curr.pixels(), c_next.pixels(), samples, dev);
         let t = k * sigma;
 
         // Subtract the strength-weighted noise removed at this scale from the running result.
         plane
             .pixels_mut()
             .par_iter_mut()
-            .zip(tmp.pixels().par_iter())
-            .for_each(|(p, &w)| *p -= strength * (w - threshold.apply(w, t)));
+            .zip(c_curr.pixels().par_iter())
+            .zip(c_next.pixels().par_iter())
+            .for_each(|((p, &cc), &cn)| {
+                let w = cc - cn;
+                *p -= strength * (w - threshold.apply(w, t));
+            });
 
         std::mem::swap(c_curr, c_next); // c_curr = c_{j+1}
     }
 }
 
-/// Robust per-scale noise σ: `1.4826 · MAD` of a uniform-stride subsample of the wavelet plane.
-fn estimate_sigma(plane: &[f32], samples: &mut Vec<f32>, dev: &mut Vec<f32>) -> f32 {
-    let stride = (plane.len() / MAX_NOISE_SAMPLES).max(1);
+/// Robust per-scale noise σ of the detail `w = curr − next`: `1.4826 · MAD` of a uniform-stride
+/// subsample, computing each sampled `w` on the fly (the full detail plane is never materialized).
+fn estimate_sigma(curr: &[f32], next: &[f32], samples: &mut Vec<f32>, dev: &mut Vec<f32>) -> f32 {
+    let stride = (curr.len() / MAX_NOISE_SAMPLES).max(1);
     samples.clear();
-    samples.extend(plane.iter().step_by(stride).copied());
+    samples.extend(
+        curr.iter()
+            .zip(next.iter())
+            .step_by(stride)
+            .map(|(&c, &n)| c - n),
+    );
     if samples.is_empty() {
         return 0.0;
     }

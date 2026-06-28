@@ -81,26 +81,43 @@ fn convolve_horizontal(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) 
     let width = src.width();
     let wi = width as isize;
     let s = step as isize;
+    // Interior `[lo, hi)` has all five taps in-bounds; only the thin borders need reflection.
+    let lo = (2 * step).min(width);
+    let hi = width.saturating_sub(2 * step);
     dst.pixels_mut()
         .par_chunks_mut(width)
         .enumerate()
         .for_each(|(y, out)| {
             let row = src.row(y);
-            for x in 0..width {
-                out[x] = if x >= 2 * step && x + 2 * step < width {
-                    B3[0] * row[x - 2 * step]
-                        + B3[1] * row[x - step]
-                        + B3[2] * row[x]
-                        + B3[3] * row[x + step]
-                        + B3[4] * row[x + 2 * step]
-                } else {
-                    let xi = x as isize;
-                    B3[0] * row[reflect(xi - 2 * s, wi)]
-                        + B3[1] * row[reflect(xi - s, wi)]
-                        + B3[2] * row[x]
-                        + B3[3] * row[reflect(xi + s, wi)]
-                        + B3[4] * row[reflect(xi + 2 * s, wi)]
-                };
+            let reflected = |x: usize| {
+                let xi = x as isize;
+                B3[0] * row[reflect(xi - 2 * s, wi)]
+                    + B3[1] * row[reflect(xi - s, wi)]
+                    + B3[2] * row[x]
+                    + B3[3] * row[reflect(xi + s, wi)]
+                    + B3[4] * row[reflect(xi + 2 * s, wi)]
+            };
+            for (x, o) in out[..lo].iter_mut().enumerate() {
+                *o = reflected(x);
+            }
+            // Branchless fixed-offset stencil: zip-iterated so the per-element bounds checks elide
+            // and the compiler can auto-vectorize the (vast-majority) interior.
+            if hi > lo {
+                let n = hi - lo;
+                out[lo..hi]
+                    .iter_mut()
+                    .zip(row[lo - 2 * step..lo - 2 * step + n].iter())
+                    .zip(row[lo - step..lo - step + n].iter())
+                    .zip(row[lo..lo + n].iter())
+                    .zip(row[lo + step..lo + step + n].iter())
+                    .zip(row[lo + 2 * step..lo + 2 * step + n].iter())
+                    .for_each(|(((((o, &m2), &m1), &c), &p1), &p2)| {
+                        *o = B3[0] * m2 + B3[1] * m1 + B3[2] * c + B3[3] * p1 + B3[4] * p2;
+                    });
+            }
+            let rstart = hi.max(lo);
+            for (i, o) in out[rstart..].iter_mut().enumerate() {
+                *o = reflected(rstart + i);
             }
         });
 }
@@ -133,10 +150,16 @@ fn convolve_vertical(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
                     src.row(reflect(yi + 2 * s, hi)),
                 )
             };
-            for x in 0..width {
-                out[x] =
-                    B3[0] * r0[x] + B3[1] * r1[x] + B3[2] * r2[x] + B3[3] * r3[x] + B3[4] * r4[x];
-            }
+            // Zip-iterated (bounds checks elide) so the compiler auto-vectorizes the 5-tap column.
+            out.iter_mut()
+                .zip(r0.iter())
+                .zip(r1.iter())
+                .zip(r2.iter())
+                .zip(r3.iter())
+                .zip(r4.iter())
+                .for_each(|(((((o, &a), &b), &c), &d), &e)| {
+                    *o = B3[0] * a + B3[1] * b + B3[2] * c + B3[3] * d + B3[4] * e;
+                });
         });
 }
 

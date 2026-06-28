@@ -14,6 +14,9 @@
 //! in-place `apply`), plus their shared support: [`op`] (the `OpError` contract) and [`wavelet`]
 //! (the multiscale primitive `denoise`/`hdr` build on).
 
+#[cfg(all(test, feature = "real-data"))]
+mod bench;
+
 pub(crate) mod background_extraction;
 pub(crate) mod color_calibration;
 pub(crate) mod denoise;
@@ -143,10 +146,44 @@ pub(crate) fn deinterleave_f32(image: &Image) -> Vec<Buffer2<f32>> {
 pub(crate) fn process_planes(image: &mut Image, process: impl FnOnce(&mut [Buffer2<f32>])) {
     let mut planes = deinterleave_f32(image);
     process(&mut planes);
-    *image = interleave_f32(planes);
+    interleave_into(image, &planes);
 }
 
-/// Re-interleave channel planes (1 or 3) back into an f32 `Image`.
+/// Re-interleave channel planes back into `image`'s existing buffer — the in-place counterpart of
+/// [`interleave_f32`], avoiding a full-image reallocation (and its first-touch page faults) on the
+/// hot op path. `planes` must match `image`'s channel count and dimensions.
+fn interleave_into(image: &mut Image, planes: &[Buffer2<f32>]) {
+    let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
+    match planes {
+        [l] => {
+            samples
+                .par_iter_mut()
+                .zip(l.pixels().par_iter())
+                .for_each(|(s, &v)| *s = v);
+        }
+        [r, g, b] => {
+            samples
+                .par_chunks_mut(3)
+                .zip(r.pixels().par_iter())
+                .zip(g.pixels().par_iter())
+                .zip(b.pixels().par_iter())
+                .for_each(|(((px, &rv), &gv), &bv)| {
+                    px[0] = rv;
+                    px[1] = gv;
+                    px[2] = bv;
+                });
+        }
+        _ => panic!(
+            "interleave_into expects 1 (L) or 3 (RGB) planes, got {}",
+            planes.len()
+        ),
+    }
+}
+
+/// Re-interleave channel planes (1 or 3) into a **new** f32 `Image` — used by the ML ops, whose
+/// output image differs from the input (channel count or content). In-place ops use
+/// [`interleave_into`] instead, which reuses the existing buffer.
+#[cfg(any(test, feature = "ml"))]
 pub(crate) fn interleave_f32(planes: Vec<Buffer2<f32>>) -> Image {
     match planes.len() {
         1 => {
@@ -230,5 +267,25 @@ mod tests {
         assert_eq!(planes[0].pixels(), &[0.1, 0.4]); // R column
         let back = interleave_f32(planes);
         assert_eq!(back.bytes(), &bytes[..]);
+    }
+
+    #[test]
+    fn interleave_into_writes_planes_back_in_place() {
+        // Scatter modified planes into a scratch image's existing buffer; both L and RGB.
+        let mut rgb = rgb_f32(2, 1, vec![0.0; 6]);
+        let r = Buffer2::new(2, 1, vec![0.1, 0.4]);
+        let g = Buffer2::new(2, 1, vec![0.2, 0.5]);
+        let b = Buffer2::new(2, 1, vec![0.3, 0.6]);
+        interleave_into(&mut rgb, &[r, g, b]);
+        let out: &[f32] = bytemuck::cast_slice(rgb.bytes());
+        assert_eq!(out, &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]); // interleaved pixel order
+
+        let mut l = Image::new_with_data(
+            ImageDesc::new(3, 1, ColorFormat::L_F32),
+            bytemuck::cast_slice(&[0.0f32; 3]).to_vec(),
+        )
+        .unwrap();
+        interleave_into(&mut l, &[Buffer2::new(3, 1, vec![0.2, 0.5, 0.9])]);
+        assert_eq!(bytemuck::cast_slice::<u8, f32>(l.bytes()), &[0.2, 0.5, 0.9]);
     }
 }
