@@ -297,10 +297,14 @@ pub fn align_and_stack(
 const MAX_CONCURRENT_LIGHTS: usize = 4;
 
 /// Rough per-frame working-set estimate, in f32 planes, for memory budgeting: a calibrated/warped
-/// frame plus its in-flight scratch (detection buffers, or a warp's input+output). Used both to
-/// reserve RAM-path scratch headroom in the tier decision and to bound the streaming concurrency.
-/// (Excludes the transient ~10-plane demosaic arena — step 1 of the streaming path can exceed this.)
+/// frame plus its in-flight scratch (detection buffers, or a warp's input+output). Used to reserve
+/// RAM-path scratch headroom in the tier decision and to bound the streaming **warp** concurrency.
 const PER_FRAME_WORKING_PLANES: usize = 8;
+
+/// Per-frame working set for the streaming **decode→demosaic→detect** step, which additionally holds
+/// the transient ~10-plane demosaic arena (`io::raw::demosaic`) on top of the output + detect
+/// scratch. Larger than [`PER_FRAME_WORKING_PLANES`], so step 1 fans out less and doesn't overshoot.
+const PER_FRAME_DECODE_PLANES: usize = 14;
 
 /// Calibrate, align, and stack raw light frames end to end — the full pipeline in one call.
 ///
@@ -469,23 +473,26 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
         path: light_paths[0].as_ref().to_path_buf(),
         source,
     })?;
-    // ~8 planes/frame covers the heaviest in-flight working set (decode + detect scratch); cap the
-    // fan-out to that, so a low-RAM machine serialises rather than OOMs.
-    let in_flight_bytes =
-        PER_FRAME_WORKING_PLANES * sensor.x * sensor.y * std::mem::size_of::<f32>();
-    let concurrency =
-        compute_load_concurrency(in_flight_bytes, 0, available, rayon::current_num_threads());
+    // Cap fan-out to the per-frame working set so a low-RAM machine serialises rather than OOMs.
+    // The decode+detect step (step 1) also holds the transient ~10-plane demosaic arena, so it needs
+    // a larger reservation than the warp step (step 2) — size the two separately.
+    let plane_bytes = sensor.x * sensor.y * std::mem::size_of::<f32>();
+    let threads = rayon::current_num_threads();
+    let decode_concurrency =
+        compute_load_concurrency(PER_FRAME_DECODE_PLANES * plane_bytes, 0, available, threads);
+    let warp_concurrency =
+        compute_load_concurrency(PER_FRAME_WORKING_PLANES * plane_bytes, 0, available, threads);
 
     // --- Step 1: decode → calibrate → demosaic → detect → spill calibrated. ---
     tracing::info!(
         frames = total,
-        concurrency,
+        concurrency = decode_concurrency,
         "Streaming: calibrating + detecting (spilling to disk)"
     );
     let done = AtomicUsize::new(0);
     let indexed: Vec<(usize, &P)> = light_paths.iter().enumerate().collect();
     let detected: Vec<DetectedFrame> =
-        try_par_map_limited(&indexed, concurrency, |&(idx, ref path)| {
+        try_par_map_limited(&indexed, decode_concurrency, |&(idx, ref path)| {
             if cancel.is_cancelled() {
                 return Err(Error::Stack(StackError::Cancelled));
             }
@@ -539,7 +546,7 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     let registered_so_far = AtomicUsize::new(0);
     let indices: Vec<usize> = (0..total).collect();
     let outcomes: Vec<Option<(WeightedFrame, FrameStats)>> =
-        try_par_map_limited(&indices, concurrency, |&idx| {
+        try_par_map_limited(&indices, warp_concurrency, |&idx| {
             if cancel.is_cancelled() {
                 // Treated as dropped here; the post-loop check turns the run into `Cancelled`.
                 return Ok(None);
