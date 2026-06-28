@@ -620,7 +620,7 @@ dependencies = [
  "arrayvec",
  "bitcode_derive",
  "bytemuck",
- "glam 0.33.1",
+ "glam 0.33.2",
  "serde",
 ]
 
@@ -958,7 +958,7 @@ dependencies = [
  "arc-swap",
  "bitcode",
  "common-derive",
- "glam 0.33.1",
+ "glam 0.33.2",
  "lz4_flex",
  "rayon",
  "rhai",
@@ -1219,7 +1219,7 @@ dependencies = [
  "clap",
  "common",
  "dark-light",
- "glam 0.33.1",
+ "glam 0.33.2",
  "imaginarium",
  "lens",
  "lz4_flex",
@@ -1823,9 +1823,9 @@ checksum = "f70749695b063ecbf6b62949ccccde2e733ec3ecbbd71d467dca4e5c6c97cca0"
 
 [[package]]
 name = "glam"
-version = "0.33.1"
+version = "0.33.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "898f5a568a84989b6c0f8caa50a93074b97dbdc58fc6d9543157bb4562758933"
+checksum = "7f22fb22f065b308be0d8724e3706c7fa3fc2a6c7d6899df4cad7860e7a75436"
 dependencies = [
  "bytemuck",
  "encase",
@@ -2149,7 +2149,7 @@ dependencies = [
  "arc-swap",
  "atomic_refcell",
  "bytemuck",
- "glam 0.33.1",
+ "glam 0.33.2",
  "hashbrown 0.17.1",
  "image",
  "paste",
@@ -2488,7 +2488,7 @@ dependencies = [
  "bytemuck",
  "common",
  "fits-well",
- "glam 0.33.1",
+ "glam 0.33.2",
  "image",
  "imaginarium",
  "libraw-rs-sys",
@@ -2650,7 +2650,7 @@ dependencies = [
  "glam 0.30.10",
  "glam 0.31.1",
  "glam 0.32.1",
- "glam 0.33.1",
+ "glam 0.33.2",
  "matrixmultiply",
  "nalgebra-macros",
  "num-complex",
@@ -3373,7 +3373,7 @@ dependencies = [
  "etagere",
  "fixedbitset",
  "gethostname",
- "glam 0.33.1",
+ "glam 0.33.2",
  "half",
  "image",
  "padding-struct",
