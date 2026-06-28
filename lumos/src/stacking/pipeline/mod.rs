@@ -184,16 +184,27 @@ pub fn align_and_stack(
         "Reference frame selected"
     );
 
-    // Register + warp every non-reference frame to the reference. A frame that fails to solve
-    // is dropped (its index returned), not fatal.
-    let reg_total = lights.len() - 1;
+    // Register + warp every non-reference frame to the reference; the reference passes through
+    // unwarped. `lights` is consumed **by value** (`into_par_iter`) so each input frame is freed as
+    // its warped output is produced — we never hold the input set and the warped set at once, which
+    // roughly halves the peak of this (the heaviest) stage. A frame that fails to register is dropped
+    // (its index returned), not fatal.
+    let n_lights = lights.len();
+    let reg_total = n_lights - 1;
     tracing::info!(frames = reg_total, "Registering frames to the reference");
     let registered_so_far = AtomicUsize::new(0);
     let outcomes: Vec<Result<StackFrame, usize>> = lights
-        .par_iter()
+        .into_par_iter()
         .enumerate()
-        .filter(|(index, _)| *index != reference)
         .map(|(index, img)| {
+            if index == reference {
+                // Reference goes in unwarped → fully covered; `coverage: None` weights it 1
+                // everywhere (no throwaway full-coverage map to allocate).
+                return Ok(StackFrame {
+                    image: img,
+                    coverage: None,
+                });
+            }
             // Cancelled: drop this frame (skips the heavy register + warp); the
             // post-loop check below turns the run into `Cancelled`.
             if cancel.is_cancelled() {
@@ -211,11 +222,12 @@ pub fn align_and_stack(
                         transform = %result.transform,
                         "registered"
                     );
-                    let warped = warp(img, &result.warp_transform(), &config.registration);
+                    let warped = warp(&img, &result.warp_transform(), &config.registration);
                     Ok(StackFrame {
                         image: warped.image,
                         coverage: Some(warped.coverage),
                     })
+                    // `img` (the input frame) is dropped here, freeing its planes.
                 }
                 Err(error) => {
                     tracing::info!(frame = n, total = reg_total, %error, "registration failed");
@@ -229,8 +241,9 @@ pub fn align_and_stack(
     }
 
     // Each warped frame carries its coverage (how much of each output pixel landed on real
-    // source); the stack uses it so warped-frame borders don't drag the edges dark.
-    let mut frames: Vec<StackFrame> = Vec::with_capacity(outcomes.len() + 1);
+    // source); the stack uses it so warped-frame borders don't drag the edges dark. The reference
+    // is already in `outcomes` (in its index position, unwarped).
+    let mut frames: Vec<StackFrame> = Vec::with_capacity(outcomes.len());
     let mut dropped = Vec::new();
     for outcome in outcomes {
         match outcome {
@@ -245,24 +258,13 @@ pub fn align_and_stack(
         "Registration complete"
     );
 
-    // Every non-reference frame dropped → nothing aligned. (A lone reference frame is fine.)
-    if frames.is_empty() && lights.len() > 1 {
+    // Only the reference survived → every non-reference frame dropped. (A lone reference input is
+    // fine; "nothing aligned" with more than one input is an error.)
+    if frames.len() <= 1 && n_lights > 1 {
         return Err(Error::AllFramesDropped {
-            count: lights.len() - 1,
+            count: n_lights - 1,
         });
     }
-
-    // The reference goes in unwarped — move it out of `lights` (which is no longer borrowed).
-    let reference_image = lights
-        .into_iter()
-        .nth(reference)
-        .expect("reference index is in range");
-    // Unwarped → fully covered; `coverage: None` tells the stack to weight it 1 everywhere
-    // (no throwaway full-coverage map to allocate).
-    frames.push(StackFrame {
-        image: reference_image,
-        coverage: None,
-    });
 
     let registered = frames.len();
     tracing::info!(frames = registered, "Stacking aligned frames");
@@ -423,6 +425,27 @@ mod tests {
 
         assert_eq!(result.dropped, vec![2], "blank frame should be dropped");
         assert_eq!(result.registered, 2, "reference + one aligned frame");
+    }
+
+    #[test]
+    fn all_non_reference_frames_dropped_errors() {
+        // With the reference produced in-place (it survives in `frames`), "nothing aligned" means
+        // only the reference remains — guard the changed `frames.len() <= 1` condition.
+        let (base, _) = base_field();
+        let dims = base.dimensions;
+        let blank = || AstroImage::from_pixels(dims, vec![0.1; dims.size.x * dims.size.y]);
+        // Reference has stars; both others are blank → both fail to register → nothing aligns.
+        let frames = vec![base, blank(), blank()];
+
+        let config = AlignStackConfig {
+            reference: Reference::Index(0),
+            ..Default::default()
+        };
+        let err = align_and_stack(frames, &config, CancelToken::never()).unwrap_err();
+        assert!(
+            matches!(err, Error::AllFramesDropped { count: 2 }),
+            "all non-reference frames dropped → AllFramesDropped {{ count: 2 }}, got {err:?}"
+        );
     }
 
     #[test]
