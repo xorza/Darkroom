@@ -339,3 +339,54 @@ fn build_background_config_reflects_fields_and_feeds_background_extract() {
         .collect();
     assert_eq!(modes, ["subtract", "divide"]);
 }
+
+#[test]
+fn ml_denoise_node_is_registered() {
+    let lib = astro_library();
+    let f = func(&lib, "ml_denoise");
+    assert_eq!(f.category, "astro");
+    let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(names, ["image"]);
+    assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
+    assert_eq!(f.outputs.len(), 1);
+    assert_eq!(f.outputs[0].name, "image");
+    assert_eq!(f.outputs[0].ty.declared(), *IMAGE_DATA_TYPE);
+}
+
+#[test]
+fn remove_stars_node_has_starless_and_stars_outputs() {
+    let lib = astro_library();
+    let f = func(&lib, "remove_stars");
+    assert_eq!(f.category, "astro");
+    let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(names, ["image"]);
+    assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
+    let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
+    assert_eq!(out_names, ["starless", "stars"]);
+    for o in &f.outputs {
+        assert_eq!(o.ty.declared(), *IMAGE_DATA_TYPE);
+    }
+}
+
+#[test]
+fn ml_model_paths_default_and_round_trip() {
+    use std::path::Path;
+    assert_eq!(
+        MlModelPaths::default().denoise,
+        Path::new("DeepSNR_weights_v2.onnx")
+    );
+    assert_eq!(
+        MlModelPaths::default().star_removal,
+        Path::new("StarNet2_weights.onnx")
+    );
+
+    let original = ml_model_paths();
+    set_ml_model_paths(MlModelPaths {
+        denoise: "/models/d.onnx".into(),
+        star_removal: "/models/s.onnx".into(),
+    });
+    let got = ml_model_paths();
+    assert_eq!(got.denoise, Path::new("/models/d.onnx"));
+    assert_eq!(got.star_removal, Path::new("/models/s.onnx"));
+    set_ml_model_paths(original); // restore for any other test reading the global
+}

@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, RwLock};
 
 use common::CancelToken;
 use common::file_utils::astro_image_files;
@@ -15,8 +15,8 @@ use imaginarium::Image as RawImage;
 use lumos::{
     AlignStackConfig, AstroImage, CalibrationImages, CalibrationMasters, CfaImage,
     DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, ImageDimensions, LocalContrast,
-    NeutralizeBackground, OpError, Reference, StackConfig, StarDetector, calibrate_align_stack,
-    stack_cfa_master,
+    MlError, NeutralizeBackground, OpError, Reference, StackConfig, StarDetector, TiledOnnxConfig,
+    calibrate_align_stack, ml_denoise, remove_stars, stack_cfa_master,
 };
 use scenarium::data::{
     DataType, DynamicValue, EnumVariants, FsPathConfig, FsPathMode, StaticValue,
@@ -45,6 +45,45 @@ const ASTRO_IMAGE_EXTENSIONS: [&str; 13] = [
     "raf", "cr2", "cr3", "nef", "arw", "dng", // camera RAW
     "tiff", "tif", "png", "jpg", "jpeg", // standard
 ];
+
+/// ONNX model paths for the ML nodes (`ml_denoise` / `remove_stars`). lumos ships no models, so these
+/// are caller-supplied and configured at runtime — darkroom's settings window sets them via
+/// [`set_ml_model_paths`]. The nodes read the current paths each run, so a config change takes effect
+/// on the next invocation. Defaults are bare filenames resolved against the working directory.
+#[derive(Debug, Clone)]
+pub struct MlModelPaths {
+    /// ONNX denoiser model (e.g. DeepSNR), used by `ml_denoise`.
+    pub denoise: PathBuf,
+    /// StarNet-style star-removal ONNX model, used by `remove_stars`.
+    pub star_removal: PathBuf,
+}
+
+impl Default for MlModelPaths {
+    fn default() -> Self {
+        Self {
+            denoise: PathBuf::from("DeepSNR_weights_v2.onnx"),
+            star_removal: PathBuf::from("StarNet2_weights.onnx"),
+        }
+    }
+}
+
+static ML_MODEL_PATHS: LazyLock<RwLock<MlModelPaths>> =
+    LazyLock::new(|| RwLock::new(MlModelPaths::default()));
+
+/// Set the ONNX model paths the `ml_denoise` / `remove_stars` nodes use (darkroom's config window).
+pub fn set_ml_model_paths(paths: MlModelPaths) {
+    *ML_MODEL_PATHS
+        .write()
+        .expect("ml model paths lock poisoned") = paths;
+}
+
+/// The currently-configured ML model paths (so the config window can populate its fields).
+pub fn ml_model_paths() -> MlModelPaths {
+    ML_MODEL_PATHS
+        .read()
+        .expect("ml model paths lock poisoned")
+        .clone()
+}
 
 /// Reusable data type for an astro image file-path input: an existing-file
 /// picker filtered to [`ASTRO_IMAGE_EXTENSIONS`]. Shared so every astro
@@ -630,6 +669,50 @@ pub fn astro_library() -> Library {
             })),
     );
 
+    // ml_denoise — caller-supplied ONNX denoiser (DeepSNR), display-domain.
+    library.add(processing_func(
+        "ace786f9-8a02-4ed1-93a0-ad67bf0680f8",
+        "ml_denoise",
+        "Denoise a stretched image with a caller-supplied ONNX model (DeepSNR)",
+        vec![frame_input("image")],
+        FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+            Box::pin(async move {
+                let model = ml_model_paths().denoise;
+                let out = run_ml(&inputs[0].value, move |img| {
+                    ml_denoise(img, &TiledOnnxConfig::new(model))
+                })
+                .await?;
+                outputs[0] = DynamicValue::from_custom(Image::from(out));
+                Ok(())
+            })
+        }),
+    ));
+
+    // remove_stars — caller-supplied StarNet ONNX model → starless + recovered stars layers.
+    library.add(
+        Func::new("60c31a76-eed4-467c-9ba3-5c89d294a91b", "remove_stars")
+            .description(
+                "Remove stars with a caller-supplied StarNet ONNX model (starless + stars)",
+            )
+            .category("astro")
+            .pure()
+            .input(frame_input("image"))
+            .output("starless", IMAGE_DATA_TYPE.clone())
+            .output("stars", IMAGE_DATA_TYPE.clone())
+            .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    let model = ml_model_paths().star_removal;
+                    let result = run_ml(&inputs[0].value, move |img| {
+                        remove_stars(img, &TiledOnnxConfig::new(model))
+                    })
+                    .await?;
+                    outputs[0] = DynamicValue::from_custom(Image::from(result.starless));
+                    outputs[1] = DynamicValue::from_custom(Image::from(result.stars));
+                    Ok(())
+                })
+            })),
+    );
+
     library
 }
 
@@ -720,6 +803,21 @@ where
     .map_err(anyhow::Error::from)? // join error
     .map_err(anyhow::Error::from)?; // op rejected the config / format
     Ok(DynamicValue::from_custom(Image::from(out)))
+}
+
+/// Run a caller-supplied ONNX op (`ml_denoise` / `remove_stars`) off the worker: pull the input
+/// `Image` to CPU, run `op` on a blocking thread (ONNX inference), and surface an [`MlError`]
+/// (missing model file, image smaller than the model window) as the node's error.
+async fn run_ml<R, F>(value: &DynamicValue, op: F) -> anyhow::Result<R>
+where
+    F: FnOnce(&RawImage) -> Result<R, MlError> + Send + 'static,
+    R: Send + 'static,
+{
+    let cpu = image_to_cpu(value)?;
+    tokio::task::spawn_blocking(move || op(&cpu))
+        .await
+        .map_err(anyhow::Error::from)? // join error
+        .map_err(anyhow::Error::from) // model load / inference failure
 }
 
 /// Extract an owned CPU `imaginarium::Image` from a node's `Image` input.

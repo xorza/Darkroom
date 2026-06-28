@@ -6,9 +6,10 @@ Node-function library: adapts `imaginarium` (GPU image ops) **and** `lumos`
 ## Layout
 
 Two domains as folders + a shared bridge at the root. Modules are private;
-`lib.rs` publishes only `AstroFrame`, `Image`, `astro_library`, `image_library`
-(everything else — config mirrors, presets, datatypes, the bridge — is
-crate-internal).
+`lib.rs` publishes `AstroFrame`, `Image`, `astro_library`, `image_library`, plus
+the ML model-path config (`MlModelPaths`, `set_ml_model_paths`, `ml_model_paths`)
+that darkroom's settings window drives (everything else — config mirrors, presets,
+datatypes, the bridge — is crate-internal).
 
 ```
 src/
@@ -64,6 +65,7 @@ src/
 | `auto_stretch` | Display-stretch an `AstroFrame`: a `method` value_variants quick-pick (`StretchPreset`), overridable by `build_stretch_config` → `lumos::Stretch::apply`, off-thread. |
 | `background_extract` / `denoise` / `scnr` / `neutralize_background` / `hdr_compress` / `local_contrast` | Per-frame `AstroFrame → AstroFrame` processing (lumos in-place ops — op-named config structs `lumos::{ExtractBackground, Denoise, Scnr, NeutralizeBackground, Hdr, LocalContrast}` whose `.apply(&mut Image) -> Result<_, OpError>` runs via the `processing_func` + `run_frame_op` helpers, which surface an `OpError` as the node's error, off-thread). `background_extract`/`scnr` take a unified value_variants preset input (overridable by their build node); `denoise`/`hdr_compress`/`local_contrast` keep an inline scalar (`strength`/`amount`) **plus** an optional `config` override fed by their `build_*_config` node. |
 | `star_detect` | Detect stars in an `AstroFrame` → star `count` (Int): a `detection` value_variants quick-pick (`DetectionPreset`) overridable by `build_detection_config` (`StarDetector`). |
+| `ml_denoise` / `remove_stars` | Caller-supplied ONNX nodes (lumos `ml` feature, `Image → Image` / `Image → {starless, stars}`): `lumos::{ml_denoise, remove_stars}` over an RGB_F32 master, run off-thread via the `run_ml` helper. The `.onnx` paths are **not** node inputs — they come from the runtime `MlModelPaths` global (`set_ml_model_paths` / `ml_model_paths`, set by darkroom's config window; default bare filenames). A missing model / too-small image surfaces an `MlError` as the node error. Enabling `ml` pulls `ort` (ONNX runtime) into lens + darkroom. |
 | `build_background_config` / `build_detection_config` / `build_registration_config` / `build_combine_config` / `build_denoise_config` / `build_hdr_config` / `build_local_contrast_config` / `build_stretch_config` / `build_scnr_config` | Config-builder nodes (`config_builder_func::<…ConfigDef>`): a field-per-input node → a config value, wired into the matching node's config input. **Every** preset node (stack_lights' detection/registration/combine, background_extract, auto_stretch, scnr, star_detect) is the same shape — a `value_variants` quick-pick overridable by its build node. The scalar nodes (`denoise`/`hdr_compress`/`local_contrast`) instead keep an inline scalar + an optional `config` override (`config_override_input`). Mirrors live in `astro/configs.rs`. |
 | `astro_to_image` | Bridge an `AstroFrame` → `Image` so the imaginarium image nodes can consume astro output. |
 

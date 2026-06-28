@@ -7,7 +7,7 @@ edition.workspace = true
 common = { workspace = true }
 scenarium = { workspace = true }
 imaginarium = { workspace = true }
-lumos = { workspace = true }
+lumos = { workspace = true, features = ["ml"] }
 anyhow = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
