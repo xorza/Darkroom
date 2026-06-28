@@ -323,12 +323,22 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         path: light_paths[0].as_ref().to_path_buf(),
         source,
     })?;
-    let warped_bytes = 4 * sensor.x * sensor.y * std::mem::size_of::<f32>();
+    let plane_bytes = sensor.x * sensor.y * std::mem::size_of::<f32>();
+    let warped_bytes = 4 * plane_bytes; // resident warped frame: 3 channels + coverage
+    // The RAM path runs detection/warp at full core count, each concurrent frame holding ~7 planes
+    // of scratch (detection buffers, or a warp's in-flight input+output). Reserve that worst case so
+    // the RAM path is only taken when the *frames and the scratch* fit — otherwise stream, which is
+    // memory-bounded (validated flat-in-N). This prevents a scratch overshoot from OOMing a stack
+    // whose frames alone would fit, on a high-core machine.
+    let concurrent = total.min(rayon::current_num_threads());
+    let scratch_reserve = (7 * plane_bytes * concurrent) as u64;
     let available = config.stack.cache.get_available_memory();
-    if !fits_in_memory(warped_bytes, total, available) {
+    let frame_budget = available.saturating_sub(scratch_reserve);
+    if !fits_in_memory(warped_bytes, total, frame_budget) {
         tracing::info!(
             frames = total,
-            "Frame set exceeds the RAM budget — streaming via the disk cache (memory-bounded)"
+            available_mb = available / (1024 * 1024),
+            "Frame set + scratch exceeds the RAM budget — streaming via the disk cache (memory-bounded)"
         );
         return calibrate_align_stack_streaming(light_paths, masters, config, cancel);
     }
