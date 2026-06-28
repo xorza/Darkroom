@@ -187,6 +187,10 @@ pub fn align_and_stack(
         config.registration.required_stars(),
     )?;
     let ref_stars = &star_sets[reference];
+    // The stacked master inherits the reference frame's (the alignment anchor's) metadata — captured
+    // before `lights` is consumed by the warp, and matching the streaming path which combines with
+    // `detected[reference].metadata`. (Otherwise the combine would derive it from frame 0.)
+    let ref_metadata = lights[reference].metadata.clone();
     tracing::info!(
         reference,
         ref_stars = ref_stars.len(),
@@ -277,12 +281,13 @@ pub fn align_and_stack(
 
     let registered = frames.len();
     tracing::info!(frames = registered, "Stacking aligned frames");
-    let stacked = stack_images(
+    let mut stacked = stack_images(
         frames,
         config.stack.clone(),
         ProgressCallback::default(),
         cancel,
     )?;
+    stacked.image.metadata = ref_metadata;
     tracing::info!("Stack complete");
 
     Ok(AlignStackResult::from_stack(
@@ -480,8 +485,12 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     let threads = rayon::current_num_threads();
     let decode_concurrency =
         compute_load_concurrency(PER_FRAME_DECODE_PLANES * plane_bytes, 0, available, threads);
-    let warp_concurrency =
-        compute_load_concurrency(PER_FRAME_WORKING_PLANES * plane_bytes, 0, available, threads);
+    let warp_concurrency = compute_load_concurrency(
+        PER_FRAME_WORKING_PLANES * plane_bytes,
+        0,
+        available,
+        threads,
+    );
 
     // --- Step 1: decode → calibrate → demosaic → detect → spill calibrated. ---
     tracing::info!(
@@ -706,6 +715,34 @@ mod tests {
 
         assert_eq!(result.dropped, vec![2], "blank frame should be dropped");
         assert_eq!(result.registered, 2, "reference + one aligned frame");
+    }
+
+    #[test]
+    fn stacked_master_inherits_reference_frame_metadata() {
+        // The master's metadata comes from the reference frame (the alignment anchor), not frame 0,
+        // so the RAM and streaming tiers agree. With reference = index 1, frame 0 is a (warped)
+        // non-reference frame whose metadata must NOT win.
+        let (base, reg) = base_field();
+        let mut f0 = shifted(&base, &reg, 5.0, 3.0);
+        let mut f1 = base.clone(); // the reference (index 1)
+        let mut f2 = shifted(&base, &reg, -4.0, 6.0);
+        f0.metadata.exposure_time = Some(10.0);
+        f1.metadata.exposure_time = Some(20.0);
+        f2.metadata.exposure_time = Some(30.0);
+
+        let config = AlignStackConfig {
+            reference: Reference::Index(1),
+            ..Default::default()
+        };
+        let result =
+            align_and_stack(vec![f0, f1, f2], &config, CancelToken::never()).expect("stack");
+
+        assert_eq!(result.reference, 1);
+        assert_eq!(
+            result.image.metadata.exposure_time,
+            Some(20.0),
+            "master must inherit the reference (index 1) metadata, not frame 0's"
+        );
     }
 
     #[test]
