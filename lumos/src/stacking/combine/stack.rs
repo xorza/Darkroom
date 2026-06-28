@@ -3,19 +3,20 @@
 //! Provides `stack()` (from paths) and `stack_images()` (in-memory) as the main API
 //! for image stacking operations; both take a [`ProgressCallback`].
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
 
 use crate::AstroImage;
 use crate::io::astro_image::cfa::CfaImage;
+use crate::io::astro_image::{AstroImageMetadata, ImageDimensions};
 use common::CancelToken;
 use imaginarium::Buffer2;
 
 use crate::math;
 use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::cache::{
-    CfaCache, FrameStats, GeometryPlanes, LightCache, StackableImage,
+    CfaCache, FrameStats, GeometryPlanes, LightCache, StackableImage, WeightedFrame,
 };
 use crate::stacking::combine::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use crate::stacking::combine::error::Error;
@@ -194,6 +195,53 @@ pub fn stack_images(
     let mut cache = LightCache::from_stack_frames(frames, &config.cache, progress)?;
     cache.core.cancel = cancel;
     // In-memory only (no disk cache), but `cache` drops cleanly via `CacheCore`'s `Drop` regardless.
+    let result = run_stacking_weighted(&cache, &config);
+    if cache.core.cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    Ok(result)
+}
+
+/// Combine pre-tiered warped frames into a stacked result. The streaming align/stack pipeline builds
+/// the [`WeightedFrame`]s itself (spilling to disk or keeping in RAM as it warps), so the frame set
+/// is never fully resident; `cache_dir` is `Some` for the disk tier (removed on `Drop`). Identical
+/// combine math to [`stack_images`] — only the frame *storage* differs.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn stack_weighted_frames(
+    frames: Vec<WeightedFrame>,
+    channel_stats: Vec<FrameStats>,
+    cache_dir: Option<PathBuf>,
+    dimensions: ImageDimensions,
+    metadata: AstroImageMetadata,
+    config: StackConfig,
+    progress: ProgressCallback,
+    cancel: CancelToken,
+) -> Result<StackResult, Error> {
+    if frames.is_empty() {
+        return Err(Error::NoFrames);
+    }
+    config.validate();
+    validate_manual_weights(&config, frames.len());
+
+    tracing::info!(
+        method = ?config.method,
+        weighting = ?config.weighting,
+        normalization = ?config.normalization,
+        frame_count = frames.len(),
+        disk_tier = cache_dir.is_some(),
+        "Starting unified stack (pre-tiered frames)"
+    );
+
+    let cache = LightCache::from_weighted_frames(
+        frames,
+        channel_stats,
+        cache_dir,
+        dimensions,
+        metadata,
+        &config.cache,
+        progress,
+        cancel,
+    );
     let result = run_stacking_weighted(&cache, &config);
     if cache.core.cancel.is_cancelled() {
         return Err(Error::Cancelled);
@@ -456,6 +504,7 @@ pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) ->
 mod tests {
     use super::*;
     use crate::io::astro_image::PixelData;
+    use crate::stacking::combine::cache::spill_weighted_frame;
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::rejection::Rejection;
     use crate::{
@@ -463,6 +512,92 @@ mod tests {
         stacking::combine::cache::tests::make_test_cache,
     };
     use std::path::PathBuf;
+
+    /// The load-bearing guarantee for memory-aware stacking: spilling frames to disk (mmap) and
+    /// combining must be **bit-identical** to the all-RAM combine — same frames, same math, only the
+    /// plane storage differs. Exercises σ-clip rejection + noise weighting + global norm + a partial
+    /// coverage map (so the coverage spill round-trips too).
+    #[test]
+    fn disk_tier_output_is_bit_identical_to_memory_tier() {
+        let (w, h, n) = (40usize, 30usize, 12usize);
+        let dims = ImageDimensions::new((w, h), 1);
+        let make_frame = |f: usize| -> StackFrame {
+            let mut px = vec![0.0f32; w * h];
+            for (i, p) in px.iter_mut().enumerate() {
+                let hash = (i as u32).wrapping_mul(2654435761) ^ (f as u32).wrapping_mul(40503);
+                *p = 0.2 + (f as f32) * 0.01 + (hash as f32 / u32::MAX as f32 - 0.5) * 0.02;
+            }
+            px[(f * 7) % (w * h)] = 0.95; // an outlier so rejection actually fires
+            let image = AstroImage::from_planar_channels(dims, [px]);
+            // Every other frame gets a partial coverage map (warped-border emulation).
+            let coverage = f.is_multiple_of(2).then(|| {
+                let mut c = vec![1.0f32; w * h];
+                c[0] = 0.3;
+                Buffer2::new(w, h, c)
+            });
+            StackFrame { image, coverage }
+        };
+        let frames: Vec<StackFrame> = (0..n).map(make_frame).collect();
+        let config = StackConfig::light();
+
+        let ram = stack_images(
+            frames
+                .iter()
+                .map(|f| StackFrame {
+                    image: f.image.clone(),
+                    coverage: f.coverage.clone(),
+                })
+                .collect(),
+            config.clone(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap();
+
+        let cache_dir =
+            std::env::temp_dir().join(format!("lumos_tier_test_{}", std::process::id()));
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        let metadata = frames[0].image.metadata().clone();
+        let (wfs, stats): (Vec<_>, Vec<_>) = frames
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| {
+                spill_weighted_frame(&cache_dir, &format!("f{i}"), f.image, f.coverage, dims)
+                    .unwrap()
+            })
+            .unzip();
+        let disk = stack_weighted_frames(
+            wfs,
+            stats,
+            Some(cache_dir.clone()),
+            dims,
+            metadata,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap();
+
+        let bits = |b: &Buffer2<f32>| b.pixels().iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(
+            bits(ram.image.channel(0)),
+            bits(disk.image.channel(0)),
+            "stacked image differs between RAM and disk tiers"
+        );
+        assert_eq!(
+            bits(&ram.coverage),
+            bits(&disk.coverage),
+            "coverage differs"
+        );
+        assert_eq!(bits(&ram.weight), bits(&disk.weight), "weight differs");
+        assert_eq!(
+            bits(&ram.variance),
+            bits(&disk.variance),
+            "variance differs"
+        );
+
+        std::fs::remove_dir_all(&cache_dir).ok();
+    }
 
     // ========== Helpers ==========
 

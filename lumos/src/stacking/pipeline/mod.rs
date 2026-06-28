@@ -12,19 +12,27 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use arrayvec::ArrayVec;
 use common::CancelToken;
 use common::parallel::try_par_map_limited;
 use imaginarium::Buffer2;
 
-use crate::io::astro_image::AstroImage;
 use crate::io::astro_image::error::ImageError;
-use crate::io::raw::load_raw_cfa;
+use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
+use crate::io::raw::{load_raw_cfa, raw_dimensions};
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, reject_cosmic_rays};
+use crate::stacking::combine::cache::{
+    FrameStats, Plane, WeightedFrame, image_from_spilled_channels, remove_spilled_channels,
+    spill_channels, spill_weighted_frame,
+};
+use crate::stacking::combine::cache_config::{compute_load_concurrency, fits_in_memory};
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::progress::ProgressCallback;
-use crate::stacking::combine::stack::{StackFrame, stack_images};
+use crate::stacking::combine::stack::{
+    StackFrame, StackResult, stack_images, stack_weighted_frames,
+};
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::{register, warp};
 use crate::stacking::star_detection::config::Config as StarDetectionConfig;
@@ -73,6 +81,27 @@ pub struct AlignStackResult {
     pub registered: usize,
     /// Indices of frames dropped because they failed to register, ascending.
     pub dropped: Vec<usize>,
+}
+
+impl AlignStackResult {
+    /// Wrap a combine [`StackResult`] with the alignment bookkeeping (shared by the RAM and
+    /// streaming paths, which build this identically).
+    fn from_stack(
+        stacked: StackResult,
+        reference: usize,
+        registered: usize,
+        dropped: Vec<usize>,
+    ) -> Self {
+        Self {
+            image: stacked.image,
+            coverage: stacked.coverage,
+            weight: stacked.weight,
+            variance: stacked.variance,
+            reference,
+            registered,
+            dropped,
+        }
+    }
 }
 
 /// Errors from [`align_and_stack`] and [`calibrate_align_stack`].
@@ -151,33 +180,13 @@ pub fn align_and_stack(
         return Err(Error::Stack(StackError::Cancelled));
     }
 
-    let reference = match config.reference {
-        Reference::Index(index) => {
-            if index >= lights.len() {
-                return Err(Error::ReferenceOutOfRange {
-                    index,
-                    count: lights.len(),
-                });
-            }
-            index
-        }
-        // Most stars → most anchors for the other frames to match against.
-        Reference::Auto => star_sets
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, stars)| stars.len())
-            .map(|(index, _)| index)
-            .expect("lights is non-empty"),
-    };
-
+    let star_counts: Vec<usize> = star_sets.iter().map(|s| s.len()).collect();
+    let reference = select_reference(
+        &star_counts,
+        config.reference,
+        config.registration.required_stars(),
+    )?;
     let ref_stars = &star_sets[reference];
-    if ref_stars.len() < config.registration.required_stars() {
-        return Err(Error::ReferenceInsufficientStars {
-            index: reference,
-            found: ref_stars.len(),
-            required: config.registration.required_stars(),
-        });
-    }
     tracing::info!(
         reference,
         ref_stars = ref_stars.len(),
@@ -276,15 +285,9 @@ pub fn align_and_stack(
     )?;
     tracing::info!("Stack complete");
 
-    Ok(AlignStackResult {
-        image: stacked.image,
-        coverage: stacked.coverage,
-        weight: stacked.weight,
-        variance: stacked.variance,
-        reference,
-        registered,
-        dropped,
-    })
+    Ok(AlignStackResult::from_stack(
+        stacked, reference, registered, dropped,
+    ))
 }
 
 /// Max light frames decoded+demosaiced concurrently. The RAW decode is the one
@@ -308,7 +311,28 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     config: &AlignStackConfig,
     cancel: CancelToken,
 ) -> Result<AlignStackResult, Error> {
+    if light_paths.is_empty() {
+        return Err(Error::NoFrames);
+    }
     let total = light_paths.len();
+
+    // Tier decision: peek the sensor dimensions (no decode) and estimate the warped-frame footprint
+    // (RGB + coverage = 4 planes — conservative for mono). If the set won't fit ~75% RAM, stream it
+    // through a disk cache so peak RAM stays flat in the frame count.
+    let sensor = raw_dimensions(light_paths[0].as_ref()).map_err(|source| Error::Load {
+        path: light_paths[0].as_ref().to_path_buf(),
+        source,
+    })?;
+    let warped_bytes = 4 * sensor.x * sensor.y * std::mem::size_of::<f32>();
+    let available = config.stack.cache.get_available_memory();
+    if !fits_in_memory(warped_bytes, total, available) {
+        tracing::info!(
+            frames = total,
+            "Frame set exceeds the RAM budget — streaming via the disk cache (memory-bounded)"
+        );
+        return calibrate_align_stack_streaming(light_paths, masters, config, cancel);
+    }
+
     tracing::info!(
         frames = total,
         "Loading, calibrating and demosaicing raw lights (RAW decode — the slow phase)"
@@ -325,36 +349,269 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
             if cancel.is_cancelled() {
                 return Err(Error::Stack(StackError::Cancelled));
             }
-            let mut cfa = load_raw_cfa(path.as_ref()).map_err(|source| Error::Load {
-                path: path.as_ref().to_path_buf(),
-                source,
-            })?;
-            masters.calibrate(&mut cfa);
-            if let Some(cr) = &config.cosmic_ray {
-                // Dispatched per CFA type inside `reject_cosmic_rays` (mono / Bayer-deinterleave /
-                // X-Trans same-color). Only an unlabeled frame is skipped — its pattern is unknown,
-                // so any same-color/Laplacian stencil could corrupt a mislabeled mosaic.
-                match &cfa.metadata.cfa_type {
-                    Some(_) => {
-                        let removed = reject_cosmic_rays(&mut cfa, cr);
-                        tracing::info!(removed, "rejected cosmic rays");
-                    }
-                    None => {
-                        tracing::warn!("frame has no CFA pattern; skipping cosmic-ray rejection")
-                    }
-                }
-            }
-            // Demosaic is the other heavy step; it polls `cancel` internally and
-            // bails mid-pass, surfacing as `Cancelled` here.
-            let image = cfa
-                .demosaic(&cancel)
-                .map_err(|_| Error::Stack(StackError::Cancelled))?;
+            let image = decode_calibrate_demosaic(path.as_ref(), masters, config, &cancel)?;
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             tracing::info!(frame = n, total, "calibrated light");
             Ok(image)
         })?;
 
     align_and_stack(calibrated, config, cancel)
+}
+
+/// Load one raw light, apply the calibration masters, optionally reject cosmic rays, and demosaic to
+/// an `AstroImage`. The per-frame core shared by the RAM and streaming calibrate paths.
+fn decode_calibrate_demosaic(
+    path: &Path,
+    masters: &CalibrationMasters,
+    config: &AlignStackConfig,
+    cancel: &CancelToken,
+) -> Result<AstroImage, Error> {
+    let mut cfa = load_raw_cfa(path).map_err(|source| Error::Load {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    masters.calibrate(&mut cfa);
+    if let Some(cr) = &config.cosmic_ray {
+        // Dispatched per CFA type inside `reject_cosmic_rays` (mono / Bayer-deinterleave /
+        // X-Trans same-color). Only an unlabeled frame is skipped — its pattern is unknown, so any
+        // same-color/Laplacian stencil could corrupt a mislabeled mosaic.
+        match &cfa.metadata.cfa_type {
+            Some(_) => {
+                let removed = reject_cosmic_rays(&mut cfa, cr);
+                tracing::info!(removed, "rejected cosmic rays");
+            }
+            None => tracing::warn!("frame has no CFA pattern; skipping cosmic-ray rejection"),
+        }
+    }
+    // Demosaic is the other heavy step; it polls `cancel` internally and bails mid-pass.
+    cfa.demosaic(cancel)
+        .map_err(|_| Error::Stack(StackError::Cancelled))
+}
+
+/// Choose the reference (alignment anchor) index from per-frame star counts, validating it has
+/// enough stars. Shared by the RAM and streaming paths.
+fn select_reference(
+    star_counts: &[usize],
+    reference: Reference,
+    required: usize,
+) -> Result<usize, Error> {
+    let index = match reference {
+        Reference::Index(index) => {
+            if index >= star_counts.len() {
+                return Err(Error::ReferenceOutOfRange {
+                    index,
+                    count: star_counts.len(),
+                });
+            }
+            index
+        }
+        // Most stars → most anchors for the other frames to match against.
+        Reference::Auto => (0..star_counts.len())
+            .max_by_key(|&i| star_counts[i])
+            .expect("star_counts is non-empty"),
+    };
+    if star_counts[index] < required {
+        return Err(Error::ReferenceInsufficientStars {
+            index,
+            found: star_counts[index],
+            required,
+        });
+    }
+    Ok(index)
+}
+
+/// A detected-but-not-yet-warped frame in the streaming path: its stars (kept in RAM) plus its
+/// calibrated channels spilled to disk (mmap), so no pixel data of the full set stays resident.
+/// `metadata`/`dimensions` are the small per-frame headers captured before the image was dropped.
+struct DetectedFrame {
+    stars: Vec<Star>,
+    calibrated: ArrayVec<Plane, 3>,
+    metadata: AstroImageMetadata,
+    dimensions: ImageDimensions,
+}
+
+/// Memory-bounded `calibrate → align → stack` for sets that don't fit ~75% RAM. Spills calibrated
+/// and warped frames to the disk cache (mmap), so peak RAM is `concurrency × one-frame-working-set`
+/// plus the combine's chunk window — flat in the frame count. Reuses the combine cache's tiering
+/// primitives; the disk dir is removed when the combine's cache drops.
+fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
+    light_paths: &[P],
+    masters: &CalibrationMasters,
+    config: &AlignStackConfig,
+    cancel: CancelToken,
+) -> Result<AlignStackResult, Error> {
+    let total = light_paths.len();
+    let cache_dir = config.stack.cache.cache_dir.clone();
+    std::fs::create_dir_all(&cache_dir).map_err(|source| {
+        Error::Stack(StackError::CreateCacheDir {
+            path: cache_dir.clone(),
+            source,
+        })
+    })?;
+    let available = config.stack.cache.get_available_memory();
+    let sensor = raw_dimensions(light_paths[0].as_ref()).map_err(|source| Error::Load {
+        path: light_paths[0].as_ref().to_path_buf(),
+        source,
+    })?;
+    // ~8 planes/frame covers the heaviest in-flight working set (decode + detect scratch); cap the
+    // fan-out to that, so a low-RAM machine serialises rather than OOMs.
+    let in_flight_bytes = 8 * sensor.x * sensor.y * std::mem::size_of::<f32>();
+    let concurrency =
+        compute_load_concurrency(in_flight_bytes, 0, available, rayon::current_num_threads());
+
+    // --- Step 1: decode → calibrate → demosaic → detect → spill calibrated. ---
+    tracing::info!(
+        frames = total,
+        concurrency,
+        "Streaming: calibrating + detecting (spilling to disk)"
+    );
+    let done = AtomicUsize::new(0);
+    let indexed: Vec<(usize, &P)> = light_paths.iter().enumerate().collect();
+    let detected: Vec<DetectedFrame> =
+        try_par_map_limited(&indexed, concurrency, |&(idx, ref path)| {
+            if cancel.is_cancelled() {
+                return Err(Error::Stack(StackError::Cancelled));
+            }
+            let image = decode_calibrate_demosaic(path.as_ref(), masters, config, &cancel)?;
+            let dimensions = image.dimensions();
+            let metadata = image.metadata.clone();
+            let stars = StarDetector::from_config(config.detection.clone())
+                .detect(&image)
+                .stars;
+            let calibrated =
+                spill_channels(&cache_dir, &format!("calib_{idx}"), &image, dimensions)
+                    .map_err(Error::Stack)?;
+            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+            tracing::info!(
+                frame = n,
+                total,
+                stars = stars.len(),
+                "calibrated + detected"
+            );
+            Ok(DetectedFrame {
+                stars,
+                calibrated,
+                metadata,
+                dimensions,
+            })
+        })?;
+    if cancel.is_cancelled() {
+        return Err(Error::Stack(StackError::Cancelled));
+    }
+
+    let dimensions = detected[0].dimensions;
+    let star_counts: Vec<usize> = detected.iter().map(|d| d.stars.len()).collect();
+    let reference = select_reference(
+        &star_counts,
+        config.reference,
+        config.registration.required_stars(),
+    )?;
+    let metadata = detected[reference].metadata.clone();
+    let ref_stars = &detected[reference].stars;
+    tracing::info!(
+        reference,
+        ref_stars = ref_stars.len(),
+        "Reference selected (streaming)"
+    );
+
+    // --- Step 2: load calibrated (mmap) → register + warp → spill warped → free calibrated. ---
+    tracing::info!(
+        frames = total - 1,
+        "Streaming: registering + warping (spilling to disk)"
+    );
+    let registered_so_far = AtomicUsize::new(0);
+    let indices: Vec<usize> = (0..total).collect();
+    let outcomes: Vec<Option<(WeightedFrame, FrameStats)>> =
+        try_par_map_limited(&indices, concurrency, |&idx| {
+            if cancel.is_cancelled() {
+                // Treated as dropped here; the post-loop check turns the run into `Cancelled`.
+                return Ok(None);
+            }
+            let d = &detected[idx];
+            let calib = image_from_spilled_channels(&d.calibrated, dimensions, &metadata);
+            let base = format!("warped_{idx}");
+            let spilled = if idx == reference {
+                // Reference goes in unwarped → fully covered (`coverage: None`).
+                Some(spill_weighted_frame(
+                    &cache_dir, &base, calib, None, dimensions,
+                ))
+            } else {
+                let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
+                match register(ref_stars, &d.stars, &config.registration) {
+                    Ok(reg) => {
+                        let warped = warp(&calib, &reg.warp_transform(), &config.registration);
+                        tracing::info!(
+                            frame = n,
+                            total = total - 1,
+                            inliers = reg.num_inliers,
+                            "registered (streaming)"
+                        );
+                        Some(spill_weighted_frame(
+                            &cache_dir,
+                            &base,
+                            warped.image,
+                            Some(warped.coverage),
+                            dimensions,
+                        ))
+                    }
+                    Err(error) => {
+                        tracing::info!(frame = n, total = total - 1, %error, "registration failed");
+                        None
+                    }
+                }
+            };
+            // The calibrated spill is no longer needed once warped — free it to keep peak temp disk
+            // at ~`N × warped frame`, not `N × (calibrated + warped)`.
+            remove_spilled_channels(&cache_dir, &format!("calib_{idx}"), dimensions.channels);
+            match spilled {
+                Some(Ok(frame)) => Ok(Some(frame)),
+                Some(Err(e)) => Err(Error::Stack(e)), // a spill I/O failure is fatal
+                None => Ok(None),                     // registration drop
+            }
+        })?;
+    if cancel.is_cancelled() {
+        return Err(Error::Stack(StackError::Cancelled));
+    }
+
+    // `try_par_map_limited` preserves input order, so the position is the frame index.
+    let mut frames = Vec::with_capacity(outcomes.len());
+    let mut frame_stats = Vec::with_capacity(outcomes.len());
+    let mut dropped = Vec::new();
+    for (idx, outcome) in outcomes.into_iter().enumerate() {
+        match outcome {
+            Some((frame, stats)) => {
+                frames.push(frame);
+                frame_stats.push(stats);
+            }
+            None => dropped.push(idx),
+        }
+    }
+    dropped.sort_unstable();
+    if frames.len() <= 1 && total > 1 {
+        return Err(Error::AllFramesDropped { count: total - 1 });
+    }
+
+    let registered = frames.len();
+    tracing::info!(
+        frames = registered,
+        dropped = dropped.len(),
+        "Streaming: combining (mmap)"
+    );
+    let stacked = stack_weighted_frames(
+        frames,
+        frame_stats,
+        Some(cache_dir),
+        dimensions,
+        metadata,
+        config.stack.clone(),
+        ProgressCallback::default(),
+        cancel,
+    )
+    .map_err(Error::Stack)?;
+
+    Ok(AlignStackResult::from_stack(
+        stacked, reference, registered, dropped,
+    ))
 }
 
 #[cfg(test)]
@@ -521,5 +778,75 @@ mod tests {
         assert!(result.image.width() > 0 && result.image.height() > 0);
         assert_eq!(result.registered + result.dropped.len(), lights.len());
         assert!(result.registered >= 1, "at least the reference is stacked");
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(feature = "real-data"),
+        ignore = "requires the bundled real-data dataset"
+    )]
+    fn streaming_disk_tier_matches_ram_on_real_lights() {
+        use crate::testing::calibration_image_paths;
+        use crate::{CalibrationFrames, DEFAULT_SIGMA_THRESHOLD};
+
+        let dark_paths = calibration_image_paths("Darks").unwrap_or_default();
+        let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
+        let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
+        let empty: Vec<std::path::PathBuf> = Vec::new();
+        let masters = CalibrationMasters::from_files(
+            CalibrationFrames {
+                darks: &dark_paths,
+                flats: &flat_paths,
+                bias: &bias_paths,
+                flat_darks: &empty,
+            },
+            DEFAULT_SIGMA_THRESHOLD,
+        )
+        .expect("build calibration masters");
+
+        let all = calibration_image_paths("Lights").expect("Lights subdirectory");
+        let lights = &all[..all.len().min(3)];
+        assert!(lights.len() >= 2, "need ≥2 lights to exercise registration");
+
+        // Seed RANSAC so both tiers are bit-comparable (registration is the only nondeterminism).
+        let mut config = AlignStackConfig::default();
+        config.registration.seed = Some(0x00C0_FFEE);
+
+        // RAM tier: huge memory budget → the all-in-memory path.
+        let mut ram_cfg = config.clone();
+        ram_cfg.stack.cache.available_memory = Some(u64::MAX);
+        let ram = calibrate_align_stack(lights, &masters, &ram_cfg, CancelToken::never())
+            .expect("RAM-tier stack");
+
+        // Disk tier: a 1-byte budget forces the streaming disk path; clean its cache on drop.
+        let mut disk_cfg = config;
+        disk_cfg.stack.cache.available_memory = Some(1);
+        disk_cfg.stack.cache.keep_cache = false;
+        let disk = calibrate_align_stack(lights, &masters, &disk_cfg, CancelToken::never())
+            .expect("disk-tier (streaming) stack");
+
+        assert_eq!(ram.registered, disk.registered, "same frames stacked");
+        assert_eq!(ram.dropped, disk.dropped, "same frames dropped");
+        assert_eq!(ram.reference, disk.reference, "same reference");
+        assert_eq!(ram.image.dimensions(), disk.image.dimensions());
+        // Bit-identical: same frames, same (seeded) registration, same combine — only the frame
+        // storage (RAM vs mmap) differs.
+        for c in 0..ram.image.channels() {
+            let a: Vec<u32> = ram
+                .image
+                .channel(c)
+                .pixels()
+                .iter()
+                .map(|x| x.to_bits())
+                .collect();
+            let b: Vec<u32> = disk
+                .image
+                .channel(c)
+                .pixels()
+                .iter()
+                .map(|x| x.to_bits())
+                .collect();
+            assert_eq!(a, b, "channel {c} differs between the RAM and disk tiers");
+        }
     }
 }

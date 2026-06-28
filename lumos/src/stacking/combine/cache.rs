@@ -760,6 +760,36 @@ pub(crate) struct GeometryPlanes {
 }
 
 impl LightCache {
+    /// Build a cache from pre-tiered [`WeightedFrame`]s and their stats — the streaming pipeline
+    /// produces these directly (spilling to disk or keeping in RAM as it warps), so the whole frame
+    /// set is never materialised at once. `cache_dir` is `Some` for the disk tier (removed on
+    /// `Drop`), `None` for the RAM tier. `dimensions`/`metadata` come from the (consumed) frames.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_weighted_frames(
+        frames: Vec<WeightedFrame>,
+        channel_stats: Vec<FrameStats>,
+        cache_dir: Option<PathBuf>,
+        dimensions: ImageDimensions,
+        metadata: AstroImageMetadata,
+        config: &CacheConfig,
+        progress: ProgressCallback,
+        cancel: CancelToken,
+    ) -> Self {
+        debug_assert_eq!(frames.len(), channel_stats.len());
+        Self {
+            frames,
+            core: CacheCore {
+                cache_dir,
+                dimensions,
+                metadata,
+                channel_stats,
+                config: config.clone(),
+                progress,
+                cancel,
+            },
+        }
+    }
+
     /// Build an in-memory coverage-weighted cache from [`StackFrame`]s (image + optional
     /// per-pixel coverage), moving channels and coverage into [`Plane::Memory`] (no copy).
     pub fn from_stack_frames(
@@ -1247,23 +1277,75 @@ fn cache_image_channels(
     image: &impl StackableImage,
     dimensions: ImageDimensions,
 ) -> Result<Frame, Error> {
-    let channels = dimensions.channels;
+    Ok(Frame {
+        channels: spill_channels(cache_dir, base_filename, image, dimensions)?,
+    })
+}
 
+/// Spill an image's channels to `cache_dir/<base>_c<ch>.bin` and return them as memory-mapped
+/// [`Plane`]s. The tiering primitive shared by the path-based loader, the streaming calibrate spill,
+/// and the streaming warp spill.
+pub(crate) fn spill_channels(
+    cache_dir: &Path,
+    base_filename: &str,
+    image: &impl StackableImage,
+    dimensions: ImageDimensions,
+) -> Result<ArrayVec<Plane, 3>, Error> {
     let mut planes = ArrayVec::new();
-
-    for c in 0..channels {
-        let channel_filename = channel_cache_filename(base_filename, c);
-        let channel_path = cache_dir.join(&channel_filename);
-
-        // Write channel if not reusable
+    for c in 0..dimensions.channels {
+        let channel_path = cache_dir.join(channel_cache_filename(base_filename, c));
         if !try_reuse_channel_cache_file(&channel_path, dimensions) {
             write_channel_cache_file(&channel_path, image.channel(c))?;
         }
-
         planes.push(Plane::Mapped(mmap_channel_file(channel_path)?));
     }
+    Ok(planes)
+}
 
-    Ok(Frame { channels: planes })
+/// Spill a warped light frame (channels + optional coverage) to the disk cache and return the
+/// memory-mapped [`WeightedFrame`] plus its [`FrameStats`] — computed from the in-RAM `image` before
+/// it is dropped, so the streaming pipeline never re-reads the planes just for stats.
+pub(crate) fn spill_weighted_frame(
+    cache_dir: &Path,
+    base_filename: &str,
+    image: AstroImage,
+    coverage: Option<Buffer2<f32>>,
+    dimensions: ImageDimensions,
+) -> Result<(WeightedFrame, FrameStats), Error> {
+    let stats = compute_frame_stats(&image);
+    let channels = spill_channels(cache_dir, base_filename, &image, dimensions)?;
+    let coverage = match coverage {
+        Some(cov) => {
+            let path = cache_dir.join(format!("{base_filename}_coverage.bin"));
+            write_channel_cache_file(&path, &cov)?;
+            Some(Plane::Mapped(mmap_channel_file(path)?))
+        }
+        None => None,
+    };
+    Ok((WeightedFrame { channels, coverage }, stats))
+}
+
+/// Reconstruct an `AstroImage` from spilled (memory-mapped) channels — used by the streaming warp to
+/// pull a calibrated frame back into RAM for [`crate::stacking::registration::warp`], which needs a
+/// full `AstroImage`. Copies the mmap'd planes into owned buffers (bounded by warp concurrency).
+pub(crate) fn image_from_spilled_channels(
+    channels: &[Plane],
+    dimensions: ImageDimensions,
+    metadata: &AstroImageMetadata,
+) -> AstroImage {
+    let n = dimensions.size.x * dimensions.size.y;
+    let planes = channels.iter().map(|p| p.chunk(0, n).to_vec());
+    let mut image = AstroImage::from_planar_channels(dimensions, planes);
+    image.metadata = metadata.clone();
+    image
+}
+
+/// Delete a calibrated frame's spilled channel files once its warp has consumed it (keeps peak temp
+/// usage at ~`N × warped-frame` rather than `N × (calibrated + warped)`).
+pub(crate) fn remove_spilled_channels(cache_dir: &Path, base_filename: &str, channels: usize) {
+    for c in 0..channels {
+        let _ = std::fs::remove_file(cache_dir.join(channel_cache_filename(base_filename, c)));
+    }
 }
 
 #[cfg(test)]
