@@ -49,6 +49,24 @@ use common::cpu_features;
 const MIDTONES_MIN: f32 = 1e-4;
 const MIDTONES_MAX: f32 = 1.0 - 1e-4;
 
+/// Cephes single-precision `logf` polynomial coefficients (`cephes/logf.c`), accurate to ~1 ULP on
+/// the reduced mantissa. Shared verbatim by the AVX2 and NEON `asinh` backends (`asinh(x) =
+/// logf(x + √(x²+1))`) so the two arches stay bit-for-bit identical — one source of truth, no
+/// "keep in sync" drift. `Q1`/`Q2` are the two-part ln(2) that reassembles log from mantissa +
+/// exponent.
+pub(crate) const LOG_P0: f32 = 7.037_683_6e-2;
+pub(crate) const LOG_P1: f32 = -1.151_461e-1;
+pub(crate) const LOG_P2: f32 = 1.167_699_9e-1;
+pub(crate) const LOG_P3: f32 = -1.242_014_1e-1;
+pub(crate) const LOG_P4: f32 = 1.424_932_3e-1;
+pub(crate) const LOG_P5: f32 = -1.666_805_8e-1;
+pub(crate) const LOG_P6: f32 = 2.000_071_5e-1;
+pub(crate) const LOG_P7: f32 = -2.499_999_4e-1;
+pub(crate) const LOG_P8: f32 = 3.333_333e-1;
+pub(crate) const SQRTHF: f32 = 0.707_106_77;
+pub(crate) const LOG_Q1: f32 = -2.121_944_4e-4;
+pub(crate) const LOG_Q2: f32 = 0.693_359_4;
+
 /// Which stretch curve to apply, and how its parameters are chosen.
 #[derive(Debug, Clone, Copy)]
 pub enum StretchMethod {

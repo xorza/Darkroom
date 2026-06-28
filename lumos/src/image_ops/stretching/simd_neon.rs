@@ -11,22 +11,10 @@ use std::arch::aarch64::*;
 
 use common::Rgb;
 
-use crate::image_ops::stretching::{AsinhCurve, color_preserve_pixel};
-
-// Cephes single-precision logf polynomial (cephes/logf.c), accurate to ~1 ULP on the reduced
-// mantissa. `Q1`/`Q2` are the two-part ln(2) used to reassemble log from mantissa + exponent.
-const LOG_P0: f32 = 7.037_683_6e-2;
-const LOG_P1: f32 = -1.151_461e-1;
-const LOG_P2: f32 = 1.167_699_9e-1;
-const LOG_P3: f32 = -1.242_014_1e-1;
-const LOG_P4: f32 = 1.424_932_3e-1;
-const LOG_P5: f32 = -1.666_805_8e-1;
-const LOG_P6: f32 = 2.000_071_5e-1;
-const LOG_P7: f32 = -2.499_999_4e-1;
-const LOG_P8: f32 = 3.333_333e-1;
-const SQRTHF: f32 = 0.707_106_77;
-const LOG_Q1: f32 = -2.121_944_4e-4;
-const LOG_Q2: f32 = 0.693_359_4;
+use crate::image_ops::stretching::{
+    AsinhCurve, LOG_P0, LOG_P1, LOG_P2, LOG_P3, LOG_P4, LOG_P5, LOG_P6, LOG_P7, LOG_P8, LOG_Q1,
+    LOG_Q2, SQRTHF, color_preserve_pixel,
+};
 
 /// Vectorized single-precision `logf` for 4 lanes (Cephes). Valid for `x > 0`; callers here only
 /// ever pass `x = arg + √(arg²+1) ≥ 1`.
