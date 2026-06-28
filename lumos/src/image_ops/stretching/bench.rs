@@ -7,6 +7,7 @@ use std::hint::black_box;
 
 use imaginarium::Image;
 
+use super::AsinhCurve;
 use crate::Stretch;
 use crate::io::astro_image::{AstroImage, ImageDimensions};
 
@@ -70,5 +71,45 @@ fn bench_stretch_auto_asinh_rgb(b: ::quickbench::Bencher) {
             .apply(&mut img)
             .expect("stretch applies to an RGB f32 master");
         black_box(img)
+    });
+}
+
+/// Single-thread throughput of the color-preserving arcsinh kernel itself, isolated from the
+/// `clone`/planar→interleaved-convert/subsample overhead the end-to-end benches above also pay.
+/// The kernel is branchless in the pixel data, so re-running it in place over drifting values costs
+/// a constant per call — no per-iteration reset needed.
+#[quick_bench(warmup_iters = 1, iters = 10)]
+fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
+    let curve = AsinhCurve::new(0.05);
+    let n_px = W * H;
+    let mut buf = vec![0.0f32; n_px * 3];
+    for (i, px) in buf.chunks_exact_mut(3).enumerate() {
+        let hash = (i as u32).wrapping_mul(2654435761) as f32 / u32::MAX as f32;
+        let v = 0.03 + hash * 0.5; // background-to-star spread, some channels above 1
+        px[0] = v;
+        px[1] = v * 0.9;
+        px[2] = v * 0.8;
+    }
+    b.bench(|| {
+        // SAFETY: NEON is always available on aarch64.
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            super::simd_neon::asinh_color_preserve_neon(&mut buf, curve.inv_beta, curve.inv_norm);
+        }
+        #[cfg(not(target_arch = "aarch64"))]
+        for px in buf.chunks_exact_mut(3) {
+            let out = super::color_preserve_pixel(
+                common::Rgb {
+                    r: px[0],
+                    g: px[1],
+                    b: px[2],
+                },
+                &curve,
+            );
+            px[0] = out.r;
+            px[1] = out.g;
+            px[2] = out.b;
+        }
+        black_box(&buf);
     });
 }

@@ -172,6 +172,7 @@ Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `
 | `stacking/star_detection/median_filter` | ✓ | ✓ | ✓ |
 | `stacking/star_detection/centroid/{gaussian,moffat}_fit` | ✓ | | ✓ |
 | `stacking/registration/interpolation/warp` (bilinear; Lanczos 128-bit FMA + deringing) | ✓ | ✓ | ✓ |
+| `image_ops/stretching` (color-preserving arcsinh; Cephes `logf`/`asinh`) | ✓ | | ✓ |
 
 ## WIP / notes
 

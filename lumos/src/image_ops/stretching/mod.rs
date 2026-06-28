@@ -36,6 +36,8 @@ use imaginarium::{ChannelCount, Image};
 mod bench;
 #[cfg(target_arch = "x86_64")]
 mod simd_avx2;
+#[cfg(target_arch = "aarch64")]
+mod simd_neon;
 #[cfg(test)]
 mod tests;
 
@@ -583,9 +585,9 @@ fn apply_color_preserving_image(image: &mut Image, curve: Curve) {
     }
 }
 
-/// Color-preserving arcsinh. The per-pixel `asinh` is the curve's hot spot, so RGB images take an
-/// AVX2 path that vectorizes it (≈ f32-exact, ~1 ULP vs libm); everything else (mono, no AVX2) uses
-/// the scalar per-pixel map.
+/// Color-preserving arcsinh. The per-pixel `asinh` is the curve's hot spot, so RGB images take a
+/// vectorized path (AVX2 on x86_64, NEON on aarch64) that computes it ≈ f32-exact (~1 ULP vs libm);
+/// everything else (mono, no AVX2) uses the scalar per-pixel map.
 fn apply_color_preserving_asinh(image: &mut Image, c: AsinhCurve) {
     #[cfg(target_arch = "x86_64")]
     if image.desc.color_format.channel_count == ChannelCount::Rgb && cpu_features::has_avx2() {
@@ -594,6 +596,16 @@ fn apply_color_preserving_asinh(image: &mut Image, c: AsinhCurve) {
         samples.par_chunks_mut(8192 * 3).for_each(|blk| {
             // SAFETY: AVX2 availability checked above.
             unsafe { simd_avx2::asinh_color_preserve_avx2(blk, c.inv_beta, c.inv_norm) };
+        });
+        return;
+    }
+    #[cfg(target_arch = "aarch64")]
+    if image.desc.color_format.channel_count == ChannelCount::Rgb {
+        // ~8K pixels per task; each band stays whole-pixel (length a multiple of 3).
+        let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
+        samples.par_chunks_mut(8192 * 3).for_each(|blk| {
+            // SAFETY: NEON is always available on aarch64.
+            unsafe { simd_neon::asinh_color_preserve_neon(blk, c.inv_beta, c.inv_norm) };
         });
         return;
     }
