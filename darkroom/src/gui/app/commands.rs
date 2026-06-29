@@ -37,16 +37,6 @@ impl App {
             }
             MenuCommand::SaveDocument => self.save_current(),
             MenuCommand::SaveDocumentAs => self.save_document_as(),
-            MenuCommand::LoadTheme => {
-                if let Some(path) = dialogs::pick_theme_open() {
-                    self.load_theme(ui, &path);
-                }
-            }
-            MenuCommand::ExportTheme => {
-                if let Some(path) = dialogs::pick_theme_save() {
-                    dialogs::export_theme(&self.theme, &path);
-                }
-            }
             MenuCommand::SetTheme(choice) => {
                 // Resolve the choice to a concrete palette (`System`
                 // queries the OS), push the matching palantir palette onto
@@ -236,29 +226,6 @@ impl App {
         self.engine.set_document_cache(self.current_path.as_deref());
         self.config.document_path = path;
         self.config.save();
-    }
-
-    /// Load a theme picked from the dialog and apply it to the live
-    /// session. Not persisted: the next launch always restores the
-    /// preference recorded in [`AppConfig::theme`] (set via the Theme
-    /// menu), regardless of any file loaded in this session.
-    fn load_theme(&mut self, ui: &mut Ui, picked: &Path) {
-        if self.load_theme_file(picked) {
-            ui.theme = self.theme.palantir_theme.clone();
-        }
-    }
-
-    /// Apply a theme `.toml` from `path` into `self.theme`. Returns
-    /// whether it succeeded; on failure leaves the current theme
-    /// untouched. Shared by startup restore and menu load.
-    pub(crate) fn load_theme_file(&mut self, path: &Path) -> bool {
-        match dialogs::load_theme(path) {
-            Some(theme) => {
-                self.theme = theme;
-                true
-            }
-            None => false,
-        }
     }
 }
 

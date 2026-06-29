@@ -21,8 +21,6 @@ pub(crate) enum MenuCommand {
     SaveDocument,
     /// Always prompt for a destination.
     SaveDocumentAs,
-    LoadTheme,
-    ExportTheme,
     /// Set the theme preference: `System` follows the OS light/dark
     /// setting, `Dark`/`Light` pin a palette. Persisted to config.
     SetTheme(ThemeChoice),

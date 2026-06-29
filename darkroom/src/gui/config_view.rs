@@ -8,8 +8,8 @@
 use std::path::Path;
 
 use palantir::{
-    Align, Background, Button, Configure, Corners, Panel, Sizing, Spacing, Text, TextStyle, Ui,
-    VAlign,
+    Align, Background, Button, Configure, Corners, Panel, RadioButton, Sizing, Spacing, Text,
+    TextStyle, Ui, VAlign,
 };
 
 use crate::core::theme_pref::ThemeChoice;
@@ -33,57 +33,30 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<MenuCommand> {
         .show(ui, |ui| {
             heading(ui, "Configuration");
 
-            // Appearance — theme preference + theme-file I/O (the sole home
-            // for theme settings now that the Theme menu is gone).
+            // Appearance — the theme preference (the sole home for theme
+            // settings now that the Theme menu is gone).
             subheading(ui, theme, "Appearance");
+            // The radios mutate a local copy; a change from the current
+            // preference becomes a `SetTheme` for `App` to apply + persist.
+            let mut selected = ctx.theme_choice;
             Panel::hstack()
                 .id_salt("config_theme_row")
                 .size((Sizing::Hug, Sizing::Hug))
-                .gap(6.0)
+                .gap(16.0)
                 .show(ui, |ui| {
                     for (choice, label) in [
                         (ThemeChoice::System, "System"),
                         (ThemeChoice::Dark, "Dark"),
                         (ThemeChoice::Light, "Light"),
                     ] {
-                        let mark = if choice == ctx.theme_choice {
-                            "● "
-                        } else {
-                            "○ "
-                        };
-                        if Button::new()
-                            .id_salt(label)
-                            .label(format!("{mark}{label}"))
-                            .show(ui)
-                            .clicked()
-                        {
-                            command = Some(MenuCommand::SetTheme(choice));
-                        }
+                        RadioButton::new(&mut selected, choice)
+                            .label(label)
+                            .show(ui);
                     }
                 });
-            // Load/export a theme `.toml` (moved here from the Theme menu).
-            Panel::hstack()
-                .id_salt("config_theme_io_row")
-                .size((Sizing::Hug, Sizing::Hug))
-                .gap(6.0)
-                .show(ui, |ui| {
-                    if Button::new()
-                        .id_salt("theme_load")
-                        .label("Load Theme…")
-                        .show(ui)
-                        .clicked()
-                    {
-                        command = Some(MenuCommand::LoadTheme);
-                    }
-                    if Button::new()
-                        .id_salt("theme_export")
-                        .label("Export Theme…")
-                        .show(ui)
-                        .clicked()
-                    {
-                        command = Some(MenuCommand::ExportTheme);
-                    }
-                });
+            if selected != ctx.theme_choice {
+                command = Some(MenuCommand::SetTheme(selected));
+            }
 
             // ML models — caller-supplied ONNX files the ml_denoise /
             // remove_stars nodes load (lumos ships none).
