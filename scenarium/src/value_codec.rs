@@ -53,6 +53,13 @@ pub trait CustomValueCodec: Send + Sync + std::fmt::Debug {
     /// Rebuild a value from bytes a prior [`Self::encode`] produced. Errors are
     /// expected when a blob outlives the binary that wrote it (corrupt or
     /// layout-changed bytes).
+    ///
+    /// **Contract:** a codec must *reject bytes it didn't write* — version its own frame
+    /// and return `Err` on a mismatch. The framework treats a decode error as a cache
+    /// miss and recomputes, but it can't tell a layout-changed blob from a valid one, so
+    /// an unversioned codec that changes its byte format for the same `TypeId` (without
+    /// the framework's `FORMAT_VERSION` or digest `DOMAIN` being bumped) would decode
+    /// stale bytes into a wrong value — a silent false hit.
     fn decode(&self, bytes: Vec<u8>) -> std::result::Result<Arc<dyn CustomValue>, CodecError>;
 }
 
@@ -80,6 +87,14 @@ pub(crate) enum Error {
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
+
+/// Version of the cache *blob* framing (the [`CachedValue`] mirror serialized below),
+/// prefixed to every blob as 4 little-endian bytes. Bitcode isn't self-describing, so a
+/// change to `CachedValue`'s shape would silently mis-decode old blobs; bumping this
+/// makes [`deserialize_outputs`] reject them as a miss (→ recompute) instead. It does
+/// **not** cover a custom codec's opaque `blob` bytes — that's the codec's own
+/// responsibility (see [`CustomValueCodec::decode`]).
+const FORMAT_VERSION: u32 = 1;
 
 /// Serializable mirror of one [`DynamicValue`]. `Custom` carries the producer's
 /// type id so the loader can pick the right codec.
@@ -116,15 +131,31 @@ pub(crate) async fn serialize_outputs(
         });
     }
     // In-memory encode of known-serializable types: failure is a logic bug.
-    Ok(serialize(&cached, SerdeFormat::Bitcode).expect("cache output serialization"))
+    let body = serialize(&cached, SerdeFormat::Bitcode).expect("cache output serialization");
+    let mut bytes = Vec::with_capacity(4 + body.len());
+    bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+    bytes.extend_from_slice(&body);
+    Ok(bytes)
 }
 
 /// Decode outputs previously written by [`serialize_outputs`], rebuilding custom
 /// values through `registry`. Errors on malformed bytes or an unregistered type.
 /// Consumes `bytes` (the blob is moved into the deserializer, not borrowed).
 pub(crate) fn deserialize_outputs(bytes: Vec<u8>, library: &Library) -> Result<Vec<DynamicValue>> {
+    if bytes.len() < 4 {
+        return Err(Error::Frame(
+            "cache blob too short for a version header".into(),
+        ));
+    }
+    let (header, body) = bytes.split_at(4);
+    let version = u32::from_le_bytes(header.try_into().expect("4-byte header"));
+    if version != FORMAT_VERSION {
+        return Err(Error::Frame(format!(
+            "unsupported cache format version {version} (expected {FORMAT_VERSION})"
+        )));
+    }
     let cached: Vec<CachedValue> =
-        deserialize(&bytes, SerdeFormat::Bitcode).map_err(|e| Error::Frame(e.to_string()))?;
+        deserialize(body, SerdeFormat::Bitcode).map_err(|e| Error::Frame(e.to_string()))?;
     cached
         .into_iter()
         .map(|value| {

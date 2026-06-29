@@ -62,7 +62,13 @@ pub(crate) async fn write(
         Err(value_codec::Error::UnknownType(_)) => return Ok(false),
         Err(e) => return Err(Error::Encode(e)),
     };
-    atomic_write(path, &bytes)?;
+    // `atomic_write` is blocking `std::fs`; run it off the async worker thread so a
+    // large blob's write doesn't stall the runtime (progress events, cancel polling,
+    // other event-loop tasks). `serialize_outputs` above already did the heavy encode.
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || atomic_write(&path, &bytes))
+        .await
+        .expect("cache write task panicked")?;
     Ok(true)
 }
 
@@ -189,5 +195,31 @@ mod tests {
         .unwrap();
         assert!(!wrote, "no codec ⇒ Ok(false), nothing written");
         assert!(!file.0.exists(), "no blob created");
+    }
+
+    /// A blob whose format-version header doesn't match the current one decodes to a
+    /// miss (recompute), not a silent mis-decode — guards against a `CachedValue` shape
+    /// change serving garbage through the non-self-describing bitcode frame.
+    #[tokio::test]
+    async fn read_rejects_an_unknown_format_version() {
+        let file = temp_file("badversion");
+        let outputs = vec![DynamicValue::Static(StaticValue::Int(1))];
+        write(
+            &file.0,
+            &outputs,
+            &library(),
+            &mut ContextManager::default(),
+        )
+        .await
+        .unwrap();
+        // Corrupt the 4-byte little-endian version header at the front of the blob.
+        let mut bytes = std::fs::read(&file.0).unwrap();
+        bytes[0] ^= 0xff;
+        std::fs::write(&file.0, &bytes).unwrap();
+
+        assert!(
+            read(&file.0, &library()).is_none(),
+            "a blob with an unknown format version is treated as a miss"
+        );
     }
 }

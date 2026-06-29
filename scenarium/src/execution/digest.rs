@@ -1,5 +1,5 @@
-//! Content digests for node outputs — the cache key for the per-slot RAM cache
-//! (and the disk cache, when that's wired up).
+//! Content digests for node outputs — the cache key for the per-slot RAM cache and
+//! the content-addressed disk cache.
 //!
 //! A node's output is a pure function of its function (identity + version), its
 //! resolved input values, the outputs of its upstream producers, and the content
@@ -9,6 +9,19 @@
 //! cache key *and* the invalidation signal: change anything upstream and every
 //! downstream digest changes — on this machine or any other. See
 //! `README.md` Part B.
+//!
+//! **Trust boundary (what is *not* folded).** The digest is only as honest as these
+//! assumptions; violating one is a *false hit* (a stale value served):
+//! - **`func_version` is the behavior contract.** Output *types* are folded, but a
+//!   lambda whose value logic (or a default for an unbound optional input) changes with
+//!   the same signature and no version bump re-uses the old digest. Bump the version.
+//! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
+//!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
+//!   cached).
+//! - **`FsPath` identity is `(len, mtime)`** ([`fs_file_id`]) — a same-size edit within
+//!   mtime granularity can slip through; a full content hash is the opt-in resolver.
+//! - **Custom-value blob format** is the codec's responsibility, not the digest's — see
+//!   `CustomValueCodec::decode`; a breaking codec change needs a `DOMAIN` bump.
 
 use blake3::Hasher;
 
