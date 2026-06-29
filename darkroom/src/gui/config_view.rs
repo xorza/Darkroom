@@ -33,8 +33,8 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<MenuCommand> {
         .show(ui, |ui| {
             heading(ui, "Configuration");
 
-            // Appearance — theme preference (mirrors the Theme menu so the
-            // setting is reachable from the panel too).
+            // Appearance — theme preference + theme-file I/O (the sole home
+            // for theme settings now that the Theme menu is gone).
             subheading(ui, theme, "Appearance");
             Panel::hstack()
                 .id_salt("config_theme_row")
@@ -59,6 +59,29 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<MenuCommand> {
                         {
                             command = Some(MenuCommand::SetTheme(choice));
                         }
+                    }
+                });
+            // Load/export a theme `.toml` (moved here from the Theme menu).
+            Panel::hstack()
+                .id_salt("config_theme_io_row")
+                .size((Sizing::Hug, Sizing::Hug))
+                .gap(6.0)
+                .show(ui, |ui| {
+                    if Button::new()
+                        .id_salt("theme_load")
+                        .label("Load Theme…")
+                        .show(ui)
+                        .clicked()
+                    {
+                        command = Some(MenuCommand::LoadTheme);
+                    }
+                    if Button::new()
+                        .id_salt("theme_export")
+                        .label("Export Theme…")
+                        .show(ui)
+                        .clicked()
+                    {
+                        command = Some(MenuCommand::ExportTheme);
                     }
                 });
 
