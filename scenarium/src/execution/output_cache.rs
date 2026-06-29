@@ -47,7 +47,6 @@ use crate::execution::cache::Cache;
 use crate::execution::digest::Digest;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::function::{Func, OutputType};
 use crate::library::Library;
 use crate::special::SpecialNode;
 
@@ -121,15 +120,10 @@ impl OutputCache {
     /// via [`Self::hydrate_frontier`], or an inspection read), so a disk-cached
     /// value sitting behind another disk-cached value never enters RAM. A bypassed
     /// cache node, a resident hit, a node with no current digest, or one whose
-    /// outputs lack a registered codec is left unflagged (it recomputes). `library`
-    /// resolves output types (the program stores spans only); the codec table read
-    /// at load time is this cache's own `library`.
-    pub(crate) fn mark_available(
-        &self,
-        program: &ExecutionProgram,
-        library: &Library,
-        cache: &mut Cache,
-    ) {
+    /// outputs lack a registered codec is left unflagged (it recomputes). Reads the
+    /// node's resolved output types off the slot ([`Cache::recompute_output_types`]),
+    /// so no library is needed here for resolution — only this cache's own codec table.
+    pub(crate) fn mark_available(&self, program: &ExecutionProgram, cache: &mut Cache) {
         for idx in 0..program.e_nodes.len() {
             cache.slots[idx].disk_available = false;
             if is_bypassed(program, idx) || cache.is_resident_hit(idx) {
@@ -141,7 +135,7 @@ impl OutputCache {
             let Some(target) = self.target(program, idx, cache) else {
                 continue;
             };
-            if self.outputs_decodable(program, library, idx) && target.path().exists() {
+            if self.outputs_decodable(&cache.slots[idx].output_types) && target.path().exists() {
                 cache.slots[idx].disk_available = true;
             }
         }
@@ -203,12 +197,13 @@ impl OutputCache {
     }
 
     /// Deserialize node `idx`'s disk blob into its slot. Returns whether the slot is
-    /// resident afterward: `true` if already resident or the read succeeded. On a
-    /// failure — read error (codec gone, corrupt or deleted blob) *or* a blob whose
-    /// types no longer match the node's declared outputs ([`Self::outputs_well_typed`])
-    /// — the stale `disk_available` flag is cleared, so a re-plan recomputes the node
-    /// instead of pruning it behind a value that can't be trusted, and `false` is
-    /// returned.
+    /// resident afterward: `true` if already resident or the read succeeded. On a read
+    /// failure (codec gone, corrupt or deleted blob) the stale `disk_available` flag is
+    /// cleared, so a re-plan recomputes the node instead of pruning it behind a value
+    /// that can't be loaded — and `false` is returned. A blob can't be of the *wrong
+    /// type* for a matching digest: the output signature is folded into the digest
+    /// ([`Cache::recompute_output_types`](crate::execution::cache::Cache::recompute_output_types)),
+    /// so a redefined output re-keys rather than colliding.
     fn hydrate_slot(&self, program: &ExecutionProgram, cache: &mut Cache, idx: usize) -> bool {
         if cache.slots[idx].output_values.is_some() {
             return true;
@@ -221,7 +216,6 @@ impl OutputCache {
         if let Some(digest) = cache.current_digest(idx)
             && let Some(target) = self.target(program, idx, cache)
             && let Some(values) = blob::read(target.path(), &self.library)
-            && self.outputs_well_typed(program, idx, &values)
         {
             cache.hydrate(idx, values, digest);
             return true;
@@ -272,42 +266,15 @@ impl OutputCache {
     }
 
     /// Whether every output of node `idx` could be decoded back from a blob: each
-    /// `Custom` output type (resolved through wildcard reroutes) has a codec in this
-    /// cache's library. Predicts, without reading, whether `blob::read` would
-    /// succeed — so `mark_available` never flags a node whose later frontier load
-    /// would fail and trip the executor's "value present" invariant. An unresolvable
-    /// output type imposes no constraint (treated as decodable).
-    fn outputs_decodable(&self, program: &ExecutionProgram, library: &Library, idx: usize) -> bool {
-        let n_outputs = program.e_nodes[idx].outputs.len as usize;
-        (0..n_outputs).all(
-            |port| match effective_output_type(program, library, idx, port) {
-                Some(DataType::Custom(type_id)) => self.library.codec(&type_id).is_some(),
-                _ => true,
-            },
-        )
-    }
-
-    /// Whether decoded `values` match node `idx`'s declared output signature: the
-    /// arity, plus each value's runtime kind against its declared port type (exact
-    /// type id for `Custom`). A port whose type can't be resolved (partial library
-    /// snapshot, or an unresolved wildcard) is not constrained. Guards against a blob
-    /// whose stored types no longer match the graph — a func redefined without a
-    /// version bump, or a file-cache input rewired to another type — reaching a
-    /// consumer that would mis-read or panic-downcast it.
-    fn outputs_well_typed(
-        &self,
-        program: &ExecutionProgram,
-        idx: usize,
-        values: &[DynamicValue],
-    ) -> bool {
-        if values.len() != program.e_nodes[idx].outputs.len as usize {
-            return false;
-        }
-        values.iter().enumerate().all(|(port, value)| {
-            match effective_output_type(program, &self.library, idx, port) {
-                Some(ty) => value_matches_type(value, &ty),
-                None => true,
-            }
+    /// `Custom` output type has a codec in this cache's library. `types` are the
+    /// node's resolved output types off its slot, so this predicts (without reading)
+    /// whether `blob::read` would succeed — `mark_available` never flags a node whose
+    /// later frontier load would fail and trip the executor's "value present"
+    /// invariant. An unresolved type (`Null`) imposes no constraint.
+    fn outputs_decodable(&self, types: &[DataType]) -> bool {
+        types.iter().all(|ty| match ty {
+            DataType::Custom(type_id) => self.library.codec(type_id).is_some(),
+            _ => true,
         })
     }
 
@@ -351,73 +318,6 @@ impl OutputCache {
     }
 }
 
-/// The concrete output type of node `idx`'s `port`, resolving a wildcard reroute by
-/// following its mirrored input through the program's bindings. `None` when it can't
-/// be resolved — the func isn't in `library` (a partial snapshot), or a wildcard's
-/// mirror isn't a `Bind` (a const/unbound mirror is never a custom value). Callers
-/// treat `None` as "no constraint" so a partial library never forces a false verdict.
-fn effective_output_type(
-    program: &ExecutionProgram,
-    library: &Library,
-    idx: usize,
-    port: usize,
-) -> Option<DataType> {
-    match &node_func(program, library, idx)?.outputs.get(port)?.ty {
-        OutputType::Fixed(data_type) => Some(data_type.clone()),
-        OutputType::Wildcard { mirrors } => {
-            let span = program.e_nodes[idx].inputs;
-            match &program.inputs[span.range()].get(*mirrors)?.binding {
-                ExecutionBinding::Bind(addr) => {
-                    effective_output_type(program, library, addr.target_idx, addr.port_idx)
-                }
-                _ => None,
-            }
-        }
-    }
-}
-
-/// Whether a runtime `value` is consistent with a declared port type. The match is
-/// deliberately lenient so a legitimate value is never rejected (a false reject only
-/// costs a recompute, but must not happen on the warm path): `Unbound` matches
-/// anything (a port may be left unwritten), a `Static(Null)` literal is type-agnostic,
-/// and a declared `Null` (unresolved wildcard) imposes nothing. The cases that matter
-/// are tight: a `Custom` must carry the *exact* declared type id (a wrong-type
-/// downcast is the panic this guards), and a primitive's kind must match. `Enum` is
-/// matched loosely — the stored value carries only its variant name, not the type id.
-fn value_matches_type(value: &DynamicValue, ty: &DataType) -> bool {
-    use crate::data::StaticValue as S;
-    match value {
-        DynamicValue::Unbound => true,
-        DynamicValue::Custom(v) => matches!(ty, DataType::Custom(tid) if v.type_id() == *tid),
-        DynamicValue::Static(s) => matches!(
-            (s, ty),
-            (_, DataType::Null)
-                | (S::Null, _)
-                | (S::Float(_), DataType::Float)
-                | (S::Int(_), DataType::Int)
-                | (S::Bool(_), DataType::Bool)
-                | (S::String(_), DataType::String)
-                | (S::FsPath(_), DataType::FsPath(_))
-                | (S::Enum(_), DataType::Enum(_))
-        ),
-    }
-}
-
-/// The func backing node `idx`: a special node's hardcoded spec, else the library
-/// entry for its `func_id`. `None` when the library is a partial snapshot that
-/// doesn't carry this func (so type resolution degrades to "unknown" rather than
-/// panicking — see [`effective_output_type`]).
-fn node_func<'a>(
-    program: &'a ExecutionProgram,
-    library: &'a Library,
-    idx: usize,
-) -> Option<&'a Func> {
-    match program.e_nodes[idx].special {
-        Some(special) => Some(special.func()),
-        None => library.by_id(&program.e_nodes[idx].func_id),
-    }
-}
-
 /// True for a bypassed cache-passthrough node — recompute + overwrite, so never
 /// hydrate it.
 fn is_bypassed(program: &ExecutionProgram, idx: usize) -> bool {
@@ -453,67 +353,5 @@ mod tests {
             h.chars()
                 .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
         );
-    }
-
-    /// The value↔type matcher: tight where it must be (a `Custom` needs the exact
-    /// type id — the wrong-downcast panic this guards — and a primitive's kind must
-    /// match), lenient everywhere a false reject would needlessly recompute
-    /// (`Unbound`, a null literal, an unresolved `Null` declared type).
-    #[test]
-    fn value_matches_type_is_tight_on_custom_and_kind_lenient_elsewhere() {
-        use std::any::Any;
-        use std::fmt;
-        use std::sync::Arc;
-
-        use crate::data::{CustomValue, StaticValue, TypeId};
-
-        const T1: &str = "d894ee78-5d46-44cb-9671-d6816846d15f";
-        const T2: &str = "12dae9d1-7cc1-400b-89a5-8e506069f8ce";
-
-        #[derive(Debug)]
-        struct V(&'static str);
-        impl fmt::Display for V {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "V")
-            }
-        }
-        impl CustomValue for V {
-            fn type_id(&self) -> TypeId {
-                self.0.into()
-            }
-            fn as_any(&self) -> &dyn Any {
-                self
-            }
-        }
-
-        let int = DynamicValue::Static(StaticValue::Int(1));
-        let float = DynamicValue::Static(StaticValue::Float(1.0));
-        let custom_t1 = DynamicValue::Custom(Arc::new(V(T1)));
-
-        // Primitive kinds must match exactly.
-        assert!(value_matches_type(&int, &DataType::Int));
-        assert!(!value_matches_type(&int, &DataType::Float));
-        assert!(value_matches_type(&float, &DataType::Float));
-        assert!(!value_matches_type(&float, &DataType::Int));
-
-        // Custom must carry the exact declared type id; never crosses kinds.
-        assert!(value_matches_type(&custom_t1, &DataType::Custom(T1.into())));
-        assert!(!value_matches_type(
-            &custom_t1,
-            &DataType::Custom(T2.into())
-        ));
-        assert!(!value_matches_type(&custom_t1, &DataType::Int));
-        assert!(!value_matches_type(&int, &DataType::Custom(T1.into())));
-
-        // Lenient: never reject these (a false reject only costs a recompute).
-        assert!(value_matches_type(
-            &DynamicValue::Unbound,
-            &DataType::Custom(T1.into())
-        ));
-        assert!(value_matches_type(&int, &DataType::Null));
-        assert!(value_matches_type(
-            &DynamicValue::Static(StaticValue::Null),
-            &DataType::Int
-        ));
     }
 }

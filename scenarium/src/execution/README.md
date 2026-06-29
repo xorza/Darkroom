@@ -266,9 +266,15 @@ external files it reads. `DigestEngine` folds exactly that into a 256-bit BLAKE3
   different bytes invalidates.
 - **Output ports** of a multi-output node are disambiguated (`port_digest`); a `DOMAIN`
   separator versions the hashing scheme itself.
+- **Output signature.** Each node's resolved output types (arity + each type, wildcards
+  followed — `Cache::recompute_output_types`) are folded in, so redefining a func's
+  outputs (`Int → Float`, an added port) re-keys it *without* a version bump. This is
+  what makes "a blob exists for this digest but is the wrong type" impossible by
+  construction: a type change is a key change, so the stale blob is never looked up.
 
 Digests are **compile-stable**, so the engine recomputes them once per `update`
-(`Cache::recompute_digests`) and the planner/run read the stored value.
+(`Cache::recompute_output_types` then `Cache::recompute_digests`) and the planner/run
+read the stored value.
 
 ## B.3 Storage (`blob.rs`)
 
@@ -323,16 +329,13 @@ The engine drives a fixed sequence; the ordering *is* the contract.
 2. **`execute` → plan, then `hydrate_frontier` (looped).** Read into RAM only the
    **frontier** — the cached producers an executing node's inputs `Bind` to. Producers
    *behind* a pruned producer are never referenced, so a chain loads only its frontier.
-   Each loaded blob is **type-verified** (`outputs_well_typed`): its arity and per-port
-   runtime types are checked against the node's declared outputs, with an exact type-id
-   match for `Custom` (the unresolvable-type ports are left unchecked). A frontier blob
-   that fails to load — a read error (corrupt/deleted/undecodable) *or* a type mismatch
-   (a func redefined without a version bump, a file-cache input rewired to another type) —
-   clears its own `disk_available` and makes `hydrate_frontier` return `false`; the engine
-   **re-plans**, rescheduling that node to recompute instead of pruning it behind an absent
-   or wrong-typed value (which would trip the executor's "value present" invariant or
-   panic-downcast a consumer). Each failure clears one flag, so the plan/hydrate loop
-   converges.
+   A frontier blob can't be of the *wrong type* — the output signature is in the digest
+   (§B.2), so a mismatched type would have re-keyed — but it can still fail to *load*
+   (corrupt/deleted/undecodable); that clears its own `disk_available` and makes
+   `hydrate_frontier` return `false`, so the engine **re-plans**, rescheduling that node
+   to recompute instead of pruning it behind an absent value (which would trip the
+   executor's "value present" invariant). Each failure clears one flag, so the
+   plan/hydrate loop converges.
 3. **run → `store`.** Write executed nodes' outputs (blobs already present are skipped).
 4. **after store → `evict_unused`.** Demote resident values the run neither executed nor
    read as a frontier — prior-run leftovers — back to disk-only, **iff** a blob can serve
@@ -357,16 +360,17 @@ and `A` hydrates from disk then.
 
 - Any upstream change re-keys the digest → miss → recompute → store under the new key.
 - `func_version` bump invalidates a func's cached outputs across binaries.
+- **Output-type change** — a redefined output signature (type or arity) re-keys the
+  digest (§B.2), so a stale blob of the wrong type is never even looked up. No version
+  bump needed, no runtime type check: wrong-type-for-key is impossible by construction.
 - Impure cone → no digest → never cached.
 - Missing codec / corrupt / deleted blob → treated as a miss, not a failure
   (`mark_available`'s codec check + `hydrate_frontier`'s re-plan keep it off the hot and
   the panic paths).
-- **Type mismatch** — a blob whose stored types no longer match the node's declared
-  outputs (a func redefined without a version bump; for the file cache, an input rewired
-  to another type, since `file_cache_digest` ignores the input cone) is caught at load by
-  `outputs_well_typed` and treated as a miss → recompute, never served. This closes the
-  one gap the digest alone leaves: it folds func id + version + inputs, but **not** the
-  declared output types.
+
+The **file cache** is the one exception: its digest is the path alone (Part C), so a
+type-changing input rewire is *not* caught by the digest — it's the documented
+presence-based, user-managed invalidation.
 
 ---
 

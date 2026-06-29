@@ -429,13 +429,12 @@ mod cache_persistence {
         );
     }
 
-    /// Hydrate-time type verification: a blob whose stored type no longer matches the
-    /// node's declared output (here `produce`'s func is redefined `Int → Float` with
-    /// the *same* id+version, so the content digest is unchanged and the stale `Int`
-    /// blob is still keyed to it) is rejected at load, not served — the node recomputes
-    /// and the consumer sees the correct `Float`.
+    /// A redefined output type can't serve a stale blob: `produce`'s func is changed
+    /// `Int → Float` with the *same* id+version, but the output signature is folded
+    /// into the content digest, so the Float node re-keys away from the Int blob and
+    /// recomputes — the consumer sees the correct `Float`, never the stale `Int`.
     #[tokio::test]
-    async fn blob_of_wrong_type_is_rejected_and_recomputed() {
+    async fn redefined_output_type_rekeys_and_recomputes() {
         use std::sync::Mutex;
 
         use crate::async_lambda;
@@ -524,9 +523,8 @@ mod cache_persistence {
         assert_eq!(produce_runs.load(Ordering::SeqCst), 1);
         assert_eq!(*received.lock().unwrap(), 7.0);
 
-        // Run 2 (Float): same digest, so the stale Int blob is flagged available; but
-        // hydrating it as `consume`'s frontier finds an Int where Float is declared,
-        // rejects it, and re-plans → produce recomputes as Float.
+        // Run 2 (Float): the Float output re-keys produce's digest away from the Int
+        // blob's key, so it isn't found — produce recomputes as Float.
         let float_lib = build_lib(true);
         let mut engine = engine_with(build_lib(true));
         engine.update(&graph, &float_lib).unwrap();
@@ -534,7 +532,7 @@ mod cache_persistence {
         assert_eq!(
             produce_runs.load(Ordering::SeqCst),
             2,
-            "the wrong-typed Int blob is rejected, so produce recomputes"
+            "the Float output re-keys away from the stale Int blob, so produce recomputes"
         );
         assert_eq!(
             *received.lock().unwrap(),
