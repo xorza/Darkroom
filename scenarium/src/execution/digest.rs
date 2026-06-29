@@ -70,16 +70,25 @@ pub(crate) fn fs_file_id(path: &str) -> FileId {
     }
 }
 
-/// Memoized digest computation over one [`ExecutionProgram`]. Reuse a single
-/// engine for the whole program so a shared upstream node is hashed once.
-pub(crate) struct DigestEngine<'a, F> {
-    program: &'a ExecutionProgram,
-    file_id: F,
+/// The engine's per-node working columns, kept across `update`s (owned by the
+/// [`Cache`](crate::execution::cache::Cache)) so a recompile doesn't reallocate two
+/// graph-sized `Vec`s — [`DigestEngine::new`] resizes and resets them in place.
+#[derive(Debug, Default)]
+pub(crate) struct DigestScratch {
     memo: Vec<NodeDigest>,
     /// Per-node in-progress marker — a node re-entered while still on the
     /// recursion stack is a cycle (the planner rejects these upstream; the digest
     /// pass treats it as non-reproducible rather than looping).
     visiting: Vec<bool>,
+}
+
+/// Memoized digest computation over one [`ExecutionProgram`]. Reuse a single
+/// engine for the whole program so a shared upstream node is hashed once.
+pub(crate) struct DigestEngine<'a, F> {
+    program: &'a ExecutionProgram,
+    file_id: F,
+    memo: &'a mut Vec<NodeDigest>,
+    visiting: &'a mut Vec<bool>,
 }
 
 // Manual `Debug` (the rule is "always derive Debug"): the `file_id` resolver is
@@ -95,19 +104,28 @@ impl<F> std::fmt::Debug for DigestEngine<'_, F> {
 
 impl<'a> DigestEngine<'a, fn(&str) -> FileId> {
     /// Engine using the filesystem [`fs_file_id`] resolver — the production path.
-    pub(crate) fn with_fs(program: &'a ExecutionProgram) -> Self {
-        DigestEngine::new(program, fs_file_id)
+    pub(crate) fn with_fs(program: &'a ExecutionProgram, scratch: &'a mut DigestScratch) -> Self {
+        DigestEngine::new(program, scratch, fs_file_id)
     }
 }
 
 impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
-    pub(crate) fn new(program: &'a ExecutionProgram, file_id: F) -> Self {
+    pub(crate) fn new(
+        program: &'a ExecutionProgram,
+        scratch: &'a mut DigestScratch,
+        file_id: F,
+    ) -> Self {
         let n = program.e_nodes.len();
+        let DigestScratch { memo, visiting } = scratch;
+        memo.clear();
+        memo.resize(n, NodeDigest::Pending);
+        visiting.clear();
+        visiting.resize(n, false);
         Self {
             program,
             file_id,
-            memo: vec![NodeDigest::Pending; n],
-            visiting: vec![false; n],
+            memo,
+            visiting,
         }
     }
 
@@ -210,7 +228,7 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
 
     /// Digest of one output *port* of node `idx`, or `None` if the node has no
     /// digest. Disambiguates ports of a multi-output node sharing one node digest.
-    pub(crate) fn port_digest(&mut self, idx: NodeIdx, port_idx: usize) -> Option<Digest> {
+    fn port_digest(&mut self, idx: NodeIdx, port_idx: usize) -> Option<Digest> {
         let node = self.node_digest(idx)?;
         let mut hasher = Hasher::new();
         hasher.update(&node.0);
@@ -386,7 +404,8 @@ mod tests {
     }
 
     fn digests(prog: &Prog) -> Vec<Option<Digest>> {
-        let mut engine = DigestEngine::new(&prog.program, no_files);
+        let mut scratch = DigestScratch::default();
+        let mut engine = DigestEngine::new(&prog.program, &mut scratch, no_files);
         (0..prog.program.e_nodes.len())
             .map(|i| engine.node_digest(i.into()))
             .collect()
@@ -477,27 +496,35 @@ mod tests {
         let mut p = Prog::default();
         p.add(10, 0, 1, &[konst(StaticValue::FsPath("frames".into()))]);
 
-        let d_small = DigestEngine::new(&p.program, |_: &str| FileId {
-            len: 1,
-            mtime_ns: 1,
+        let d_small = DigestEngine::new(&p.program, &mut DigestScratch::default(), |_: &str| {
+            FileId {
+                len: 1,
+                mtime_ns: 1,
+            }
         })
         .node_digest(NodeIdx(0));
-        let d_large = DigestEngine::new(&p.program, |_: &str| FileId {
-            len: 2,
-            mtime_ns: 1,
+        let d_large = DigestEngine::new(&p.program, &mut DigestScratch::default(), |_: &str| {
+            FileId {
+                len: 2,
+                mtime_ns: 1,
+            }
         })
         .node_digest(NodeIdx(0));
-        let d_mtime = DigestEngine::new(&p.program, |_: &str| FileId {
-            len: 1,
-            mtime_ns: 9,
+        let d_mtime = DigestEngine::new(&p.program, &mut DigestScratch::default(), |_: &str| {
+            FileId {
+                len: 1,
+                mtime_ns: 9,
+            }
         })
         .node_digest(NodeIdx(0));
         assert_ne!(d_small, d_large, "file length must matter");
         assert_ne!(d_small, d_mtime, "file mtime must matter");
 
-        let same = DigestEngine::new(&p.program, |_: &str| FileId {
-            len: 1,
-            mtime_ns: 1,
+        let same = DigestEngine::new(&p.program, &mut DigestScratch::default(), |_: &str| {
+            FileId {
+                len: 1,
+                mtime_ns: 1,
+            }
         })
         .node_digest(NodeIdx(0));
         assert_eq!(d_small, same, "identical file identity ⇒ identical digest");
@@ -505,9 +532,11 @@ mod tests {
         // The path string itself is folded too, independent of file identity.
         let mut q = Prog::default();
         q.add(10, 0, 1, &[konst(StaticValue::FsPath("other".into()))]);
-        let d_other = DigestEngine::new(&q.program, |_: &str| FileId {
-            len: 1,
-            mtime_ns: 1,
+        let d_other = DigestEngine::new(&q.program, &mut DigestScratch::default(), |_: &str| {
+            FileId {
+                len: 1,
+                mtime_ns: 1,
+            }
         })
         .node_digest(NodeIdx(0));
         assert_ne!(d_small, d_other, "different path ⇒ different digest");
@@ -521,7 +550,8 @@ mod tests {
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A.0
         p.add(20, 0, 1, &[bind(0, 1)]); // C binds A.1 (same func as B)
 
-        let mut engine = DigestEngine::new(&p.program, no_files);
+        let mut scratch = DigestScratch::default();
+        let mut engine = DigestEngine::new(&p.program, &mut scratch, no_files);
         assert_ne!(
             engine.port_digest(NodeIdx(0), 0),
             engine.port_digest(NodeIdx(0), 1),
@@ -588,7 +618,8 @@ mod tests {
         p.add(10, 0, 1, &[bind(1, 0)]); // A binds B (idx 1)
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A (idx 0)
         assert_eq!(
-            DigestEngine::new(&p.program, no_files).node_digest(NodeIdx(0)),
+            DigestEngine::new(&p.program, &mut DigestScratch::default(), no_files)
+                .node_digest(NodeIdx(0)),
             None
         );
     }

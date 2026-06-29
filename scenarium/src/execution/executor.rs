@@ -6,6 +6,7 @@
 //! [`Executor::run`] invokes each scheduled node's lambda and gathers stats.
 //! Per-run results (errors, timings) are columns local to the run, not cache.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::sync::mpsc::UnboundedSender;
@@ -277,7 +278,7 @@ fn collect_execution_stats(
     executed_count: usize,
     cancelled_in_flight: Option<NodeIdx>,
 ) -> ExecutionStats {
-    let mut executed_nodes = Vec::new();
+    let mut executed_nodes = Vec::with_capacity(executed_count);
     let mut missing_inputs = Vec::new();
     let mut cached_nodes = Vec::new();
     let mut node_errors = Vec::new();
@@ -330,7 +331,7 @@ fn collect_execution_stats(
         logs: Vec::new(),
         // Filled by `ExecutionEngine::execute` from the flatten pass; the executor
         // doesn't know the authoring graph.
-        flatten: FlattenMap::default(),
+        flatten: Arc::default(),
         // Set by `run` from the cancel flag after the loop.
         cancelled: false,
     }

@@ -5,8 +5,6 @@
 //! propagation that resolves each node's cached/wants-execute state. The
 //! `Planner` owns the reusable DFS scratch so a repeated plan allocates nothing.
 
-use common::is_debug;
-
 use crate::execution::cache::Cache;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeColumn, NodeIdx};
@@ -21,10 +19,15 @@ enum Color {
     Black,
 }
 
+/// Why a node sits on the DFS stack. `Root`/`Visit` both mean "discover this node"
+/// (a walk root vs. a producer reached from a consumer); they differ only as
+/// documentation. `Done` is the post-order marker pushed under a node's children.
+/// Output-usage is counted at push time (per consumer edge), so the producer-visit
+/// carries no port — both backward passes share this shape.
 #[derive(Debug)]
 enum VisitCause {
     Root,
-    OutputRequest { output_idx: usize },
+    Visit,
     Done,
 }
 
@@ -64,9 +67,8 @@ impl Planner {
 
         self.collect_roots(program, seeds);
 
-        let result = self.walk_backward_collect_order(program, plan);
+        let result = self.walk_backward_collect_order(program, cache, plan);
         if result.is_ok() {
-            self.resolve_verdicts(program, cache, plan);
             self.walk_backward_collect_execute_order(program, plan);
             validate::schedule(program, plan);
         }
@@ -118,9 +120,16 @@ impl Planner {
         }
     }
 
+    /// Backward post-order DFS from the roots: builds `process_order` (deps before
+    /// consumers), counts per-output usage, detects cycles, and — folded in here
+    /// rather than a separate forward pass — resolves each node's [`NodeVerdict`].
+    /// The verdict is set in the `Done` arm, i.e. in post-order, so every Bind dep is
+    /// already `Black` with its own verdict set when a consumer reads it (what the old
+    /// separate `resolve_verdicts` pass asserted, now structural).
     fn walk_backward_collect_order(
         &mut self,
         program: &ExecutionProgram,
+        cache: &Cache,
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
         plan.process_order.clear();
@@ -137,15 +146,29 @@ impl Planner {
 
         while let Some(visit) = self.stack.pop() {
             match visit.cause {
-                VisitCause::Root => {}
-                VisitCause::OutputRequest { output_idx } => {
-                    let span = program.e_nodes[visit.e_node_idx].outputs;
-                    plan.output_usage[span.start as usize + output_idx] += 1;
-                }
+                VisitCause::Root | VisitCause::Visit => {}
                 VisitCause::Done => {
-                    assert_eq!(self.color[visit.e_node_idx], Color::Gray);
-                    self.color[visit.e_node_idx] = Color::Black;
-                    plan.process_order.push(visit.e_node_idx);
+                    let idx = visit.e_node_idx;
+                    assert_eq!(self.color[idx], Color::Gray);
+                    self.color[idx] = Color::Black;
+                    plan.process_order.push(idx);
+                    // Cached if the output is available (resident or a flagged disk
+                    // blob); otherwise runnable unless a required input is unbound or
+                    // fed by a non-runnable producer. Post-order ⇒ deps already
+                    // verdicted, so `input_missing` reads settled values.
+                    plan.verdicts[idx] = if cache.is_available(idx) {
+                        NodeVerdict::Cached
+                    } else {
+                        let inputs = program.e_nodes[idx].inputs;
+                        let missing = program.inputs[inputs.range()]
+                            .iter()
+                            .any(|e_input| input_missing(e_input, &plan.verdicts));
+                        if missing {
+                            NodeVerdict::MissingInputs
+                        } else {
+                            NodeVerdict::Execute
+                        }
+                    };
                     continue;
                 }
             }
@@ -170,84 +193,20 @@ impl Planner {
             let span = program.e_nodes[idx].inputs;
             for e_input in &program.inputs[span.range()] {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
+                    // Count this consumer's read of the producer's port (drives the
+                    // executor's per-output Skip/Needed); once per consumer edge,
+                    // counted at push so the visit cause needs no payload.
+                    let outputs = program.e_nodes[addr.target_idx].outputs;
+                    plan.output_usage[outputs.start as usize + addr.port_idx] += 1;
                     self.stack.push(Visit {
                         e_node_idx: addr.target_idx,
-                        cause: VisitCause::OutputRequest {
-                            output_idx: addr.port_idx,
-                        },
+                        cause: VisitCause::Visit,
                     });
                 }
             }
         }
 
         Ok(())
-    }
-
-    fn resolve_verdicts(
-        &self,
-        program: &ExecutionProgram,
-        cache: &Cache,
-        plan: &mut ExecutionPlan,
-    ) {
-        // Debug-only: verify every Bind dep was already processed in this
-        // forward pass. Guaranteed by process_order being post-order DFS
-        // (deps before consumers), but worth checking — if this flips, the
-        // forward pass is reading a stale `wants_execute`/`missing_required`.
-        let mut processed = NodeColumn::<bool>::default();
-        if is_debug() {
-            processed.reset(program.e_nodes.len(), false);
-        }
-
-        for order_idx in 0..plan.process_order.len() {
-            let e_node_idx = plan.process_order[order_idx];
-
-            // The node's output is available for its current digest — resident in
-            // RAM, or a decodable blob flagged on disk at `update` (read into RAM
-            // lazily, only if an executing consumer needs it). Either way its cone
-            // is pruned. `None` (impure cone) never matches.
-            let available = cache.is_available(e_node_idx);
-
-            if available {
-                plan.verdicts[e_node_idx] = NodeVerdict::Cached;
-                if is_debug() {
-                    processed[e_node_idx] = true;
-                }
-                continue;
-            }
-
-            // Not cached: a node is runnable unless a required input is unbound,
-            // or wired to a producer that itself can't run (`missing` propagates
-            // only through non-runnable producers — a cached or executing one
-            // delivers a value, optional or not). The per-input verdict isn't
-            // stored — `collect_execution_stats` recomputes it for the rare
-            // missing node when reporting which ports are unsatisfied.
-            let inputs_span = program.e_nodes[e_node_idx].inputs;
-            let mut missing_required = false;
-            for pool_idx in inputs_span.range() {
-                let e_input = &program.inputs[pool_idx];
-                if is_debug()
-                    && let ExecutionBinding::Bind(addr) = &e_input.binding
-                {
-                    // Post-order guarantees the producer's verdict is already in
-                    // `verdicts` before `input_missing` reads it.
-                    assert!(addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize);
-                    assert!(
-                        processed[addr.target_idx],
-                        "forward pass: dep not yet processed"
-                    );
-                }
-                missing_required |= input_missing(e_input, &plan.verdicts);
-            }
-
-            plan.verdicts[e_node_idx] = if missing_required {
-                NodeVerdict::MissingInputs
-            } else {
-                NodeVerdict::Execute
-            };
-            if is_debug() {
-                processed[e_node_idx] = true;
-            }
-        }
     }
 
     // Prunes `process_order` to only nodes whose output is actually read by an
@@ -276,7 +235,7 @@ impl Planner {
             let idx = visit.e_node_idx;
 
             match visit.cause {
-                VisitCause::Root | VisitCause::OutputRequest { .. } => {}
+                VisitCause::Root | VisitCause::Visit => {}
                 VisitCause::Done => {
                     assert_eq!(self.color[idx], Color::Gray);
                     plan.execute_order.push(idx);
@@ -313,9 +272,7 @@ impl Planner {
                 {
                     self.stack.push(Visit {
                         e_node_idx: addr.target_idx,
-                        cause: VisitCause::OutputRequest {
-                            output_idx: addr.port_idx,
-                        },
+                        cause: VisitCause::Visit,
                     });
                 }
             }

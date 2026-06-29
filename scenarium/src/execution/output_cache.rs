@@ -45,7 +45,7 @@ use crate::execution::blob;
 use crate::execution::cache::{Cache, ValueCache};
 use crate::execution::digest::Digest;
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeColumn, NodeIdx};
 use crate::library::Library;
 use crate::special::SpecialNode;
 
@@ -82,6 +82,9 @@ pub struct OutputCache {
     library: Arc<Library>,
     /// Root of the content-addressed store; `None` ⇒ `persist` nodes memory-only.
     disk_root: Option<PathBuf>,
+    /// Reused "executed or read as frontier" bitset for [`Self::evict_unused`],
+    /// reset per run so eviction doesn't allocate a node-sized `Vec` each time.
+    protected: NodeColumn<bool>,
 }
 
 impl OutputCache {
@@ -90,7 +93,11 @@ impl OutputCache {
     /// `persist` nodes are memory-only; `CachePassthrough` nodes always use their
     /// explicit path).
     pub fn new(library: Arc<Library>, disk_root: Option<PathBuf>) -> Self {
-        Self { library, disk_root }
+        Self {
+            library,
+            disk_root,
+            protected: NodeColumn::default(),
+        }
     }
 
     /// The file node `idx` caches to, or `None` when it doesn't: a
@@ -244,25 +251,26 @@ impl OutputCache {
     /// Lossless: a value with no blob (Memory-only, impure) is kept, so eviction never
     /// forces a recompute.
     pub(crate) fn evict_unused(
-        &self,
+        &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
         cache: &mut Cache,
     ) {
         // Protected = nodes this run executed, plus the cached producers it read as
         // frontier inputs. Any other resident value is an untouched prior-run leftover.
-        let mut protected = vec![false; program.e_nodes.len()];
+        // The bitset is a reused scratch column, reset to the node count each run.
+        self.protected.reset(program.e_nodes.len(), false);
         for &e_idx in &plan.execute_order {
-            protected[e_idx.idx()] = true;
+            self.protected[e_idx] = true;
             let span = program.e_nodes[e_idx].inputs;
             for input in &program.inputs[span.range()] {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
-                    protected[addr.target_idx.idx()] = true;
+                    self.protected[addr.target_idx] = true;
                 }
             }
         }
         for idx in program.node_indices() {
-            if protected[idx.idx()] || cache.slots[idx].output_values().is_none() {
+            if self.protected[idx] || cache.slots[idx].output_values().is_none() {
                 continue;
             }
             // Reloadable iff a blob for the current digest is on disk — only then is

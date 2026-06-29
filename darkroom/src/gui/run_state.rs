@@ -252,6 +252,8 @@ impl RunState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
     use scenarium::prelude::{ExecutedNodeStats, FlattenMap, FuncId, LogLevel, NodeError};
 
     fn nid(n: u128) -> NodeId {
@@ -288,7 +290,7 @@ mod tests {
                 })
                 .collect(),
             logs: vec![],
-            flatten,
+            flatten: Arc::new(flatten),
             cancelled: false,
         }
     }

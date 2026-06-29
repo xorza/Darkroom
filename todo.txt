@@ -1,5 +1,3 @@
 comments in theme file
 
 save cache on button click not after successfull execute
-
-digest should also have cache value type instead of written in blob

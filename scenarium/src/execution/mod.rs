@@ -11,6 +11,8 @@
 //! cache, and executor) and exposes `update` (phase 1) and `execute` (phases
 //! 2–3, run back-to-back).
 
+use std::sync::Arc;
+
 use common::CancelToken;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -115,11 +117,11 @@ pub struct ExecutionEngine {
     pub(crate) program: ExecutionProgram,
     /// Reusable subgraph-flattening scratch (kept across compiles).
     flattener: flatten::Flattener,
-    /// How the last `update` flattened the graph (authoring↔execution id
-    /// map). Rebuilt each compile, cloned into each run's `ExecutionStats`
-    /// so the editor can project stats onto its nodes. Compile scratch,
-    /// not part of the serialized program.
-    flatten_map: FlattenMap,
+    /// How the last `update` flattened the graph (authoring↔execution id map).
+    /// Rebuilt each compile via `Arc::make_mut` (no clone when no prior run's stats
+    /// still hold it), and handed to each run's `ExecutionStats` by refcount bump.
+    /// Compile scratch, not part of the serialized program.
+    flatten_map: Arc<FlattenMap>,
     /// Per-node cross-run cache (output values, digests, node state), reconciled
     /// to the node set at each `update`.
     cache: Cache,
@@ -152,7 +154,7 @@ impl ExecutionEngine {
         self.program.clear();
         self.plan.clear();
         self.cache.clear();
-        self.flatten_map.reset();
+        Arc::make_mut(&mut self.flatten_map).reset();
     }
 
     pub fn reset_states(&mut self) {
@@ -201,7 +203,7 @@ impl ExecutionEngine {
             },
             graph,
             library,
-            &mut self.flatten_map,
+            Arc::make_mut(&mut self.flatten_map),
         ) as usize;
 
         // Realign the runtime cache to the rebuilt node set (preserve by id,

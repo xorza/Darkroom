@@ -10,7 +10,7 @@ use common::{KeyIndexKey, KeyIndexVec};
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::data::DynamicValue;
-use crate::execution::digest::{Digest, DigestEngine};
+use crate::execution::digest::{Digest, DigestEngine, DigestScratch};
 use crate::execution::program::{ExecutionNode, ExecutionProgram, NodeIdx};
 use crate::graph::NodeId;
 use crate::prelude::AnyState;
@@ -131,6 +131,9 @@ impl RuntimeSlot {
 #[derive(Default, Debug)]
 pub(crate) struct Cache {
     pub(crate) slots: KeyIndexVec<NodeId, RuntimeSlot>,
+    /// The digest engine's working columns, kept across updates so a recompile
+    /// resizes them in place instead of allocating two graph-sized `Vec`s.
+    digest_scratch: DigestScratch,
 }
 
 impl Cache {
@@ -173,7 +176,7 @@ impl Cache {
             program.n_outputs,
             "output types must be resolved before digesting"
         );
-        let mut engine = DigestEngine::with_fs(program);
+        let mut engine = DigestEngine::with_fs(program, &mut self.digest_scratch);
         for idx in program.node_indices() {
             self.slots[idx].current_digest = engine.node_digest(idx);
         }
