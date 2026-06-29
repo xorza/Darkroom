@@ -48,6 +48,15 @@ impl RuntimeSlot {
         self.output_values = None;
         self.output_digest = None;
     }
+
+    /// Drop the cached output, leaving the persistent `state`/`event_state`
+    /// intact. Run for each scheduled node before the run loop so the loop's
+    /// in-place reuse of the output `Vec` can't leak a prior run's value through
+    /// a port the lambda leaves unwritten this time.
+    pub(crate) fn clear_output(&mut self) {
+        self.output_values = None;
+        self.output_digest = None;
+    }
 }
 
 /// The per-node cross-run cache. `slots` is index-aligned to `program.e_nodes`

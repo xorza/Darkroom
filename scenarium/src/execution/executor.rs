@@ -79,6 +79,15 @@ impl Executor {
         // result is untrustworthy (a cancellable lambda bails with Ok + partial
         // output), so it's dropped from the cache and the stats below.
         let mut cancelled_in_flight: Option<usize> = None;
+
+        // Wipe each scheduled node's output before the run starts. The loop
+        // reuses a slot's output `Vec` in place (the `get_or_insert_with` below),
+        // so without this a lambda that writes only some ports this run would
+        // serve the prior run's value through the ports it leaves untouched.
+        for e_node_idx in plan.execute_order.iter().copied() {
+            cache.slots[e_node_idx].clear_output();
+        }
+
         for (pos, e_node_idx) in plan.execute_order.iter().copied().enumerate() {
             // Coarse cancel: stop scheduling further nodes. A node already
             // mid-invoke isn't interrupted (it finishes), but nothing after
@@ -172,8 +181,7 @@ impl Executor {
                 Ok(()) => slot.output_digest = slot.current_digest,
                 Err(err) => {
                     errors[e_node_idx] = Some(err);
-                    slot.output_values = None;
-                    slot.output_digest = None;
+                    slot.clear_output();
                 }
             }
             // No `Finished` for the cancelled node — it didn't complete; the

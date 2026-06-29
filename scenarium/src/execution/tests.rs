@@ -1652,6 +1652,84 @@ mod execution {
 
         Ok(())
     }
+
+    /// A scheduled node's output buffer is wiped before every run, so a lambda
+    /// that writes only some of its ports this run can't serve the previous
+    /// run's value through the ports it leaves untouched. The node is impure (it
+    /// re-runs each time): run 1 writes both ports, run 2 writes only port 0, so
+    /// port 1 must come back `Unbound` — not the stale `20` from run 1.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn scheduled_node_output_cleared_before_run() -> anyhow::Result<()> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use crate::async_lambda;
+        use crate::function::Func;
+        use crate::graph::Graph;
+        use crate::library::Library;
+
+        let invocations = Arc::new(AtomicUsize::new(0));
+        let library: Library = [Func::new(
+            "4df6d99f-cb0c-479c-9b94-6549c406d9ab",
+            "partial_writer",
+        )
+        .category("Debug")
+        .terminal()
+        .output("a", DataType::Int)
+        .output("b", DataType::Int)
+        .lambda(async_lambda!(
+            move |_, _, _, _, _, outputs| { invocations = Arc::clone(&invocations) } => {
+                let run = invocations.fetch_add(1, Ordering::Relaxed);
+                outputs[0] = DynamicValue::Static(StaticValue::Int(100 + run as i64));
+                if run == 0 {
+                    // Only the first run writes the second port.
+                    outputs[1] = DynamicValue::Static(StaticValue::Int(20));
+                }
+                Ok(())
+            }
+        ))]
+        .into();
+
+        let mut graph = Graph::default();
+        let mut node: Node = library.by_name("partial_writer").unwrap().into();
+        node.id = "0b35e5e4-be30-4733-a5a2-9d474000de10".into();
+        graph.add(node);
+        graph.validate();
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library).unwrap();
+
+        // Run 1: both ports written.
+        eg.execute_terminals().await?;
+        let outputs = eg
+            .runtime_slot(eg.by_name("partial_writer").unwrap())
+            .output_values
+            .clone()
+            .expect("the node ran, so it holds outputs");
+        assert!(
+            matches!(outputs[0], DynamicValue::Static(StaticValue::Int(100)))
+                && matches!(outputs[1], DynamicValue::Static(StaticValue::Int(20))),
+            "run 1 writes both ports: {outputs:?}"
+        );
+
+        // Run 2: only port 0 is written. The pre-run clear gives the lambda a
+        // fresh buffer, so port 1 is `Unbound` rather than the stale `20`.
+        eg.execute_terminals().await?;
+        let outputs = eg
+            .runtime_slot(eg.by_name("partial_writer").unwrap())
+            .output_values
+            .clone()
+            .expect("the node re-ran (it is impure)");
+        assert!(
+            matches!(outputs[0], DynamicValue::Static(StaticValue::Int(101))),
+            "run 2 rewrites port 0: {outputs:?}"
+        );
+        assert!(
+            matches!(outputs[1], DynamicValue::Unbound),
+            "the unwritten port must not leak run 1's value: {outputs:?}"
+        );
+
+        Ok(())
+    }
 }
 
 // === Argument Values ===
