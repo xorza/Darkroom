@@ -348,7 +348,7 @@ impl ExecutionEngine {
 
     pub(crate) fn node_verdict(&self, e_node: &ExecutionNode) -> plan::NodeVerdict {
         let idx = self.program.e_nodes.index_of_key(&e_node.id).unwrap();
-        self.plan.verdicts[idx]
+        self.plan.verdicts[idx.into()]
     }
 
     pub(crate) fn node_output_usage(&self, e_node: &ExecutionNode) -> &[u32] {
@@ -373,7 +373,9 @@ impl ExecutionEngine {
             .index_of_key(&self.by_name(node_name).unwrap().id);
         let idx = idx.unwrap();
         let slot = &mut self.cache.slots[idx];
-        slot.output_values = Some(values);
-        slot.output_digest = slot.current_digest;
+        slot.value = cache::ValueCache::Resident {
+            values,
+            produced_under: slot.current_digest,
+        };
     }
 }

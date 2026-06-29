@@ -4,7 +4,7 @@
 //! the program's pools. Reused via a buffer on the engine so a repeated run
 //! does no scheduling allocation.
 
-use crate::execution::program::{ExecutionBinding, ExecutionInput, NodeIdx};
+use crate::execution::program::{ExecutionBinding, ExecutionInput, NodeColumn, NodeIdx};
 
 /// The planner's verdict for one node this run, indexed by `e_node_idx`. The three
 /// states are mutually exclusive *by construction* — unlike the prior three-bool
@@ -42,11 +42,11 @@ impl NodeVerdict {
 /// `verdicts` must already hold the producer's verdict, which the planner's
 /// post-order forward pass guarantees. Shared by that pass and the executor's
 /// stats so the two can't drift.
-pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &[NodeVerdict]) -> bool {
+pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeColumn<NodeVerdict>) -> bool {
     match &input.binding {
         ExecutionBinding::None => input.required,
         ExecutionBinding::Const(_) => false,
-        ExecutionBinding::Bind(addr) => verdicts[addr.target_idx.idx()].missing_required_inputs(),
+        ExecutionBinding::Bind(addr) => verdicts[addr.target_idx].missing_required_inputs(),
     }
 }
 
@@ -58,7 +58,7 @@ pub(crate) struct ExecutionPlan {
     /// Pruned to only nodes whose output is read by an executing consumer.
     pub(crate) execute_order: Vec<NodeIdx>,
     /// Per-node verdict (cached / execute / missing-inputs), indexed by node position.
-    pub(crate) verdicts: Vec<NodeVerdict>,
+    pub(crate) verdicts: NodeColumn<NodeVerdict>,
     /// Per-output consumer counts, indexed by output-pool index. `> 0` ⇒ the output
     /// is `Needed` this run; `0` ⇒ `Skip`. The executor passes the count through to
     /// each lambda as [`OutputUsage`](crate::func_lambda::OutputUsage) so a node can
@@ -80,8 +80,7 @@ impl ExecutionPlan {
         self.process_order.clear();
         self.execute_order.clear();
 
-        self.verdicts.clear();
-        self.verdicts.resize(n_nodes, NodeVerdict::default());
+        self.verdicts.reset(n_nodes, NodeVerdict::default());
         self.output_usage.clear();
         self.output_usage.resize(n_outputs, 0);
     }

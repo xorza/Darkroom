@@ -45,6 +45,7 @@ fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: Binding) {
 
 mod cache_persistence {
     use super::*;
+    use crate::execution::cache::ValueCache;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -228,17 +229,18 @@ mod cache_persistence {
         // The frontier `mult` (read by the executing `print`) is in RAM...
         let mult_resident = engine
             .runtime_slot(engine.by_name("mult").unwrap())
-            .output_values
+            .output_values()
             .is_some();
         assert!(mult_resident, "frontier cache is loaded into RAM");
         // ...but the deeper `sum` is left on disk: flagged available, never read.
         let sum_resident = engine
             .runtime_slot(engine.by_name("sum").unwrap())
-            .output_values
+            .output_values()
             .is_some();
-        let sum_on_disk = engine
-            .runtime_slot(engine.by_name("sum").unwrap())
-            .disk_available;
+        let sum_on_disk = matches!(
+            engine.runtime_slot(engine.by_name("sum").unwrap()).value,
+            ValueCache::OnDisk
+        );
         assert!(
             !sum_resident,
             "a disk cache behind another is not loaded into RAM"
@@ -261,7 +263,7 @@ mod cache_persistence {
         assert!(
             engine
                 .runtime_slot(engine.by_name("sum").unwrap())
-                .output_values
+                .output_values()
                 .is_some(),
             "inspection hydrated sum into RAM"
         );
@@ -306,7 +308,7 @@ mod cache_persistence {
         assert!(
             engine
                 .runtime_slot(engine.by_name("sum").unwrap())
-                .output_values
+                .output_values()
                 .is_some(),
             "sum is resident after the run that computed it"
         );
@@ -322,18 +324,19 @@ mod cache_persistence {
 
         let sum_resident = engine
             .runtime_slot(engine.by_name("sum").unwrap())
-            .output_values
+            .output_values()
             .is_some();
-        let sum_disk = engine
-            .runtime_slot(engine.by_name("sum").unwrap())
-            .disk_available;
+        let sum_disk = matches!(
+            engine.runtime_slot(engine.by_name("sum").unwrap()).value,
+            ValueCache::OnDisk
+        );
         let mult_resident = engine
             .runtime_slot(engine.by_name("mult").unwrap())
-            .output_values
+            .output_values()
             .is_some();
         let get_a_resident = engine
             .runtime_slot(engine.by_name("get_a").unwrap())
-            .output_values
+            .output_values()
             .is_some();
         assert!(
             !sum_resident,
@@ -362,6 +365,74 @@ mod cache_persistence {
             "evicted value reloads from disk on inspection: {:?}",
             vals.outputs
         );
+    }
+
+    /// Flipping a `persist` node's inputs *back* to a previously-stored configuration
+    /// must serve that config's value from its disk blob — not the stale RAM value the
+    /// intervening run left resident under a now-superseded digest. The old
+    /// `(output_values, output_digest, disk_available)` slot let that stale RAM value
+    /// mask the fresh blob at hydrate (`hydrate_slot` short-circuited on "values
+    /// present"); the `ValueCache` enum drops it when `mark_available` flags the blob,
+    /// so the pruned frontier loads the correct bytes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn flip_back_to_stored_digest_serves_disk_blob_not_stale_ram() -> anyhow::Result<()> {
+        let dir = TempDir::new("flip_back");
+        let lib = test_func_lib(default_hooks());
+
+        // mult(persist=Disk) read by print. Const binds detach mult from any upstream,
+        // so its digest is a pure function of the two consts. Fixed node ids so the
+        // slot (and its resident value) survives each `update`.
+        let mut graph = Graph::default();
+        let mut mult = node(&lib, "mult", NodeId::from_u128(1));
+        mult.persist = CachePersistence::Disk;
+        graph.add(mult);
+        graph.add(node(&lib, "print", NodeId::from_u128(2)));
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "print", 0, (mult_id, 0).into());
+
+        let set = |graph: &mut Graph, a: i64, b: i64| {
+            bind(graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
+            bind(graph, "mult", 1, Binding::Const(StaticValue::Int(b)));
+        };
+
+        let mut engine = disk_engine(&dir);
+
+        // Config A: mult = 2 * 3 = 6 → blob_A stored on disk.
+        set(&mut graph, 2, 3);
+        engine.update(&graph, &lib)?;
+        engine.execute_terminals().await?;
+
+        // Config B: mult = 5 * 7 = 35 → slot now resident with 35 under B's digest,
+        // and blob_B stored at a different (content-addressed) path.
+        set(&mut graph, 5, 7);
+        engine.update(&graph, &lib)?;
+        engine.execute_terminals().await?;
+
+        // Flip back to A: blob_A is still on disk, but the slot holds 35 in RAM under
+        // B's (now superseded) digest. mult is pruned (disk hit) and read as print's
+        // frontier — it must serve 6 from disk, not the stale 35.
+        set(&mut graph, 2, 3);
+        engine.update(&graph, &lib)?;
+        let stats = engine.execute_terminals().await?;
+
+        // mult is served from its disk blob, not recomputed — without this, a recompute
+        // would yield 6 regardless and the stale-RAM path would go untested.
+        assert!(
+            !stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
+            "mult is a disk cache hit on flip-back, not recomputed: {:?}",
+            stats.executed_nodes
+        );
+
+        let vals = engine
+            .get_argument_values_with_previews(&mult_id)
+            .await
+            .unwrap();
+        assert!(
+            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Int(6))),
+            "flip-back serves the disk blob (6), not the stale RAM value (35): {:?}",
+            vals.outputs
+        );
+        Ok(())
     }
 
     /// A frontier blob that vanishes between `update` (which flags it available) and
@@ -916,17 +987,15 @@ mod graph_structure {
         assert_eq!(execution_graph.plan.execute_order.len(), 5);
         assert!(
             execution_graph
-                .plan
-                .verdicts
-                .iter()
-                .all(|v| !v.missing_required_inputs())
+                .program
+                .node_indices()
+                .all(|i| !execution_graph.plan.verdicts[i].missing_required_inputs())
         );
         assert!(
             execution_graph
-                .plan
-                .verdicts
-                .iter()
-                .all(|v| v.wants_execute())
+                .program
+                .node_indices()
+                .all(|i| execution_graph.plan.verdicts[i].wants_execute())
         );
 
         let get_a = execution_graph.by_name("get_a").unwrap();
@@ -2034,7 +2103,7 @@ mod invalidation {
 
         // Verify outputs exist before reset
         let sum = execution_graph.by_name("sum").unwrap();
-        assert!(execution_graph.runtime_slot(sum).output_values.is_some());
+        assert!(execution_graph.runtime_slot(sum).output_values().is_some());
 
         execution_graph.reset_states();
 
@@ -2046,7 +2115,7 @@ mod invalidation {
             .zip(execution_graph.runtime_slots())
         {
             assert!(
-                slot.output_values.is_none(),
+                slot.output_values().is_none(),
                 "node {} should have no output_values",
                 e_node.name
             );
@@ -2271,8 +2340,8 @@ mod execution {
         eg.execute_terminals().await?;
         let outputs = eg
             .runtime_slot(eg.by_name("partial_writer").unwrap())
-            .output_values
-            .clone()
+            .output_values()
+            .cloned()
             .expect("the node ran, so it holds outputs");
         assert!(
             matches!(outputs[0], DynamicValue::Static(StaticValue::Int(100)))
@@ -2285,8 +2354,8 @@ mod execution {
         eg.execute_terminals().await?;
         let outputs = eg
             .runtime_slot(eg.by_name("partial_writer").unwrap())
-            .output_values
-            .clone()
+            .output_values()
+            .cloned()
             .expect("the node re-ran (it is impure)");
         assert!(
             matches!(outputs[0], DynamicValue::Static(StaticValue::Int(101))),
@@ -2498,8 +2567,8 @@ mod error_propagation {
         let output_values = |name: &str| {
             execution_graph
                 .runtime_slot(execution_graph.by_name(name).unwrap())
-                .output_values
-                .clone()
+                .output_values()
+                .cloned()
         };
 
         // get_a fails with error, no outputs.

@@ -23,7 +23,7 @@ use crate::graph::InputPort;
 use crate::execution::Error;
 use crate::execution::cache::Cache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeColumn, NodeIdx};
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
@@ -33,8 +33,8 @@ pub(crate) struct Executor {
     output_usage: Vec<OutputUsage>,
     /// Per-run result columns, indexed by `e_node_idx`. Reused across runs and
     /// reset to node count at each run's start.
-    errors: Vec<Option<Error>>,
-    run_times: Vec<f64>,
+    errors: NodeColumn<Option<Error>>,
+    run_times: NodeColumn<f64>,
 }
 
 impl Executor {
@@ -66,10 +66,8 @@ impl Executor {
         let mut output_usage = std::mem::take(&mut self.output_usage);
         let mut errors = std::mem::take(&mut self.errors);
         let mut run_times = std::mem::take(&mut self.run_times);
-        errors.clear();
-        errors.resize(n_nodes, None);
-        run_times.clear();
-        run_times.resize(n_nodes, 0.0);
+        errors.reset(n_nodes, None);
+        run_times.reset(n_nodes, 0.0);
 
         // How far down `execute_order` the run got. Stays the full length on a
         // normal run; on cancel it's the count reached before bailing, so the
@@ -81,7 +79,7 @@ impl Executor {
         let mut cancelled_in_flight: Option<NodeIdx> = None;
 
         // Wipe each scheduled node's output before the run starts. The loop
-        // reuses a slot's output `Vec` in place (the `get_or_insert_with` below),
+        // reuses a slot's output `Vec` in place (the `output_buffer` call below),
         // so without this a lambda that writes only some ports this run would
         // serve the prior run's value through the ports it leaves untouched.
         for e_node_idx in plan.execute_order.iter().copied() {
@@ -103,8 +101,8 @@ impl Executor {
             let func_id = program.e_nodes[e_node_idx].func_id;
 
             if has_errored_dependency(program, &errors, e_node_idx) {
-                cache.slots[e_node_idx].output_values = None;
-                errors[e_node_idx.idx()] = Some(Error::SkippedUpstream { func_id });
+                cache.slots[e_node_idx].clear_output();
+                errors[e_node_idx] = Some(Error::SkippedUpstream { func_id });
                 continue;
             }
 
@@ -113,7 +111,7 @@ impl Executor {
 
             let output_count = program.e_nodes[e_node_idx].outputs.len as usize;
             let event_state = cache.slots[e_node_idx].event_state.clone();
-            assert!(errors[e_node_idx.idx()].is_none());
+            assert!(errors[e_node_idx].is_none());
 
             // Attribute any logs this node emits to it (read by
             // `ContextManager::log`).
@@ -128,18 +126,15 @@ impl Executor {
             }
             let result = {
                 let lambda = &program.e_nodes[e_node_idx].lambda;
-                let slot = &mut cache.slots[e_node_idx];
-                let outputs = slot
-                    .output_values
-                    .get_or_insert_with(|| vec![DynamicValue::Unbound; output_count]);
+                let slot = cache.slots[e_node_idx].invoke_slot(output_count);
                 lambda
                     .invoke(
                         &mut self.ctx_manager,
-                        &mut slot.state,
+                        slot.state,
                         &event_state,
                         &inputs,
                         &output_usage,
-                        outputs,
+                        slot.outputs,
                     )
                     .await
                     .map_err(|e| match e {
@@ -170,14 +165,14 @@ impl Executor {
             if cancelled {
                 cancelled_in_flight = Some(e_node_idx);
             }
-            run_times[e_node_idx.idx()] = run_time;
+            run_times[e_node_idx] = run_time;
             let slot = &mut cache.slots[e_node_idx];
             match result {
                 // The fresh output now corresponds to this node's current digest;
                 // record it so the planner's next cache check is a RAM hit.
-                Ok(()) => slot.output_digest = slot.current_digest,
+                Ok(()) => slot.stamp_produced(),
                 Err(err) => {
-                    errors[e_node_idx.idx()] = Some(err);
+                    errors[e_node_idx] = Some(err);
                     slot.clear_output();
                 }
             }
@@ -215,12 +210,12 @@ impl Executor {
 
 fn has_errored_dependency(
     program: &ExecutionProgram,
-    errors: &[Option<Error>],
+    errors: &NodeColumn<Option<Error>>,
     e_node_idx: NodeIdx,
 ) -> bool {
     let span = program.e_nodes[e_node_idx].inputs;
     program.inputs[span.range()].iter().any(|input| {
-        matches!(&input.binding, ExecutionBinding::Bind(addr) if errors[addr.target_idx.idx()].is_some())
+        matches!(&input.binding, ExecutionBinding::Bind(addr) if errors[addr.target_idx].is_some())
     })
 }
 
@@ -243,8 +238,7 @@ fn collect_inputs(
                 // *including* optional binds, so a `None` here is a planner bug,
                 // not a graph the user can author.
                 let outputs = cache.slots[addr.target_idx]
-                    .output_values
-                    .as_ref()
+                    .output_values()
                     .expect("missing output values");
                 assert_eq!(
                     outputs.len(),
@@ -277,8 +271,8 @@ fn collect_output_usage(
 fn collect_execution_stats(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
-    errors: &[Option<Error>],
-    run_times: &[f64],
+    errors: &NodeColumn<Option<Error>>,
+    run_times: &NodeColumn<f64>,
     start: Instant,
     executed_count: usize,
     cancelled_in_flight: Option<NodeIdx>,
@@ -297,13 +291,13 @@ fn collect_execution_stats(
         let e = &program.e_nodes[idx];
         executed_nodes.push(ExecutedNodeStats {
             node_id: e.id,
-            elapsed_secs: run_times[idx.idx()],
+            elapsed_secs: run_times[idx],
         });
     }
 
     for &idx in &plan.process_order {
         let e = &program.e_nodes[idx];
-        let verdict = plan.verdicts[idx.idx()];
+        let verdict = plan.verdicts[idx];
         if verdict.missing_required_inputs() {
             // Recompute which ports are unsatisfied (shares `input_missing` with
             // the planner) — only for the rare missing node, so it isn't worth a
@@ -317,7 +311,7 @@ fn collect_execution_stats(
         if verdict.is_cached() {
             cached_nodes.push(e.id);
         }
-        if let Some(err) = &errors[idx.idx()] {
+        if let Some(err) = &errors[idx] {
             node_errors.push(NodeError {
                 node_id: e.id,
                 error: err.clone(),
@@ -401,7 +395,7 @@ mod tests {
         ExecutionPlan {
             process_order: (0..n).map(NodeIdx::from).collect(),
             execute_order: (0..n).map(NodeIdx::from).collect(),
-            verdicts: vec![NodeVerdict::Execute; n],
+            verdicts: vec![NodeVerdict::Execute; n].into(),
             output_usage: vec![1; program.n_outputs],
         }
     }
@@ -442,12 +436,12 @@ mod tests {
         let (cache, stats) = run(&p.program, &plan).await;
 
         assert_eq!(
-            cache.slots[a].output_values.as_ref().unwrap()[0].as_i64(),
+            cache.slots[a].output_values().unwrap()[0].as_i64(),
             Some(7),
             "producer wrote 7"
         );
         assert_eq!(
-            cache.slots[b].output_values.as_ref().unwrap()[0].as_i64(),
+            cache.slots[b].output_values().unwrap()[0].as_i64(),
             Some(8),
             "consumer read 7 and wrote 7+1"
         );
@@ -472,11 +466,11 @@ mod tests {
         let (cache, stats) = run(&p.program, &plan).await;
 
         assert!(
-            cache.slots[a].output_values.is_none(),
+            cache.slots[a].output_values().is_none(),
             "an errored node's output is dropped (so it re-runs)"
         );
         assert!(
-            cache.slots[b].output_values.is_none(),
+            cache.slots[b].output_values().is_none(),
             "the dependent is skipped, producing nothing"
         );
         let error_of = |idx: usize| {

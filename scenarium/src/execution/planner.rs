@@ -9,7 +9,7 @@ use common::is_debug;
 
 use crate::execution::cache::Cache;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict, input_missing};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeColumn, NodeIdx};
 use crate::execution::{Error, Result, RunSeeds, validate};
 
 /// DFS coloring for the two backward passes. White = unvisited, Gray = on
@@ -39,11 +39,11 @@ struct Visit {
 #[derive(Debug, Default)]
 pub(crate) struct Planner {
     /// DFS coloring, reused across *both* backward passes (reset between).
-    color: Vec<Color>,
+    color: NodeColumn<Color>,
     /// DFS work stack.
     stack: Vec<Visit>,
     /// Root-membership marker column (dedup without hashing).
-    is_root: Vec<bool>,
+    is_root: NodeColumn<bool>,
     /// Deduped indices of the nodes the backward walks start from — terminals,
     /// event subscribers, and event-trigger owners. *Not* only `terminal` nodes.
     roots: Vec<NodeIdx>,
@@ -75,15 +75,14 @@ impl Planner {
 
     /// Mark `idx` as a walk root, deduping via the marker column.
     fn mark_root(&mut self, idx: NodeIdx) {
-        if !self.is_root[idx.idx()] {
-            self.is_root[idx.idx()] = true;
+        if !self.is_root[idx] {
+            self.is_root[idx] = true;
             self.roots.push(idx);
         }
     }
 
     fn collect_roots(&mut self, program: &ExecutionProgram, seeds: &RunSeeds) {
-        self.is_root.clear();
-        self.is_root.resize(program.e_nodes.len(), false);
+        self.is_root.reset(program.e_nodes.len(), false);
         self.roots.clear();
 
         // Add event subscribers
@@ -127,8 +126,7 @@ impl Planner {
         plan.process_order.clear();
         self.stack.clear();
 
-        self.color.clear();
-        self.color.resize(program.e_nodes.len(), Color::White);
+        self.color.reset(program.e_nodes.len(), Color::White);
 
         for e_node_idx in self.roots.iter().copied() {
             self.stack.push(Visit {
@@ -145,15 +143,15 @@ impl Planner {
                     plan.output_usage[span.start as usize + output_idx] += 1;
                 }
                 VisitCause::Done => {
-                    assert_eq!(self.color[visit.e_node_idx.idx()], Color::Gray);
-                    self.color[visit.e_node_idx.idx()] = Color::Black;
+                    assert_eq!(self.color[visit.e_node_idx], Color::Gray);
+                    self.color[visit.e_node_idx] = Color::Black;
                     plan.process_order.push(visit.e_node_idx);
                     continue;
                 }
             }
 
             let idx = visit.e_node_idx;
-            match self.color[idx.idx()] {
+            match self.color[idx] {
                 Color::Gray => {
                     return Err(Error::CycleDetected {
                         node_id: program.e_nodes[idx].id,
@@ -163,7 +161,7 @@ impl Planner {
                 Color::White => {}
             }
 
-            self.color[idx.idx()] = Color::Gray;
+            self.color[idx] = Color::Gray;
             self.stack.push(Visit {
                 e_node_idx: idx,
                 cause: VisitCause::Done,
@@ -195,11 +193,10 @@ impl Planner {
         // forward pass. Guaranteed by process_order being post-order DFS
         // (deps before consumers), but worth checking — if this flips, the
         // forward pass is reading a stale `wants_execute`/`missing_required`.
-        let mut processed = if is_debug() {
-            vec![false; program.e_nodes.len()]
-        } else {
-            Vec::new()
-        };
+        let mut processed = NodeColumn::<bool>::default();
+        if is_debug() {
+            processed.reset(program.e_nodes.len(), false);
+        }
 
         for order_idx in 0..plan.process_order.len() {
             let e_node_idx = plan.process_order[order_idx];
@@ -211,9 +208,9 @@ impl Planner {
             let available = cache.is_available(e_node_idx);
 
             if available {
-                plan.verdicts[e_node_idx.idx()] = NodeVerdict::Cached;
+                plan.verdicts[e_node_idx] = NodeVerdict::Cached;
                 if is_debug() {
-                    processed[e_node_idx.idx()] = true;
+                    processed[e_node_idx] = true;
                 }
                 continue;
             }
@@ -235,20 +232,20 @@ impl Planner {
                     // `verdicts` before `input_missing` reads it.
                     assert!(addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize);
                     assert!(
-                        processed[addr.target_idx.idx()],
+                        processed[addr.target_idx],
                         "forward pass: dep not yet processed"
                     );
                 }
                 missing_required |= input_missing(e_input, &plan.verdicts);
             }
 
-            plan.verdicts[e_node_idx.idx()] = if missing_required {
+            plan.verdicts[e_node_idx] = if missing_required {
                 NodeVerdict::MissingInputs
             } else {
                 NodeVerdict::Execute
             };
             if is_debug() {
-                processed[e_node_idx.idx()] = true;
+                processed[e_node_idx] = true;
             }
         }
     }
@@ -266,8 +263,7 @@ impl Planner {
         plan.execute_order.clear();
         self.stack.clear();
 
-        self.color.clear();
-        self.color.resize(program.e_nodes.len(), Color::White);
+        self.color.reset(program.e_nodes.len(), Color::White);
 
         for e_node_idx in self.roots.iter().copied() {
             self.stack.push(Visit {
@@ -282,14 +278,14 @@ impl Planner {
             match visit.cause {
                 VisitCause::Root | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done => {
-                    assert_eq!(self.color[idx.idx()], Color::Gray);
+                    assert_eq!(self.color[idx], Color::Gray);
                     plan.execute_order.push(idx);
-                    self.color[idx.idx()] = Color::Black;
+                    self.color[idx] = Color::Black;
                     continue;
                 }
             }
 
-            match self.color[idx.idx()] {
+            match self.color[idx] {
                 Color::White => {}
                 Color::Black => continue,
                 // Pass 1 would have rejected any cycle; a Gray revisit in pass 2
@@ -297,12 +293,12 @@ impl Planner {
                 Color::Gray => unreachable!("cycle should be detected in pass 1"),
             }
 
-            if !plan.verdicts[idx.idx()].wants_execute() {
-                self.color[idx.idx()] = Color::Black;
+            if !plan.verdicts[idx].wants_execute() {
+                self.color[idx] = Color::Black;
                 continue;
             }
 
-            self.color[idx.idx()] = Color::Gray;
+            self.color[idx] = Color::Gray;
             self.stack.push(Visit {
                 e_node_idx: idx,
                 cause: VisitCause::Done,
@@ -313,7 +309,7 @@ impl Planner {
                 // Recurse only into a producer that will itself run; a cached
                 // producer's value is already available, so its cone is pruned.
                 if let Some(addr) = e_input.binding.as_bind()
-                    && plan.verdicts[addr.target_idx.idx()].wants_execute()
+                    && plan.verdicts[addr.target_idx].wants_execute()
                 {
                     self.stack.push(Visit {
                         e_node_idx: addr.target_idx,
@@ -330,6 +326,7 @@ impl Planner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::cache::ValueCache;
     use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
     use crate::graph::NodeId;
     use crate::prelude::FuncId;
@@ -386,8 +383,10 @@ mod tests {
         for &idx in cached {
             let digest = [idx.idx() as u8 + 1; 32];
             cache.slots[idx].current_digest = Some(digest);
-            cache.slots[idx].output_values = Some(Vec::new());
-            cache.slots[idx].output_digest = Some(digest);
+            cache.slots[idx].value = ValueCache::Resident {
+                values: Vec::new(),
+                produced_under: Some(digest),
+            };
         }
         let mut planner = Planner::default();
         let mut plan = ExecutionPlan::default();
@@ -417,9 +416,9 @@ mod tests {
         assert_eq!(p.process_order, vec![a, b, c], "post-order: deps first");
         assert_eq!(p.execute_order, vec![a, b, c]);
         for idx in [a, b, c] {
-            assert!(p.verdicts[idx.idx()].wants_execute());
-            assert!(!p.verdicts[idx.idx()].is_cached());
-            assert!(!p.verdicts[idx.idx()].missing_required_inputs());
+            assert!(p.verdicts[idx].wants_execute());
+            assert!(!p.verdicts[idx].is_cached());
+            assert!(!p.verdicts[idx].missing_required_inputs());
         }
     }
 
@@ -433,8 +432,8 @@ mod tests {
         let b = f.node(true, &[(false, bind(a, 0))], 1);
 
         let p = plan_with_cached(&f, &[b]);
-        assert!(p.verdicts[b.idx()].is_cached());
-        assert!(p.verdicts[a.idx()].wants_execute(), "A wants to run…");
+        assert!(p.verdicts[b].is_cached());
+        assert!(p.verdicts[a].wants_execute(), "A wants to run…");
         assert!(
             p.execute_order.is_empty(),
             "…but isn't scheduled: its sole consumer is cached"
@@ -451,11 +450,11 @@ mod tests {
         let p = plan(&f);
         for idx in [a, b] {
             assert!(
-                p.verdicts[idx.idx()].missing_required_inputs(),
+                p.verdicts[idx].missing_required_inputs(),
                 "node {idx:?} missing"
             );
             assert!(
-                !p.verdicts[idx.idx()].wants_execute(),
+                !p.verdicts[idx].wants_execute(),
                 "node {idx:?} not runnable"
             );
         }
@@ -469,8 +468,8 @@ mod tests {
         let a = f.node(true, &[(false, ExecutionBinding::None)], 1);
 
         let p = plan(&f);
-        assert!(!p.verdicts[a.idx()].missing_required_inputs());
-        assert!(p.verdicts[a.idx()].wants_execute());
+        assert!(!p.verdicts[a].missing_required_inputs());
+        assert!(p.verdicts[a].wants_execute());
         assert_eq!(p.execute_order, vec![a]);
     }
 

@@ -31,7 +31,7 @@ pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, library: &Libr
 
         let slot = &cache.slots[idx];
         assert_eq!(slot.id, e_node.id);
-        if let Some(output_values) = slot.output_values.as_ref() {
+        if let Some(output_values) = slot.output_values() {
             assert_eq!(output_values.len(), e_node.outputs.len as usize);
         }
 
@@ -104,7 +104,7 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
         // A scheduled node is exactly `Execute` — never `Cached` (load-bearing for the
         // disk cache, which hydrates only the cached *producers* an executing node
         // reads) and never `MissingInputs`. One enum check covers all three.
-        assert_eq!(plan.verdicts[idx.idx()], NodeVerdict::Execute);
+        assert_eq!(plan.verdicts[idx], NodeVerdict::Execute);
 
         for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(addr) = &e_input.binding {
