@@ -100,8 +100,15 @@ impl App {
         // Resolve the saved preference: `System` (the default) follows
         // the OS light/dark setting, re-queried each launch.
         app.theme = Theme::from_preset(app.config.theme.resolve());
-        if let Some(path) = app.config.document_path.clone() {
-            app.load_document(&path);
+        // Reopen the last document unless the user turned that off. A failed
+        // load (the file moved or was deleted) clears the stale path, so the
+        // next launch starts clean instead of retrying the broken path.
+        if app.config.load_last_document
+            && let Some(path) = app.config.document_path.clone()
+            && !app.load_document(&path)
+        {
+            app.config.document_path = None;
+            app.config.save();
         }
         // Resolved theme (default, or whatever the config restored)
         // onto the Ui so palantir widgets paint correctly frame 1.

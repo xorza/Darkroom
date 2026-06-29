@@ -15,7 +15,7 @@ const CONFIG_FILE: &str = "darkroom.config.toml";
 /// Missing / unreadable config falls back to `default()`.
 /// `#[serde(default)]` so a partial config (TOML omits absent keys)
 /// still deserializes.
-#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
     /// Theme preference to restore (`system` / `dark` / `light`).
@@ -24,10 +24,25 @@ pub struct AppConfig {
     pub theme: ThemeChoice,
     /// Document to reopen on launch. `None` starts with an empty doc.
     pub document_path: Option<PathBuf>,
+    /// Reopen `document_path` on launch. When `false`, launch starts with
+    /// an empty document (the path is still remembered, just not opened).
+    /// Defaults to `true` — the historical reopen-where-you-left-off behavior.
+    pub load_last_document: bool,
     /// ONNX model paths for lens's ML nodes (`ml_denoise` / `remove_stars`).
     /// A TOML `[ml_models]` table — must stay the **last** field, as TOML
     /// tables follow all scalar keys at the same level.
     pub ml_models: MlModelConfig,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            theme: ThemeChoice::default(),
+            document_path: None,
+            load_last_document: true,
+            ml_models: MlModelConfig::default(),
+        }
+    }
 }
 
 /// ONNX model paths for lens's ML nodes, persisted so the caller-supplied models survive restarts.
@@ -121,6 +136,8 @@ mod tests {
         let cfg = AppConfig {
             theme: ThemeChoice::Light,
             document_path: Some(PathBuf::from("/tmp/graph.rhai")),
+            // Non-default (default is `true`) so the round-trip is meaningful.
+            load_last_document: false,
             ml_models: MlModelConfig {
                 denoise: PathBuf::from("/models/d.onnx"),
                 star_removal: PathBuf::from("/models/s.onnx"),
@@ -129,6 +146,7 @@ mod tests {
         let back = roundtrip(&cfg);
         assert_eq!(back.theme, ThemeChoice::Light);
         assert_eq!(back.document_path, Some(PathBuf::from("/tmp/graph.rhai")));
+        assert!(!back.load_last_document);
         assert_eq!(back.ml_models.denoise, PathBuf::from("/models/d.onnx"));
         assert_eq!(back.ml_models.star_removal, PathBuf::from("/models/s.onnx"));
     }
@@ -142,6 +160,8 @@ mod tests {
         let back = roundtrip(&AppConfig::default());
         assert_eq!(back.theme, ThemeChoice::System);
         assert_eq!(back.document_path, None);
+        // Defaults to reopening the last document (historical behavior).
+        assert!(back.load_last_document);
         // ML model paths default to lens's canonical bare filenames.
         assert_eq!(
             back.ml_models.denoise,
@@ -163,6 +183,8 @@ mod tests {
             deserialize(toml, SerdeFormat::Toml).expect("partial config deserializes");
         assert_eq!(cfg.theme, ThemeChoice::Dark);
         assert_eq!(cfg.document_path, None);
+        // A config predating this key still defaults to reopening the document.
+        assert!(cfg.load_last_document);
         assert_eq!(cfg.ml_models.denoise, lens::MlModelPaths::default().denoise);
     }
 }

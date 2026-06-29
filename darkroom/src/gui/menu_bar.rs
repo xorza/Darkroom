@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use glam::Vec2;
@@ -58,6 +59,15 @@ pub(crate) enum MenuCommand {
     /// Open an ONNX file dialog for one of the ML model paths and persist
     /// the choice. Raised by the Config tab's "Browse…" buttons.
     PickMlModel(MlModelKind),
+    /// Set an ML model path directly from the Config tab's editable field
+    /// (a typed or pasted path), then persist + republish it.
+    SetMlModelPath {
+        kind: MlModelKind,
+        path: PathBuf,
+    },
+    /// Toggle whether launch reopens the last document. Raised by the
+    /// Config tab's "Load last document on startup" checkbox; persisted.
+    SetLoadLastDocument(bool),
 }
 
 /// Which ML model path a [`MenuCommand::PickMlModel`] targets.

@@ -63,6 +63,11 @@ impl App {
                 self.editor.open_config(&library);
             }
             MenuCommand::PickMlModel(kind) => self.pick_ml_model(kind),
+            MenuCommand::SetMlModelPath { kind, path } => self.set_ml_model_path(kind, path),
+            MenuCommand::SetLoadLastDocument(on) => {
+                self.config.load_last_document = on;
+                self.config.save();
+            }
         }
     }
 
@@ -73,9 +78,15 @@ impl App {
     fn pick_ml_model(&mut self, kind: MlModelKind) {
         let filter =
             FsPathConfig::with_extensions(FsPathMode::ExistingFile, vec!["onnx".to_string()]);
-        let Some(path) = dialogs::pick_path(&filter) else {
-            return;
-        };
+        if let Some(path) = dialogs::pick_path(&filter) {
+            self.set_ml_model_path(kind, path);
+        }
+    }
+
+    /// Record `path` for `kind`, persist the config, and republish the paths
+    /// to lens so the next node run uses it. Shared by the Browse dialog and
+    /// the Config tab's editable path field.
+    fn set_ml_model_path(&mut self, kind: MlModelKind, path: PathBuf) {
         match kind {
             MlModelKind::Denoise => self.config.ml_models.denoise = path,
             MlModelKind::StarRemoval => self.config.ml_models.star_removal = path,
@@ -184,14 +195,18 @@ impl App {
         self.set_document_path(None);
     }
 
-    pub(crate) fn load_document(&mut self, path: &Path) {
+    /// Load `path` into a fresh editor. Returns whether it loaded — `false`
+    /// when the file is missing/corrupt (startup uses this to drop a stale
+    /// `document_path`; the menu-load path ignores it, leaving the open doc).
+    pub(crate) fn load_document(&mut self, path: &Path) -> bool {
         let Some(doc) = persistence::load_document(path) else {
-            return;
+            return false;
         };
         // Fresh editor around the loaded doc — see `new_document` for why
         // a wholesale reset (rather than poking individual fields) is right.
         self.editor = Editor::new(doc);
         self.set_document_path(Some(path.to_path_buf()));
+        true
     }
 
     /// Cmd+S: overwrite the current file if there is one, else fall
