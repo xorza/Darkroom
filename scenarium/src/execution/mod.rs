@@ -291,6 +291,33 @@ impl ExecutionEngine {
 
         Ok(stats)
     }
+
+    /// Persist to disk any **content-addressed** (`persist`) node that holds a resident
+    /// value but isn't on disk yet — e.g. a node just toggled to
+    /// `CachePersistence::Disk` whose value is still in RAM from a prior run. The worker
+    /// calls this on `SaveCaches`, since such a node is a cache hit and so never
+    /// re-executes to store itself.
+    ///
+    /// Never overwrites identical content: a content-addressed blob's path *is* its
+    /// content hash, so [`OutputCache::store_node`] skips it when it already exists.
+    /// Explicit-path (`CachePassthrough`) nodes are deliberately excluded here — their
+    /// file is (re)written by their own execution, so flushing them would overwrite an
+    /// identical file. Also a no-op for a node with no resident value.
+    pub async fn store_resident_caches(&mut self) {
+        for idx in self.program.node_indices() {
+            if !self.program.e_nodes[idx].persist {
+                continue;
+            }
+            self.output_cache
+                .store_node(
+                    &self.program,
+                    idx,
+                    &self.cache,
+                    &mut self.executor.ctx_manager,
+                )
+                .await;
+        }
+    }
 }
 
 /// Test-only inspection of the last plan's per-run flags and the runtime

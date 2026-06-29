@@ -62,6 +62,12 @@ impl Engine {
         self.worker.run_once(graph, self.library.load_full());
     }
 
+    /// Persist resident caches to disk without running the graph — e.g. after a node's
+    /// disk-cache toggle, so its RAM value reaches disk immediately.
+    pub(crate) fn save_caches(&self, graph: Graph) {
+        self.worker.save_caches(graph, self.library.load_full());
+    }
+
     /// Request cancellation of the in-flight run (coarse — the running node
     /// finishes, nothing further is scheduled).
     pub(crate) fn cancel_run(&self) {

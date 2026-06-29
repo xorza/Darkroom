@@ -221,6 +221,13 @@ impl palantir::App for App {
             &self.host_handle,
         );
 
+        // A disk-cache toggle this frame: flush the node's resident value to disk now
+        // (a `SaveCaches` to the worker — refresh the program + persist, no re-run),
+        // instead of waiting for the next evaluation.
+        if self.editor.take_caches_dirty() {
+            self.engine.save_caches(self.editor.document.graph.clone());
+        }
+
         // The frame settled which inspector panels are open; request the
         // runtime values for any that still need them.
         self.request_open_panel_values();

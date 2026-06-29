@@ -308,6 +308,14 @@ impl OutputCache {
     /// content-addressed blob already on disk is skipped (same digest ⇒ same bytes); an
     /// explicit path is always (over)written. Best-effort: a non-cacheable node or a
     /// value with no codec is skipped, any failure logged — caching never fails a run.
+    ///
+    /// Only writes a value that matches the node's *current* digest
+    /// ([`Cache::is_resident_hit`]): a resident value produced under a now-superseded
+    /// digest (an input changed since it ran) must not be written to the new digest's
+    /// content-addressed path, which would serve stale bytes on a later run. In the run
+    /// loop the just-stamped value is always a current hit; this guards the deferred
+    /// [`store_resident_caches`](crate::execution::ExecutionEngine::store_resident_caches)
+    /// flush, which runs after a recompile.
     pub(crate) fn store_node<'a>(
         &'a self,
         program: &ExecutionProgram,
@@ -316,7 +324,10 @@ impl OutputCache {
         ctx: &'a mut ContextManager,
     ) -> impl Future<Output = ()> + 'a {
         let target = self.target(program, idx, cache);
-        let outputs = cache.output_values(idx);
+        let outputs = cache
+            .is_resident_hit(idx)
+            .then(|| cache.output_values(idx))
+            .flatten();
         async move {
             let (Some(target), Some(outputs)) = (target, outputs) else {
                 return;

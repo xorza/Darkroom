@@ -52,6 +52,15 @@ pub enum WorkerMessage {
         graph: Graph,
         library: Arc<Library>,
     },
+    /// Make the program current (like `Update`, so a just-toggled `persist` flag is
+    /// reflected) and flush any resident cache value to disk — but **don't run the
+    /// graph**. For "I enabled disk caching on a node; persist its RAM value now"
+    /// without paying for a full re-execution. A cache-hit node never re-executes, so
+    /// its value would otherwise reach disk only on an unrelated input change.
+    SaveCaches {
+        graph: Graph,
+        library: Arc<Library>,
+    },
     Clear,
     /// Swap the engine's output cache (codec registry + content-addressed store
     /// root). Applied before any graph op in the same batch, so the next `Update`
@@ -261,8 +270,9 @@ enum LoopCommand {
 ///
 /// | Slot                  | Variants that write it      | Rule          |
 /// | --------------------- | --------------------------- | ------------- |
-/// | `graph_state`         | Update, Clear               | last-write-wins |
+/// | `graph_state`         | Update, Clear, SaveCaches   | last-write-wins |
 /// | `output_cache`        | SetOutputCache              | last-write-wins, applied pre-graph-op |
+/// | `save_caches`         | SaveCaches                  | idempotent flag (persist, no run) |
 /// | `loop_request`        | StartEventLoop, StopEventLoop | last-write-wins |
 /// | `execute_terminals`   | ExecuteTerminals            | idempotent flag |
 /// | `events`              | InjectEvents                | set union (dedup) |
@@ -275,6 +285,9 @@ struct BatchIntent {
     /// `Some` = a `SetOutputCache` was in this batch (the new cache). Applied
     /// before `graph_state`, so a same-batch `Update` hydrates from it.
     output_cache: Option<OutputCache>,
+    /// A `SaveCaches` was in this batch: after the graph update, flush resident cache
+    /// values to disk without running the graph.
+    save_caches: bool,
     loop_request: Option<LoopCommand>,
     execute_terminals: bool,
     exit: bool,
@@ -302,6 +315,10 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
             WorkerMessage::InjectEvents { events } => intent.events.extend(events),
             WorkerMessage::Update { graph, library } => {
                 intent.graph_state = Some(GraphOp::Replace(graph, library));
+            }
+            WorkerMessage::SaveCaches { graph, library } => {
+                intent.graph_state = Some(GraphOp::Replace(graph, library));
+                intent.save_caches = true;
             }
             WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
             WorkerMessage::SetOutputCache(cache) => intent.output_cache = Some(cache),
@@ -419,6 +436,13 @@ async fn worker_loop<ExecutionCallback>(
             }
             None => true,
         };
+
+        // `SaveCaches`: flush resident cache values to disk after the update, without
+        // running the graph (a cache-hit node won't re-execute to store itself).
+        if intent.save_caches && update_ok && !execution_engine.is_empty() {
+            execution_engine.store_resident_caches().await;
+        }
+
         let should_start_event_loop = match intent.loop_request {
             Some(LoopCommand::Start) => true,
             Some(LoopCommand::Stop) => false,

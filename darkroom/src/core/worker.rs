@@ -122,6 +122,15 @@ impl WorkerBridge {
         ]);
     }
 
+    /// Flush resident cache values to disk **without running the graph** — e.g. after
+    /// a node's disk-cache toggle, so its in-RAM value is persisted now rather than
+    /// waiting for the next run (a cache-hit node never re-executes to store itself).
+    pub(crate) fn save_caches(&self, graph: Graph, library: Arc<Library>) {
+        let _ = self
+            .worker
+            .send(WorkerMessage::SaveCaches { graph, library });
+    }
+
     /// Swap the engine's output cache (codec registry + content-addressed store
     /// root) — e.g. to repoint at the active document's store. Takes effect before
     /// the next run's compile. A dropped send (worker exited) is a harmless no-op.

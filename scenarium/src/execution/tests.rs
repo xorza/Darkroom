@@ -479,6 +479,94 @@ mod cache_persistence {
         );
     }
 
+    /// Toggling a node to disk caching persists its *existing* resident value
+    /// immediately — via `store_resident_caches`, which the worker runs after every
+    /// graph update — without waiting for a re-execution (a cache hit never re-runs).
+    #[tokio::test]
+    async fn toggling_persist_stores_resident_value_without_a_rerun() {
+        let dir = TempDir::new("toggle_persist");
+        let lib = test_func_lib(default_hooks());
+
+        // mult(const 2, const 3) = 6 → print, with mult's persistence configurable.
+        // Fixed node ids so the slot (and its resident value) survives each update.
+        let build = |persist: CachePersistence| {
+            let mut graph = Graph::default();
+            let mut mult = node(&lib, "mult", NodeId::from_u128(1));
+            mult.persist = persist;
+            graph.add(mult);
+            graph.add(node(&lib, "print", NodeId::from_u128(2)));
+            let mult_id = graph.by_name("mult").unwrap().id;
+            bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(2)));
+            bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
+            bind(&mut graph, "print", 0, (mult_id, 0).into());
+            graph
+        };
+
+        let mut engine = disk_engine(&dir);
+
+        // Run with Memory caching: mult computes (6) and stays resident, nothing on disk.
+        engine
+            .update(&build(CachePersistence::Memory), &lib)
+            .unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert!(
+            std::fs::read_dir(&dir.0).unwrap().next().is_none(),
+            "Memory caching writes nothing to disk"
+        );
+
+        // Toggle the node to Disk (a graph edit → update), but do NOT re-run. The
+        // resident value must reach disk now, not on some later execution.
+        engine.update(&build(CachePersistence::Disk), &lib).unwrap();
+        engine.store_resident_caches().await;
+        assert!(
+            std::fs::read_dir(&dir.0).unwrap().next().is_some(),
+            "toggling Disk persists the resident value without a re-execution"
+        );
+    }
+
+    /// `store_resident_caches` must not write a value under a digest it wasn't produced
+    /// under. After an input change recompiles the program, a node's resident value is
+    /// stale w.r.t. its new digest; flushing it to the new digest's content-addressed
+    /// path would make a later run at that digest load stale bytes.
+    #[tokio::test]
+    async fn flush_skips_a_value_stale_for_the_current_digest() {
+        let dir = TempDir::new("stale_flush");
+        let lib = test_func_lib(default_hooks());
+
+        // mult(persist=Disk) with const inputs → print; the consts drive mult's digest.
+        let build = |a: i64, b: i64| {
+            let mut graph = Graph::default();
+            let mut mult = node(&lib, "mult", NodeId::from_u128(1));
+            mult.persist = CachePersistence::Disk;
+            graph.add(mult);
+            graph.add(node(&lib, "print", NodeId::from_u128(2)));
+            let mult_id = graph.by_name("mult").unwrap().id;
+            bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
+            bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(b)));
+            bind(&mut graph, "print", 0, (mult_id, 0).into());
+            graph
+        };
+        let blob_count = |dir: &TempDir| std::fs::read_dir(&dir.0).unwrap().count();
+
+        let mut engine = disk_engine(&dir);
+
+        // Config A: mult runs and is stored under its digest D_A (one blob).
+        engine.update(&build(2, 3), &lib).unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(blob_count(&dir), 1, "config A's blob is stored");
+
+        // Config B: mult's inputs change ⇒ its *current* digest is now D_B, but the
+        // resident value (6) was produced under D_A. Recompile (update), no re-run, then
+        // flush — the stale value must not be written under D_B.
+        engine.update(&build(5, 7), &lib).unwrap();
+        engine.store_resident_caches().await;
+        assert_eq!(
+            blob_count(&dir),
+            1,
+            "a value stale for the current digest is not flushed (no second, D_B blob)"
+        );
+    }
+
     /// A frontier blob that vanishes between `update` (which flags it available) and
     /// the run (which reads it) must not trip the executor's "value present"
     /// invariant: `hydrate_frontier` clears the stale flag and the engine re-plans,

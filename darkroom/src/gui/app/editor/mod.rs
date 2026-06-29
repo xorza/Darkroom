@@ -74,6 +74,10 @@ pub(crate) struct Editor {
     /// side-effect field like `scene_dirty` / `needs_reconcile`, rather
     /// than a `bool` threaded back through every helper's return.
     needs_relayout: bool,
+    /// Set when a disk-cache toggle (`Intent::SetPersist`) is applied this frame.
+    /// `App` consumes it via [`Self::take_caches_dirty`] to flush the node's resident
+    /// value to disk (a `SaveCaches` to the worker) without a re-run.
+    caches_dirty: bool,
     /// Per-frame scratch buffer of pending mutations. Cleared at the
     /// top of every `frame`, filled by prepass/record/shortcut
     /// handling, and fully drained before `frame` returns — it carries
@@ -109,6 +113,7 @@ impl Editor {
             scene_dirty: false,
             needs_reconcile: true,
             needs_relayout: false,
+            caches_dirty: false,
             intents: Vec::new(),
             actions: Vec::new(),
             run_state: RunState::default(),
@@ -408,10 +413,24 @@ impl Editor {
         // borrows `self` mutably), then put the now-empty buffer back to
         // reuse its allocation next frame.
         let mut scratch = std::mem::take(&mut self.intents);
+        // A disk-cache toggle should flush the node's resident value to disk now;
+        // flag it for `App` to send a `SaveCaches` after the frame.
+        if scratch
+            .iter()
+            .any(|i| matches!(i, Intent::SetPersist { .. }))
+        {
+            self.caches_dirty = true;
+        }
         if self.commit_batch(target, library, scratch.drain(..)) {
             self.scene_dirty = true;
         }
         self.intents = scratch;
+    }
+
+    /// Whether a disk-cache toggle was applied since the last call (clears the flag).
+    /// `App` uses this to flush the node's resident value to disk without a re-run.
+    pub(crate) fn take_caches_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.caches_dirty)
     }
 
     /// Apply the record pass's view-state requests. Adding a tab to the
