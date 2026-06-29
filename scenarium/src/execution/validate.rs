@@ -9,7 +9,7 @@ use hashbrown::HashSet;
 
 use crate::execution::cache::Cache;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::graph::NodeId;
 use crate::library::Library;
 
@@ -46,7 +46,7 @@ pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, library: &Libr
 
         for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
-                assert!(e_addr.target_idx < program.e_nodes.len());
+                assert!(e_addr.target_idx.idx() < program.e_nodes.len());
                 let target = &program.e_nodes[e_addr.target_idx];
                 assert!(e_addr.port_idx < target.outputs.len as usize);
             }
@@ -69,10 +69,10 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
     // before its consumer.
     let mut seen_in_order = HashSet::with_capacity(program.e_nodes.len());
     for &idx in &plan.process_order {
-        assert!(idx < program.e_nodes.len());
+        assert!(idx.idx() < program.e_nodes.len());
         for input in program.node_inputs(&program.e_nodes[idx]) {
             if let ExecutionBinding::Bind(addr) = &input.binding {
-                assert!(addr.target_idx < program.e_nodes.len());
+                assert!(addr.target_idx.idx() < program.e_nodes.len());
                 assert!(seen_in_order.contains(&addr.target_idx));
             }
         }
@@ -85,7 +85,7 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
     for e_node in program.e_nodes.iter() {
         for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                assert!(addr.target_idx < program.e_nodes.len());
+                assert!(addr.target_idx.idx() < program.e_nodes.len());
                 assert!(addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize);
             }
         }
@@ -93,18 +93,18 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
 
     assert!(plan.execute_order.len() <= plan.process_order.len());
 
-    let mut pending: HashSet<usize> = plan.execute_order.iter().copied().collect();
+    let mut pending: HashSet<NodeIdx> = plan.execute_order.iter().copied().collect();
     assert_eq!(pending.len(), plan.execute_order.len());
 
     for &idx in &plan.execute_order {
-        assert!(idx < program.e_nodes.len());
+        assert!(idx.idx() < program.e_nodes.len());
         pending.remove(&idx);
 
         let e_node = &program.e_nodes[idx];
         // A scheduled node is exactly `Execute` — never `Cached` (load-bearing for the
         // disk cache, which hydrates only the cached *producers* an executing node
         // reads) and never `MissingInputs`. One enum check covers all three.
-        assert_eq!(plan.verdicts[idx], NodeVerdict::Execute);
+        assert_eq!(plan.verdicts[idx.idx()], NodeVerdict::Execute);
 
         for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(addr) = &e_input.binding {

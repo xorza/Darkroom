@@ -11,7 +11,7 @@ use common::{KeyIndexKey, KeyIndexVec};
 use crate::common::shared_any_state::SharedAnyState;
 use crate::data::{DataType, DynamicValue};
 use crate::execution::digest::{Digest, DigestEngine};
-use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram, NodeIdx};
 use crate::function::{Func, OutputType};
 use crate::graph::NodeId;
 use crate::library::Library;
@@ -126,7 +126,7 @@ impl Cache {
     ///    signature in means a redefined output re-keys the cache.
     pub(crate) fn recompute_digests(&mut self, program: &ExecutionProgram, library: &Library) {
         self.output_types.clear();
-        for idx in 0..program.e_nodes.len() {
+        for idx in program.node_indices() {
             let n_outputs = program.e_nodes[idx].outputs.len as usize;
             self.output_types.push(
                 (0..n_outputs)
@@ -139,16 +139,16 @@ impl Cache {
         }
 
         let mut engine = DigestEngine::with_fs(program, &self.output_types);
-        for idx in 0..program.e_nodes.len() {
+        for idx in program.node_indices() {
             self.slots[idx].current_digest = engine.node_digest(idx);
         }
     }
 
-    pub(crate) fn current_digest(&self, idx: usize) -> Option<Digest> {
+    pub(crate) fn current_digest(&self, idx: NodeIdx) -> Option<Digest> {
         self.slots[idx].current_digest
     }
 
-    pub(crate) fn output_values(&self, idx: usize) -> Option<&Vec<DynamicValue>> {
+    pub(crate) fn output_values(&self, idx: NodeIdx) -> Option<&Vec<DynamicValue>> {
         self.slots[idx].output_values.as_ref()
     }
 
@@ -157,7 +157,7 @@ impl Cache {
     /// digest (impure cone) never hits, and a digest the slot was *not* produced
     /// under (a changed input) misses too. The executor's input read and the
     /// disk-store rely on this being the true "bytes are here" predicate.
-    pub(crate) fn is_resident_hit(&self, idx: usize) -> bool {
+    pub(crate) fn is_resident_hit(&self, idx: NodeIdx) -> bool {
         let slot = &self.slots[idx];
         match slot.current_digest {
             Some(d) => slot.output_values.is_some() && slot.output_digest == Some(d),
@@ -171,13 +171,13 @@ impl Cache {
     /// a node whose value can be served — from either tier — needn't be executed.
     /// The disk tier is materialized lazily, so a disk-cached cone behind another
     /// disk-cached node is pruned here without ever being read into RAM.
-    pub(crate) fn is_available(&self, idx: usize) -> bool {
+    pub(crate) fn is_available(&self, idx: NodeIdx) -> bool {
         self.is_resident_hit(idx) || self.slots[idx].disk_available
     }
 
     /// Install a disk-loaded output into a slot under `digest` (the node's current
     /// digest), turning the next planner check into a plain RAM hit.
-    pub(crate) fn hydrate(&mut self, idx: usize, values: Vec<DynamicValue>, digest: Digest) {
+    pub(crate) fn hydrate(&mut self, idx: NodeIdx, values: Vec<DynamicValue>, digest: Digest) {
         let slot = &mut self.slots[idx];
         slot.output_values = Some(values);
         slot.output_digest = Some(digest);
@@ -200,7 +200,7 @@ const MAX_WILDCARD_DEPTH: usize = 64;
 fn effective_output_type(
     program: &ExecutionProgram,
     library: &Library,
-    idx: usize,
+    idx: NodeIdx,
     port: usize,
     depth: usize,
 ) -> Option<DataType> {
@@ -234,7 +234,7 @@ fn effective_output_type(
 fn node_func<'a>(
     program: &'a ExecutionProgram,
     library: &'a Library,
-    idx: usize,
+    idx: NodeIdx,
 ) -> Option<&'a Func> {
     match program.e_nodes[idx].special {
         Some(special) => Some(special.func()),
@@ -291,14 +291,17 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(!cache.is_resident_hit(0), "impure cone never hits");
-        assert!(!cache.is_resident_hit(1), "no cached values is a miss");
+        assert!(!cache.is_resident_hit(NodeIdx(0)), "impure cone never hits");
         assert!(
-            !cache.is_resident_hit(2),
+            !cache.is_resident_hit(NodeIdx(1)),
+            "no cached values is a miss"
+        );
+        assert!(
+            !cache.is_resident_hit(NodeIdx(2)),
             "values under a stale digest is a miss"
         );
         assert!(
-            cache.is_resident_hit(3),
+            cache.is_resident_hit(NodeIdx(3)),
             "values under the current digest is a hit"
         );
     }
@@ -335,13 +338,22 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(!cache.is_resident_hit(0), "disk-only is not resident");
-        assert!(cache.is_available(0), "disk-only is available (prunable)");
         assert!(
-            cache.is_resident_hit(1) && cache.is_available(1),
+            !cache.is_resident_hit(NodeIdx(0)),
+            "disk-only is not resident"
+        );
+        assert!(
+            cache.is_available(NodeIdx(0)),
+            "disk-only is available (prunable)"
+        );
+        assert!(
+            cache.is_resident_hit(NodeIdx(1)) && cache.is_available(NodeIdx(1)),
             "resident ⇒ both"
         );
-        assert!(!cache.is_available(2), "no value, no blob ⇒ unavailable");
+        assert!(
+            !cache.is_available(NodeIdx(2)),
+            "no value, no blob ⇒ unavailable"
+        );
     }
 
     #[test]
@@ -353,16 +365,19 @@ mod tests {
             current_digest: Some(d),
             ..Default::default()
         });
-        assert!(!cache.is_resident_hit(0), "empty slot misses");
+        assert!(!cache.is_resident_hit(NodeIdx(0)), "empty slot misses");
 
-        cache.hydrate(0, out(), d);
+        cache.hydrate(NodeIdx(0), out(), d);
         assert!(
-            cache.is_resident_hit(0),
+            cache.is_resident_hit(NodeIdx(0)),
             "a slot hydrated under its current digest hits"
         );
 
         // Hydrating under a digest that is no longer current does not hit.
         cache.slots[0].current_digest = Some([9u8; 32]);
-        assert!(!cache.is_resident_hit(0), "current digest moved on ⇒ miss");
+        assert!(
+            !cache.is_resident_hit(NodeIdx(0)),
+            "current digest moved on ⇒ miss"
+        );
     }
 }

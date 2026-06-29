@@ -23,7 +23,7 @@ use crate::graph::InputPort;
 use crate::execution::Error;
 use crate::execution::cache::Cache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
@@ -78,7 +78,7 @@ impl Executor {
         // The node (if any) that was mid-invoke when the run was cancelled. Its
         // result is untrustworthy (a cancellable lambda bails with Ok + partial
         // output), so it's dropped from the cache and the stats below.
-        let mut cancelled_in_flight: Option<usize> = None;
+        let mut cancelled_in_flight: Option<NodeIdx> = None;
 
         // Wipe each scheduled node's output before the run starts. The loop
         // reuses a slot's output `Vec` in place (the `get_or_insert_with` below),
@@ -104,7 +104,7 @@ impl Executor {
 
             if has_errored_dependency(program, &errors, e_node_idx) {
                 cache.slots[e_node_idx].output_values = None;
-                errors[e_node_idx] = Some(Error::Invoke {
+                errors[e_node_idx.idx()] = Some(Error::Invoke {
                     func_id,
                     message: "Skipped due to upstream error".to_string(),
                 });
@@ -116,7 +116,7 @@ impl Executor {
 
             let output_count = program.e_nodes[e_node_idx].outputs.len as usize;
             let event_state = cache.slots[e_node_idx].event_state.clone();
-            assert!(errors[e_node_idx].is_none());
+            assert!(errors[e_node_idx.idx()].is_none());
 
             // Attribute any logs this node emits to it (read by
             // `ContextManager::log`).
@@ -173,14 +173,14 @@ impl Executor {
             if cancelled {
                 cancelled_in_flight = Some(e_node_idx);
             }
-            run_times[e_node_idx] = run_time;
+            run_times[e_node_idx.idx()] = run_time;
             let slot = &mut cache.slots[e_node_idx];
             match result {
                 // The fresh output now corresponds to this node's current digest;
                 // record it so the planner's next cache check is a RAM hit.
                 Ok(()) => slot.output_digest = slot.current_digest,
                 Err(err) => {
-                    errors[e_node_idx] = Some(err);
+                    errors[e_node_idx.idx()] = Some(err);
                     slot.clear_output();
                 }
             }
@@ -219,18 +219,18 @@ impl Executor {
 fn has_errored_dependency(
     program: &ExecutionProgram,
     errors: &[Option<Error>],
-    e_node_idx: usize,
+    e_node_idx: NodeIdx,
 ) -> bool {
     let span = program.e_nodes[e_node_idx].inputs;
     program.inputs[span.range()].iter().any(|input| {
-        matches!(&input.binding, ExecutionBinding::Bind(addr) if errors[addr.target_idx].is_some())
+        matches!(&input.binding, ExecutionBinding::Bind(addr) if errors[addr.target_idx.idx()].is_some())
     })
 }
 
 fn collect_inputs(
     program: &ExecutionProgram,
     cache: &Cache,
-    e_node_idx: usize,
+    e_node_idx: NodeIdx,
     inputs: &mut Vec<InvokeInput>,
 ) {
     inputs.clear();
@@ -263,7 +263,7 @@ fn collect_inputs(
 fn collect_output_usage(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
-    e_node_idx: usize,
+    e_node_idx: NodeIdx,
     usage: &mut Vec<OutputUsage>,
 ) {
     usage.clear();
@@ -284,7 +284,7 @@ fn collect_execution_stats(
     run_times: &[f64],
     start: Instant,
     executed_count: usize,
-    cancelled_in_flight: Option<usize>,
+    cancelled_in_flight: Option<NodeIdx>,
 ) -> ExecutionStats {
     let mut executed_nodes = Vec::new();
     let mut missing_inputs = Vec::new();
@@ -300,13 +300,13 @@ fn collect_execution_stats(
         let e = &program.e_nodes[idx];
         executed_nodes.push(ExecutedNodeStats {
             node_id: e.id,
-            elapsed_secs: run_times[idx],
+            elapsed_secs: run_times[idx.idx()],
         });
     }
 
     for &idx in &plan.process_order {
         let e = &program.e_nodes[idx];
-        let verdict = plan.verdicts[idx];
+        let verdict = plan.verdicts[idx.idx()];
         if verdict.missing_required_inputs() {
             // Recompute which ports are unsatisfied (shares `input_missing` with
             // the planner) — only for the rare missing node, so it isn't worth a
@@ -320,7 +320,7 @@ fn collect_execution_stats(
         if verdict.is_cached() {
             cached_nodes.push(e.id);
         }
-        if let Some(err) = &errors[idx] {
+        if let Some(err) = &errors[idx.idx()] {
             node_errors.push(NodeError {
                 node_id: e.id,
                 error: err.clone(),
@@ -352,7 +352,7 @@ mod tests {
     use crate::data::StaticValue;
     use crate::execution::cache::Cache;
     use crate::execution::plan::NodeVerdict;
-    use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
+    use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
     use crate::func_lambda::FuncLambda;
     use crate::graph::NodeId;
     use crate::prelude::FuncId;
@@ -393,7 +393,7 @@ mod tests {
 
     fn bind(idx: usize, port: usize) -> ExecutionBinding {
         ExecutionBinding::Bind(ExecutionPortAddress {
-            target_idx: idx,
+            target_idx: idx.into(),
             port_idx: port,
         })
     }
@@ -402,8 +402,8 @@ mod tests {
     fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
         let n = program.e_nodes.len();
         ExecutionPlan {
-            process_order: (0..n).collect(),
-            execute_order: (0..n).collect(),
+            process_order: (0..n).map(NodeIdx::from).collect(),
+            execute_order: (0..n).map(NodeIdx::from).collect(),
             verdicts: vec![NodeVerdict::Execute; n],
             output_usage: vec![1; program.n_outputs],
         }

@@ -469,7 +469,7 @@ impl<'a> Run<'a> {
                     ..Default::default()
                 });
                 ExecutionBinding::Bind(ExecutionPortAddress {
-                    target_idx,
+                    target_idx: target_idx.into(),
                     port_idx,
                 })
             }

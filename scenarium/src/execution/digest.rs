@@ -14,7 +14,7 @@ use blake3::Hasher;
 
 use crate::data::{DataType, StaticValue};
 use crate::elements::cache_passthrough::file_cache_digest;
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::function::FuncBehavior;
 use crate::special::SpecialNode;
 
@@ -125,8 +125,8 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
     /// — the node is `Impure`, or *any* upstream producer is non-reproducible (the
     /// taint flows up). `None` is the "always recompute, never cache" signal — for
     /// RAM and disk alike. Memoized.
-    pub(crate) fn node_digest(&mut self, idx: usize) -> Option<Digest> {
-        match self.memo[idx] {
+    pub(crate) fn node_digest(&mut self, idx: NodeIdx) -> Option<Digest> {
+        match self.memo[idx.idx()] {
             NodeDigest::Digest(d) => return Some(d),
             NodeDigest::NotCacheable => return None,
             NodeDigest::Pending => {}
@@ -140,18 +140,18 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
         ) {
             let e_node = &self.program.e_nodes[idx];
             let digest = file_cache_digest(self.program.node_inputs(e_node));
-            self.memo[idx] = match digest {
+            self.memo[idx.idx()] = match digest {
                 Some(d) => NodeDigest::Digest(d),
                 None => NodeDigest::NotCacheable,
             };
             return digest;
         }
 
-        if self.visiting[idx] {
+        if self.visiting[idx.idx()] {
             // Cycle (the planner rejects these) — treat as non-reproducible.
             return None;
         }
-        self.visiting[idx] = true;
+        self.visiting[idx.idx()] = true;
 
         // Copy the shared references out so the input loop borrows them (lifetime
         // 'a), leaving `self` free for the recursive call.
@@ -174,7 +174,7 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
             // longer matches — and the change propagates downstream through the
             // port digests below. A type change in a wildcard output already flows
             // in via its mirrored input; folding it again is harmless.
-            let out_types = &output_types[idx];
+            let out_types = &output_types[idx.idx()];
             hasher.update(&(out_types.len() as u64).to_le_bytes());
             for ty in out_types {
                 hash_data_type(&mut hasher, ty);
@@ -211,8 +211,8 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
             (!tainted).then(|| hasher.finalize().into())
         };
 
-        self.visiting[idx] = false;
-        self.memo[idx] = match digest {
+        self.visiting[idx.idx()] = false;
+        self.memo[idx.idx()] = match digest {
             Some(d) => NodeDigest::Digest(d),
             None => NodeDigest::NotCacheable,
         };
@@ -221,7 +221,7 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
 
     /// Digest of one output *port* of node `idx`, or `None` if the node has no
     /// digest. Disambiguates ports of a multi-output node sharing one node digest.
-    pub(crate) fn port_digest(&mut self, idx: usize, port_idx: usize) -> Option<Digest> {
+    pub(crate) fn port_digest(&mut self, idx: NodeIdx, port_idx: usize) -> Option<Digest> {
         let node = self.node_digest(idx)?;
         let mut hasher = Hasher::new();
         hasher.update(&node);
@@ -375,7 +375,7 @@ mod tests {
 
     fn bind(idx: usize, port: usize) -> ExecutionBinding {
         ExecutionBinding::Bind(ExecutionPortAddress {
-            target_idx: idx,
+            target_idx: idx.into(),
             port_idx: port,
         })
     }
@@ -391,7 +391,7 @@ mod tests {
     fn digests(prog: &Prog) -> Vec<Option<Digest>> {
         let mut engine = DigestEngine::new(&prog.program, &prog.output_types, no_files);
         (0..prog.program.e_nodes.len())
-            .map(|i| engine.node_digest(i))
+            .map(|i| engine.node_digest(i.into()))
             .collect()
     }
 
@@ -485,17 +485,17 @@ mod tests {
             len: 1,
             mtime_ns: 1,
         })
-        .node_digest(0);
+        .node_digest(NodeIdx(0));
         let d_large = DigestEngine::new(&p.program, t, |_: &str| FileId {
             len: 2,
             mtime_ns: 1,
         })
-        .node_digest(0);
+        .node_digest(NodeIdx(0));
         let d_mtime = DigestEngine::new(&p.program, t, |_: &str| FileId {
             len: 1,
             mtime_ns: 9,
         })
-        .node_digest(0);
+        .node_digest(NodeIdx(0));
         assert_ne!(d_small, d_large, "file length must matter");
         assert_ne!(d_small, d_mtime, "file mtime must matter");
 
@@ -503,7 +503,7 @@ mod tests {
             len: 1,
             mtime_ns: 1,
         })
-        .node_digest(0);
+        .node_digest(NodeIdx(0));
         assert_eq!(d_small, same, "identical file identity ⇒ identical digest");
 
         // The path string itself is folded too, independent of file identity.
@@ -513,7 +513,7 @@ mod tests {
             len: 1,
             mtime_ns: 1,
         })
-        .node_digest(0);
+        .node_digest(NodeIdx(0));
         assert_ne!(d_small, d_other, "different path ⇒ different digest");
     }
 
@@ -527,12 +527,12 @@ mod tests {
 
         let mut engine = DigestEngine::new(&p.program, &p.output_types, no_files);
         assert_ne!(
-            engine.port_digest(0, 0),
-            engine.port_digest(0, 1),
+            engine.port_digest(NodeIdx(0), 0),
+            engine.port_digest(NodeIdx(0), 1),
             "ports of one node must hash apart"
         );
-        let db = engine.node_digest(1);
-        let dc = engine.node_digest(2);
+        let db = engine.node_digest(NodeIdx(1));
+        let dc = engine.node_digest(NodeIdx(2));
         assert_ne!(db, dc, "consumers reading different ports must differ");
     }
 
@@ -592,7 +592,7 @@ mod tests {
         p.add(10, 0, 1, &[bind(1, 0)]); // A binds B (idx 1)
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A (idx 0)
         assert_eq!(
-            DigestEngine::new(&p.program, &p.output_types, no_files).node_digest(0),
+            DigestEngine::new(&p.program, &p.output_types, no_files).node_digest(NodeIdx(0)),
             None
         );
     }

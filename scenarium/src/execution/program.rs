@@ -4,6 +4,8 @@
 //! [`Executor`](crate::execution::executor::Executor); all per-run scheduling state in the
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan).
 
+use std::ops::{Index, IndexMut};
+
 use common::{KeyIndexKey, KeyIndexVec, Span};
 use serde::{Deserialize, Serialize};
 
@@ -14,15 +16,52 @@ use crate::graph::NodeId;
 use crate::prelude::{FuncId, FuncLambda};
 use crate::special::SpecialNode;
 
+/// A position into the flat node table — `e_nodes`, the cache's `slots`, and the
+/// per-node plan/cache columns are all indexed by it. Resolved at flatten and stable
+/// for the program's lifetime. A newtype so it can't be crossed with an input-pool
+/// index, an output-pool index, or a port number: those are different spaces, and
+/// mixing them was previously a silent `usize` bug caught only by debug `validate`.
+/// `KeyIndexVec<NodeId, _>` indexes by it directly; plain `Vec` columns go through
+/// [`NodeIdx::idx`].
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+pub(crate) struct NodeIdx(pub(crate) u32);
+
+impl NodeIdx {
+    pub(crate) fn idx(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl From<usize> for NodeIdx {
+    fn from(i: usize) -> Self {
+        NodeIdx(i as u32)
+    }
+}
+
+impl<V: KeyIndexKey<NodeId>> Index<NodeIdx> for KeyIndexVec<NodeId, V> {
+    type Output = V;
+    fn index(&self, i: NodeIdx) -> &V {
+        &self[i.idx()]
+    }
+}
+
+impl<V: KeyIndexKey<NodeId>> IndexMut<NodeIdx> for KeyIndexVec<NodeId, V> {
+    fn index_mut(&mut self, i: NodeIdx) -> &mut V {
+        &mut self[i.idx()]
+    }
+}
+
 // === Execution Binding ===
 
-/// A flat output address: producer node `target_idx` (index into `e_nodes`/`slots`,
-/// resolved at flatten and stable for the program's lifetime), output `port_idx`. The
-/// producer's `NodeId` is *not* stored — it's `e_nodes[target_idx].id`; the index is
-/// the canonical key here, so there's no id/index pair to keep in sync.
+/// A flat output address: producer node `target_idx` (a [`NodeIdx`], resolved at
+/// flatten and stable for the program's lifetime), output `port_idx`. The producer's
+/// `NodeId` is *not* stored — it's `e_nodes[target_idx].id`; the index is the
+/// canonical key here, so there's no id/index pair to keep in sync.
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub(crate) struct ExecutionPortAddress {
-    pub target_idx: usize,
+    pub target_idx: NodeIdx,
     pub port_idx: usize,
 }
 
@@ -133,6 +172,12 @@ impl ExecutionProgram {
         self.inputs.clear();
         self.events.clear();
         self.n_outputs = 0;
+    }
+
+    /// Every node position, typed — `for idx in program.node_indices()` instead of
+    /// `for idx in 0..program.e_nodes.len()` so the loop variable is a [`NodeIdx`].
+    pub(crate) fn node_indices(&self) -> impl Iterator<Item = NodeIdx> {
+        (0..self.e_nodes.len()).map(NodeIdx::from)
     }
 
     /// `e_node`'s slice of the shared input pool.

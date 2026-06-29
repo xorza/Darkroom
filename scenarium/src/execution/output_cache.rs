@@ -46,7 +46,7 @@ use crate::execution::blob;
 use crate::execution::cache::Cache;
 use crate::execution::digest::Digest;
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::library::Library;
 use crate::special::SpecialNode;
 
@@ -97,7 +97,7 @@ impl OutputCache {
     /// The file node `idx` caches to, or `None` when it doesn't: a
     /// `CachePassthrough` with a `Const` path → explicit; a `persist` node with a
     /// disk root and a content digest → content-addressed; anything else → none.
-    fn target(&self, program: &ExecutionProgram, idx: usize, cache: &Cache) -> Option<Target> {
+    fn target(&self, program: &ExecutionProgram, idx: NodeIdx, cache: &Cache) -> Option<Target> {
         let e_node = &program.e_nodes[idx];
         if matches!(e_node.special, Some(SpecialNode::CachePassthrough { .. })) {
             return cache_node_path(program.node_inputs(e_node))
@@ -125,7 +125,7 @@ impl OutputCache {
     /// ([`Cache::recompute_digests`]), so no library is needed here for
     /// resolution — only this cache's own codec table.
     pub(crate) fn mark_available(&self, program: &ExecutionProgram, cache: &mut Cache) {
-        for idx in 0..program.e_nodes.len() {
+        for idx in program.node_indices() {
             cache.slots[idx].disk_available = false;
             if is_bypassed(program, idx) || cache.is_resident_hit(idx) {
                 continue;
@@ -136,7 +136,7 @@ impl OutputCache {
             let Some(target) = self.target(program, idx, cache) else {
                 continue;
             };
-            if self.outputs_decodable(&cache.output_types[idx]) && target.path().exists() {
+            if self.outputs_decodable(&cache.output_types[idx.idx()]) && target.path().exists() {
                 cache.slots[idx].disk_available = true;
             }
         }
@@ -167,7 +167,7 @@ impl OutputCache {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
                     // Only a producer the planner serves from cache needs loading; a
                     // producer that will execute fills its own slot during the run.
-                    if plan.verdicts[addr.target_idx].is_cached()
+                    if plan.verdicts[addr.target_idx.idx()].is_cached()
                         && !self.hydrate_slot(program, cache, addr.target_idx)
                     {
                         all_loaded = false;
@@ -186,7 +186,7 @@ impl OutputCache {
         &self,
         program: &ExecutionProgram,
         cache: &mut Cache,
-        idx: usize,
+        idx: NodeIdx,
     ) {
         self.hydrate_slot(program, cache, idx);
         let span = program.e_nodes[idx].inputs;
@@ -205,7 +205,7 @@ impl OutputCache {
     /// type* for a matching digest: the output signature is folded into the digest
     /// ([`Cache::recompute_digests`](crate::execution::cache::Cache::recompute_digests)),
     /// so a redefined output re-keys rather than colliding.
-    fn hydrate_slot(&self, program: &ExecutionProgram, cache: &mut Cache, idx: usize) -> bool {
+    fn hydrate_slot(&self, program: &ExecutionProgram, cache: &mut Cache, idx: NodeIdx) -> bool {
         if cache.slots[idx].output_values.is_some() {
             return true;
         }
@@ -242,16 +242,16 @@ impl OutputCache {
         // frontier inputs. Any other resident value is an untouched prior-run leftover.
         let mut protected = vec![false; program.e_nodes.len()];
         for &e_idx in &plan.execute_order {
-            protected[e_idx] = true;
+            protected[e_idx.idx()] = true;
             let span = program.e_nodes[e_idx].inputs;
             for input in &program.inputs[span.range()] {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
-                    protected[addr.target_idx] = true;
+                    protected[addr.target_idx.idx()] = true;
                 }
             }
         }
-        for (idx, &is_protected) in protected.iter().enumerate() {
-            if is_protected || cache.slots[idx].output_values.is_none() {
+        for idx in program.node_indices() {
+            if protected[idx.idx()] || cache.slots[idx].output_values.is_none() {
                 continue;
             }
             // Reloadable iff a blob for the current digest is on disk — only then is
@@ -321,7 +321,7 @@ impl OutputCache {
 
 /// True for a bypassed cache-passthrough node — recompute + overwrite, so never
 /// hydrate it.
-fn is_bypassed(program: &ExecutionProgram, idx: usize) -> bool {
+fn is_bypassed(program: &ExecutionProgram, idx: NodeIdx) -> bool {
     matches!(
         program.e_nodes[idx].special,
         Some(SpecialNode::CachePassthrough { bypass: true })

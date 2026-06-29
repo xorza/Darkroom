@@ -9,7 +9,7 @@ use common::is_debug;
 
 use crate::execution::cache::Cache;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict, input_missing};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::execution::{Error, Result, RunSeeds, validate};
 
 /// DFS coloring for the two backward passes. White = unvisited, Gray = on
@@ -30,7 +30,7 @@ enum VisitCause {
 
 #[derive(Debug)]
 struct Visit {
-    e_node_idx: usize,
+    e_node_idx: NodeIdx,
     cause: VisitCause,
 }
 
@@ -46,7 +46,7 @@ pub(crate) struct Planner {
     is_root: Vec<bool>,
     /// Deduped indices of the nodes the backward walks start from — terminals,
     /// event subscribers, and event-trigger owners. *Not* only `terminal` nodes.
-    roots: Vec<usize>,
+    roots: Vec<NodeIdx>,
 }
 
 impl Planner {
@@ -74,9 +74,9 @@ impl Planner {
     }
 
     /// Mark `idx` as a walk root, deduping via the marker column.
-    fn mark_root(&mut self, idx: usize) {
-        if !self.is_root[idx] {
-            self.is_root[idx] = true;
+    fn mark_root(&mut self, idx: NodeIdx) {
+        if !self.is_root[idx.idx()] {
+            self.is_root[idx.idx()] = true;
             self.roots.push(idx);
         }
     }
@@ -94,7 +94,7 @@ impl Planner {
                 .clone();
             for sub in &subs {
                 let idx = program.e_nodes.index_of_key(sub).unwrap();
-                self.mark_root(idx);
+                self.mark_root(idx.into());
             }
         }
 
@@ -102,7 +102,7 @@ impl Planner {
         if seeds.terminals {
             for (idx, e) in program.e_nodes.iter().enumerate() {
                 if e.terminal {
-                    self.mark_root(idx);
+                    self.mark_root(idx.into());
                 }
             }
         }
@@ -114,7 +114,7 @@ impl Planner {
                     .iter()
                     .any(|ev| !ev.subscribers.is_empty())
                 {
-                    self.mark_root(idx);
+                    self.mark_root(idx.into());
                 }
             }
         }
@@ -146,15 +146,15 @@ impl Planner {
                     plan.output_usage[span.start as usize + output_idx] += 1;
                 }
                 VisitCause::Done => {
-                    assert_eq!(self.color[visit.e_node_idx], Color::Gray);
-                    self.color[visit.e_node_idx] = Color::Black;
+                    assert_eq!(self.color[visit.e_node_idx.idx()], Color::Gray);
+                    self.color[visit.e_node_idx.idx()] = Color::Black;
                     plan.process_order.push(visit.e_node_idx);
                     continue;
                 }
             }
 
             let idx = visit.e_node_idx;
-            match self.color[idx] {
+            match self.color[idx.idx()] {
                 Color::Gray => {
                     return Err(Error::CycleDetected {
                         node_id: program.e_nodes[idx].id,
@@ -164,7 +164,7 @@ impl Planner {
                 Color::White => {}
             }
 
-            self.color[idx] = Color::Gray;
+            self.color[idx.idx()] = Color::Gray;
             self.stack.push(Visit {
                 e_node_idx: idx,
                 cause: VisitCause::Done,
@@ -212,9 +212,9 @@ impl Planner {
             let available = cache.is_available(e_node_idx);
 
             if available {
-                plan.verdicts[e_node_idx] = NodeVerdict::Cached;
+                plan.verdicts[e_node_idx.idx()] = NodeVerdict::Cached;
                 if is_debug() {
-                    processed[e_node_idx] = true;
+                    processed[e_node_idx.idx()] = true;
                 }
                 continue;
             }
@@ -236,20 +236,20 @@ impl Planner {
                     // `verdicts` before `input_missing` reads it.
                     assert!(addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize);
                     assert!(
-                        processed[addr.target_idx],
+                        processed[addr.target_idx.idx()],
                         "forward pass: dep not yet processed"
                     );
                 }
                 missing_required |= input_missing(e_input, &plan.verdicts);
             }
 
-            plan.verdicts[e_node_idx] = if missing_required {
+            plan.verdicts[e_node_idx.idx()] = if missing_required {
                 NodeVerdict::MissingInputs
             } else {
                 NodeVerdict::Execute
             };
             if is_debug() {
-                processed[e_node_idx] = true;
+                processed[e_node_idx.idx()] = true;
             }
         }
     }
@@ -283,14 +283,14 @@ impl Planner {
             match visit.cause {
                 VisitCause::Root | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done => {
-                    assert_eq!(self.color[idx], Color::Gray);
+                    assert_eq!(self.color[idx.idx()], Color::Gray);
                     plan.execute_order.push(idx);
-                    self.color[idx] = Color::Black;
+                    self.color[idx.idx()] = Color::Black;
                     continue;
                 }
             }
 
-            match self.color[idx] {
+            match self.color[idx.idx()] {
                 Color::White => {}
                 Color::Black => continue,
                 // Pass 1 would have rejected any cycle; a Gray revisit in pass 2
@@ -298,12 +298,12 @@ impl Planner {
                 Color::Gray => unreachable!("cycle should be detected in pass 1"),
             }
 
-            if !plan.verdicts[idx].wants_execute() {
-                self.color[idx] = Color::Black;
+            if !plan.verdicts[idx.idx()].wants_execute() {
+                self.color[idx.idx()] = Color::Black;
                 continue;
             }
 
-            self.color[idx] = Color::Gray;
+            self.color[idx.idx()] = Color::Gray;
             self.stack.push(Visit {
                 e_node_idx: idx,
                 cause: VisitCause::Done,
@@ -314,7 +314,7 @@ impl Planner {
                 // Recurse only into a producer that will itself run; a cached
                 // producer's value is already available, so its cone is pruned.
                 if let Some(addr) = e_input.binding.as_bind()
-                    && plan.verdicts[addr.target_idx].wants_execute()
+                    && plan.verdicts[addr.target_idx.idx()].wants_execute()
                 {
                     self.stack.push(Visit {
                         e_node_idx: addr.target_idx,
@@ -349,7 +349,7 @@ mod tests {
             terminal: bool,
             inputs: &[(bool, ExecutionBinding)],
             outputs: u32,
-        ) -> usize {
+        ) -> NodeIdx {
             let inputs_start = self.program.inputs.len() as u32;
             for (required, binding) in inputs {
                 self.program.inputs.push(ExecutionInput {
@@ -369,11 +369,11 @@ mod tests {
                 outputs: Span::new(outputs_start, outputs),
                 ..Default::default()
             });
-            idx
+            idx.into()
         }
     }
 
-    fn bind(idx: usize, port: usize) -> ExecutionBinding {
+    fn bind(idx: NodeIdx, port: usize) -> ExecutionBinding {
         ExecutionBinding::Bind(ExecutionPortAddress {
             target_idx: idx,
             port_idx: port,
@@ -381,11 +381,11 @@ mod tests {
     }
 
     /// Plan `terminals` over `fix`, with the slots at `cached` marked as RAM hits.
-    fn plan_with_cached(fix: &Fix, cached: &[usize]) -> ExecutionPlan {
+    fn plan_with_cached(fix: &Fix, cached: &[NodeIdx]) -> ExecutionPlan {
         let mut cache = Cache::default();
         cache.reconcile(&fix.program.e_nodes);
         for &idx in cached {
-            let digest = [idx as u8 + 1; 32];
+            let digest = [idx.idx() as u8 + 1; 32];
             cache.slots[idx].current_digest = Some(digest);
             cache.slots[idx].output_values = Some(Vec::new());
             cache.slots[idx].output_digest = Some(digest);
@@ -418,9 +418,9 @@ mod tests {
         assert_eq!(p.process_order, vec![a, b, c], "post-order: deps first");
         assert_eq!(p.execute_order, vec![a, b, c]);
         for idx in [a, b, c] {
-            assert!(p.verdicts[idx].wants_execute());
-            assert!(!p.verdicts[idx].is_cached());
-            assert!(!p.verdicts[idx].missing_required_inputs());
+            assert!(p.verdicts[idx.idx()].wants_execute());
+            assert!(!p.verdicts[idx.idx()].is_cached());
+            assert!(!p.verdicts[idx.idx()].missing_required_inputs());
         }
     }
 
@@ -434,8 +434,8 @@ mod tests {
         let b = f.node(true, &[(false, bind(a, 0))], 1);
 
         let p = plan_with_cached(&f, &[b]);
-        assert!(p.verdicts[b].is_cached());
-        assert!(p.verdicts[a].wants_execute(), "A wants to run…");
+        assert!(p.verdicts[b.idx()].is_cached());
+        assert!(p.verdicts[a.idx()].wants_execute(), "A wants to run…");
         assert!(
             p.execute_order.is_empty(),
             "…but isn't scheduled: its sole consumer is cached"
@@ -452,10 +452,13 @@ mod tests {
         let p = plan(&f);
         for idx in [a, b] {
             assert!(
-                p.verdicts[idx].missing_required_inputs(),
-                "node {idx} missing"
+                p.verdicts[idx.idx()].missing_required_inputs(),
+                "node {idx:?} missing"
             );
-            assert!(!p.verdicts[idx].wants_execute(), "node {idx} not runnable");
+            assert!(
+                !p.verdicts[idx.idx()].wants_execute(),
+                "node {idx:?} not runnable"
+            );
         }
         assert!(p.execute_order.is_empty());
     }
@@ -467,8 +470,8 @@ mod tests {
         let a = f.node(true, &[(false, ExecutionBinding::None)], 1);
 
         let p = plan(&f);
-        assert!(!p.verdicts[a].missing_required_inputs());
-        assert!(p.verdicts[a].wants_execute());
+        assert!(!p.verdicts[a.idx()].missing_required_inputs());
+        assert!(p.verdicts[a.idx()].wants_execute());
         assert_eq!(p.execute_order, vec![a]);
     }
 
@@ -488,8 +491,8 @@ mod tests {
     fn dependency_cycle_is_rejected() {
         // A binds B, B binds A (A terminal) — the planner must error, not loop.
         let mut f = Fix::default();
-        f.node(true, &[(false, bind(1, 0))], 1); // A (idx 0) binds B
-        f.node(false, &[(false, bind(0, 0))], 1); // B (idx 1) binds A
+        f.node(true, &[(false, bind(NodeIdx(1), 0))], 1); // A (idx 0) binds B
+        f.node(false, &[(false, bind(NodeIdx(0), 0))], 1); // B (idx 1) binds A
 
         let mut cache = Cache::default();
         cache.reconcile(&f.program.e_nodes);

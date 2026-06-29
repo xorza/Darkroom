@@ -4,7 +4,7 @@
 //! the program's pools. Reused via a buffer on the engine so a repeated run
 //! does no scheduling allocation.
 
-use crate::execution::program::{ExecutionBinding, ExecutionInput};
+use crate::execution::program::{ExecutionBinding, ExecutionInput, NodeIdx};
 
 /// The planner's verdict for one node this run, indexed by `e_node_idx`. The three
 /// states are mutually exclusive *by construction* — unlike the prior three-bool
@@ -46,7 +46,7 @@ pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &[NodeVerdict]) ->
     match &input.binding {
         ExecutionBinding::None => input.required,
         ExecutionBinding::Const(_) => false,
-        ExecutionBinding::Bind(addr) => verdicts[addr.target_idx].missing_required_inputs(),
+        ExecutionBinding::Bind(addr) => verdicts[addr.target_idx.idx()].missing_required_inputs(),
     }
 }
 
@@ -54,10 +54,10 @@ pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &[NodeVerdict]) ->
 pub(crate) struct ExecutionPlan {
     /// Post-order DFS over the dependency graph (deps before consumers),
     /// seeded from the terminals. Superset of `execute_order`.
-    pub(crate) process_order: Vec<usize>,
+    pub(crate) process_order: Vec<NodeIdx>,
     /// Pruned to only nodes whose output is read by an executing consumer.
-    pub(crate) execute_order: Vec<usize>,
-    /// Per-node verdict (cached / execute / missing-inputs), indexed by `e_node_idx`.
+    pub(crate) execute_order: Vec<NodeIdx>,
+    /// Per-node verdict (cached / execute / missing-inputs), indexed by node position.
     pub(crate) verdicts: Vec<NodeVerdict>,
     /// Per-output consumer counts, indexed by output-pool index. `> 0` ⇒ the output
     /// is `Needed` this run; `0` ⇒ `Skip`. The executor passes the count through to

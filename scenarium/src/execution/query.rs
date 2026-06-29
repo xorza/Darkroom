@@ -5,7 +5,7 @@
 
 use crate::data::DynamicValue;
 use crate::execution::event::{EventRef, EventTrigger};
-use crate::execution::program::ExecutionBinding;
+use crate::execution::program::{ExecutionBinding, NodeIdx};
 use crate::execution::{ArgumentValues, ExecutionEngine};
 use crate::execution_stats::ExecutionStats;
 use crate::graph::NodeId;
@@ -17,7 +17,7 @@ impl ExecutionEngine {
     /// node reads back empty. Kept `pub(crate)` to keep that footgun off the public
     /// surface.
     pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-        let idx = self.program.e_nodes.index_of_key(node_id)?;
+        let idx: NodeIdx = self.program.e_nodes.index_of_key(node_id)?.into();
         let e_node = &self.program.e_nodes[idx];
 
         let inputs = self.program.inputs[e_node.inputs.range()]
@@ -52,7 +52,7 @@ impl ExecutionEngine {
     ) -> Option<ArgumentValues> {
         if let Some(idx) = self.program.e_nodes.index_of_key(node_id) {
             self.output_cache
-                .hydrate_for_inspection(&self.program, &mut self.cache, idx);
+                .hydrate_for_inspection(&self.program, &mut self.cache, idx.into());
         }
         let mut values = self.get_argument_values(node_id)?;
         let mut pending_previews = Vec::new();
