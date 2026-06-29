@@ -70,11 +70,13 @@ pub(crate) fn fs_file_id(path: &str) -> FileId {
     }
 }
 
-/// The engine's per-node working columns, kept across `update`s (owned by the
-/// [`Cache`](crate::execution::cache::Cache)) so a recompile doesn't reallocate two
-/// graph-sized `Vec`s — [`DigestEngine::new`] resizes and resets them in place.
-#[derive(Debug, Default)]
-pub(crate) struct DigestScratch {
+/// Memoized digest computation, owning its per-node working columns so the
+/// [`Cache`](crate::execution::cache::Cache) keeps one engine across updates and a
+/// recompile reuses the buffers ([`reset`](Self::reset)) instead of reallocating two
+/// graph-sized `Vec`s. The program is *not* held — it's passed to [`node_digest`](Self::node_digest)
+/// per recompute, so the engine carries no lifetime.
+pub(crate) struct DigestEngine<F> {
+    file_id: F,
     memo: Vec<NodeDigest>,
     /// Per-node in-progress marker — a node re-entered while still on the
     /// recursion stack is a cycle (the planner rejects these upstream; the digest
@@ -82,18 +84,9 @@ pub(crate) struct DigestScratch {
     visiting: Vec<bool>,
 }
 
-/// Memoized digest computation over one [`ExecutionProgram`]. Reuse a single
-/// engine for the whole program so a shared upstream node is hashed once.
-pub(crate) struct DigestEngine<'a, F> {
-    program: &'a ExecutionProgram,
-    file_id: F,
-    memo: &'a mut Vec<NodeDigest>,
-    visiting: &'a mut Vec<bool>,
-}
-
 // Manual `Debug` (the rule is "always derive Debug"): the `file_id` resolver is
 // an `F: Fn` closure that isn't `Debug`, so the derive can't apply.
-impl<F> std::fmt::Debug for DigestEngine<'_, F> {
+impl<F> std::fmt::Debug for DigestEngine<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DigestEngine")
             .field("memo", &self.memo)
@@ -102,38 +95,42 @@ impl<F> std::fmt::Debug for DigestEngine<'_, F> {
     }
 }
 
-impl<'a> DigestEngine<'a, fn(&str) -> FileId> {
+impl Default for DigestEngine<fn(&str) -> FileId> {
     /// Engine using the filesystem [`fs_file_id`] resolver — the production path.
-    pub(crate) fn with_fs(program: &'a ExecutionProgram, scratch: &'a mut DigestScratch) -> Self {
-        DigestEngine::new(program, scratch, fs_file_id)
+    fn default() -> Self {
+        DigestEngine::with_resolver(fs_file_id)
     }
 }
 
-impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
-    pub(crate) fn new(
-        program: &'a ExecutionProgram,
-        scratch: &'a mut DigestScratch,
-        file_id: F,
-    ) -> Self {
-        let n = program.e_nodes.len();
-        let DigestScratch { memo, visiting } = scratch;
-        memo.clear();
-        memo.resize(n, NodeDigest::Pending);
-        visiting.clear();
-        visiting.resize(n, false);
-        Self {
-            program,
+impl<F: Fn(&str) -> FileId> DigestEngine<F> {
+    pub(crate) fn with_resolver(file_id: F) -> Self {
+        DigestEngine {
             file_id,
-            memo,
-            visiting,
+            memo: Vec::new(),
+            visiting: Vec::new(),
         }
+    }
+
+    /// Size the working columns to `program` and clear them — call once before the
+    /// [`node_digest`](Self::node_digest) loop of a fresh recompute (the memo persists
+    /// *within* that loop so a shared upstream node is hashed once).
+    pub(crate) fn reset(&mut self, program: &ExecutionProgram) {
+        let n = program.e_nodes.len();
+        self.memo.clear();
+        self.memo.resize(n, NodeDigest::Pending);
+        self.visiting.clear();
+        self.visiting.resize(n, false);
     }
 
     /// Content digest of node `idx`, or `None` when its output isn't reproducible
     /// — the node is `Impure`, or *any* upstream producer is non-reproducible (the
     /// taint flows up). `None` is the "always recompute, never cache" signal — for
     /// RAM and disk alike. Memoized.
-    pub(crate) fn node_digest(&mut self, idx: NodeIdx) -> Option<Digest> {
+    pub(crate) fn node_digest(
+        &mut self,
+        program: &ExecutionProgram,
+        idx: NodeIdx,
+    ) -> Option<Digest> {
         match self.memo[idx.idx()] {
             NodeDigest::Digest(d) => return Some(d),
             NodeDigest::NotCacheable => return None,
@@ -143,11 +140,11 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
         // cone — so input 0 can be impure/expensive and the node still presents a
         // digest (the reproducibility boundary). Resolve it before recursing.
         if matches!(
-            self.program.e_nodes[idx].special,
+            program.e_nodes[idx].special,
             Some(SpecialNode::CachePassthrough { .. })
         ) {
-            let e_node = &self.program.e_nodes[idx];
-            let digest = file_cache_digest(self.program.node_inputs(e_node));
+            let e_node = &program.e_nodes[idx];
+            let digest = file_cache_digest(program.node_inputs(e_node));
             self.memo[idx.idx()] = match digest {
                 Some(d) => NodeDigest::Digest(d),
                 None => NodeDigest::NotCacheable,
@@ -161,9 +158,6 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
         }
         self.visiting[idx.idx()] = true;
 
-        // Copy the shared references out so the input loop borrows them (lifetime
-        // 'a), leaving `self` free for the recursive call.
-        let program = self.program;
         let e_node = &program.e_nodes[idx];
 
         // Only a `Pure` node is content-cacheable; `Impure` varies per run.
@@ -201,7 +195,7 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
                         Self::hash_static(&mut hasher, value, &self.file_id);
                     }
                     ExecutionBinding::Bind(addr) => {
-                        match self.port_digest(addr.target_idx, addr.port_idx) {
+                        match self.port_digest(program, addr.target_idx, addr.port_idx) {
                             Some(upstream) => {
                                 hasher.update(&[2u8]);
                                 hasher.update(&upstream.0);
@@ -228,8 +222,13 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
 
     /// Digest of one output *port* of node `idx`, or `None` if the node has no
     /// digest. Disambiguates ports of a multi-output node sharing one node digest.
-    fn port_digest(&mut self, idx: NodeIdx, port_idx: usize) -> Option<Digest> {
-        let node = self.node_digest(idx)?;
+    fn port_digest(
+        &mut self,
+        program: &ExecutionProgram,
+        idx: NodeIdx,
+        port_idx: usize,
+    ) -> Option<Digest> {
+        let node = self.node_digest(program, idx)?;
         let mut hasher = Hasher::new();
         hasher.update(&node.0);
         hasher.update(&(port_idx as u64).to_le_bytes());
@@ -403,11 +402,22 @@ mod tests {
         FileId::default()
     }
 
+    /// One node's digest with a one-shot engine (resolver + a fresh recompute).
+    fn digest_at(
+        program: &ExecutionProgram,
+        file_id: impl Fn(&str) -> FileId,
+        idx: NodeIdx,
+    ) -> Option<Digest> {
+        let mut engine = DigestEngine::with_resolver(file_id);
+        engine.reset(program);
+        engine.node_digest(program, idx)
+    }
+
     fn digests(prog: &Prog) -> Vec<Option<Digest>> {
-        let mut scratch = DigestScratch::default();
-        let mut engine = DigestEngine::new(&prog.program, &mut scratch, no_files);
+        let mut engine = DigestEngine::with_resolver(no_files);
+        engine.reset(&prog.program);
         (0..prog.program.e_nodes.len())
-            .map(|i| engine.node_digest(i.into()))
+            .map(|i| engine.node_digest(&prog.program, i.into()))
             .collect()
     }
 
@@ -496,49 +506,54 @@ mod tests {
         let mut p = Prog::default();
         p.add(10, 0, 1, &[konst(StaticValue::FsPath("frames".into()))]);
 
-        let d_small = DigestEngine::new(&p.program, &mut DigestScratch::default(), |_: &str| {
-            FileId {
+        let d_small = digest_at(
+            &p.program,
+            |_| FileId {
                 len: 1,
                 mtime_ns: 1,
-            }
-        })
-        .node_digest(NodeIdx(0));
-        let d_large = DigestEngine::new(&p.program, &mut DigestScratch::default(), |_: &str| {
-            FileId {
+            },
+            NodeIdx(0),
+        );
+        let d_large = digest_at(
+            &p.program,
+            |_| FileId {
                 len: 2,
                 mtime_ns: 1,
-            }
-        })
-        .node_digest(NodeIdx(0));
-        let d_mtime = DigestEngine::new(&p.program, &mut DigestScratch::default(), |_: &str| {
-            FileId {
+            },
+            NodeIdx(0),
+        );
+        let d_mtime = digest_at(
+            &p.program,
+            |_| FileId {
                 len: 1,
                 mtime_ns: 9,
-            }
-        })
-        .node_digest(NodeIdx(0));
+            },
+            NodeIdx(0),
+        );
         assert_ne!(d_small, d_large, "file length must matter");
         assert_ne!(d_small, d_mtime, "file mtime must matter");
 
-        let same = DigestEngine::new(&p.program, &mut DigestScratch::default(), |_: &str| {
-            FileId {
+        let same = digest_at(
+            &p.program,
+            |_| FileId {
                 len: 1,
                 mtime_ns: 1,
-            }
-        })
-        .node_digest(NodeIdx(0));
+            },
+            NodeIdx(0),
+        );
         assert_eq!(d_small, same, "identical file identity ⇒ identical digest");
 
         // The path string itself is folded too, independent of file identity.
         let mut q = Prog::default();
         q.add(10, 0, 1, &[konst(StaticValue::FsPath("other".into()))]);
-        let d_other = DigestEngine::new(&q.program, &mut DigestScratch::default(), |_: &str| {
-            FileId {
+        let d_other = digest_at(
+            &q.program,
+            |_| FileId {
                 len: 1,
                 mtime_ns: 1,
-            }
-        })
-        .node_digest(NodeIdx(0));
+            },
+            NodeIdx(0),
+        );
         assert_ne!(d_small, d_other, "different path ⇒ different digest");
     }
 
@@ -550,15 +565,15 @@ mod tests {
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A.0
         p.add(20, 0, 1, &[bind(0, 1)]); // C binds A.1 (same func as B)
 
-        let mut scratch = DigestScratch::default();
-        let mut engine = DigestEngine::new(&p.program, &mut scratch, no_files);
+        let mut engine = DigestEngine::with_resolver(no_files);
+        engine.reset(&p.program);
         assert_ne!(
-            engine.port_digest(NodeIdx(0), 0),
-            engine.port_digest(NodeIdx(0), 1),
+            engine.port_digest(&p.program, NodeIdx(0), 0),
+            engine.port_digest(&p.program, NodeIdx(0), 1),
             "ports of one node must hash apart"
         );
-        let db = engine.node_digest(NodeIdx(1));
-        let dc = engine.node_digest(NodeIdx(2));
+        let db = engine.node_digest(&p.program, NodeIdx(1));
+        let dc = engine.node_digest(&p.program, NodeIdx(2));
         assert_ne!(db, dc, "consumers reading different ports must differ");
     }
 
@@ -617,11 +632,7 @@ mod tests {
         let mut p = Prog::default();
         p.add(10, 0, 1, &[bind(1, 0)]); // A binds B (idx 1)
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A (idx 0)
-        assert_eq!(
-            DigestEngine::new(&p.program, &mut DigestScratch::default(), no_files)
-                .node_digest(NodeIdx(0)),
-            None
-        );
+        assert_eq!(digest_at(&p.program, no_files, NodeIdx(0)), None);
     }
 
     #[test]
