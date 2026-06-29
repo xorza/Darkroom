@@ -23,6 +23,7 @@ use crate::graph::InputPort;
 
 use crate::execution::RunError;
 use crate::execution::cache::Cache;
+use crate::execution::output_cache::OutputCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeColumn, NodeIdx};
 
@@ -41,13 +42,16 @@ pub(crate) struct Executor {
 impl Executor {
     /// Execute every node in `plan.execute_order`, invoking its lambda with the
     /// collected inputs. Mutates the `cache` (output values + digests) and stamps
-    /// each executed node's `output_digest` from its `current_digest`. The
-    /// `program` and `plan` are read-only. Returns per-run stats.
+    /// each executed node's `output_digest` from its `current_digest`, then persists
+    /// it to `output_cache` right away (so a long run's earlier caches survive a later
+    /// failure or cancel). The `program` and `plan` are read-only. Returns per-run stats.
+    #[allow(clippy::too_many_arguments)] // an orchestration entry point; each arg is a distinct collaborator
     pub(crate) async fn run(
         &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
         cache: &mut Cache,
+        output_cache: &OutputCache,
         flatten: &FlattenMap,
         progress: Option<&UnboundedSender<RunProgress>>,
         cancel: CancelToken,
@@ -168,15 +172,19 @@ impl Executor {
             }
             run_times[e_node_idx] = run_time;
             let slot = &mut cache.slots[e_node_idx];
-            match result {
+            let succeeded = match result {
                 // The fresh output now corresponds to this node's current digest;
                 // record it so the planner's next cache check is a RAM hit.
-                Ok(()) => slot.stamp_produced(),
+                Ok(()) => {
+                    slot.stamp_produced();
+                    true
+                }
                 Err(err) => {
                     errors[e_node_idx] = Some(err);
                     slot.clear_output();
+                    false
                 }
-            }
+            };
             // No `Finished` for the cancelled node — it didn't complete; the
             // consumer would otherwise paint it executed live.
             if !cancelled && let Some(progress) = progress {
@@ -186,6 +194,15 @@ impl Executor {
                         elapsed_secs: run_time,
                     },
                 });
+            }
+            // Persist this node's cache the moment it finishes (durable as the run
+            // progresses), not at the end of the whole run. The snapshot is taken
+            // synchronously inside `store_node`; only the write awaits, so the cache
+            // borrow doesn't cross it.
+            if succeeded {
+                output_cache
+                    .store_node(program, e_node_idx, cache, &mut self.ctx_manager)
+                    .await;
             }
         }
 
@@ -404,12 +421,14 @@ mod tests {
     async fn run(program: &ExecutionProgram, plan: &ExecutionPlan) -> (Cache, ExecutionStats) {
         let mut cache = Cache::default();
         cache.reconcile(&program.e_nodes);
+        let output_cache = OutputCache::default();
         let mut executor = Executor::default();
         let stats = executor
             .run(
                 program,
                 plan,
                 &mut cache,
+                &output_cache,
                 &FlattenMap::default(),
                 None,
                 CancelToken::never(),

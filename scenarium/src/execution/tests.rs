@@ -48,7 +48,7 @@ mod cache_persistence {
     use crate::execution::cache::ValueCache;
     use std::path::PathBuf;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
     /// A unique temp directory removed on drop, so tests don't collide or leak.
     struct TempDir(PathBuf);
@@ -433,6 +433,50 @@ mod cache_persistence {
             vals.outputs
         );
         Ok(())
+    }
+
+    /// A `persist` node is written to disk the moment *it* finishes, not in a batch at
+    /// the end of the run — so its blob is already on disk by the time a downstream
+    /// node executes. The terminal `print` hook checks the store dir is non-empty when
+    /// it runs; that holds only because `mult` was persisted right after it finished,
+    /// before `print` started. (Batched-at-the-end storing would leave the dir empty
+    /// here.)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn persist_node_lands_on_disk_before_its_consumer_runs() {
+        let dir = TempDir::new("per_node_store");
+        let root = dir.0.clone();
+        let blob_present_when_print_ran = Arc::new(AtomicBool::new(false));
+        let flag = blob_present_when_print_ran.clone();
+        let lib = test_func_lib(TestFuncHooks {
+            print: Arc::new(move |_v| {
+                let non_empty = std::fs::read_dir(&root)
+                    .map(|mut entries| entries.next().is_some())
+                    .unwrap_or(false);
+                flag.store(non_empty, Ordering::SeqCst);
+            }),
+            ..default_hooks()
+        });
+
+        // mult(const 2, const 3) = 6, persist=Disk → print. Const binds detach mult
+        // from any upstream, so only mult + print run.
+        let mut graph = Graph::default();
+        let mut mult = node(&lib, "mult", NodeId::unique());
+        mult.persist = CachePersistence::Disk;
+        graph.add(mult);
+        graph.add(node(&lib, "print", NodeId::unique()));
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(2)));
+        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
+        bind(&mut graph, "print", 0, (mult_id, 0).into());
+
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &lib).unwrap();
+        engine.execute_terminals().await.unwrap();
+
+        assert!(
+            blob_present_when_print_ran.load(Ordering::SeqCst),
+            "mult's disk blob must exist when print runs (persisted per-node, not batched)"
+        );
     }
 
     /// A frontier blob that vanishes between `update` (which flags it available) and

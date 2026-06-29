@@ -26,10 +26,12 @@
 //!    schedule consumes. A failed read clears that flag and returns `false`, so the
 //!    engine re-plans (the failed node then recomputes) — this is why hydration runs
 //!    *after* planning and the two loop until it succeeds.
-//! 3. run → [`store`](OutputCache::store): write freshly-computed outputs.
-//! 4. after store → [`evict_unused`](OutputCache::evict_unused): drop RAM copies the
-//!    run didn't touch but disk can serve again (must run after `store`, so a value
-//!    computed this run is on disk before its RAM copy is reclaimed).
+//! 3. run → [`store_node`](OutputCache::store_node): the executor calls this for each
+//!    node the moment it finishes, so its blob is durable before the next node runs (a
+//!    later failure or cancel can't lose the earlier nodes' caches).
+//! 4. after the run → [`evict_unused`](OutputCache::evict_unused): drop RAM copies the
+//!    run didn't touch but disk can serve again — lossless, because the per-node stores
+//!    already put this run's values on disk.
 //!
 //! [`hydrate_for_inspection`](OutputCache::hydrate_for_inspection) is the off-run
 //! path: an editor query reads a node's value, loading its blob on demand.
@@ -39,7 +41,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::context::ContextManager;
-use crate::data::{DataType, DynamicValue};
+use crate::data::DataType;
 use crate::elements::cache_passthrough::cache_node_path;
 use crate::execution::blob;
 use crate::execution::cache::{Cache, ValueCache};
@@ -297,41 +299,34 @@ impl OutputCache {
         })
     }
 
-    /// Write every cacheable node that ran this round to its file, so a later run
-    /// hydrates instead of recomputing. The `(target, outputs)` snapshot is taken
-    /// **synchronously** (this fn isn't `async`) — the [`Cache`] isn't `Sync`, so
-    /// its borrow must not cross the serialize await in the returned future; the
-    /// clone is cheap (custom values are `Arc`). A content-addressed blob already
-    /// on disk is skipped (same digest ⇒ same bytes — avoids re-serializing); an
-    /// explicit path is always (over)written. Best-effort: a non-codec'able value
-    /// is skipped, any failure logged — caching never fails a run.
-    pub(crate) fn store<'a>(
+    /// Write node `idx`'s freshly-computed outputs to its file the moment it finishes
+    /// (the executor calls this right after a successful invoke), so a long run's
+    /// earlier caches are durable even if a later node errors or the run is cancelled.
+    /// The outputs are **borrowed**, not cloned — they may be large, and the write
+    /// future captures only the value slice (which is `Sync`), never the whole
+    /// (non-`Sync`) [`Cache`], so the borrow can safely cross the serialize await. A
+    /// content-addressed blob already on disk is skipped (same digest ⇒ same bytes); an
+    /// explicit path is always (over)written. Best-effort: a non-cacheable node or a
+    /// value with no codec is skipped, any failure logged — caching never fails a run.
+    pub(crate) fn store_node<'a>(
         &'a self,
         program: &ExecutionProgram,
-        plan: &ExecutionPlan,
-        cache: &Cache,
+        idx: NodeIdx,
+        cache: &'a Cache,
         ctx: &'a mut ContextManager,
     ) -> impl Future<Output = ()> + 'a {
-        let pending: Vec<(Target, Vec<DynamicValue>)> = plan
-            .execute_order
-            .iter()
-            .filter_map(|&idx| {
-                let target = self.target(program, idx, cache)?;
-                // A content-addressed blob already on disk is the same bytes —
-                // skip the clone (and the write) entirely, not just the serialize.
-                if let Target::Addressed(path) = &target
-                    && path.exists()
-                {
-                    return None;
-                }
-                Some((target, cache.output_values(idx)?.clone()))
-            })
-            .collect();
+        let target = self.target(program, idx, cache);
+        let outputs = cache.output_values(idx);
         async move {
-            for (target, outputs) in &pending {
-                if let Err(e) = blob::write(target.path(), outputs, &self.library, ctx).await {
-                    tracing::warn!(path = %target.path().display(), error = %e, "failed to write output cache");
-                }
+            let (Some(target), Some(outputs)) = (target, outputs) else {
+                return;
+            };
+            // A content-addressed blob already on disk is the same bytes — skip.
+            if matches!(&target, Target::Addressed(path) if path.exists()) {
+                return;
+            }
+            if let Err(e) = blob::write(target.path(), outputs, &self.library, ctx).await {
+                tracing::warn!(path = %target.path().display(), error = %e, "failed to write output cache");
             }
         }
     }

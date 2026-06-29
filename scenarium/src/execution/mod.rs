@@ -262,31 +262,24 @@ impl ExecutionEngine {
             }
         }
 
-        // Phase 3: run the schedule.
+        // Phase 3: run the schedule. Each node's disk cache is written the moment it
+        // finishes (inside the run loop), not batched here — so a long run's earlier
+        // caches are durable even if a later node fails or the run is cancelled.
         let mut stats = self
             .executor
             .run(
                 &self.program,
                 &self.plan,
                 &mut self.cache,
+                &self.output_cache,
                 &self.flatten_map,
                 progress,
                 cancel,
             )
             .await;
 
-        // Phase 3b: persist freshly-computed cache outputs to their files.
-        self.output_cache
-            .store(
-                &self.program,
-                &self.plan,
-                &self.cache,
-                &mut self.executor.ctx_manager,
-            )
-            .await;
-
-        // Phase 3c: reclaim RAM from prior-run values this run left untouched and
-        // that the disk store (just written above) can serve again on demand.
+        // Phase 3b: reclaim RAM from prior-run values this run left untouched and
+        // that the disk store (written per-node above) can serve again on demand.
         self.output_cache
             .evict_unused(&self.program, &self.plan, &mut self.cache);
 

@@ -1,3 +1,1 @@
 comments in theme file
-
-save cache on button click not after successfull execute
