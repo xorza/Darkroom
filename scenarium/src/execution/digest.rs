@@ -12,7 +12,7 @@
 
 use blake3::Hasher;
 
-use crate::data::StaticValue;
+use crate::data::{DataType, StaticValue};
 use crate::elements::cache_passthrough::file_cache_digest;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::function::FuncBehavior;
@@ -71,6 +71,11 @@ pub(crate) fn fs_file_id(path: &str) -> FileId {
 /// engine for the whole program so a shared upstream node is hashed once.
 pub(crate) struct DigestEngine<'a, F> {
     program: &'a ExecutionProgram,
+    /// Each node's resolved output types (one list per node, indexed by node), folded
+    /// into its digest so redefining a func's outputs (`Int → Float`, an added port)
+    /// re-keys the cache without relying on a `func_version` bump. Resolved once at
+    /// `update` ([`Cache::recompute_output_types`](crate::execution::cache::Cache::recompute_output_types)).
+    output_types: &'a [Vec<DataType>],
     file_id: F,
     memo: Vec<NodeDigest>,
     /// Per-node in-progress marker — a node re-entered while still on the
@@ -92,16 +97,24 @@ impl<F> std::fmt::Debug for DigestEngine<'_, F> {
 
 impl<'a> DigestEngine<'a, fn(&str) -> FileId> {
     /// Engine using the filesystem [`fs_file_id`] resolver — the production path.
-    pub(crate) fn with_fs(program: &'a ExecutionProgram) -> Self {
-        DigestEngine::new(program, fs_file_id)
+    pub(crate) fn with_fs(
+        program: &'a ExecutionProgram,
+        output_types: &'a [Vec<DataType>],
+    ) -> Self {
+        DigestEngine::new(program, output_types, fs_file_id)
     }
 }
 
 impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
-    pub(crate) fn new(program: &'a ExecutionProgram, file_id: F) -> Self {
+    pub(crate) fn new(
+        program: &'a ExecutionProgram,
+        output_types: &'a [Vec<DataType>],
+        file_id: F,
+    ) -> Self {
         let n = program.e_nodes.len();
         Self {
             program,
+            output_types,
             file_id,
             memo: vec![NodeDigest::Pending; n],
             visiting: vec![false; n],
@@ -140,9 +153,10 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
         }
         self.visiting[idx] = true;
 
-        // Copy the shared program reference out so the input loop borrows the
-        // program (lifetime 'a), leaving `self` free for the recursive call.
+        // Copy the shared references out so the input loop borrows them (lifetime
+        // 'a), leaving `self` free for the recursive call.
         let program = self.program;
+        let output_types = self.output_types;
         let e_node = &program.e_nodes[idx];
 
         // Only a `Pure` node is content-cacheable; `Impure` varies per run.
@@ -153,6 +167,18 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
             hasher.update(DOMAIN);
             hasher.update(&e_node.func_id.as_u128().to_le_bytes());
             hasher.update(&e_node.func_version.to_le_bytes());
+
+            // Output signature: arity + each resolved output type. A node that
+            // produces a different shape (a flipped type, an added port) re-keys
+            // here, so a stale blob can never be served under a key whose type no
+            // longer matches — and the change propagates downstream through the
+            // port digests below. A type change in a wildcard output already flows
+            // in via its mirrored input; folding it again is harmless.
+            let out_types = &output_types[idx];
+            hasher.update(&(out_types.len() as u64).to_le_bytes());
+            for ty in out_types {
+                hash_data_type(&mut hasher, ty);
+            }
 
             let mut tainted = false;
             for pool_idx in e_node.inputs.range() {
@@ -244,6 +270,27 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
     }
 }
 
+/// Fold a declared port type into `hasher`: a discriminant tag, plus the nominal
+/// type id for `Custom`/`Enum` (so two distinct custom types don't collide). The
+/// `FsPath` config is identity-irrelevant to the cached bytes, so only the tag is
+/// hashed.
+fn hash_data_type(hasher: &mut Hasher, ty: &DataType) {
+    let tag: u8 = match ty {
+        DataType::Null => 0,
+        DataType::Float => 1,
+        DataType::Int => 2,
+        DataType::Bool => 3,
+        DataType::String => 4,
+        DataType::FsPath(_) => 5,
+        DataType::Custom(_) => 6,
+        DataType::Enum(_) => 7,
+    };
+    hasher.update(&[tag]);
+    if let DataType::Custom(type_id) | DataType::Enum(type_id) = ty {
+        hasher.update(&type_id.as_u128().to_le_bytes());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,14 +301,17 @@ mod tests {
     use common::Span;
 
     /// Minimal hand-built `ExecutionProgram` for digest tests. Node ids are
-    /// `from_u128(idx + 1)`; `bind`'s target id must match that scheme.
+    /// `from_u128(idx + 1)`; `bind`'s target id must match that scheme. `output_types`
+    /// parallels the nodes — each output defaults to `Int`, overridable via
+    /// [`Prog::add_typed`] to exercise the output-signature folding.
     #[derive(Debug, Default)]
     struct Prog {
         program: ExecutionProgram,
+        output_types: Vec<Vec<DataType>>,
     }
 
     impl Prog {
-        /// Add a `Pure` (content-cacheable) node.
+        /// Add a `Pure` (content-cacheable) node; outputs default to `Int`.
         fn add(
             &mut self,
             func: u128,
@@ -270,6 +320,18 @@ mod tests {
             bindings: &[ExecutionBinding],
         ) -> usize {
             self.add_with(FuncBehavior::Pure, func, version, outputs, bindings)
+        }
+
+        /// Add a `Pure` node with explicit output types (the digest folds them).
+        fn add_typed(
+            &mut self,
+            func: u128,
+            types: &[DataType],
+            bindings: &[ExecutionBinding],
+        ) -> usize {
+            let idx = self.add_with(FuncBehavior::Pure, func, 0, types.len() as u32, bindings);
+            self.output_types[idx] = types.to_vec();
+            idx
         }
 
         /// Add an `Impure` node — its `node_digest` is always `None`.
@@ -305,6 +367,8 @@ mod tests {
                 outputs: Span::new(outputs_start, outputs),
                 ..Default::default()
             });
+            self.output_types
+                .push(vec![DataType::Int; outputs as usize]);
             idx
         }
     }
@@ -326,7 +390,7 @@ mod tests {
     }
 
     fn digests(prog: &Prog) -> Vec<Option<Digest>> {
-        let mut engine = DigestEngine::new(&prog.program, no_files);
+        let mut engine = DigestEngine::new(&prog.program, &prog.output_types, no_files);
         (0..prog.program.e_nodes.len())
             .map(|i| engine.node_digest(i))
             .collect()
@@ -416,18 +480,19 @@ mod tests {
         // digest: this is what stops machine B serving A's result for B's files.
         let mut p = Prog::default();
         p.add(10, 0, 1, &[konst(StaticValue::FsPath("frames".into()))]);
+        let t = &p.output_types;
 
-        let d_small = DigestEngine::new(&p.program, |_: &str| FileId {
+        let d_small = DigestEngine::new(&p.program, t, |_: &str| FileId {
             len: 1,
             mtime_ns: 1,
         })
         .node_digest(0);
-        let d_large = DigestEngine::new(&p.program, |_: &str| FileId {
+        let d_large = DigestEngine::new(&p.program, t, |_: &str| FileId {
             len: 2,
             mtime_ns: 1,
         })
         .node_digest(0);
-        let d_mtime = DigestEngine::new(&p.program, |_: &str| FileId {
+        let d_mtime = DigestEngine::new(&p.program, t, |_: &str| FileId {
             len: 1,
             mtime_ns: 9,
         })
@@ -435,7 +500,7 @@ mod tests {
         assert_ne!(d_small, d_large, "file length must matter");
         assert_ne!(d_small, d_mtime, "file mtime must matter");
 
-        let same = DigestEngine::new(&p.program, |_: &str| FileId {
+        let same = DigestEngine::new(&p.program, t, |_: &str| FileId {
             len: 1,
             mtime_ns: 1,
         })
@@ -445,7 +510,7 @@ mod tests {
         // The path string itself is folded too, independent of file identity.
         let mut q = Prog::default();
         q.add(10, 0, 1, &[konst(StaticValue::FsPath("other".into()))]);
-        let d_other = DigestEngine::new(&q.program, |_: &str| FileId {
+        let d_other = DigestEngine::new(&q.program, &q.output_types, |_: &str| FileId {
             len: 1,
             mtime_ns: 1,
         })
@@ -461,7 +526,7 @@ mod tests {
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A.0
         p.add(20, 0, 1, &[bind(0, 1)]); // C binds A.1 (same func as B)
 
-        let mut engine = DigestEngine::new(&p.program, no_files);
+        let mut engine = DigestEngine::new(&p.program, &p.output_types, no_files);
         assert_ne!(
             engine.port_digest(0, 0),
             engine.port_digest(0, 1),
@@ -472,6 +537,54 @@ mod tests {
         assert_ne!(db, dc, "consumers reading different ports must differ");
     }
 
+    /// The output signature is part of the key: a flipped type, an added port, or a
+    /// distinct custom type re-keys the node, and a producer's change propagates to
+    /// its consumers — so a redefined func can never serve a stale blob of the wrong
+    /// type without a version bump.
+    #[test]
+    fn output_signature_folds_into_digest_and_propagates() {
+        use crate::data::TypeId;
+
+        // A flipped output type re-keys.
+        let mut flip = Prog::default();
+        flip.add_typed(10, &[DataType::Int], &[]);
+        flip.add_typed(10, &[DataType::Float], &[]);
+        let d = digests(&flip);
+        assert_ne!(d[0], d[1], "a flipped output type re-keys the node");
+
+        // An added output port re-keys (arity is folded).
+        let mut arity = Prog::default();
+        arity.add_typed(10, &[DataType::Int], &[]);
+        arity.add_typed(10, &[DataType::Int, DataType::Int], &[]);
+        let d = digests(&arity);
+        assert_ne!(d[0], d[1], "an added output port re-keys the node");
+
+        // Distinct custom types fold their type id — no collision.
+        let mut custom = Prog::default();
+        custom.add_typed(10, &[DataType::Custom(TypeId::from_u128(1))], &[]);
+        custom.add_typed(10, &[DataType::Custom(TypeId::from_u128(2))], &[]);
+        let d = digests(&custom);
+        assert_ne!(d[0], d[1], "distinct custom output types re-key");
+
+        // A producer's output-type change propagates to its consumer downstream.
+        let build = |producer: DataType| {
+            let mut g = Prog::default();
+            g.add_typed(10, &[producer], &[]); // 0: producer
+            g.add_typed(20, &[DataType::Int], &[bind(0, 0)]); // 1: consumes 0.0
+            digests(&g)
+        };
+        let base = build(DataType::Int);
+        let changed = build(DataType::Float);
+        assert_ne!(
+            base[0], changed[0],
+            "producer's digest tracks its output type"
+        );
+        assert_ne!(
+            base[1], changed[1],
+            "and the change propagates to the consumer"
+        );
+    }
+
     #[test]
     fn cycle_yields_none() {
         // A binds B.0, B binds A.0 — a malformed program (the planner rejects it
@@ -479,7 +592,10 @@ mod tests {
         let mut p = Prog::default();
         p.add(10, 0, 1, &[bind(1, 0)]); // A binds B (idx 1)
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A (idx 0)
-        assert_eq!(DigestEngine::new(&p.program, no_files).node_digest(0), None);
+        assert_eq!(
+            DigestEngine::new(&p.program, &p.output_types, no_files).node_digest(0),
+            None
+        );
     }
 
     #[test]

@@ -197,13 +197,19 @@ impl ExecutionEngine {
         // `persist` outputs into RAM — both off the per-execute path. The trade-off
         // is that an external file change with no graph edit isn't noticed until
         // the next update/reopen.
+        // Resolve each node's output types from the full library (every func is
+        // present — `check_with` validated them) and cache them on the slot. These
+        // feed the digest (an output-signature change re-keys the cache) and the
+        // disk cache's codec check, both without a library at load time — so this
+        // must run *before* `recompute_digests`.
+        self.cache.recompute_output_types(&self.program, library);
         self.cache.recompute_digests(&self.program);
         // Flag which cached outputs (content-addressed `persist` + explicit-path
         // `CachePassthrough`) are available on disk for the current digest, so the
         // planner prunes their cones — *without* reading them. The bytes load lazily
         // at execute time, and only for the values a run actually consumes.
         self.output_cache
-            .mark_available(&self.program, library, &mut self.cache);
+            .mark_available(&self.program, &mut self.cache);
         Ok(())
     }
 

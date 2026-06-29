@@ -121,8 +121,9 @@ impl OutputCache {
     /// value sitting behind another disk-cached value never enters RAM. A bypassed
     /// cache node, a resident hit, a node with no current digest, or one whose
     /// outputs lack a registered codec is left unflagged (it recomputes). Reads the
-    /// node's resolved output types off the slot ([`Cache::recompute_output_types`]),
-    /// so no library is needed here for resolution — only this cache's own codec table.
+    /// node's resolved output types off the cache's `output_types` column
+    /// ([`Cache::recompute_output_types`]), so no library is needed here for
+    /// resolution — only this cache's own codec table.
     pub(crate) fn mark_available(&self, program: &ExecutionProgram, cache: &mut Cache) {
         for idx in 0..program.e_nodes.len() {
             cache.slots[idx].disk_available = false;
@@ -135,7 +136,7 @@ impl OutputCache {
             let Some(target) = self.target(program, idx, cache) else {
                 continue;
             };
-            if self.outputs_decodable(&cache.slots[idx].output_types) && target.path().exists() {
+            if self.outputs_decodable(&cache.output_types[idx]) && target.path().exists() {
                 cache.slots[idx].disk_available = true;
             }
         }
