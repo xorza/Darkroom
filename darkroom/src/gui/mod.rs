@@ -1,4 +1,5 @@
 pub(crate) mod canvas;
+pub(crate) mod config_view;
 pub(crate) mod dialogs;
 pub(crate) mod main_window;
 pub(crate) mod menu_bar;

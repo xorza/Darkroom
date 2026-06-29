@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use palantir::Ui;
-use scenarium::data::{FsPathConfig, StaticValue};
+use scenarium::data::{FsPathConfig, FsPathMode, StaticValue};
 use scenarium::graph::{Binding, NodeKind};
 use scenarium::library::Library;
 use scenarium::prelude::{NodeId, SubgraphDef, SubgraphId};
@@ -23,7 +23,7 @@ use crate::core::io::persistence;
 use crate::gui::app::App;
 use crate::gui::app::editor::Editor;
 use crate::gui::dialogs;
-use crate::gui::menu_bar::MenuCommand;
+use crate::gui::menu_bar::{MenuCommand, MlModelKind};
 use crate::gui::theme::Theme;
 
 impl App {
@@ -68,7 +68,30 @@ impl App {
             } => self.pick_input_path(node_id, port_idx, config),
             MenuCommand::Run => self.run_graph(),
             MenuCommand::CancelRun => self.engine.cancel_run(),
+            MenuCommand::OpenConfig => {
+                let library = self.engine.library.load();
+                self.editor.open_config(&library);
+            }
+            MenuCommand::PickMlModel(kind) => self.pick_ml_model(kind),
         }
+    }
+
+    /// Open an ONNX file dialog for one of the ML model paths and, on a
+    /// pick, persist it and republish the paths to lens so the next
+    /// `ml_denoise` / `remove_stars` run uses the new model. Runs outside
+    /// the record (blocking dialog), like the other file ops.
+    fn pick_ml_model(&mut self, kind: MlModelKind) {
+        let filter =
+            FsPathConfig::with_extensions(FsPathMode::ExistingFile, vec!["onnx".to_string()]);
+        let Some(path) = dialogs::pick_path(&filter) else {
+            return;
+        };
+        match kind {
+            MlModelKind::Denoise => self.config.ml_models.denoise = path,
+            MlModelKind::StarRemoval => self.config.ml_models.star_removal = path,
+        }
+        self.config.save();
+        self.config.apply_ml_model_paths();
     }
 
     /// Open a file dialog for a node's `FsPath` const input and, if the
@@ -131,7 +154,11 @@ impl App {
     /// rather than re-adds. Non-undoable (library + disk only); the node
     /// resolves against the active graph.
     fn publish_node_subgraph(&mut self, node_id: NodeId) {
-        let target = self.editor.document.active_target();
+        // The S-badge that raises this only exists on the canvas, so a
+        // graph tab is always active here; bail otherwise.
+        let Some(target) = self.editor.document.active_target() else {
+            return;
+        };
         if publish_local_def(
             &mut self.editor.document,
             &self.engine.library,
@@ -397,7 +424,8 @@ fn promote_source(document: &Document, library: &Library) -> Option<PromoteSourc
 /// subgraph-instance node in the active graph (whose def resolves), else
 /// the open subgraph interior. `None` when neither applies.
 fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotable> {
-    let target = document.active_target();
+    // Export/promote act on the active graph; a non-graph tab has none.
+    let target = document.active_target()?;
     let graph = document.graph_for(target)?;
     if let Some(view) = document.view(target) {
         for nid in &view.selected_nodes {

@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use scenarium::library::Library;
 use scenarium::prelude::Graph as CoreGraph;
 
-use crate::core::document::Document;
+use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::{Intent, commit_intent_cascading};
 use crate::core::engine::Engine;
 use crate::core::io::config::AppConfig;
@@ -200,7 +200,9 @@ fn empty_document() -> Document {
 /// cascades into dropping the now-incompatible downstream wires (`library`
 /// resolves the types).
 fn apply_intents(document: &mut Document, intents: Vec<Intent>, library: &Library) -> bool {
-    let target = document.active_target();
+    // Script edits target the active graph. The non-GUI frontends never open
+    // a non-graph tab, so this is `Main` in practice; fall back to it anyway.
+    let target = document.active_target().unwrap_or(GraphRef::Main);
     let mut needs_reconcile = false;
     for intent in intents {
         for step in commit_intent_cascading(intent, document, target, library) {

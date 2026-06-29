@@ -55,6 +55,20 @@ pub(crate) enum MenuCommand {
     Run,
     /// Request cancellation of the in-flight run.
     CancelRun,
+    /// Open (or focus) the Config tab — the app-settings window.
+    OpenConfig,
+    /// Open an ONNX file dialog for one of the ML model paths and persist
+    /// the choice. Raised by the Config tab's "Browse…" buttons.
+    PickMlModel(MlModelKind),
+}
+
+/// Which ML model path a [`MenuCommand::PickMlModel`] targets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MlModelKind {
+    /// The `ml_denoise` node's model (DeepSNR).
+    Denoise,
+    /// The `remove_stars` node's model (StarNet).
+    StarRemoval,
 }
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
@@ -75,6 +89,7 @@ pub(crate) fn show(
         .gap(2.0)
         .show(ui, |ui| {
             command = file_menu(ui, host)
+                .or_else(|| view_menu(ui))
                 .or_else(|| subgraph_menu(ui))
                 .or_else(|| theme_menu(ui, theme_choice))
                 .or_else(|| run_menu(ui, running));
@@ -128,6 +143,16 @@ fn file_menu(ui: &mut Ui, host: Option<&HostHandle>) -> Option<MenuCommand> {
             && let Some(h) = host
         {
             h.quit();
+        }
+        command
+    })
+}
+
+fn view_menu(ui: &mut Ui) -> Option<MenuCommand> {
+    dropdown(ui, "View", |ui, popup| {
+        let mut command = None;
+        if MenuItem::new("Config").show(ui, popup).clicked() {
+            command = Some(MenuCommand::OpenConfig);
         }
         command
     })

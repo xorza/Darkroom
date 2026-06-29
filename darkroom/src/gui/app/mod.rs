@@ -37,6 +37,9 @@ pub(crate) struct AppContext<'a> {
     /// keyed by authoring `NodeId`. Read by the inspection panel's Log and
     /// Inputs/Outputs sections.
     pub(crate) run_state: &'a RunState,
+    /// Persisted app config (theme + ML model paths), so a non-graph view
+    /// like the Config tab can display the current settings.
+    pub(crate) config: &'a AppConfig,
 }
 
 /// Thin shell around the [`Editor`] (which owns the document + its edit
@@ -214,6 +217,7 @@ impl palantir::App for App {
             &library,
             &self.theme,
             self.config.theme,
+            &self.config,
             &self.host_handle,
         );
 

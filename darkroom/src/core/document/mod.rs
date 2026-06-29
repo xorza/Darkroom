@@ -37,6 +37,19 @@ pub enum GraphRef {
     Local(SubgraphId),
 }
 
+/// What an editor tab shows. Most tabs are graphs — the root and any
+/// opened subgraph interiors ([`TabRef::Graph`]) — but a tab can also be
+/// a non-graph app view like [`TabRef::Config`] (the settings window).
+/// Persisted + undoable like the rest of the tab/view state, so reopening
+/// a document restores its open tabs and Ctrl+Z walks tab open/close.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TabRef {
+    /// A graph pane (root or a local subgraph interior).
+    Graph(GraphRef),
+    /// The app-config / settings view — no graph, no canvas.
+    Config,
+}
+
 /// Which side of a subgraph def's interface a boundary-port edit targets:
 /// `Input` → `def.inputs` (the `SubgraphInput` node's output ports),
 /// `Output` → `def.outputs` (the `SubgraphOutput` node's input ports).
@@ -226,17 +239,17 @@ pub struct Document {
     #[serde(default)]
     pub sub_views: HashMap<SubgraphId, GraphView>,
     /// Open editor tabs, left to right. Always non-empty; `tabs[0]` is
-    /// `GraphRef::Main`. Persisted + undoable like the rest of the view
-    /// state (switching tabs is an undoable `Intent`).
+    /// `TabRef::Graph(GraphRef::Main)`. Persisted + undoable like the rest
+    /// of the view state (switching tabs is an undoable `Intent`).
     #[serde(default = "default_tabs")]
-    pub tabs: Vec<GraphRef>,
+    pub tabs: Vec<TabRef>,
     /// Index into `tabs` of the visible tab.
     #[serde(default)]
     pub active: usize,
 }
 
-fn default_tabs() -> Vec<GraphRef> {
-    vec![GraphRef::Main]
+fn default_tabs() -> Vec<TabRef> {
+    vec![TabRef::Graph(GraphRef::Main)]
 }
 
 /// Index of the slot named `expected`: `idx_hint` when it still holds
@@ -324,9 +337,18 @@ impl Document {
         })
     }
 
-    /// The graph the active tab points at.
-    pub fn active_target(&self) -> GraphRef {
+    /// The active tab (graph pane or a non-graph app view).
+    pub fn active_tab(&self) -> TabRef {
         self.tabs[self.active]
+    }
+
+    /// The graph the active tab points at, or `None` when the active tab
+    /// is a non-graph view (e.g. `Config`).
+    pub fn active_target(&self) -> Option<GraphRef> {
+        match self.tabs[self.active] {
+            TabRef::Graph(target) => Some(target),
+            TabRef::Config => None,
+        }
     }
 
     /// Ensure a `GraphView` exists for a local subgraph interior,
@@ -362,27 +384,31 @@ impl Document {
     pub fn ensure_valid_active(&mut self) {
         // Common case: every tab still resolves — touch nothing (no
         // per-frame allocation). Only rebuild the list when a tab's
-        // graph actually vanished.
-        if self.tabs.iter().any(|t| self.graph_for(*t).is_none()) {
+        // graph actually vanished. Non-graph tabs (e.g. `Config`) always
+        // resolve.
+        if self.tabs.iter().any(|t| match t {
+            TabRef::Graph(g) => self.graph_for(*g).is_none(),
+            TabRef::Config => false,
+        }) {
             // Split the borrow so `retain` (mut `tabs`) can read `graph`.
             let Document { graph, tabs, .. } = self;
             tabs.retain(|t| match t {
-                GraphRef::Main => true,
-                GraphRef::Local(id) => graph.subgraphs.by_key(id).is_some(),
+                TabRef::Graph(GraphRef::Main) | TabRef::Config => true,
+                TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(id).is_some(),
             });
         }
         // Seed views for any `Local` tab missing one. Guarded by `any`
         // so the common (all-seeded) case allocates nothing.
-        if self
-            .tabs
-            .iter()
-            .any(|t| matches!(t, GraphRef::Local(id) if !self.sub_views.contains_key(id)))
-        {
+        if self.tabs.iter().any(
+            |t| matches!(t, TabRef::Graph(GraphRef::Local(id)) if !self.sub_views.contains_key(id)),
+        ) {
             let missing: Vec<SubgraphId> = self
                 .tabs
                 .iter()
                 .filter_map(|t| match t {
-                    GraphRef::Local(id) if !self.sub_views.contains_key(id) => Some(*id),
+                    TabRef::Graph(GraphRef::Local(id)) if !self.sub_views.contains_key(id) => {
+                        Some(*id)
+                    }
                     _ => None,
                 })
                 .collect();
@@ -542,13 +568,19 @@ impl Document {
         }
 
         assert!(!self.tabs.is_empty(), "tab list must be non-empty");
-        assert_eq!(self.tabs[0], GraphRef::Main, "first tab must be Main");
+        assert_eq!(
+            self.tabs[0],
+            TabRef::Graph(GraphRef::Main),
+            "first tab must be Main"
+        );
         assert!(self.active < self.tabs.len(), "active tab index in range");
         for tab in &self.tabs {
-            assert!(
-                self.graph_for(*tab).is_some(),
-                "open tab references a missing graph"
-            );
+            if let TabRef::Graph(g) = tab {
+                assert!(
+                    self.graph_for(*g).is_some(),
+                    "open tab references a missing graph"
+                );
+            }
         }
     }
 
@@ -907,6 +939,61 @@ mod tests {
         let id2 = doc.create_subgraph();
         assert_ne!(id, id2);
         assert_eq!(doc.graph.subgraphs.len(), 2);
+    }
+
+    #[test]
+    fn config_tab_has_no_graph_target_and_survives_validation() {
+        let mut doc = Document::default();
+        // A graph tab resolves to a target; the appended Config tab does not.
+        assert_eq!(doc.active_target(), Some(GraphRef::Main));
+        doc.tabs.push(TabRef::Config);
+        doc.active = 1;
+        assert_eq!(doc.active_tab(), TabRef::Config);
+        assert_eq!(doc.active_target(), None, "a non-graph tab has no target");
+
+        // A non-graph tab always resolves, so it's never pruned and the
+        // active index is left alone.
+        doc.ensure_valid_active();
+        assert_eq!(
+            doc.tabs,
+            vec![TabRef::Graph(GraphRef::Main), TabRef::Config]
+        );
+        assert_eq!(doc.active, 1);
+        doc.validate();
+    }
+
+    #[test]
+    fn ensure_valid_active_keeps_config_when_a_subgraph_tab_vanishes() {
+        let mut doc = Document::default();
+        let id = doc.create_subgraph();
+        doc.tabs
+            .extend([TabRef::Graph(GraphRef::Local(id)), TabRef::Config]);
+        doc.active = 2; // viewing the config tab
+        // Drop the subgraph out from under its open tab.
+        doc.graph.subgraphs.remove_by_key(&id);
+
+        doc.ensure_valid_active();
+        // The dead subgraph tab is pruned; Main + Config remain, and active
+        // is clamped back into range.
+        assert_eq!(
+            doc.tabs,
+            vec![TabRef::Graph(GraphRef::Main), TabRef::Config]
+        );
+        assert_eq!(doc.active, 1);
+    }
+
+    #[test]
+    fn config_tab_round_trips_in_every_format() {
+        let mut doc: Document = core_test_graph().into();
+        doc.tabs.push(TabRef::Config);
+        for format in SerdeFormat::all_formats_for_testing() {
+            let bytes = doc.serialize(format).expect("serialize with a config tab");
+            let back = Document::deserialize(format, &bytes).expect("deserialize");
+            assert_eq!(
+                back.tabs, doc.tabs,
+                "tabs (including Config) round-trip for {format:?}"
+            );
+        }
     }
 
     #[test]

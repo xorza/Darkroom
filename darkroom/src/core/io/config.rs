@@ -69,12 +69,12 @@ impl AppConfig {
             .join(CONFIG_FILE)
     }
 
-    /// Publish the persisted ML model paths into lens's runtime global so the `ml_denoise` /
-    /// `remove_stars` nodes resolve the caller-supplied models. Called from [`load`] so every
-    /// startup path picks the paths up without a separate call.
+    /// Publish the ML model paths into lens's runtime global so the `ml_denoise` / `remove_stars`
+    /// nodes resolve the caller-supplied models. Called from [`load`] at startup and again whenever
+    /// the Config tab edits a path, so a change takes effect on the next node run.
     ///
     /// [`load`]: AppConfig::load
-    fn apply_ml_model_paths(&self) {
+    pub(crate) fn apply_ml_model_paths(&self) {
         lens::set_ml_model_paths((&self.ml_models).into());
     }
 

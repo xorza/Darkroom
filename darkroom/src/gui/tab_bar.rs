@@ -12,7 +12,7 @@ use palantir::{
 };
 use scenarium::prelude::SubgraphId;
 
-use crate::core::document::GraphRef;
+use crate::core::document::{GraphRef, TabRef};
 use crate::core::edit::intent::Intent;
 use crate::gui::UiAction;
 use crate::gui::theme::Theme;
@@ -22,11 +22,13 @@ use crate::gui::widgets::inline_rename::InlineRename;
 const SUBGRAPH_NAME_MAX_CHARS: usize = 32;
 
 /// One tab's display state, built by `main_window` from the open-tab list.
-/// `subgraph_id.is_some()` is the renamable + closable test (subgraph
-/// tabs only; the Main tab is `None`).
+/// `subgraph_id.is_some()` marks an inline-renamable subgraph tab;
+/// `closable` marks a tab that carries a close button (every tab except
+/// the `Main` graph — subgraph *and* non-graph views like Config).
 pub(crate) struct TabLabel {
     pub(crate) text: InternedStr,
     pub(crate) subgraph_id: Option<SubgraphId>,
+    pub(crate) closable: bool,
 }
 
 /// Stable id for the tab chip at `index` — deterministic so prepass can
@@ -67,15 +69,18 @@ fn tab_rename_wid(sub_id: SubgraphId) -> WidgetId {
 /// `PortFrame` cache — without that, the switch lands in the
 /// post-record drain, Pass A draws the old tab, and Pass B redraws
 /// the new tab with an empty port cache (no connections that frame).
-pub(crate) fn emit_tab_actions(ui: &Ui, tabs: &[GraphRef], actions: &mut Vec<UiAction>) {
+pub(crate) fn emit_tab_actions(ui: &Ui, tabs: &[TabRef], actions: &mut Vec<UiAction>) {
     for (index, tab) in tabs.iter().enumerate() {
-        // Only non-`Main` tabs (index > 0) carry a close button.
-        if index > 0 && ui.response_for(tab_close_wid(index)).clicked {
+        // Every tab except the `Main` graph carries a close button.
+        let closable = !matches!(tab, TabRef::Graph(GraphRef::Main));
+        if closable && ui.response_for(tab_close_wid(index)).clicked {
             actions.push(UiAction::CloseTab(index));
             continue;
         }
-        let label_clicked =
-            matches!(tab, GraphRef::Local(id) if ui.response_for(tab_rename_wid(*id)).clicked);
+        let label_clicked = matches!(
+            tab,
+            TabRef::Graph(GraphRef::Local(id)) if ui.response_for(tab_rename_wid(*id)).clicked
+        );
         if label_clicked || ui.response_for(tab_chip_wid(index)).clicked {
             actions.push(UiAction::ActivateTab(index));
         }
@@ -170,10 +175,10 @@ fn tab_chip(
     } else {
         Background::default()
     };
-    // A subgraph tab trades right inset for the top-right close button
+    // A closable tab trades right inset for the top-right close button
     // (equal 4px top/right gaps); Main stays symmetric so its label is
     // centered.
-    let padding = if tab.subgraph_id.is_some() {
+    let padding = if tab.closable {
         Spacing::new(10.0, 4.0, 4.0, 4.0)
     } else {
         Spacing::xy(10.0, 4.0)
@@ -215,11 +220,11 @@ fn tab_chip(
                     out.push(Intent::RenameSubgraph { id: sub_id, to });
                 }
             } else {
-                // Main tab: plain label, activation handled by the outer
-                // chip in `emit_tab_actions`.
+                // Main / non-graph tab: plain label, activation handled by
+                // the outer chip in `emit_tab_actions`.
                 Text::new(tab.text.clone()).style(label_style).show(ui);
             }
-            if tab.subgraph_id.is_some() {
+            if tab.closable {
                 let close_wid = tab_close_wid(index);
                 // Hover comes from last frame's response; paint a subtle
                 // highlight chip behind the `×` when pointed at.

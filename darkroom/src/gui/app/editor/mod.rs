@@ -14,9 +14,10 @@
 use palantir::Ui;
 use scenarium::prelude::{Library, NodeId, SubgraphDef};
 
-use crate::core::document::{Document, GraphRef};
+use crate::core::document::{Document, GraphRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::{Intent, build_duplicate_intent_for, commit_intent_cascading};
+use crate::core::io::config::AppConfig;
 use crate::core::theme_pref::ThemeChoice;
 use crate::core::worker::ValueRequest;
 use crate::gui::HostHandle;
@@ -130,7 +131,7 @@ impl Editor {
     /// No-ops (and self-cancelling steps) are dropped, like the in-frame
     /// drain.
     pub(crate) fn apply_edit(&mut self, intent: Intent, library: &Library) {
-        let target = self.document.active_target();
+        let target = self.document.active_target().unwrap_or(GraphRef::Main);
         self.commit_batch(target, library, [intent]);
     }
 
@@ -140,7 +141,7 @@ impl Editor {
     /// script inbound queue before the frame; the unconditional pre-prepass
     /// rebuild folds the edits in, so `scene_dirty` needn't be set here.
     pub(crate) fn apply_external_intents(&mut self, intents: Vec<Intent>, library: &Library) {
-        let target = self.document.active_target();
+        let target = self.document.active_target().unwrap_or(GraphRef::Main);
         self.commit_batch(target, library, intents);
     }
 
@@ -198,6 +199,7 @@ impl Editor {
         library: &Library,
         theme: &Theme,
         theme_choice: ThemeChoice,
+        config: &AppConfig,
         host: &HostHandle,
     ) -> Option<MenuCommand> {
         self.intents.clear();
@@ -205,42 +207,45 @@ impl Editor {
         self.needs_relayout = false;
 
         // ── Navigation phase ─────────────────────────────────────────
-        // Settle the active graph entirely from frame-top inputs
-        // (keyboard undo/redo + last-frame click responses). `navigate`
-        // reads *last* frame's `scene` to resolve tab/chip clicks, so it
-        // must run before this frame's rebuild. After it, `target` is
-        // fixed for the rest of the frame.
+        // Settle the active tab entirely from frame-top inputs (keyboard
+        // undo/redo + last-frame click responses). `navigate` reads *last*
+        // frame's `scene` to resolve tab/chip clicks, so it must run before
+        // this frame's rebuild. After it, the active tab is fixed.
         self.navigate(ui, library);
-        let target = self.document.active_target();
-        self.sync_target(target);
+        // `Some` for a graph pane, `None` for a non-graph view (Config):
+        // the scene projection + canvas edit pipeline run only when a graph
+        // tab is active.
+        let graph_target = self.document.active_target();
 
-        // Rebuild the projection for this frame, after the navigation
-        // phase has fully settled the document — so prepass and
-        // `PortFrame` never read a stale graph (the old "rebuild only on
-        // tab switch" path let an undo/redo leave them a frame behind).
-        // Unconditional: `Scene` re-interns port names into palantir's
-        // per-frame text arena, which clears each `Ui::frame`, so the
-        // projection must be regenerated every frame regardless.
-        self.rebuild_scene(target, library);
-        self.scene_dirty = false;
+        if let Some(target) = graph_target {
+            self.sync_target(target);
 
-        // ── Edit phase ───────────────────────────────────────────────
-        // Prepass emits input-derived graph mutations (drag, pan/zoom,
-        // connection commit) drained *before* the record so Pass A sees
-        // the settled doc. It reads everything off `Scene`, so it takes
-        // neither the func lib nor the full `AppContext`.
-        self.main_window.prepass(ui, &self.scene, &mut self.intents);
-        self.drain_intents(target, library);
-        self.apply_canvas_shortcuts(ui, target);
+            // Rebuild the projection for this frame, after the navigation
+            // phase has fully settled the document — so prepass and
+            // `PortFrame` never read a stale graph. Unconditional for a
+            // graph tab: `Scene` re-interns port names into palantir's
+            // per-frame text arena (cleared each `Ui::frame`).
+            self.rebuild_scene(target, library);
+            self.scene_dirty = false;
+
+            // ── Edit phase ───────────────────────────────────────────
+            // Prepass emits input-derived graph mutations (drag, pan/zoom,
+            // connection commit) drained *before* the record so Pass A sees
+            // the settled doc. It reads everything off `Scene`.
+            self.main_window.prepass(ui, &self.scene, &mut self.intents);
+            self.drain_intents(target, library);
+            self.apply_canvas_shortcuts(ui, target);
+        }
 
         let command_from_shortcut = self.menu_shortcut(ui);
 
         // Record. Rebuild again only if the pre-record drain actually
         // changed the doc (drag, connection commit) — an idle frame or a
-        // bare tab switch leaves `scene_dirty` false and skips it, so the
-        // tab-switch frame rebuilds once, not twice.
+        // bare tab switch leaves `scene_dirty` false and skips it.
         if self.scene_dirty {
-            self.rebuild_scene(target, library);
+            if let Some(target) = graph_target {
+                self.rebuild_scene(target, library);
+            }
             self.scene_dirty = false;
         }
         let ctx = AppContext {
@@ -248,6 +253,7 @@ impl Editor {
             theme_choice,
             library,
             run_state: &self.run_state,
+            config,
         };
         let command = self
             .main_window
@@ -265,14 +271,17 @@ impl Editor {
         // available to build the duplicate / removal intents against the
         // live selection (the canvas gesture only sees the read-only Scene).
         // Pushed before the post-record drain so it lands this frame.
-        if let Some(action) = self.main_window.graph_ui.take_node_menu_action() {
+        if let Some(target) = graph_target
+            && let Some(action) = self.main_window.graph_ui.take_node_menu_action()
+        {
             self.apply_node_menu_action(action, target);
         }
 
-        // Post-record drain — graph edits the record surfaced (node
-        // select, cache toggle, const edit). Navigation is fully settled
-        // in the navigation phase, so nothing here moves the active tab.
-        self.drain_intents(target, library);
+        // Post-record drain — graph edits the record surfaced (node select,
+        // cache toggle, const edit) plus tab-strip renames. Those and the
+        // navigation steps are graph-agnostic, so a non-graph active tab
+        // drains against `Main` (the target is unused for them).
+        self.drain_intents(graph_target.unwrap_or(GraphRef::Main), library);
 
         // Single consumption point for the frame's accumulated relayout
         // signal (edits, tab switch, undo/redo). A menu side effect adds
@@ -332,7 +341,12 @@ impl Editor {
         // steps are graph-agnostic, so the target passed here doesn't
         // matter).
         self.apply_view_actions();
-        self.drain_intents(self.document.active_target(), library);
+        // The queued intents (switch/close/rename) are graph-agnostic, so
+        // a non-graph active tab drains against `Main` harmlessly.
+        self.drain_intents(
+            self.document.active_target().unwrap_or(GraphRef::Main),
+            library,
+        );
         // A closed/deleted target can't be active; fall back to Main.
         self.document.ensure_valid_active();
     }
@@ -433,7 +447,8 @@ impl Editor {
     /// reverses focus (the opened tab stays open) and a fresh open discards
     /// the redo tail, instead of leaving `active` mutated outside the record.
     fn open_graph(&mut self, target: GraphRef) {
-        let index = match self.document.tabs.iter().position(|t| *t == target) {
+        let tab = TabRef::Graph(target);
+        let index = match self.document.tabs.iter().position(|t| *t == tab) {
             Some(index) => index,
             None => {
                 if let GraphRef::Local(id) = target
@@ -441,11 +456,27 @@ impl Editor {
                 {
                     return; // subgraph vanished — nothing to open
                 }
-                self.document.tabs.push(target);
+                self.document.tabs.push(tab);
                 self.document.tabs.len() - 1
             }
         };
         self.intents.push(Intent::SwitchTab { to: index });
+    }
+
+    /// Open the [`TabRef::Config`] settings tab and focus it (reusing the
+    /// existing tab if already open). Mirrors [`open_graph`]: adding the
+    /// tab is the non-undoable part; the focus routes through a recorded
+    /// `SwitchTab`. Called from the View ▸ Config menu via `App`, so it
+    /// records the switch and drains it immediately like every external edit.
+    pub(crate) fn open_config(&mut self, library: &Library) {
+        let index = match self.document.tabs.iter().position(|t| *t == TabRef::Config) {
+            Some(index) => index,
+            None => {
+                self.document.tabs.push(TabRef::Config);
+                self.document.tabs.len() - 1
+            }
+        };
+        self.apply_edit(Intent::SwitchTab { to: index }, library);
     }
 }
 
@@ -479,7 +510,10 @@ mod tests {
         open(&mut editor, GraphRef::Local(a));
         assert_eq!(
             editor.document.tabs,
-            vec![GraphRef::Main, GraphRef::Local(a)]
+            vec![
+                TabRef::Graph(GraphRef::Main),
+                TabRef::Graph(GraphRef::Local(a))
+            ]
         );
         assert_eq!(editor.document.active, 1);
 

@@ -39,7 +39,7 @@ use scenarium::subgraph::SubgraphRef;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::view_node::ViewNode;
-use crate::core::document::{BoundarySide, Document, EditScope, EditScopeRef, GraphRef};
+use crate::core::document::{BoundarySide, Document, EditScope, EditScopeRef, GraphRef, TabRef};
 
 /// What the caller wants to change. Forward-only — no `from` fields.
 /// Each variant says "set X to Y"; the consumer captures the previous
@@ -289,7 +289,7 @@ pub enum DocStep {
     /// before/after the close.
     CloseTab {
         index: usize,
-        target: GraphRef,
+        target: TabRef,
         from_active: usize,
         to_active: usize,
     },

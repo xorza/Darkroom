@@ -2,12 +2,13 @@ use std::mem::take;
 
 use palantir::{Background, Configure, Panel, Sizing, Ui};
 
-use crate::core::document::{Document, GraphRef};
+use crate::core::document::{Document, GraphRef, TabRef};
 use crate::core::edit::intent::Intent;
 use crate::gui::HostHandle;
 use crate::gui::UiAction;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::GraphUI;
+use crate::gui::config_view;
 use crate::gui::menu_bar;
 use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::emit_subgraph_opens;
@@ -81,7 +82,17 @@ impl MainWindow {
                             menu_bar::show(ui, host, ctx.theme_choice, ctx.run_state.is_running());
                     });
                 tab_bar::show(ui, ctx.theme, &tabs, doc.active, out);
-                self.graph_ui.frame(ui, ctx, scene, out, &mut command);
+                // The content pane below the strip is the active tab's view:
+                // the graph canvas for a graph tab, or the config window for
+                // the non-graph Config tab.
+                match doc.active_tab() {
+                    TabRef::Graph(_) => self.graph_ui.frame(ui, ctx, scene, out, &mut command),
+                    TabRef::Config => {
+                        if let Some(c) = config_view::show(ui, ctx) {
+                            command = Some(c);
+                        }
+                    }
+                }
             });
 
         if take(&mut self.first_frame) {
@@ -106,11 +117,12 @@ fn tab_labels(doc: &Document) -> Vec<TabLabel> {
     doc.tabs
         .iter()
         .map(|t| match t {
-            GraphRef::Main => TabLabel {
+            TabRef::Graph(GraphRef::Main) => TabLabel {
                 text: "main".into(),
                 subgraph_id: None,
+                closable: false,
             },
-            GraphRef::Local(id) => {
+            TabRef::Graph(GraphRef::Local(id)) => {
                 let name = doc
                     .graph
                     .subgraphs
@@ -120,8 +132,14 @@ fn tab_labels(doc: &Document) -> Vec<TabLabel> {
                 TabLabel {
                     text: name.into(),
                     subgraph_id: Some(*id),
+                    closable: true,
                 }
             }
+            TabRef::Config => TabLabel {
+                text: "config".into(),
+                subgraph_id: None,
+                closable: true,
+            },
         })
         .collect()
 }
