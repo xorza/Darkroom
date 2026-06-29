@@ -12,7 +12,7 @@ mod tests;
 pub enum SerdeRhaiError {
     #[error("Rhai evaluation failed: {0}")]
     Eval(String),
-    #[error("Serialization to JSON intermediary failed")]
+    #[error("JSON intermediary conversion failed: {0}")]
     SerdeJson(#[from] serde_json::Error),
     #[error("Invalid UTF-8")]
     Utf8(#[from] std::str::Utf8Error),
