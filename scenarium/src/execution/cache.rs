@@ -106,6 +106,15 @@ impl Cache {
     /// output types (`ExecutionProgram::resolve_output_types`, run earlier this
     /// update), so a redefined output re-keys the cache.
     pub(crate) fn recompute_digests(&mut self, program: &ExecutionProgram) {
+        // The output-type pool is resolved by a separate `update` step
+        // (`ExecutionProgram::resolve_output_types`) that must run first — the digest
+        // folds it. Catch a forgotten/incomplete resolve loudly here rather than as a
+        // cryptic out-of-range slice deep in the recursion. O(1), so a release assert.
+        assert_eq!(
+            program.output_types.len(),
+            program.n_outputs,
+            "output types must be resolved before digesting"
+        );
         let mut engine = DigestEngine::with_fs(program);
         for idx in program.node_indices() {
             self.slots[idx].current_digest = engine.node_digest(idx);
