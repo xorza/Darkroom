@@ -5,11 +5,11 @@
 //! `App` to apply and persist *outside* the record, exactly like the menu
 //! bar (the editor tree doesn't own `AppConfig`).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use palantir::{
-    Align, Background, Button, Configure, Corners, Panel, RadioButton, Sizing, Spacing, Text,
-    TextStyle, Ui, VAlign,
+    Align, Background, Button, Checkbox, Configure, Panel, RadioButton, Sizing, Spacing, Text,
+    TextEdit, TextStyle, Ui, VAlign, WidgetId,
 };
 
 use crate::core::theme_pref::ThemeChoice;
@@ -58,12 +58,21 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<MenuCommand> {
                 command = Some(MenuCommand::SetTheme(selected));
             }
 
+            // Startup — whether launch reopens the last document.
+            subheading(ui, theme, "Startup");
+            let mut load_last = ctx.config.load_last_document;
+            Checkbox::new(&mut load_last)
+                .label("Load last document on startup")
+                .show(ui);
+            if load_last != ctx.config.load_last_document {
+                command = Some(MenuCommand::SetLoadLastDocument(load_last));
+            }
+
             // ML models — caller-supplied ONNX files the ml_denoise /
             // remove_stars nodes load (lumos ships none).
             subheading(ui, theme, "ML Models (ONNX)");
             if let Some(c) = model_row(
                 ui,
-                theme,
                 "Denoise (DeepSNR)",
                 &ctx.config.ml_models.denoise,
                 MlModelKind::Denoise,
@@ -72,7 +81,6 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<MenuCommand> {
             }
             if let Some(c) = model_row(
                 ui,
-                theme,
                 "Star removal (StarNet)",
                 &ctx.config.ml_models.star_removal,
                 MlModelKind::StarRemoval,
@@ -104,17 +112,22 @@ fn subheading(ui: &mut Ui, theme: &Theme, text: &'static str) {
         .show(ui);
 }
 
-/// One model-path row: a fixed-width label, the current path in a muted
-/// field, and a "Browse…" button that raises a [`MenuCommand::PickMlModel`]
-/// for `kind`. Returns the command when the button was clicked.
+/// Width of an ML-path field — wide enough for a deep path, bounded so it
+/// doesn't span the whole settings panel.
+const ML_PATH_FIELD_WIDTH: f32 = 520.0;
+
+/// One model-path row: a fixed-width label, an **editable** path field (type
+/// or paste a path; Enter or click-away commits), and a "Browse…" button.
+/// Returns a [`MenuCommand::SetMlModelPath`] on an edited path or a
+/// [`MenuCommand::PickMlModel`] when Browse is clicked.
 fn model_row(
     ui: &mut Ui,
-    theme: &Theme,
     label: &'static str,
     path: &Path,
     kind: MlModelKind,
 ) -> Option<MenuCommand> {
     let mut command = None;
+    let id = WidgetId::from_hash(("config.ml_model_path", label));
     Panel::hstack()
         .id_salt(label)
         .size((Sizing::FILL, Sizing::Hug))
@@ -132,24 +145,32 @@ fn model_row(
                         })
                         .show(ui);
                 });
-            Panel::hstack()
-                .id_salt("path")
-                .size((Sizing::FILL, Sizing::Hug))
-                .padding(Spacing::xy(8.0, 4.0))
-                .background(Background {
-                    fill: theme.header_fill.into(),
-                    corners: Corners::all(3.0),
-                    ..Default::default()
-                })
-                .show(ui, |ui| {
-                    Text::new(path.display().to_string())
-                        .style(TextStyle {
-                            color: theme.text_muted,
-                            font_size_px: 12.0,
-                            ..ui.theme.text
-                        })
-                        .show(ui);
+
+            // Editable path field. The draft lives across frames in the state
+            // map, mirroring the current path while unfocused (so a Browse pick
+            // shows up); `TextEdit`'s own submit/blur signals drive the commit —
+            // no focus or key polling.
+            let canonical = path.display().to_string();
+            if ui.focused_id() != Some(id) {
+                let buf = ui.state_mut::<String>(id);
+                if *buf != canonical {
+                    buf.replace_range(.., &canonical);
+                }
+            }
+            let mut draft = std::mem::take(ui.state_mut::<String>(id));
+            let resp = TextEdit::new(&mut draft)
+                .id(id)
+                .size((Sizing::Fixed(ML_PATH_FIELD_WIDTH), Sizing::Hug))
+                .show(ui);
+            let commit = resp.submitted() || resp.lost_focus();
+            ui.state_mut::<String>(id).replace_range(.., &draft);
+            if commit && draft != canonical {
+                command = Some(MenuCommand::SetMlModelPath {
+                    kind,
+                    path: PathBuf::from(draft),
                 });
+            }
+
             if Button::new()
                 .id_salt("browse")
                 .label("Browse…")
