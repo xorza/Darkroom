@@ -567,6 +567,88 @@ mod cache_persistence {
         );
     }
 
+    /// A corrupt / incompatible cache blob must be *deleted* on a failed load, so the
+    /// recompute that follows writes a fresh one. Without the delete, `store_node`'s
+    /// skip-if-exists keeps the broken file and the node recomputes on *every* run
+    /// (the regression: an old-format blob rejected by `FORMAT_VERSION` was never
+    /// replaced). Each "session" is a fresh engine, so the disk cache is the only source.
+    #[tokio::test]
+    async fn corrupt_blob_is_replaced_so_the_next_reopen_is_a_hit() {
+        let dir = TempDir::new("corrupt_replace");
+        let get_a_calls = Arc::new(AtomicUsize::new(0));
+        let lib = {
+            let calls = get_a_calls.clone();
+            test_func_lib(TestFuncHooks {
+                get_a: Arc::new(move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(1)
+                }),
+                print: Arc::new(|_| {}),
+                ..default_hooks()
+            })
+        };
+
+        // get_a → mult(persist=Disk) → print. mult reads get_a, so a mult cache hit
+        // prunes get_a — its call count tracks whether mult actually recomputed.
+        let mut graph = Graph::default();
+        graph.add(node(&lib, "get_a", NodeId::from_u128(1)));
+        let mut mult = node(&lib, "mult", NodeId::from_u128(2));
+        mult.persist = CachePersistence::Disk;
+        graph.add(mult);
+        graph.add(node(&lib, "print", NodeId::from_u128(3)));
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "mult", 0, (get_a_id, 0).into());
+        bind(&mut graph, "mult", 1, (get_a_id, 0).into());
+        bind(&mut graph, "print", 0, (mult_id, 0).into());
+
+        // Cold run: get_a + mult compute; mult is stored (one blob).
+        {
+            let mut engine = disk_engine(&dir);
+            engine.update(&graph, &lib).unwrap();
+            engine.execute_terminals().await.unwrap();
+        }
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            1,
+            "cold run computes get_a"
+        );
+
+        // Corrupt mult's blob (a torn write / an old, version-mismatched format).
+        let blob = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        std::fs::write(&blob, b"garbage").unwrap();
+
+        // Reopen: mult's blob fails to load → recompute (get_a runs again) → the corrupt
+        // blob is deleted and a fresh one written.
+        {
+            let mut engine = disk_engine(&dir);
+            engine.update(&graph, &lib).unwrap();
+            engine.execute_terminals().await.unwrap();
+        }
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            2,
+            "a corrupt blob forces exactly one recompute"
+        );
+
+        // Reopen again: mult's blob is fresh → cache hit → get_a stays pruned.
+        {
+            let mut engine = disk_engine(&dir);
+            engine.update(&graph, &lib).unwrap();
+            engine.execute_terminals().await.unwrap();
+        }
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            2,
+            "the corrupt blob was replaced, so the next reopen is a hit (no recompute)"
+        );
+    }
+
     /// A frontier blob that vanishes between `update` (which flags it available) and
     /// the run (which reads it) must not trip the executor's "value present"
     /// invariant: `hydrate_frontier` clears the stale flag and the engine re-plans,

@@ -216,10 +216,12 @@ impl OutputCache {
 
     /// Deserialize node `idx`'s disk blob into its slot. Returns whether the slot is
     /// resident afterward: `true` if already resident or the read succeeded. On a read
-    /// failure (codec gone, corrupt or deleted blob) the stale `disk_available` flag is
-    /// cleared, so a re-plan recomputes the node instead of pruning it behind a value
-    /// that can't be loaded — and `false` is returned. A blob can't be of the *wrong
-    /// type* for a matching digest: the output signature is folded into the digest
+    /// failure (codec gone, corrupt, an incompatible blob format, or deleted) the file is
+    /// **deleted** and the stale `OnDisk` flag cleared, so the re-plan recomputes the
+    /// node *and* its store writes a fresh blob — without the delete, `store_node`'s
+    /// skip-if-exists would keep the broken file and the node would recompute on every
+    /// run. Returns `false`. A blob can't be of the *wrong type* for a matching digest:
+    /// the output signature is folded into the digest
     /// ([`Cache::recompute_digests`](crate::execution::cache::Cache::recompute_digests)),
     /// so a redefined output re-keys rather than colliding.
     fn hydrate_slot(&self, program: &ExecutionProgram, cache: &mut Cache, idx: NodeIdx) -> bool {
@@ -232,14 +234,18 @@ impl OutputCache {
         if !matches!(cache.slots[idx].value, ValueCache::OnDisk) {
             return false;
         }
-        // The slot claimed an on-disk blob, so any path that fails to load it now is a
-        // stale claim: drop it (`false` ⇒ the caller re-plans to recompute the node).
+        // The slot claimed an on-disk blob. Load it; on success it's resident.
         if let Some(digest) = cache.current_digest(idx)
             && let Some(target) = self.target(program, idx, cache)
-            && let Some(values) = blob::read(target.path(), &self.library)
         {
-            cache.hydrate(idx, values, digest);
-            return true;
+            if let Some(values) = blob::read(target.path(), &self.library) {
+                cache.hydrate(idx, values, digest);
+                return true;
+            }
+            // The blob didn't load — corrupt, an incompatible format, or vanished. Delete
+            // it so the recompute that follows writes a fresh one (otherwise the broken
+            // file lingers and `store_node` skips it as "already on disk", forever).
+            let _ = std::fs::remove_file(target.path());
         }
         cache.slots[idx].clear_output();
         false
