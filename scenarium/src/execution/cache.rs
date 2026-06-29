@@ -77,7 +77,7 @@ pub(crate) struct Cache {
     pub(crate) slots: KeyIndexVec<NodeId, RuntimeSlot>,
     /// Each node's resolved declared output types (wildcards followed), one inner
     /// `Vec` per node aligned to `slots`, rebuilt every `update` by
-    /// [`Self::recompute_output_types`]. A separate column (not a slot field) so the
+    /// [`Self::recompute_digests`]. A separate column (not a slot field) so the
     /// digest pass can read it while writing `slots`. The digest folds these (an
     /// output-signature change re-keys), and the disk cache's codec check reads them
     /// — both without a library at load time. An unresolved wildcard port is
@@ -110,29 +110,21 @@ impl Cache {
         }
     }
 
-    /// Refresh every slot's `current_digest`. Digests are compile-stable (consts /
-    /// bindings / func versions / output types are fixed between updates), so the
-    /// engine calls this once per `update`; the planner and run then read the stored
-    /// value rather than re-walking the cone each execute. The resolved `output_types`
-    /// (set by [`Self::recompute_output_types`], which must run first) are folded into
-    /// the digest, so a redefined output signature re-keys the cache. The engine reads
-    /// the `output_types` column while this writes the disjoint `slots` column — no
-    /// intermediate buffers.
-    pub(crate) fn recompute_digests(&mut self, program: &ExecutionProgram) {
-        let mut engine = DigestEngine::with_fs(program, &self.output_types);
-        for idx in 0..program.e_nodes.len() {
-            self.slots[idx].current_digest = engine.node_digest(idx);
-        }
-    }
-
-    /// Resolve each node's declared output types (wildcards followed through
-    /// bindings) into the `output_types` column, so the digest and the disk cache's
-    /// codec check can read them with no library at load time. Rebuilt every `update`
-    /// from the **full** library — where every compiled node's func is guaranteed
-    /// present (`check_with` resolved them). A port with no concrete type (an
-    /// unresolved wildcard) stores `DataType::Null`, the lenient "unconstrained"
-    /// sentinel.
-    pub(crate) fn recompute_output_types(&mut self, program: &ExecutionProgram, library: &Library) {
+    /// Recompute the compile-stable per-node columns once per `update`: each node's
+    /// resolved output types, then its content digest. Both are fixed between updates
+    /// (consts / bindings / func versions / output signatures don't change), so the
+    /// planner and run read the stored values rather than re-walking the cone each
+    /// execute.
+    ///
+    /// 1. **Output types** — resolved (wildcards followed) from the **full** library,
+    ///    where every compiled node's func is guaranteed present (`check_with` resolved
+    ///    them); an unresolved wildcard port stores `DataType::Null`. Read by the
+    ///    digest below and by the disk cache's codec check, with no library at load
+    ///    time. Resolved first because the digest folds them.
+    /// 2. **Digests** — the engine reads the `output_types` column while this writes
+    ///    the disjoint `slots` column (no intermediate buffers); folding the output
+    ///    signature in means a redefined output re-keys the cache.
+    pub(crate) fn recompute_digests(&mut self, program: &ExecutionProgram, library: &Library) {
         self.output_types.clear();
         for idx in 0..program.e_nodes.len() {
             let n_outputs = program.e_nodes[idx].outputs.len as usize;
@@ -144,6 +136,11 @@ impl Cache {
                     })
                     .collect(),
             );
+        }
+
+        let mut engine = DigestEngine::with_fs(program, &self.output_types);
+        for idx in 0..program.e_nodes.len() {
+            self.slots[idx].current_digest = engine.node_digest(idx);
         }
     }
 
@@ -188,7 +185,7 @@ impl Cache {
 }
 
 /// Backstop for a wildcard chain that cycles (a malformed program the planner
-/// rejects as `CycleDetected`, but `recompute_output_types` runs before planning):
+/// rejects as `CycleDetected`, but `recompute_digests` runs before planning):
 /// beyond this depth resolution gives up with `None` rather than recursing forever.
 /// Legitimate reroute chains are a handful deep.
 const MAX_WILDCARD_DEPTH: usize = 64;

@@ -74,7 +74,7 @@ pub(crate) struct DigestEngine<'a, F> {
     /// Each node's resolved output types (one list per node, indexed by node), folded
     /// into its digest so redefining a func's outputs (`Int → Float`, an added port)
     /// re-keys the cache without relying on a `func_version` bump. Resolved once at
-    /// `update` ([`Cache::recompute_output_types`](crate::execution::cache::Cache::recompute_output_types)).
+    /// `update` ([`Cache::recompute_digests`](crate::execution::cache::Cache::recompute_digests)).
     output_types: &'a [Vec<DataType>],
     file_id: F,
     memo: Vec<NodeDigest>,

@@ -122,7 +122,7 @@ impl OutputCache {
     /// cache node, a resident hit, a node with no current digest, or one whose
     /// outputs lack a registered codec is left unflagged (it recomputes). Reads the
     /// node's resolved output types off the cache's `output_types` column
-    /// ([`Cache::recompute_output_types`]), so no library is needed here for
+    /// ([`Cache::recompute_digests`]), so no library is needed here for
     /// resolution — only this cache's own codec table.
     pub(crate) fn mark_available(&self, program: &ExecutionProgram, cache: &mut Cache) {
         for idx in 0..program.e_nodes.len() {
@@ -203,7 +203,7 @@ impl OutputCache {
     /// cleared, so a re-plan recomputes the node instead of pruning it behind a value
     /// that can't be loaded — and `false` is returned. A blob can't be of the *wrong
     /// type* for a matching digest: the output signature is folded into the digest
-    /// ([`Cache::recompute_output_types`](crate::execution::cache::Cache::recompute_output_types)),
+    /// ([`Cache::recompute_digests`](crate::execution::cache::Cache::recompute_digests)),
     /// so a redefined output re-keys rather than colliding.
     fn hydrate_slot(&self, program: &ExecutionProgram, cache: &mut Cache, idx: usize) -> bool {
         if cache.slots[idx].output_values.is_some() {

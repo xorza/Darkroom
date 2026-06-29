@@ -267,14 +267,14 @@ external files it reads. `DigestEngine` folds exactly that into a 256-bit BLAKE3
 - **Output ports** of a multi-output node are disambiguated (`port_digest`); a `DOMAIN`
   separator versions the hashing scheme itself.
 - **Output signature.** Each node's resolved output types (arity + each type, wildcards
-  followed — `Cache::recompute_output_types`) are folded in, so redefining a func's
-  outputs (`Int → Float`, an added port) re-keys it *without* a version bump. This is
-  what makes "a blob exists for this digest but is the wrong type" impossible by
-  construction: a type change is a key change, so the stale blob is never looked up.
+  followed) are folded in, so redefining a func's outputs (`Int → Float`, an added port)
+  re-keys it *without* a version bump. This is what makes "a blob exists for this digest
+  but is the wrong type" impossible by construction: a type change is a key change, so
+  the stale blob is never looked up.
 
 Digests are **compile-stable**, so the engine recomputes them once per `update`
-(`Cache::recompute_output_types` then `Cache::recompute_digests`) and the planner/run
-read the stored value.
+(`Cache::recompute_digests`, which resolves the output types it folds in first) and the
+planner/run read the stored value.
 
 ## B.3 Storage (`blob.rs`)
 
