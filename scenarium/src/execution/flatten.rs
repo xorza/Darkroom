@@ -118,14 +118,19 @@ impl Flattener {
         std::mem::swap(pools.inputs, &mut new_inputs);
         self.inputs_scratch = new_inputs;
 
-        // Apply resolved event edges now that every flat emitter exists and is
-        // addressable by key. Subscribers were cleared while rebuilding events.
+        // Apply resolved event edges now that every flat emitter/subscriber exists and
+        // is addressable by key. Both ends resolve to flat positions here (the
+        // subscriber to a `NodeIdx`, like a binding target). Subscribers were cleared
+        // while rebuilding events.
         for s in &self.subs {
+            let Some(subscriber) = e_nodes.index_of_key(&s.subscriber) else {
+                continue;
+            };
             if let Some(e_node) = e_nodes.by_key_mut(&s.emitter) {
                 let span = e_node.events.range();
                 pools.events[span][s.event_idx]
                     .subscribers
-                    .push(s.subscriber);
+                    .push(subscriber.into());
             }
         }
 

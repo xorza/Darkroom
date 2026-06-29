@@ -136,7 +136,9 @@ impl OutputCache {
             let Some(target) = self.target(program, idx, cache) else {
                 continue;
             };
-            if self.outputs_decodable(&cache.output_types[idx.idx()]) && target.path().exists() {
+            if self.outputs_decodable(program.node_output_types(&program.e_nodes[idx]))
+                && target.path().exists()
+            {
                 cache.slots[idx].disk_available = true;
             }
         }

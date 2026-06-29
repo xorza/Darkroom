@@ -51,6 +51,8 @@ use program::{ExecutionNode, ExecutionProgram};
 pub enum Error {
     #[error("{message}")]
     Invoke { func_id: FuncId, message: String },
+    #[error("node {func_id:?} skipped: an upstream dependency errored")]
+    SkippedUpstream { func_id: FuncId },
     #[error("invalid graph: {message}")]
     InvalidGraph { message: String },
     #[error("node {func_id:?} was cancelled before completing")]
@@ -190,18 +192,19 @@ impl ExecutionEngine {
         // default new, trim gone).
         self.cache.reconcile(&self.program.e_nodes);
 
+        // Resolve the program's output-type pool from the full library (every func is
+        // present — `check_with` validated them), making the compiled program
+        // self-describing. Fed into the digest below (an output-signature change
+        // re-keys) and the disk cache's codec check, with no library at run time.
+        self.program.resolve_output_types(library);
+
         validate::compiled(&self.program, &self.cache, library);
 
-        // A node's digest changes only at compile (consts/bindings/func versions
-        // are fixed between updates), so recompute it now and pull any disk-cached
-        // `persist` outputs into RAM — both off the per-execute path. The trade-off
-        // is that an external file change with no graph edit isn't noticed until
-        // the next update/reopen.
-        // Recompute the compile-stable per-node columns: resolved output types (fed
-        // into the digest and the disk cache's codec check) and content digests. Both
-        // are derived from the full library — every func is present (`check_with`
-        // validated them) — and off the per-execute path.
-        self.cache.recompute_digests(&self.program, library);
+        // A node's digest is compile-stable (consts/bindings/func versions/output
+        // types are fixed between updates), so recompute it now — off the per-execute
+        // path. The trade-off is that an external file change with no graph edit isn't
+        // noticed until the next update/reopen.
+        self.cache.recompute_digests(&self.program);
         // Flag which cached outputs (content-addressed `persist` + explicit-path
         // `CachePassthrough`) are available on disk for the current digest, so the
         // planner prunes their cones — *without* reading them. The bytes load lazily

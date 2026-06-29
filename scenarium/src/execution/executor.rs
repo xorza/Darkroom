@@ -104,10 +104,7 @@ impl Executor {
 
             if has_errored_dependency(program, &errors, e_node_idx) {
                 cache.slots[e_node_idx].output_values = None;
-                errors[e_node_idx.idx()] = Some(Error::Invoke {
-                    func_id,
-                    message: "Skipped due to upstream error".to_string(),
-                });
+                errors[e_node_idx.idx()] = Some(Error::SkippedUpstream { func_id });
                 continue;
             }
 
@@ -490,6 +487,6 @@ mod tests {
                 .map(|e| e.error.to_string())
         };
         assert!(error_of(a).unwrap().contains("boom"));
-        assert!(error_of(b).unwrap().contains("upstream error"));
+        assert!(error_of(b).unwrap().contains("upstream"));
     }
 }

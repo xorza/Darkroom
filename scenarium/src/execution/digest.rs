@@ -71,11 +71,6 @@ pub(crate) fn fs_file_id(path: &str) -> FileId {
 /// engine for the whole program so a shared upstream node is hashed once.
 pub(crate) struct DigestEngine<'a, F> {
     program: &'a ExecutionProgram,
-    /// Each node's resolved output types (one list per node, indexed by node), folded
-    /// into its digest so redefining a func's outputs (`Int → Float`, an added port)
-    /// re-keys the cache without relying on a `func_version` bump. Resolved once at
-    /// `update` ([`Cache::recompute_digests`](crate::execution::cache::Cache::recompute_digests)).
-    output_types: &'a [Vec<DataType>],
     file_id: F,
     memo: Vec<NodeDigest>,
     /// Per-node in-progress marker — a node re-entered while still on the
@@ -97,24 +92,16 @@ impl<F> std::fmt::Debug for DigestEngine<'_, F> {
 
 impl<'a> DigestEngine<'a, fn(&str) -> FileId> {
     /// Engine using the filesystem [`fs_file_id`] resolver — the production path.
-    pub(crate) fn with_fs(
-        program: &'a ExecutionProgram,
-        output_types: &'a [Vec<DataType>],
-    ) -> Self {
-        DigestEngine::new(program, output_types, fs_file_id)
+    pub(crate) fn with_fs(program: &'a ExecutionProgram) -> Self {
+        DigestEngine::new(program, fs_file_id)
     }
 }
 
 impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
-    pub(crate) fn new(
-        program: &'a ExecutionProgram,
-        output_types: &'a [Vec<DataType>],
-        file_id: F,
-    ) -> Self {
+    pub(crate) fn new(program: &'a ExecutionProgram, file_id: F) -> Self {
         let n = program.e_nodes.len();
         Self {
             program,
-            output_types,
             file_id,
             memo: vec![NodeDigest::Pending; n],
             visiting: vec![false; n],
@@ -156,7 +143,6 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
         // Copy the shared references out so the input loop borrows them (lifetime
         // 'a), leaving `self` free for the recursive call.
         let program = self.program;
-        let output_types = self.output_types;
         let e_node = &program.e_nodes[idx];
 
         // Only a `Pure` node is content-cacheable; `Impure` varies per run.
@@ -174,7 +160,7 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
             // longer matches — and the change propagates downstream through the
             // port digests below. A type change in a wildcard output already flows
             // in via its mirrored input; folding it again is harmless.
-            let out_types = &output_types[idx.idx()];
+            let out_types = program.node_output_types(e_node);
             hasher.update(&(out_types.len() as u64).to_le_bytes());
             for ty in out_types {
                 hash_data_type(&mut hasher, ty);
@@ -301,13 +287,12 @@ mod tests {
     use common::Span;
 
     /// Minimal hand-built `ExecutionProgram` for digest tests. Node ids are
-    /// `from_u128(idx + 1)`; `bind`'s target id must match that scheme. `output_types`
-    /// parallels the nodes — each output defaults to `Int`, overridable via
-    /// [`Prog::add_typed`] to exercise the output-signature folding.
+    /// `from_u128(idx + 1)`; `bind`'s target id must match that scheme. Output types
+    /// go straight into `program.output_types` — each output defaults to `Int`,
+    /// overridable via [`Prog::add_typed`] to exercise the output-signature folding.
     #[derive(Debug, Default)]
     struct Prog {
         program: ExecutionProgram,
-        output_types: Vec<Vec<DataType>>,
     }
 
     impl Prog {
@@ -319,7 +304,13 @@ mod tests {
             outputs: u32,
             bindings: &[ExecutionBinding],
         ) -> usize {
-            self.add_with(FuncBehavior::Pure, func, version, outputs, bindings)
+            self.add_with(
+                FuncBehavior::Pure,
+                func,
+                version,
+                &vec![DataType::Int; outputs as usize],
+                bindings,
+            )
         }
 
         /// Add a `Pure` node with explicit output types (the digest folds them).
@@ -329,14 +320,18 @@ mod tests {
             types: &[DataType],
             bindings: &[ExecutionBinding],
         ) -> usize {
-            let idx = self.add_with(FuncBehavior::Pure, func, 0, types.len() as u32, bindings);
-            self.output_types[idx] = types.to_vec();
-            idx
+            self.add_with(FuncBehavior::Pure, func, 0, types, bindings)
         }
 
         /// Add an `Impure` node — its `node_digest` is always `None`.
         fn add_impure(&mut self, func: u128, outputs: u32, bindings: &[ExecutionBinding]) -> usize {
-            self.add_with(FuncBehavior::Impure, func, 0, outputs, bindings)
+            self.add_with(
+                FuncBehavior::Impure,
+                func,
+                0,
+                &vec![DataType::Int; outputs as usize],
+                bindings,
+            )
         }
 
         fn add_with(
@@ -344,7 +339,7 @@ mod tests {
             behavior: FuncBehavior,
             func: u128,
             version: u64,
-            outputs: u32,
+            types: &[DataType],
             bindings: &[ExecutionBinding],
         ) -> usize {
             let inputs_start = self.program.inputs.len() as u32;
@@ -356,7 +351,8 @@ mod tests {
             }
             let idx = self.program.e_nodes.len();
             let outputs_start = self.program.n_outputs as u32;
-            self.program.n_outputs += outputs as usize;
+            self.program.n_outputs += types.len();
+            self.program.output_types.extend_from_slice(types);
             self.program.e_nodes.add(ExecutionNode {
                 id: NodeId::from_u128(idx as u128 + 1),
                 inited: true,
@@ -364,11 +360,9 @@ mod tests {
                 func_id: FuncId::from_u128(func),
                 func_version: version,
                 inputs: Span::new(inputs_start, bindings.len() as u32),
-                outputs: Span::new(outputs_start, outputs),
+                outputs: Span::new(outputs_start, types.len() as u32),
                 ..Default::default()
             });
-            self.output_types
-                .push(vec![DataType::Int; outputs as usize]);
             idx
         }
     }
@@ -389,7 +383,7 @@ mod tests {
     }
 
     fn digests(prog: &Prog) -> Vec<Option<Digest>> {
-        let mut engine = DigestEngine::new(&prog.program, &prog.output_types, no_files);
+        let mut engine = DigestEngine::new(&prog.program, no_files);
         (0..prog.program.e_nodes.len())
             .map(|i| engine.node_digest(i.into()))
             .collect()
@@ -479,19 +473,18 @@ mod tests {
         // digest: this is what stops machine B serving A's result for B's files.
         let mut p = Prog::default();
         p.add(10, 0, 1, &[konst(StaticValue::FsPath("frames".into()))]);
-        let t = &p.output_types;
 
-        let d_small = DigestEngine::new(&p.program, t, |_: &str| FileId {
+        let d_small = DigestEngine::new(&p.program, |_: &str| FileId {
             len: 1,
             mtime_ns: 1,
         })
         .node_digest(NodeIdx(0));
-        let d_large = DigestEngine::new(&p.program, t, |_: &str| FileId {
+        let d_large = DigestEngine::new(&p.program, |_: &str| FileId {
             len: 2,
             mtime_ns: 1,
         })
         .node_digest(NodeIdx(0));
-        let d_mtime = DigestEngine::new(&p.program, t, |_: &str| FileId {
+        let d_mtime = DigestEngine::new(&p.program, |_: &str| FileId {
             len: 1,
             mtime_ns: 9,
         })
@@ -499,7 +492,7 @@ mod tests {
         assert_ne!(d_small, d_large, "file length must matter");
         assert_ne!(d_small, d_mtime, "file mtime must matter");
 
-        let same = DigestEngine::new(&p.program, t, |_: &str| FileId {
+        let same = DigestEngine::new(&p.program, |_: &str| FileId {
             len: 1,
             mtime_ns: 1,
         })
@@ -509,7 +502,7 @@ mod tests {
         // The path string itself is folded too, independent of file identity.
         let mut q = Prog::default();
         q.add(10, 0, 1, &[konst(StaticValue::FsPath("other".into()))]);
-        let d_other = DigestEngine::new(&q.program, &q.output_types, |_: &str| FileId {
+        let d_other = DigestEngine::new(&q.program, |_: &str| FileId {
             len: 1,
             mtime_ns: 1,
         })
@@ -525,7 +518,7 @@ mod tests {
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A.0
         p.add(20, 0, 1, &[bind(0, 1)]); // C binds A.1 (same func as B)
 
-        let mut engine = DigestEngine::new(&p.program, &p.output_types, no_files);
+        let mut engine = DigestEngine::new(&p.program, no_files);
         assert_ne!(
             engine.port_digest(NodeIdx(0), 0),
             engine.port_digest(NodeIdx(0), 1),
@@ -592,7 +585,7 @@ mod tests {
         p.add(10, 0, 1, &[bind(1, 0)]); // A binds B (idx 1)
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A (idx 0)
         assert_eq!(
-            DigestEngine::new(&p.program, &p.output_types, no_files).node_digest(NodeIdx(0)),
+            DigestEngine::new(&p.program, no_files).node_digest(NodeIdx(0)),
             None
         );
     }

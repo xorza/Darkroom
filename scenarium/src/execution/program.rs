@@ -9,10 +9,11 @@ use std::ops::{Index, IndexMut};
 use common::{KeyIndexKey, KeyIndexVec, Span};
 use serde::{Deserialize, Serialize};
 
-use crate::data::StaticValue;
+use crate::data::{DataType, StaticValue};
 use crate::event_lambda::EventLambda;
-use crate::function::FuncBehavior;
+use crate::function::{Func, FuncBehavior, OutputType};
 use crate::graph::NodeId;
+use crate::library::Library;
 use crate::prelude::{FuncId, FuncLambda};
 use crate::special::SpecialNode;
 
@@ -92,7 +93,10 @@ pub(crate) struct ExecutionInput {
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub(crate) struct ExecutionEvent {
-    pub subscribers: Vec<NodeId>,
+    /// Flat positions of the nodes subscribed to this event, resolved at flatten —
+    /// like a binding's `target_idx`, so the planner seeds its walk roots without a
+    /// per-plan id→index lookup. (Data and event edges now address the same way.)
+    pub subscribers: Vec<NodeIdx>,
     #[serde(skip, default)]
     pub lambda: EventLambda,
 }
@@ -158,10 +162,17 @@ pub(crate) struct ExecutionProgram {
     pub(crate) e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
     pub(crate) inputs: Vec<ExecutionInput>,
     pub(crate) events: Vec<ExecutionEvent>,
-    /// Total output count across all nodes (sum of every output span length) —
-    /// the size of the plan's `output_usage` column. Outputs carry no per-node
-    /// static data, so there is no output pool; flatten accumulates this total
-    /// while assigning spans and stores it here rather than re-summing each plan.
+    /// The output pool: each node's resolved declared output types (wildcards
+    /// followed), flat and indexed like `output_usage` — `e_node.outputs.range()` is
+    /// the node's slice. Resolved once at flatten by [`Self::resolve_output_types`]
+    /// from the func library (which the program doesn't retain), so the compiled
+    /// program is self-describing. Read by the digest (an output-signature change
+    /// re-keys) and the disk cache's codec check. An unresolved wildcard port is
+    /// `DataType::Null`. `len()` is also `n_outputs`.
+    #[serde(default)]
+    pub(crate) output_types: Vec<DataType>,
+    /// Total output count across all nodes (sum of every output span length) — the
+    /// size of `output_types` and the plan's `output_usage` column.
     #[serde(default)]
     pub(crate) n_outputs: usize,
 }
@@ -171,6 +182,7 @@ impl ExecutionProgram {
         self.e_nodes.clear();
         self.inputs.clear();
         self.events.clear();
+        self.output_types.clear();
         self.n_outputs = 0;
     }
 
@@ -183,5 +195,85 @@ impl ExecutionProgram {
     /// `e_node`'s slice of the shared input pool.
     pub(crate) fn node_inputs(&self, e_node: &ExecutionNode) -> &[ExecutionInput] {
         &self.inputs[e_node.inputs.range()]
+    }
+
+    /// `e_node`'s slice of the resolved output-type pool.
+    pub(crate) fn node_output_types(&self, e_node: &ExecutionNode) -> &[DataType] {
+        &self.output_types[e_node.outputs.range()]
+    }
+
+    /// Fill the `output_types` pool by resolving each node's declared output types
+    /// (wildcards followed through bindings) from the full `library` — done once at
+    /// flatten, where every compiled node's func is guaranteed present (`check_with`
+    /// resolved them). An unresolved wildcard port stores `DataType::Null`. Builds
+    /// into a fresh buffer first so the per-node reads don't alias the write-back.
+    pub(crate) fn resolve_output_types(&mut self, library: &Library) {
+        let mut types = Vec::with_capacity(self.n_outputs);
+        for idx in self.node_indices() {
+            let n_outputs = self.e_nodes[idx].outputs.len as usize;
+            for port in 0..n_outputs {
+                types.push(
+                    effective_output_type(self, library, idx, port, 0).unwrap_or(DataType::Null),
+                );
+            }
+        }
+        self.output_types = types;
+    }
+}
+
+/// Backstop for a wildcard chain that cycles (a malformed program the planner rejects
+/// as `CycleDetected`, but output types resolve at flatten, before planning): beyond
+/// this depth resolution gives up with `None` rather than recursing forever.
+/// Legitimate reroute chains are a handful deep.
+const MAX_WILDCARD_DEPTH: usize = 64;
+
+/// The concrete declared output type of node `idx`'s `port`, resolving a wildcard
+/// reroute by following its mirrored input through the program's bindings. `None`
+/// *only* for an output with no concrete type — a wildcard whose mirror isn't a
+/// `Bind` (a const/unbound mirror is never a custom value), an out-of-range port, or
+/// a cyclic chain past [`MAX_WILDCARD_DEPTH`]. An **absent func is not a `None` case**:
+/// every compiled node's func resolved at `check_with`, so its absence is an invariant
+/// violation that panics rather than silently degrading.
+fn effective_output_type(
+    program: &ExecutionProgram,
+    library: &Library,
+    idx: NodeIdx,
+    port: usize,
+    depth: usize,
+) -> Option<DataType> {
+    if depth > MAX_WILDCARD_DEPTH {
+        return None;
+    }
+    let func = node_func(program, library, idx)
+        .expect("a compiled node's func is registered in the library (validated at check_with)");
+    match &func.outputs.get(port)?.ty {
+        OutputType::Fixed(data_type) => Some(data_type.clone()),
+        OutputType::Wildcard { mirrors } => {
+            let span = program.e_nodes[idx].inputs;
+            match &program.inputs[span.range()].get(*mirrors)?.binding {
+                ExecutionBinding::Bind(addr) => effective_output_type(
+                    program,
+                    library,
+                    addr.target_idx,
+                    addr.port_idx,
+                    depth + 1,
+                ),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// The func backing node `idx`: a special node's hardcoded spec, else the library
+/// entry for its `func_id`. `None` only if the library doesn't carry the func — which,
+/// for the program's own (`check_with`-validated) library, never happens.
+fn node_func<'a>(
+    program: &'a ExecutionProgram,
+    library: &'a Library,
+    idx: NodeIdx,
+) -> Option<&'a Func> {
+    match program.e_nodes[idx].special {
+        Some(special) => Some(special.func()),
+        None => library.by_id(&program.e_nodes[idx].func_id),
     }
 }

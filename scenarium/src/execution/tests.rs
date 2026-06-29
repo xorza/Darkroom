@@ -2525,7 +2525,7 @@ mod error_propagation {
                     .unwrap_or_else(|| panic!("{name} should carry an upstream error"))
                     .error
                     .to_string()
-                    .contains("upstream error"),
+                    .contains("upstream"),
                 "{name} should report an upstream error",
             );
             assert!(
@@ -3435,7 +3435,11 @@ mod subgraph {
     }
 
     fn subscriber_ids(eg: &ExecutionEngine, e: &ExecutionNode, event_idx: usize) -> Vec<NodeId> {
-        eg.node_events(e)[event_idx].subscribers.clone()
+        eg.node_events(e)[event_idx]
+            .subscribers
+            .iter()
+            .map(|&i| eg.program.e_nodes[i].id)
+            .collect()
     }
 
     /// A parent subscriber of a composite's exposed event is rewired onto the

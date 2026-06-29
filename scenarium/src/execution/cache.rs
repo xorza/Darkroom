@@ -9,12 +9,10 @@
 use common::{KeyIndexKey, KeyIndexVec};
 
 use crate::common::shared_any_state::SharedAnyState;
-use crate::data::{DataType, DynamicValue};
+use crate::data::DynamicValue;
 use crate::execution::digest::{Digest, DigestEngine};
-use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram, NodeIdx};
-use crate::function::{Func, OutputType};
+use crate::execution::program::{ExecutionNode, ExecutionProgram, NodeIdx};
 use crate::graph::NodeId;
-use crate::library::Library;
 use crate::prelude::AnyState;
 
 /// One node's cross-run runtime state, index-aligned to the program's `e_nodes`:
@@ -75,20 +73,11 @@ impl RuntimeSlot {
 #[derive(Default, Debug)]
 pub(crate) struct Cache {
     pub(crate) slots: KeyIndexVec<NodeId, RuntimeSlot>,
-    /// Each node's resolved declared output types (wildcards followed), one inner
-    /// `Vec` per node aligned to `slots`, rebuilt every `update` by
-    /// [`Self::recompute_digests`]. A separate column (not a slot field) so the
-    /// digest pass can read it while writing `slots`. The digest folds these (an
-    /// output-signature change re-keys), and the disk cache's codec check reads them
-    /// — both without a library at load time. An unresolved wildcard port is
-    /// `DataType::Null`.
-    pub(crate) output_types: Vec<Vec<DataType>>,
 }
 
 impl Cache {
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
-        self.output_types.clear();
     }
 
     /// Rebuild `slots` in `e_nodes` order: preserve each surviving node's cache by
@@ -110,35 +99,14 @@ impl Cache {
         }
     }
 
-    /// Recompute the compile-stable per-node columns once per `update`: each node's
-    /// resolved output types, then its content digest. Both are fixed between updates
-    /// (consts / bindings / func versions / output signatures don't change), so the
-    /// planner and run read the stored values rather than re-walking the cone each
-    /// execute.
-    ///
-    /// 1. **Output types** — resolved (wildcards followed) from the **full** library,
-    ///    where every compiled node's func is guaranteed present (`check_with` resolved
-    ///    them); an unresolved wildcard port stores `DataType::Null`. Read by the
-    ///    digest below and by the disk cache's codec check, with no library at load
-    ///    time. Resolved first because the digest folds them.
-    /// 2. **Digests** — the engine reads the `output_types` column while this writes
-    ///    the disjoint `slots` column (no intermediate buffers); folding the output
-    ///    signature in means a redefined output re-keys the cache.
-    pub(crate) fn recompute_digests(&mut self, program: &ExecutionProgram, library: &Library) {
-        self.output_types.clear();
-        for idx in program.node_indices() {
-            let n_outputs = program.e_nodes[idx].outputs.len as usize;
-            self.output_types.push(
-                (0..n_outputs)
-                    .map(|port| {
-                        effective_output_type(program, library, idx, port, 0)
-                            .unwrap_or(DataType::Null)
-                    })
-                    .collect(),
-            );
-        }
-
-        let mut engine = DigestEngine::with_fs(program, &self.output_types);
+    /// Refresh every slot's `current_digest`. Compile-stable (consts / bindings / func
+    /// versions / output signatures are fixed between updates), so the engine calls
+    /// this once per `update`; the planner and run read the stored value rather than
+    /// re-walking the cone each execute. The digest folds the program's resolved
+    /// output types (`ExecutionProgram::resolve_output_types`, run earlier this
+    /// update), so a redefined output re-keys the cache.
+    pub(crate) fn recompute_digests(&mut self, program: &ExecutionProgram) {
+        let mut engine = DigestEngine::with_fs(program);
         for idx in program.node_indices() {
             self.slots[idx].current_digest = engine.node_digest(idx);
         }
@@ -181,64 +149,6 @@ impl Cache {
         let slot = &mut self.slots[idx];
         slot.output_values = Some(values);
         slot.output_digest = Some(digest);
-    }
-}
-
-/// Backstop for a wildcard chain that cycles (a malformed program the planner
-/// rejects as `CycleDetected`, but `recompute_digests` runs before planning):
-/// beyond this depth resolution gives up with `None` rather than recursing forever.
-/// Legitimate reroute chains are a handful deep.
-const MAX_WILDCARD_DEPTH: usize = 64;
-
-/// The concrete declared output type of node `idx`'s `port`, resolving a wildcard
-/// reroute by following its mirrored input through the program's bindings. `None`
-/// *only* for an output with no concrete type — a wildcard whose mirror isn't a
-/// `Bind` (a const/unbound mirror is never a custom value), an out-of-range port, or
-/// a cyclic chain past [`MAX_WILDCARD_DEPTH`]. An **absent func is not a `None` case**:
-/// every compiled node's func resolved at `check_with`, so its absence is an invariant
-/// violation that panics rather than silently degrading the type check.
-fn effective_output_type(
-    program: &ExecutionProgram,
-    library: &Library,
-    idx: NodeIdx,
-    port: usize,
-    depth: usize,
-) -> Option<DataType> {
-    if depth > MAX_WILDCARD_DEPTH {
-        return None;
-    }
-    let func = node_func(program, library, idx)
-        .expect("a compiled node's func is registered in the library (validated at check_with)");
-    match &func.outputs.get(port)?.ty {
-        OutputType::Fixed(data_type) => Some(data_type.clone()),
-        OutputType::Wildcard { mirrors } => {
-            let span = program.e_nodes[idx].inputs;
-            match &program.inputs[span.range()].get(*mirrors)?.binding {
-                ExecutionBinding::Bind(addr) => effective_output_type(
-                    program,
-                    library,
-                    addr.target_idx,
-                    addr.port_idx,
-                    depth + 1,
-                ),
-                _ => None,
-            }
-        }
-    }
-}
-
-/// The func backing node `idx`: a special node's hardcoded spec, else the library
-/// entry for its `func_id`. `None` only if the library doesn't carry the func — which,
-/// for the program's own (`check_with`-validated) library, never happens; callers
-/// treat that as the invariant violation it is.
-fn node_func<'a>(
-    program: &'a ExecutionProgram,
-    library: &'a Library,
-    idx: NodeIdx,
-) -> Option<&'a Func> {
-    match program.e_nodes[idx].special {
-        Some(special) => Some(special.func()),
-        None => library.by_id(&program.e_nodes[idx].func_id),
     }
 }
 

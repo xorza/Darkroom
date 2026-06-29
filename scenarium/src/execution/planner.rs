@@ -92,9 +92,8 @@ impl Planner {
             let subs = program.events[e_node.events.range()][event.event_idx]
                 .subscribers
                 .clone();
-            for sub in &subs {
-                let idx = program.e_nodes.index_of_key(sub).unwrap();
-                self.mark_root(idx.into());
+            for sub in subs {
+                self.mark_root(sub);
             }
         }
 
