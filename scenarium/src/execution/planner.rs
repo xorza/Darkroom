@@ -23,7 +23,7 @@ enum Color {
 
 #[derive(Debug)]
 enum VisitCause {
-    Terminal,
+    Root,
     OutputRequest { output_idx: usize },
     Done,
 }
@@ -42,10 +42,11 @@ pub(crate) struct Planner {
     color: Vec<Color>,
     /// DFS work stack.
     stack: Vec<Visit>,
-    /// Terminal-membership marker column (dedup without hashing).
-    is_terminal: Vec<bool>,
-    /// Deduped terminal node indices that seed the backward walks.
-    terminal_seeds: Vec<usize>,
+    /// Root-membership marker column (dedup without hashing).
+    is_root: Vec<bool>,
+    /// Deduped indices of the nodes the backward walks start from — terminals,
+    /// event subscribers, and event-trigger owners. *Not* only `terminal` nodes.
+    roots: Vec<usize>,
 }
 
 impl Planner {
@@ -61,7 +62,7 @@ impl Planner {
     ) -> Result<()> {
         plan.reset(program.e_nodes.len(), program.n_outputs);
 
-        self.collect_terminal_nodes(program, seeds);
+        self.collect_roots(program, seeds);
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
@@ -72,18 +73,18 @@ impl Planner {
         result
     }
 
-    /// Mark `idx` as a terminal seed, deduping via the marker column.
-    fn mark_terminal(&mut self, idx: usize) {
-        if !self.is_terminal[idx] {
-            self.is_terminal[idx] = true;
-            self.terminal_seeds.push(idx);
+    /// Mark `idx` as a walk root, deduping via the marker column.
+    fn mark_root(&mut self, idx: usize) {
+        if !self.is_root[idx] {
+            self.is_root[idx] = true;
+            self.roots.push(idx);
         }
     }
 
-    fn collect_terminal_nodes(&mut self, program: &ExecutionProgram, seeds: &RunSeeds) {
-        self.is_terminal.clear();
-        self.is_terminal.resize(program.e_nodes.len(), false);
-        self.terminal_seeds.clear();
+    fn collect_roots(&mut self, program: &ExecutionProgram, seeds: &RunSeeds) {
+        self.is_root.clear();
+        self.is_root.resize(program.e_nodes.len(), false);
+        self.roots.clear();
 
         // Add event subscribers
         for event in &seeds.events {
@@ -93,7 +94,7 @@ impl Planner {
                 .clone();
             for sub in &subs {
                 let idx = program.e_nodes.index_of_key(sub).unwrap();
-                self.mark_terminal(idx);
+                self.mark_root(idx);
             }
         }
 
@@ -101,7 +102,7 @@ impl Planner {
         if seeds.terminals {
             for (idx, e) in program.e_nodes.iter().enumerate() {
                 if e.terminal {
-                    self.mark_terminal(idx);
+                    self.mark_root(idx);
                 }
             }
         }
@@ -113,7 +114,7 @@ impl Planner {
                     .iter()
                     .any(|ev| !ev.subscribers.is_empty())
                 {
-                    self.mark_terminal(idx);
+                    self.mark_root(idx);
                 }
             }
         }
@@ -130,16 +131,16 @@ impl Planner {
         self.color.clear();
         self.color.resize(program.e_nodes.len(), Color::White);
 
-        for e_node_idx in self.terminal_seeds.iter().copied() {
+        for e_node_idx in self.roots.iter().copied() {
             self.stack.push(Visit {
                 e_node_idx,
-                cause: VisitCause::Terminal,
+                cause: VisitCause::Root,
             });
         }
 
         while let Some(visit) = self.stack.pop() {
             match visit.cause {
-                VisitCause::Terminal => {}
+                VisitCause::Root => {}
                 VisitCause::OutputRequest { output_idx } => {
                     let span = program.e_nodes[visit.e_node_idx].outputs;
                     plan.output_usage[span.start as usize + output_idx] += 1;
@@ -204,12 +205,13 @@ impl Planner {
         for order_idx in 0..plan.process_order.len() {
             let e_node_idx = plan.process_order[order_idx];
 
-            // Cache hit: the slot holds a value produced under this node's current
-            // digest (a disk-cached value was hydrated into the slot at update, so
-            // this is a RAM check either way). `None` (impure cone) never matches.
-            let cached = cache.is_hit(e_node_idx);
+            // The node's output is available for its current digest — resident in
+            // RAM, or a decodable blob flagged on disk at `update` (read into RAM
+            // lazily, only if an executing consumer needs it). Either way its cone
+            // is pruned. `None` (impure cone) never matches.
+            let available = cache.is_available(e_node_idx);
 
-            if cached {
+            if available {
                 plan.node_flags[e_node_idx] = NodeFlags {
                     cached: true,
                     wants_execute: false,
@@ -272,10 +274,10 @@ impl Planner {
         self.color.clear();
         self.color.resize(program.e_nodes.len(), Color::White);
 
-        for e_node_idx in self.terminal_seeds.iter().copied() {
+        for e_node_idx in self.roots.iter().copied() {
             self.stack.push(Visit {
                 e_node_idx,
-                cause: VisitCause::Terminal,
+                cause: VisitCause::Root,
             });
         }
 
@@ -283,7 +285,7 @@ impl Planner {
             let idx = visit.e_node_idx;
 
             match visit.cause {
-                VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
+                VisitCause::Root | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done => {
                     assert_eq!(self.color[idx], Color::Gray);
                     plan.execute_order.push(idx);

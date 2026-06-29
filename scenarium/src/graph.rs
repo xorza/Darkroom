@@ -185,8 +185,9 @@ mod binding_map_serde {
 /// is a *request* honored only for reproducible nodes — a node with an impure node
 /// anywhere in its upstream cone has no content digest, so it's silently kept
 /// memory-only and never risks serving a stale value. The on-disk backend is wired
-/// only once a caller enables it (`ExecutionEngine::set_disk_cache`); until then
-/// every node is memory-only regardless. See `docs/disk-cache-design.md`.
+/// only once a caller enables it (`ExecutionEngine::set_output_cache` with a disk
+/// root); until then every node is memory-only regardless. See
+/// `execution/README.md` Part B.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum CachePersistence {
     #[default]
@@ -284,7 +285,7 @@ pub struct Graph {
     /// Local (per-instance) subgraph definitions referenced by this graph's
     /// `NodeKind::Subgraph(SubgraphRef::Local(_))` nodes. Editing one of
     /// these affects only this graph. Shared definitions live in
-    /// `Library.subgraphs` instead. See `docs/subgraph-design.md` §4.4.
+    /// `Library.subgraphs` instead. See `execution/README.md` Part A §4.4.
     #[serde(default)]
     pub subgraphs: KeyIndexVec<SubgraphId, SubgraphDef>,
 }

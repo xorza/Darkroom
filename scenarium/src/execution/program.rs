@@ -80,7 +80,7 @@ pub(crate) struct ExecutionNode {
     /// [`NodeKind::Special`](crate::graph::NodeKind::Special)); the engine
     /// recognizes the kind for special behavior — e.g. the cache node's path-keyed
     /// load/store + input pruning, with the bypass toggle riding in the variant.
-    /// See `docs/file-cache-design.md`.
+    /// See `README.md` Part C.
     #[serde(default)]
     pub special: Option<SpecialNode>,
 

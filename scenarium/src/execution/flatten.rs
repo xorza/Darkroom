@@ -10,7 +10,7 @@
 //! to their interior emitter; triggering a composite reaches the interior
 //! nodes wired to its `SubgraphInput`).
 //!
-//! See `docs/subgraph-design.md` §5.
+//! See `README.md` Part A §5.
 
 use std::hash::Hasher;
 

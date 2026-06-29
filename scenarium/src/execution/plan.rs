@@ -37,9 +37,10 @@ pub(crate) struct ExecutionPlan {
     pub(crate) execute_order: Vec<usize>,
     /// Per-node flags, indexed by `e_node_idx`.
     pub(crate) node_flags: Vec<NodeFlags>,
-    /// Per-output consumer counts, indexed by output-pool index. `> 0` ⇒
-    /// the output is Needed this run; `0` ⇒ Skip. A count (not a bool) so
-    /// future refcount-based eviction can use the multiplicity.
+    /// Per-output consumer counts, indexed by output-pool index. `> 0` ⇒ the output
+    /// is `Needed` this run; `0` ⇒ `Skip`. The executor passes the count through to
+    /// each lambda as [`OutputUsage`](crate::func_lambda::OutputUsage) so a node can
+    /// skip computing outputs nobody reads.
     pub(crate) output_usage: Vec<u32>,
 }
 

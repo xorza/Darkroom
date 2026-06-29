@@ -1,9 +1,5 @@
 comments in theme file
 
-dont load caches for inactiva nodes
-
 save cache on button click not after successfull execute
 
 digest should also have cache value type instead of written in blob
-
-Deferred (not in this scope): evicting already-resident prior-run values that a given run finds neither frontier nor inspected, to reclaim carried-over RAM.

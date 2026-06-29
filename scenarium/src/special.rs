@@ -7,7 +7,7 @@
 //! `elements/` module (e.g. [`cache_passthrough`](crate::elements::cache_passthrough))
 //! — with no new field elsewhere. [`SpecialNode::func`] maps a variant to that
 //! interface; the engine then special-cases the node's *behavior* (e.g. the cache
-//! node's path-keyed load/store and input pruning — see `docs/file-cache-design.md`).
+//! node's path-keyed load/store and input pruning — see `execution/README.md` Part C).
 
 use serde::{Deserialize, Serialize};
 

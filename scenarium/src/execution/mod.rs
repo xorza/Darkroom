@@ -109,11 +109,11 @@ pub struct ExecutionEngine {
     planner: Planner,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
-    /// Output cache: hydrates `persist` (content-addressed) and `CachePassthrough`
-    /// (explicit-path) node outputs into the RAM cache at `update`, and persists
-    /// fresh ones after a run. Holds the one codec registry and the optional disk
-    /// root; empty default is memory-only. Set via [`Self::set_disk_root`] /
-    /// [`Self::set_value_registry`].
+    /// Output cache: flags which `persist` (content-addressed) and `CachePassthrough`
+    /// (explicit-path) node outputs are available on disk at `update` (so the planner
+    /// prunes), reads only the ones a run consumes into RAM at execute time, and
+    /// persists fresh ones after a run. Holds the one codec registry and the optional
+    /// disk root; empty default is memory-only. Set via [`Self::set_output_cache`].
     output_cache: OutputCache,
 }
 
@@ -169,7 +169,9 @@ impl ExecutionEngine {
             });
         }
 
-        self.plan.clear();
+        // The plan isn't cleared here: every `execute` re-`plan`s from scratch (the
+        // planner `reset`s the buffer), and nothing reads the plan between a compile
+        // and the next run. `clear()` is reserved for full teardown (`Self::clear`).
 
         // Flatten subgraphs straight into execution nodes — no intermediate
         // `Graph`. Everything below is boundary-agnostic (func nodes only).
@@ -196,9 +198,12 @@ impl ExecutionEngine {
         // is that an external file change with no graph edit isn't noticed until
         // the next update/reopen.
         self.cache.recompute_digests(&self.program);
-        // Hydrate cached outputs (content-addressed `persist` + explicit-path
-        // `CachePassthrough`) into the RAM cache, so the planner prunes their cones.
-        self.output_cache.load_into(&self.program, &mut self.cache);
+        // Flag which cached outputs (content-addressed `persist` + explicit-path
+        // `CachePassthrough`) are available on disk for the current digest, so the
+        // planner prunes their cones — *without* reading them. The bytes load lazily
+        // at execute time, and only for the values a run actually consumes.
+        self.output_cache
+            .mark_available(&self.program, library, &mut self.cache);
         Ok(())
     }
 
@@ -214,10 +219,23 @@ impl ExecutionEngine {
         progress: Option<&UnboundedSender<RunProgress>>,
         cancel: CancelToken,
     ) -> Result<ExecutionStats> {
-        // Phase 2: schedule into the reusable plan buffer (node digests were
-        // recomputed at `update` time and persist across re-executes).
-        self.planner
-            .plan(&self.program, &self.cache, &seeds, &mut self.plan)?;
+        // Phase 2 + 2b: schedule into the reusable plan buffer (node digests were
+        // recomputed at `update` and persist across re-executes), then read the
+        // disk-cached values the schedule will consume (the frontier feeding
+        // executing nodes) into RAM — values behind a pruned producer stay on disk.
+        // A frontier blob that fails to load clears its own availability, so we
+        // re-plan to schedule that node for recompute instead of pruning it behind an
+        // absent value; each failure clears one flag, so this converges.
+        loop {
+            self.planner
+                .plan(&self.program, &self.cache, &seeds, &mut self.plan)?;
+            if self
+                .output_cache
+                .hydrate_frontier(&self.program, &self.plan, &mut self.cache)
+            {
+                break;
+            }
+        }
 
         // Phase 3: run the schedule.
         let mut stats = self
@@ -241,6 +259,11 @@ impl ExecutionEngine {
                 &mut self.executor.ctx_manager,
             )
             .await;
+
+        // Phase 3c: reclaim RAM from prior-run values this run left untouched and
+        // that the disk store (just written above) can serve again on demand.
+        self.output_cache
+            .evict_unused(&self.program, &self.plan, &mut self.cache);
 
         stats.triggered_events = seeds.events;
         // Annotate with how the graph was flattened so the stats' flat ids

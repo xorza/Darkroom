@@ -162,6 +162,273 @@ mod cache_persistence {
         );
     }
 
+    /// Two disk-cached nodes chained (`sum` → `mult`) under an executing terminal
+    /// (`print`). On reopen only the frontier `mult` — the cached value `print`
+    /// actually reads — is deserialized into RAM; the deeper `sum`, whose sole
+    /// consumer `mult` is itself cached, stays on disk (`disk_available`, no resident
+    /// bytes). That is the RAM win. Inspecting `sum` then pulls it in on demand.
+    #[tokio::test]
+    async fn chained_disk_cache_loads_only_the_frontier() {
+        let dir = TempDir::new("chain-frontier");
+
+        let get_a_calls = Arc::new(AtomicUsize::new(0));
+        let make_lib = || {
+            let calls = get_a_calls.clone();
+            test_func_lib(TestFuncHooks {
+                get_a: Arc::new(move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(7)
+                }),
+                ..default_hooks()
+            })
+        };
+
+        // get_a(7) → sum(persist) = 7+7 = 14 → mult(persist) = 14*7 = 98 → print.
+        let lib = make_lib();
+        let mut graph = Graph::default();
+        graph.add(node(&lib, "get_a", NodeId::unique()));
+        let mut sum = node(&lib, "sum", NodeId::unique());
+        sum.persist = CachePersistence::Disk;
+        graph.add(sum);
+        let mut mult = node(&lib, "mult", NodeId::unique());
+        mult.persist = CachePersistence::Disk;
+        graph.add(mult);
+        graph.add(node(&lib, "print", NodeId::unique()));
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let sum_id = graph.by_name("sum").unwrap().id;
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "sum", 0, (get_a_id, 0).into());
+        bind(&mut graph, "sum", 1, (get_a_id, 0).into());
+        bind(&mut graph, "mult", 0, (sum_id, 0).into());
+        bind(&mut graph, "mult", 1, (get_a_id, 0).into());
+        bind(&mut graph, "print", 0, (mult_id, 0).into());
+
+        // First run: everything computes; sum (14) and mult (98) stored to disk.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
+
+        // Reopen over the same store with fresh RAM, then run.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+
+        // Both disk-cached nodes are served (pruned); get_a never recomputes.
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            1,
+            "no upstream recompute"
+        );
+        assert!(
+            stats.cached_nodes.contains(&sum_id) && stats.cached_nodes.contains(&mult_id),
+            "both disk-cached nodes are pruned"
+        );
+
+        // The frontier `mult` (read by the executing `print`) is in RAM...
+        let mult_resident = engine
+            .runtime_slot(engine.by_name("mult").unwrap())
+            .output_values
+            .is_some();
+        assert!(mult_resident, "frontier cache is loaded into RAM");
+        // ...but the deeper `sum` is left on disk: flagged available, never read.
+        let sum_resident = engine
+            .runtime_slot(engine.by_name("sum").unwrap())
+            .output_values
+            .is_some();
+        let sum_on_disk = engine
+            .runtime_slot(engine.by_name("sum").unwrap())
+            .disk_available;
+        assert!(
+            !sum_resident,
+            "a disk cache behind another is not loaded into RAM"
+        );
+        assert!(
+            sum_on_disk,
+            "the deeper cache is still flagged available on disk"
+        );
+
+        // Inspecting `sum` pulls it in on demand: value correct, now resident.
+        let vals = engine
+            .get_argument_values_with_previews(&sum_id)
+            .await
+            .unwrap();
+        assert!(
+            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Int(14))),
+            "inspection reads sum's stored value: {:?}",
+            vals.outputs
+        );
+        assert!(
+            engine
+                .runtime_slot(engine.by_name("sum").unwrap())
+                .output_values
+                .is_some(),
+            "inspection hydrated sum into RAM"
+        );
+    }
+
+    /// Eviction reclaims carried-over RAM: a value a prior run computed and left
+    /// resident, that a later run neither executes nor reads as a frontier input, is
+    /// dropped from RAM once the disk store can serve it again. In one engine across
+    /// two runs, run 1 computes `sum` (disk-cached); run 2 only needs the downstream
+    /// `mult` (frontier), so `sum` falls behind the frontier and is reclaimed — while
+    /// the still-read `mult` and the non-reloadable `get_a` are kept.
+    #[tokio::test]
+    async fn prior_run_value_evicted_once_unused_and_reloadable() {
+        let dir = TempDir::new("evict");
+        let lib = test_func_lib(default_hooks());
+
+        // get_a(1) → sum(persist) = 2 → mult(persist) = 2 → print, one engine.
+        let mut graph = Graph::default();
+        graph.add(node(&lib, "get_a", NodeId::unique()));
+        let mut sum = node(&lib, "sum", NodeId::unique());
+        sum.persist = CachePersistence::Disk;
+        graph.add(sum);
+        let mut mult = node(&lib, "mult", NodeId::unique());
+        mult.persist = CachePersistence::Disk;
+        graph.add(mult);
+        graph.add(node(&lib, "print", NodeId::unique()));
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let sum_id = graph.by_name("sum").unwrap().id;
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "sum", 0, (get_a_id, 0).into());
+        bind(&mut graph, "sum", 1, (get_a_id, 0).into());
+        bind(&mut graph, "mult", 0, (sum_id, 0).into());
+        bind(&mut graph, "mult", 1, (get_a_id, 0).into());
+        bind(&mut graph, "print", 0, (mult_id, 0).into());
+
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &lib).unwrap();
+
+        // Run 1 (cold): everything computes and stays resident; nothing evicted yet
+        // (all of it is this run's own output).
+        engine.execute_terminals().await.unwrap();
+        assert!(
+            engine
+                .runtime_slot(engine.by_name("sum").unwrap())
+                .output_values
+                .is_some(),
+            "sum is resident after the run that computed it"
+        );
+
+        // Run 2: only `print` runs, reading cached `mult` (frontier). `sum` is now
+        // an untouched, reloadable leftover.
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            stats.executed_nodes.len(),
+            1,
+            "only print runs the second time"
+        );
+
+        let sum_resident = engine
+            .runtime_slot(engine.by_name("sum").unwrap())
+            .output_values
+            .is_some();
+        let sum_disk = engine
+            .runtime_slot(engine.by_name("sum").unwrap())
+            .disk_available;
+        let mult_resident = engine
+            .runtime_slot(engine.by_name("mult").unwrap())
+            .output_values
+            .is_some();
+        let get_a_resident = engine
+            .runtime_slot(engine.by_name("get_a").unwrap())
+            .output_values
+            .is_some();
+        assert!(
+            !sum_resident,
+            "the unused prior-run value is evicted from RAM"
+        );
+        assert!(
+            sum_disk,
+            "the evicted value stays available on disk for reload"
+        );
+        assert!(
+            mult_resident,
+            "the frontier value the run read is kept resident"
+        );
+        assert!(
+            get_a_resident,
+            "a non-reloadable (Memory) value is kept, never force-recomputed"
+        );
+
+        // Lossless: inspecting `sum` reloads it with the correct value (1 + 1 = 2).
+        let vals = engine
+            .get_argument_values_with_previews(&sum_id)
+            .await
+            .unwrap();
+        assert!(
+            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Int(2))),
+            "evicted value reloads from disk on inspection: {:?}",
+            vals.outputs
+        );
+    }
+
+    /// A frontier blob that vanishes between `update` (which flags it available) and
+    /// the run (which reads it) must not trip the executor's "value present"
+    /// invariant: `hydrate_frontier` clears the stale flag and the engine re-plans,
+    /// rescheduling the node to recompute instead of pruning it behind an absent
+    /// value.
+    #[tokio::test]
+    async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
+        let dir = TempDir::new("vanish");
+        let recompute = Arc::new(AtomicUsize::new(0));
+        let make_lib = || {
+            let calls = recompute.clone();
+            test_func_lib(TestFuncHooks {
+                get_a: Arc::new(move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(7)
+                }),
+                ..default_hooks()
+            })
+        };
+
+        // get_a → sum(persist) → print(terminal). print reads sum, so sum is the
+        // frontier the run must load.
+        let lib = make_lib();
+        let mut graph = Graph::default();
+        graph.add(node(&lib, "get_a", NodeId::unique()));
+        let mut sum = node(&lib, "sum", NodeId::unique());
+        sum.persist = CachePersistence::Disk;
+        graph.add(sum);
+        graph.add(node(&lib, "print", NodeId::unique()));
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let sum_id = graph.by_name("sum").unwrap().id;
+        bind(&mut graph, "sum", 0, (get_a_id, 0).into());
+        bind(&mut graph, "sum", 1, (get_a_id, 0).into());
+        bind(&mut graph, "print", 0, (sum_id, 0).into());
+
+        // Run 1: writes sum's blob to disk.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        engine.execute_terminals().await.unwrap();
+        let after_run1 = recompute.load(Ordering::SeqCst);
+
+        // Reopen: `update` flags sum available from its on-disk blob...
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        // ...but the blob vanishes before the run reads it.
+        for entry in std::fs::read_dir(&dir.0).unwrap() {
+            std::fs::remove_file(entry.unwrap().path()).unwrap();
+        }
+        let stats = engine.execute_terminals().await.unwrap();
+
+        // The run completes (no panic): the failed frontier load rescheduled sum.
+        assert!(
+            stats.executed_nodes.iter().any(|n| n.node_id == sum_id),
+            "sum recomputes when its blob is gone"
+        );
+        assert!(
+            !stats.cached_nodes.contains(&sum_id),
+            "a vanished blob is not served as a cache hit"
+        );
+        assert!(
+            recompute.load(Ordering::SeqCst) > after_run1,
+            "get_a re-ran to feed sum's recompute"
+        );
+    }
+
     /// A `persist` node whose cone contains an impure node has digest `None`, so
     /// it's never disk-cached even with `persist=Disk` — on reopen it recomputes.
     #[tokio::test]
@@ -234,6 +501,168 @@ mod cache_persistence {
         assert!(
             stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
             "mult recomputes on reopen"
+        );
+    }
+
+    /// The codec guard on `mark_available`: a `persist` node whose blob is on disk
+    /// but whose custom output type has *no registered codec* (a value written by a
+    /// build that had the codec, reopened by one that doesn't) is not flagged
+    /// available — it recomputes, rather than being pruned and then panicking on a
+    /// failed frontier load. With the codec it's served and decodes on inspection.
+    #[tokio::test]
+    async fn missing_codec_skips_disk_cache_instead_of_panicking() {
+        use std::any::Any;
+        use std::fmt;
+
+        use async_trait::async_trait;
+
+        use crate::async_lambda;
+        use crate::context::ContextManager;
+        use crate::data::{CustomValue, TypeId};
+        use crate::function::Func;
+        use crate::library::{Library, TypeEntry};
+        use crate::value_codec::CustomValueCodec;
+
+        type CodecError = Box<dyn std::error::Error + Send + Sync>;
+
+        const BLOB_TYPE: &str = "50be7976-6d55-4567-8389-13107b1698ba";
+        const FUNC_ID: &str = "b1ddc0bf-5f92-4e0c-9481-23e48c65004b";
+
+        #[derive(Debug)]
+        struct Blob(Vec<u8>);
+        impl fmt::Display for Blob {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "Blob({} bytes)", self.0.len())
+            }
+        }
+        impl CustomValue for Blob {
+            fn type_id(&self) -> TypeId {
+                BLOB_TYPE.into()
+            }
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+        #[derive(Debug)]
+        struct BlobCodec;
+        #[async_trait]
+        impl CustomValueCodec for BlobCodec {
+            async fn encode(
+                &self,
+                value: &dyn CustomValue,
+                _ctx: &mut ContextManager,
+            ) -> std::result::Result<Vec<u8>, CodecError> {
+                Ok(value.as_any().downcast_ref::<Blob>().unwrap().0.clone())
+            }
+            fn decode(
+                &self,
+                bytes: Vec<u8>,
+            ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+                Ok(Arc::new(Blob(bytes)))
+            }
+        }
+
+        // A pure, terminal, disk-persisted func emitting a custom `Blob`. The type's
+        // codec is present only when `with_codec`.
+        let blob_lib = |with_codec: bool, recompute: Arc<AtomicUsize>| -> Library {
+            let mut library = Library::default();
+            library.register_type(
+                BLOB_TYPE,
+                if with_codec {
+                    TypeEntry::custom_with_codec("Blob", Arc::new(BlobCodec))
+                } else {
+                    TypeEntry::custom("Blob")
+                },
+            );
+            library.add(
+                Func::new(FUNC_ID, "make_blob")
+                    .category("Test")
+                    .pure()
+                    .terminal()
+                    .output("out", DataType::Custom(BLOB_TYPE.into()))
+                    .lambda(async_lambda!(
+                        move |_, _, _, _, _, outputs| { counter = recompute.clone() } => {
+                            counter.fetch_add(1, Ordering::SeqCst);
+                            outputs[0] = DynamicValue::Custom(Arc::new(Blob(vec![9, 9, 9])));
+                            Ok(())
+                        }
+                    )),
+            );
+            library
+        };
+
+        let disk_engine_with_lib = |dir: &TempDir, library: Library| {
+            use crate::execution::output_cache::OutputCache;
+            let mut engine = ExecutionEngine::default();
+            engine.set_output_cache(OutputCache::new(Arc::new(library), Some(dir.0.clone())));
+            engine
+        };
+
+        let dir = TempDir::new("missing-codec");
+        let recompute = Arc::new(AtomicUsize::new(0));
+
+        let mut graph = Graph::default();
+        let mut blob_node = node(
+            &blob_lib(true, recompute.clone()),
+            "make_blob",
+            NodeId::unique(),
+        );
+        blob_node.persist = CachePersistence::Disk;
+        let blob_id = blob_node.id;
+        graph.add(blob_node);
+
+        // Run 1 (codec present): computes + writes the Blob to disk.
+        let mut engine = disk_engine_with_lib(&dir, blob_lib(true, recompute.clone()));
+        engine
+            .update(&graph, &blob_lib(true, recompute.clone()))
+            .unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(recompute.load(Ordering::SeqCst), 1, "cold run computes");
+
+        // Reopen with codec: served from disk (no recompute); inspection decodes it.
+        let mut engine = disk_engine_with_lib(&dir, blob_lib(true, recompute.clone()));
+        engine
+            .update(&graph, &blob_lib(true, recompute.clone()))
+            .unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            recompute.load(Ordering::SeqCst),
+            1,
+            "codec present ⇒ served"
+        );
+        assert!(
+            stats.cached_nodes.contains(&blob_id),
+            "blob node disk-cached"
+        );
+        let vals = engine
+            .get_argument_values_with_previews(&blob_id)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&vals.outputs[0], DynamicValue::Custom(_)),
+            "inspection decodes the blob from disk: {:?}",
+            vals.outputs
+        );
+
+        // Reopen WITHOUT codec: blob present but undecodable ⇒ not flagged available
+        // ⇒ recompute, no panic.
+        let mut engine = disk_engine_with_lib(&dir, blob_lib(false, recompute.clone()));
+        engine
+            .update(&graph, &blob_lib(false, recompute.clone()))
+            .unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            recompute.load(Ordering::SeqCst),
+            2,
+            "missing codec ⇒ recompute"
+        );
+        assert!(
+            !stats.cached_nodes.contains(&blob_id),
+            "an undecodable blob is not a cache hit"
+        );
+        assert!(
+            stats.executed_nodes.iter().any(|n| n.node_id == blob_id),
+            "the node recomputes instead of tripping a failed frontier load"
         );
     }
 }

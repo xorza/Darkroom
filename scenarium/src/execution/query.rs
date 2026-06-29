@@ -11,7 +11,12 @@ use crate::execution_stats::ExecutionStats;
 use crate::graph::NodeId;
 
 impl ExecutionEngine {
-    pub fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
+    /// Resident-only argument values. The public entry point is
+    /// [`Self::get_argument_values_with_previews`], which hydrates disk-cached
+    /// values first; this bare accessor reads whatever is in RAM, so a disk-only
+    /// node reads back empty. Kept `pub(crate)` to keep that footgun off the public
+    /// surface.
+    pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
         let idx = self.program.e_nodes.index_of_key(node_id)?;
         let e_node = &self.program.e_nodes[idx];
 
@@ -37,11 +42,18 @@ impl ExecutionEngine {
         Some(ArgumentValues { inputs, outputs })
     }
 
-    /// `get_argument_values` plus awaited preview resolution.
+    /// `get_argument_values` plus awaited preview resolution. Reads any disk-cached
+    /// value this node shows (its own outputs and its inputs' producers) into RAM
+    /// first — `mark_available` flags them without loading, so an inspected node a
+    /// run never touched still resolves.
     pub async fn get_argument_values_with_previews(
         &mut self,
         node_id: &NodeId,
     ) -> Option<ArgumentValues> {
+        if let Some(idx) = self.program.e_nodes.index_of_key(node_id) {
+            self.output_cache
+                .hydrate_for_inspection(&self.program, &mut self.cache, idx);
+        }
         let mut values = self.get_argument_values(node_id)?;
         let mut pending_previews = Vec::new();
         for value in values

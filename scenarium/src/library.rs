@@ -107,7 +107,7 @@ pub struct Library {
 
     /// Shared (linked) subgraph definitions. A node with
     /// `NodeKind::Subgraph(SubgraphRef::Linked(id))` resolves here; editing a
-    /// def propagates to every linked instance. See `docs/subgraph-design.md`.
+    /// def propagates to every linked instance. See `execution/README.md` Part A.
     #[serde(default)]
     pub subgraphs: KeyIndexVec<SubgraphId, SubgraphDef>,
 

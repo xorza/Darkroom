@@ -3,7 +3,7 @@
 //! inputs/outputs/events, so it can be instantiated as a single node in a
 //! parent graph. Execution-time flattening lives in `execution::flatten`.
 //!
-//! See `docs/subgraph-design.md` for the full design.
+//! See `execution/README.md` Part A for the full design.
 
 use common::KeyIndexKey;
 use common::id_type;
@@ -31,7 +31,7 @@ id_type!(SubgraphId);
 /// any node, can itself be subscribed to a parent event; which interior
 /// subnodes then fire is the subgraph's internal wiring (interior nodes
 /// subscribing to the def's `SubgraphInput` node), not an exposed port.
-/// See `docs/subgraph-design.md` §4.5.
+/// See `execution/README.md` Part A §4.5.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SubgraphEvent {
     pub name: String,

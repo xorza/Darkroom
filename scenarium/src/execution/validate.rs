@@ -107,6 +107,9 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
         let flags = plan.node_flags[idx];
         assert!(flags.wants_execute);
         assert!(!flags.missing_required_inputs);
+        // A scheduled node is never served from cache — load-bearing for the disk
+        // cache, which hydrates only the cached *producers* an executing node reads.
+        assert!(!flags.cached);
 
         for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(addr) = &e_input.binding {

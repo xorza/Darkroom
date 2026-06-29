@@ -3,7 +3,7 @@
 //! `FsPath` in `input[1]`. When that file exists, the value is loaded from it and
 //! `input[0]`'s upstream is pruned (not computed). The engine does the path-keyed
 //! file I/O; this module only supplies the node's interface + passthrough lambda.
-//! See `docs/file-cache-design.md`.
+//! See `../execution/README.md` Part C.
 
 use std::sync::{Arc, OnceLock};
 

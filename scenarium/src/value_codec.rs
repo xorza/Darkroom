@@ -1,6 +1,6 @@
 //! Codec layer for a node's output values (`Vec<DynamicValue>`) — turns them
 //! to/from bytes for the cache. The bytes are stored by
-//! [`DiskCache`](crate::execution::disk_cache::DiskCache); this module is the
+//! [`OutputCache`](crate::execution::output_cache::OutputCache); this module is the
 //! value↔bytes half, not the storage.
 //!
 //! [`DynamicValue`] is deliberately not `Serialize`: `Unbound`/`Static` are
@@ -13,8 +13,8 @@
 //! value yet — which is exactly why the registry must exist). A type with no
 //! registered codec is left out of the cache, and
 //! caching is all-or-nothing per node so a reload never yields a half-real output
-//! set. The [`DiskCache`](crate::execution::disk_cache::DiskCache) is the one
-//! consumer. See `scenarium/docs/disk-cache-design.md`.
+//! set. The [`OutputCache`](crate::execution::output_cache::OutputCache) is the one
+//! consumer. See `execution/README.md` Part B.
 
 use std::sync::Arc;
 
