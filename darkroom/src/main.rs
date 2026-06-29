@@ -135,7 +135,11 @@ fn run_gui(script_cfg: ScriptConfig) {
     WinitHost::new(
         MAIN_WINDOW,
         WinitHostConfig::new("darkroom"),
-        move |ui, handle| App::new(ui, handle, script_cfg),
+        move |ui, handle| {
+            // ui.debug_overlay_mut().damage_rect = true;
+
+            App::new(ui, handle, script_cfg)
+        },
     )
     .run();
 }
