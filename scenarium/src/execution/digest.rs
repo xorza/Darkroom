@@ -24,7 +24,10 @@ const DOMAIN: &[u8] = b"scenarium-cache-v1";
 
 /// 256-bit content digest. Cross-machine stable for a given binary: equal
 /// digests mean the same func+version, params, upstream outputs, and file inputs.
-pub(crate) type Digest = [u8; 32];
+/// A newtype, not a bare `[u8; 32]`, so an arbitrary byte array can't silently pose
+/// as a digest where one is expected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Digest(pub(crate) [u8; 32]);
 
 /// One node's memoized digest result. A node has a digest iff its whole cone is
 /// reproducible; an impure node (or any impure ancestor) is `NotCacheable`, which
@@ -183,7 +186,7 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
                         match self.port_digest(addr.target_idx, addr.port_idx) {
                             Some(upstream) => {
                                 hasher.update(&[2u8]);
-                                hasher.update(&upstream);
+                                hasher.update(&upstream.0);
                             }
                             // A non-reproducible producer taints this node.
                             None => {
@@ -194,7 +197,7 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
                     }
                 }
             }
-            (!tainted).then(|| hasher.finalize().into())
+            (!tainted).then(|| Digest(hasher.finalize().into()))
         };
 
         self.visiting[idx.idx()] = false;
@@ -210,9 +213,9 @@ impl<'a, F: Fn(&str) -> FileId> DigestEngine<'a, F> {
     pub(crate) fn port_digest(&mut self, idx: NodeIdx, port_idx: usize) -> Option<Digest> {
         let node = self.node_digest(idx)?;
         let mut hasher = Hasher::new();
-        hasher.update(&node);
+        hasher.update(&node.0);
         hasher.update(&(port_idx as u64).to_le_bytes());
-        Some(hasher.finalize().into())
+        Some(Digest(hasher.finalize().into()))
     }
 
     /// Fold one constant into `hasher`: a discriminant tag plus length-prefixed

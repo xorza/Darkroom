@@ -34,7 +34,6 @@
 //! [`hydrate_for_inspection`](OutputCache::hydrate_for_inspection) is the off-run
 //! path: an editor query reads a node's value, loading its blob on demand.
 
-use std::fmt::Write as _;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -105,8 +104,9 @@ impl OutputCache {
         }
         if e_node.persist {
             let digest = cache.current_digest(idx)?;
+            let mut buf = [0u8; 64];
             return Some(Target::Addressed(
-                self.disk_root.as_ref()?.join(hex(&digest)),
+                self.disk_root.as_ref()?.join(hex(&digest, &mut buf)),
             ));
         }
         None
@@ -338,13 +338,17 @@ fn is_bypassed(program: &ExecutionProgram, idx: NodeIdx) -> bool {
     )
 }
 
-/// Lowercase hex of a digest — the 64-char content-addressed blob filename.
-fn hex(digest: &Digest) -> String {
-    let mut out = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        let _ = write!(out, "{byte:02x}");
+/// Lowercase hex of a digest into a caller-owned stack buffer (no heap) — the
+/// 64-char content-addressed blob filename. The returned `&str` borrows `buf`, so the
+/// caller keeps it alive until the path is built. Avoids a per-call `String`; the
+/// remaining `PathBuf` for the `stat`/read is inherent and dwarfed by that syscall.
+fn hex<'a>(digest: &Digest, buf: &'a mut [u8; 64]) -> &'a str {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for (i, &byte) in digest.0.iter().enumerate() {
+        buf[2 * i] = HEX[(byte >> 4) as usize];
+        buf[2 * i + 1] = HEX[(byte & 0x0f) as usize];
     }
-    out
+    std::str::from_utf8(buf).expect("hex digits are ASCII")
 }
 
 #[cfg(test)]
@@ -356,7 +360,8 @@ mod tests {
         let mut digest = [0u8; 32];
         digest[0] = 0xab;
         digest[31] = 0x0f;
-        let h = hex(&digest);
+        let mut buf = [0u8; 64];
+        let h = hex(&Digest(digest), &mut buf);
         assert_eq!(h.len(), 64);
         assert!(h.starts_with("ab"));
         assert!(h.ends_with("0f"));

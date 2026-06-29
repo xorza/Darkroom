@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use hashbrown::HashMap;
 
-use crate::execution::Error;
+use crate::execution::RunError;
 use crate::execution::event::EventRef;
 use crate::graph::{InputPort, NodeId};
 
@@ -142,7 +142,7 @@ pub struct RunProgress {
 #[derive(Debug, Clone)]
 pub struct NodeError {
     pub node_id: NodeId,
-    pub error: Error,
+    pub error: RunError,
 }
 
 /// Severity of a [`LogEntry`] emitted by a node during execution.

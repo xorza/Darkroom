@@ -47,20 +47,36 @@ use program::{ExecutionNode, ExecutionProgram};
 
 // === Error Types ===
 
+/// An **operation-level** failure that aborts a whole compile / plan / run: the graph
+/// won't compile ([`InvalidGraph`](Error::InvalidGraph)), the schedule has a cycle
+/// ([`CycleDetected`](Error::CycleDetected)), or the event loop's lambda panicked
+/// ([`EventLambdaPanic`](Error::EventLambdaPanic)). It's the error type of the engine's
+/// `Result`-returning entry points. A *single node's* run failure is a [`RunError`]
+/// (collected into [`ExecutionStats::node_errors`](crate::execution_stats::ExecutionStats)),
+/// never one of these — the two phases can't be confused at the type level.
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum Error {
-    #[error("{message}")]
-    Invoke { func_id: FuncId, message: String },
-    #[error("node {func_id:?} skipped: an upstream dependency errored")]
-    SkippedUpstream { func_id: FuncId },
     #[error("invalid graph: {message}")]
     InvalidGraph { message: String },
-    #[error("node {func_id:?} was cancelled before completing")]
-    Cancelled { func_id: FuncId },
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
     CycleDetected { node_id: NodeId },
     #[error("event lambda for node {node_id:?} panicked: {message}")]
     EventLambdaPanic { node_id: NodeId, message: String },
+}
+
+/// A **single node's** run-time failure, collected per-node into
+/// [`ExecutionStats::node_errors`](crate::execution_stats::ExecutionStats). Distinct
+/// from [`Error`] (whole-operation failures): a `RunError` always concerns exactly one
+/// node, so it can't carry a compile/plan failure, and a caller reading `node_errors`
+/// can't mistake a setup failure for a node's outcome.
+#[derive(Debug, Error, Clone, Serialize, Deserialize)]
+pub enum RunError {
+    #[error("{message}")]
+    Invoke { func_id: FuncId, message: String },
+    #[error("node {func_id:?} skipped: an upstream dependency errored")]
+    SkippedUpstream { func_id: FuncId },
+    #[error("node {func_id:?} was cancelled before completing")]
+    Cancelled { func_id: FuncId },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

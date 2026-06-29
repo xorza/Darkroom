@@ -20,7 +20,7 @@ use crate::execution_stats::{
 use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage};
 use crate::graph::InputPort;
 
-use crate::execution::Error;
+use crate::execution::RunError;
 use crate::execution::cache::Cache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeColumn, NodeIdx};
@@ -33,7 +33,7 @@ pub(crate) struct Executor {
     output_usage: Vec<OutputUsage>,
     /// Per-run result columns, indexed by `e_node_idx`. Reused across runs and
     /// reset to node count at each run's start.
-    errors: NodeColumn<Option<Error>>,
+    errors: NodeColumn<Option<RunError>>,
     run_times: NodeColumn<f64>,
 }
 
@@ -102,7 +102,7 @@ impl Executor {
 
             if has_errored_dependency(program, &errors, e_node_idx) {
                 cache.slots[e_node_idx].clear_output();
-                errors[e_node_idx] = Some(Error::SkippedUpstream { func_id });
+                errors[e_node_idx] = Some(RunError::SkippedUpstream { func_id });
                 continue;
             }
 
@@ -140,8 +140,8 @@ impl Executor {
                     .map_err(|e| match e {
                         // A lambda that bailed on cancel reports it truthfully;
                         // surface it as a cancel rather than a generic invoke error.
-                        InvokeError::Cancelled => Error::Cancelled { func_id },
-                        other => Error::Invoke {
+                        InvokeError::Cancelled => RunError::Cancelled { func_id },
+                        other => RunError::Invoke {
                             func_id,
                             message: other.to_string(),
                         },
@@ -149,7 +149,7 @@ impl Executor {
             };
 
             let run_time = invoke_start.elapsed().as_secs_f64();
-            // A cancellable lambda reports a cancel itself (→ `Error::Cancelled`
+            // A cancellable lambda reports a cancel itself (→ `RunError::Cancelled`
             // above). This is the safety net for the rest: a lambda that doesn't
             // poll the token (a builtin, a single decode) but ran while the run
             // was cancelled returns `Ok` with a result from an aborted run — map
@@ -157,11 +157,11 @@ impl Executor {
             // error stands on its own, even mid-cancel.
             let result = match result {
                 Ok(()) if self.ctx_manager.cancel.is_cancelled() => {
-                    Err(Error::Cancelled { func_id })
+                    Err(RunError::Cancelled { func_id })
                 }
                 other => other,
             };
-            let cancelled = matches!(&result, Err(Error::Cancelled { .. }));
+            let cancelled = matches!(&result, Err(RunError::Cancelled { .. }));
             if cancelled {
                 cancelled_in_flight = Some(e_node_idx);
             }
@@ -210,7 +210,7 @@ impl Executor {
 
 fn has_errored_dependency(
     program: &ExecutionProgram,
-    errors: &NodeColumn<Option<Error>>,
+    errors: &NodeColumn<Option<RunError>>,
     e_node_idx: NodeIdx,
 ) -> bool {
     let span = program.e_nodes[e_node_idx].inputs;
@@ -271,7 +271,7 @@ fn collect_output_usage(
 fn collect_execution_stats(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
-    errors: &NodeColumn<Option<Error>>,
+    errors: &NodeColumn<Option<RunError>>,
     run_times: &NodeColumn<f64>,
     start: Instant,
     executed_count: usize,

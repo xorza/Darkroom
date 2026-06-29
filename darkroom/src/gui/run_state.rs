@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use palantir::Ui;
-use scenarium::execution::ArgumentValues;
+use scenarium::execution::{ArgumentValues, RunError};
 use scenarium::prelude::{ExecutionStats, LogEntry, NodeId, RunPhase, RunProgress};
 
 use crate::core::worker::{RunId, ValueRequest};
@@ -149,7 +149,7 @@ impl RunState {
             // A node cancelled mid-run didn't fail — it was interrupted and
             // will re-run next time. Leave it neutral (no glow) rather than
             // flagging it as an error.
-            if matches!(e.error, scenarium::execution::Error::Cancelled { .. }) {
+            if matches!(e.error, RunError::Cancelled { .. }) {
                 continue;
             }
             self.record_status(stats, e.node_id, ExecStatus::Errored);
@@ -252,7 +252,7 @@ impl RunState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::prelude::{ExecutedNodeStats, FlattenMap, LogLevel, NodeError};
+    use scenarium::prelude::{ExecutedNodeStats, FlattenMap, FuncId, LogLevel, NodeError};
 
     fn nid(n: u128) -> NodeId {
         NodeId::from_u128(n)
@@ -281,7 +281,10 @@ mod tests {
                 .iter()
                 .map(|&node_id| NodeError {
                     node_id,
-                    error: scenarium::execution::Error::CycleDetected { node_id },
+                    error: RunError::Invoke {
+                        func_id: FuncId::from_u128(0),
+                        message: "test error".into(),
+                    },
                 })
                 .collect(),
             logs: vec![],

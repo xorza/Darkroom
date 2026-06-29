@@ -48,7 +48,7 @@ pub(crate) fn file_cache_digest(node_inputs: &[ExecutionInput]) -> Option<Digest
     let mut hasher = Hasher::new();
     hasher.update(DOMAIN_FILECACHE);
     hasher.update(path.as_bytes());
-    Some(hasher.finalize().into())
+    Some(Digest(hasher.finalize().into()))
 }
 
 /// Stable `FuncId` standing in for the cache node in the flattened program (digest

@@ -327,6 +327,7 @@ impl Planner {
 mod tests {
     use super::*;
     use crate::execution::cache::ValueCache;
+    use crate::execution::digest::Digest;
     use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
     use crate::graph::NodeId;
     use crate::prelude::FuncId;
@@ -381,7 +382,7 @@ mod tests {
         let mut cache = Cache::default();
         cache.reconcile(&fix.program.e_nodes);
         for &idx in cached {
-            let digest = [idx.idx() as u8 + 1; 32];
+            let digest = Digest([idx.idx() as u8 + 1; 32]);
             cache.slots[idx].current_digest = Some(digest);
             cache.slots[idx].value = ValueCache::Resident {
                 values: Vec::new(),

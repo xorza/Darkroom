@@ -233,8 +233,8 @@ mod tests {
     /// exact digest. The four cases below are the full truth table.
     #[test]
     fn is_hit_requires_current_digest_values_and_matching_output_digest() {
-        let d: Digest = [7u8; 32];
-        let other: Digest = [8u8; 32];
+        let d = Digest([7u8; 32]);
+        let other = Digest([8u8; 32]);
         let mut cache = Cache::default();
 
         // 0: impure cone (no current digest) — never hits, even holding values.
@@ -296,7 +296,7 @@ mod tests {
     /// it's an independent "a blob exists" bit, gated by the same `update`.
     #[test]
     fn is_available_unions_resident_hit_and_disk_flag() {
-        let d: Digest = [7u8; 32];
+        let d = Digest([7u8; 32]);
         let mut cache = Cache::default();
 
         // 0: nothing resident, but a decodable blob was flagged on disk.
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn hydrate_turns_a_miss_into_a_hit() {
-        let d: Digest = [3u8; 32];
+        let d = Digest([3u8; 32]);
         let mut cache = Cache::default();
         cache.slots.add(RuntimeSlot {
             id: NodeId::from_u128(1),
@@ -359,7 +359,7 @@ mod tests {
         );
 
         // Hydrating under a digest that is no longer current does not hit.
-        cache.slots[0].current_digest = Some([9u8; 32]);
+        cache.slots[0].current_digest = Some(Digest([9u8; 32]));
         assert!(
             !cache.is_resident_hit(NodeIdx(0)),
             "current digest moved on ⇒ miss"

@@ -1775,7 +1775,7 @@ mod behavior {
         assert!(
             matches!(
                 stats.node_errors.as_slice(),
-                [NodeError { node_id: n, error: Error::Cancelled { .. } }] if *n == node_id
+                [NodeError { node_id: n, error: RunError::Cancelled { .. } }] if *n == node_id
             ),
             "the node is reported truthfully as Cancelled, not a fake success: {:?}",
             stats.node_errors
@@ -1808,7 +1808,7 @@ mod behavior {
     }
 
     /// A lambda that bails by returning `InvokeError::Cancelled` is reported as
-    /// `Error::Cancelled` (not a generic `Invoke` error) and dropped from the
+    /// `RunError::Cancelled` (not a generic `Invoke` error) and dropped from the
     /// executed set — the truthful lambda-level signal, distinct from the
     /// executor's flag-check fallback covered above (asserted here without
     /// touching the flag, so only the error mapping can produce the verdict).
@@ -1860,9 +1860,9 @@ mod behavior {
         assert!(
             matches!(
                 stats.node_errors.as_slice(),
-                [NodeError { node_id: n, error: Error::Cancelled { .. } }] if *n == node_id
+                [NodeError { node_id: n, error: RunError::Cancelled { .. } }] if *n == node_id
             ),
-            "InvokeError::Cancelled maps to Error::Cancelled, not Invoke: {:?}",
+            "InvokeError::Cancelled maps to RunError::Cancelled, not Invoke: {:?}",
             stats.node_errors
         );
 
