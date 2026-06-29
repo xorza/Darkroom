@@ -429,6 +429,120 @@ mod cache_persistence {
         );
     }
 
+    /// Hydrate-time type verification: a blob whose stored type no longer matches the
+    /// node's declared output (here `produce`'s func is redefined `Int → Float` with
+    /// the *same* id+version, so the content digest is unchanged and the stale `Int`
+    /// blob is still keyed to it) is rejected at load, not served — the node recomputes
+    /// and the consumer sees the correct `Float`.
+    #[tokio::test]
+    async fn blob_of_wrong_type_is_rejected_and_recomputed() {
+        use std::sync::Mutex;
+
+        use crate::async_lambda;
+        use crate::execution::output_cache::OutputCache;
+        use crate::function::{Func, FuncInput};
+        use crate::library::Library;
+
+        const PRODUCE: &str = "63b7a83c-d7fc-46f4-805a-4bf2695e3763";
+        const CONSUME: &str = "39bbd6b3-b919-4095-b3d0-79a4515de75e";
+
+        let dir = TempDir::new("wrong-type");
+        let produce_runs = Arc::new(AtomicUsize::new(0));
+        let received = Arc::new(Mutex::new(f64::NAN));
+
+        // `produce` is a pure, Disk-persisted source; its declared output type and
+        // value are `Int` when `as_float` is false, `Float` when true — same func id
+        // and version, so its digest (which folds neither) is identical either way.
+        // `consume` (terminal) reads it and records the value as f64.
+        let build_lib =
+            |as_float: bool| -> Library {
+                let mut lib = Library::default();
+                let produce = Func::new(PRODUCE, "produce")
+                    .category("Test")
+                    .pure()
+                    .output(
+                        "out",
+                        if as_float {
+                            DataType::Float
+                        } else {
+                            DataType::Int
+                        },
+                    );
+                let runs = produce_runs.clone();
+                let produce = if as_float {
+                    produce.lambda(
+                        async_lambda!(move |_, _, _, _, _, outputs| { runs = runs.clone() } => {
+                            runs.fetch_add(1, Ordering::SeqCst);
+                            outputs[0] = DynamicValue::Static(StaticValue::Float(1.5));
+                            Ok(())
+                        }),
+                    )
+                } else {
+                    produce.lambda(
+                        async_lambda!(move |_, _, _, _, _, outputs| { runs = runs.clone() } => {
+                            runs.fetch_add(1, Ordering::SeqCst);
+                            outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+                            Ok(())
+                        }),
+                    )
+                };
+                lib.add(produce);
+                let recv = received.clone();
+                lib.add(
+                Func::new(CONSUME, "consume")
+                    .category("Test")
+                    .terminal()
+                    .input(FuncInput::required("in", DataType::Null))
+                    .lambda(async_lambda!(move |_, _, _, inputs, _, _| { recv = recv.clone() } => {
+                        *recv.lock().unwrap() = inputs[0].value.as_f64().unwrap_or(f64::NAN);
+                        Ok(())
+                    })),
+            );
+                lib
+            };
+
+        let engine_with = |lib: Library| {
+            let mut eg = ExecutionEngine::default();
+            eg.set_output_cache(OutputCache::new(Arc::new(lib), Some(dir.0.clone())));
+            eg
+        };
+
+        // produce(persist) → consume(terminal).
+        let int_lib = build_lib(false);
+        let mut graph = Graph::default();
+        let mut produce_node = node(&int_lib, "produce", NodeId::unique());
+        produce_node.persist = CachePersistence::Disk;
+        let produce_id = produce_node.id;
+        graph.add(produce_node);
+        graph.add(node(&int_lib, "consume", NodeId::unique()));
+        bind(&mut graph, "consume", 0, (produce_id, 0).into());
+
+        // Run 1 (Int): produce runs, stores its Int blob; consume sees 7.
+        let mut engine = engine_with(build_lib(false));
+        engine.update(&graph, &int_lib).unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(produce_runs.load(Ordering::SeqCst), 1);
+        assert_eq!(*received.lock().unwrap(), 7.0);
+
+        // Run 2 (Float): same digest, so the stale Int blob is flagged available; but
+        // hydrating it as `consume`'s frontier finds an Int where Float is declared,
+        // rejects it, and re-plans → produce recomputes as Float.
+        let float_lib = build_lib(true);
+        let mut engine = engine_with(build_lib(true));
+        engine.update(&graph, &float_lib).unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            produce_runs.load(Ordering::SeqCst),
+            2,
+            "the wrong-typed Int blob is rejected, so produce recomputes"
+        );
+        assert_eq!(
+            *received.lock().unwrap(),
+            1.5,
+            "consume receives the recomputed Float, never the stale Int"
+        );
+    }
+
     /// A `persist` node whose cone contains an impure node has digest `None`, so
     /// it's never disk-cached even with `persist=Disk` — on reopen it recomputes.
     #[tokio::test]

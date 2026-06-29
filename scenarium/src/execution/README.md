@@ -323,11 +323,16 @@ The engine drives a fixed sequence; the ordering *is* the contract.
 2. **`execute` → plan, then `hydrate_frontier` (looped).** Read into RAM only the
    **frontier** — the cached producers an executing node's inputs `Bind` to. Producers
    *behind* a pruned producer are never referenced, so a chain loads only its frontier.
-   A frontier blob that fails to load (corrupt/deleted/undecodable) clears its own
-   `disk_available` and makes `hydrate_frontier` return `false`; the engine **re-plans**,
-   rescheduling that node to recompute instead of pruning it behind an absent value
-   (which would trip the executor's "value present" invariant). Each failure clears one
-   flag, so the plan/hydrate loop converges.
+   Each loaded blob is **type-verified** (`outputs_well_typed`): its arity and per-port
+   runtime types are checked against the node's declared outputs, with an exact type-id
+   match for `Custom` (the unresolvable-type ports are left unchecked). A frontier blob
+   that fails to load — a read error (corrupt/deleted/undecodable) *or* a type mismatch
+   (a func redefined without a version bump, a file-cache input rewired to another type) —
+   clears its own `disk_available` and makes `hydrate_frontier` return `false`; the engine
+   **re-plans**, rescheduling that node to recompute instead of pruning it behind an absent
+   or wrong-typed value (which would trip the executor's "value present" invariant or
+   panic-downcast a consumer). Each failure clears one flag, so the plan/hydrate loop
+   converges.
 3. **run → `store`.** Write executed nodes' outputs (blobs already present are skipped).
 4. **after store → `evict_unused`.** Demote resident values the run neither executed nor
    read as a frontier — prior-run leftovers — back to disk-only, **iff** a blob can serve
@@ -356,6 +361,12 @@ and `A` hydrates from disk then.
 - Missing codec / corrupt / deleted blob → treated as a miss, not a failure
   (`mark_available`'s codec check + `hydrate_frontier`'s re-plan keep it off the hot and
   the panic paths).
+- **Type mismatch** — a blob whose stored types no longer match the node's declared
+  outputs (a func redefined without a version bump; for the file cache, an input rewired
+  to another type, since `file_cache_digest` ignores the input cone) is caught at load by
+  `outputs_well_typed` and treated as a miss → recompute, never served. This closes the
+  one gap the digest alone leaves: it folds func id + version + inputs, but **not** the
+  declared output types.
 
 ---
 
