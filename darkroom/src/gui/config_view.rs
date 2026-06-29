@@ -162,7 +162,7 @@ fn model_row(
                 .id(id)
                 .size((Sizing::Fixed(ML_PATH_FIELD_WIDTH), Sizing::Hug))
                 .show(ui);
-            let commit = resp.submitted() || resp.lost_focus();
+            let commit = resp.submitted || resp.lost_focus;
             ui.state_mut::<String>(id).replace_range(.., &draft);
             if commit && draft != canonical {
                 command = Some(MenuCommand::SetMlModelPath {
