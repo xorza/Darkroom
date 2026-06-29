@@ -917,16 +917,16 @@ mod graph_structure {
         assert!(
             execution_graph
                 .plan
-                .node_flags
+                .verdicts
                 .iter()
-                .all(|f| !f.missing_required_inputs)
+                .all(|v| !v.missing_required_inputs())
         );
         assert!(
             execution_graph
                 .plan
-                .node_flags
+                .verdicts
                 .iter()
-                .all(|f| f.wants_execute)
+                .all(|v| v.wants_execute())
         );
 
         let get_a = execution_graph.by_name("get_a").unwrap();
@@ -1075,11 +1075,19 @@ mod missing_inputs {
         let print = execution_graph.by_name("print").unwrap();
 
         // get_b has no missing inputs (no inputs at all)
-        assert!(!execution_graph.node_flags(get_b).missing_required_inputs);
+        assert!(
+            !execution_graph
+                .node_verdict(get_b)
+                .missing_required_inputs()
+        );
         // sum is missing input[0], propagates to downstream mult and print
-        assert!(execution_graph.node_flags(sum).missing_required_inputs);
-        assert!(execution_graph.node_flags(mult).missing_required_inputs);
-        assert!(execution_graph.node_flags(print).missing_required_inputs);
+        assert!(execution_graph.node_verdict(sum).missing_required_inputs());
+        assert!(execution_graph.node_verdict(mult).missing_required_inputs());
+        assert!(
+            execution_graph
+                .node_verdict(print)
+                .missing_required_inputs()
+        );
 
         // Nothing should be scheduled for execution
         assert_eq!(execution_graph.plan.execute_order.len(), 0);
@@ -1110,9 +1118,13 @@ mod missing_inputs {
         let print = execution_graph.by_name("print").unwrap();
 
         // The missing flag flows through the optional bind to mult and on to print.
-        assert!(execution_graph.node_flags(sum).missing_required_inputs);
-        assert!(execution_graph.node_flags(mult).missing_required_inputs);
-        assert!(execution_graph.node_flags(print).missing_required_inputs);
+        assert!(execution_graph.node_verdict(sum).missing_required_inputs());
+        assert!(execution_graph.node_verdict(mult).missing_required_inputs());
+        assert!(
+            execution_graph
+                .node_verdict(print)
+                .missing_required_inputs()
+        );
 
         // The whole chain is gated — nothing executes.
         assert!(execution_node_names_in_order(&execution_graph).is_empty());
@@ -1139,8 +1151,12 @@ mod missing_inputs {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
 
-        assert!(!execution_graph.node_flags(mult).missing_required_inputs);
-        assert!(!execution_graph.node_flags(print).missing_required_inputs);
+        assert!(!execution_graph.node_verdict(mult).missing_required_inputs());
+        assert!(
+            !execution_graph
+                .node_verdict(print)
+                .missing_required_inputs()
+        );
         assert!(execution_node_names_in_order(&execution_graph).contains(&"mult".to_string()));
 
         Ok(())
@@ -1173,7 +1189,7 @@ mod missing_inputs {
         execution_graph.execute_terminals().await?;
 
         let mult = execution_graph.by_name("mult").unwrap();
-        assert!(execution_graph.node_flags(mult).missing_required_inputs);
+        assert!(execution_graph.node_verdict(mult).missing_required_inputs());
         assert!(execution_node_names_in_order(&execution_graph).is_empty());
 
         Ok(())
@@ -1212,9 +1228,17 @@ mod disabled_nodes {
         let get_b = execution_graph.by_name("get_b").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
-        assert!(!execution_graph.node_flags(get_b).missing_required_inputs);
-        assert!(execution_graph.node_flags(mult).missing_required_inputs);
-        assert!(execution_graph.node_flags(print).missing_required_inputs);
+        assert!(
+            !execution_graph
+                .node_verdict(get_b)
+                .missing_required_inputs()
+        );
+        assert!(execution_graph.node_verdict(mult).missing_required_inputs());
+        assert!(
+            execution_graph
+                .node_verdict(print)
+                .missing_required_inputs()
+        );
 
         Ok(())
     }
@@ -1287,10 +1311,14 @@ mod const_bindings {
             execution_node_names_in_order(&execution_graph),
             ["mult", "print"]
         );
-        assert!(execution_graph.node_flags(mult).wants_execute);
-        assert!(!execution_graph.node_flags(mult).cached);
-        assert!(!execution_graph.node_flags(mult).missing_required_inputs);
-        assert!(!execution_graph.node_flags(print).missing_required_inputs);
+        assert!(execution_graph.node_verdict(mult).wants_execute());
+        assert!(!execution_graph.node_verdict(mult).is_cached());
+        assert!(!execution_graph.node_verdict(mult).missing_required_inputs());
+        assert!(
+            !execution_graph
+                .node_verdict(print)
+                .missing_required_inputs()
+        );
 
         Ok(())
     }
@@ -2120,7 +2148,7 @@ mod execution {
 
         // sum should be marked as missing required inputs
         let sum = execution_graph.by_name("sum").unwrap();
-        assert!(execution_graph.node_flags(sum).missing_required_inputs);
+        assert!(execution_graph.node_verdict(sum).missing_required_inputs());
 
         Ok(())
     }
@@ -3260,7 +3288,7 @@ mod subgraph {
 
     fn bind_target(eg: &ExecutionEngine, e: &ExecutionNode, input_idx: usize) -> NodeId {
         match &eg.node_inputs(e)[input_idx].binding {
-            ExecutionBinding::Bind(addr) => addr.target_id,
+            ExecutionBinding::Bind(addr) => eg.program.e_nodes[addr.target_idx].id,
             other => panic!("expected Bind, got {other:?}"),
         }
     }

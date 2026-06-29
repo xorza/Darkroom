@@ -375,7 +375,6 @@ mod tests {
 
     fn bind(idx: usize, port: usize) -> ExecutionBinding {
         ExecutionBinding::Bind(ExecutionPortAddress {
-            target_id: NodeId::from_u128(idx as u128 + 1),
             target_idx: idx,
             port_idx: port,
         })

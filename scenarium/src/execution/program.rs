@@ -16,9 +16,12 @@ use crate::special::SpecialNode;
 
 // === Execution Binding ===
 
+/// A flat output address: producer node `target_idx` (index into `e_nodes`/`slots`,
+/// resolved at flatten and stable for the program's lifetime), output `port_idx`. The
+/// producer's `NodeId` is *not* stored — it's `e_nodes[target_idx].id`; the index is
+/// the canonical key here, so there's no id/index pair to keep in sync.
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub(crate) struct ExecutionPortAddress {
-    pub target_id: NodeId,
     pub target_idx: usize,
     pub port_idx: usize,
 }

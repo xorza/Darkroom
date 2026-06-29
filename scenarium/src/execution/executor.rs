@@ -306,18 +306,18 @@ fn collect_execution_stats(
 
     for &idx in &plan.process_order {
         let e = &program.e_nodes[idx];
-        let flags = plan.node_flags[idx];
-        if flags.missing_required_inputs {
+        let verdict = plan.verdicts[idx];
+        if verdict.missing_required_inputs() {
             // Recompute which ports are unsatisfied (shares `input_missing` with
             // the planner) — only for the rare missing node, so it isn't worth a
             // stored column.
             for (i, pool_idx) in e.inputs.range().enumerate() {
-                if input_missing(&program.inputs[pool_idx], &plan.node_flags) {
+                if input_missing(&program.inputs[pool_idx], &plan.verdicts) {
                     missing_inputs.push(InputPort::new(e.id, i));
                 }
             }
         }
-        if flags.cached {
+        if verdict.is_cached() {
             cached_nodes.push(e.id);
         }
         if let Some(err) = &errors[idx] {
@@ -351,7 +351,7 @@ mod tests {
     use crate::async_lambda;
     use crate::data::StaticValue;
     use crate::execution::cache::Cache;
-    use crate::execution::plan::NodeFlags;
+    use crate::execution::plan::NodeVerdict;
     use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
     use crate::func_lambda::FuncLambda;
     use crate::graph::NodeId;
@@ -393,7 +393,6 @@ mod tests {
 
     fn bind(idx: usize, port: usize) -> ExecutionBinding {
         ExecutionBinding::Bind(ExecutionPortAddress {
-            target_id: NodeId::from_u128(idx as u128 + 1),
             target_idx: idx,
             port_idx: port,
         })
@@ -405,14 +404,7 @@ mod tests {
         ExecutionPlan {
             process_order: (0..n).collect(),
             execute_order: (0..n).collect(),
-            node_flags: vec![
-                NodeFlags {
-                    wants_execute: true,
-                    cached: false,
-                    missing_required_inputs: false,
-                };
-                n
-            ],
+            verdicts: vec![NodeVerdict::Execute; n],
             output_usage: vec![1; program.n_outputs],
         }
     }

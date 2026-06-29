@@ -8,7 +8,7 @@ use common::is_debug;
 use hashbrown::HashSet;
 
 use crate::execution::cache::Cache;
-use crate::execution::plan::ExecutionPlan;
+use crate::execution::plan::{ExecutionPlan, NodeVerdict};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::graph::NodeId;
 use crate::library::Library;
@@ -48,7 +48,6 @@ pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, library: &Libr
             if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
                 assert!(e_addr.target_idx < program.e_nodes.len());
                 let target = &program.e_nodes[e_addr.target_idx];
-                assert_eq!(e_addr.target_id, target.id);
                 assert!(e_addr.port_idx < target.outputs.len as usize);
             }
         }
@@ -80,12 +79,10 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
         assert!(seen_in_order.insert(idx));
     }
 
-    for (idx, e_node) in program.e_nodes.iter().enumerate() {
-        let flags = plan.node_flags[idx];
-        if flags.missing_required_inputs {
-            assert!(!flags.wants_execute);
-        }
-
+    // (Per-node verdict consistency — the old "missing ⇒ !wants_execute" — is now a
+    // property of the `NodeVerdict` enum: one of three mutually exclusive states, so
+    // the contradiction can't be represented. Only binding bounds remain to check.)
+    for e_node in program.e_nodes.iter() {
         for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(addr) = &e_input.binding {
                 assert!(addr.target_idx < program.e_nodes.len());
@@ -104,12 +101,10 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
         pending.remove(&idx);
 
         let e_node = &program.e_nodes[idx];
-        let flags = plan.node_flags[idx];
-        assert!(flags.wants_execute);
-        assert!(!flags.missing_required_inputs);
-        // A scheduled node is never served from cache — load-bearing for the disk
-        // cache, which hydrates only the cached *producers* an executing node reads.
-        assert!(!flags.cached);
+        // A scheduled node is exactly `Execute` — never `Cached` (load-bearing for the
+        // disk cache, which hydrates only the cached *producers* an executing node
+        // reads) and never `MissingInputs`. One enum check covers all three.
+        assert_eq!(plan.verdicts[idx], NodeVerdict::Execute);
 
         for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(addr) = &e_input.binding {

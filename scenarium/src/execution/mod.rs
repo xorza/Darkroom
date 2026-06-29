@@ -343,9 +343,9 @@ impl ExecutionEngine {
         &self.program.events[e_node.events.range()]
     }
 
-    pub(crate) fn node_flags(&self, e_node: &ExecutionNode) -> plan::NodeFlags {
+    pub(crate) fn node_verdict(&self, e_node: &ExecutionNode) -> plan::NodeVerdict {
         let idx = self.program.e_nodes.index_of_key(&e_node.id).unwrap();
-        self.plan.node_flags[idx]
+        self.plan.verdicts[idx]
     }
 
     pub(crate) fn node_output_usage(&self, e_node: &ExecutionNode) -> &[u32] {

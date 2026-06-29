@@ -167,7 +167,7 @@ impl OutputCache {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
                     // Only a producer the planner serves from cache needs loading; a
                     // producer that will execute fills its own slot during the run.
-                    if plan.node_flags[addr.target_idx].cached
+                    if plan.verdicts[addr.target_idx].is_cached()
                         && !self.hydrate_slot(program, cache, addr.target_idx)
                     {
                         all_loaded = false;

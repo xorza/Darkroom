@@ -469,7 +469,6 @@ impl<'a> Run<'a> {
                     ..Default::default()
                 });
                 ExecutionBinding::Bind(ExecutionPortAddress {
-                    target_id: node_id,
                     target_idx,
                     port_idx,
                 })

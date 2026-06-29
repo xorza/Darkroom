@@ -8,7 +8,7 @@
 use common::is_debug;
 
 use crate::execution::cache::Cache;
-use crate::execution::plan::{ExecutionPlan, NodeFlags, input_missing};
+use crate::execution::plan::{ExecutionPlan, NodeVerdict, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::execution::{Error, Result, RunSeeds, validate};
 
@@ -66,7 +66,7 @@ impl Planner {
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
-            self.resolve_node_flags(program, cache, plan);
+            self.resolve_verdicts(program, cache, plan);
             self.walk_backward_collect_execute_order(program, plan);
             validate::schedule(program, plan);
         }
@@ -186,7 +186,7 @@ impl Planner {
         Ok(())
     }
 
-    fn resolve_node_flags(
+    fn resolve_verdicts(
         &self,
         program: &ExecutionProgram,
         cache: &Cache,
@@ -212,11 +212,7 @@ impl Planner {
             let available = cache.is_available(e_node_idx);
 
             if available {
-                plan.node_flags[e_node_idx] = NodeFlags {
-                    cached: true,
-                    wants_execute: false,
-                    missing_required_inputs: false,
-                };
+                plan.verdicts[e_node_idx] = NodeVerdict::Cached;
                 if is_debug() {
                     processed[e_node_idx] = true;
                 }
@@ -237,20 +233,20 @@ impl Planner {
                     && let ExecutionBinding::Bind(addr) = &e_input.binding
                 {
                     // Post-order guarantees the producer's verdict is already in
-                    // `node_flags` before `input_missing` reads it.
+                    // `verdicts` before `input_missing` reads it.
                     assert!(addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize);
                     assert!(
                         processed[addr.target_idx],
                         "forward pass: dep not yet processed"
                     );
                 }
-                missing_required |= input_missing(e_input, &plan.node_flags);
+                missing_required |= input_missing(e_input, &plan.verdicts);
             }
 
-            plan.node_flags[e_node_idx] = NodeFlags {
-                cached: false,
-                wants_execute: !missing_required,
-                missing_required_inputs: missing_required,
+            plan.verdicts[e_node_idx] = if missing_required {
+                NodeVerdict::MissingInputs
+            } else {
+                NodeVerdict::Execute
             };
             if is_debug() {
                 processed[e_node_idx] = true;
@@ -302,7 +298,7 @@ impl Planner {
                 Color::Gray => unreachable!("cycle should be detected in pass 1"),
             }
 
-            if !plan.node_flags[idx].wants_execute {
+            if !plan.verdicts[idx].wants_execute() {
                 self.color[idx] = Color::Black;
                 continue;
             }
@@ -318,7 +314,7 @@ impl Planner {
                 // Recurse only into a producer that will itself run; a cached
                 // producer's value is already available, so its cone is pruned.
                 if let Some(addr) = e_input.binding.as_bind()
-                    && plan.node_flags[addr.target_idx].wants_execute
+                    && plan.verdicts[addr.target_idx].wants_execute()
                 {
                     self.stack.push(Visit {
                         e_node_idx: addr.target_idx,
@@ -340,8 +336,8 @@ mod tests {
     use crate::prelude::FuncId;
     use common::Span;
 
-    /// Hand-built program for planner tests. Node `idx` gets id `from_u128(idx+1)`,
-    /// so `bind`'s `target_idx`/`target_id` line up. Inputs are `(required, binding)`.
+    /// Hand-built program for planner tests. Node `idx` gets id `from_u128(idx+1)`.
+    /// Inputs are `(required, binding)`.
     #[derive(Default)]
     struct Fix {
         program: ExecutionProgram,
@@ -379,7 +375,6 @@ mod tests {
 
     fn bind(idx: usize, port: usize) -> ExecutionBinding {
         ExecutionBinding::Bind(ExecutionPortAddress {
-            target_id: NodeId::from_u128(idx as u128 + 1),
             target_idx: idx,
             port_idx: port,
         })
@@ -423,9 +418,9 @@ mod tests {
         assert_eq!(p.process_order, vec![a, b, c], "post-order: deps first");
         assert_eq!(p.execute_order, vec![a, b, c]);
         for idx in [a, b, c] {
-            assert!(p.node_flags[idx].wants_execute);
-            assert!(!p.node_flags[idx].cached);
-            assert!(!p.node_flags[idx].missing_required_inputs);
+            assert!(p.verdicts[idx].wants_execute());
+            assert!(!p.verdicts[idx].is_cached());
+            assert!(!p.verdicts[idx].missing_required_inputs());
         }
     }
 
@@ -439,8 +434,8 @@ mod tests {
         let b = f.node(true, &[(false, bind(a, 0))], 1);
 
         let p = plan_with_cached(&f, &[b]);
-        assert!(p.node_flags[b].cached);
-        assert!(p.node_flags[a].wants_execute, "A wants to run…");
+        assert!(p.verdicts[b].is_cached());
+        assert!(p.verdicts[a].wants_execute(), "A wants to run…");
         assert!(
             p.execute_order.is_empty(),
             "…but isn't scheduled: its sole consumer is cached"
@@ -457,10 +452,10 @@ mod tests {
         let p = plan(&f);
         for idx in [a, b] {
             assert!(
-                p.node_flags[idx].missing_required_inputs,
+                p.verdicts[idx].missing_required_inputs(),
                 "node {idx} missing"
             );
-            assert!(!p.node_flags[idx].wants_execute, "node {idx} not runnable");
+            assert!(!p.verdicts[idx].wants_execute(), "node {idx} not runnable");
         }
         assert!(p.execute_order.is_empty());
     }
@@ -472,8 +467,8 @@ mod tests {
         let a = f.node(true, &[(false, ExecutionBinding::None)], 1);
 
         let p = plan(&f);
-        assert!(!p.node_flags[a].missing_required_inputs);
-        assert!(p.node_flags[a].wants_execute);
+        assert!(!p.verdicts[a].missing_required_inputs());
+        assert!(p.verdicts[a].wants_execute());
         assert_eq!(p.execute_order, vec![a]);
     }
 
