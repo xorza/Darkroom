@@ -74,9 +74,10 @@ pub(crate) fn fs_file_id(path: &str) -> FileId {
 /// [`Cache`](crate::execution::cache::Cache) keeps one engine across updates and a
 /// recompile reuses the buffers ([`reset`](Self::reset)) instead of reallocating two
 /// graph-sized `Vec`s. The program is *not* held — it's passed to [`node_digest`](Self::node_digest)
-/// per recompute, so the engine carries no lifetime.
-pub(crate) struct DigestEngine<F> {
-    file_id: F,
+/// per recompute, so the engine carries no lifetime. File identity is resolved with
+/// [`fs_file_id`] directly.
+#[derive(Debug, Default)]
+pub(crate) struct DigestEngine {
     memo: Vec<NodeDigest>,
     /// Per-node in-progress marker — a node re-entered while still on the
     /// recursion stack is a cycle (the planner rejects these upstream; the digest
@@ -84,33 +85,7 @@ pub(crate) struct DigestEngine<F> {
     visiting: Vec<bool>,
 }
 
-// Manual `Debug` (the rule is "always derive Debug"): the `file_id` resolver is
-// an `F: Fn` closure that isn't `Debug`, so the derive can't apply.
-impl<F> std::fmt::Debug for DigestEngine<F> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DigestEngine")
-            .field("memo", &self.memo)
-            .field("visiting", &self.visiting)
-            .finish_non_exhaustive()
-    }
-}
-
-impl Default for DigestEngine<fn(&str) -> FileId> {
-    /// Engine using the filesystem [`fs_file_id`] resolver — the production path.
-    fn default() -> Self {
-        DigestEngine::with_resolver(fs_file_id)
-    }
-}
-
-impl<F: Fn(&str) -> FileId> DigestEngine<F> {
-    pub(crate) fn with_resolver(file_id: F) -> Self {
-        DigestEngine {
-            file_id,
-            memo: Vec::new(),
-            visiting: Vec::new(),
-        }
-    }
-
+impl DigestEngine {
     /// Size the working columns to `program` and clear them — call once before the
     /// [`node_digest`](Self::node_digest) loop of a fresh recompute (the memo persists
     /// *within* that loop so a shared upstream node is hashed once).
@@ -192,7 +167,7 @@ impl<F: Fn(&str) -> FileId> DigestEngine<F> {
                     }
                     ExecutionBinding::Const(value) => {
                         hasher.update(&[1u8]);
-                        Self::hash_static(&mut hasher, value, &self.file_id);
+                        Self::hash_static(&mut hasher, value);
                     }
                     ExecutionBinding::Bind(addr) => {
                         match self.port_digest(program, addr.target_idx, addr.port_idx) {
@@ -238,7 +213,7 @@ impl<F: Fn(&str) -> FileId> DigestEngine<F> {
     /// Fold one constant into `hasher`: a discriminant tag plus length-prefixed
     /// payload (so `"ab"`+`"c"` can't collide with `"a"`+`"bc"`), and for an
     /// `FsPath` the resolved file identity on top of the path string.
-    fn hash_static(hasher: &mut Hasher, value: &StaticValue, file_id: &F) {
+    fn hash_static(hasher: &mut Hasher, value: &StaticValue) {
         match value {
             StaticValue::Null => {
                 hasher.update(&[0u8]);
@@ -263,7 +238,7 @@ impl<F: Fn(&str) -> FileId> DigestEngine<F> {
                 hasher.update(&[5u8]);
                 hasher.update(&(path.len() as u64).to_le_bytes());
                 hasher.update(path.as_bytes());
-                let id = file_id(path);
+                let id = fs_file_id(path);
                 hasher.update(&id.len.to_le_bytes());
                 hasher.update(&id.mtime_ns.to_le_bytes());
             }
@@ -398,23 +373,16 @@ mod tests {
         ExecutionBinding::Const(value)
     }
 
-    fn no_files(_: &str) -> FileId {
-        FileId::default()
-    }
-
-    /// One node's digest with a one-shot engine (resolver + a fresh recompute).
-    fn digest_at(
-        program: &ExecutionProgram,
-        file_id: impl Fn(&str) -> FileId,
-        idx: NodeIdx,
-    ) -> Option<Digest> {
-        let mut engine = DigestEngine::with_resolver(file_id);
+    /// One node's digest with a one-shot engine (a fresh recompute), re-statting any
+    /// `FsPath` const each call.
+    fn digest_at(program: &ExecutionProgram, idx: NodeIdx) -> Option<Digest> {
+        let mut engine = DigestEngine::default();
         engine.reset(program);
         engine.node_digest(program, idx)
     }
 
     fn digests(prog: &Prog) -> Vec<Option<Digest>> {
-        let mut engine = DigestEngine::with_resolver(no_files);
+        let mut engine = DigestEngine::default();
         engine.reset(&prog.program);
         (0..prog.program.e_nodes.len())
             .map(|i| engine.node_digest(&prog.program, i.into()))
@@ -501,60 +469,40 @@ mod tests {
 
     #[test]
     fn fs_path_folds_file_identity_and_path() {
-        // Same FsPath const, different file identity (e.g. mtime) ⇒ different
-        // digest: this is what stops machine B serving A's result for B's files.
-        let mut p = Prog::default();
-        p.add(10, 0, 1, &[konst(StaticValue::FsPath("frames".into()))]);
+        // An `FsPath` const folds its resolved file identity (len, mtime — see
+        // `fs_file_id`) on top of the path string, so a file change re-keys: this is
+        // what stops machine B serving A's result for B's files. The resolver is the
+        // real filesystem, so exercise it with a temp file. `digest_at` re-stats it on
+        // each call (a fresh engine).
+        let file = std::env::temp_dir().join("scenarium_digest_fs_path_test.bin");
+        let path = file.to_string_lossy().into_owned();
+        let prog_for = |path: &str| {
+            let mut p = Prog::default();
+            p.add(10, 0, 1, &[konst(StaticValue::FsPath(path.into()))]);
+            p
+        };
 
-        let d_small = digest_at(
-            &p.program,
-            |_| FileId {
-                len: 1,
-                mtime_ns: 1,
-            },
-            NodeIdx(0),
+        let p = prog_for(&path);
+        std::fs::write(&file, b"x").unwrap(); // len 1
+        let d_len1 = digest_at(&p.program, NodeIdx(0));
+        std::fs::write(&file, b"xyz").unwrap(); // len 3 — file identity changed
+        let d_len3 = digest_at(&p.program, NodeIdx(0));
+        assert_ne!(
+            d_len1, d_len3,
+            "a file content change must re-key the digest"
         );
-        let d_large = digest_at(
-            &p.program,
-            |_| FileId {
-                len: 2,
-                mtime_ns: 1,
-            },
-            NodeIdx(0),
-        );
-        let d_mtime = digest_at(
-            &p.program,
-            |_| FileId {
-                len: 1,
-                mtime_ns: 9,
-            },
-            NodeIdx(0),
-        );
-        assert_ne!(d_small, d_large, "file length must matter");
-        assert_ne!(d_small, d_mtime, "file mtime must matter");
 
-        let same = digest_at(
-            &p.program,
-            |_| FileId {
-                len: 1,
-                mtime_ns: 1,
-            },
-            NodeIdx(0),
-        );
-        assert_eq!(d_small, same, "identical file identity ⇒ identical digest");
+        // A present file and a missing one are distinct identities.
+        std::fs::remove_file(&file).unwrap();
+        let d_missing = digest_at(&p.program, NodeIdx(0));
+        assert_ne!(d_len3, d_missing, "file presence must matter");
 
-        // The path string itself is folded too, independent of file identity.
-        let mut q = Prog::default();
-        q.add(10, 0, 1, &[konst(StaticValue::FsPath("other".into()))]);
+        // The path string itself is folded, independent of file identity (both missing).
         let d_other = digest_at(
-            &q.program,
-            |_| FileId {
-                len: 1,
-                mtime_ns: 1,
-            },
+            &prog_for("definitely-missing-elsewhere").program,
             NodeIdx(0),
         );
-        assert_ne!(d_small, d_other, "different path ⇒ different digest");
+        assert_ne!(d_missing, d_other, "different path ⇒ different digest");
     }
 
     #[test]
@@ -565,7 +513,7 @@ mod tests {
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A.0
         p.add(20, 0, 1, &[bind(0, 1)]); // C binds A.1 (same func as B)
 
-        let mut engine = DigestEngine::with_resolver(no_files);
+        let mut engine = DigestEngine::default();
         engine.reset(&p.program);
         assert_ne!(
             engine.port_digest(&p.program, NodeIdx(0), 0),
@@ -632,7 +580,7 @@ mod tests {
         let mut p = Prog::default();
         p.add(10, 0, 1, &[bind(1, 0)]); // A binds B (idx 1)
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A (idx 0)
-        assert_eq!(digest_at(&p.program, no_files, NodeIdx(0)), None);
+        assert_eq!(digest_at(&p.program, NodeIdx(0)), None);
     }
 
     #[test]

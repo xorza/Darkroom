@@ -10,7 +10,7 @@ use common::{KeyIndexKey, KeyIndexVec};
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::data::DynamicValue;
-use crate::execution::digest::{Digest, DigestEngine, FileId};
+use crate::execution::digest::{Digest, DigestEngine};
 use crate::execution::program::{ExecutionNode, ExecutionProgram, NodeIdx};
 use crate::graph::NodeId;
 use crate::prelude::AnyState;
@@ -133,7 +133,7 @@ pub(crate) struct Cache {
     pub(crate) slots: KeyIndexVec<NodeId, RuntimeSlot>,
     /// One digest engine kept across updates; its working columns are reused (sized
     /// per recompile) instead of reallocated. Holds no program — that's passed in.
-    digest_engine: DigestEngine<fn(&str) -> FileId>,
+    digest_engine: DigestEngine,
 }
 
 impl Cache {
