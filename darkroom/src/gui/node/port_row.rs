@@ -6,9 +6,10 @@
 //! header by [`crate::gui::node::NodeUI`]; the boundary-port rename
 //! affordance lives in [`crate::gui::node::port_rename`].
 
+use glam::Vec2;
 use palantir::{
-    Align, Color, Configure, ContextMenu, Corners, Grid, HAlign, MenuItem, Panel, Rect, Sense,
-    Shape, Sizing, Spacing, Stroke, Tooltip, Track, Ui, VAlign, WidgetId,
+    Align, Color, Configure, ContextMenu, Corners, Grid, HAlign, MenuItem, Mesh, Panel, Rect,
+    Sense, Shape, Sizing, Spacing, Stroke, Text, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use scenarium::data::{DataType, FsPathMode, StaticValue};
 use scenarium::function::ValueVariant;
@@ -23,7 +24,7 @@ use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
 use crate::gui::node::{RecordCtx, set_input};
 use crate::gui::run_state::ExecStatus;
-use crate::gui::scene::{InputBindingView, SceneInput, SceneNode, SceneOutput};
+use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::Theme;
 use crate::gui::{PortKind, PortRef};
 
@@ -45,7 +46,10 @@ const PORT_ROW_HEIGHT_EM: f32 = 1.8;
 
 pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
-    let n_rows = (node.inputs.len as usize).max(node.outputs.len as usize);
+    // Events list under the outputs in the same column, so the output side
+    // needs a row per output *and* per event.
+    let n_rows =
+        (node.inputs.len as usize).max(node.outputs.len as usize + node.events.len as usize);
     if n_rows == 0 {
         return;
     }
@@ -110,6 +114,11 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
         // *inputs* — renameable, except the trailing "+" placeholder.
         let rename = (node.boundary && i + 1 < outputs.len()).then_some(BoundarySide::Input);
         output_cell(ui, rcx, port, output, rename, out);
+    }
+    // Events emit from the same (right) side; list them in the rows directly
+    // below the data outputs.
+    for (i, event) in rcx.scene.events(node.events).iter().enumerate() {
+        event_cell(ui, rcx, node.id, i, outputs.len() + i, event);
     }
 }
 
@@ -308,6 +317,67 @@ fn output_cell(
         });
     // Double-click to disconnect every consumer is handled in
     // `emit_port_dblclicks` (prepass) alongside the input-side gesture.
+}
+
+/// One event (emitter) port row: the event name plus a white triangle glyph,
+/// right-aligned and overhanging the node edge like a data output. Sits in
+/// `COL_OUTPUT` at `row` (below the data outputs). Display-only for now — no
+/// connection/subscription gesture, so it emits no intents.
+fn event_cell(
+    ui: &mut Ui,
+    rcx: RecordCtx<'_>,
+    node_id: NodeId,
+    event_idx: usize,
+    row: usize,
+    event: &SceneEvent,
+) {
+    let theme = rcx.theme;
+    let overhang = theme.port_overhang();
+    let wid = event_glyph_wid(node_id, event_idx);
+    Panel::hstack()
+        .id_salt(("event", event_idx))
+        .grid_cell((row as u16, COL_OUTPUT))
+        .align(Align::new(HAlign::Right, VAlign::Center))
+        .size((Sizing::Hug, Sizing::Hug))
+        .gap(4.0)
+        .child_align(Align::v(VAlign::Center))
+        .show(ui, |ui| {
+            Text::new(event.name.clone()).show(ui);
+            event_glyph(ui, theme, wid, Spacing::new(0.0, 0.0, -overhang, 0.0));
+        });
+}
+
+/// Stable widget id for an event port glyph. A separate id space from data
+/// ports (`port_circle_wid`) because events are indexed independently of
+/// outputs.
+fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
+    WidgetId::from_hash(("graph.node.event_glyph", node_id, event_idx))
+}
+
+/// Paints an event port glyph: a white right-pointing triangle (a port dot
+/// rotated 90°), the same `port_size` box and edge overhang as a data port's
+/// circle, so it lines up with the outputs above it.
+fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, margin: Spacing) {
+    let port = theme.port_size;
+    // Right-pointing isosceles triangle filling the port box: the apex points
+    // outward (away from the node body), matching the emit direction.
+    let tri = Mesh::filled_triangle(
+        Vec2::new(0.0, 0.0),
+        Vec2::new(0.0, port),
+        Vec2::new(port, port * 0.5),
+        Color::WHITE,
+    );
+    Panel::zstack()
+        .id(wid)
+        .size((Sizing::Fixed(port), Sizing::Fixed(port)))
+        .margin(margin)
+        .show(ui, |ui| {
+            ui.add_shape(Shape::Mesh {
+                mesh: &tri,
+                local_rect: None,
+                tint: Color::WHITE.into(),
+            });
+        });
 }
 
 /// Hover / grab box scaled past the painted dot so ports are easier to

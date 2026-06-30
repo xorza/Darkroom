@@ -30,6 +30,10 @@ pub struct Scene {
     /// One flat pool of [`SceneOutput`] across every node, sliced by the single
     /// `SceneNode::outputs` span.
     pub outputs: Vec<SceneOutput>,
+    /// One flat pool of [`SceneEvent`] across every node, sliced by the single
+    /// `SceneNode::events` span. Events are emitter ports (always outgoing), so
+    /// the UI lists them under the output ports.
+    pub events: Vec<SceneEvent>,
     /// One flat pool of every input's picker options across all nodes, sliced
     /// per input by [`SceneInput::value_variants`].
     pub value_variants_pool: Vec<ValueVariant>,
@@ -75,6 +79,7 @@ impl Default for Scene {
             connections: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
+            events: Vec::new(),
             value_variants_pool: Vec::new(),
             pan: Vec2::ZERO,
             zoom: 1.0,
@@ -117,6 +122,13 @@ pub struct SceneOutput {
     pub ty: DataType,
 }
 
+/// One event (emitter) port in the per-frame projection. Events carry no data
+/// type — they are pure triggers — so a name is all the UI needs to list them.
+#[derive(Debug)]
+pub struct SceneEvent {
+    pub name: InternedStr,
+}
+
 #[derive(Debug)]
 pub struct SceneNode {
     pub id: NodeId,
@@ -130,6 +142,8 @@ pub struct SceneNode {
     pub inputs: Span,
     /// Span into [`Scene::outputs`].
     pub outputs: Span,
+    /// Span into [`Scene::events`]. Listed under the output ports.
+    pub events: Span,
     /// `Some` for a composite (`NodeKind::Subgraph`) instance — carries
     /// the ref so the header's open-in-tab action knows which def to
     /// target. `None` for a plain func node.
@@ -206,6 +220,7 @@ impl Scene {
         self.connections.clear();
         self.inputs.clear();
         self.outputs.clear();
+        self.events.clear();
         self.value_variants_pool.clear();
 
         for vn in view.view_nodes.iter() {
@@ -222,6 +237,7 @@ impl Scene {
                     kind_label: f.name.clone().into(),
                     inputs: Cow::Borrowed(&f.inputs),
                     outputs: Cow::Borrowed(&f.outputs),
+                    events: f.events.iter().map(|e| e.name.clone().into()).collect(),
                     subgraph: None,
                     terminal: f.terminal,
                     uncacheable: f.uncacheable,
@@ -230,6 +246,7 @@ impl Scene {
                     kind_label: d.name.clone().into(),
                     inputs: Cow::Borrowed(&d.inputs),
                     outputs: Cow::Borrowed(&d.outputs),
+                    events: d.events.iter().map(|e| e.name.clone().into()).collect(),
                     subgraph: Some(*r),
                     // A composite's terminal-ness is derived at flatten
                     // time, not stored on the def; treat "no exposed
@@ -246,6 +263,7 @@ impl Scene {
                         kind_label: f.name.clone().into(),
                         inputs: Cow::Borrowed(&f.inputs),
                         outputs: Cow::Borrowed(&f.outputs),
+                        events: f.events.iter().map(|e| e.name.clone().into()).collect(),
                         subgraph: None,
                         terminal: f.terminal,
                         uncacheable: f.uncacheable,
@@ -264,6 +282,7 @@ impl Scene {
                         kind_label: "Input".into(),
                         inputs: Cow::Borrowed(&[]),
                         outputs: Cow::Owned(outputs),
+                        events: Vec::new(),
                         subgraph: None,
                         terminal: false,
                         uncacheable: true,
@@ -280,6 +299,7 @@ impl Scene {
                         kind_label: "Output".into(),
                         inputs: Cow::Owned(inputs),
                         outputs: Cow::Borrowed(&[]),
+                        events: Vec::new(),
                         subgraph: None,
                         terminal: false,
                         uncacheable: true,
@@ -313,6 +333,7 @@ impl Scene {
                         kind_label: kind_label.into(),
                         inputs: Cow::Borrowed(&[]),
                         outputs: Cow::Borrowed(&[]),
+                        events: Vec::new(),
                         subgraph: None,
                         terminal: false,
                         uncacheable: true,
@@ -366,6 +387,13 @@ impl Scene {
                         },
                     }),
             );
+            let events = extend_pool(
+                &mut self.events,
+                interface
+                    .events
+                    .iter()
+                    .map(|name| SceneEvent { name: name.clone() }),
+            );
             // Boundary nodes carry no name in the model; label them by
             // role so the interior header isn't a blank bar.
             let name: InternedStr = match (&node.kind, node.name.is_empty()) {
@@ -380,6 +408,7 @@ impl Scene {
                 kind_label: interface.kind_label,
                 inputs,
                 outputs,
+                events,
                 subgraph: interface.subgraph,
                 terminal: interface.terminal,
                 disabled: node.disabled,
@@ -414,6 +443,11 @@ impl Scene {
         slice_pool(&self.outputs, span)
     }
 
+    /// A node's event (emitter) ports, sliced by its `events` span.
+    pub fn events(&self, span: Span) -> &[SceneEvent] {
+        slice_pool(&self.events, span)
+    }
+
     /// One input's picker options, resolved from its [`SceneInput::value_variants`]
     /// span into the shared pool.
     pub fn value_variants(&self, span: Span) -> &[ValueVariant] {
@@ -434,6 +468,11 @@ struct NodeInterface<'a> {
     kind_label: InternedStr,
     inputs: Cow<'a, [FuncInput]>,
     outputs: Cow<'a, [FuncOutput]>,
+    /// Event (emitter) port names, in declaration order. `FuncEvent` and
+    /// `SubgraphEvent` differ in type but both expose a `name`, and the UI
+    /// only lists the name — so the interface flattens them to interned
+    /// names rather than threading a third `Cow<[_]>` of incompatible types.
+    events: Vec<InternedStr>,
     subgraph: Option<SubgraphRef>,
     terminal: bool,
     /// Node manages its own caching (or has no output to cache), so the editor's
@@ -677,6 +716,45 @@ mod tests {
         assert!(
             !scene.inputs(known_node.inputs).is_empty(),
             "the resolved func still renders its interface"
+        );
+    }
+
+    #[test]
+    fn func_events_project_in_order_alongside_outputs() {
+        use scenarium::elements::worker_events_library::{
+            FRAME_EVENT_FUNC_ID, worker_events_library,
+        };
+
+        // The `frame event` func declares two events ("always", "fps") and two
+        // data outputs ("delta", "frame no"); the projection must surface both
+        // independently — events in their own pool, outputs unchanged.
+        let library = worker_events_library();
+        let mut graph = Graph::default();
+        let node: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
+        let node_id = node.id;
+        graph.add(node);
+
+        let view = GraphView::for_graph(&graph);
+        let mut scene = Scene::default();
+        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+
+        let n = scene.nodes.iter().find(|n| n.id == node_id).unwrap();
+        let event_names: Vec<&str> = scene
+            .events(n.events)
+            .iter()
+            .map(|e| e.name.as_str(""))
+            .collect();
+        assert_eq!(event_names, ["always", "fps"], "events project in order");
+
+        let output_names: Vec<&str> = scene
+            .outputs(n.outputs)
+            .iter()
+            .map(|o| o.name.as_str(""))
+            .collect();
+        assert_eq!(
+            output_names,
+            ["delta", "frame no"],
+            "data outputs are unaffected by events"
         );
     }
 
