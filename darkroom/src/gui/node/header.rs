@@ -73,14 +73,12 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool
     // the same half-on-the-edge overhang the port circles use.
     let overhang = theme.port_radius() + theme.node_border_width * 2.0;
     // Rotate the base (left-pointing) triangle +45° about its center so the
-    // apex points up-left, aligned with the wire arriving from there; scale
-    // around the same center for hover feedback. The layout box is unchanged
-    // (meshes aren't clipped to the owner rect, so rotated points may exceed
-    // it).
-    let scale = if hovered { 1.35 } else { 1.0 };
+    // apex points up-left, aligned with the wire arriving from there. The
+    // layout box is unchanged (meshes aren't clipped to the owner rect, so
+    // rotated points may exceed it).
     let c = Vec2::splat(port * 0.5);
     let rot = Vec2::from_angle(std::f32::consts::FRAC_PI_4);
-    let tf = |v: Vec2| c + rot.rotate((v - c) * scale);
+    let tf = |v: Vec2| c + rot.rotate(v - c);
     let tri = Mesh::filled_triangle(
         tf(Vec2::new(port, 0.0)),
         tf(Vec2::new(port, port)),
