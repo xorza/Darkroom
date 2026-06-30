@@ -115,6 +115,12 @@ debug = false
 incremental = false
 
 
+# debug=2 (the dev default) bloated target/ into ~1.6M DWARF .o files, starving builds on I/O
+# (Spotlight + fingerprint stats); line-tables-only keeps backtrace line numbers without the heavy DWARF.
+[profile.dev]
+debug = "line-tables-only"
+
+
 # Optimize heavy dependencies even in dev/test builds
 [profile.dev.package.wgpu]
 opt-level = 3

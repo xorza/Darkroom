@@ -1,6 +1,6 @@
 //! The `image` domain — `imaginarium`-backed nodes and types. This module is
 //! also the home of [`Image`] (a [`imaginarium::ImageBuffer`] wrapped as a
-//! scenarium [`CustomValue`] with an async GPU thumbnail preview).
+//! scenarium [`CustomValue`] with a CPU-built thumbnail preview).
 
 mod blend_mode;
 pub(crate) mod codec;
@@ -10,43 +10,14 @@ pub(crate) mod vision_ctx;
 
 use std::any::Any;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 use std::sync::LazyLock;
 
 use common::Slot;
 use imaginarium::{ColorFormat, ImageBuffer, ImageDesc, Transform, Vec2};
 use scenarium::context::ContextManager;
 use scenarium::data::{CustomValue, DataType, PendingPreview, TypeId};
-use tokio::sync::Notify;
-use tokio::task::JoinHandle;
 
 use crate::image::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
-
-/// Pending preview for image data that requires GPU polling.
-struct ImagePendingPreview {
-    task: JoinHandle<()>,
-    ready_notify: Arc<Notify>,
-}
-
-#[async_trait::async_trait]
-impl PendingPreview for ImagePendingPreview {
-    async fn wait(self: Box<Self>, ctx_manager: &mut ContextManager) {
-        // Wait for the task to signal it's ready for GPU polling
-        self.ready_notify.notified().await;
-
-        // Poll the GPU
-        let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
-        vision_ctx
-            .processing_ctx
-            .gpu()
-            .expect("Gpu is expected to be available")
-            .wait_async()
-            .await;
-
-        // Wait for the task to complete
-        let _ = self.task.await;
-    }
-}
 
 pub static IMAGE_TYPE_ID: LazyLock<TypeId> =
     LazyLock::new(|| "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into());
@@ -107,61 +78,34 @@ impl CustomValue for Image {
         let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
         let preview_desc = ImageDesc::new(new_width, new_height, desc.color_format);
-
         let mut scaled_buffer = ImageBuffer::new_empty(preview_desc);
 
-        let result = Transform::new().scale(Vec2::new(scale, scale)).execute(
+        // CPU-only: the transform runs on the CPU and the result is already
+        // CPU-resident, so the downscaled preview is built inline (a 256px frame
+        // is cheap) with no GPU round-trip — hence no pending work to poll.
+        if let Err(e) = Transform::new().scale(Vec2::new(scale, scale)).execute(
             &mut vision_ctx.processing_ctx,
             &self.buffer,
             &mut scaled_buffer,
-        );
-
-        if let Err(e) = result {
-            tracing::error!("Failed to scale preview: {}", e);
+        ) {
+            tracing::error!("Failed to scale preview: {e}");
             return None;
         }
 
-        let gpu = vision_ctx
-            .processing_ctx
-            .gpu()
-            .expect("GPU context required for preview generation")
-            .clone();
-
-        let ready_notify = Arc::new(Notify::new());
-
-        // Spawn async task to download from GPU and convert
-        let task = tokio::spawn({
-            let preview_slot = self.preview.clone();
-            let ready_notify = ready_notify.clone();
-            async move {
-                let scaled_gpu = scaled_buffer
-                    .as_gpu()
-                    .expect("Expected that Transform always returns Gpu image");
-
-                // Signal that we're ready for GPU polling before starting the async download
-                ready_notify.notify_one();
-
-                let scaled_cpu = match scaled_gpu.to_image_async(&gpu).await {
-                    Ok(img) => img,
-                    Err(e) => {
-                        tracing::error!("Failed to read preview from GPU: {}", e);
-                        return;
-                    }
-                };
-
-                let preview_image = match scaled_cpu.convert(ColorFormat::RGBA_U8) {
-                    Ok(img) => img,
-                    Err(e) => {
-                        tracing::error!("Failed to convert preview to RGBA_U8: {}", e);
-                        return;
-                    }
-                };
-
-                preview_slot.send(preview_image);
+        let scaled_cpu = match scaled_buffer.to_cpu(&vision_ctx.processing_ctx) {
+            Ok(img) => img,
+            Err(e) => {
+                tracing::error!("Failed to read preview: {e}");
+                return None;
             }
-        });
+        };
 
-        Some(Box::new(ImagePendingPreview { task, ready_notify }))
+        match scaled_cpu.convert(ColorFormat::RGBA_U8) {
+            Ok(preview_image) => self.preview.send(preview_image),
+            Err(e) => tracing::error!("Failed to convert preview to RGBA_U8: {e}"),
+        }
+
+        None
     }
 }
 
