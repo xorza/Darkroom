@@ -15,7 +15,7 @@ use imaginarium::Image as RawImage;
 use lumos::{
     AlignStackConfig, AstroImage, CalibrationImages, CalibrationMasters, CfaImage,
     DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, ImageDimensions, LocalContrast,
-    MlError, NeutralizeBackground, OpError, Reference, StackConfig, StarDetector, TiledOnnxConfig,
+    MlError, NeutralizeBackground, OpError, Reference, StackConfig, TiledOnnxConfig,
     calibrate_align_stack, ml_denoise, remove_stars, stack_cfa_master,
 };
 use scenarium::data::{
@@ -621,53 +621,6 @@ pub fn astro_library() -> Library {
             })
         }),
     ));
-
-    // star_detect → star count
-    library.add(
-        Func::new("eb93559d-370c-4bea-aef0-c43897f3416a", "star_detect")
-            .description("Detects stars and outputs the count")
-            .category("astro")
-            .pure()
-            .input(frame_input("image"))
-            .input(preset_config_input::<DetectionConfigDef>(
-                "detection",
-                DetectionPreset::variant_names(),
-            ))
-            .output("count", DataType::Int)
-            .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
-
-                    // A wired build_detection_config overrides the picked preset.
-                    let config = inputs[1]
-                        .value
-                        .as_custom::<ConfigValue<DetectionConfigDef>>()
-                        .map(|c| c.0.clone().into())
-                        .or_else(|| {
-                            inputs[1]
-                                .value
-                                .as_enum()
-                                .and_then(|s| DetectionPreset::from_str(s).ok())
-                                .map(|preset| preset.config())
-                        })
-                        .expect("detection config is validated at the compile boundary");
-                    // Star detection works on planar channels, so bring the
-                    // image back to a CPU `AstroImage` for the detector.
-                    let cpu = image_to_cpu(&inputs[0].value)?;
-                    let count = tokio::task::spawn_blocking(move || {
-                        let astro = AstroImage::from(cpu);
-                        StarDetector::from_config(config).detect(&astro).stars.len()
-                    })
-                    .await
-                    .map_err(anyhow::Error::from)?;
-
-                    outputs[0] = (count as i64).into();
-
-                    Ok(())
-                })
-            })),
-    );
 
     // ml_denoise — caller-supplied ONNX denoiser (DeepSNR), display-domain.
     library.add(processing_func(

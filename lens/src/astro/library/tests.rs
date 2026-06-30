@@ -192,12 +192,6 @@ fn processing_nodes_are_registered() {
             "{name} out type"
         );
     }
-    // star_detect analyzes the frame and outputs a count.
-    let sd = func(&lib, "star_detect");
-    assert_eq!(sd.inputs[0].data_type, *IMAGE_DATA_TYPE);
-    assert_eq!(sd.outputs.len(), 1);
-    assert_eq!(sd.outputs[0].name, "count");
-    assert_eq!(sd.outputs[0].ty.declared(), DataType::Int);
 }
 
 #[test]
@@ -246,7 +240,7 @@ fn preset_nodes_use_value_variant_picks_with_build_overrides() {
     // Every preset node is consistent: a config-typed input whose `value_variants`
     // are the preset names (seeded to the first), overridable by a build node.
     // (node, input name, input index, config type, build node, first preset)
-    let cases: [(&str, &str, usize, DataType, &str, &str); 3] = [
+    let cases: [(&str, &str, usize, DataType, &str, &str); 2] = [
         (
             "auto_stretch",
             "method",
@@ -262,14 +256,6 @@ fn preset_nodes_use_value_variant_picks_with_build_overrides() {
             config_data_type::<ScnrConfigDef>(),
             "build_scnr_config",
             "average_neutral",
-        ),
-        (
-            "star_detect",
-            "detection",
-            1,
-            config_data_type::<DetectionConfigDef>(),
-            "build_detection_config",
-            "wide_field",
         ),
     ];
     for (node, input_name, idx, ty, builder, first_preset) in cases {
