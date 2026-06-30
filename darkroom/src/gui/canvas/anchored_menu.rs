@@ -36,10 +36,8 @@ impl AnchoredMenu {
         body: impl FnOnce(&mut Ui, &PopupHandle) -> Option<T>,
     ) -> Option<T> {
         let anchor = self.anchor?;
-        if ui.escape_pressed() {
-            self.anchor = None;
-            return None;
-        }
+        // Esc dismissal is owned by the `Dismiss` popup below (folds into
+        // `resp.dismissed`) — no separate `escape_pressed` here.
         let chrome = ui.theme.context_menu.panel.clone();
         let mut pick = None;
         let mut popup = Popup::anchored_to(anchor)
