@@ -5,6 +5,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use lens::{astro_library, image_library};
 use scenarium::elements::basic_library::basic_library;
+use scenarium::elements::fs_watch_library::fs_watch_library;
 use scenarium::elements::worker_events_library::worker_events_library;
 use scenarium::prelude::Library;
 
@@ -24,6 +25,7 @@ pub(crate) fn runtime_func_lib() -> SharedLibrary {
     let mut library = Library::default();
     library.merge(basic_library());
     library.merge(worker_events_library());
+    library.merge(fs_watch_library());
     library.merge(image_library());
     library.merge(astro_library());
     for def in library::load_library() {
