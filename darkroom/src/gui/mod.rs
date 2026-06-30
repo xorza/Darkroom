@@ -4,6 +4,7 @@ pub(crate) mod dialogs;
 pub(crate) mod main_window;
 pub(crate) mod menu_bar;
 pub(crate) mod node;
+pub(crate) mod run_button;
 pub(crate) mod tab_bar;
 pub(crate) mod widgets;
 

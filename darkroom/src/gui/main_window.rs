@@ -12,6 +12,7 @@ use crate::gui::config_view;
 use crate::gui::menu_bar;
 use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::emit_subgraph_opens;
+use crate::gui::run_button;
 use crate::gui::scene::Scene;
 use crate::gui::tab_bar::{self, TabLabel};
 
@@ -85,7 +86,22 @@ impl MainWindow {
                 // the graph canvas for a graph tab, or the config window for
                 // the non-graph Config tab.
                 match doc.active_tab() {
-                    TabRef::Graph(_) => self.graph_ui.frame(ui, ctx, scene, out, &mut command),
+                    TabRef::Graph(_) => {
+                        // Overlay the run/cancel toggle on the canvas's
+                        // top-left corner; it hit-tests above the canvas, so a
+                        // click on it never starts a pan.
+                        Panel::zstack()
+                            .id_salt("graph_overlay")
+                            .size((Sizing::FILL, Sizing::FILL))
+                            .show(ui, |ui| {
+                                self.graph_ui.frame(ui, ctx, scene, out, &mut command);
+                                if let Some(c) =
+                                    run_button::show(ui, ctx, ctx.run_state.is_running())
+                                {
+                                    command = Some(c);
+                                }
+                            });
+                    }
                     TabRef::Config => {
                         if let Some(c) = config_view::show(ui, ctx) {
                             command = Some(c);
