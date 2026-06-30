@@ -60,7 +60,7 @@
 
       "Read(//proc/sys/kernel/**)",
 
-      "Skill(review-modules)"
+      "Skill(*)"
     ],
     "deny": ["Read(./.env)"]
   },
