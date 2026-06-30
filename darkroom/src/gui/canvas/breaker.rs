@@ -1,6 +1,6 @@
 use glam::Vec2;
 use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui};
-use scenarium::graph::{Binding, InputPort};
+use scenarium::graph::{Binding, InputPort, Subscription};
 use scenarium::prelude::NodeId;
 
 use crate::core::edit::intent::Intent;
@@ -54,6 +54,10 @@ pub(crate) struct BreakerState {
     /// by `NodeUI::draw_all`, drained on release into
     /// `Intent::RemoveNode`. Same one-visit-per-node guarantee.
     pub(crate) broken_nodes: Vec<NodeId>,
+    /// Event subscriptions whose wire the breaker intersects this frame.
+    /// Filled by `EventConnectionUI::draw`, drained on release into
+    /// `Intent::Unsubscribe`. Same one-visit-per-edge guarantee as `broken`.
+    pub(crate) broken_subscriptions: Vec<Subscription>,
 }
 
 impl BreakerState {
@@ -64,6 +68,7 @@ impl BreakerState {
             button,
             broken: Vec::new(),
             broken_nodes: Vec::new(),
+            broken_subscriptions: Vec::new(),
         }
     }
 
@@ -227,6 +232,20 @@ impl BreakerUI {
                         node_id: addr.node_id,
                         input_idx: addr.port_idx,
                         to: Binding::None,
+                    });
+                }
+                // A removed node already drops its subscriptions (RemoveNode's
+                // undo step captures every edge touching it), so skip any
+                // whose emitter or subscriber is doomed to avoid redundant
+                // history.
+                for s in b.broken_subscriptions.drain(..) {
+                    if doomed_nodes.contains(&s.emitter) || doomed_nodes.contains(&s.subscriber) {
+                        continue;
+                    }
+                    out.push(Intent::Unsubscribe {
+                        emitter: s.emitter,
+                        event_idx: s.event_idx,
+                        subscriber: s.subscriber,
                     });
                 }
                 self.state = None;

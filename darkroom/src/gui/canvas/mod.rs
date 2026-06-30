@@ -313,8 +313,9 @@ impl GraphUI {
                             let mut probe = breaker_ui.probe(canvas_origin);
                             connection_ui.draw(ui, ctx, scene, port_frame, &mut probe);
                             // Subscription wires sit under the node bodies
-                            // like data wires (drawn before `draw_all`).
-                            event_connection_ui.draw(ui, ctx, scene, port_frame);
+                            // like data wires (drawn before `draw_all`), and
+                            // share the breaker probe so they're cuttable too.
+                            event_connection_ui.draw(ui, ctx, scene, port_frame, &mut probe);
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,

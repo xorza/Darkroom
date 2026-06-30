@@ -5,6 +5,7 @@ use scenarium::prelude::NodeId;
 use crate::core::edit::intent::Intent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
+use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::to_world;
 use crate::gui::scene::Scene;
@@ -109,13 +110,16 @@ impl EventConnectionUI {
         self.state.and_then(|s| s.snap_sub)
     }
 
-    /// Paint every committed subscription wire on the current scene.
+    /// Paint every committed subscription wire on the current scene, marking
+    /// those the active breaker (`probe.state`) crosses as broken — pushed
+    /// onto `probe.state.broken_subscriptions` for the release-frame drain.
     pub(crate) fn draw(
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &Scene,
         port_frame: &PortFrame,
+        probe: &mut BreakerProbe<'_>,
     ) {
         let width = ctx.theme.connection_width;
         for s in &scene.subscriptions {
@@ -130,14 +134,32 @@ impl EventConnectionUI {
                 continue;
             };
             let EventHandles { p1, p2 } = event_handles(p0, p3);
+            let broken = probe
+                .state
+                .as_deref()
+                .is_some_and(|b| b.intersects_cubic(p0, p1, p2, p3));
+            if broken {
+                // unwrap: `broken == true` implies `state` is `Some`.
+                probe
+                    .state
+                    .as_deref_mut()
+                    .unwrap()
+                    .broken_subscriptions
+                    .push(*s);
+            }
             ui.add_shape(Shape::CubicBezier {
                 p0,
                 p1,
                 p2,
                 p3,
                 width,
-                // White to match the emitter/subscriber glyphs.
-                brush: Brush::Solid(Color::WHITE),
+                // White to match the emitter/subscriber glyphs; the broken
+                // alarm color wins while the breaker crosses it.
+                brush: if broken {
+                    Brush::Solid(ctx.theme.connection_broken)
+                } else {
+                    Brush::Solid(Color::WHITE)
+                },
                 cap: LineCap::Round,
             });
         }
