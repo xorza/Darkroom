@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod bench;
 mod cpu;
 #[cfg(feature = "wgpu")]
 mod gpu;
