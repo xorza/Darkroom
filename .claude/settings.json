@@ -3,6 +3,7 @@
     "RUST_BACKTRACE": "1",
     "CARGO_TERM_COLOR": "always"
   },
+  "skipAutoPermissionPrompt": true,
   "permissions": {
     "defaultMode": "auto",
     "allow": [
