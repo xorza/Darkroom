@@ -1,6 +1,6 @@
 //! Keyboard input → intent/command mapping. A child module of `editor`:
 //! these read palantir's key state and translate chords into queued
-//! `Intent`s (canvas edits) or a `MenuCommand` (file ops). Being a child
+//! `Intent`s (canvas edits) or a `AppCommand` (file ops). Being a child
 //! lets them drive the pipeline through `Editor`'s private fields without
 //! widening visibility; they never touch the frame orchestration.
 
@@ -10,8 +10,8 @@ use palantir::{Key, Shortcut, Ui};
 
 use crate::core::document::GraphRef;
 use crate::core::edit::intent::{self, Intent, build_duplicate_intent};
+use crate::gui::app::AppCommand;
 use crate::gui::app::editor::Editor;
-use crate::gui::menu_bar::MenuCommand;
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
 const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');
@@ -106,7 +106,7 @@ impl Editor {
         }
     }
 
-    /// Map Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+R to a `MenuCommand`.
+    /// Map Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+R to a `AppCommand`.
     ///
     /// Document file ops are **global** — they fire regardless of
     /// focus, so Ctrl+S still saves while a node's value editor is
@@ -117,22 +117,22 @@ impl Editor {
     /// the others' subscription that frame). Save-As (Ctrl+Shift+S) is
     /// checked before Save (Ctrl+S) so the shift variant wins its
     /// combo. Theme actions are menu-only — no shortcut.
-    pub(crate) fn menu_shortcut(&self, ui: &mut Ui) -> Option<MenuCommand> {
+    pub(crate) fn menu_shortcut(&self, ui: &mut Ui) -> Option<AppCommand> {
         let new = ui.key_pressed(NEW_SHORTCUT);
         let open = ui.key_pressed(OPEN_SHORTCUT);
         let save_as = ui.key_pressed(SAVE_AS_SHORTCUT);
         let save = ui.key_pressed(SAVE_SHORTCUT);
         let run = ui.key_pressed(RUN_SHORTCUT);
         if new {
-            Some(MenuCommand::NewDocument)
+            Some(AppCommand::NewDocument)
         } else if open {
-            Some(MenuCommand::LoadDocument)
+            Some(AppCommand::LoadDocument)
         } else if save_as {
-            Some(MenuCommand::SaveDocumentAs)
+            Some(AppCommand::SaveDocumentAs)
         } else if save {
-            Some(MenuCommand::SaveDocument)
+            Some(AppCommand::SaveDocument)
         } else if run {
-            Some(MenuCommand::Run)
+            Some(AppCommand::Run)
         } else {
             None
         }

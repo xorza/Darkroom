@@ -6,13 +6,13 @@ use crate::core::document::{Document, GraphRef, TabRef};
 use crate::core::edit::intent::Intent;
 use crate::gui::HostHandle;
 use crate::gui::UiAction;
+use crate::gui::app::AppCommand;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::GraphUI;
 use crate::gui::config_view;
+use crate::gui::graph_toolbar;
 use crate::gui::menu_bar;
-use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::emit_subgraph_opens;
-use crate::gui::run_button;
 use crate::gui::scene::Scene;
 use crate::gui::tab_bar::{self, TabLabel};
 
@@ -58,7 +58,7 @@ impl MainWindow {
         host: Option<&HostHandle>,
         doc: &Document,
         out: &mut Vec<Intent>,
-    ) -> Option<MenuCommand> {
+    ) -> Option<AppCommand> {
         let mut command = None;
         let tabs = tab_labels(doc);
         // Top-to-bottom: menu bar, then the tab strip, then the graph.
@@ -95,9 +95,7 @@ impl MainWindow {
                             .size((Sizing::FILL, Sizing::FILL))
                             .show(ui, |ui| {
                                 self.graph_ui.frame(ui, ctx, scene, out, &mut command);
-                                if let Some(c) =
-                                    run_button::show(ui, ctx, ctx.run_state.is_running())
-                                {
+                                if let Some(c) = graph_toolbar::show(ui, ctx) {
                                     command = Some(c);
                                 }
                             });

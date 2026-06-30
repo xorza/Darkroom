@@ -1,9 +1,9 @@
-//! Menu-command side effects: the file/theme/subgraph load-save flows
-//! `App` runs *outside* the record pass (after the frame's record +
-//! drain), so the blocking file dialog holds no frame borrows. Kept
-//! apart from the per-frame pipeline in `app.rs` — these only touch
-//! `Document`/`Theme`/`AppConfig` + persistence, never the gesture or
-//! scene state.
+//! [`AppCommand`](super::AppCommand) handling: the file/theme/subgraph/run/
+//! events side effects `App` runs *outside* the record pass (after the
+//! frame's record + drain), so a blocking file dialog or worker call holds no
+//! frame borrows. Kept apart from the per-frame pipeline in `mod.rs` — these
+//! touch `Document`/`Theme`/`AppConfig`/`Engine` + persistence, never the
+//! gesture or scene state.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,22 +22,22 @@ use crate::core::io::library;
 use crate::core::io::persistence;
 use crate::gui::app::App;
 use crate::gui::app::editor::Editor;
+use crate::gui::app::{AppCommand, MlModelKind};
 use crate::gui::dialogs;
-use crate::gui::menu_bar::{MenuCommand, MlModelKind};
 use crate::gui::theme::Theme;
 
 impl App {
-    pub(crate) fn handle_menu_command(&mut self, ui: &mut Ui, command: MenuCommand) {
+    pub(crate) fn handle_command(&mut self, ui: &mut Ui, command: AppCommand) {
         match command {
-            MenuCommand::NewDocument => self.new_document(),
-            MenuCommand::LoadDocument => {
+            AppCommand::NewDocument => self.new_document(),
+            AppCommand::LoadDocument => {
                 if let Some(path) = dialogs::pick_open_path(self.current_path.as_deref()) {
                     self.load_document(&path);
                 }
             }
-            MenuCommand::SaveDocument => self.save_current(),
-            MenuCommand::SaveDocumentAs => self.save_document_as(),
-            MenuCommand::SetTheme(choice) => {
+            AppCommand::SaveDocument => self.save_current(),
+            AppCommand::SaveDocumentAs => self.save_document_as(),
+            AppCommand::SetTheme(choice) => {
                 // Resolve the choice to a concrete palette (`System`
                 // queries the OS), push the matching palantir palette onto
                 // the Ui, and persist the preference so the next launch
@@ -47,24 +47,26 @@ impl App {
                 self.config.theme = choice;
                 self.config.save();
             }
-            MenuCommand::ExportSubgraph => self.export_active_subgraph(),
-            MenuCommand::ImportSubgraph => self.import_subgraph(),
-            MenuCommand::PromoteSubgraph => self.promote_active_subgraph(),
-            MenuCommand::PublishNodeSubgraph { node_id } => self.publish_node_subgraph(node_id),
-            MenuCommand::PickInputPath {
+            AppCommand::ExportSubgraph => self.export_active_subgraph(),
+            AppCommand::ImportSubgraph => self.import_subgraph(),
+            AppCommand::PromoteSubgraph => self.promote_active_subgraph(),
+            AppCommand::PublishNodeSubgraph { node_id } => self.publish_node_subgraph(node_id),
+            AppCommand::PickInputPath {
                 node_id,
                 port_idx,
                 config,
             } => self.pick_input_path(node_id, port_idx, config),
-            MenuCommand::Run => self.run_graph(),
-            MenuCommand::CancelRun => self.engine.cancel_run(),
-            MenuCommand::OpenConfig => {
+            AppCommand::Run => self.run_graph(),
+            AppCommand::CancelRun => self.engine.cancel_run(),
+            AppCommand::StartEvents => self.start_events(),
+            AppCommand::StopEvents => self.stop_events(),
+            AppCommand::OpenConfig => {
                 let library = self.engine.library.load();
                 self.editor.open_config(&library);
             }
-            MenuCommand::PickMlModel(kind) => self.pick_ml_model(kind),
-            MenuCommand::SetMlModelPath { kind, path } => self.set_ml_model_path(kind, path),
-            MenuCommand::SetLoadLastDocument(on) => {
+            AppCommand::PickMlModel(kind) => self.pick_ml_model(kind),
+            AppCommand::SetMlModelPath { kind, path } => self.set_ml_model_path(kind, path),
+            AppCommand::SetLoadLastDocument(on) => {
                 self.config.load_last_document = on;
                 self.config.save();
             }

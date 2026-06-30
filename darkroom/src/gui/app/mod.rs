@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use palantir::Ui;
-use scenarium::prelude::{Graph as CoreGraph, Library};
+use scenarium::data::FsPathConfig;
+use scenarium::prelude::{Graph as CoreGraph, Library, NodeId};
 
 use crate::core::document::Document;
 use crate::core::engine::Engine;
@@ -21,6 +22,81 @@ mod commands;
 pub(crate) mod editor;
 
 use editor::Editor;
+
+/// A deferred, side-effecting command a UI surface (the menu bar, the graph
+/// toolbar, the Config tab, a node's S-badge, an inline path-picker) hands to
+/// [`App`] to perform *outside* the record pass — after the frame's record +
+/// drain, so a blocking file dialog or worker call holds no frame borrows.
+/// The producing UI never touches `Document` / `Theme` / `Engine` directly;
+/// it returns one of these and [`App::handle_command`] actions it.
+#[derive(Clone, Debug)]
+pub(crate) enum AppCommand {
+    NewDocument,
+    LoadDocument,
+    /// Save to the current file, or prompt (Save As) if there isn't one.
+    SaveDocument,
+    /// Always prompt for a destination.
+    SaveDocumentAs,
+    /// Set the theme preference: `System` follows the OS light/dark
+    /// setting, `Dark`/`Light` pin a palette. Persisted to config.
+    SetTheme(ThemeChoice),
+    /// Export the active subgraph (plus its local-def dependencies) to a
+    /// file. No-op when the active tab isn't a subgraph.
+    ExportSubgraph,
+    /// Import a subgraph bundle from a file into the current document.
+    ImportSubgraph,
+    /// Publish a copy of the active subgraph into the shared library
+    /// (`Library`), so it can be instanced as `Linked` anywhere. No-op
+    /// when the active tab / selection isn't a subgraph.
+    PromoteSubgraph,
+    /// Publish a specific node's local subgraph def to the library (the
+    /// S-badge "Publish" action). Updates the library def it came from
+    /// in place when linked (`origin`), else creates a new entry and
+    /// links the local def to it.
+    PublishNodeSubgraph {
+        node_id: NodeId,
+    },
+    /// Open a file dialog (filtered by `config`) for a node's `FsPath`
+    /// const input, applying the chosen path as a `SetInput` edit. Raised
+    /// by the inline pick button (see `gui::node::emit_path_picks`); the
+    /// blocking dialog runs outside the record like the other file ops.
+    PickInputPath {
+        node_id: NodeId,
+        port_idx: usize,
+        config: Arc<FsPathConfig>,
+    },
+    /// Evaluate the graph once on the worker.
+    Run,
+    /// Request cancellation of the in-flight run.
+    CancelRun,
+    /// Start the worker's event loop (fire emitter events → run subscribers).
+    StartEvents,
+    /// Stop the worker's event loop.
+    StopEvents,
+    /// Open (or focus) the Config tab — the app-settings window.
+    OpenConfig,
+    /// Open an ONNX file dialog for one of the ML model paths and persist
+    /// the choice. Raised by the Config tab's "Browse…" buttons.
+    PickMlModel(MlModelKind),
+    /// Set an ML model path directly from the Config tab's editable field
+    /// (a typed or pasted path), then persist + republish it.
+    SetMlModelPath {
+        kind: MlModelKind,
+        path: PathBuf,
+    },
+    /// Toggle whether launch reopens the last document. Raised by the
+    /// Config tab's "Load last document on startup" checkbox; persisted.
+    SetLoadLastDocument(bool),
+}
+
+/// Which ML model path an [`AppCommand::PickMlModel`] targets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MlModelKind {
+    /// The `ml_denoise` node's model (DeepSNR).
+    Denoise,
+    /// The `remove_stars` node's model (StarNet).
+    StarRemoval,
+}
 
 /// Shared per-frame context threaded down the UI tree. Holds borrows
 /// of state owned higher up so child subtrees don't take a growing
@@ -40,6 +116,11 @@ pub(crate) struct AppContext<'a> {
     /// Persisted app config (theme + ML model paths), so a non-graph view
     /// like the Config tab can display the current settings.
     pub(crate) config: &'a AppConfig,
+    /// Whether the worker's event loop is running — drives the events
+    /// toggle's on/off look. App-side intent rather than the worker's atomic,
+    /// so the button can't lag a frame behind (and `Update` from a one-shot
+    /// run, which tears the loop down, resets it in lockstep).
+    pub(crate) events_running: bool,
 }
 
 /// Thin shell around the [`Editor`] (which owns the document + its edit
@@ -47,7 +128,7 @@ pub(crate) struct AppContext<'a> {
 /// borrows each frame — the [`Engine`] (func lib + worker + script host),
 /// the active theme, session config + file path, and the host handle. Its
 /// `frame` drains the engine's worker + script queues into the editor's
-/// projections, runs one `Editor::frame`, and actions the [`MenuCommand`]
+/// projections, runs one `Editor::frame`, and actions the [`AppCommand`]
 /// it surfaces (file / theme / subgraph dialogs, run) outside the record.
 #[derive(Debug)]
 pub(crate) struct App {
@@ -67,6 +148,10 @@ pub(crate) struct App {
     /// Written on every doc/theme change so the next launch reopens
     /// where the user left off.
     pub(crate) config: AppConfig,
+    /// Whether the worker's event loop is currently running (toggled by the
+    /// events button). Reset whenever a one-shot run's `Update` tears the
+    /// loop down, so it tracks the worker's real state.
+    pub(crate) events_running: bool,
 }
 
 impl App {
@@ -95,6 +180,7 @@ impl App {
             host_handle: handle,
             current_path: None,
             config: AppConfig::default(),
+            events_running: false,
         };
         app.config = AppConfig::load();
         // Resolve the saved preference: `System` (the default) follows
@@ -126,6 +212,23 @@ impl App {
         // per-node values, and tags the replies the open panels request.
         self.editor.run_state.begin_run();
         self.engine.run_once(self.editor.document.graph.clone());
+        // The worker's `Update` tears down any running event loop, so the
+        // toggle must drop in lockstep.
+        self.events_running = false;
+    }
+
+    /// Start the worker's event loop on the current graph: emitter events
+    /// fire and their subscribers run until stopped.
+    pub(crate) fn start_events(&mut self) {
+        self.engine
+            .start_event_loop(self.editor.document.graph.clone());
+        self.events_running = true;
+    }
+
+    /// Stop the worker's event loop.
+    pub(crate) fn stop_events(&mut self) {
+        self.engine.stop_event_loop();
+        self.events_running = false;
     }
 
     /// Consume worker results posted since the last frame. A finished run
@@ -225,6 +328,7 @@ impl palantir::App for App {
             &self.theme,
             self.config.theme,
             &self.config,
+            self.events_running,
             &self.host_handle,
         );
 
@@ -243,7 +347,7 @@ impl palantir::App for App {
         // after the frame's record + drain. Loading replaces the
         // document/theme wholesale, so always relayout afterward.
         if let Some(command) = command {
-            self.handle_menu_command(ui, command);
+            self.handle_command(ui, command);
             ui.request_relayout();
         }
     }

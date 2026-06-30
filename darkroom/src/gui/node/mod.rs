@@ -350,7 +350,7 @@ pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAc
 /// A click on an `FsPath` input's inline pick button, surfaced for the
 /// caller to translate into a deferred file-dialog command. The node UI
 /// produces the domain request (node + port + picker config) and stays
-/// unaware of the app-level `MenuCommand` enum — the canvas, which already
+/// unaware of the app-level `AppCommand` enum — the canvas, which already
 /// owns the command channel, does the translation.
 pub(crate) struct PathPickRequest {
     pub(crate) node_id: NodeId,

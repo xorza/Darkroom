@@ -145,6 +145,22 @@ impl WorkerBridge {
         self.worker.request_cancel();
     }
 
+    /// Start the event loop on the current graph: load it, then run the loop
+    /// that fires each emitter's events and executes their subscribers. One
+    /// batched send so the `Update` and `StartEventLoop` commit as a unit.
+    pub(crate) fn start_event_loop(&self, graph: Graph, library: Arc<Library>) {
+        let _ = self.worker.send_many([
+            WorkerMessage::Update { graph, library },
+            WorkerMessage::StartEventLoop,
+        ]);
+    }
+
+    /// Stop the event loop (aborts the per-event tasks). A dropped send
+    /// (worker already exited) is a harmless shutdown no-op.
+    pub(crate) fn stop_event_loop(&self) {
+        let _ = self.worker.send(WorkerMessage::StopEventLoop);
+    }
+
     /// Ask the worker for one node's computed input/output values. The
     /// worker answers on a oneshot against its live executor slots; a
     /// forwarder task on our runtime turns that into a

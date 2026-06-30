@@ -3,8 +3,8 @@ use scenarium::prelude::NodeId;
 use scenarium::subgraph::SubgraphRef;
 
 use crate::core::edit::intent::Intent;
+use crate::gui::app::AppCommand;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
-use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::header::subgraph_badge_wid;
 use crate::gui::scene::Scene;
 
@@ -26,7 +26,7 @@ impl SubgraphMenuUi {
         ui: &mut Ui,
         scene: &Scene,
         out: &mut Vec<Intent>,
-        cmd: &mut Option<MenuCommand>,
+        cmd: &mut Option<AppCommand>,
     ) {
         // Latch on a secondary-click of any local-subgraph node's badge,
         // read from last frame's response (same timing as the open).
@@ -60,7 +60,7 @@ impl SubgraphMenuUi {
         {
             match choice {
                 MenuChoice::Publish => {
-                    *cmd = Some(MenuCommand::PublishNodeSubgraph { node_id });
+                    *cmd = Some(AppCommand::PublishNodeSubgraph { node_id });
                 }
                 MenuChoice::Detach => out.push(Intent::DetachSubgraph { node_id }),
             }

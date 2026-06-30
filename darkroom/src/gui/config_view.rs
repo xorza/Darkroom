@@ -1,7 +1,7 @@
 //! The Config tab's content: a settings window for [`AppConfig`] (theme
 //! preference + the lens ML model paths). Rendered by `main_window` when
 //! the active tab is `TabRef::Config`. Pure view — it reads the current
-//! settings from [`AppContext`] and surfaces edits as [`MenuCommand`]s for
+//! settings from [`AppContext`] and surfaces edits as [`AppCommand`]s for
 //! `App` to apply and persist *outside* the record, exactly like the menu
 //! bar (the editor tree doesn't own `AppConfig`).
 
@@ -14,13 +14,13 @@ use palantir::{
 
 use crate::core::theme_pref::ThemeChoice;
 use crate::gui::app::AppContext;
-use crate::gui::menu_bar::{MenuCommand, MlModelKind};
+use crate::gui::app::{AppCommand, MlModelKind};
 use crate::gui::theme::Theme;
 
 /// Draw the config window and return the edit the user requested, if any.
-pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<MenuCommand> {
+pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
     let theme = ctx.theme;
-    let mut command: Option<MenuCommand> = None;
+    let mut command: Option<AppCommand> = None;
     Panel::vstack()
         .id_salt("config_view")
         .size((Sizing::FILL, Sizing::FILL))
@@ -55,7 +55,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<MenuCommand> {
                     }
                 });
             if selected != ctx.theme_choice {
-                command = Some(MenuCommand::SetTheme(selected));
+                command = Some(AppCommand::SetTheme(selected));
             }
 
             // Startup — whether launch reopens the last document.
@@ -65,7 +65,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<MenuCommand> {
                 .label("Load last document on startup")
                 .show(ui);
             if load_last != ctx.config.load_last_document {
-                command = Some(MenuCommand::SetLoadLastDocument(load_last));
+                command = Some(AppCommand::SetLoadLastDocument(load_last));
             }
 
             // ML models — caller-supplied ONNX files the ml_denoise /
@@ -118,14 +118,14 @@ const ML_PATH_FIELD_WIDTH: f32 = 520.0;
 
 /// One model-path row: a fixed-width label, an **editable** path field (type
 /// or paste a path; Enter or click-away commits), and a "Browse…" button.
-/// Returns a [`MenuCommand::SetMlModelPath`] on an edited path or a
-/// [`MenuCommand::PickMlModel`] when Browse is clicked.
+/// Returns a [`AppCommand::SetMlModelPath`] on an edited path or a
+/// [`AppCommand::PickMlModel`] when Browse is clicked.
 fn model_row(
     ui: &mut Ui,
     label: &'static str,
     path: &Path,
     kind: MlModelKind,
-) -> Option<MenuCommand> {
+) -> Option<AppCommand> {
     let mut command = None;
     let id = WidgetId::from_hash(("config.ml_model_path", label));
     Panel::hstack()
@@ -165,7 +165,7 @@ fn model_row(
             let commit = resp.submitted || resp.lost_focus;
             ui.state_mut::<String>(id).replace_range(.., &draft);
             if commit && draft != canonical {
-                command = Some(MenuCommand::SetMlModelPath {
+                command = Some(AppCommand::SetMlModelPath {
                     kind,
                     path: PathBuf::from(draft),
                 });
@@ -177,7 +177,7 @@ fn model_row(
                 .show(ui)
                 .clicked()
             {
-                command = Some(MenuCommand::PickMlModel(kind));
+                command = Some(AppCommand::PickMlModel(kind));
             }
         });
     command

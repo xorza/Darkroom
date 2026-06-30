@@ -20,6 +20,7 @@ use scenarium::prelude::NodeId;
 use std::collections::BTreeSet;
 
 use crate::core::edit::intent::Intent;
+use crate::gui::app::AppCommand;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
@@ -31,7 +32,6 @@ use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
-use crate::gui::menu_bar::MenuCommand;
 use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_port_dblclicks};
 use crate::gui::scene::{Scene, SceneNode};
 use crate::gui::{PortKind, PortRef};
@@ -162,7 +162,7 @@ impl GraphUI {
         ctx: &AppContext<'_>,
         scene: &Scene,
         out: &mut Vec<Intent>,
-        cmd: &mut Option<MenuCommand>,
+        cmd: &mut Option<AppCommand>,
     ) {
         // Pan/zoom was already folded into the document in `prepass`
         // and mirrored into `scene` by `Scene::rebuild`, so the
@@ -205,11 +205,11 @@ impl GraphUI {
         // PickInputPath command (App opens the dialog outside the record).
         // The node UI returns a domain request; the canvas — which owns the
         // command channel — translates it, so node code never names
-        // `MenuCommand`. A command already set this frame wins.
+        // `AppCommand`. A command already set this frame wins.
         if cmd.is_none()
             && let Some(req) = emit_path_picks(ui, scene)
         {
-            *cmd = Some(MenuCommand::PickInputPath {
+            *cmd = Some(AppCommand::PickInputPath {
                 node_id: req.node_id,
                 port_idx: req.port_idx,
                 config: req.config,

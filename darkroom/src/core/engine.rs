@@ -74,6 +74,18 @@ impl Engine {
         self.worker.cancel_run();
     }
 
+    /// Start the event loop on `graph` (loads it, then fires events). The
+    /// worker's `Update` tears down any prior loop first.
+    pub(crate) fn start_event_loop(&self, graph: Graph) {
+        self.worker
+            .start_event_loop(graph, self.library.load_full());
+    }
+
+    /// Stop the event loop.
+    pub(crate) fn stop_event_loop(&self) {
+        self.worker.stop_event_loop();
+    }
+
     /// Non-blocking drain of worker results posted since the last frame.
     pub(crate) fn drain_worker(&self) -> impl Iterator<Item = WorkerEvent> + '_ {
         self.worker.drain()

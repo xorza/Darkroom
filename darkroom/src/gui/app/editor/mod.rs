@@ -5,7 +5,7 @@
 //! tree state, and the transient frame-coordination scratch. [`App`] is a
 //! thin shell around it: it owns the runtime/IO (func lib, theme, config,
 //! file path, worker, host handle), drains the worker into the editor's
-//! projections, runs one `Editor::frame`, and handles the [`MenuCommand`]
+//! projections, runs one `Editor::frame`, and handles the [`AppCommand`]
 //! that frame surfaces. Everything the GUI tree reads or mutates lives
 //! here; nothing in `Editor` knows about file dialogs or the worker.
 //!
@@ -22,9 +22,9 @@ use crate::core::theme_pref::ThemeChoice;
 use crate::core::worker::ValueRequest;
 use crate::gui::HostHandle;
 use crate::gui::UiAction;
+use crate::gui::app::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::main_window::MainWindow;
-use crate::gui::menu_bar::MenuCommand;
 use crate::gui::run_state::RunState;
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
@@ -190,7 +190,7 @@ impl Editor {
     }
 
     /// Run one frame of the edit pipeline against the borrowed runtime
-    /// context (`library`, `theme`, `host`), returning the [`MenuCommand`]
+    /// context (`library`, `theme`, `host`), returning the [`AppCommand`]
     /// the frame surfaced (if any) for `App` to action outside the record.
     ///
     /// The frame splits into a **navigation phase** (settle *which* graph
@@ -198,6 +198,7 @@ impl Editor {
     /// graph), because input that switches tabs/opens subgraphs comes from
     /// *last* frame's click responses and must resolve before anything
     /// edits or records.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
@@ -205,8 +206,9 @@ impl Editor {
         theme: &Theme,
         theme_choice: ThemeChoice,
         config: &AppConfig,
+        events_running: bool,
         host: &HostHandle,
-    ) -> Option<MenuCommand> {
+    ) -> Option<AppCommand> {
         self.intents.clear();
         self.actions.clear();
         self.needs_relayout = false;
@@ -259,6 +261,7 @@ impl Editor {
             library,
             run_state: &self.run_state,
             config,
+            events_running,
         };
         let command = self
             .main_window

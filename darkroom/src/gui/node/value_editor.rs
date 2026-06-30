@@ -97,7 +97,7 @@ pub(crate) fn show(
         StaticValue::FsPath(path) => {
             // A pick button showing the chosen file's name. The click is
             // polled by `emit_path_picks` (by `id`), which surfaces a
-            // `MenuCommand::PickInputPath`; `App` opens the dialog outside
+            // `AppCommand::PickInputPath`; `App` opens the dialog outside
             // the record and applies the resulting path. So no synchronous
             // value here.
             Button::new()
