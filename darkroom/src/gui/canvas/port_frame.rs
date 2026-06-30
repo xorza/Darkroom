@@ -1,13 +1,16 @@
 use std::collections::HashMap;
+use std::hash::Hash;
 
 use glam::Vec2;
-use palantir::{Rect, Ui};
+use palantir::{Rect, ResponseState, Ui};
+use scenarium::prelude::NodeId;
 
 use crate::gui::canvas::node_ports;
+use crate::gui::node::header::subscription_glyph_wid;
 use crate::gui::node::node_widget_id;
-use crate::gui::node::port_row::port_circle_wid;
+use crate::gui::node::port_row::{event_glyph_wid, port_circle_wid};
 use crate::gui::scene::Scene;
-use crate::gui::{PortKind, PortRef};
+use crate::gui::{EventRef, PortKind, PortRef};
 
 /// Per-frame snapshot of the four `ResponseState` fields downstream
 /// consumers actually read. Built once at the top of
@@ -23,6 +26,13 @@ use crate::gui::{PortKind, PortRef};
 #[derive(Default, Debug)]
 pub(crate) struct PortFrame {
     map: HashMap<PortRef, PortInfo>,
+    /// Emitter event glyphs (the white triangles under a node's outputs),
+    /// keyed by [`EventRef`]. The drag source for subscription wires.
+    events: HashMap<EventRef, PortInfo>,
+    /// Subscription pins (the top-left triangle on terminal nodes), keyed
+    /// by node — a subscription is whole-node, so one pin per node. The
+    /// drop target for subscription wires.
+    subs: HashMap<NodeId, PortInfo>,
     /// Per-port intra-node offset (`port_rect.center - node_rect.min`),
     /// kept **across frames and tab switches**. A port's offset is
     /// layout-stable (it only depends on the node's content, not its
@@ -33,6 +43,10 @@ pub(crate) struct PortFrame {
     /// of popping in one frame late. Keyed by the globally-unique
     /// `PortRef`, so it naturally spans every open graph.
     offsets: HashMap<PortRef, Vec2>,
+    /// Intra-node offsets for event glyphs — same role as `offsets`.
+    event_offsets: HashMap<EventRef, Vec2>,
+    /// Intra-node offsets for subscription pins — same role as `offsets`.
+    sub_offsets: HashMap<NodeId, Vec2>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -65,6 +79,8 @@ struct PortInfo {
 impl PortFrame {
     pub(crate) fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
         self.map.clear();
+        self.events.clear();
+        self.subs.clear();
         for n in &scene.nodes {
             // Port offsets within a node are stable; the node's
             // canvas-local position changes when the user drags. Take
@@ -80,31 +96,26 @@ impl PortFrame {
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in node_ports(n, kind) {
                     let r = ui.response_for(port_circle_wid(port));
-                    // Fresh offset this frame (both rects recorded last
-                    // frame) refreshes the cache; otherwise fall back to
-                    // the cached offset so a just-shown graph still
-                    // anchors its curves.
-                    let fresh_offset = match (r.layout_rect, node_min) {
-                        (Some(port_rect), Some(node_min)) => Some(port_rect.center() - node_min),
-                        _ => None,
-                    };
-                    if let Some(offset) = fresh_offset {
-                        self.offsets.insert(port, offset);
-                    }
-                    let layout_center = fresh_offset
-                        .or_else(|| self.offsets.get(&port).copied())
-                        .map(|offset| n.pos + offset);
-                    self.map.insert(
-                        port,
-                        PortInfo {
-                            layout_center,
-                            screen_rect: r.rect,
-                            hovered: r.hovered,
-                            drag_started: r.drag_started(),
-                            dragging: r.drag_started() || r.drag_delta().is_some(),
-                        },
-                    );
+                    let info = snapshot(r, node_min, n.pos, port, &mut self.offsets);
+                    self.map.insert(port, info);
                 }
+            }
+            // Emitter event glyphs, drag sources for subscription wires.
+            for event_idx in 0..n.events.len as usize {
+                let ev = EventRef {
+                    node_id: n.id,
+                    event_idx,
+                };
+                let r = ui.response_for(event_glyph_wid(n.id, event_idx));
+                let info = snapshot(r, node_min, n.pos, ev, &mut self.event_offsets);
+                self.events.insert(ev, info);
+            }
+            // The subscription pin only exists on terminal nodes (only they
+            // render one — see `header::subscription_glyph`).
+            if n.terminal {
+                let r = ui.response_for(subscription_glyph_wid(n.id));
+                let info = snapshot(r, node_min, n.pos, n.id, &mut self.sub_offsets);
+                self.subs.insert(n.id, info);
             }
         }
         // `offsets` deliberately accumulates across every tab the user
@@ -155,5 +166,82 @@ impl PortFrame {
         if let Some(info) = self.map.get_mut(&p) {
             info.hovered = true;
         }
+    }
+
+    /// Canvas-local center of an emitter event glyph, or `None` when it
+    /// hasn't measured yet.
+    pub(crate) fn event_center_canvas_local(&self, e: EventRef) -> Option<Vec2> {
+        self.events.get(&e)?.layout_center
+    }
+
+    /// `true` on the one-frame edge of a drag-start on this event glyph.
+    pub(crate) fn event_drag_started(&self, e: EventRef) -> bool {
+        self.events.get(&e).is_some_and(|i| i.drag_started)
+    }
+
+    /// `true` while a drag started on this event glyph is still live.
+    pub(crate) fn event_dragging(&self, e: EventRef) -> bool {
+        self.events.get(&e).is_some_and(|i| i.dragging)
+    }
+
+    /// Canvas-local center of a node's subscription pin, or `None` when it
+    /// hasn't measured yet (or the node has no pin).
+    pub(crate) fn sub_center_canvas_local(&self, node_id: NodeId) -> Option<Vec2> {
+        self.subs.get(&node_id)?.layout_center
+    }
+
+    /// `true` when `pointer` (screen coords) falls inside this node's
+    /// subscription-pin rect.
+    pub(crate) fn sub_contains_pointer(&self, node_id: NodeId, pointer: Vec2) -> bool {
+        self.subs
+            .get(&node_id)
+            .and_then(|i| i.screen_rect)
+            .is_some_and(|r| r.contains(pointer))
+    }
+
+    /// `true` when a node's subscription pin should paint highlighted — set
+    /// by the canvas for the active drag's snap target (palantir's
+    /// drag-capture suppression otherwise hides it from `response.hovered`).
+    pub(crate) fn sub_is_hovered(&self, node_id: NodeId) -> bool {
+        self.subs.get(&node_id).is_some_and(|i| i.hovered)
+    }
+
+    /// Force a subscription pin's hover flag on (idempotent) — the event
+    /// drag's snap target, mirroring [`Self::set_hovered`] for data ports.
+    pub(crate) fn set_sub_hovered(&mut self, node_id: NodeId) {
+        if let Some(info) = self.subs.get_mut(&node_id) {
+            info.hovered = true;
+        }
+    }
+}
+
+/// Snapshot one widget's [`ResponseState`] into a [`PortInfo`]: refresh the
+/// intra-node offset from this frame's rects when both recorded, else fall
+/// back to the cached offset so a just-shown graph still anchors. The center
+/// is `node_pos + offset` so a moved node's glyph tracks its current
+/// position. Shared by data ports, event glyphs, and subscription pins.
+fn snapshot<K: Eq + Hash + Copy>(
+    r: ResponseState,
+    node_min: Option<Vec2>,
+    node_pos: Vec2,
+    key: K,
+    offsets: &mut HashMap<K, Vec2>,
+) -> PortInfo {
+    let fresh_offset = match (r.layout_rect, node_min) {
+        (Some(rect), Some(node_min)) => Some(rect.center() - node_min),
+        _ => None,
+    };
+    if let Some(offset) = fresh_offset {
+        offsets.insert(key, offset);
+    }
+    let layout_center = fresh_offset
+        .or_else(|| offsets.get(&key).copied())
+        .map(|offset| node_pos + offset);
+    PortInfo {
+        layout_center,
+        screen_rect: r.rect,
+        hovered: r.hovered,
+        drag_started: r.drag_started(),
+        dragging: r.drag_started() || r.drag_delta().is_some(),
     }
 }

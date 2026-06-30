@@ -2,6 +2,7 @@ pub(crate) mod anchored_menu;
 pub(crate) mod background;
 pub(crate) mod breaker;
 pub(crate) mod connection_ui;
+pub(crate) mod event_connection_ui;
 pub(crate) mod inspector;
 pub(crate) mod new_node_ui;
 pub(crate) mod node_menu;
@@ -22,6 +23,7 @@ use crate::gui::app::AppContext;
 use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
+use crate::gui::canvas::event_connection_ui::EventConnectionUI;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
@@ -76,6 +78,7 @@ struct Gestures {
     node_ui: NodeUI,
     breaker_ui: BreakerUI,
     connection_ui: ConnectionUI,
+    event_connection_ui: EventConnectionUI,
     new_node_ui: NewNodeUi,
     subgraph_menu: SubgraphMenuUi,
     node_menu: NodeMenuUi,
@@ -144,6 +147,12 @@ impl GraphUI {
         self.gestures
             .connection_ui
             .apply(ui, scene, &self.port_frame, resume, out);
+        // Subscription wires (emitter → subscriber) latch/commit here too,
+        // for the same pre-record reasons; an emitter glyph and a data port
+        // can't both latch (different widget-id spaces).
+        self.gestures
+            .event_connection_ui
+            .apply(ui, scene, &self.port_frame, out);
     }
 
     pub(crate) fn frame(
@@ -214,6 +223,10 @@ impl GraphUI {
         if let Some(snap) = self.gestures.connection_ui.snap_port() {
             self.port_frame.set_hovered(snap);
         }
+        // Same for an event drag's snapped subscription pin.
+        if let Some(sub) = self.gestures.event_connection_ui.snap_sub() {
+            self.port_frame.set_sub_hovered(sub);
+        }
         // Cycle inspector toggles + close transient panels on outside
         // actions, all from last-frame responses (same timing as every
         // other gesture here).
@@ -228,6 +241,7 @@ impl GraphUI {
                     node_ui,
                     breaker_ui,
                     connection_ui,
+                    event_connection_ui,
                     new_node_ui: _,
                     subgraph_menu: _,
                     node_menu: _,
@@ -298,6 +312,9 @@ impl GraphUI {
                         {
                             let mut probe = breaker_ui.probe(canvas_origin);
                             connection_ui.draw(ui, ctx, scene, port_frame, &mut probe);
+                            // Subscription wires sit under the node bodies
+                            // like data wires (drawn before `draw_all`).
+                            event_connection_ui.draw(ui, ctx, scene, port_frame);
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,
@@ -315,6 +332,13 @@ impl GraphUI {
                         inspectors.draw_panels(ui, ctx.theme, ctx.library, scene, ctx.run_state);
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);
+                        event_connection_ui.draw_in_flight(
+                            ui,
+                            ctx,
+                            scene,
+                            port_frame,
+                            canvas_origin,
+                        );
                     });
             });
     }

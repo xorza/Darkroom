@@ -8,7 +8,7 @@ use scenarium::data::{DataType, StaticValue};
 use scenarium::function::{FuncInput, FuncOutput, OutputType, ValueVariant};
 use scenarium::prelude::{
     Binding, CachePersistence, Graph, Library, NodeId, NodeKind, OutputPort, SubgraphDef,
-    SubgraphRef,
+    SubgraphRef, Subscription,
 };
 
 use crate::core::document::GraphView;
@@ -21,6 +21,12 @@ pub struct Scene {
     /// iteration the paint/z-order passes rely on.
     pub nodes: KeyIndexVec<NodeId, SceneNode>,
     pub connections: Vec<SceneConnection>,
+    /// Event-subscription edges (emitter event → subscriber node), mirrored
+    /// from the active graph each rebuild. Drawn as event wires; the editor
+    /// adds/removes them via the subscription drag gesture. The model's
+    /// `Subscription` is a plain `Copy` id-bundle with no render-only fields,
+    /// so it's mirrored verbatim (unlike `SceneConnection`, which flattens).
+    pub subscriptions: Vec<Subscription>,
     /// One flat pool of [`SceneInput`] across every node, sliced by the single
     /// `SceneNode::inputs` span. A struct-per-port (not parallel columns) so the
     /// per-port fields can't desync. Keeps per-node allocations to zero in
@@ -77,6 +83,7 @@ impl Default for Scene {
         Self {
             nodes: KeyIndexVec::default(),
             connections: Vec::new(),
+            subscriptions: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
             events: Vec::new(),
@@ -218,6 +225,7 @@ impl Scene {
         self.zoom = view.scale;
         self.nodes.clear();
         self.connections.clear();
+        self.subscriptions.clear();
         self.inputs.clear();
         self.outputs.clear();
         self.events.clear();
@@ -431,6 +439,8 @@ impl Scene {
                 tgt_port: dst.port_idx,
             });
         }
+
+        self.subscriptions.extend(graph.subscriptions());
     }
 
     /// A node's input ports, sliced by its `inputs` span.
@@ -756,6 +766,35 @@ mod tests {
             ["delta", "frame no"],
             "data outputs are unaffected by events"
         );
+    }
+
+    #[test]
+    fn subscriptions_project_from_graph() {
+        use scenarium::elements::worker_events_library::{
+            FRAME_EVENT_FUNC_ID, worker_events_library,
+        };
+
+        // Two frame-event nodes; subscribe the second to the first's "fps"
+        // event (event_idx 1). The projection must mirror that one edge.
+        let library = worker_events_library();
+        let mut graph = Graph::default();
+        let emitter: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
+        let emitter_id = emitter.id;
+        graph.add(emitter);
+        let subscriber: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
+        let subscriber_id = subscriber.id;
+        graph.add(subscriber);
+        graph.subscribe(emitter_id, 1, subscriber_id);
+
+        let view = GraphView::for_graph(&graph);
+        let mut scene = Scene::default();
+        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+
+        assert_eq!(scene.subscriptions.len(), 1);
+        let s = &scene.subscriptions[0];
+        assert_eq!(s.emitter, emitter_id);
+        assert_eq!(s.event_idx, 1);
+        assert_eq!(s.subscriber, subscriber_id);
     }
 
     #[test]

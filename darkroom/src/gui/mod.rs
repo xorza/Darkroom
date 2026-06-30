@@ -76,3 +76,13 @@ pub(crate) struct PortRef {
     pub(crate) kind: PortKind,
     pub(crate) port_idx: usize,
 }
+
+/// One event (emitter) port's identity. Events are indexed independently
+/// of data outputs, so they get their own ref rather than a `PortRef`
+/// kind. Domain-keyed like [`PortRef`] so geometry/drag code derives the
+/// glyph's `WidgetId` (`event_glyph_wid`) without a cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct EventRef {
+    pub(crate) node_id: scenarium::prelude::NodeId,
+    pub(crate) event_idx: usize,
+}

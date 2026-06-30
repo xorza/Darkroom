@@ -321,8 +321,8 @@ fn output_cell(
 
 /// One event (emitter) port row: the event name plus a white triangle glyph,
 /// right-aligned and overhanging the node edge like a data output. Sits in
-/// `COL_OUTPUT` at `row` (below the data outputs). Display-only for now — no
-/// connection/subscription gesture, so it emits no intents.
+/// `COL_OUTPUT` at `row` (below the data outputs). The glyph senses drags so a
+/// wire can be pulled from it to a subscriber pin (see `EventConnectionUI`).
 fn event_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
@@ -349,14 +349,16 @@ fn event_cell(
 
 /// Stable widget id for an event port glyph. A separate id space from data
 /// ports (`port_circle_wid`) because events are indexed independently of
-/// outputs.
-fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
+/// outputs. `pub(crate)` so `PortFrame` / `EventConnectionUI` reconstruct it
+/// from domain coords (`EventRef`) to poll the drag.
+pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
     WidgetId::from_hash(("graph.node.event_glyph", node_id, event_idx))
 }
 
 /// Paints an event port glyph: a white right-pointing triangle (a port dot
 /// rotated 90°), the same `port_size` box and edge overhang as a data port's
-/// circle, so it lines up with the outputs above it.
+/// circle, so it lines up with the outputs above it. Senses `CLICK | DRAG`
+/// so a subscription wire can be dragged out of it.
 fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, margin: Spacing) {
     let port = theme.port_size;
     // Right-pointing isosceles triangle filling the port box: the apex points
@@ -371,6 +373,7 @@ fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, margin: Spacing) {
         .id(wid)
         .size((Sizing::Fixed(port), Sizing::Fixed(port)))
         .margin(margin)
+        .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
             ui.add_shape(Shape::Mesh {
                 mesh: &tri,

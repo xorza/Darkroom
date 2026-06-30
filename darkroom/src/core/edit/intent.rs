@@ -171,6 +171,20 @@ pub enum Intent {
         id: SubgraphId,
         to: String,
     },
+    /// Subscribe `subscriber` to `emitter`'s event `event_idx` — an event
+    /// wire dropped on a subscription pin. Idempotent (a no-op when the
+    /// subscription already exists).
+    Subscribe {
+        emitter: NodeId,
+        event_idx: usize,
+        subscriber: NodeId,
+    },
+    /// Remove an event subscription.
+    Unsubscribe {
+        emitter: NodeId,
+        event_idx: usize,
+        subscriber: NodeId,
+    },
 }
 
 /// Self-contained undo-stack entry. Each leaf variant carries both
@@ -273,6 +287,17 @@ pub enum GraphStep {
         to_pan: Vec2,
         to_scale: f32,
     },
+    /// Add or remove an event subscription. `from`/`to` are the
+    /// subscribed-state booleans, so apply/revert just (un)subscribe to
+    /// match — subscribe and unsubscribe are exact inverses, so one step
+    /// type backs both the `Subscribe` and `Unsubscribe` intents.
+    SetSubscription {
+        emitter: NodeId,
+        event_idx: usize,
+        subscriber: NodeId,
+        from: bool,
+        to: bool,
+    },
 }
 
 /// Document-global steps — they mutate fields that aren't scoped to a
@@ -366,6 +391,7 @@ impl GraphStep {
                 (*from_pan - *to_pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
                     && (*from_scale - *to_scale).abs() < VIEWPORT_EPS
             }
+            GraphStep::SetSubscription { from, to, .. } => from == to,
         }
     }
 }
@@ -546,6 +572,34 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             from_scale: view.scale,
             to_pan: pan,
             to_scale: scale,
+        },
+        Intent::Subscribe {
+            emitter,
+            event_idx,
+            subscriber,
+        } => {
+            // Both endpoints must exist; a stale drag onto a vanished node
+            // drops rather than recording a dangling subscription.
+            graph.by_id(&emitter)?;
+            graph.by_id(&subscriber)?;
+            GraphStep::SetSubscription {
+                from: graph.is_subscribed(emitter, event_idx, subscriber),
+                to: true,
+                emitter,
+                event_idx,
+                subscriber,
+            }
+        }
+        Intent::Unsubscribe {
+            emitter,
+            event_idx,
+            subscriber,
+        } => GraphStep::SetSubscription {
+            from: graph.is_subscribed(emitter, event_idx, subscriber),
+            to: false,
+            emitter,
+            event_idx,
+            subscriber,
         },
     };
     Some(UndoStep::Graph(step))
@@ -884,6 +938,29 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.view.pan = *to_pan;
             scope.view.scale = *to_scale;
         }
+        GraphStep::SetSubscription {
+            emitter,
+            event_idx,
+            subscriber,
+            to,
+            ..
+        } => set_subscription(scope, *emitter, *event_idx, *subscriber, *to),
+    }
+}
+
+/// Apply (`subscribed = true`) or remove (`false`) one event subscription.
+/// Shared by `apply_graph` (writes `to`) and `revert_graph` (writes `from`).
+fn set_subscription(
+    scope: &mut EditScope<'_>,
+    emitter: NodeId,
+    event_idx: usize,
+    subscriber: NodeId,
+    subscribed: bool,
+) {
+    if subscribed {
+        scope.graph.subscribe(emitter, event_idx, subscriber);
+    } else {
+        scope.graph.unsubscribe(emitter, event_idx, subscriber);
     }
 }
 
@@ -1012,6 +1089,13 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.view.pan = *from_pan;
             scope.view.scale = *from_scale;
         }
+        GraphStep::SetSubscription {
+            emitter,
+            event_idx,
+            subscriber,
+            from,
+            ..
+        } => set_subscription(scope, *emitter, *event_idx, *subscriber, *from),
     }
 }
 
@@ -1063,7 +1147,10 @@ impl UndoStep {
             // Disabling only dims the body paint — same rect, no remeasure.
             | GraphStep::SetDisabled { .. }
             // The cache toggle flips a badge fill — same rect, no remeasure.
-            | GraphStep::SetPersist { .. } => false,
+            | GraphStep::SetPersist { .. }
+            // Event wiring paints a wire between existing glyphs — no
+            // node remeasure.
+            | GraphStep::SetSubscription { .. } => false,
         },
     }
     }
@@ -1092,7 +1179,9 @@ impl UndoStep {
                 | GraphStep::SetSelection { .. }
                 | GraphStep::SetDisabled { .. }
                 | GraphStep::SetPersist { .. }
-                | GraphStep::SetViewport { .. },
+                | GraphStep::SetViewport { .. }
+                // Subscriptions don't feed a subgraph's derived interface.
+                | GraphStep::SetSubscription { .. },
             )
             | UndoStep::Doc(_) => false,
         }
@@ -1123,7 +1212,8 @@ impl UndoStep {
                 | GraphStep::SetSelection { .. }
                 | GraphStep::SetDisabled { .. }
                 | GraphStep::SetPersist { .. }
-                | GraphStep::DetachSubgraph { .. },
+                | GraphStep::DetachSubgraph { .. }
+                | GraphStep::SetSubscription { .. },
             )
             | UndoStep::Doc(
                 DocStep::CloseTab { .. }
@@ -1216,6 +1306,88 @@ mod tests {
         doc.graph.add(node);
         doc.main_view.view_nodes.add(ViewNode { id, pos });
         id
+    }
+
+    #[test]
+    fn subscribe_unsubscribe_commit_and_undo() {
+        let mut doc = Document::default();
+        let emitter = add_node_at(&mut doc, Vec2::ZERO);
+        let subscriber = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
+        let sub = |e, i, s| Intent::Subscribe {
+            emitter: e,
+            event_idx: i,
+            subscriber: s,
+        };
+
+        // Subscribe commits and writes the edge.
+        let step = commit_intent(sub(emitter, 0, subscriber), &mut doc, GraphRef::Main)
+            .expect("subscribe commits");
+        assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
+
+        // A second identical subscribe is a no-op (from == to == true).
+        assert!(
+            commit_intent(sub(emitter, 0, subscriber), &mut doc, GraphRef::Main).is_none(),
+            "re-subscribing the same edge is a no-op"
+        );
+
+        // Undo removes it; redo restores it.
+        revert_step(&step, &mut doc, GraphRef::Main);
+        assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
+        apply_step(&step, &mut doc, GraphRef::Main);
+        assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
+
+        // Unsubscribe commits, removes the edge, and undo brings it back.
+        let step = commit_intent(
+            Intent::Unsubscribe {
+                emitter,
+                event_idx: 0,
+                subscriber,
+            },
+            &mut doc,
+            GraphRef::Main,
+        )
+        .expect("unsubscribe commits");
+        assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
+        revert_step(&step, &mut doc, GraphRef::Main);
+        assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
+
+        // Redo the unsubscribe (apply writes the `to = unsubscribed` half),
+        // then unsubscribing the now-absent edge is a no-op.
+        apply_step(&step, &mut doc, GraphRef::Main);
+        assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
+        assert!(
+            commit_intent(
+                Intent::Unsubscribe {
+                    emitter,
+                    event_idx: 0,
+                    subscriber,
+                },
+                &mut doc,
+                GraphRef::Main,
+            )
+            .is_none(),
+            "unsubscribing a missing edge is a no-op"
+        );
+    }
+
+    #[test]
+    fn subscribe_to_missing_node_is_dropped() {
+        let mut doc = Document::default();
+        let emitter = add_node_at(&mut doc, Vec2::ZERO);
+        let ghost = NodeId::unique();
+        assert!(
+            commit_intent(
+                Intent::Subscribe {
+                    emitter,
+                    event_idx: 0,
+                    subscriber: ghost,
+                },
+                &mut doc,
+                GraphRef::Main,
+            )
+            .is_none(),
+            "a subscription to a node that doesn't exist is dropped, not recorded"
+        );
     }
 
     #[test]

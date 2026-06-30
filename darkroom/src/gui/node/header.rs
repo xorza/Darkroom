@@ -53,25 +53,33 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
         .size((Sizing::FILL, Sizing::Hug))
         .show(ui, |ui| {
             header_bar(ui, rcx, node, out);
-            subscription_glyph(ui, theme, node.id);
+            // Highlighted while an event drag is snapped to this pin.
+            let snapped = rcx.port_frame.sub_is_hovered(node.id);
+            subscription_glyph(ui, theme, node.id, snapped);
         });
 }
 
 /// One whole-node event-subscription pin: a white left-pointing triangle
 /// overhanging the node's top-left corner. Negative top *and* left margins
-/// pull it out past both edges, like a port circle overhangs its edge.
-/// Display-only for now; no subscription gesture yet.
-fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId) {
+/// pull it out past both edges, like a port circle overhangs its edge. It's
+/// the drop target for an event wire; `hovered` (set while a drag snaps to
+/// it) scales the triangle up as drop feedback.
+fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool) {
     let port = theme.port_size;
     // Overhang past the body's inner edge (the border-folded padding) by the
     // dot's radius on each axis, centering the glyph box on the body corner —
     // the same half-on-the-edge overhang the port circles use.
     let overhang = theme.port_radius() + theme.node_border_width * 2.0;
-    // Apex on the left (base flush at the node), so it points outward.
+    // Apex on the left (base flush at the node), so it points outward. Grow it
+    // around the box center when snapped, leaving the layout box unchanged
+    // (meshes aren't clipped to the owner rect).
+    let scale = if hovered { 1.35 } else { 1.0 };
+    let c = Vec2::splat(port * 0.5);
+    let grow = |v: Vec2| c + (v - c) * scale;
     let tri = Mesh::filled_triangle(
-        Vec2::new(port, 0.0),
-        Vec2::new(port, port),
-        Vec2::new(0.0, port * 0.5),
+        grow(Vec2::new(port, 0.0)),
+        grow(Vec2::new(port, port)),
+        grow(Vec2::new(0.0, port * 0.5)),
         Color::WHITE,
     );
     Panel::zstack()
@@ -89,9 +97,10 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId) {
 }
 
 /// Stable id for a node's event-subscription pin. Keyed on the node (a
-/// subscription is whole-node, not per-port), so it's reconstructible for a
-/// future wiring gesture without threading state.
-fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
+/// subscription is whole-node, not per-port), so `PortFrame` /
+/// `EventConnectionUI` reconstruct it to poll the pin's geometry as a wire
+/// drop target.
+pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.subscription_glyph", node_id))
 }
 
