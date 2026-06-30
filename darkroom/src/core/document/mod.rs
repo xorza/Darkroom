@@ -554,8 +554,7 @@ impl Document {
     /// Derived-validity fixup run alongside [`Self::reconcile_boundaries`];
     /// both recurse into local subgraph defs.
     pub fn prune_dangling_wiring(&mut self, library: &Library) {
-        self.graph.prune_bindings(library);
-        self.graph.prune_subscriptions(library);
+        self.graph.prune_dangling_wiring(library);
     }
 
     pub fn validate(&self) {

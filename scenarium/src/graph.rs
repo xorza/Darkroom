@@ -708,30 +708,54 @@ impl Graph {
     /// surface, since auto-dropping a retyped wire is a stronger call.
     /// Recurses into local subgraph defs. Returns the number removed;
     /// idempotent.
-    pub fn prune_bindings(&mut self, library: &Library) -> usize {
+    pub fn prune_dangling_wiring(&mut self, library: &Library) -> usize {
         // `retain` would need `&self` for the port-count lookups while holding
-        // `&mut self.bindings`; swap the map out so the filter can read the
-        // rest of `self`, then swap it back.
+        // `&mut self.bindings` / `&mut self.subscriptions`; swap each out so the
+        // filter can read the rest of `self`, then swap it back.
         let mut bindings = std::mem::take(&mut self.bindings);
         let before = bindings.len();
-        bindings.retain(|dst, binding| {
-            let consumer_ok = self
-                .by_id(&dst.node_id)
-                .is_some_and(|c| self.port_in_range(c, dst.port_idx, true, library));
-            consumer_ok
-                && match binding {
-                    Binding::Bind(src) => self
-                        .by_id(&src.node_id)
-                        .is_some_and(|p| self.port_in_range(p, src.port_idx, false, library)),
-                    Binding::None | Binding::Const(_) => true,
-                }
-        });
+        bindings.retain(|dst, binding| self.binding_live(*dst, binding, library));
         self.bindings = bindings;
         let mut removed = before - self.bindings.len();
+
+        let mut subs = std::mem::take(&mut self.subscriptions);
+        let before = subs.len();
+        subs.retain(|s| self.subscription_live(s, library));
+        self.subscriptions = subs;
+        removed += before - self.subscriptions.len();
+
         for def in self.subgraphs.iter_mut() {
-            removed += def.graph.prune_bindings(library);
+            removed += def.graph.prune_dangling_wiring(library);
         }
         removed
+    }
+
+    /// Whether a binding still addresses ports that exist on both ends — the
+    /// structural validity [`Self::prune_dangling_wiring`] keeps. An in-range
+    /// but type-incompatible binding stays (auto-dropping a retyped wire is a
+    /// stronger call left to the run / [`Self::check_with`]).
+    fn binding_live(&self, dst: InputPort, binding: &Binding, library: &Library) -> bool {
+        self.by_id(&dst.node_id)
+            .is_some_and(|c| self.port_in_range(c, dst.port_idx, true, library))
+            && match binding {
+                Binding::Bind(src) => self
+                    .by_id(&src.node_id)
+                    .is_some_and(|p| self.port_in_range(p, src.port_idx, false, library)),
+                Binding::None | Binding::Const(_) => true,
+            }
+    }
+
+    /// Whether a subscription still references a live event: its emitter is
+    /// present and `event_idx` is in range. A present emitter whose func/def is
+    /// *missing* from the library has unknowable arity, so it's kept (valid
+    /// again once the library is restored); a removed emitter drops the edge.
+    fn subscription_live(&self, s: &Subscription, library: &Library) -> bool {
+        match self.by_id(&s.emitter) {
+            None => false,
+            Some(emitter) => self
+                .event_count_opt(emitter, library)
+                .is_none_or(|count| s.event_idx < count),
+        }
     }
 
     /// Whether `node`'s `idx`-th input (`is_input`) or output port exists.
@@ -760,8 +784,9 @@ impl Graph {
     }
 
     /// The emitter's event count, or `None` when its func/def is missing from
-    /// the library (unknowable). The fallible peer of [`Self::event_count`],
-    /// used by [`Self::prune_subscriptions`] so a stub node's wiring survives.
+    /// the library (unknowable). The fallible peer of [`Self::event_count`]
+    /// (which delegates here) — used by the subscription prune so a stub
+    /// node's wiring survives.
     fn event_count_opt(&self, node: &Node, library: &Library) -> Option<usize> {
         match &node.kind {
             NodeKind::Func(id) => library.by_id(id).map(|f| f.events.len()),
@@ -770,34 +795,6 @@ impl Graph {
             NodeKind::SubgraphInput => Some(1),
             NodeKind::SubgraphOutput => Some(0),
         }
-    }
-
-    /// Drop subscriptions that no longer reference a live event: the emitter
-    /// node is gone, or `event_idx` is past the emitter's current event count
-    /// (its func/def shrank its event set — e.g. a document loaded against a
-    /// newer library). Recurses into local subgraph defs. Returns the number
-    /// removed; idempotent, so a no-op on a valid graph.
-    pub fn prune_subscriptions(&mut self, library: &Library) -> usize {
-        // `retain` would need `&self` for `event_count` while holding
-        // `&mut self.subscriptions`; swap the set out so the filter can read
-        // the rest of `self`, then swap it back.
-        let mut subs = std::mem::take(&mut self.subscriptions);
-        let before = subs.len();
-        subs.retain(|s| match self.by_id(&s.emitter) {
-            // Emitter node removed from the graph → the edge is dead.
-            None => false,
-            // Present but its func/def is missing from the library → arity is
-            // unknowable, so keep it (valid again once the library is fixed).
-            Some(emitter) => self
-                .event_count_opt(emitter, library)
-                .is_none_or(|count| s.event_idx < count),
-        });
-        self.subscriptions = subs;
-        let mut removed = before - self.subscriptions.len();
-        for def in self.subgraphs.iter_mut() {
-            removed += def.graph.prune_subscriptions(library);
-        }
-        removed
     }
 
     /// Subscribers of one emitter event, in `NodeId` order.
@@ -1157,15 +1154,12 @@ impl Graph {
 
     /// Number of events a node exposes. `SubgraphInput` exposes exactly one —
     /// the trigger that interior nodes subscribe to so they fire when the
-    /// enclosing composite is triggered.
+    /// enclosing composite is triggered. Infallible peer of
+    /// [`Self::event_count_opt`]; callers (e.g. `check_with`) resolve every
+    /// func/def first, so the lookup can't miss.
     fn event_count(&self, node: &Node, library: &Library, _ctx_def: Option<&SubgraphDef>) -> usize {
-        match &node.kind {
-            NodeKind::Func(func_id) => library.by_id(func_id).unwrap().events.len(),
-            NodeKind::Subgraph(r) => self.resolve_def(*r, library).unwrap().events.len(),
-            NodeKind::Special(s) => s.func().events.len(),
-            NodeKind::SubgraphInput => 1,
-            NodeKind::SubgraphOutput => 0,
-        }
+        self.event_count_opt(node, library)
+            .expect("event_count on a node whose func/def is unresolved")
     }
 
     // === Construction helpers (seed default bindings) ===
@@ -2080,7 +2074,7 @@ mod tests {
         graph.subscribe(emitter_id, 1, subscriber_id); // event_idx past the one event
         graph.subscribe(ghost, 0, subscriber_id); // emitter doesn't exist
 
-        let removed = graph.prune_subscriptions(&library);
+        let removed = graph.prune_dangling_wiring(&library);
         assert_eq!(removed, 2, "out-of-range and missing-emitter edges drop");
         assert!(
             graph.is_subscribed(emitter_id, 0, subscriber_id),
@@ -2090,7 +2084,7 @@ mod tests {
         assert!(!graph.is_subscribed(ghost, 0, subscriber_id));
 
         // Idempotent on an already-valid graph.
-        assert_eq!(graph.prune_subscriptions(&library), 0);
+        assert_eq!(graph.prune_dangling_wiring(&library), 0);
 
         // An emitter whose func is missing from the library has unknowable
         // arity, so its subscription is kept (not panicked on, not dropped).
@@ -2098,7 +2092,7 @@ mod tests {
         let ghost_id = ghost.id;
         graph.add(ghost);
         graph.subscribe(ghost_id, 4, subscriber_id);
-        assert_eq!(graph.prune_subscriptions(&library), 0);
+        assert_eq!(graph.prune_dangling_wiring(&library), 0);
         assert!(graph.is_subscribed(ghost_id, 4, subscriber_id));
     }
 
@@ -2133,7 +2127,7 @@ mod tests {
         graph.set_input_binding(InputPort::new(e, 0), (ghost, 0).into()); // producer node gone
         graph.set_input_binding(InputPort::new(ghost, 0), (a, 0).into()); // consumer node gone
 
-        let removed = graph.prune_bindings(&library);
+        let removed = graph.prune_dangling_wiring(&library);
         assert_eq!(
             removed, 4,
             "every dangling binding drops, the valid one stays"
@@ -2156,7 +2150,7 @@ mod tests {
             InputPort::new(b, 0),
             Binding::Const(crate::data::StaticValue::from(1i64)),
         );
-        assert_eq!(graph.prune_bindings(&library), 0);
+        assert_eq!(graph.prune_dangling_wiring(&library), 0);
 
         // A node whose func is absent from the library (a stub for a doc saved
         // against a richer library) has unknowable arity, so its wiring is
@@ -2167,7 +2161,7 @@ mod tests {
         graph.set_input_binding(InputPort::new(ghost_id, 3), (a, 0).into());
         graph.set_input_binding(InputPort::new(b, 0), (ghost_id, 7).into());
         assert_eq!(
-            graph.prune_bindings(&library),
+            graph.prune_dangling_wiring(&library),
             0,
             "unresolvable-node wiring is preserved"
         );
