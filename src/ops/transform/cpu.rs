@@ -4,11 +4,17 @@ use rayon::prelude::*;
 
 use super::{FilterMode, Transform};
 use crate::common::color_format::{ChannelSize, ChannelType};
+#[cfg(target_arch = "x86_64")]
+use crate::cpu_features;
 use crate::image::Image;
 
 /// NEON RGB/RGBA bilinear specialization of the scalar path below (aarch64 only).
 #[cfg(target_arch = "aarch64")]
 mod neon;
+
+/// SSE4.1 RGB/RGBA bilinear specialization of the scalar path below (x86_64).
+#[cfg(target_arch = "x86_64")]
+mod sse;
 
 /// Applies an affine transform to `input`, sampling into `output`.
 ///
@@ -28,9 +34,9 @@ pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
     let fmt = input.desc.color_format;
     let channels = fmt.channel_count.channel_count() as usize;
 
-    // RGB/RGBA bilinear vectorize ~1.3–1.5× and are bit-identical to the scalar
-    // reference (cross-checked). L stays scalar (gather-bound — NEON measured
-    // slower), and nearest is a near-memcpy the scalar path already nails.
+    // RGB/RGBA bilinear vectorize and are bit-identical to the scalar reference
+    // (cross-checked). L stays scalar (gather-bound — SIMD measured slower), and
+    // nearest is a near-memcpy the scalar path already nails.
     #[cfg(target_arch = "aarch64")]
     if channels >= 3 && transform.filter == FilterMode::Bilinear {
         use ChannelSize::{_8bit, _16bit, _32bit};
@@ -42,6 +48,21 @@ pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
             (_16bit, UInt, 3) => return neon::apply_packed::<u16, 3>(transform, input, output),
             (_32bit, Float, 4) => return neon::apply_packed::<f32, 4>(transform, input, output),
             (_32bit, Float, 3) => return neon::apply_packed::<f32, 3>(transform, input, output),
+            _ => {}
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    if channels >= 3 && transform.filter == FilterMode::Bilinear && cpu_features::has_sse4_1() {
+        use ChannelSize::{_8bit, _16bit, _32bit};
+        use ChannelType::{Float, UInt};
+        match (fmt.channel_size, fmt.channel_type, channels) {
+            (_8bit, UInt, 4) => return sse::apply_packed::<u8, 4>(transform, input, output),
+            (_8bit, UInt, 3) => return sse::apply_packed::<u8, 3>(transform, input, output),
+            (_16bit, UInt, 4) => return sse::apply_packed::<u16, 4>(transform, input, output),
+            (_16bit, UInt, 3) => return sse::apply_packed::<u16, 3>(transform, input, output),
+            (_32bit, Float, 4) => return sse::apply_packed::<f32, 4>(transform, input, output),
+            (_32bit, Float, 3) => return sse::apply_packed::<f32, 3>(transform, input, output),
             _ => {}
         }
     }
@@ -449,6 +470,66 @@ mod tests {
             assert!(
                 pixels_equal(&scalar, &simd),
                 "NEON diverged from scalar for {format}"
+            );
+        }
+    }
+
+    /// Every SSE4.1 packed bilinear path (RGB, RGBA) is bit-identical to the
+    /// scalar reference, on a rotation and a non-multiple-of-4 width that hit
+    /// interior, edge, and out-of-bounds taps. Skips if the CPU lacks SSE4.1.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_sse_matches_scalar() {
+        if !cpu_features::has_sse4_1() {
+            return;
+        }
+        use ChannelSize::{_8bit, _16bit, _32bit};
+        use ChannelType::{Float, UInt};
+        let center = Vec2::new(18.5, 9.5);
+        for &format in ALL_FORMATS {
+            let cc = format.channel_count.channel_count();
+            if cc == 1 {
+                continue; // L has no SSE path.
+            }
+            let input = create_test_image(format, 37, 19, 7);
+            let transform = Transform::new()
+                .rotate_around(0.7, center)
+                .filter(FilterMode::Bilinear);
+
+            let mut scalar = Image::new_black(input.desc).unwrap();
+            let mut simd = Image::new_black(input.desc).unwrap();
+
+            match (format.channel_size, format.channel_type, cc) {
+                (_8bit, UInt, 4) => {
+                    apply_typed::<u8, 4>(&transform, &input, &mut scalar);
+                    sse::apply_packed::<u8, 4>(&transform, &input, &mut simd);
+                }
+                (_8bit, UInt, 3) => {
+                    apply_typed::<u8, 3>(&transform, &input, &mut scalar);
+                    sse::apply_packed::<u8, 3>(&transform, &input, &mut simd);
+                }
+                (_16bit, UInt, 4) => {
+                    apply_typed::<u16, 4>(&transform, &input, &mut scalar);
+                    sse::apply_packed::<u16, 4>(&transform, &input, &mut simd);
+                }
+                (_16bit, UInt, 3) => {
+                    apply_typed::<u16, 3>(&transform, &input, &mut scalar);
+                    sse::apply_packed::<u16, 3>(&transform, &input, &mut simd);
+                }
+                (_32bit, Float, 4) => {
+                    apply_typed::<f32, 4>(&transform, &input, &mut scalar);
+                    sse::apply_packed::<f32, 4>(&transform, &input, &mut simd);
+                }
+                (_32bit, Float, 3) => {
+                    apply_typed::<f32, 3>(&transform, &input, &mut scalar);
+                    sse::apply_packed::<f32, 3>(&transform, &input, &mut simd);
+                }
+                _ => unreachable!(),
+            }
+
+            assert!(
+                pixels_equal(&scalar, &simd),
+                "SSE diverged from scalar for {format}"
             );
         }
     }
