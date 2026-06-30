@@ -56,42 +56,49 @@ pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
     }
 }
 
-/// A pixel channel element that normalizes to and from `f32` in `[0, 1]`.
+/// A pixel channel element converted to/from `f32` in its **native** value
+/// range (u8 `0..=255`, u16 `0..=65535`, f32 unchanged).
+///
+/// The GPU shader normalizes to `[0, 1]` before interpolating and rescales on
+/// write; on the CPU that round-trip is pure overhead, because interpolation is
+/// linear (`mix(a/M, b/M, t) * M == mix(a, b, t)`) so the `/M` and `*M` cancel.
+/// Interpolating in the native range drops one divide and one multiply per
+/// channel per tap — and is marginally more accurate (no double rounding).
 trait TransformElem: Pod + Send + Sync {
-    fn to_norm(self) -> f32;
-    fn from_norm(v: f32) -> Self;
+    fn to_f32(self) -> f32;
+    fn from_f32(v: f32) -> Self;
 }
 
 impl TransformElem for u8 {
     #[inline]
-    fn to_norm(self) -> f32 {
-        self as f32 / 255.0
+    fn to_f32(self) -> f32 {
+        self as f32
     }
     #[inline]
-    fn from_norm(v: f32) -> Self {
-        // Truncate toward zero, matching the shader's `u32(clamp(v, 0, 255))`.
-        (v * 255.0).clamp(0.0, 255.0) as Self
+    fn from_f32(v: f32) -> Self {
+        // Truncate toward zero, matching the shader's `u32(clamp(...))`.
+        v.clamp(0.0, 255.0) as Self
     }
 }
 
 impl TransformElem for u16 {
     #[inline]
-    fn to_norm(self) -> f32 {
-        self as f32 / 65535.0
+    fn to_f32(self) -> f32 {
+        self as f32
     }
     #[inline]
-    fn from_norm(v: f32) -> Self {
-        (v * 65535.0).clamp(0.0, 65535.0) as Self
+    fn from_f32(v: f32) -> Self {
+        v.clamp(0.0, 65535.0) as Self
     }
 }
 
 impl TransformElem for f32 {
     #[inline]
-    fn to_norm(self) -> f32 {
+    fn to_f32(self) -> f32 {
         self
     }
     #[inline]
-    fn from_norm(v: f32) -> Self {
+    fn from_f32(v: f32) -> Self {
         // Float output is written unclamped, matching the shader.
         v
     }
@@ -129,8 +136,9 @@ where
         });
 }
 
-/// Reads the pixel at integer `(x, y)` as normalized RGBA. Grayscale broadcasts
-/// to `(g, g, g, 1)` and RGB fills `(r, g, b, 1)`; out-of-bounds reads as zero.
+/// Reads the `N` channels of the pixel at integer `(x, y)` into the low lanes of
+/// an `[f32; 4]` (unused lanes stay zero); out-of-bounds reads as all-zero. Only
+/// the low `N` lanes are ever written back, so the padding never affects output.
 #[inline]
 fn read_pixel<T, const N: usize>(
     pixels: &[T],
@@ -146,36 +154,21 @@ where
         return [0.0; 4];
     }
     let base = (y as usize * width + x as usize) * N;
-    match N {
-        1 => {
-            let g = pixels[base].to_norm();
-            [g, g, g, 1.0]
-        }
-        3 => [
-            pixels[base].to_norm(),
-            pixels[base + 1].to_norm(),
-            pixels[base + 2].to_norm(),
-            1.0,
-        ],
-        4 => [
-            pixels[base].to_norm(),
-            pixels[base + 1].to_norm(),
-            pixels[base + 2].to_norm(),
-            pixels[base + 3].to_norm(),
-        ],
-        _ => unreachable!(),
+    let mut px = [0.0f32; 4];
+    for (lane, &raw) in px.iter_mut().zip(&pixels[base..base + N]) {
+        *lane = raw.to_f32();
     }
+    px
 }
 
-/// Writes normalized RGBA back into `N` channels. Grayscale keeps the red
-/// channel; RGB drops the implicit alpha; RGBA keeps all four.
+/// Writes the low `N` lanes back into the output pixel's channels.
 #[inline]
 fn write_pixel<T, const N: usize>(out: &mut [T], rgba: [f32; 4])
 where
     T: TransformElem,
 {
     for (dst, &v) in out.iter_mut().zip(rgba.iter()) {
-        *dst = T::from_norm(v);
+        *dst = T::from_f32(v);
     }
 }
 
