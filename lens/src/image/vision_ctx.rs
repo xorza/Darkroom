@@ -9,8 +9,9 @@ pub struct VisionCtx {
 
 impl Default for VisionCtx {
     fn default() -> Self {
+        // Lens is CPU-only: skip GPU init entirely (every op has a CPU path).
         Self {
-            processing_ctx: imaginarium::ProcessingContext::new(),
+            processing_ctx: imaginarium::ProcessingContext::cpu_only(),
         }
     }
 }
