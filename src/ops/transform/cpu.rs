@@ -6,6 +6,10 @@ use super::{FilterMode, Transform};
 use crate::common::color_format::{ChannelSize, ChannelType};
 use crate::image::Image;
 
+/// NEON RGBA specialization of the scalar path below (aarch64 only).
+#[cfg(target_arch = "aarch64")]
+mod neon;
+
 /// Applies an affine transform to `input`, sampling into `output`.
 ///
 /// Output dimensions come from `output`'s descriptor (they may differ from the
@@ -23,6 +27,26 @@ pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
 
     let fmt = input.desc.color_format;
     let channels = fmt.channel_count.channel_count() as usize;
+
+    // NEON specialization for 4-channel bilinear: one RGBA pixel is a full f32x4
+    // lane, so the convert→mix→convert chain vectorizes cleanly (~1.3–1.4×). Only
+    // bilinear — scalar nearest is already a near-memcpy. L/RGB stay scalar.
+    // Bit-identical to the scalar reference (cross-checked).
+    #[cfg(target_arch = "aarch64")]
+    if channels == 4 && transform.filter == FilterMode::Bilinear {
+        match (fmt.channel_size, fmt.channel_type) {
+            (ChannelSize::_8bit, ChannelType::UInt) => {
+                return neon::apply_rgba_bilinear::<u8>(transform, input, output);
+            }
+            (ChannelSize::_16bit, ChannelType::UInt) => {
+                return neon::apply_rgba_bilinear::<u16>(transform, input, output);
+            }
+            (ChannelSize::_32bit, ChannelType::Float) => {
+                return neon::apply_rgba_bilinear::<f32>(transform, input, output);
+            }
+            _ => {}
+        }
+    }
 
     match (fmt.channel_size, fmt.channel_type, channels) {
         (ChannelSize::_8bit, ChannelType::UInt, 1) => {
@@ -372,6 +396,49 @@ mod tests {
         // Nearest replicates source samples; bilinear ramps between them.
         assert_eq!(nearest.bytes(), &[0, 0, 100, 100]);
         assert_ne!(nearest.bytes(), bilinear.bytes());
+    }
+
+    /// The NEON bilinear RGBA path is bit-identical to the scalar reference across
+    /// all three RGBA formats, on a rotation that hits interior, edge, and
+    /// out-of-bounds taps.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn test_neon_matches_scalar_rgba() {
+        let center = Vec2::new(18.5, 9.5);
+        for &format in &[
+            ColorFormat::RGBA_U8,
+            ColorFormat::RGBA_U16,
+            ColorFormat::RGBA_F32,
+        ] {
+            let input = create_test_image(format, 37, 19, 7);
+            let transform = Transform::new()
+                .rotate_around(0.7, center)
+                .filter(FilterMode::Bilinear);
+
+            let mut scalar = Image::new_black(input.desc).unwrap();
+            let mut simd = Image::new_black(input.desc).unwrap();
+
+            match (format.channel_size, format.channel_type) {
+                (ChannelSize::_8bit, ChannelType::UInt) => {
+                    apply_typed::<u8, 4>(&transform, &input, &mut scalar);
+                    neon::apply_rgba_bilinear::<u8>(&transform, &input, &mut simd);
+                }
+                (ChannelSize::_16bit, ChannelType::UInt) => {
+                    apply_typed::<u16, 4>(&transform, &input, &mut scalar);
+                    neon::apply_rgba_bilinear::<u16>(&transform, &input, &mut simd);
+                }
+                (ChannelSize::_32bit, ChannelType::Float) => {
+                    apply_typed::<f32, 4>(&transform, &input, &mut scalar);
+                    neon::apply_rgba_bilinear::<f32>(&transform, &input, &mut simd);
+                }
+                _ => unreachable!(),
+            }
+
+            assert!(
+                pixels_equal(&scalar, &simd),
+                "NEON diverged from scalar for {format}"
+            );
+        }
     }
 
     #[cfg(feature = "wgpu")]
