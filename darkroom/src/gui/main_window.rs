@@ -79,7 +79,7 @@ impl MainWindow {
                         ..Default::default()
                     })
                     .show(ui, |ui| {
-                        command = menu_bar::show(ui, host, ctx.run_state.is_running());
+                        command = menu_bar::show(ui, host);
                     });
                 tab_bar::show(ui, ctx.theme, &tabs, doc.active, out);
                 // The content pane below the strip is the active tab's view:

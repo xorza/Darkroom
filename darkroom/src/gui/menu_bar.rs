@@ -83,7 +83,7 @@ pub(crate) enum MlModelKind {
 /// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.
 /// `Quit` calls into [`HostHandle::quit`]; everything else returns a
 /// [`MenuCommand`] for `App` to consume.
-pub(crate) fn show(ui: &mut Ui, host: Option<&HostHandle>, running: bool) -> Option<MenuCommand> {
+pub(crate) fn show(ui: &mut Ui, host: Option<&HostHandle>) -> Option<MenuCommand> {
     let mut command = None;
     Panel::hstack()
         .auto_id()
@@ -93,8 +93,7 @@ pub(crate) fn show(ui: &mut Ui, host: Option<&HostHandle>, running: bool) -> Opt
         .show(ui, |ui| {
             command = file_menu(ui, host)
                 .or_else(|| view_menu(ui))
-                .or_else(|| subgraph_menu(ui))
-                .or_else(|| run_menu(ui, running));
+                .or_else(|| subgraph_menu(ui));
         });
     command
 }
@@ -174,20 +173,6 @@ fn subgraph_menu(ui: &mut Ui) -> Option<MenuCommand> {
             .clicked()
         {
             command = Some(MenuCommand::PromoteSubgraph);
-        }
-        command
-    })
-}
-
-fn run_menu(ui: &mut Ui, running: bool) -> Option<MenuCommand> {
-    dropdown(ui, "Run", |ui, popup| {
-        let mut command = None;
-        if MenuItem::new("Run Once").show(ui, popup).clicked() {
-            command = Some(MenuCommand::Run);
-        }
-        // Only offer Cancel while a run is actually in flight.
-        if running && MenuItem::new("Cancel Run").show(ui, popup).clicked() {
-            command = Some(MenuCommand::CancelRun);
         }
         command
     })
