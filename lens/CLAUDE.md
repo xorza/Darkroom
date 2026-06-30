@@ -29,7 +29,7 @@ src/
 
 | Module | Role |
 |--------|------|
-| `image/mod.rs` | `Image` — `imaginarium::ImageBuffer` as a `CustomValue` (backend-agnostic thumbnail: `execute()` + `to_cpu()`, runs on whatever backend the context holds). |
+| `image/mod.rs` | `Image` — `imaginarium::ImageBuffer` as a `CustomValue` (thumbnail via the fused `imaginarium::Preview` op: `make_cpu` + one-pass downscale→RGBA8). |
 | `image/library.rs` | `image_library()` — imaginarium nodes (category `image`). |
 | `image/{blend_mode,conversion_format,vision_ctx}.rs` | `BlendMode`/`ColorFormat` datatypes; `VisionCtx` (GPU/CPU `ProcessingContext`). |
 | `astro/mod.rs` | `AstroFrame` — `lumos::AstroImage` as a `CustomValue` (CPU thumbnail preview). |
@@ -43,7 +43,7 @@ src/
 
 - `image_library()` — builds a `Library` of the imaginarium image nodes.
 - `astro_library()` — builds a `Library` of the lumos astro nodes.
-- `Image` — wrapper around `imaginarium::ImageBuffer` implementing `CustomValue`; `gen_preview` downscales via the backend-agnostic `Transform::execute` and reads back with `to_cpu` (CPU = no-op, GPU = download), so the context type alone decides the backend.
+- `Image` — wrapper around `imaginarium::ImageBuffer` implementing `CustomValue`; `gen_preview` reads a CPU view (`make_cpu` — no-op on CPU, download on GPU) and builds the thumbnail with the fused `imaginarium::Preview` op (area-average downscale + RGBA8 convert in one pass).
 - `AstroFrame` — wrapper around `lumos::AstroImage` implementing `CustomValue`; `gen_preview` builds a downscaled RGBA_U8 thumbnail on the CPU (planar channels sampled straight to RGBA, no display stretch — linear frames preview dark) and parks it in a `Slot`.
 - `Masters` — wrapper around `lumos::CalibrationMasters`.
 - `VisionCtx` — context holding a `ProcessingContext` for GPU/CPU dispatch.

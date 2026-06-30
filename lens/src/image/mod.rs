@@ -13,7 +13,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
 use common::Slot;
-use imaginarium::{ColorFormat, ImageBuffer, ImageDesc, Transform, Vec2};
+use imaginarium::Preview;
 use scenarium::context::ContextManager;
 use scenarium::data::{CustomValue, DataType, PendingPreview, TypeId};
 
@@ -72,38 +72,25 @@ impl CustomValue for Image {
             PREVIEW_SIZE as f32 / max_dim as f32
         };
 
+        // `Preview` clamps the target to at least 1×1 internally.
         let new_width = (desc.width as f32 * scale).round() as usize;
         let new_height = (desc.height as f32 * scale).round() as usize;
 
         let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
-        let preview_desc = ImageDesc::new(new_width, new_height, desc.color_format);
-        let mut scaled_buffer = ImageBuffer::new_empty(preview_desc);
-
-        // CPU-only: the transform runs on the CPU and the result is already
-        // CPU-resident, so the downscaled preview is built inline (a 256px frame
-        // is cheap) with no GPU round-trip — hence no pending work to poll.
-        if let Err(e) = Transform::new().scale(Vec2::new(scale, scale)).execute(
-            &mut vision_ctx.processing_ctx,
-            &self.buffer,
-            &mut scaled_buffer,
-        ) {
-            tracing::error!("Failed to scale preview: {e}");
-            return None;
-        }
-
-        let scaled_cpu = match scaled_buffer.to_cpu(&vision_ctx.processing_ctx) {
+        // The fused downscale→RGBA8 op builds the thumbnail in one pass from a
+        // CPU view of the buffer (a no-op for the CPU-only context), so there's
+        // no GPU round-trip and no pending work to poll.
+        let src = match self.buffer.make_cpu(&vision_ctx.processing_ctx) {
             Ok(img) => img,
             Err(e) => {
-                tracing::error!("Failed to read preview: {e}");
+                tracing::error!("Failed to read image for preview: {e}");
                 return None;
             }
         };
 
-        match scaled_cpu.convert(ColorFormat::RGBA_U8) {
-            Ok(preview_image) => self.preview.send(preview_image),
-            Err(e) => tracing::error!("Failed to convert preview to RGBA_U8: {e}"),
-        }
+        self.preview
+            .send(Preview::new(new_width, new_height).to_rgba8(&src));
 
         None
     }
