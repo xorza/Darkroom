@@ -59,27 +59,31 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
         });
 }
 
-/// One whole-node event-subscription pin: a white left-pointing triangle
-/// overhanging the node's top-left corner. Negative top *and* left margins
-/// pull it out past both edges, like a port circle overhangs its edge. It's
-/// the drop target for an event wire; `hovered` (set while a drag snaps to
-/// it) scales the triangle up as drop feedback.
+/// One whole-node event-subscription pin: a white triangle overhanging the
+/// node's top-left corner, its apex pointing up-left toward the incoming
+/// wire. Negative top *and* left margins pull it out past both edges, like a
+/// port circle overhangs its edge. It's the drop target for an event wire;
+/// `hovered` (set while a drag snaps to it) scales the triangle up as drop
+/// feedback.
 fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool) {
     let port = theme.port_size;
     // Overhang past the body's inner edge (the border-folded padding) by the
     // dot's radius on each axis, centering the glyph box on the body corner —
     // the same half-on-the-edge overhang the port circles use.
     let overhang = theme.port_radius() + theme.node_border_width * 2.0;
-    // Apex on the left (base flush at the node), so it points outward. Grow it
-    // around the box center when snapped, leaving the layout box unchanged
-    // (meshes aren't clipped to the owner rect).
+    // Rotate the base (left-pointing) triangle +45° about its center so the
+    // apex points up-left, aligned with the wire arriving from there; scale
+    // around the same center for hover feedback. The layout box is unchanged
+    // (meshes aren't clipped to the owner rect, so rotated points may exceed
+    // it).
     let scale = if hovered { 1.35 } else { 1.0 };
     let c = Vec2::splat(port * 0.5);
-    let grow = |v: Vec2| c + (v - c) * scale;
+    let rot = Vec2::from_angle(std::f32::consts::FRAC_PI_4);
+    let tf = |v: Vec2| c + rot.rotate((v - c) * scale);
     let tri = Mesh::filled_triangle(
-        grow(Vec2::new(port, 0.0)),
-        grow(Vec2::new(port, port)),
-        grow(Vec2::new(0.0, port * 0.5)),
+        tf(Vec2::new(port, 0.0)),
+        tf(Vec2::new(port, port)),
+        tf(Vec2::new(0.0, port * 0.5)),
         Color::WHITE,
     );
     Panel::zstack()
