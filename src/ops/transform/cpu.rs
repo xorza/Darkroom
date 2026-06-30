@@ -6,7 +6,7 @@ use super::{FilterMode, Transform};
 use crate::common::color_format::{ChannelSize, ChannelType};
 use crate::image::Image;
 
-/// NEON RGBA specialization of the scalar path below (aarch64 only).
+/// NEON RGB/RGBA bilinear specialization of the scalar path below (aarch64 only).
 #[cfg(target_arch = "aarch64")]
 mod neon;
 
@@ -28,22 +28,20 @@ pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
     let fmt = input.desc.color_format;
     let channels = fmt.channel_count.channel_count() as usize;
 
-    // NEON specialization for 4-channel bilinear: one RGBA pixel is a full f32x4
-    // lane, so the convert→mix→convert chain vectorizes cleanly (~1.3–1.4×). Only
-    // bilinear — scalar nearest is already a near-memcpy. L/RGB stay scalar.
-    // Bit-identical to the scalar reference (cross-checked).
+    // RGB/RGBA bilinear vectorize ~1.3–1.5× and are bit-identical to the scalar
+    // reference (cross-checked). L stays scalar (gather-bound — NEON measured
+    // slower), and nearest is a near-memcpy the scalar path already nails.
     #[cfg(target_arch = "aarch64")]
-    if channels == 4 && transform.filter == FilterMode::Bilinear {
-        match (fmt.channel_size, fmt.channel_type) {
-            (ChannelSize::_8bit, ChannelType::UInt) => {
-                return neon::apply_rgba_bilinear::<u8>(transform, input, output);
-            }
-            (ChannelSize::_16bit, ChannelType::UInt) => {
-                return neon::apply_rgba_bilinear::<u16>(transform, input, output);
-            }
-            (ChannelSize::_32bit, ChannelType::Float) => {
-                return neon::apply_rgba_bilinear::<f32>(transform, input, output);
-            }
+    if channels >= 3 && transform.filter == FilterMode::Bilinear {
+        use ChannelSize::{_8bit, _16bit, _32bit};
+        use ChannelType::{Float, UInt};
+        match (fmt.channel_size, fmt.channel_type, channels) {
+            (_8bit, UInt, 4) => return neon::apply_packed::<u8, 4>(transform, input, output),
+            (_8bit, UInt, 3) => return neon::apply_packed::<u8, 3>(transform, input, output),
+            (_16bit, UInt, 4) => return neon::apply_packed::<u16, 4>(transform, input, output),
+            (_16bit, UInt, 3) => return neon::apply_packed::<u16, 3>(transform, input, output),
+            (_32bit, Float, 4) => return neon::apply_packed::<f32, 4>(transform, input, output),
+            (_32bit, Float, 3) => return neon::apply_packed::<f32, 3>(transform, input, output),
             _ => {}
         }
     }
@@ -398,18 +396,20 @@ mod tests {
         assert_ne!(nearest.bytes(), bilinear.bytes());
     }
 
-    /// The NEON bilinear RGBA path is bit-identical to the scalar reference across
-    /// all three RGBA formats, on a rotation that hits interior, edge, and
-    /// out-of-bounds taps.
+    /// Every NEON packed bilinear path (RGB, RGBA) is bit-identical to the scalar
+    /// reference, on a rotation and a non-multiple-of-4 width that hit interior,
+    /// edge, and out-of-bounds taps.
     #[cfg(target_arch = "aarch64")]
     #[test]
-    fn test_neon_matches_scalar_rgba() {
+    fn test_neon_matches_scalar() {
+        use ChannelSize::{_8bit, _16bit, _32bit};
+        use ChannelType::{Float, UInt};
         let center = Vec2::new(18.5, 9.5);
-        for &format in &[
-            ColorFormat::RGBA_U8,
-            ColorFormat::RGBA_U16,
-            ColorFormat::RGBA_F32,
-        ] {
+        for &format in ALL_FORMATS {
+            let cc = format.channel_count.channel_count();
+            if cc == 1 {
+                continue; // L has no NEON path.
+            }
             let input = create_test_image(format, 37, 19, 7);
             let transform = Transform::new()
                 .rotate_around(0.7, center)
@@ -418,18 +418,30 @@ mod tests {
             let mut scalar = Image::new_black(input.desc).unwrap();
             let mut simd = Image::new_black(input.desc).unwrap();
 
-            match (format.channel_size, format.channel_type) {
-                (ChannelSize::_8bit, ChannelType::UInt) => {
+            match (format.channel_size, format.channel_type, cc) {
+                (_8bit, UInt, 4) => {
                     apply_typed::<u8, 4>(&transform, &input, &mut scalar);
-                    neon::apply_rgba_bilinear::<u8>(&transform, &input, &mut simd);
+                    neon::apply_packed::<u8, 4>(&transform, &input, &mut simd);
                 }
-                (ChannelSize::_16bit, ChannelType::UInt) => {
+                (_8bit, UInt, 3) => {
+                    apply_typed::<u8, 3>(&transform, &input, &mut scalar);
+                    neon::apply_packed::<u8, 3>(&transform, &input, &mut simd);
+                }
+                (_16bit, UInt, 4) => {
                     apply_typed::<u16, 4>(&transform, &input, &mut scalar);
-                    neon::apply_rgba_bilinear::<u16>(&transform, &input, &mut simd);
+                    neon::apply_packed::<u16, 4>(&transform, &input, &mut simd);
                 }
-                (ChannelSize::_32bit, ChannelType::Float) => {
+                (_16bit, UInt, 3) => {
+                    apply_typed::<u16, 3>(&transform, &input, &mut scalar);
+                    neon::apply_packed::<u16, 3>(&transform, &input, &mut simd);
+                }
+                (_32bit, Float, 4) => {
                     apply_typed::<f32, 4>(&transform, &input, &mut scalar);
-                    neon::apply_rgba_bilinear::<f32>(&transform, &input, &mut simd);
+                    neon::apply_packed::<f32, 4>(&transform, &input, &mut simd);
+                }
+                (_32bit, Float, 3) => {
+                    apply_typed::<f32, 3>(&transform, &input, &mut scalar);
+                    neon::apply_packed::<f32, 3>(&transform, &input, &mut simd);
                 }
                 _ => unreachable!(),
             }
