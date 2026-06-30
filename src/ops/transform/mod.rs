@@ -1,10 +1,14 @@
+mod cpu;
+#[cfg(feature = "wgpu")]
 mod gpu;
+#[cfg(feature = "wgpu")]
 pub(crate) mod pipeline;
 
 use glam::{Affine2, Vec2};
 
 use crate::common::color_format::ALL_FORMATS;
 use crate::common::error::Result;
+use crate::image::Image;
 use crate::ops::backend_selection::{Backend, select_backend};
 use crate::processing_context::ProcessingContext;
 use crate::processing_context::image_buffer::ImageBuffer;
@@ -81,31 +85,56 @@ impl Transform {
         self
     }
 
+    /// Applies the affine transform on the CPU, sampling `input` into `output`.
+    ///
+    /// `output`'s descriptor sets the result dimensions (which may differ from
+    /// the input's); output pixels whose source maps outside the input are zero.
+    /// Grayscale and RGB sample against an implicit opaque alpha; RGBA carries
+    /// its own alpha through the same interpolation as the color channels.
+    ///
+    /// # Panics
+    /// Panics if input and output have different color formats.
+    pub fn apply_cpu(&self, input: &Image, output: &mut Image) {
+        cpu::apply(self, input, output);
+    }
+
     /// Applies the operation, automatically choosing CPU or GPU based on data location.
     ///
-    /// Transform is GPU-only, so this always uses GPU.
+    /// Prefers GPU if any input/output is already on GPU; otherwise runs on the CPU.
     ///
     /// # Errors
     /// Returns an error if:
     /// - Input and output have different color formats
-    /// - The color format is not one of the 12 supported formats
+    /// - The color format is not one of the nine supported formats
     pub fn execute(
         &self,
         ctx: &mut ProcessingContext,
         input: &ImageBuffer,
         output: &mut ImageBuffer,
     ) -> Result<()> {
-        let backend = select_backend(
-            ctx,
-            &[input, output],
-            &[], // No CPU support
-            ALL_FORMATS,
-            "Transform",
-        )?;
+        let backend = select_backend(ctx, &[input, output], ALL_FORMATS, ALL_FORMATS, "Transform")?;
 
         match backend {
+            #[cfg(feature = "wgpu")]
             Backend::Gpu => self.execute_gpu(ctx, input, output),
-            Backend::Cpu => unreachable!("Transform does not support CPU"),
+            Backend::Cpu => self.execute_cpu(ctx, input, output),
         }
+    }
+
+    /// Applies the operation using CPU with ImageBuffer.
+    ///
+    /// Automatically downloads images from GPU if needed.
+    pub fn execute_cpu(
+        &self,
+        ctx: &mut ProcessingContext,
+        input: &ImageBuffer,
+        output: &mut ImageBuffer,
+    ) -> Result<()> {
+        let input_cpu = input.make_cpu(ctx)?;
+        let mut output_cpu = output.make_cpu_mut(ctx)?;
+
+        self.apply_cpu(&input_cpu, &mut output_cpu);
+
+        Ok(())
     }
 }
