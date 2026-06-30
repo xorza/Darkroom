@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{Brush, Color, Ui};
+use palantir::{Brush, Ui};
 use scenarium::prelude::NodeId;
 
 use crate::core::edit::intent::Intent;
@@ -9,6 +9,7 @@ use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::pointer_world;
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, add_cubic_wire};
+use crate::gui::node::port_color::event_color;
 use crate::gui::scene::Scene;
 
 /// Control points for an event wire from emitter `p0` (a triangle on the
@@ -135,12 +136,12 @@ impl EventConnectionUI {
                     .broken_subscriptions
                     .push(*s);
             }
-            // White to match the emitter/subscriber glyphs; the broken alarm
-            // color wins while the breaker crosses it.
+            // The neutral event color matches the emitter/subscriber glyphs;
+            // the broken alarm color wins while the breaker crosses it.
             let brush = if broken {
                 Brush::Solid(ctx.theme.connection_broken)
             } else {
-                Brush::Solid(Color::WHITE)
+                Brush::Solid(event_color(ctx.theme, false))
             };
             add_cubic_wire(ui, p0, p3, handles, width, brush);
         }
@@ -175,7 +176,7 @@ impl EventConnectionUI {
             p3,
             event_handles(p0, p3),
             ctx.theme.connection_width,
-            Brush::Solid(Color::WHITE),
+            Brush::Solid(event_color(ctx.theme, false)),
         );
     }
 }

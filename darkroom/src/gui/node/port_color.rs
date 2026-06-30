@@ -30,6 +30,17 @@ pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: 
     }
 }
 
+/// Color for an event emitter glyph, subscription pin, or event wire.
+/// Events carry no data type, so they use the theme's neutral event swatch
+/// (not a type hue); `hovered` lifts it like the positional port colors.
+pub(crate) fn event_color(theme: &Theme, hovered: bool) -> Color {
+    if hovered {
+        theme.event_port_hover
+    } else {
+        theme.event_port
+    }
+}
+
 /// Positional color for an untyped port — the theme's input/output port
 /// swatch, hover variant included.
 fn fallback(theme: &Theme, kind: PortKind, hovered: bool) -> Color {
@@ -192,6 +203,19 @@ mod tests {
             port_color(&t, &custom(0), PortKind::Input, false),
             port_color(&t, &custom(1), PortKind::Input, false),
         );
+    }
+
+    #[test]
+    fn event_color_is_neutral_and_lifts_on_hover() {
+        // Events use the theme's neutral event swatch, distinct from any data
+        // hue, and the hover variant differs from rest on both presets.
+        for t in [Theme::dark(), Theme::light()] {
+            let rest = event_color(&t, false);
+            let hov = event_color(&t, true);
+            assert_eq!(rest, t.event_port);
+            assert_eq!(hov, t.event_port_hover);
+            assert_ne!(rest, hov, "hover must visibly differ from rest");
+        }
     }
 
     #[test]

@@ -12,6 +12,7 @@ use scenarium::prelude::{CachePersistence, NodeId};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
+use crate::gui::node::port_color::event_color;
 use crate::gui::node::{RecordCtx, exec_color, node_rename_wid, select_intent};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::SceneNode;
@@ -84,13 +85,16 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool
         tf(Vec2::new(port, 0.0)),
         tf(Vec2::new(port, port)),
         tf(Vec2::new(0.0, port * 0.5)),
-        Color::WHITE,
+        event_color(theme, hovered),
     );
-    Panel::zstack()
+    // `Sense::HOVER` so plain mouse-over lights the pin and anchors the
+    // tooltip; it captures no clicks, so node drag/select still fall through.
+    let pin = Panel::zstack()
         .id(subscription_glyph_wid(node_id))
         .size((Sizing::Fixed(port), Sizing::Fixed(port)))
         .align(Align::new(HAlign::Left, VAlign::Top))
         .margin(Spacing::new(-overhang, -overhang, 0.0, 0.0))
+        .sense(Sense::HOVER)
         .show(ui, |ui| {
             ui.add_shape(Shape::Mesh {
                 mesh: &tri,
@@ -98,6 +102,9 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool
                 tint: Color::WHITE.into(),
             });
         });
+    Tooltip::for_(&pin.response.snapshot())
+        .text("Event subscription — drop an event wire here")
+        .show(ui);
 }
 
 /// Stable id for a node's event-subscription pin. Keyed on the node (a

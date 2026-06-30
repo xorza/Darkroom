@@ -86,6 +86,10 @@ pub(crate) mod dark {
     pub(crate) const OUTPUT_PORT: Color = Color::hex(0xffa63d);
     pub(crate) const INPUT_PORT_HOVER: Color = Color::hex(0xe9ff8e);
     pub(crate) const OUTPUT_PORT_HOVER: Color = Color::hex(0xffc878);
+    // Events read as neutral white to set them apart from the type-colored
+    // data ports; near-white at rest so hover can lift to pure white.
+    pub(crate) const EVENT_PORT: Color = Color::hex(0xe6e6e6);
+    pub(crate) const EVENT_PORT_HOVER: Color = Color::hex(0xffffff);
 
     // palantir sub-theme palette — values palantir's widgets normally
     // read from its own `palette::*` consts. Pushed through
@@ -138,6 +142,10 @@ pub(crate) mod light {
     pub(crate) const OUTPUT_PORT: Color = Color::hex(0xfa8d3e);
     pub(crate) const INPUT_PORT_HOVER: Color = Color::hex(0x6f9603);
     pub(crate) const OUTPUT_PORT_HOVER: Color = Color::hex(0xd97527);
+    // White is invisible on the light canvas, so events use a mid-gray at
+    // rest and darken on hover (matching the light-theme port emphasis).
+    pub(crate) const EVENT_PORT: Color = Color::hex(0x5b5b5b);
+    pub(crate) const EVENT_PORT_HOVER: Color = Color::hex(0x2e2e2e);
 
     // palantir sub-theme palette — see `dark::PAL_*` for the contract.
     pub(crate) const PAL_TEXT: Color = Color::hex(0x5c6166);
@@ -293,6 +301,11 @@ pub struct Theme {
     pub output_port: Color,
     pub input_port_hover: Color,
     pub output_port_hover: Color,
+    /// Event emitter glyphs, subscription pins, and event wires (neutral,
+    /// distinct from the type-colored data ports). `_hover` lifts it like the
+    /// positional port colors do.
+    pub event_port: Color,
+    pub event_port_hover: Color,
     /// Side of the port circle quad. The circle's corner radius is
     /// derived as `port_size * 0.5` (see [`Self::port_radius`]).
     pub port_size: f32,
@@ -673,6 +686,8 @@ struct PaletteColors {
     output_port: Color,
     input_port_hover: Color,
     output_port_hover: Color,
+    event_port: Color,
+    event_port_hover: Color,
 }
 
 impl PaletteColors {
@@ -699,6 +714,8 @@ impl PaletteColors {
         output_port: dark::OUTPUT_PORT,
         input_port_hover: dark::INPUT_PORT_HOVER,
         output_port_hover: dark::OUTPUT_PORT_HOVER,
+        event_port: dark::EVENT_PORT,
+        event_port_hover: dark::EVENT_PORT_HOVER,
     };
 
     const LIGHT: Self = Self {
@@ -724,6 +741,8 @@ impl PaletteColors {
         output_port: light::OUTPUT_PORT,
         input_port_hover: light::INPUT_PORT_HOVER,
         output_port_hover: light::OUTPUT_PORT_HOVER,
+        event_port: light::EVENT_PORT,
+        event_port_hover: light::EVENT_PORT_HOVER,
     };
 }
 
@@ -826,6 +845,8 @@ impl Theme {
             output_port: c.output_port,
             input_port_hover: c.input_port_hover,
             output_port_hover: c.output_port_hover,
+            event_port: c.event_port,
+            event_port_hover: c.event_port_hover,
             port_size: PORT_SIZE,
             port_col_pad_top: PORT_COL_PAD_TOP,
             port_col_pad_x: PORT_COL_PAD_X,

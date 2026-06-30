@@ -386,6 +386,11 @@ impl Editor {
     pub(crate) fn rebuild_scene(&mut self, target: GraphRef, library: &Library) {
         if self.needs_reconcile {
             self.document.reconcile_boundaries(library);
+            // Same pass: drop bindings/subscriptions left dangling by a library
+            // skew on load (an input/output/event the node no longer exposes),
+            // or by a removed endpoint. Runs before the rebuild below, so the
+            // stale wire never projects.
+            self.document.prune_dangling_wiring(library);
             self.needs_reconcile = false;
         }
         let graph = self

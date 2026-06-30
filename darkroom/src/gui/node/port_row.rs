@@ -19,14 +19,14 @@ use scenarium::prelude::NodeId;
 
 use crate::core::document::BoundarySide;
 use crate::core::edit::intent::Intent;
-use crate::gui::node::port_color::port_color;
+use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
 use crate::gui::node::{RecordCtx, set_input};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::Theme;
-use crate::gui::{PortKind, PortRef};
+use crate::gui::{EventRef, PortKind, PortRef};
 
 /// Grid columns: inputs (hug), input values (hug — uniform width keeps the
 /// editors aligned), a fill spacer, then outputs (hug). The outputs sit in a
@@ -334,6 +334,9 @@ fn event_cell(
     let theme = rcx.theme;
     let overhang = theme.port_overhang();
     let wid = event_glyph_wid(node_id, event_idx);
+    let ev = EventRef { node_id, event_idx };
+    let fill = event_color(theme, rcx.port_frame.event_is_hovered(ev));
+    let tip = format!("event: {}", event.name.as_str(""));
     Panel::hstack()
         .id_salt(("event", event_idx))
         .grid_cell((row as u16, COL_OUTPUT))
@@ -343,7 +346,14 @@ fn event_cell(
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             Text::new(event.name.clone()).show(ui);
-            event_glyph(ui, theme, wid, Spacing::new(0.0, 0.0, -overhang, 0.0));
+            event_glyph(
+                ui,
+                theme,
+                wid,
+                fill,
+                Spacing::new(0.0, 0.0, -overhang, 0.0),
+                &tip,
+            );
         });
 }
 
@@ -355,11 +365,12 @@ pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
     WidgetId::from_hash(("graph.node.event_glyph", node_id, event_idx))
 }
 
-/// Paints an event port glyph: a white right-pointing triangle (a port dot
-/// rotated 90°), the same `port_size` box and edge overhang as a data port's
-/// circle, so it lines up with the outputs above it. Senses `CLICK | DRAG`
-/// so a subscription wire can be dragged out of it.
-fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, margin: Spacing) {
+/// Paints an event port glyph: a right-pointing triangle (a port dot rotated
+/// 90°), the same `port_size` box and edge overhang as a data port's circle,
+/// so it lines up with the outputs above it. `fill` carries the hover state;
+/// `tip` shows as a hover tooltip. Senses `CLICK | DRAG` so a subscription
+/// wire can be dragged out of it.
+fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: Spacing, tip: &str) {
     let port = theme.port_size;
     // Right-pointing isosceles triangle filling the port box: the apex points
     // outward (away from the node body), matching the emit direction.
@@ -367,9 +378,9 @@ fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, margin: Spacing) {
         Vec2::new(0.0, 0.0),
         Vec2::new(0.0, port),
         Vec2::new(port, port * 0.5),
-        Color::WHITE,
+        fill,
     );
-    Panel::zstack()
+    let glyph = Panel::zstack()
         .id(wid)
         .size((Sizing::Fixed(port), Sizing::Fixed(port)))
         .margin(margin)
@@ -381,6 +392,11 @@ fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, margin: Spacing) {
                 tint: Color::WHITE.into(),
             });
         });
+    if !tip.is_empty() {
+        Tooltip::for_(&glyph.response.snapshot())
+            .text(tip.to_owned())
+            .show(ui);
+    }
 }
 
 /// Hover / grab box scaled past the painted dot so ports are easier to

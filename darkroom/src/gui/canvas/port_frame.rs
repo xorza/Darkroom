@@ -184,6 +184,11 @@ impl PortFrame {
         self.events.get(&e).is_some_and(|i| i.dragging)
     }
 
+    /// `true` when an emitter event glyph is hovered (plain mouse-over).
+    pub(crate) fn event_is_hovered(&self, e: EventRef) -> bool {
+        self.events.get(&e).is_some_and(|i| i.hovered)
+    }
+
     /// Canvas-local center of a node's subscription pin, or `None` when it
     /// hasn't measured yet (or the node has no pin).
     pub(crate) fn sub_center_canvas_local(&self, node_id: NodeId) -> Option<Vec2> {

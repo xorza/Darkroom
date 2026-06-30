@@ -548,6 +548,16 @@ impl Document {
         }
     }
 
+    /// Drop wiring left dangling when a node's func/def changed its interface
+    /// (e.g. a document loaded against a newer library): data bindings whose
+    /// port is now out of range, and event subscriptions whose event is gone.
+    /// Derived-validity fixup run alongside [`Self::reconcile_boundaries`];
+    /// both recurse into local subgraph defs.
+    pub fn prune_dangling_wiring(&mut self, library: &Library) {
+        self.graph.prune_bindings(library);
+        self.graph.prune_subscriptions(library);
+    }
+
     pub fn validate(&self) {
         if !is_debug() {
             return;
