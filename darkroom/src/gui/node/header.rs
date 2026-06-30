@@ -3,9 +3,10 @@
 //! and the `i` inspect chip). Drawn as the top child of each node body by
 //! [`crate::gui::node::NodeUI`].
 
+use glam::Vec2;
 use palantir::{
-    Align, Background, Color, Configure, Corners, Panel, Sense, Sizing, Spacing, Spinner, Stroke,
-    Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, Corners, HAlign, Mesh, Panel, Sense, Shape, Sizing,
+    Spacing, Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 use scenarium::prelude::{CachePersistence, NodeId};
 
@@ -36,10 +37,68 @@ pub(crate) fn fmt_elapsed(secs: f64) -> String {
     }
 }
 
-/// The header bar: just the node title. Indicator chips + the run-time
-/// label live in [`status_row`] below it so adding/removing the time
-/// label never reflows the title.
+/// The header bar (title + inspect chip). A terminal node also carries a
+/// whole-node event-subscription pin — a white triangle overhanging the
+/// top-left edge — so the header is overlaid in a zstack: the pin floats
+/// over the bar's left edge without reflowing the title (zstack children
+/// don't push each other). Non-terminal nodes draw the bar directly.
 pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+    if !node.terminal {
+        header_bar(ui, rcx, node, out);
+        return;
+    }
+    let theme = rcx.theme;
+    Panel::zstack()
+        .id_salt("header_overlay")
+        .size((Sizing::FILL, Sizing::Hug))
+        .show(ui, |ui| {
+            header_bar(ui, rcx, node, out);
+            subscription_glyph(ui, theme, node.id);
+        });
+}
+
+/// One whole-node event-subscription pin: a white left-pointing triangle
+/// overhanging the node's top-left corner. Negative top *and* left margins
+/// pull it out past both edges, like a port circle overhangs its edge.
+/// Display-only for now; no subscription gesture yet.
+fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId) {
+    let port = theme.port_size;
+    // Overhang past the body's inner edge (the border-folded padding) by the
+    // dot's radius on each axis, centering the glyph box on the body corner —
+    // the same half-on-the-edge overhang the port circles use.
+    let overhang = theme.port_radius() + theme.node_border_width * 2.0;
+    // Apex on the left (base flush at the node), so it points outward.
+    let tri = Mesh::filled_triangle(
+        Vec2::new(port, 0.0),
+        Vec2::new(port, port),
+        Vec2::new(0.0, port * 0.5),
+        Color::WHITE,
+    );
+    Panel::zstack()
+        .id(subscription_glyph_wid(node_id))
+        .size((Sizing::Fixed(port), Sizing::Fixed(port)))
+        .align(Align::new(HAlign::Left, VAlign::Top))
+        .margin(Spacing::new(-overhang, -overhang, 0.0, 0.0))
+        .show(ui, |ui| {
+            ui.add_shape(Shape::Mesh {
+                mesh: &tri,
+                local_rect: None,
+                tint: Color::WHITE.into(),
+            });
+        });
+}
+
+/// Stable id for a node's event-subscription pin. Keyed on the node (a
+/// subscription is whole-node, not per-port), so it's reconstructible for a
+/// future wiring gesture without threading state.
+fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.subscription_glyph", node_id))
+}
+
+/// The header bar proper: the node title plus the right-aligned inspect
+/// chip. Indicator chips + the run-time label live in [`status_row`] below
+/// it so adding/removing the time label never reflows the title.
+fn header_bar(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding). Its top corners must
