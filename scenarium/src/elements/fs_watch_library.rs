@@ -2,7 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::event::ModifyKind;
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::Notify;
 use tokio::time::timeout;
 
@@ -42,7 +43,9 @@ impl WatchState {
         let callback_signal = signal.clone();
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                if res.is_ok() {
+                if let Ok(event) = res
+                    && is_content_change(&event.kind)
+                {
                     callback_signal.notify_one();
                 }
             })?;
@@ -72,6 +75,24 @@ impl std::fmt::Debug for WatchState {
     }
 }
 
+/// Whether an event is a change to the directory's *contents* — a new file, a
+/// removal, a rename, or a data write.
+///
+/// We subscribe to exactly `Create`, `Remove`, and `Modify`, and drop everything
+/// else: `Access` (reads/opens/closes) and the uncategorized `Any`/`Other`
+/// catch-alls. The one carve-out is metadata-only `Modify`s (access/write time,
+/// permissions, ownership, xattrs) — that's where an access-time bump lands, so
+/// it's filtered too. `Modify(Any)` is still kept: some backends (macOS
+/// FSEvents) report a real write that coarsely, and dropping it would swallow
+/// genuine changes.
+fn is_content_change(kind: &EventKind) -> bool {
+    match kind {
+        EventKind::Modify(ModifyKind::Metadata(_)) => false,
+        EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => true,
+        _ => false,
+    }
+}
+
 fn directory_type() -> DataType {
     DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::Directory)))
 }
@@ -85,7 +106,8 @@ pub fn fs_watch_library() -> Library {
         Func::new(WATCH_DIRECTORY_FUNC_ID, "watch directory")
             .category("Filesystem")
             .description(
-                "Passes a directory through unchanged and fires `changed` when its contents change.",
+                "Passes a directory through unchanged and fires `changed` when files are added, \
+                 removed, renamed, or written — ignoring access-time and other metadata-only events.",
             )
             .input(FuncInput::required("directory", directory_type()).const_only())
             .input(FuncInput::required("recursive", DataType::Bool).default(true).const_only())
@@ -230,6 +252,39 @@ mod tests {
         assert_eq!(func.events[0].name, "changed");
         // Impure so it re-executes (and re-emits the passthrough) on every fire.
         assert!(matches!(func.behavior, FuncBehavior::Impure));
+    }
+
+    #[test]
+    fn classifies_filesystem_event_kinds() {
+        use super::is_content_change;
+        use notify::EventKind;
+        use notify::event::{
+            AccessKind, CreateKind, DataChange, MetadataKind, ModifyKind, RemoveKind, RenameMode,
+        };
+
+        // Subscribed: writes, new files, removes, renames.
+        assert!(is_content_change(&EventKind::Create(CreateKind::File)));
+        assert!(is_content_change(&EventKind::Remove(RemoveKind::File)));
+        assert!(is_content_change(&EventKind::Modify(ModifyKind::Data(
+            DataChange::Content
+        ))));
+        assert!(is_content_change(&EventKind::Modify(ModifyKind::Name(
+            RenameMode::Both
+        ))));
+        // Coarse `Modify(Any)` is kept — macOS FSEvents reports real writes that way.
+        assert!(is_content_change(&EventKind::Modify(ModifyKind::Any)));
+
+        // Dropped: metadata-only changes (incl. access time), reads, and the
+        // uncategorized catch-alls.
+        assert!(!is_content_change(&EventKind::Modify(
+            ModifyKind::Metadata(MetadataKind::AccessTime)
+        )));
+        assert!(!is_content_change(&EventKind::Modify(
+            ModifyKind::Metadata(MetadataKind::Permissions)
+        )));
+        assert!(!is_content_change(&EventKind::Access(AccessKind::Read)));
+        assert!(!is_content_change(&EventKind::Any));
+        assert!(!is_content_change(&EventKind::Other));
     }
 
     #[tokio::test]
