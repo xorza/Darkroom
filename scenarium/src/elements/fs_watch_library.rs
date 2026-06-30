@@ -1,8 +1,10 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::Notify;
+use tokio::time::timeout;
 
 use crate::data::{DataType, FsPathConfig, FsPathMode, StaticValue};
 use crate::event_lambda::EventLambda;
@@ -18,6 +20,11 @@ pub const WATCH_DIRECTORY_FUNC_ID: FuncId = FuncId::from_u128(0x1318c24c2ac74a9a
 struct WatchState {
     path: String,
     recursive: bool,
+    /// Trailing-edge quiet window: after the first change the event lambda keeps
+    /// absorbing follow-up changes until the directory is silent this long, then
+    /// fires once. Collapses the burst of low-level events one user action (paste,
+    /// save) produces into a single fire. Zero disables it.
+    debounce: Duration,
     /// Pulsed by the watcher's callback thread on every filesystem event; the
     /// event lambda parks on `notified()`. `notify_one` keeps a single permit
     /// when no waiter is parked, so a change between fires is never missed and a
@@ -30,7 +37,7 @@ struct WatchState {
 }
 
 impl WatchState {
-    fn new(path: &str, recursive: bool) -> notify::Result<Self> {
+    fn new(path: &str, recursive: bool, debounce: Duration) -> notify::Result<Self> {
         let signal = Arc::new(Notify::new());
         let callback_signal = signal.clone();
         let mut watcher =
@@ -48,6 +55,7 @@ impl WatchState {
         Ok(Self {
             path: path.to_string(),
             recursive,
+            debounce,
             signal,
             watcher,
         })
@@ -59,6 +67,7 @@ impl std::fmt::Debug for WatchState {
         f.debug_struct("WatchState")
             .field("path", &self.path)
             .field("recursive", &self.recursive)
+            .field("debounce", &self.debounce)
             .finish_non_exhaustive()
     }
 }
@@ -78,17 +87,30 @@ pub fn fs_watch_library() -> Library {
             .description(
                 "Passes a directory through unchanged and fires `changed` when its contents change.",
             )
-            .input(FuncInput::required("directory", directory_type()))
-            .input(FuncInput::required("recursive", DataType::Bool).default(true))
+            .input(FuncInput::required("directory", directory_type()).const_only())
+            .input(FuncInput::required("recursive", DataType::Bool).default(true).const_only())
+            .input(FuncInput::required("debounce ms", DataType::Int).default(1000i64).const_only())
             .output("directory", directory_type())
             .event(
                 "changed",
                 EventLambda::new(|state| {
                     Box::pin(async move {
-                        let signal =
-                            state.lock().await.get::<WatchState>().map(|w| w.signal.clone());
-                        match signal {
-                            Some(signal) => signal.notified().await,
+                        let watch = state
+                            .lock()
+                            .await
+                            .get::<WatchState>()
+                            .map(|w| (w.signal.clone(), w.debounce));
+                        match watch {
+                            Some((signal, debounce)) => {
+                                // Wait for the first change of a burst...
+                                signal.notified().await;
+                                // ...then absorb follow-up changes until the
+                                // directory stays quiet for `debounce`, so one
+                                // user action fires once instead of N times.
+                                while !debounce.is_zero()
+                                    && timeout(debounce, signal.notified()).await.is_ok()
+                                {}
+                            }
                             // No watcher (e.g. empty/invalid path): never fire.
                             None => std::future::pending::<()>().await,
                         }
@@ -101,17 +123,24 @@ pub fn fs_watch_library() -> Library {
                         let path =
                             inputs[0].value.as_fs_path().unwrap_or_default().to_string();
                         let recursive = inputs[1].value.as_bool().unwrap_or(true);
+                        let debounce = Duration::from_millis(
+                            inputs[2].value.as_i64().unwrap_or(1000).max(0) as u64,
+                        );
 
                         if !path.is_empty() {
                             let mut guard = event_state.lock().await;
-                            let stale = guard
+                            let needs_rebuild = guard
                                 .get::<WatchState>()
                                 .map(|w| w.path != path || w.recursive != recursive)
                                 .unwrap_or(true);
-                            if stale {
-                                let watch_state = WatchState::new(&path, recursive)
+                            if needs_rebuild {
+                                let watch_state = WatchState::new(&path, recursive, debounce)
                                     .map_err(anyhow::Error::from)?;
                                 guard.set(watch_state);
+                            } else if let Some(w) = guard.get_mut::<WatchState>() {
+                                // Debounce is consumer-side — retune without
+                                // tearing down the live OS watch.
+                                w.debounce = debounce;
                             }
                         }
 
@@ -135,7 +164,8 @@ mod tests {
     use crate::prelude::{AnyState, SharedAnyState};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use tokio::time::{Duration, timeout};
+    use std::time::Instant;
+    use tokio::time::{Duration, sleep, timeout};
 
     fn unique_temp_dir() -> std::path::PathBuf {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -161,6 +191,9 @@ mod tests {
             InvokeInput {
                 value: StaticValue::Bool(recursive).into(),
             },
+            InvokeInput {
+                value: StaticValue::Int(250).into(),
+            },
         ];
         let usage = [OutputUsage::Needed(1)];
         let mut outputs = [DynamicValue::Unbound];
@@ -185,10 +218,12 @@ mod tests {
         let func = lib.by_name("watch directory").expect("func registered");
 
         assert_eq!(func.id, WATCH_DIRECTORY_FUNC_ID);
-        assert_eq!(func.inputs.len(), 2);
+        assert_eq!(func.inputs.len(), 3);
         assert_eq!(func.inputs[0].name, "directory");
         assert_eq!(func.inputs[1].name, "recursive");
         assert_eq!(func.inputs[1].default_value, Some(StaticValue::Bool(true)));
+        assert_eq!(func.inputs[2].name, "debounce ms");
+        assert_eq!(func.inputs[2].default_value, Some(StaticValue::Int(1000)));
         assert_eq!(func.outputs.len(), 1);
         assert_eq!(func.outputs[0].name, "directory");
         assert_eq!(func.events.len(), 1);
@@ -313,7 +348,7 @@ mod tests {
     #[tokio::test]
     async fn watcher_signals_on_content_change() {
         let dir = unique_temp_dir();
-        let ws = WatchState::new(dir.to_str().unwrap(), false).unwrap();
+        let ws = WatchState::new(dir.to_str().unwrap(), false, Duration::ZERO).unwrap();
         let signal = ws.signal.clone();
 
         // Absorb any spurious event from creating the directory itself, so the
@@ -327,6 +362,47 @@ mod tests {
             .expect("creating a file in the watched dir must fire the watcher");
 
         drop(ws);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn debounce_collapses_burst_into_one_fire() {
+        let dir = unique_temp_dir();
+        let lib = fs_watch_library();
+        let func = lib.by_name("watch directory").unwrap();
+
+        // Seed per-node state with a 200ms-debounce watcher, then drive the real
+        // `changed` event lambda against a hand-pulsed signal (a "burst").
+        let event_state = SharedAnyState::default();
+        let ws = WatchState::new(dir.to_str().unwrap(), false, Duration::from_millis(200)).unwrap();
+        let signal = ws.signal.clone();
+        event_state.lock().await.set(ws);
+
+        let lambda = func.events[0].event_lambda.clone();
+        let es = event_state.clone();
+        let start = Instant::now();
+        let handle = tokio::spawn(async move { lambda.invoke(es).await });
+        tokio::task::yield_now().await;
+
+        // Two pulses 50ms apart — both inside the 200ms window.
+        signal.notify_one();
+        sleep(Duration::from_millis(50)).await;
+        signal.notify_one();
+
+        // The first pulse must not have fired immediately — it's being debounced.
+        assert!(!handle.is_finished(), "must not fire mid-burst");
+
+        // Exactly one fire, only after the window elapses past the last pulse.
+        timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("debounced fire")
+            .unwrap();
+        assert!(
+            start.elapsed() >= Duration::from_millis(200),
+            "fire must be delayed by the debounce window, got {:?}",
+            start.elapsed()
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
