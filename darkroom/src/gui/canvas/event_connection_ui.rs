@@ -1,35 +1,26 @@
 use glam::Vec2;
-use palantir::{Brush, Color, LineCap, Shape, Ui};
+use palantir::{Brush, Color, Ui};
 use scenarium::prelude::NodeId;
 
 use crate::core::edit::intent::Intent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
+use crate::gui::canvas::pointer_world;
 use crate::gui::canvas::port_frame::PortFrame;
-use crate::gui::canvas::to_world;
+use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, add_cubic_wire};
 use crate::gui::scene::Scene;
-
-/// Minimum length of an event wire's bezier control handles, so a short
-/// emitter→subscriber link still bows into a readable curve.
-const MIN_EVENT_HANDLE: f32 = 40.0;
-
-/// The two interior control points of an event-wire cubic.
-struct EventHandles {
-    p1: Vec2,
-    p2: Vec2,
-}
 
 /// Control points for an event wire from emitter `p0` (a triangle on the
 /// right of its node) to subscriber pin `p3` (the top-left pin). The emitter
 /// handle leaves rightward like a data output; the subscriber handle points
 /// **up-left**, matching the pin's outward-pointing triangle so the wire
 /// meets it head-on.
-fn event_handles(p0: Vec2, p3: Vec2) -> EventHandles {
-    let d = (p0.distance(p3) * 0.4).max(MIN_EVENT_HANDLE);
+fn event_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
+    let d = (p0.distance(p3) * 0.4).max(MIN_HANDLE);
     // (-1, -1) is up-left in screen space (y grows downward).
     let up_left = Vec2::new(-1.0, -1.0).normalize();
-    EventHandles {
+    CubicHandles {
         p1: p0 + Vec2::new(d, 0.0),
         p2: p3 + up_left * d,
     }
@@ -133,11 +124,8 @@ impl EventConnectionUI {
             ) else {
                 continue;
             };
-            let EventHandles { p1, p2 } = event_handles(p0, p3);
-            let broken = probe
-                .state
-                .as_deref()
-                .is_some_and(|b| b.intersects_cubic(p0, p1, p2, p3));
+            let handles = event_handles(p0, p3);
+            let broken = probe.crosses_cubic(p0, handles.p1, handles.p2, p3);
             if broken {
                 // unwrap: `broken == true` implies `state` is `Some`.
                 probe
@@ -147,21 +135,14 @@ impl EventConnectionUI {
                     .broken_subscriptions
                     .push(*s);
             }
-            ui.add_shape(Shape::CubicBezier {
-                p0,
-                p1,
-                p2,
-                p3,
-                width,
-                // White to match the emitter/subscriber glyphs; the broken
-                // alarm color wins while the breaker crosses it.
-                brush: if broken {
-                    Brush::Solid(ctx.theme.connection_broken)
-                } else {
-                    Brush::Solid(Color::WHITE)
-                },
-                cap: LineCap::Round,
-            });
+            // White to match the emitter/subscriber glyphs; the broken alarm
+            // color wins while the breaker crosses it.
+            let brush = if broken {
+                Brush::Solid(ctx.theme.connection_broken)
+            } else {
+                Brush::Solid(Color::WHITE)
+            };
+            add_cubic_wire(ui, p0, p3, handles, width, brush);
         }
     }
 
@@ -183,21 +164,19 @@ impl EventConnectionUI {
         };
         let end = match state.snap_sub {
             Some(sub) => port_frame.sub_center_canvas_local(sub),
-            None => ui.pointer_pos().map(|p| to_world(p - canvas_origin, scene)),
+            None => pointer_world(ui, scene, canvas_origin),
         };
         let Some(p3) = end else {
             return;
         };
-        let EventHandles { p1, p2 } = event_handles(p0, p3);
-        ui.add_shape(Shape::CubicBezier {
+        add_cubic_wire(
+            ui,
             p0,
-            p1,
-            p2,
             p3,
-            width: ctx.theme.connection_width,
-            brush: Brush::Solid(Color::WHITE),
-            cap: LineCap::Round,
-        });
+            event_handles(p0, p3),
+            ctx.theme.connection_width,
+            Brush::Solid(Color::WHITE),
+        );
     }
 }
 

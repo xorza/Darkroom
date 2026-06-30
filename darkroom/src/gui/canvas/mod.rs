@@ -10,6 +10,7 @@ pub(crate) mod pan_zoom;
 pub(crate) mod port_frame;
 pub(crate) mod selection_ui;
 pub(crate) mod subgraph_menu;
+pub(crate) mod wire;
 
 use glam::Vec2;
 use palantir::{
@@ -432,6 +433,13 @@ pub(crate) fn node_ports(node: &SceneNode, kind: PortKind) -> impl Iterator<Item
 pub(crate) fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
     let zoom = if scene.zoom > 0.0 { scene.zoom } else { 1.0 };
     (outer_local - scene.pan) / zoom
+}
+
+/// The pointer in inner-canvas world coords, or `None` when it's off-window.
+/// The free end of an in-flight wire that hasn't snapped to a target yet;
+/// `canvas_origin` is the inner canvas's pre-transform origin.
+pub(crate) fn pointer_world(ui: &Ui, scene: &Scene, canvas_origin: Vec2) -> Option<Vec2> {
+    ui.pointer_pos().map(|p| to_world(p - canvas_origin, scene))
 }
 
 /// Stable id for the outer (pan-capture) canvas. `auto_stable` mixes

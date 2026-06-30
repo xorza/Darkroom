@@ -1,8 +1,5 @@
 use glam::Vec2;
-use palantir::{
-    Brush, Color, LineCap, LinearGradient, PointerButton, PointerEvent, PointerSense, Shape, Stop,
-    Ui,
-};
+use palantir::{Brush, Color, LinearGradient, PointerButton, PointerEvent, PointerSense, Stop, Ui};
 use scenarium::data::DataType;
 use scenarium::graph::{Binding, InputPort, closes_data_cycle};
 
@@ -10,27 +7,20 @@ use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::port_frame::PortFrame;
-use crate::gui::canvas::{node_ports, outer_canvas_widget_id, to_world};
+use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, add_cubic_wire};
+use crate::gui::canvas::{node_ports, outer_canvas_widget_id, pointer_world};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
 use crate::gui::scene::{InputBindingView, Scene};
 use crate::gui::{PortKind, PortRef};
 
-/// Minimum horizontal length of a connection's bezier control handles,
-/// so short/backward links still bow out into a readable S-curve.
-const MIN_CUBIC_HANDLE: f32 = 40.0;
-
-/// The two interior control points of a connection cubic.
-struct CubicHandles {
-    p1: Vec2,
-    p2: Vec2,
-}
-
 /// Control points for a left-to-right cubic between port centers `p0`
-/// (output side) and `p3` (input side). Shared by the permanent and
-/// in-flight draws so the preview matches the committed curve exactly.
+/// (output side) and `p3` (input side): both handles run horizontally so the
+/// curve leaves the output rightward and arrives at the input leftward.
+/// Shared by the permanent and in-flight draws so the preview matches the
+/// committed curve exactly.
 fn cubic_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
-    let dx = ((p3.x - p0.x).abs() * 0.5).max(MIN_CUBIC_HANDLE);
+    let dx = ((p3.x - p0.x).abs() * 0.5).max(MIN_HANDLE);
     CubicHandles {
         p1: p0 + Vec2::new(dx, 0.0),
         p2: p3 - Vec2::new(dx, 0.0),
@@ -296,11 +286,8 @@ impl ConnectionUI {
             ) else {
                 continue;
             };
-            let CubicHandles { p1, p2 } = cubic_handles(p0, p3);
-            let broken = probe
-                .state
-                .as_deref()
-                .is_some_and(|b| b.intersects_cubic(p0, p1, p2, p3));
+            let handles = cubic_handles(p0, p3);
+            let broken = probe.crosses_cubic(p0, handles.p1, handles.p2, p3);
             if broken {
                 // unwrap: `broken == true` implies `state` is `Some`.
                 probe
@@ -328,15 +315,7 @@ impl ConnectionUI {
                     port_color(ctx.theme, &tgt_ty, PortKind::Input, false),
                 )
             };
-            ui.add_shape(Shape::CubicBezier {
-                p0,
-                p1,
-                p2,
-                p3,
-                width,
-                brush,
-                cap: LineCap::Round,
-            });
+            add_cubic_wire(ui, p0, p3, handles, width, brush);
         }
     }
 
@@ -359,7 +338,7 @@ impl ConnectionUI {
         };
         let end = match state.snap_end {
             Some(snap) => port_frame.center_canvas_local(snap),
-            None => ui.pointer_pos().map(|p| to_world(p - canvas_origin, scene)),
+            None => pointer_world(ui, scene, canvas_origin),
         };
         let Some(end) = end else { return };
         // Orient handles by kind: outputs grow rightward, inputs grow
@@ -369,20 +348,18 @@ impl ConnectionUI {
             PortKind::Output => (start, end),
             PortKind::Input => (end, start),
         };
-        let CubicHandles { p1, p2 } = cubic_handles(p0, p3);
         // Tint the in-flight wire by the dragged port's data type, so the
         // preview already reads as the type being connected.
         let drag_ty = port_data_type(scene, start_port).unwrap_or_default();
         let wire = port_color(ctx.theme, &drag_ty, start_port.kind, false);
-        ui.add_shape(Shape::CubicBezier {
+        add_cubic_wire(
+            ui,
             p0,
-            p1,
-            p2,
             p3,
-            width: ctx.theme.connection_width,
-            brush: port_gradient(wire, wire),
-            cap: LineCap::Round,
-        });
+            cubic_handles(p0, p3),
+            ctx.theme.connection_width,
+            port_gradient(wire, wire),
+        );
     }
 }
 

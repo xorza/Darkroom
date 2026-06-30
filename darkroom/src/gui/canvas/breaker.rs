@@ -19,6 +19,17 @@ pub(crate) struct BreakerProbe<'a> {
     pub(crate) state: Option<&'a mut BreakerState>,
 }
 
+impl BreakerProbe<'_> {
+    /// True if the active breaker polyline crosses the cubic `p0..p3`. A
+    /// no-op (false) when no breaker gesture is live, so wire renderers can
+    /// call it unconditionally before deciding whether to record a cut.
+    pub(crate) fn crosses_cubic(&self, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> bool {
+        self.state
+            .as_deref()
+            .is_some_and(|b| b.intersects_cubic(p0, p1, p2, p3))
+    }
+}
+
 /// Polyline samples closer than this (in inner-canvas world units)
 /// are dropped — keeps the breaker from accumulating sub-pixel
 /// duplicates on a slow drag.
