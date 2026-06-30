@@ -46,6 +46,7 @@ pub use crate::processing_context::image_buffer::ImageBuffer;
 
 pub use crate::ops::blend::{Blend, BlendMode};
 pub use crate::ops::contrast_brightness::ContrastBrightness;
+pub use crate::ops::preview::Preview;
 pub use crate::ops::transform::{FilterMode, Transform};
 
 #[cfg(feature = "wgpu")]
