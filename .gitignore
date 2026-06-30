@@ -44,3 +44,4 @@ log/
 darkroom.config.rhai
 darkroom.library.rhai
 darkroom.config.toml
+.cargo/config.toml
