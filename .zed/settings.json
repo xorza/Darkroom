@@ -1,4 +1,14 @@
 {
+  // Keep Zed's fs watcher off high-churn build output — cargo rewrites
+  // thousands of files under target/ per build and can overflow the
+  // inotify event queue, dropping the source/git events that matter.
+  // NOTE: this list replaces Zed's defaults, so the defaults are re-listed.
+  "file_scan_exclusions": [
+    "**/.git",
+    "**/.DS_Store",
+    "**/Thumbs.db",
+    "**/target",
+  ],
   "lsp": {
     "rust-analyzer": {
       "initialization_options": {
