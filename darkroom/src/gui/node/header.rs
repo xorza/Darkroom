@@ -5,8 +5,8 @@
 
 use glam::Vec2;
 use palantir::{
-    Align, Background, Color, Configure, Corners, HAlign, Mesh, Panel, Sense, Shape, Sizing,
-    Spacing, Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, Corners, HAlign, Panel, Sense, Shape, Sizing, Spacing,
+    Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 use scenarium::prelude::{CachePersistence, NodeId};
 
@@ -75,17 +75,12 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool
     let overhang = theme.port_radius() + theme.node_border_width * 2.0;
     // Rotate the base (left-pointing) triangle +45° about its center so the
     // apex points up-left, aligned with the wire arriving from there. The
-    // layout box is unchanged (meshes aren't clipped to the owner rect, so
-    // rotated points may exceed it).
+    // rotated points are passed straight to the SDF triangle primitive; the
+    // layout box is unchanged (the glyph isn't clipped to the owner rect, so
+    // the rotated apex may exceed it).
     let c = Vec2::splat(port * 0.5);
     let rot = Vec2::from_angle(std::f32::consts::FRAC_PI_4);
     let tf = |v: Vec2| c + rot.rotate(v - c);
-    let tri = Mesh::filled_triangle(
-        tf(Vec2::new(port, 0.0)),
-        tf(Vec2::new(port, port)),
-        tf(Vec2::new(0.0, port * 0.5)),
-        event_color(theme, hovered),
-    );
     // `CLICK | DRAG`, like the emitter glyph / port circles: `DRAG` pulls a
     // subscription wire out of the pin and captures the press so it doesn't
     // fall through to the node body's own drag. A plain click on the pin no
@@ -97,10 +92,13 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool
         .margin(Spacing::new(-overhang, -overhang, 0.0, 0.0))
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
-            ui.add_shape(Shape::Mesh {
-                mesh: &tri,
-                local_rect: None,
-                tint: Color::WHITE.into(),
+            ui.add_shape(Shape::Triangle {
+                a: tf(Vec2::new(port, 0.0)),
+                b: tf(Vec2::new(port, port)),
+                c: tf(Vec2::new(0.0, port * 0.5)),
+                radius: 0.0,
+                fill: event_color(theme, hovered).into(),
+                stroke: Stroke::ZERO,
             });
         });
     Tooltip::for_(&pin.response.snapshot())

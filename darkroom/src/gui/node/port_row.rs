@@ -8,8 +8,8 @@
 
 use glam::Vec2;
 use palantir::{
-    Align, Color, Configure, ContextMenu, Corners, Grid, HAlign, MenuItem, Mesh, Panel, Rect,
-    Sense, Shape, Sizing, Spacing, Stroke, Text, Tooltip, Track, Ui, VAlign, WidgetId,
+    Align, Color, Configure, ContextMenu, Corners, Grid, HAlign, MenuItem, Panel, Rect, Sense,
+    Shape, Sizing, Spacing, Stroke, Text, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use scenarium::data::{DataType, FsPathMode, StaticValue};
 use scenarium::function::ValueVariant;
@@ -372,24 +372,22 @@ pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
 /// wire can be dragged out of it.
 fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: Spacing, tip: &str) {
     let port = theme.port_size;
-    // Right-pointing isosceles triangle filling the port box: the apex points
-    // outward (away from the node body), matching the emit direction.
-    let tri = Mesh::filled_triangle(
-        Vec2::new(0.0, 0.0),
-        Vec2::new(0.0, port),
-        Vec2::new(port, port * 0.5),
-        fill,
-    );
     let glyph = Panel::zstack()
         .id(wid)
         .size((Sizing::Fixed(port), Sizing::Fixed(port)))
         .margin(margin)
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
-            ui.add_shape(Shape::Mesh {
-                mesh: &tri,
-                local_rect: None,
-                tint: Color::WHITE.into(),
+            // Right-pointing isosceles triangle filling the port box: the apex
+            // points outward (away from the node body), matching the emit
+            // direction. SDF-antialiased via the triangle primitive.
+            ui.add_shape(Shape::Triangle {
+                a: Vec2::new(0.0, 0.0),
+                b: Vec2::new(0.0, port),
+                c: Vec2::new(port, port * 0.5),
+                radius: 0.0,
+                fill: fill.into(),
+                stroke: Stroke::ZERO,
             });
         });
     if !tip.is_empty() {

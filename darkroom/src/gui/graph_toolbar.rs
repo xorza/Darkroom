@@ -5,7 +5,7 @@
 
 use glam::Vec2;
 use palantir::{
-    Align, Background, Color, Configure, Corners, HAlign, Mesh, Panel, Rect, Sense, Shape, Sizing,
+    Align, Background, Color, Configure, Corners, HAlign, Panel, Rect, Sense, Shape, Sizing,
     Spacing, Stroke, Ui, VAlign, WidgetId,
 };
 
@@ -105,16 +105,13 @@ fn toggle_button(
 
 /// A right-pointing play triangle (run once), optically centered in the box.
 fn draw_play(ui: &mut Ui, s: f32, color: Color) {
-    let tri = Mesh::filled_triangle(
-        Vec2::new(s * 0.38, s * 0.30),
-        Vec2::new(s * 0.38, s * 0.70),
-        Vec2::new(s * 0.70, s * 0.50),
-        color,
-    );
-    ui.add_shape(Shape::Mesh {
-        mesh: &tri,
-        local_rect: None,
-        tint: Color::WHITE.into(),
+    ui.add_shape(Shape::Triangle {
+        a: Vec2::new(s * 0.38, s * 0.30),
+        b: Vec2::new(s * 0.38, s * 0.70),
+        c: Vec2::new(s * 0.70, s * 0.50),
+        radius: 0.0,
+        fill: color.into(),
+        stroke: Stroke::ZERO,
     });
 }
 
@@ -128,15 +125,12 @@ fn draw_play_bar(ui: &mut Ui, s: f32, color: Color) {
         stroke: Stroke::ZERO,
     });
     // The play triangle, just to its right.
-    let tri = Mesh::filled_triangle(
-        Vec2::new(s * 0.46, s * 0.30),
-        Vec2::new(s * 0.46, s * 0.70),
-        Vec2::new(s * 0.74, s * 0.50),
-        color,
-    );
-    ui.add_shape(Shape::Mesh {
-        mesh: &tri,
-        local_rect: None,
-        tint: Color::WHITE.into(),
+    ui.add_shape(Shape::Triangle {
+        a: Vec2::new(s * 0.46, s * 0.30),
+        b: Vec2::new(s * 0.46, s * 0.70),
+        c: Vec2::new(s * 0.74, s * 0.50),
+        radius: 0.0,
+        fill: color.into(),
+        stroke: Stroke::ZERO,
     });
 }
