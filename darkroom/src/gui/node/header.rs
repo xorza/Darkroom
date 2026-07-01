@@ -65,7 +65,7 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
 /// wire. Negative top *and* left margins pull it out past both edges, like a
 /// port circle overhangs its edge. It's both a drop target for an emitter's
 /// event wire *and* a drag source — pulling from it starts a subscription
-/// wire aimed at an emitter (see `EventConnectionUI`). `hovered` (set while a
+/// wire aimed at an emitter (see `SubscriptionUI`). `hovered` (set while a
 /// drag snaps to it) tints the triangle as drop feedback.
 fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool) {
     let port = theme.port_size;
@@ -110,7 +110,7 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool
 
 /// Stable id for a node's event-subscription pin. Keyed on the node (a
 /// subscription is whole-node, not per-port), so `PortFrame` /
-/// `EventConnectionUI` reconstruct it to poll the pin's geometry as a wire
+/// `SubscriptionUI` reconstruct it to poll the pin's geometry as a wire
 /// drop target.
 pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.subscription_glyph", node_id))

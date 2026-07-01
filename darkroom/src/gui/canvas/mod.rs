@@ -2,7 +2,6 @@ pub(crate) mod anchored_menu;
 pub(crate) mod background;
 pub(crate) mod breaker;
 pub(crate) mod connection_ui;
-pub(crate) mod event_connection_ui;
 pub(crate) mod inspector;
 pub(crate) mod new_node_ui;
 pub(crate) mod node_menu;
@@ -10,6 +9,7 @@ pub(crate) mod pan_zoom;
 pub(crate) mod port_frame;
 pub(crate) mod selection_ui;
 pub(crate) mod subgraph_menu;
+pub(crate) mod subscription_ui;
 pub(crate) mod wire;
 
 use glam::Vec2;
@@ -25,13 +25,13 @@ use crate::gui::app::AppContext;
 use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
-use crate::gui::canvas::event_connection_ui::EventConnectionUI;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
 use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
+use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_port_dblclicks};
 use crate::gui::scene::{Scene, SceneNode};
 use crate::gui::{PortKind, PortRef};
@@ -79,7 +79,7 @@ struct Gestures {
     node_ui: NodeUI,
     breaker_ui: BreakerUI,
     connection_ui: ConnectionUI,
-    event_connection_ui: EventConnectionUI,
+    subscription_ui: SubscriptionUI,
     new_node_ui: NewNodeUi,
     subgraph_menu: SubgraphMenuUi,
     node_menu: NodeMenuUi,
@@ -152,7 +152,7 @@ impl GraphUI {
         // for the same pre-record reasons; an emitter glyph and a data port
         // can't both latch (different widget-id spaces).
         self.gestures
-            .event_connection_ui
+            .subscription_ui
             .apply(ui, scene, &self.port_frame, out);
     }
 
@@ -226,10 +226,10 @@ impl GraphUI {
         }
         // Same for an event drag's snapped subscription pin (emitter-started
         // drag) or snapped emitter glyph (subscriber-started drag).
-        if let Some(sub) = self.gestures.event_connection_ui.snap_sub() {
+        if let Some(sub) = self.gestures.subscription_ui.snap_sub() {
             self.port_frame.set_sub_hovered(sub);
         }
-        if let Some(emitter) = self.gestures.event_connection_ui.snap_emitter() {
+        if let Some(emitter) = self.gestures.subscription_ui.snap_emitter() {
             self.port_frame.set_event_hovered(emitter);
         }
         // Cycle inspector toggles + close transient panels on outside
@@ -246,7 +246,7 @@ impl GraphUI {
                     node_ui,
                     breaker_ui,
                     connection_ui,
-                    event_connection_ui,
+                    subscription_ui,
                     new_node_ui: _,
                     subgraph_menu: _,
                     node_menu: _,
@@ -320,7 +320,7 @@ impl GraphUI {
                             // Subscription wires sit under the node bodies
                             // like data wires (drawn before `draw_all`), and
                             // share the breaker probe so they're cuttable too.
-                            event_connection_ui.draw(ui, ctx, scene, port_frame, &mut probe);
+                            subscription_ui.draw(ui, ctx, scene, port_frame, &mut probe);
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,
@@ -338,13 +338,7 @@ impl GraphUI {
                         inspectors.draw_panels(ui, ctx.theme, ctx.library, scene, ctx.run_state);
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);
-                        event_connection_ui.draw_in_flight(
-                            ui,
-                            ctx,
-                            scene,
-                            port_frame,
-                            canvas_origin,
-                        );
+                        subscription_ui.draw_in_flight(ui, ctx, scene, port_frame, canvas_origin);
                     });
             });
     }

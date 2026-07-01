@@ -66,7 +66,7 @@ pub(crate) struct BreakerState {
     /// `Intent::RemoveNode`. Same one-visit-per-node guarantee.
     pub(crate) broken_nodes: Vec<NodeId>,
     /// Event subscriptions whose wire the breaker intersects this frame.
-    /// Filled by `EventConnectionUI::draw`, drained on release into
+    /// Filled by `SubscriptionUI::draw`, drained on release into
     /// `Intent::Unsubscribe`. Same one-visit-per-edge guarantee as `broken`.
     pub(crate) broken_subscriptions: Vec<Subscription>,
 }

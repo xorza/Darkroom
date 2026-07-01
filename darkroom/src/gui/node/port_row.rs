@@ -322,7 +322,7 @@ fn output_cell(
 /// One event (emitter) port row: the event name plus a white triangle glyph,
 /// right-aligned and overhanging the node edge like a data output. Sits in
 /// `COL_OUTPUT` at `row` (below the data outputs). The glyph senses drags so a
-/// wire can be pulled from it to a subscriber pin (see `EventConnectionUI`).
+/// wire can be pulled from it to a subscriber pin (see `SubscriptionUI`).
 fn event_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
@@ -359,7 +359,7 @@ fn event_cell(
 
 /// Stable widget id for an event port glyph. A separate id space from data
 /// ports (`port_circle_wid`) because events are indexed independently of
-/// outputs. `pub(crate)` so `PortFrame` / `EventConnectionUI` reconstruct it
+/// outputs. `pub(crate)` so `PortFrame` / `SubscriptionUI` reconstruct it
 /// from domain coords (`EventRef`) to poll the drag.
 pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
     WidgetId::from_hash(("graph.node.event_glyph", node_id, event_idx))

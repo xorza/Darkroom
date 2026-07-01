@@ -41,7 +41,7 @@ fn event_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
 /// an emitter and drop on a pin, or pull from a pin and drop on an emitter.
 /// Held-drag only; no const-drop or new-node spawn.
 #[derive(Default, Debug)]
-pub(crate) struct EventConnectionUI {
+pub(crate) struct SubscriptionUI {
     state: Option<EventInFlight>,
 }
 
@@ -65,7 +65,7 @@ enum EventInFlight {
     },
 }
 
-impl EventConnectionUI {
+impl SubscriptionUI {
     /// Drive the in-flight subscription wire: latch a fresh drag from either
     /// an emitter glyph or a subscription pin, track the snapped opposite
     /// end, and commit an [`Intent::Subscribe`] on release over a valid

@@ -1,6 +1,6 @@
 //! Shared connection-curve primitives. Both the data-wire renderer
 //! ([`super::connection_ui`]) and the event/subscription-wire renderer
-//! ([`super::event_connection_ui`]) compute their own control handles but
+//! ([`super::subscription_ui`]) compute their own control handles but
 //! draw the curve through the one primitive here, so the two stay visually
 //! identical apart from their brush.
 
