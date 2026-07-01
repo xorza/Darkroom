@@ -42,7 +42,7 @@ fn event_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
 /// Held-drag only; no const-drop or new-node spawn.
 #[derive(Default, Debug)]
 pub(crate) struct SubscriptionUI {
-    state: Option<EventInFlight>,
+    state: Option<InFlight>,
 }
 
 /// The in-flight event wire, discriminated by which end it started from. Both
@@ -50,7 +50,7 @@ pub(crate) struct SubscriptionUI {
 /// the snap target differ. Identity-only — endpoints resolve every frame from
 /// `PortFrame`, so the wire survives layout changes and node moves.
 #[derive(Clone, Copy, Debug)]
-enum EventInFlight {
+enum InFlight {
     /// Started on an emitter event glyph; snapping to a subscription pin.
     FromEmitter {
         emitter: EventRef,
@@ -82,12 +82,12 @@ impl SubscriptionUI {
         // preferring the emitter scan is arbitrary, not a conflict.
         if self.state.is_none() {
             if let Some(emitter) = scan_event_drag_start(port_frame, scene) {
-                self.state = Some(EventInFlight::FromEmitter {
+                self.state = Some(InFlight::FromEmitter {
                     emitter,
                     snap_sub: None,
                 });
             } else if let Some(subscriber) = scan_sub_drag_start(port_frame, scene) {
-                self.state = Some(EventInFlight::FromSubscriber {
+                self.state = Some(InFlight::FromSubscriber {
                     subscriber,
                     snap_emitter: None,
                 });
@@ -100,37 +100,34 @@ impl SubscriptionUI {
         let Some(mut state) = self.state else {
             return;
         };
-        // Refresh the snapped opposite end for this frame.
-        match &mut state {
-            EventInFlight::FromEmitter { emitter, snap_sub } => {
+        // Refresh the snapped opposite end, then read the source glyph's drag
+        // state: `*_dragging` rolls up `drag_delta().is_some() ||
+        // drag_started()`, so its transition to `false` is the release edge.
+        let still_dragging = match &mut state {
+            InFlight::FromEmitter { emitter, snap_sub } => {
                 *snap_sub = scan_sub_target(port_frame, ui, scene, *emitter);
+                port_frame.event_dragging(*emitter)
             }
-            EventInFlight::FromSubscriber {
+            InFlight::FromSubscriber {
                 subscriber,
                 snap_emitter,
             } => {
                 *snap_emitter = scan_emitter_target(port_frame, ui, scene, *subscriber);
+                port_frame.sub_dragging(*subscriber)
             }
-        }
-        self.state = Some(state);
-
-        // Release edge: the source glyph's drag transitioning to not-dragging.
-        // `*_dragging` rolls up `drag_delta().is_some() || drag_started()`.
-        let still_dragging = match state {
-            EventInFlight::FromEmitter { emitter, .. } => port_frame.event_dragging(emitter),
-            EventInFlight::FromSubscriber { subscriber, .. } => port_frame.sub_dragging(subscriber),
         };
+        self.state = Some(state);
         if still_dragging {
             return;
         }
         // Released over a valid target: both directions resolve to the same
         // (emitter, subscriber) pair and commit the same idempotent intent.
         match state {
-            EventInFlight::FromEmitter {
+            InFlight::FromEmitter {
                 emitter,
                 snap_sub: Some(subscriber),
             }
-            | EventInFlight::FromSubscriber {
+            | InFlight::FromSubscriber {
                 subscriber,
                 snap_emitter: Some(emitter),
             } => out.push(Intent::Subscribe {
@@ -148,7 +145,7 @@ impl SubscriptionUI {
     /// drop target.
     pub(crate) fn snap_sub(&self) -> Option<NodeId> {
         match self.state {
-            Some(EventInFlight::FromEmitter { snap_sub, .. }) => snap_sub,
+            Some(InFlight::FromEmitter { snap_sub, .. }) => snap_sub,
             _ => None,
         }
     }
@@ -158,7 +155,7 @@ impl SubscriptionUI {
     /// drop target.
     pub(crate) fn snap_emitter(&self) -> Option<EventRef> {
         match self.state {
-            Some(EventInFlight::FromSubscriber { snap_emitter, .. }) => snap_emitter,
+            Some(InFlight::FromSubscriber { snap_emitter, .. }) => snap_emitter,
             _ => None,
         }
     }
@@ -223,7 +220,7 @@ impl SubscriptionUI {
     ) {
         let (p0, p3) = match self.state {
             None => return,
-            Some(EventInFlight::FromEmitter { emitter, snap_sub }) => {
+            Some(InFlight::FromEmitter { emitter, snap_sub }) => {
                 let Some(p0) = port_frame.event_center_canvas_local(emitter) else {
                     return;
                 };
@@ -234,7 +231,7 @@ impl SubscriptionUI {
                 let Some(p3) = free else { return };
                 (p0, p3)
             }
-            Some(EventInFlight::FromSubscriber {
+            Some(InFlight::FromSubscriber {
                 subscriber,
                 snap_emitter,
             }) => {
