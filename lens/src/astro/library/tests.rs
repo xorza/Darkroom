@@ -1,6 +1,7 @@
 //! Registration tests for the astro library.
 
 use scenarium::data::StaticValue;
+use scenarium::function::FuncBehavior;
 
 use super::*;
 
@@ -45,6 +46,9 @@ fn build_masters_node_is_registered() {
     let lib = astro_library();
     let f = func(&lib, "build_masters");
     assert_eq!(f.category, "astro");
+    // Impure: folder contents can change between runs; a stable node opts back
+    // into caching via `Node::force_pure`.
+    assert_eq!(f.behavior, FuncBehavior::Impure);
     assert_eq!(f.outputs.len(), 1);
     assert_eq!(f.outputs[0].ty.declared(), *MASTERS_DATA_TYPE);
 
@@ -73,6 +77,9 @@ fn stack_lights_node_is_registered() {
     let lib = astro_library();
     let f = func(&lib, "stack_lights");
     assert_eq!(f.category, "astro");
+    // Impure: the `lights` folder can change between runs; a stable node opts
+    // back into caching via `Node::force_pure`.
+    assert_eq!(f.behavior, FuncBehavior::Impure);
 
     // One input per stage: lights, masters, detection, registration,
     // combine, reference.

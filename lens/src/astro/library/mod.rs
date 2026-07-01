@@ -153,7 +153,10 @@ pub fn astro_library() -> Library {
                  next run instead of re-stacking.",
             )
             .category("astro")
-            .pure()
+            // Impure: the same folder path can hold different frames run to
+            // run, so the framework must not content-cache the output. A node
+            // over a folder the user knows is stable can opt back into caching
+            // via `Node::force_pure`.
             .inputs([
                 dir_input("darks"),
                 dir_input("flats"),
@@ -204,7 +207,9 @@ pub fn astro_library() -> Library {
         Func::new("b02f5c42-7bda-48f6-81dd-81338efbb126", "stack_lights")
             .description("Calibrates, aligns and stacks a folder of light frames into one image")
             .category("astro")
-            .pure()
+            // Impure: the `lights` folder contents can change between runs, so
+            // the output isn't content-cacheable by default. A node over a
+            // stable folder can opt back in via `Node::force_pure`.
             .input(FuncInput::required("lights", ASTRO_DIR_DATA_TYPE.clone()))
             .input(FuncInput::optional("masters", MASTERS_DATA_TYPE.clone()))
             // Each stage is one input: a preset quick-pick (the `value_variants`

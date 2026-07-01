@@ -23,7 +23,7 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
 };
 use crate::execution_stats::FlattenMap;
-use crate::function::Func;
+use crate::function::{Func, FuncBehavior};
 use crate::graph::{Binding, CachePersistence, Graph, InputPort, NodeId, NodeKind, Subscription};
 use crate::library::Library;
 use crate::special::SpecialNode;
@@ -324,7 +324,15 @@ impl<'a> Run<'a> {
             e_node.outputs = Span::new(outputs_start, func.outputs.len() as u32);
             e_node.events = Span::new(events_start, func.events.len() as u32);
             e_node.terminal = func.terminal;
-            e_node.behavior = func.behavior;
+            // A `force_pure` node asserts determinism despite an `Impure` decl,
+            // so it flattens to `Pure` (content-cacheable). Harmless on an
+            // already-`Pure` func. Only leaf func/special nodes reach here — a
+            // `Subgraph` node's flag never applies (it recurses above).
+            e_node.behavior = if node.force_pure {
+                FuncBehavior::Pure
+            } else {
+                func.behavior
+            };
             // Record the `Disk` request; whether it's actually honored is decided
             // by the content digest (a node with an impure cone has no digest and
             // so can't be disk-cached) — see `digest.rs`.

@@ -234,6 +234,18 @@ pub struct Node {
     /// pre-field documents enabled.
     #[serde(default)]
     pub disabled: bool,
+
+    /// User assertion that this instance is deterministic, overriding an
+    /// `Impure` func decl: flatten forces the flat node's `FuncBehavior` to
+    /// `Pure`, so its output becomes content-cacheable (and skippable on
+    /// rerun) even though the func declares itself impure. Meant for funcs
+    /// that are impure only because of external state the user knows is
+    /// stable for this node (e.g. a `build_masters`/`stack_lights` node
+    /// pointed at a folder that won't change). A no-op on an already-`Pure`
+    /// func. `#[serde(default)]` → `false` keeps pre-field documents on the
+    /// func's declared behavior.
+    #[serde(default)]
+    pub force_pure: bool,
 }
 
 impl NodeKind {
@@ -1211,6 +1223,7 @@ impl Node {
             name: String::new(),
             persist: CachePersistence::Memory,
             disabled: false,
+            force_pure: false,
         }
     }
 
@@ -1226,6 +1239,7 @@ impl Node {
             name: def.name.clone(),
             persist: CachePersistence::Memory,
             disabled: false,
+            force_pure: false,
         }
     }
 }
@@ -1240,6 +1254,7 @@ impl From<&Func> for Node {
             name: func.name.clone(),
             persist: CachePersistence::Memory,
             disabled: false,
+            force_pure: false,
         }
     }
 }
