@@ -18,7 +18,7 @@ use crate::data::DynamicValue;
 use crate::execution_stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
-use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage};
+use crate::func_lambda::{ChangeCheck, InvokeError, InvokeInput, OutputUsage};
 use crate::graph::InputPort;
 
 use crate::execution::RunError;
@@ -26,6 +26,32 @@ use crate::execution::cache::Cache;
 use crate::execution::output_cache::OutputCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeColumn, NodeIdx};
+
+/// What became of a node this run — the runtime early-cutoff state, set as each node
+/// settles. Merges the two mutually-exclusive facts a node carries: `Ran` (it
+/// recomputed — the "dirty" signal a consumer's pre-check reads to know a producer
+/// changed) and `Reused` (its pre-check reported unchanged, so its prior output was
+/// served — counted as cached, not executed). `Pending` (default) is a node not
+/// reached this run: cached, or below a cancel/error. "Both dirty and reused" can't
+/// be built.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum NodeRun {
+    #[default]
+    Pending,
+    Ran,
+    Reused,
+}
+
+impl NodeRun {
+    /// The node recomputed — its consumers must treat its output as changed.
+    fn is_dirty(self) -> bool {
+        matches!(self, NodeRun::Ran)
+    }
+    /// The node reused its prior output (pre-check unchanged).
+    fn is_reused(self) -> bool {
+        matches!(self, NodeRun::Reused)
+    }
+}
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
@@ -37,6 +63,10 @@ pub(crate) struct Executor {
     /// reset to node count at each run's start.
     errors: NodeColumn<Option<RunError>>,
     run_times: NodeColumn<f64>,
+    /// Per-run early-cutoff outcome per node (see [`NodeRun`]): a producer's `Ran` is
+    /// the "dirty" signal a consumer's pre-check reads; `Reused` makes stats count the
+    /// node as cached.
+    outcomes: NodeColumn<NodeRun>,
 }
 
 impl Executor {
@@ -71,8 +101,10 @@ impl Executor {
         let mut output_usage = std::mem::take(&mut self.output_usage);
         let mut errors = std::mem::take(&mut self.errors);
         let mut run_times = std::mem::take(&mut self.run_times);
+        let mut outcomes = std::mem::take(&mut self.outcomes);
         errors.reset(n_nodes, None);
         run_times.reset(n_nodes, 0.0);
+        outcomes.reset(n_nodes, NodeRun::Pending);
 
         // How far down `execute_order` the run got. Stays the full length on a
         // normal run; on cancel it's the count reached before bailing, so the
@@ -104,6 +136,30 @@ impl Executor {
             }
 
             collect_inputs(program, cache, e_node_idx, &mut inputs);
+
+            // Runtime early-cutoff: a node with a pre-check that reports `Unchanged`,
+            // whose Bind-producers all stayed unchanged this run and which holds a
+            // prior output to reuse, skips its lambda and serves that output — staying
+            // "clean" (`dirty` unset) so its own pre-check consumers can skip in turn.
+            // The topological order means every producer is already decided here.
+            let e_node = &program.e_nodes[e_node_idx];
+            let upstream_dirty = program.inputs[e_node.inputs.range()].iter().any(|input| {
+                matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[addr.target_idx].is_dirty())
+            });
+            let has_prior = cache.slots[e_node_idx].output_values().is_some();
+            let unchanged = !e_node.pre_check.is_none()
+                && has_prior
+                && !upstream_dirty
+                && e_node
+                    .pre_check
+                    .check(&mut cache.slots[e_node_idx].state, &inputs)
+                    == ChangeCheck::Unchanged;
+            if unchanged {
+                outcomes[e_node_idx] = NodeRun::Reused;
+                continue;
+            }
+            outcomes[e_node_idx] = NodeRun::Ran;
+
             collect_output_usage(program, plan, e_node_idx, &mut output_usage);
 
             let output_count = program.e_nodes[e_node_idx].outputs.len as usize;
@@ -204,6 +260,7 @@ impl Executor {
             plan,
             &errors,
             &run_times,
+            &outcomes,
             start,
             executed_count,
             cancelled_in_flight,
@@ -214,6 +271,7 @@ impl Executor {
         self.output_usage = output_usage;
         self.errors = errors;
         self.run_times = run_times;
+        self.outcomes = outcomes;
         stats
     }
 }
@@ -278,11 +336,13 @@ fn collect_output_usage(
     }));
 }
 
+#[allow(clippy::too_many_arguments)] // stats projection over several distinct per-run columns
 fn collect_execution_stats(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
     errors: &NodeColumn<Option<RunError>>,
     run_times: &NodeColumn<f64>,
+    outcomes: &NodeColumn<NodeRun>,
     start: Instant,
     executed_count: usize,
     cancelled_in_flight: Option<NodeIdx>,
@@ -299,6 +359,12 @@ fn collect_execution_stats(
             continue;
         }
         let e = &program.e_nodes[idx];
+        // A node whose pre-check reported unchanged reused its prior output rather
+        // than running, so it reads as cached, not executed.
+        if outcomes[idx].is_reused() {
+            cached_nodes.push(e.id);
+            continue;
+        }
         executed_nodes.push(ExecutedNodeStats {
             node_id: e.id,
             elapsed_secs: run_times[idx],

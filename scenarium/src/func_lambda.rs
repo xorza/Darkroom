@@ -20,6 +20,17 @@ pub enum OutputUsage {
     Needed(u32),
 }
 
+/// A func's pre-check verdict, returned by [`PreCheck`] before the main lambda runs.
+/// `Unchanged` lets the executor reuse the node's prior output and skip the lambda;
+/// `Changed` runs it. A func returns `Unchanged` only when it can guarantee its output
+/// is identical to last run's — the same determinism contract as `Pure`, asserted at
+/// runtime rather than declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeCheck {
+    Changed,
+    Unchanged,
+}
+
 #[derive(Debug, Error)]
 pub enum InvokeError {
     #[error("{0}")]
@@ -126,6 +137,53 @@ impl std::fmt::Debug for FuncLambda {
         match self {
             FuncLambda::None => f.debug_struct("FuncLambda::None").finish(),
             FuncLambda::Lambda(_) => f.debug_struct("FuncLambda::Lambda").finish(),
+        }
+    }
+}
+
+type PreCheckFn = dyn Fn(&mut AnyState, &[InvokeInput]) -> ChangeCheck + Send + Sync + 'static;
+
+/// Optional cheap "did anything I read change?" probe, run before a node's main
+/// lambda. Given the node's persistent [`AnyState`] (to recall + update a fingerprint
+/// of what it last read) and the resolved inputs, it returns a [`ChangeCheck`]. When
+/// it reports `Unchanged` and the node's upstream producers are all unchanged this
+/// run, the executor skips the lambda and reuses the prior output — and the skip
+/// propagates to pre-check consumers. Stored on the func like [`FuncLambda`], skipped
+/// on serialize and re-attached at flatten.
+#[derive(Clone, Default)]
+pub enum PreCheck {
+    #[default]
+    None,
+    Check(Arc<PreCheckFn>),
+}
+
+impl PreCheck {
+    pub fn new<F>(check: F) -> Self
+    where
+        F: Fn(&mut AnyState, &[InvokeInput]) -> ChangeCheck + Send + Sync + 'static,
+    {
+        Self::Check(Arc::new(check))
+    }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    /// Run the probe. A node with no pre-check is always treated as `Changed`, so it
+    /// runs every time it's scheduled (the default behavior).
+    pub fn check(&self, state: &mut AnyState, inputs: &[InvokeInput]) -> ChangeCheck {
+        match self {
+            PreCheck::None => ChangeCheck::Changed,
+            PreCheck::Check(check) => check(state, inputs),
+        }
+    }
+}
+
+impl std::fmt::Debug for PreCheck {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PreCheck::None => f.debug_struct("PreCheck::None").finish(),
+            PreCheck::Check(_) => f.debug_struct("PreCheck::Check").finish(),
         }
     }
 }

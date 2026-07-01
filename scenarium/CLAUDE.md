@@ -103,7 +103,15 @@ the per-node `current_digests` column. `RuntimeSlot` (`executor.rs:29`) caches
 The run loop walks `execute_order`: skip if an upstream errored, resolve each input
 (None/Const/Bind→upstream cached output), set `ctx_manager.current_node` for log
 attribution, await the lambda, store results, and stamp `output_digest` from the
-node's current digest. When `execute` is given
+node's current digest. **Runtime early-cutoff** (`func_lambda::PreCheck`/`ChangeCheck`):
+a func may attach a cheap pre-check probe run before its lambda; if it reports
+`Unchanged` *and* the node's Bind-producers all stayed unchanged this run (`dirty`
+column, set as each node settles) *and* a prior output exists, the executor reuses
+that output and skips the lambda — staying clean so its own pre-check consumers skip
+in turn (the skip propagates down the cone). Output buffers are never wiped or
+evicted, so a prior output is always there to reuse; a reused node counts as
+`cached` in stats. This complements the plan-time digest cache (which handles `Pure`
+nodes) — the pre-check earns its keep on impure nodes and their tainted cones. When `execute` is given
 a progress `UnboundedSender<RunProgress>`, the loop sends `RunPhase::Started`
 before each lambda and `Finished{elapsed}` after — node ids resolved to authoring
 attribution via the `FlattenMap` so the consumer needn't be. Stats (executed,

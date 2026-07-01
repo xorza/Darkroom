@@ -2131,6 +2131,124 @@ mod behavior {
 
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pre_check_unchanged_skips_node_and_propagates_downstream() -> anyhow::Result<()> {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        use crate::async_lambda;
+        use crate::func_lambda::{ChangeCheck, PreCheck};
+        use crate::function::{Func, FuncInput};
+        use crate::graph::Graph;
+        use crate::library::Library;
+
+        // `a`'s pre-check tracks an external "changed" flag; `b`'s always reports
+        // unchanged. So `b` reruns iff its own state changed OR `a` stayed dirty — its
+        // skip is the *propagation* of `a`'s, not just its own pre-check.
+        let a_changed = Arc::new(AtomicBool::new(false));
+        let a_runs = Arc::new(AtomicUsize::new(0));
+        let b_runs = Arc::new(AtomicUsize::new(0));
+
+        let a_changed_pc = Arc::clone(&a_changed);
+        let a_runs_l = Arc::clone(&a_runs);
+        let a = Func::new("a4baacc3-6c23-4e3b-aef7-32290f614a14", "a")
+            .pre_check(PreCheck::new(move |_state, _inputs| {
+                if a_changed_pc.load(Ordering::Relaxed) {
+                    ChangeCheck::Changed
+                } else {
+                    ChangeCheck::Unchanged
+                }
+            }))
+            .output("out", DataType::Int)
+            .lambda(async_lambda!(
+                move |_, _, _, _, _, outputs| { a_runs_l = Arc::clone(&a_runs_l) } => {
+                    let n = a_runs_l.fetch_add(1, Ordering::Relaxed);
+                    outputs[0] = DynamicValue::Static(StaticValue::Int(10 + n as i64));
+                    Ok(())
+                }
+            ));
+
+        let b_runs_l = Arc::clone(&b_runs);
+        let b = Func::new("58ee3b43-f774-41f0-acfa-054ce0205e2e", "b")
+            .terminal()
+            .pre_check(PreCheck::new(|_state, _inputs| ChangeCheck::Unchanged))
+            .input(FuncInput::required("in", DataType::Int))
+            .output("out", DataType::Int)
+            .lambda(async_lambda!(
+                move |_, _, _, inputs, _, outputs| { b_runs_l = Arc::clone(&b_runs_l) } => {
+                    let n = b_runs_l.fetch_add(1, Ordering::Relaxed);
+                    let v = inputs[0].value.as_i64().unwrap();
+                    outputs[0] = DynamicValue::Static(StaticValue::Int(v * 100 + n as i64));
+                    Ok(())
+                }
+            ));
+
+        let library: Library = [a, b].into();
+
+        let mut graph = Graph::default();
+        let mut a_node: Node = library.by_name("a").unwrap().into();
+        a_node.id = "b8eb5357-336c-40cf-9a51-b663d1f6c1c3".into();
+        let a_id = a_node.id;
+        graph.add(a_node);
+        let mut b_node: Node = library.by_name("b").unwrap().into();
+        b_node.id = "5b01c661-2347-44eb-af5e-fcee172e8955".into();
+        let b_id = b_node.id;
+        graph.add(b_node);
+        graph.set_input_binding(InputPort::new(b_id, 0), (a_id, 0).into());
+        graph.validate();
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library).unwrap();
+
+        let runs = |a: &Arc<AtomicUsize>, b: &Arc<AtomicUsize>| {
+            (a.load(Ordering::Relaxed), b.load(Ordering::Relaxed))
+        };
+        let b_out = |eg: &ExecutionEngine| {
+            eg.runtime_slot(eg.by_name("b").unwrap())
+                .output_values()
+                .unwrap()[0]
+                .as_i64()
+                .unwrap()
+        };
+
+        // Run 1: no prior output, both run. a → 10 (n=0); b → 10*100+0 = 1000.
+        eg.execute_terminals().await?;
+        assert_eq!(runs(&a_runs, &b_runs), (1, 1), "both run first time");
+        assert_eq!(b_out(&eg), 1000);
+
+        // Run 2: a's pre-check says unchanged ⇒ a skips; b's pre-check says unchanged
+        // and a is clean ⇒ b skips too (the skip propagated).
+        eg.execute_terminals().await?;
+        assert_eq!(
+            runs(&a_runs, &b_runs),
+            (1, 1),
+            "both reuse their prior output"
+        );
+        assert_eq!(b_out(&eg), 1000, "b serves its reused prior output");
+
+        // Flip `a` to changed. Run 3: a recomputes (→11); b's own pre-check STILL says
+        // unchanged, but a is now dirty, so the propagation forces b to recompute.
+        a_changed.store(true, Ordering::Relaxed);
+        eg.execute_terminals().await?;
+        assert_eq!(
+            runs(&a_runs, &b_runs),
+            (2, 2),
+            "a changed ⇒ a reruns, and its dirty bit forces b to rerun despite b's own \
+             unchanged pre-check"
+        );
+        assert_eq!(b_out(&eg), 11 * 100 + 1, "b recomputes from a's new output");
+
+        // Settle again. Run 4: both skip once more.
+        a_changed.store(false, Ordering::Relaxed);
+        eg.execute_terminals().await?;
+        assert_eq!(
+            runs(&a_runs, &b_runs),
+            (2, 2),
+            "both skip again once a is unchanged"
+        );
+
+        Ok(())
+    }
 }
 
 // === Composite (Subgraph) Caching ===

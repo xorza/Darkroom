@@ -2,7 +2,7 @@ use crate::context::ContextType;
 
 use crate::data::*;
 use crate::event_lambda::EventLambda;
-use crate::func_lambda::FuncLambda;
+use crate::func_lambda::{FuncLambda, PreCheck};
 use common::KeyIndexKey;
 use common::id_type;
 use serde::{Deserialize, Serialize};
@@ -172,6 +172,13 @@ pub struct Func {
 
     #[serde(skip, default)]
     pub lambda: FuncLambda,
+
+    /// Optional pre-check probe: a cheap runtime "did anything change?" gate that can
+    /// report the node's output is unchanged so the executor reuses it and skips this
+    /// lambda. See [`PreCheck`]. Skipped on serialize + re-attached at flatten, like
+    /// `lambda`.
+    #[serde(skip, default)]
+    pub pre_check: PreCheck,
 }
 
 impl KeyIndexKey<FuncId> for Func {
@@ -218,6 +225,14 @@ impl Func {
 
     pub fn terminal(mut self) -> Self {
         self.terminal = true;
+        self
+    }
+
+    /// Attach a [`PreCheck`] — a cheap probe run before the lambda that can report the
+    /// node's output is unchanged, letting the executor reuse the prior output, skip
+    /// the recompute, and propagate the skip to pre-check consumers.
+    pub fn pre_check(mut self, pre_check: PreCheck) -> Self {
+        self.pre_check = pre_check;
         self
     }
 

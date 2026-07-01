@@ -14,7 +14,7 @@ use crate::event_lambda::EventLambda;
 use crate::function::{Func, FuncBehavior, OutputType};
 use crate::graph::NodeId;
 use crate::library::Library;
-use crate::prelude::{FuncId, FuncLambda};
+use crate::prelude::{FuncId, FuncLambda, PreCheck};
 use crate::special::SpecialNode;
 
 /// A position into the flat node table — `e_nodes`, the cache's `slots`, and the
@@ -197,6 +197,11 @@ pub(crate) struct ExecutionNode {
 
     #[serde(skip)]
     pub lambda: FuncLambda,
+
+    /// Copied from [`Func::pre_check`](crate::function::Func::pre_check) at flatten,
+    /// like `lambda`. `PreCheck::None` for a node without one.
+    #[serde(skip)]
+    pub pre_check: PreCheck,
 
     #[serde(default)]
     pub name: String,
