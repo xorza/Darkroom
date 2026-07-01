@@ -220,6 +220,22 @@ impl Cache {
             produced_under: Some(digest),
         };
     }
+
+    /// Drop resident outputs of the non-reproducible cone (`current_digest` is
+    /// `None` — impure nodes and anything tainted by an impure producer). Such a
+    /// value can never be a resident hit (see [`Self::is_resident_hit`]), so a copy
+    /// left from a prior run is dead weight — and that cone re-executes this run
+    /// anyway. Called at the *start* of a run, so the last run's outputs stay
+    /// resident while idle (the inspector can still read them) and are dropped only
+    /// once a new run begins. Reproducible resident hits and disk-backed values keep
+    /// a `Some` digest, so they're untouched.
+    pub(crate) fn evict_non_reproducible(&mut self) {
+        for slot in self.slots.iter_mut() {
+            if slot.current_digest.is_none() {
+                slot.clear_output();
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -366,6 +382,58 @@ mod tests {
         assert!(
             !cache.is_resident_hit(NodeIdx(0)),
             "current digest moved on ⇒ miss"
+        );
+    }
+
+    /// `evict_non_reproducible` drops resident outputs of the non-reproducible cone
+    /// (`current_digest == None`) and leaves every reproducible slot — resident hits
+    /// and disk-backed values, both `Some`-digest — untouched.
+    #[test]
+    fn evict_non_reproducible_clears_only_none_digest_residents() {
+        let d = Digest([7u8; 32]);
+        let mut cache = Cache::default();
+
+        // 0: impure/tainted (no digest) holding a value — evicted.
+        cache.slots.add(RuntimeSlot {
+            id: NodeId::from_u128(1),
+            current_digest: None,
+            value: ValueCache::Resident {
+                values: out(),
+                produced_under: None,
+            },
+            ..Default::default()
+        });
+        // 1: reproducible resident hit — kept.
+        cache.slots.add(RuntimeSlot {
+            id: NodeId::from_u128(2),
+            current_digest: Some(d),
+            value: ValueCache::Resident {
+                values: out(),
+                produced_under: Some(d),
+            },
+            ..Default::default()
+        });
+        // 2: disk-backed value (has a digest) — kept.
+        cache.slots.add(RuntimeSlot {
+            id: NodeId::from_u128(3),
+            current_digest: Some(d),
+            value: ValueCache::OnDisk,
+            ..Default::default()
+        });
+
+        cache.evict_non_reproducible();
+
+        assert!(
+            matches!(cache.slots[NodeIdx(0)].value, ValueCache::Empty),
+            "the None-digest resident output is dropped"
+        );
+        assert!(
+            cache.is_resident_hit(NodeIdx(1)),
+            "a reproducible resident hit survives"
+        );
+        assert!(
+            matches!(cache.slots[NodeIdx(2)].value, ValueCache::OnDisk),
+            "a disk-backed value survives"
         );
     }
 }

@@ -2106,6 +2106,33 @@ mod behavior {
         Ok(())
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn impure_output_stays_resident_for_inspection_after_run() -> anyhow::Result<()> {
+        // An impure node re-runs every time, but its last output must stay
+        // resident *between* runs so the editor's on-demand inspector can read it
+        // — there's no disk fallback for an impure node. Only the start of a new
+        // run evicts it (see `Cache::evict_non_reproducible`).
+        let graph = test_graph();
+        let mut library = test_func_lib(default_hooks());
+        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+
+        let mut execution_graph = ExecutionEngine::default();
+        execution_graph.update(&graph, &library).unwrap();
+        execution_graph.execute_terminals().await?;
+
+        let slot = execution_graph.runtime_slot(execution_graph.by_name("get_b").unwrap());
+        let outputs = slot
+            .output_values()
+            .expect("impure node's output stays resident after the run");
+        assert_eq!(
+            outputs[0].as_f64(),
+            Some(11.0),
+            "the last-run output is readable for inspection (get_b returns 11)"
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn force_pure_node_skips_impure_func() -> anyhow::Result<()> {
         // Same fixture as `impure_node_always_invoked` — `get_b`'s func is

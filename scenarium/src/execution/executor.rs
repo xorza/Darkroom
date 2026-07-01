@@ -83,6 +83,14 @@ impl Executor {
         // output), so it's dropped from the cache and the stats below.
         let mut cancelled_in_flight: Option<NodeIdx> = None;
 
+        // Evict the non-reproducible cone's leftover outputs now, at run start.
+        // A `None`-digest node (impure, or tainted by one) can never be a cache
+        // hit, so its value from a prior run is dead weight; kept resident only
+        // *between* runs so the inspector reads the last output, dropped here as a
+        // new run begins. Also covers a node not scheduled this run (whose stale
+        // output the per-node wipe below wouldn't reach).
+        cache.evict_non_reproducible();
+
         // Wipe each scheduled node's output before the run starts. The loop
         // reuses a slot's output `Vec` in place (the `output_buffer` call below),
         // so without this a lambda that writes only some ports this run would
