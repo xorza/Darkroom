@@ -100,11 +100,6 @@ holds the two orders plus SoA flag columns: `node_flags` and `output_usage`
 the per-node `current_digests` column. `RuntimeSlot` (`executor.rs:29`) caches
 `output_values` + the `output_digest` they were produced under, per-node
 `AnyState`/`SharedAnyState`, and per-run `error`/`run_time`.
-At run start it also evicts the non-reproducible cone's leftover outputs
-(`Cache::evict_non_reproducible` — any slot whose `current_digest` is `None`, i.e.
-impure nodes and anything tainted by one): such a value can never be a cache hit,
-so it's kept resident only *between* runs (so the inspector can read the last
-output) and dropped as a new run begins.
 The run loop walks `execute_order`: skip if an upstream errored, resolve each input
 (None/Const/Bind→upstream cached output), set `ctx_manager.current_node` for log
 attribution, await the lambda, store results, and stamp `output_digest` from the

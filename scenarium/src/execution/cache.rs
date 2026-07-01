@@ -78,10 +78,11 @@ impl RuntimeSlot {
         self.value = ValueCache::Empty;
     }
 
-    /// Drop the cached output, leaving the persistent `state`/`event_state`
-    /// intact. Run for each scheduled node before the run loop so the loop's
-    /// in-place reuse of the output `Vec` can't leak a prior run's value through
-    /// a port the lambda leaves unwritten this time.
+    /// Drop the cached output, leaving the persistent `state`/`event_state` intact.
+    /// The run loop calls this on the failure paths — a node that errored or was
+    /// skipped for an errored dependency — so a stale prior value isn't left resident
+    /// as if it were this run's result. (Successful runs reuse the buffer in place;
+    /// see [`invoke_slot`](Self::invoke_slot).)
     pub(crate) fn clear_output(&mut self) {
         self.value = ValueCache::Empty;
     }
@@ -94,17 +95,25 @@ impl RuntimeSlot {
         }
     }
 
-    /// Prepare the slot for a lambda invocation: ensure a fresh `Unbound` output
-    /// buffer (the pre-run `clear_output` left the slot `Empty`, so this allocates;
-    /// `produced_under` stays unset until [`stamp_produced`](Self::stamp_produced) on
-    /// success), and hand back *disjoint* mutable borrows of `state` and that buffer —
-    /// the lambda writes both at once, which a single whole-slot borrow couldn't allow.
+    /// Prepare the slot for a lambda invocation and hand back *disjoint* mutable
+    /// borrows of `state` and the output buffer — the lambda writes both at once,
+    /// which a single whole-slot borrow couldn't allow. A resident buffer is reused
+    /// **in place** (its prior values kept — a re-running lambda overwrites all its
+    /// outputs; a future skip can reuse them), `resize`d to the current arity so a
+    /// func-version change that altered output count can't leave a stale-length
+    /// buffer. `produced_under` stays as-is until [`stamp_produced`](Self::stamp_produced)
+    /// updates it on success.
     pub(crate) fn invoke_slot(&mut self, output_count: usize) -> InvokeSlot<'_> {
-        if !matches!(self.value, ValueCache::Resident { .. }) {
-            self.value = ValueCache::Resident {
-                values: vec![DynamicValue::Unbound; output_count],
-                produced_under: None,
-            };
+        match &mut self.value {
+            ValueCache::Resident { values, .. } => {
+                values.resize(output_count, DynamicValue::Unbound);
+            }
+            _ => {
+                self.value = ValueCache::Resident {
+                    values: vec![DynamicValue::Unbound; output_count],
+                    produced_under: None,
+                };
+            }
         }
         let ValueCache::Resident { values, .. } = &mut self.value else {
             unreachable!("set to Resident just above");
@@ -219,22 +228,6 @@ impl Cache {
             values,
             produced_under: Some(digest),
         };
-    }
-
-    /// Drop resident outputs of the non-reproducible cone (`current_digest` is
-    /// `None` — impure nodes and anything tainted by an impure producer). Such a
-    /// value can never be a resident hit (see [`Self::is_resident_hit`]), so a copy
-    /// left from a prior run is dead weight — and that cone re-executes this run
-    /// anyway. Called at the *start* of a run, so the last run's outputs stay
-    /// resident while idle (the inspector can still read them) and are dropped only
-    /// once a new run begins. Reproducible resident hits and disk-backed values keep
-    /// a `Some` digest, so they're untouched.
-    pub(crate) fn evict_non_reproducible(&mut self) {
-        for slot in self.slots.iter_mut() {
-            if slot.current_digest.is_none() {
-                slot.clear_output();
-            }
-        }
     }
 }
 
@@ -382,58 +375,6 @@ mod tests {
         assert!(
             !cache.is_resident_hit(NodeIdx(0)),
             "current digest moved on ⇒ miss"
-        );
-    }
-
-    /// `evict_non_reproducible` drops resident outputs of the non-reproducible cone
-    /// (`current_digest == None`) and leaves every reproducible slot — resident hits
-    /// and disk-backed values, both `Some`-digest — untouched.
-    #[test]
-    fn evict_non_reproducible_clears_only_none_digest_residents() {
-        let d = Digest([7u8; 32]);
-        let mut cache = Cache::default();
-
-        // 0: impure/tainted (no digest) holding a value — evicted.
-        cache.slots.add(RuntimeSlot {
-            id: NodeId::from_u128(1),
-            current_digest: None,
-            value: ValueCache::Resident {
-                values: out(),
-                produced_under: None,
-            },
-            ..Default::default()
-        });
-        // 1: reproducible resident hit — kept.
-        cache.slots.add(RuntimeSlot {
-            id: NodeId::from_u128(2),
-            current_digest: Some(d),
-            value: ValueCache::Resident {
-                values: out(),
-                produced_under: Some(d),
-            },
-            ..Default::default()
-        });
-        // 2: disk-backed value (has a digest) — kept.
-        cache.slots.add(RuntimeSlot {
-            id: NodeId::from_u128(3),
-            current_digest: Some(d),
-            value: ValueCache::OnDisk,
-            ..Default::default()
-        });
-
-        cache.evict_non_reproducible();
-
-        assert!(
-            matches!(cache.slots[NodeIdx(0)].value, ValueCache::Empty),
-            "the None-digest resident output is dropped"
-        );
-        assert!(
-            cache.is_resident_hit(NodeIdx(1)),
-            "a reproducible resident hit survives"
-        );
-        assert!(
-            matches!(cache.slots[NodeIdx(2)].value, ValueCache::OnDisk),
-            "a disk-backed value survives"
         );
     }
 }

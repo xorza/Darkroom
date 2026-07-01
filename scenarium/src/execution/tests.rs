@@ -2108,10 +2108,9 @@ mod behavior {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn impure_output_stays_resident_for_inspection_after_run() -> anyhow::Result<()> {
-        // An impure node re-runs every time, but its last output must stay
-        // resident *between* runs so the editor's on-demand inspector can read it
-        // — there's no disk fallback for an impure node. Only the start of a new
-        // run evicts it (see `Cache::evict_non_reproducible`).
+        // An impure node re-runs every time, but its output stays resident after a
+        // run: outputs are never wiped or evicted, so the editor's on-demand
+        // inspector can read the last value even though there's no disk fallback.
         let graph = test_graph();
         let mut library = test_func_lib(default_hooks());
         library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
@@ -2532,13 +2531,15 @@ mod execution {
         Ok(())
     }
 
-    /// A scheduled node's output buffer is wiped before every run, so a lambda
-    /// that writes only some of its ports this run can't serve the previous
-    /// run's value through the ports it leaves untouched. The node is impure (it
-    /// re-runs each time): run 1 writes both ports, run 2 writes only port 0, so
-    /// port 1 must come back `Unbound` — not the stale `20` from run 1.
+    /// Output buffers are **not** wiped between runs — a re-running node reuses its
+    /// slot's buffer in place, so an output port a lambda leaves unwritten this run
+    /// retains its prior value. This is the contract the reuse model rests on
+    /// (a skipped node keeps its whole prior output); the flip side is that a lambda
+    /// must write *all* the outputs it means to produce each run. The node is impure
+    /// (re-runs each time): run 1 writes both ports, run 2 writes only port 0, so
+    /// port 1 keeps the `20` from run 1.
     #[tokio::test(flavor = "multi_thread")]
-    async fn scheduled_node_output_cleared_before_run() -> anyhow::Result<()> {
+    async fn unwritten_output_port_retains_prior_value() -> anyhow::Result<()> {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         use crate::async_lambda;
@@ -2590,8 +2591,8 @@ mod execution {
             "run 1 writes both ports: {outputs:?}"
         );
 
-        // Run 2: only port 0 is written. The pre-run clear gives the lambda a
-        // fresh buffer, so port 1 is `Unbound` rather than the stale `20`.
+        // Run 2: only port 0 is written. With no pre-run wipe the lambda reuses the
+        // slot's buffer in place, so port 1 keeps run 1's `20`.
         eg.execute_terminals().await?;
         let outputs = eg
             .runtime_slot(eg.by_name("partial_writer").unwrap())
@@ -2603,8 +2604,8 @@ mod execution {
             "run 2 rewrites port 0: {outputs:?}"
         );
         assert!(
-            matches!(outputs[1], DynamicValue::Unbound),
-            "the unwritten port must not leak run 1's value: {outputs:?}"
+            matches!(outputs[1], DynamicValue::Static(StaticValue::Int(20))),
+            "the unwritten port retains its prior value (no wipe): {outputs:?}"
         );
 
         Ok(())
