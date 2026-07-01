@@ -127,6 +127,13 @@ pub enum Intent {
         node_id: NodeId,
         to: CachePersistence,
     },
+    /// Toggle a node's `force_pure` assertion (`Node::force_pure`). The header
+    /// `P` badge sets it; a forced-pure node flattens to `Pure` and becomes
+    /// content-cacheable despite an `Impure` func decl.
+    SetForcePure {
+        node_id: NodeId,
+        to: bool,
+    },
     /// Fork a private standalone copy of a `Subgraph(Local(_))` node's
     /// def and re-point the node at it (the S-badge "Detach" action).
     /// The copy gets fresh ids and a cleared `origin`, so it diverges
@@ -273,6 +280,11 @@ pub enum GraphStep {
         from: CachePersistence,
         to: CachePersistence,
     },
+    SetForcePure {
+        node_id: NodeId,
+        from: bool,
+        to: bool,
+    },
     /// Fork + re-point: `def` (a fresh standalone copy) joins the
     /// graph's local defs and the node swaps from `from_id` to `def.id`.
     /// Undo restores the `from_id` ref and drops `def`.
@@ -382,6 +394,7 @@ impl GraphStep {
             GraphStep::SetSelection { from, to } => from == to,
             GraphStep::SetDisabled { from, to, .. } => from == to,
             GraphStep::SetPersist { from, to, .. } => from == to,
+            GraphStep::SetForcePure { from, to, .. } => from == to,
             GraphStep::SetViewport {
                 from_pan,
                 from_scale,
@@ -551,6 +564,11 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
         },
         Intent::SetPersist { node_id, to } => GraphStep::SetPersist {
             from: graph.by_id(&node_id)?.persist,
+            node_id,
+            to,
+        },
+        Intent::SetForcePure { node_id, to } => GraphStep::SetForcePure {
+            from: graph.by_id(&node_id)?.force_pure,
             node_id,
             to,
         },
@@ -927,6 +945,9 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetPersist { node_id, to, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().persist = *to;
         }
+        GraphStep::SetForcePure { node_id, to, .. } => {
+            scope.graph.by_id_mut(node_id).unwrap().force_pure = *to;
+        }
         GraphStep::DetachSubgraph { node_id, def, .. } => {
             scope.graph.subgraphs.add((**def).clone());
             scope.graph.by_id_mut(node_id).unwrap().kind =
@@ -1072,6 +1093,9 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetPersist { node_id, from, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().persist = *from;
         }
+        GraphStep::SetForcePure { node_id, from, .. } => {
+            scope.graph.by_id_mut(node_id).unwrap().force_pure = *from;
+        }
         GraphStep::DetachSubgraph {
             node_id,
             from_id,
@@ -1148,6 +1172,8 @@ impl UndoStep {
             | GraphStep::SetDisabled { .. }
             // The cache toggle flips a badge fill — same rect, no remeasure.
             | GraphStep::SetPersist { .. }
+            // The force-pure toggle flips a badge fill — same rect.
+            | GraphStep::SetForcePure { .. }
             // Event wiring paints a wire between existing glyphs — no
             // node remeasure.
             | GraphStep::SetSubscription { .. } => false,
@@ -1179,6 +1205,7 @@ impl UndoStep {
                 | GraphStep::SetSelection { .. }
                 | GraphStep::SetDisabled { .. }
                 | GraphStep::SetPersist { .. }
+                | GraphStep::SetForcePure { .. }
                 | GraphStep::SetViewport { .. }
                 // Subscriptions don't feed a subgraph's derived interface.
                 | GraphStep::SetSubscription { .. },
@@ -1212,6 +1239,7 @@ impl UndoStep {
                 | GraphStep::SetSelection { .. }
                 | GraphStep::SetDisabled { .. }
                 | GraphStep::SetPersist { .. }
+                | GraphStep::SetForcePure { .. }
                 | GraphStep::DetachSubgraph { .. }
                 | GraphStep::SetSubscription { .. },
             )
@@ -1553,6 +1581,52 @@ mod tests {
             )
             .is_none(),
             "Memory → Memory writes nothing"
+        );
+    }
+
+    #[test]
+    fn set_force_pure_commits_and_reverts() {
+        let mut doc = Document::default();
+        let id = add_node_at(&mut doc, Vec2::ZERO);
+        // Fresh nodes inherit the func's declared behavior (force_pure off).
+        assert!(!doc.graph.by_id(&id).unwrap().force_pure);
+
+        // Flip on: the step applies and carries the prior value for revert.
+        let step = commit_intent(
+            Intent::SetForcePure {
+                node_id: id,
+                to: true,
+            },
+            &mut doc,
+            GraphRef::Main,
+        )
+        .expect("false → true is a real change, not a no-op");
+        assert!(doc.graph.by_id(&id).unwrap().force_pure);
+        assert!(
+            !step.requires_relayout() && !step.requires_reconcile(),
+            "a purity toggle neither remeasures nor reshapes the interface"
+        );
+        assert!(
+            step.gesture_key().is_none(),
+            "each purity toggle is its own undo entry"
+        );
+
+        // Undo restores the declared behavior.
+        revert_step(&step, &mut doc, GraphRef::Main);
+        assert!(!doc.graph.by_id(&id).unwrap().force_pure);
+
+        // Setting it to the value it already holds is a no-op (no undo entry).
+        assert!(
+            commit_intent(
+                Intent::SetForcePure {
+                    node_id: id,
+                    to: false,
+                },
+                &mut doc,
+                GraphRef::Main,
+            )
+            .is_none(),
+            "false → false writes nothing"
         );
     }
 
