@@ -44,6 +44,17 @@ const DOMAIN: &[u8] = b"scenarium-cache-v1";
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct Digest(pub(crate) [u8; 32]);
 
+/// A node's two identity digests, recomputed together at each `update` and stored on
+/// its [`RuntimeSlot`](crate::execution::cache::RuntimeSlot). `content` is the
+/// reproducibility / cache key (`None` for an impure node or one tainted by an impure
+/// producer); `local` is the non-tainting per-node digest the executor's runtime
+/// reuse pairs with the `dirty` bits. Bundled so a slot refreshes both in one call.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NodeDigests {
+    pub(crate) content: Option<Digest>,
+    pub(crate) local: Digest,
+}
+
 /// One node's memoized digest result. A node has a digest iff its whole cone is
 /// reproducible; an impure node (or any impure ancestor) is `NotCacheable`, which
 /// is at once "never RAM-cache" and "never disk-cache" — `Some`/`None` carry
@@ -207,6 +218,16 @@ impl DigestEngine {
         digest
     }
 
+    /// A node's two identity digests, computed together for a slot refresh: the
+    /// reproducibility `content` digest (memoized/recursive) and the non-tainting
+    /// `local` digest (a flat pass). The single call `recompute_digests` makes.
+    pub(crate) fn node_digests(&mut self, program: &ExecutionProgram, idx: NodeIdx) -> NodeDigests {
+        NodeDigests {
+            content: self.node_digest(program, idx),
+            local: local_digest(program, idx),
+        }
+    }
+
     /// Digest of one output *port* of node `idx`, or `None` if the node has no
     /// digest. Disambiguates ports of a multi-output node sharing one node digest.
     fn port_digest(
@@ -294,7 +315,7 @@ fn hash_data_type(hasher: &mut Hasher, ty: &DataType) {
 /// run has entirely-unchanged inputs, so it can reuse its prior output even when it's
 /// tainted (no content digest) and has no pre-check. A distinct domain tag keeps it
 /// from ever colliding with a `node_digest`.
-pub(crate) fn local_digest(program: &ExecutionProgram, idx: NodeIdx) -> Digest {
+fn local_digest(program: &ExecutionProgram, idx: NodeIdx) -> Digest {
     let e_node = &program.e_nodes[idx];
     let mut hasher = Hasher::new();
     hasher.update(DOMAIN);

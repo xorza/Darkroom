@@ -10,7 +10,7 @@ use common::{KeyIndexKey, KeyIndexVec};
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::data::DynamicValue;
-use crate::execution::digest::{Digest, DigestEngine, local_digest};
+use crate::execution::digest::{Digest, DigestEngine, NodeDigests};
 use crate::execution::program::{ExecutionNode, ExecutionProgram, NodeIdx};
 use crate::graph::NodeId;
 use crate::prelude::AnyState;
@@ -156,6 +156,13 @@ impl RuntimeSlot {
             self.produced_local = Some(local);
         }
     }
+
+    /// Store both freshly-recomputed identity digests (see [`NodeDigests`]), keeping
+    /// `current_digest` and `current_local` in sync from one `recompute` call.
+    pub(crate) fn set_digests(&mut self, digests: NodeDigests) {
+        self.current_digest = digests.content;
+        self.current_local = digests.local;
+    }
 }
 
 /// The per-node cross-run cache. `slots` is index-aligned to `program.e_nodes`
@@ -211,8 +218,7 @@ impl Cache {
         );
         self.digest_engine.reset(program);
         for idx in program.node_indices() {
-            self.slots[idx].current_digest = self.digest_engine.node_digest(program, idx);
-            self.slots[idx].current_local = local_digest(program, idx);
+            self.slots[idx].set_digests(self.digest_engine.node_digests(program, idx));
         }
     }
 
