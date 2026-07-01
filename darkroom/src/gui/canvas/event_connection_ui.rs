@@ -27,35 +27,49 @@ fn event_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
     }
 }
 
-/// Owns the in-flight subscription wire (an emitter drag) plus the committed
-/// subscription-wire renderer. One wire at a time, so a single `Option`
-/// suffices; the committed list lives on `Scene::subscriptions`.
+/// Owns the in-flight subscription wire (an emitter *or* subscriber drag)
+/// plus the committed subscription-wire renderer. One wire at a time, so a
+/// single `Option` suffices; the committed list lives on
+/// `Scene::subscriptions`.
 ///
 /// A sibling of [`crate::gui::canvas::connection_ui::ConnectionUI`] rather
 /// than a mode of it: an event wire carries no data type, runs no cycle /
-/// const checks, and snaps only to whole-node subscription pins (which only
-/// terminal nodes expose — that's what makes "events connect only to
-/// subscribers" structural). Held-drag only; no const-drop or new-node spawn.
+/// const checks, and links an emitter event glyph to a whole-node
+/// subscription pin (which only terminal nodes expose — that's what makes
+/// "events connect only to subscribers" structural). The drag can start from
+/// either end (mirroring a data wire's start-from-input-or-output): pull from
+/// an emitter and drop on a pin, or pull from a pin and drop on an emitter.
+/// Held-drag only; no const-drop or new-node spawn.
 #[derive(Default, Debug)]
 pub(crate) struct EventConnectionUI {
     state: Option<EventInFlight>,
 }
 
-/// Identity-only — endpoints resolve every frame from `PortFrame`, so the
-/// wire survives layout changes and node moves.
+/// The in-flight event wire, discriminated by which end it started from. Both
+/// directions commit the same [`Intent::Subscribe`]; only the fixed end and
+/// the snap target differ. Identity-only — endpoints resolve every frame from
+/// `PortFrame`, so the wire survives layout changes and node moves.
 #[derive(Clone, Copy, Debug)]
-struct EventInFlight {
-    /// The emitter event the wire started from.
-    emitter: EventRef,
-    /// Subscription pin currently under the pointer, if any — drives the
-    /// preview's snap end.
-    snap_sub: Option<NodeId>,
+enum EventInFlight {
+    /// Started on an emitter event glyph; snapping to a subscription pin.
+    FromEmitter {
+        emitter: EventRef,
+        /// Subscription pin currently under the pointer, if any.
+        snap_sub: Option<NodeId>,
+    },
+    /// Started on a subscription pin; snapping to an emitter event glyph.
+    FromSubscriber {
+        subscriber: NodeId,
+        /// Emitter event glyph currently under the pointer, if any.
+        snap_emitter: Option<EventRef>,
+    },
 }
 
 impl EventConnectionUI {
-    /// Drive the in-flight subscription wire: latch a fresh emitter drag,
-    /// track the snapped subscription pin, and commit an
-    /// [`Intent::Subscribe`] on release over a pin. Esc cancels.
+    /// Drive the in-flight subscription wire: latch a fresh drag from either
+    /// an emitter glyph or a subscription pin, track the snapped opposite
+    /// end, and commit an [`Intent::Subscribe`] on release over a valid
+    /// target. Esc cancels.
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
@@ -63,13 +77,21 @@ impl EventConnectionUI {
         port_frame: &PortFrame,
         out: &mut Vec<Intent>,
     ) {
-        if self.state.is_none()
-            && let Some(emitter) = scan_event_drag_start(port_frame, scene)
-        {
-            self.state = Some(EventInFlight {
-                emitter,
-                snap_sub: None,
-            });
+        // Latch a fresh drag only when idle. An emitter and a pin can't both
+        // start one this frame (distinct widget-id spaces, one press), so
+        // preferring the emitter scan is arbitrary, not a conflict.
+        if self.state.is_none() {
+            if let Some(emitter) = scan_event_drag_start(port_frame, scene) {
+                self.state = Some(EventInFlight::FromEmitter {
+                    emitter,
+                    snap_sub: None,
+                });
+            } else if let Some(subscriber) = scan_sub_drag_start(port_frame, scene) {
+                self.state = Some(EventInFlight::FromSubscriber {
+                    subscriber,
+                    snap_emitter: None,
+                });
+            }
         }
         if ui.escape_pressed() {
             self.state = None;
@@ -78,28 +100,67 @@ impl EventConnectionUI {
         let Some(mut state) = self.state else {
             return;
         };
-        state.snap_sub = scan_sub_target(port_frame, ui, scene, state.emitter);
+        // Refresh the snapped opposite end for this frame.
+        match &mut state {
+            EventInFlight::FromEmitter { emitter, snap_sub } => {
+                *snap_sub = scan_sub_target(port_frame, ui, scene, *emitter);
+            }
+            EventInFlight::FromSubscriber {
+                subscriber,
+                snap_emitter,
+            } => {
+                *snap_emitter = scan_emitter_target(port_frame, ui, scene, *subscriber);
+            }
+        }
         self.state = Some(state);
 
-        // `event_dragging` rolls up `drag_delta().is_some() ||
-        // drag_started()`; its transition to `false` is the release edge.
-        if port_frame.event_dragging(state.emitter) {
+        // Release edge: the source glyph's drag transitioning to not-dragging.
+        // `*_dragging` rolls up `drag_delta().is_some() || drag_started()`.
+        let still_dragging = match state {
+            EventInFlight::FromEmitter { emitter, .. } => port_frame.event_dragging(emitter),
+            EventInFlight::FromSubscriber { subscriber, .. } => port_frame.sub_dragging(subscriber),
+        };
+        if still_dragging {
             return;
         }
-        if let Some(subscriber) = state.snap_sub {
-            out.push(Intent::Subscribe {
-                emitter: state.emitter.node_id,
-                event_idx: state.emitter.event_idx,
+        // Released over a valid target: both directions resolve to the same
+        // (emitter, subscriber) pair and commit the same idempotent intent.
+        match state {
+            EventInFlight::FromEmitter {
+                emitter,
+                snap_sub: Some(subscriber),
+            }
+            | EventInFlight::FromSubscriber {
                 subscriber,
-            });
+                snap_emitter: Some(emitter),
+            } => out.push(Intent::Subscribe {
+                emitter: emitter.node_id,
+                event_idx: emitter.event_idx,
+                subscriber,
+            }),
+            _ => {}
         }
         self.state = None;
     }
 
-    /// The subscription pin currently snapped under the pointer, if any —
-    /// read by `GraphUI` to highlight the drop target.
+    /// The subscription pin currently snapped under the pointer (an
+    /// emitter-started drag), if any — read by `GraphUI` to highlight the
+    /// drop target.
     pub(crate) fn snap_sub(&self) -> Option<NodeId> {
-        self.state.and_then(|s| s.snap_sub)
+        match self.state {
+            Some(EventInFlight::FromEmitter { snap_sub, .. }) => snap_sub,
+            _ => None,
+        }
+    }
+
+    /// The emitter event glyph currently snapped under the pointer (a
+    /// subscriber-started drag), if any — read by `GraphUI` to highlight the
+    /// drop target.
+    pub(crate) fn snap_emitter(&self) -> Option<EventRef> {
+        match self.state {
+            Some(EventInFlight::FromSubscriber { snap_emitter, .. }) => snap_emitter,
+            _ => None,
+        }
     }
 
     /// Paint every committed subscription wire on the current scene, marking
@@ -147,8 +208,11 @@ impl EventConnectionUI {
         }
     }
 
-    /// Paint the in-flight drag preview: a cubic from the emitter glyph to
-    /// the snapped pin (when set) or the pointer.
+    /// Paint the in-flight drag preview: a cubic between the emitter side
+    /// (`p0`) and the subscriber side (`p3`). Whichever end the drag started
+    /// from is fixed to its glyph; the free end follows the snapped opposite
+    /// glyph (when set) or the pointer. The emitter is always `p0` so the
+    /// preview keeps a committed wire's shape regardless of drag direction.
     pub(crate) fn draw_in_flight(
         &self,
         ui: &mut Ui,
@@ -157,18 +221,33 @@ impl EventConnectionUI {
         port_frame: &PortFrame,
         canvas_origin: Vec2,
     ) {
-        let Some(state) = self.state else {
-            return;
-        };
-        let Some(p0) = port_frame.event_center_canvas_local(state.emitter) else {
-            return;
-        };
-        let end = match state.snap_sub {
-            Some(sub) => port_frame.sub_center_canvas_local(sub),
-            None => pointer_world(ui, scene, canvas_origin),
-        };
-        let Some(p3) = end else {
-            return;
+        let (p0, p3) = match self.state {
+            None => return,
+            Some(EventInFlight::FromEmitter { emitter, snap_sub }) => {
+                let Some(p0) = port_frame.event_center_canvas_local(emitter) else {
+                    return;
+                };
+                let free = match snap_sub {
+                    Some(sub) => port_frame.sub_center_canvas_local(sub),
+                    None => pointer_world(ui, scene, canvas_origin),
+                };
+                let Some(p3) = free else { return };
+                (p0, p3)
+            }
+            Some(EventInFlight::FromSubscriber {
+                subscriber,
+                snap_emitter,
+            }) => {
+                let Some(p3) = port_frame.sub_center_canvas_local(subscriber) else {
+                    return;
+                };
+                let free = match snap_emitter {
+                    Some(e) => port_frame.event_center_canvas_local(e),
+                    None => pointer_world(ui, scene, canvas_origin),
+                };
+                let Some(p0) = free else { return };
+                (p0, p3)
+            }
         };
         add_cubic_wire(
             ui,
@@ -197,6 +276,17 @@ fn scan_event_drag_start(frame: &PortFrame, scene: &Scene) -> Option<EventRef> {
     None
 }
 
+/// First subscription pin whose drag started this frame, or `None`. Only
+/// terminal nodes render a pin, so only they can start a reverse event drag.
+fn scan_sub_drag_start(frame: &PortFrame, scene: &Scene) -> Option<NodeId> {
+    for n in &scene.nodes {
+        if n.terminal && frame.sub_drag_started(n.id) {
+            return Some(n.id);
+        }
+    }
+    None
+}
+
 /// Subscription pin under the pointer that's a valid drop for `emitter`: a
 /// terminal node (the only kind that renders a pin) other than the emitter's
 /// own node. The pin-only target enforces "events connect only to
@@ -209,6 +299,34 @@ fn scan_sub_target(frame: &PortFrame, ui: &Ui, scene: &Scene, emitter: EventRef)
         }
         if frame.sub_contains_pointer(n.id, pointer) {
             return Some(n.id);
+        }
+    }
+    None
+}
+
+/// Emitter event glyph under the pointer that's a valid drop for a wire
+/// dragged from `subscriber`'s pin: any node's event other than the
+/// subscriber's own (a node can't subscribe to itself). Mirror of
+/// [`scan_sub_target`] for the reverse drag.
+fn scan_emitter_target(
+    frame: &PortFrame,
+    ui: &Ui,
+    scene: &Scene,
+    subscriber: NodeId,
+) -> Option<EventRef> {
+    let pointer = ui.pointer_pos()?;
+    for n in &scene.nodes {
+        if n.id == subscriber {
+            continue;
+        }
+        for event_idx in 0..n.events.len as usize {
+            let e = EventRef {
+                node_id: n.id,
+                event_idx,
+            };
+            if frame.event_contains_pointer(e, pointer) {
+                return Some(e);
+            }
         }
     }
     None

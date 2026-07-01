@@ -63,9 +63,10 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
 /// One whole-node event-subscription pin: a white triangle overhanging the
 /// node's top-left corner, its apex pointing up-left toward the incoming
 /// wire. Negative top *and* left margins pull it out past both edges, like a
-/// port circle overhangs its edge. It's the drop target for an event wire;
-/// `hovered` (set while a drag snaps to it) scales the triangle up as drop
-/// feedback.
+/// port circle overhangs its edge. It's both a drop target for an emitter's
+/// event wire *and* a drag source — pulling from it starts a subscription
+/// wire aimed at an emitter (see `EventConnectionUI`). `hovered` (set while a
+/// drag snaps to it) tints the triangle as drop feedback.
 fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool) {
     let port = theme.port_size;
     // Overhang past the body's inner edge (the border-folded padding) by the
@@ -85,14 +86,16 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool
         tf(Vec2::new(0.0, port * 0.5)),
         event_color(theme, hovered),
     );
-    // `Sense::HOVER` so plain mouse-over lights the pin and anchors the
-    // tooltip; it captures no clicks, so node drag/select still fall through.
+    // `CLICK | DRAG`, like the emitter glyph / port circles: `DRAG` pulls a
+    // subscription wire out of the pin and captures the press so it doesn't
+    // fall through to the node body's own drag. A plain click on the pin no
+    // longer selects the node — the same tradeoff those glyphs already make.
     let pin = Panel::zstack()
         .id(subscription_glyph_wid(node_id))
         .size((Sizing::Fixed(port), Sizing::Fixed(port)))
         .align(Align::new(HAlign::Left, VAlign::Top))
         .margin(Spacing::new(-overhang, -overhang, 0.0, 0.0))
-        .sense(Sense::HOVER)
+        .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
             ui.add_shape(Shape::Mesh {
                 mesh: &tri,
@@ -101,7 +104,7 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool
             });
         });
     Tooltip::for_(&pin.response.snapshot())
-        .text("Event subscription — drop an event wire here")
+        .text("Event subscription — drag to an emitter, or drop an event wire here")
         .show(ui);
 }
 

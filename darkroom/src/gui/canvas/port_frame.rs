@@ -189,6 +189,23 @@ impl PortFrame {
         self.events.get(&e).is_some_and(|i| i.hovered)
     }
 
+    /// `true` when `pointer` (screen coords) falls inside this emitter event
+    /// glyph's rect — the snap test for a reverse (subscriber → emitter) drag.
+    pub(crate) fn event_contains_pointer(&self, e: EventRef, pointer: Vec2) -> bool {
+        self.events
+            .get(&e)
+            .and_then(|i| i.screen_rect)
+            .is_some_and(|r| r.contains(pointer))
+    }
+
+    /// Force an emitter event glyph's hover flag on (idempotent) — the
+    /// reverse event drag's snap target, mirroring [`Self::set_sub_hovered`].
+    pub(crate) fn set_event_hovered(&mut self, e: EventRef) {
+        if let Some(info) = self.events.get_mut(&e) {
+            info.hovered = true;
+        }
+    }
+
     /// Canvas-local center of a node's subscription pin, or `None` when it
     /// hasn't measured yet (or the node has no pin).
     pub(crate) fn sub_center_canvas_local(&self, node_id: NodeId) -> Option<Vec2> {
@@ -202,6 +219,18 @@ impl PortFrame {
             .get(&node_id)
             .and_then(|i| i.screen_rect)
             .is_some_and(|r| r.contains(pointer))
+    }
+
+    /// `true` on the one-frame edge of a drag-start on this subscription pin —
+    /// the reverse (subscriber → emitter) event drag's latch.
+    pub(crate) fn sub_drag_started(&self, node_id: NodeId) -> bool {
+        self.subs.get(&node_id).is_some_and(|i| i.drag_started)
+    }
+
+    /// `true` while a drag started on this subscription pin is still live.
+    /// Read on the start pin to detect release.
+    pub(crate) fn sub_dragging(&self, node_id: NodeId) -> bool {
+        self.subs.get(&node_id).is_some_and(|i| i.dragging)
     }
 
     /// `true` when a node's subscription pin should paint highlighted — set

@@ -224,9 +224,13 @@ impl GraphUI {
         if let Some(snap) = self.gestures.connection_ui.snap_port() {
             self.port_frame.set_hovered(snap);
         }
-        // Same for an event drag's snapped subscription pin.
+        // Same for an event drag's snapped subscription pin (emitter-started
+        // drag) or snapped emitter glyph (subscriber-started drag).
         if let Some(sub) = self.gestures.event_connection_ui.snap_sub() {
             self.port_frame.set_sub_hovered(sub);
+        }
+        if let Some(emitter) = self.gestures.event_connection_ui.snap_emitter() {
+            self.port_frame.set_event_hovered(emitter);
         }
         // Cycle inspector toggles + close transient panels on outside
         // actions, all from last-frame responses (same timing as every
