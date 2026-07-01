@@ -5,7 +5,7 @@ use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
-use scenarium::function::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
+use scenarium::function::{FuncInput, FuncOutput, OutputType, ValueVariant};
 use scenarium::prelude::{
     Binding, CachePersistence, Graph, Library, NodeId, NodeKind, OutputPort, SubgraphDef,
     SubgraphRef, Subscription,
@@ -168,14 +168,6 @@ pub struct SceneNode {
     /// self-caching nodes (the file-cache passthrough) and boundary/stub nodes
     /// that have no output to persist.
     pub uncacheable: bool,
-    /// User assertion that this node is deterministic (`Node::force_pure`).
-    /// The header `P` badge toggles it via `Intent::SetForcePure`; when set,
-    /// flatten treats the node as `Pure` despite an `Impure` func decl.
-    pub force_pure: bool,
-    /// The node func's declared behavior. Gates the `P` badge — the force-pure
-    /// override only means anything for an `Impure` func. `Pure` for subgraphs
-    /// (purity is per interior leaf) and boundary/stub nodes (no func).
-    pub func_behavior: FuncBehavior,
     /// A `SubgraphInput`/`SubgraphOutput` interface boundary node. Its
     /// ports route the subgraph interface rather than carry literal
     /// values, so the const-value affordances (inline editor, "Set
@@ -257,7 +249,6 @@ impl Scene {
                     subgraph: None,
                     terminal: f.terminal,
                     uncacheable: f.uncacheable,
-                    func_behavior: f.behavior,
                 }),
                 NodeKind::Subgraph(r) => graph.resolve_def(*r, library).map(|d| NodeInterface {
                     kind_label: d.name.clone().into(),
@@ -270,10 +261,6 @@ impl Scene {
                     // outputs" as the visible sink signal.
                     terminal: d.outputs.is_empty(),
                     uncacheable: false,
-                    // A subgraph's purity is decided per interior leaf at
-                    // flatten; a single node-level force_pure can't express it,
-                    // so `Pure` here just means "no `P` badge".
-                    func_behavior: FuncBehavior::Pure,
                 }),
                 // A built-in special node: its interface is the hardcoded spec.
                 // Any wildcard output it declares is resolved below, with every
@@ -288,7 +275,6 @@ impl Scene {
                         subgraph: None,
                         terminal: f.terminal,
                         uncacheable: f.uncacheable,
-                        func_behavior: f.behavior,
                     })
                 }
                 // Inbound boundary: no inputs; one output per def input,
@@ -308,7 +294,6 @@ impl Scene {
                         subgraph: None,
                         terminal: false,
                         uncacheable: true,
-                        func_behavior: FuncBehavior::Pure,
                     }
                 }),
                 // Outbound boundary: one input per def output (synthesized
@@ -326,7 +311,6 @@ impl Scene {
                         subgraph: None,
                         terminal: false,
                         uncacheable: true,
-                        func_behavior: FuncBehavior::Pure,
                     }
                 }),
             };
@@ -361,7 +345,6 @@ impl Scene {
                         subgraph: None,
                         terminal: false,
                         uncacheable: true,
-                        func_behavior: FuncBehavior::Pure,
                     }
                 }
             };
@@ -439,8 +422,6 @@ impl Scene {
                 disabled: node.disabled,
                 persist: node.persist == CachePersistence::Disk,
                 uncacheable: interface.uncacheable,
-                force_pure: node.force_pure,
-                func_behavior: interface.func_behavior,
                 boundary: matches!(
                     node.kind,
                     NodeKind::SubgraphInput | NodeKind::SubgraphOutput
@@ -507,10 +488,6 @@ struct NodeInterface<'a> {
     /// Node manages its own caching (or has no output to cache), so the editor's
     /// disk-cache (persist) toggle is hidden — see [`SceneNode::uncacheable`].
     uncacheable: bool,
-    /// The node func's declared behavior — gates the header `P` badge (see
-    /// [`SceneNode::func_behavior`]). `Pure` for subgraphs (purity is per
-    /// interior leaf) and boundary/stub nodes (no func).
-    func_behavior: FuncBehavior,
 }
 
 /// The literal a port falls back to when given a const binding: its declared

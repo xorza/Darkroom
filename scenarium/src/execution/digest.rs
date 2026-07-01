@@ -18,8 +18,10 @@
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
 //!   cached).
-//! - **`FsPath` identity is `(len, mtime)`** ([`fs_file_id`]) — a same-size edit within
-//!   mtime granularity can slip through; a full content hash is the opt-in resolver.
+//! - **`FsPath` identity is `(len, mtime)`** — a file's own, or a directory's
+//!   entries' ([`hash_fs_path_identity`]), so a folder-reading node can be `Pure` and
+//!   still re-key when its contents change. A same-size edit within mtime granularity
+//!   can slip through; a full content hash is the opt-in resolver.
 //! - **Custom-value blob format** is the codec's responsibility, not the digest's — see
 //!   `CustomValueCodec::decode`; a breaking codec change needs a `DOMAIN` bump.
 
@@ -55,22 +57,19 @@ enum NodeDigest {
 }
 
 /// Identity of an external file an `FsPath` input points at, folded into the
-/// digest so the same path holding different bytes invalidates the cache. The
-/// default [`fs_file_id`] resolver uses `(len, mtime)` — cheap; a full content
-/// hash is the opt-in for setups where mtime can lie.
+/// digest so the same path holding different bytes invalidates the cache. Uses
+/// `(len, mtime)` — cheap; a same-size in-place edit within mtime granularity can
+/// slip (a full content hash would be the opt-in resolver).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FileId {
     pub(crate) len: u64,
     pub(crate) mtime_ns: u128,
 }
 
-/// `(len, mtime)` of `path`, or [`FileId::default`] when it can't be stat'd. A
-/// missing file still differs from a present one, and the path string itself is
-/// folded separately, so distinct missing paths stay distinct.
-pub(crate) fn fs_file_id(path: &str) -> FileId {
-    let Ok(meta) = std::fs::metadata(path) else {
-        return FileId::default();
-    };
+/// `(len, mtime)` from an already-resolved [`std::fs::Metadata`] — shared by a file
+/// input and each entry of a directory input, so a directory walk doesn't
+/// re-`metadata` what `read_dir` already stat'd.
+fn file_id_from_meta(meta: &std::fs::Metadata) -> FileId {
     let mtime_ns = meta
         .modified()
         .ok()
@@ -87,8 +86,8 @@ pub(crate) fn fs_file_id(path: &str) -> FileId {
 /// [`Cache`](crate::execution::cache::Cache) keeps one engine across updates and a
 /// recompile reuses the buffers ([`reset`](Self::reset)) instead of reallocating two
 /// graph-sized `Vec`s. The program is *not* held — it's passed to [`node_digest`](Self::node_digest)
-/// per recompute, so the engine carries no lifetime. File identity is resolved with
-/// [`fs_file_id`] directly.
+/// per recompute, so the engine carries no lifetime. File and directory identity are
+/// resolved with [`hash_fs_path_identity`] directly.
 #[derive(Debug, Default)]
 pub(crate) struct DigestEngine {
     memo: Vec<NodeDigest>,
@@ -251,9 +250,7 @@ impl DigestEngine {
                 hasher.update(&[5u8]);
                 hasher.update(&(path.len() as u64).to_le_bytes());
                 hasher.update(path.as_bytes());
-                let id = fs_file_id(path);
-                hasher.update(&id.len.to_le_bytes());
-                hasher.update(&id.mtime_ns.to_le_bytes());
+                hash_fs_path_identity(hasher, path);
             }
             StaticValue::Enum(name) => {
                 hasher.update(&[6u8]);
@@ -285,6 +282,65 @@ fn hash_data_type(hasher: &mut Hasher, ty: &DataType) {
     }
 }
 
+/// Fold an `FsPath` input's external identity into `hasher`: for a regular file its
+/// `(len, mtime)`; for a **directory**, a fingerprint of its immediate entries (each
+/// entry's name + `(len, mtime)`, sorted for determinism) — so adding, removing, or
+/// editing a contained file re-keys the node's digest. This is what lets a node that
+/// reads a folder (calibration frames, a light-frame set) be `Pure` and cache
+/// correctly: the folder's contents *are* part of the cache key. A path that can't be
+/// stat'd folds a distinct "missing" marker. Same `(len, mtime)` trust boundary as the
+/// file case, and non-recursive — enough for the flat frame folders these inputs point
+/// at; a nested layout only tracks its subdirectories' own mtimes.
+fn hash_fs_path_identity(hasher: &mut Hasher, path: &str) {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_dir() => {
+            hasher.update(&[1u8]);
+            hash_dir_entries(hasher, path);
+        }
+        Ok(meta) => {
+            hasher.update(&[0u8]);
+            let id = file_id_from_meta(&meta);
+            hasher.update(&id.len.to_le_bytes());
+            hasher.update(&id.mtime_ns.to_le_bytes());
+        }
+        // Missing/unreadable — distinct from both a file and a dir. The path string
+        // is folded by the caller, so distinct missing paths stay distinct.
+        Err(_) => {
+            hasher.update(&[2u8]);
+        }
+    }
+}
+
+/// Fold a directory's immediate entries into `hasher` in a deterministic order:
+/// entry count, then each entry's name and `(len, mtime)`, sorted by name
+/// (`read_dir` order isn't stable across platforms). An unreadable directory folds
+/// only its (zero) count.
+fn hash_dir_entries(hasher: &mut Hasher, dir: &str) {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        hasher.update(&0u64.to_le_bytes());
+        return;
+    };
+    let mut entries: Vec<(String, FileId)> = read
+        .flatten()
+        .map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let id = entry
+                .metadata()
+                .map(|m| file_id_from_meta(&m))
+                .unwrap_or_default();
+            (name, id)
+        })
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    hasher.update(&(entries.len() as u64).to_le_bytes());
+    for (name, id) in &entries {
+        hasher.update(&(name.len() as u64).to_le_bytes());
+        hasher.update(name.as_bytes());
+        hasher.update(&id.len.to_le_bytes());
+        hasher.update(&id.mtime_ns.to_le_bytes());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +349,54 @@ mod tests {
     use crate::function::FuncId;
     use crate::graph::NodeId;
     use common::Span;
+
+    /// A folder-input node stays `Pure` and cacheable, but its digest tracks the
+    /// folder's *contents*: `hash_fs_path_identity` re-keys when a contained file is
+    /// added, edited, or removed, and folds identically for an unchanged directory —
+    /// closing the gap a bare directory mtime (add/remove only) leaves.
+    #[test]
+    fn dir_fingerprint_tracks_entry_changes() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "scenarium-digest-dirfp-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.to_string_lossy().into_owned();
+
+        let fingerprint = |p: &str| {
+            let mut h = Hasher::new();
+            hash_fs_path_identity(&mut h, p);
+            h.finalize()
+        };
+
+        std::fs::write(dir.join("a.fits"), b"one").unwrap();
+        let base = fingerprint(&path);
+        assert_eq!(
+            fingerprint(&path),
+            base,
+            "an unchanged directory folds identically"
+        );
+
+        std::fs::write(dir.join("b.fits"), b"two").unwrap();
+        let after_add = fingerprint(&path);
+        assert_ne!(
+            after_add, base,
+            "adding a file re-keys the directory fingerprint"
+        );
+
+        // In-place edit changing length — the gap a bare directory mtime would miss.
+        std::fs::write(dir.join("a.fits"), b"one-plus-more").unwrap();
+        let after_edit = fingerprint(&path);
+        assert_ne!(after_edit, after_add, "editing a contained file re-keys it");
+
+        std::fs::remove_file(dir.join("b.fits")).unwrap();
+        assert_ne!(fingerprint(&path), after_edit, "removing a file re-keys it");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     /// Minimal hand-built `ExecutionProgram` for digest tests. Node ids are
     /// `from_u128(idx + 1)`; `bind`'s target id must match that scheme. Output types

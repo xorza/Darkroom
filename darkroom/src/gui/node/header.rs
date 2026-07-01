@@ -8,7 +8,7 @@ use palantir::{
     Align, Background, Color, Configure, Corners, HAlign, Panel, Sense, Shape, Sizing, Spacing,
     Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
-use scenarium::prelude::{CachePersistence, FuncBehavior, NodeId};
+use scenarium::prelude::{CachePersistence, NodeId};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
@@ -174,9 +174,9 @@ fn header_bar(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<I
 
 /// The status strip under the header: the last-run time label (left) and
 /// the indicator chips (`S` subgraph-open, `T` terminal, `D` disable, `C`
-/// cache, `P` force-pure), right-aligned. Its own row so the time
-/// appearing/disappearing doesn't resize the header; the disable chip always
-/// shows, so the row's height is reserved regardless.
+/// cache), right-aligned. Its own row so the time appearing/disappearing
+/// doesn't resize the header; the disable chip always shows, so the row's
+/// height is reserved regardless.
 pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     Panel::hstack()
@@ -286,28 +286,6 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     });
                 }
             }
-            // Force-pure toggle: filled when the user has asserted this node is
-            // deterministic (`Node::force_pure`), overriding an `Impure` func
-            // decl so the output becomes content-cacheable. Only shown where the
-            // override means anything — an impure func that isn't self-caching.
-            // Muted swatch, like `D`: a config flip, not an alarm.
-            if node.func_behavior == FuncBehavior::Impure && !node.uncacheable {
-                let force_pure_toggled = Badge {
-                    salt: "badge_p",
-                    glyph: "P",
-                    color: theme.text_muted,
-                    filled: node.force_pure,
-                    wid: Some(force_pure_badge_wid(node.id)),
-                    tip: "Force pure — treat as deterministic, enable caching",
-                }
-                .show(ui, theme);
-                if force_pure_toggled {
-                    out.push(Intent::SetForcePure {
-                        node_id: node.id,
-                        to: !node.force_pure,
-                    });
-                }
-            }
         });
 }
 
@@ -342,11 +320,6 @@ fn disable_badge_wid(node_id: NodeId) -> WidgetId {
 /// Stable id for a node's clickable memory/disk cache chip.
 fn persist_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.persist_badge", node_id))
-}
-
-/// Stable id for a node's clickable force-pure chip.
-fn force_pure_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.force_pure_badge", node_id))
 }
 
 /// Stable id for a subgraph node's clickable open-in-tab chip.

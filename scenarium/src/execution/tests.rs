@@ -2132,40 +2132,6 @@ mod behavior {
 
         Ok(())
     }
-
-    #[test]
-    fn force_pure_node_skips_impure_func() -> anyhow::Result<()> {
-        // Same fixture as `impure_node_always_invoked` — `get_b`'s func is
-        // `Impure`, so on its own it re-runs every time. Marking the *node*
-        // `force_pure` overrides the decl: flatten treats it as `Pure`, so a
-        // cached output lets it skip on rerun. This is the exact contrast to
-        // `impure_node_always_invoked` — same func behavior, opposite outcome
-        // purely from the per-node flag.
-        let mut graph = test_graph();
-        let mut library = test_func_lib(TestFuncHooks::default());
-        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
-        graph.by_name_mut("get_b").unwrap().force_pure = true;
-
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
-        assert!(
-            execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()),
-            "get_b runs on the first prepare (no cache yet)"
-        );
-
-        // With a cached output present, the forced-pure node skips — whereas a
-        // plain impure `get_b` would still be in the execute order.
-        execution_graph.set_output_values("get_b", vec![DynamicValue::Static(StaticValue::Int(7))]);
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[])?;
-        assert!(
-            !execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()),
-            "force_pure lets the impure-func node skip on rerun"
-        );
-
-        Ok(())
-    }
 }
 
 // === Composite (Subgraph) Caching ===

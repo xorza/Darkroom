@@ -48,10 +48,8 @@ port Vecs; wiring lives flat at graph level:
 
 `Node` (`graph.rs:126`) is pure identity: `id`, `kind: NodeKind`
 (Func / Subgraph / SubgraphInput / SubgraphOutput), `name`,
-`persist: CachePersistence` (`Memory | Disk`), `disabled: bool`, and
-`force_pure: bool` (user assertion of determinism — flatten forces the flat
-node to `Pure` despite an `Impure` func decl, making it content-cacheable).
-Port arity derives from `kind`. `Binding` (`graph.rs:48`) is `None` (unbound) /
+`persist: CachePersistence` (`Memory | Disk`), `disabled: bool`. Port arity
+derives from `kind`. `Binding` (`graph.rs:48`) is `None` (unbound) /
 `Const(StaticValue)` / `Bind(OutputPort)`. `validate_with(library)` recurses per
 composite level with recursion guards.
 
