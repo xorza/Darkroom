@@ -18,7 +18,7 @@ use crate::data::DynamicValue;
 use crate::execution_stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
-use crate::func_lambda::{ChangeCheck, InvokeError, InvokeInput, OutputUsage};
+use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage};
 use crate::function::FuncBehavior;
 use crate::graph::InputPort;
 
@@ -140,29 +140,33 @@ impl Executor {
 
             // Runtime early-cutoff. A node reuses its prior output — skipping its
             // lambda and staying "clean" (`dirty` unset) so its own consumers can skip
-            // in turn — when its inputs are wholly unchanged: every Bind-producer
-            // stayed clean this run (the topological order means they're all decided),
-            // AND its own local inputs (consts + wiring) match (`local_unchanged`),
-            // AND it can vouch its output is then unchanged — a `Pure` node by
-            // determinism, an impure node via a pre-check reporting `Unchanged`.
-            // Requires a prior output to serve (never the first run).
+            // in turn — when its inputs are wholly unchanged: every Bind-producer stayed
+            // clean this run (topological order ⇒ all decided), AND its own local inputs
+            // match, AND it can vouch its output is then unchanged (a `Pure` node by
+            // determinism, or any node with a pre-check). Requires a prior output.
+            //
+            // A pre-check contributes a precise, execution-time content digest of what
+            // the func actually reads; it overrides the coarse plan-time local digest,
+            // so both the reuse comparison and the produced stamp key on it — an
+            // irrelevant file its fingerprint ignores can't block reuse — and, being a
+            // content key, it's what a disk cache would key on.
             let e_node = &program.e_nodes[e_node_idx];
+            let has_pre_check = if let Some(hash) = e_node
+                .pre_check
+                .check(&mut cache.slots[e_node_idx].state, &inputs)
+            {
+                cache.slots[e_node_idx].current_local = hash;
+                true
+            } else {
+                false
+            };
             let upstream_dirty = program.inputs[e_node.inputs.range()].iter().any(|input| {
                 matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[addr.target_idx].is_dirty())
             });
             let can_reuse = cache.slots[e_node_idx].output_values().is_some()
                 && !upstream_dirty
                 && cache.slots[e_node_idx].local_unchanged();
-            let unchanged = can_reuse
-                && if e_node.behavior == FuncBehavior::Pure {
-                    true
-                } else {
-                    !e_node.pre_check.is_none()
-                        && e_node
-                            .pre_check
-                            .check(&mut cache.slots[e_node_idx].state, &inputs)
-                            == ChangeCheck::Unchanged
-                };
+            let unchanged = can_reuse && (has_pre_check || e_node.behavior == FuncBehavior::Pure);
             if unchanged {
                 outcomes[e_node_idx] = NodeRun::Reused;
                 continue;

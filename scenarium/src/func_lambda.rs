@@ -7,6 +7,7 @@ use thiserror::Error;
 use crate::{
     context::ContextManager,
     data::DynamicValue,
+    execution::digest::Digest,
     prelude::{AnyState, SharedAnyState},
 };
 
@@ -18,17 +19,6 @@ pub enum OutputUsage {
     Skip,
     /// Number of executing consumers reading this output this run (always `> 0`).
     Needed(u32),
-}
-
-/// A func's pre-check verdict, returned by [`PreCheck`] before the main lambda runs.
-/// `Unchanged` lets the executor reuse the node's prior output and skip the lambda;
-/// `Changed` runs it. A func returns `Unchanged` only when it can guarantee its output
-/// is identical to last run's — the same determinism contract as `Pure`, asserted at
-/// runtime rather than declared.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChangeCheck {
-    Changed,
-    Unchanged,
 }
 
 #[derive(Debug, Error)]
@@ -141,15 +131,18 @@ impl std::fmt::Debug for FuncLambda {
     }
 }
 
-type PreCheckFn = dyn Fn(&mut AnyState, &[InvokeInput]) -> ChangeCheck + Send + Sync + 'static;
+type PreCheckFn = dyn Fn(&mut AnyState, &[InvokeInput]) -> Digest + Send + Sync + 'static;
 
-/// Optional cheap "did anything I read change?" probe, run before a node's main
-/// lambda. Given the node's persistent [`AnyState`] (to recall + update a fingerprint
-/// of what it last read) and the resolved inputs, it returns a [`ChangeCheck`]. When
-/// it reports `Unchanged` and the node's upstream producers are all unchanged this
-/// run, the executor skips the lambda and reuses the prior output — and the skip
-/// propagates to pre-check consumers. Stored on the func like [`FuncLambda`], skipped
-/// on serialize and re-attached at flatten.
+/// Optional probe, run before a node's main lambda, that returns a **content digest**
+/// of whatever the func decides identifies its output — typically a fingerprint of the
+/// files/inputs it actually reads (`Digest::hash` builds one). The framework compares
+/// it to the digest the node's resident output was produced under: an unchanged digest
+/// with clean upstream lets the executor reuse the prior output and skip the lambda,
+/// and — because it's a content key, not just a "did it change" bit — it's what a disk
+/// cache can be keyed on. Runs at execution time, so it sees resolved inputs (incl.
+/// bound paths); the framework owns storage/comparison, so the func does no
+/// bookkeeping. Stored on the func like [`FuncLambda`], skipped on serialize and
+/// re-attached at flatten.
 #[derive(Clone, Default)]
 pub enum PreCheck {
     #[default]
@@ -160,7 +153,7 @@ pub enum PreCheck {
 impl PreCheck {
     pub fn new<F>(check: F) -> Self
     where
-        F: Fn(&mut AnyState, &[InvokeInput]) -> ChangeCheck + Send + Sync + 'static,
+        F: Fn(&mut AnyState, &[InvokeInput]) -> Digest + Send + Sync + 'static,
     {
         Self::Check(Arc::new(check))
     }
@@ -169,12 +162,14 @@ impl PreCheck {
         matches!(self, Self::None)
     }
 
-    /// Run the probe. A node with no pre-check is always treated as `Changed`, so it
-    /// runs every time it's scheduled (the default behavior).
-    pub fn check(&self, state: &mut AnyState, inputs: &[InvokeInput]) -> ChangeCheck {
+    /// Run the probe, or `None` for a node without a pre-check (which then runs every
+    /// time it's scheduled — the default behavior). `state` is the node's persistent
+    /// [`AnyState`] — the framework owns the digest comparison, so the func needn't use
+    /// it, but it's threaded through for funcs that want to cache intermediate work.
+    pub fn check(&self, state: &mut AnyState, inputs: &[InvokeInput]) -> Option<Digest> {
         match self {
-            PreCheck::None => ChangeCheck::Changed,
-            PreCheck::Check(check) => check(state, inputs),
+            PreCheck::None => None,
+            PreCheck::Check(check) => Some(check(state, inputs)),
         }
     }
 }

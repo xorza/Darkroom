@@ -42,7 +42,17 @@ const DOMAIN: &[u8] = b"scenarium-cache-v1";
 /// A newtype, not a bare `[u8; 32]`, so an arbitrary byte array can't silently pose
 /// as a digest where one is expected.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct Digest(pub(crate) [u8; 32]);
+pub struct Digest(pub(crate) [u8; 32]);
+
+impl Digest {
+    /// A content digest of arbitrary bytes — the public constructor a func's
+    /// [`PreCheck`](crate::func_lambda::PreCheck) uses to turn its input fingerprint
+    /// into a digest. The inner bytes stay `pub(crate)`, so a digest can only be
+    /// *made* by hashing, never forged from an arbitrary array.
+    pub fn hash(bytes: &[u8]) -> Digest {
+        Digest(blake3::hash(bytes).into())
+    }
+}
 
 /// A node's two identity digests, recomputed together at each `update` and stored on
 /// its [`RuntimeSlot`](crate::execution::cache::RuntimeSlot). `content` is the

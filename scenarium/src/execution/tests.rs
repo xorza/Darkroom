@@ -2137,14 +2137,15 @@ mod behavior {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
         use crate::async_lambda;
-        use crate::func_lambda::{ChangeCheck, PreCheck};
+        use crate::execution::digest::Digest;
+        use crate::func_lambda::PreCheck;
         use crate::function::{Func, FuncInput};
         use crate::graph::Graph;
         use crate::library::Library;
 
-        // `a`'s pre-check tracks an external "changed" flag; `b`'s always reports
-        // unchanged. So `b` reruns iff its own state changed OR `a` stayed dirty — its
-        // skip is the *propagation* of `a`'s, not just its own pre-check.
+        // `a`'s pre-check hashes a "version" flag into its content digest; `b`'s digest
+        // is constant. So `b` reruns iff `a` stayed dirty — its skip is the
+        // *propagation* of `a`'s, not its own pre-check.
         let a_changed = Arc::new(AtomicBool::new(false));
         let a_runs = Arc::new(AtomicUsize::new(0));
         let b_runs = Arc::new(AtomicUsize::new(0));
@@ -2153,11 +2154,7 @@ mod behavior {
         let a_runs_l = Arc::clone(&a_runs);
         let a = Func::new("a4baacc3-6c23-4e3b-aef7-32290f614a14", "a")
             .pre_check(PreCheck::new(move |_state, _inputs| {
-                if a_changed_pc.load(Ordering::Relaxed) {
-                    ChangeCheck::Changed
-                } else {
-                    ChangeCheck::Unchanged
-                }
+                Digest::hash(&[a_changed_pc.load(Ordering::Relaxed) as u8])
             }))
             .output("out", DataType::Int)
             .lambda(async_lambda!(
@@ -2171,7 +2168,7 @@ mod behavior {
         let b_runs_l = Arc::clone(&b_runs);
         let b = Func::new("58ee3b43-f774-41f0-acfa-054ce0205e2e", "b")
             .terminal()
-            .pre_check(PreCheck::new(|_state, _inputs| ChangeCheck::Unchanged))
+            .pre_check(PreCheck::new(|_state, _inputs| Digest::hash(&[0u8])))
             .input(FuncInput::required("in", DataType::Int))
             .output("out", DataType::Int)
             .lambda(async_lambda!(
@@ -2238,13 +2235,13 @@ mod behavior {
         );
         assert_eq!(b_out(&eg), 11 * 100 + 1, "b recomputes from a's new output");
 
-        // Settle again. Run 4: both skip once more.
-        a_changed.store(false, Ordering::Relaxed);
+        // Run 4: `a`'s digest is unchanged since run 3 (flag still set), so the chain
+        // re-settles — both skip again.
         eg.execute_terminals().await?;
         assert_eq!(
             runs(&a_runs, &b_runs),
             (2, 2),
-            "both skip again once a is unchanged"
+            "both skip again once a's digest settles"
         );
 
         Ok(())
@@ -2255,16 +2252,17 @@ mod behavior {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
         use crate::async_lambda;
-        use crate::func_lambda::{ChangeCheck, PreCheck};
+        use crate::execution::digest::Digest;
+        use crate::func_lambda::PreCheck;
         use crate::function::{Func, FuncInput};
         use crate::graph::Graph;
         use crate::library::Library;
 
-        // `p` is impure with a pre-check (its output changes only when the flag flips).
-        // `d` is PURE with NO pre-check, downstream of `p` — so it's tainted (no content
-        // digest). It must still auto-skip when `p` reuses and `d`'s own const input is
-        // unchanged (that's the untainting the local digest buys), and rerun when either
-        // `p` changes (dirty propagation) or its own const changes (local digest).
+        // `p` is impure with a pre-check whose content digest changes only when the flag
+        // flips. `d` is PURE with NO pre-check, downstream of `p` — so it's tainted (no
+        // content digest). It must still auto-skip when `p` reuses and `d`'s own const
+        // input is unchanged (that's the untainting the local digest buys), and rerun
+        // when either `p` changes (dirty propagation) or its own const changes.
         let p_changed = Arc::new(AtomicBool::new(false));
         let p_runs = Arc::new(AtomicUsize::new(0));
         let d_runs = Arc::new(AtomicUsize::new(0));
@@ -2273,11 +2271,7 @@ mod behavior {
         let p_runs_l = Arc::clone(&p_runs);
         let p = Func::new("78a4b1b6-f894-4a9c-85c7-ab8417a8b31c", "p")
             .pre_check(PreCheck::new(move |_state, _inputs| {
-                if p_changed_pc.load(Ordering::Relaxed) {
-                    ChangeCheck::Changed
-                } else {
-                    ChangeCheck::Unchanged
-                }
+                Digest::hash(&[p_changed_pc.load(Ordering::Relaxed) as u8])
             }))
             .output("out", DataType::Int)
             .lambda(async_lambda!(
@@ -2377,6 +2371,127 @@ mod behavior {
             107,
             "d recomputes from p's new output (1) and const 7"
         );
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pure_precheck_skips_irrelevant_change_and_downstream_skips() -> anyhow::Result<()> {
+        use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+        use crate::async_lambda;
+        use crate::execution::digest::Digest;
+        use crate::func_lambda::PreCheck;
+        use crate::function::{Func, FuncInput};
+        use crate::graph::{Binding, Graph};
+        use crate::library::Library;
+
+        // `s` is PURE with a pre-check. Its `x` input stands for "any folder change" — a
+        // plan-digest miss (a `.lcm`/`.txt` appearing), so bumping it schedules `s`. Its
+        // pre-check hashes `content` ("the frames"), so it reuses across an *irrelevant*
+        // change and reruns only when the content changes. `t` is a plain Pure consumer
+        // that must skip whenever `s` reuses.
+        let content = Arc::new(AtomicU64::new(0));
+        let s_runs = Arc::new(AtomicUsize::new(0));
+        let t_runs = Arc::new(AtomicUsize::new(0));
+
+        let content_pc = Arc::clone(&content);
+        let content_l = Arc::clone(&content);
+        let s_runs_l = Arc::clone(&s_runs);
+        let s = Func::new("f1076fc0-8bbd-4737-9ef5-a8f12f670fd7", "s")
+            .pure()
+            .input(FuncInput::required("x", DataType::Int))
+            .output("out", DataType::Int)
+            .pre_check(PreCheck::new(move |_state, _inputs| {
+                Digest::hash(&content_pc.load(Ordering::Relaxed).to_le_bytes())
+            }))
+            .lambda(async_lambda!(
+                move |_, _, _, _, _, outputs| {
+                    s_runs_l = Arc::clone(&s_runs_l),
+                    content_l = Arc::clone(&content_l)
+                } => {
+                    s_runs_l.fetch_add(1, Ordering::Relaxed);
+                    outputs[0] =
+                        DynamicValue::Static(StaticValue::Int(content_l.load(Ordering::Relaxed) as i64));
+                    Ok(())
+                }
+            ));
+
+        let t_runs_l = Arc::clone(&t_runs);
+        let t = Func::new("c85a13b4-a7d9-41b6-a220-7d76660efcca", "t")
+            .pure()
+            .terminal()
+            .input(FuncInput::required("in", DataType::Int))
+            .output("out", DataType::Int)
+            .lambda(async_lambda!(
+                move |_, _, _, inputs, _, outputs| { t_runs_l = Arc::clone(&t_runs_l) } => {
+                    t_runs_l.fetch_add(1, Ordering::Relaxed);
+                    outputs[0] =
+                        DynamicValue::Static(StaticValue::Int(inputs[0].value.as_i64().unwrap()));
+                    Ok(())
+                }
+            ));
+
+        let library: Library = [s, t].into();
+
+        let s_id: NodeId = "2098eec3-eff6-4886-8f7a-533e08184c91".into();
+        let t_id: NodeId = "39b55029-1c76-42fc-9485-0ebbf9ebe404".into();
+        let build = |x: i64| {
+            let mut graph = Graph::default();
+            let mut s_node: Node = library.by_name("s").unwrap().into();
+            s_node.id = s_id;
+            graph.add(s_node);
+            let mut t_node: Node = library.by_name("t").unwrap().into();
+            t_node.id = t_id;
+            graph.add(t_node);
+            graph.set_input_binding(InputPort::new(s_id, 0), Binding::Const(StaticValue::Int(x)));
+            graph.set_input_binding(InputPort::new(t_id, 0), (s_id, 0).into());
+            graph.validate();
+            graph
+        };
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&build(1), &library).unwrap();
+
+        let runs = |s: &Arc<AtomicUsize>, t: &Arc<AtomicUsize>| {
+            (s.load(Ordering::Relaxed), t.load(Ordering::Relaxed))
+        };
+        let t_out = |eg: &ExecutionEngine| {
+            eg.runtime_slot(eg.by_name("t").unwrap())
+                .output_values()
+                .unwrap()[0]
+                .as_i64()
+                .unwrap()
+        };
+
+        // Run 1: both run. s → content 0.
+        eg.execute_terminals().await?;
+        assert_eq!(runs(&s_runs, &t_runs), (1, 1), "both run first time");
+        assert_eq!(t_out(&eg), 0);
+
+        // Irrelevant change: bump `x` (a plan-digest miss) but not `content`. `s` is
+        // scheduled, but its pre-check digest is unchanged, so it REUSES — and `t`
+        // auto-skips behind it. The pure+pre-check skip on an irrelevant change.
+        eg.update(&build(2), &library).unwrap();
+        eg.execute_terminals().await?;
+        assert_eq!(
+            runs(&s_runs, &t_runs),
+            (1, 1),
+            "Pure+pre-check node reuses across an irrelevant change; its consumer skips too",
+        );
+        assert_eq!(t_out(&eg), 0, "t serves its reused output");
+
+        // Relevant change: bump `content` (and `x`, since any real change also moves the
+        // coarse key). The pre-check digest now differs → `s` reruns → `t` reruns.
+        content.store(1, Ordering::Relaxed);
+        eg.update(&build(3), &library).unwrap();
+        eg.execute_terminals().await?;
+        assert_eq!(
+            runs(&s_runs, &t_runs),
+            (2, 2),
+            "a content change reruns the Pure+pre-check node and propagates to its consumer",
+        );
+        assert_eq!(t_out(&eg), 1, "t recomputes from s's new content");
 
         Ok(())
     }

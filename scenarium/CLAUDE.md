@@ -103,19 +103,26 @@ the per-node `current_digests` column. `RuntimeSlot` (`executor.rs:29`) caches
 The run loop walks `execute_order`: skip if an upstream errored, resolve each input
 (None/Const/Bind→upstream cached output), set `ctx_manager.current_node` for log
 attribution, await the lambda, store results, and stamp `output_digest` from the
-node's current digest. **Runtime early-cutoff** (`func_lambda::PreCheck`/`ChangeCheck`,
-`NodeRun` outcomes): a node reuses its prior output — skipping its lambda and staying
-clean so its own consumers skip in turn (propagation down the cone) — when its inputs
-are wholly unchanged: every Bind-producer stayed clean this run (`NodeRun::Ran` is the
-per-node "dirty" signal, set as each node settles) **and** its own local inputs match
-(`digest::local_digest` — a non-tainting per-node digest of func id/version, output
-types, const values, and wiring, stored as `RuntimeSlot::current_local`/`produced_local`),
-**and** it can vouch its output is then unchanged — a **`Pure` node by determinism**
-(so a Pure node tainted by an impure ancestor auto-skips with no pre-check once its
-upstream is clean), an **impure node via a pre-check** reporting `Unchanged`. Output
-buffers are never wiped or evicted, so a prior output is always there to reuse; a
-reused node counts as `cached` in stats. This complements the plan-time digest cache
-(which prunes reproducible `Pure` cache-hits before the run entirely). When `execute` is given
+node's current digest. **Runtime early-cutoff** (`func_lambda::PreCheck`, `NodeRun`
+outcomes): a node reuses its prior output — skipping its lambda and staying clean so
+its own consumers skip in turn (propagation down the cone) — when its inputs are
+wholly unchanged: every Bind-producer stayed clean this run (`NodeRun::Ran` is the
+per-node "dirty" signal, set as each node settles) **and** its own local digest matches
+(`RuntimeSlot::current_local`/`produced_local`) **and** it can vouch its output is then
+unchanged — a **`Pure` node by determinism** (so a Pure node tainted by an impure
+ancestor auto-skips with no pre-check once its upstream is clean), or **any node with a
+pre-check**. A [`PreCheck`](func_lambda.rs) returns a **content `Digest`** of what the
+func actually reads (execution time, so it sees resolved/bound inputs; `Digest::hash`
+builds one); the executor uses it *in place of* the coarse plan-time `local_digest`, so
+an irrelevant file the fingerprint ignores (a `build_masters` `.lcm`, a stray `.txt`)
+can't block reuse even though the plan-time content digest coarsely re-keyed and
+scheduled the node. Being a content key (not a relative "changed?" bit), it's also what
+a disk cache can be keyed on. `local_digest` (`digest.rs`) is the non-tainting
+fallback digest — func id/version, output types, const values, wiring — for
+pre-check-less nodes. Output buffers are never wiped or evicted, so a prior output is
+always there to reuse; a reused node counts as `cached` in stats. This complements the
+plan-time digest cache (which prunes reproducible `Pure` cache-hits before the run
+entirely). When `execute` is given
 a progress `UnboundedSender<RunProgress>`, the loop sends `RunPhase::Started`
 before each lambda and `Finished{elapsed}` after — node ids resolved to authoring
 attribution via the `FlattenMap` so the consumer needn't be. Stats (executed,
