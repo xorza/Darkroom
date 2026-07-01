@@ -2249,6 +2249,137 @@ mod behavior {
 
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pure_tainted_node_auto_skips_when_upstream_reuses() -> anyhow::Result<()> {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        use crate::async_lambda;
+        use crate::func_lambda::{ChangeCheck, PreCheck};
+        use crate::function::{Func, FuncInput};
+        use crate::graph::Graph;
+        use crate::library::Library;
+
+        // `p` is impure with a pre-check (its output changes only when the flag flips).
+        // `d` is PURE with NO pre-check, downstream of `p` — so it's tainted (no content
+        // digest). It must still auto-skip when `p` reuses and `d`'s own const input is
+        // unchanged (that's the untainting the local digest buys), and rerun when either
+        // `p` changes (dirty propagation) or its own const changes (local digest).
+        let p_changed = Arc::new(AtomicBool::new(false));
+        let p_runs = Arc::new(AtomicUsize::new(0));
+        let d_runs = Arc::new(AtomicUsize::new(0));
+
+        let p_changed_pc = Arc::clone(&p_changed);
+        let p_runs_l = Arc::clone(&p_runs);
+        let p = Func::new("78a4b1b6-f894-4a9c-85c7-ab8417a8b31c", "p")
+            .pre_check(PreCheck::new(move |_state, _inputs| {
+                if p_changed_pc.load(Ordering::Relaxed) {
+                    ChangeCheck::Changed
+                } else {
+                    ChangeCheck::Unchanged
+                }
+            }))
+            .output("out", DataType::Int)
+            .lambda(async_lambda!(
+                move |_, _, _, _, _, outputs| { p_runs_l = Arc::clone(&p_runs_l) } => {
+                    let n = p_runs_l.fetch_add(1, Ordering::Relaxed);
+                    outputs[0] = DynamicValue::Static(StaticValue::Int(n as i64));
+                    Ok(())
+                }
+            ));
+
+        let d_runs_l = Arc::clone(&d_runs);
+        let d = Func::new("b62d7f6f-5806-455a-bd7f-6e4041a6ca5d", "d")
+            .pure()
+            .terminal()
+            .input(FuncInput::required("in", DataType::Int))
+            .input(FuncInput::required("k", DataType::Int))
+            .output("out", DataType::Int)
+            .lambda(async_lambda!(
+                move |_, _, _, inputs, _, outputs| { d_runs_l = Arc::clone(&d_runs_l) } => {
+                    d_runs_l.fetch_add(1, Ordering::Relaxed);
+                    let v = inputs[0].value.as_i64().unwrap();
+                    let k = inputs[1].value.as_i64().unwrap();
+                    outputs[0] = DynamicValue::Static(StaticValue::Int(v * 100 + k));
+                    Ok(())
+                }
+            ));
+
+        let library: Library = [p, d].into();
+
+        let p_id: NodeId = "6b4f7dd5-9f51-4180-a818-003b774bd0a5".into();
+        let d_id: NodeId = "dd1c67ef-3da9-466a-890c-b7de0c702b35".into();
+        let build = |k: i64| {
+            let mut graph = Graph::default();
+            let mut p_node: Node = library.by_name("p").unwrap().into();
+            p_node.id = p_id;
+            graph.add(p_node);
+            let mut d_node: Node = library.by_name("d").unwrap().into();
+            d_node.id = d_id;
+            graph.add(d_node);
+            graph.set_input_binding(InputPort::new(d_id, 0), (p_id, 0).into());
+            graph.set_input_binding(InputPort::new(d_id, 1), Binding::Const(StaticValue::Int(k)));
+            graph.validate();
+            graph
+        };
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&build(5), &library).unwrap();
+
+        let runs = |p: &Arc<AtomicUsize>, d: &Arc<AtomicUsize>| {
+            (p.load(Ordering::Relaxed), d.load(Ordering::Relaxed))
+        };
+        let d_out = |eg: &ExecutionEngine| {
+            eg.runtime_slot(eg.by_name("d").unwrap())
+                .output_values()
+                .unwrap()[0]
+                .as_i64()
+                .unwrap()
+        };
+
+        // Run 1: both run. p → 0; d → 0*100+5 = 5.
+        eg.execute_terminals().await?;
+        assert_eq!(runs(&p_runs, &d_runs), (1, 1), "both run first time");
+        assert_eq!(d_out(&eg), 5);
+
+        // Run 2: p reuses (pre-check unchanged). d is Pure + tainted with NO pre-check,
+        // but upstream is clean and its const is unchanged, so it auto-skips — the
+        // untainting the local digest enables.
+        eg.execute_terminals().await?;
+        assert_eq!(
+            runs(&p_runs, &d_runs),
+            (1, 1),
+            "the Pure tainted consumer auto-skips when its upstream reuses"
+        );
+        assert_eq!(d_out(&eg), 5, "d serves its reused output");
+
+        // Change d's own const input (p still reuses). d's local digest changes, so it
+        // must rerun even though upstream is clean — the safety the local digest gives.
+        eg.update(&build(7), &library).unwrap();
+        eg.execute_terminals().await?;
+        assert_eq!(
+            runs(&p_runs, &d_runs),
+            (1, 2),
+            "a local const change reruns the Pure node even though upstream is clean"
+        );
+        assert_eq!(d_out(&eg), 7, "d recomputes with the new const (p still 0)");
+
+        // Flip p to changed. p reruns; its dirty bit propagates to force d to rerun.
+        p_changed.store(true, Ordering::Relaxed);
+        eg.execute_terminals().await?;
+        assert_eq!(
+            runs(&p_runs, &d_runs),
+            (2, 3),
+            "p changed ⇒ p reruns and the dirty bit propagates to d"
+        );
+        assert_eq!(
+            d_out(&eg),
+            107,
+            "d recomputes from p's new output (1) and const 7"
+        );
+
+        Ok(())
+    }
 }
 
 // === Composite (Subgraph) Caching ===

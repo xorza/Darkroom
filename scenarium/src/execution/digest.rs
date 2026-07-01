@@ -41,7 +41,7 @@ const DOMAIN: &[u8] = b"scenarium-cache-v1";
 /// digests mean the same func+version, params, upstream outputs, and file inputs.
 /// A newtype, not a bare `[u8; 32]`, so an arbitrary byte array can't silently pose
 /// as a digest where one is expected.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct Digest(pub(crate) [u8; 32]);
 
 /// One node's memoized digest result. A node has a digest iff its whole cone is
@@ -179,7 +179,7 @@ impl DigestEngine {
                     }
                     ExecutionBinding::Const(value) => {
                         hasher.update(&[1u8]);
-                        Self::hash_static(&mut hasher, value);
+                        hash_static(&mut hasher, value);
                     }
                     ExecutionBinding::Bind(addr) => {
                         match self.port_digest(program, addr.target_idx, addr.port_idx) {
@@ -221,42 +221,43 @@ impl DigestEngine {
         hasher.update(&(port_idx as u64).to_le_bytes());
         Some(Digest(hasher.finalize().into()))
     }
+}
 
-    /// Fold one constant into `hasher`: a discriminant tag plus length-prefixed
-    /// payload (so `"ab"`+`"c"` can't collide with `"a"`+`"bc"`), and for an
-    /// `FsPath` the resolved file identity on top of the path string.
-    fn hash_static(hasher: &mut Hasher, value: &StaticValue) {
-        match value {
-            StaticValue::Null => {
-                hasher.update(&[0u8]);
-            }
-            StaticValue::Float(v) => {
-                hasher.update(&[1u8]);
-                hasher.update(&v.to_bits().to_le_bytes());
-            }
-            StaticValue::Int(v) => {
-                hasher.update(&[2u8]);
-                hasher.update(&v.to_le_bytes());
-            }
-            StaticValue::Bool(v) => {
-                hasher.update(&[3u8, *v as u8]);
-            }
-            StaticValue::String(s) => {
-                hasher.update(&[4u8]);
-                hasher.update(&(s.len() as u64).to_le_bytes());
-                hasher.update(s.as_bytes());
-            }
-            StaticValue::FsPath(path) => {
-                hasher.update(&[5u8]);
-                hasher.update(&(path.len() as u64).to_le_bytes());
-                hasher.update(path.as_bytes());
-                hash_fs_path_identity(hasher, path);
-            }
-            StaticValue::Enum(name) => {
-                hasher.update(&[6u8]);
-                hasher.update(&(name.len() as u64).to_le_bytes());
-                hasher.update(name.as_bytes());
-            }
+/// Fold one constant into `hasher`: a discriminant tag plus length-prefixed payload
+/// (so `"ab"`+`"c"` can't collide with `"a"`+`"bc"`), and for an `FsPath` the resolved
+/// file identity on top of the path string. A free helper like [`hash_data_type`] —
+/// used by both [`DigestEngine::node_digest`] and [`local_digest`].
+fn hash_static(hasher: &mut Hasher, value: &StaticValue) {
+    match value {
+        StaticValue::Null => {
+            hasher.update(&[0u8]);
+        }
+        StaticValue::Float(v) => {
+            hasher.update(&[1u8]);
+            hasher.update(&v.to_bits().to_le_bytes());
+        }
+        StaticValue::Int(v) => {
+            hasher.update(&[2u8]);
+            hasher.update(&v.to_le_bytes());
+        }
+        StaticValue::Bool(v) => {
+            hasher.update(&[3u8, *v as u8]);
+        }
+        StaticValue::String(s) => {
+            hasher.update(&[4u8]);
+            hasher.update(&(s.len() as u64).to_le_bytes());
+            hasher.update(s.as_bytes());
+        }
+        StaticValue::FsPath(path) => {
+            hasher.update(&[5u8]);
+            hasher.update(&(path.len() as u64).to_le_bytes());
+            hasher.update(path.as_bytes());
+            hash_fs_path_identity(hasher, path);
+        }
+        StaticValue::Enum(name) => {
+            hasher.update(&[6u8]);
+            hasher.update(&(name.len() as u64).to_le_bytes());
+            hasher.update(name.as_bytes());
         }
     }
 }
@@ -280,6 +281,53 @@ fn hash_data_type(hasher: &mut Hasher, ty: &DataType) {
     if let DataType::Custom(type_id) | DataType::Enum(type_id) = ty {
         hasher.update(&type_id.as_u128().to_le_bytes());
     }
+}
+
+/// A node's *local* content digest — its identity plus its own inputs' structure,
+/// **without** recursing into producer outputs. Folds func id + version + output
+/// types, then per input: a marker for unbound, the value for a `Const`, and the
+/// producer's stable node id + port for a `Bind` (the *wiring*, not the producer's
+/// content). Unlike [`DigestEngine::node_digest`] it never taints — it's always
+/// `Some`, because it deliberately excludes the one thing that taints (a producer's
+/// reproducibility). The executor pairs it with the runtime `dirty` bits: a `Pure`
+/// node whose local digest is unchanged *and* whose producers all stayed clean this
+/// run has entirely-unchanged inputs, so it can reuse its prior output even when it's
+/// tainted (no content digest) and has no pre-check. A distinct domain tag keeps it
+/// from ever colliding with a `node_digest`.
+pub(crate) fn local_digest(program: &ExecutionProgram, idx: NodeIdx) -> Digest {
+    let e_node = &program.e_nodes[idx];
+    let mut hasher = Hasher::new();
+    hasher.update(DOMAIN);
+    hasher.update(b"local");
+    hasher.update(&e_node.func_id.as_u128().to_le_bytes());
+    hasher.update(&e_node.func_version.to_le_bytes());
+
+    let out_types = program.node_output_types(e_node);
+    hasher.update(&(out_types.len() as u64).to_le_bytes());
+    for ty in out_types {
+        hash_data_type(&mut hasher, ty);
+    }
+
+    for pool_idx in e_node.inputs.range() {
+        match &program.inputs[pool_idx].binding {
+            ExecutionBinding::None => {
+                hasher.update(&[0u8]);
+            }
+            ExecutionBinding::Const(value) => {
+                hasher.update(&[1u8]);
+                hash_static(&mut hasher, value);
+            }
+            // The wiring only — a rewire (different producer/port) re-keys here; a
+            // change in the producer's *output* is carried by the runtime `dirty` bit
+            // instead, so it isn't folded here.
+            ExecutionBinding::Bind(addr) => {
+                hasher.update(&[2u8]);
+                hasher.update(&program.e_nodes[addr.target_idx].id.as_u128().to_le_bytes());
+                hasher.update(&(addr.port_idx as u64).to_le_bytes());
+            }
+        }
+    }
+    Digest(hasher.finalize().into())
 }
 
 /// Fold an `FsPath` input's external identity into `hasher`: for a regular file its

@@ -19,6 +19,7 @@ use crate::execution_stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
 use crate::func_lambda::{ChangeCheck, InvokeError, InvokeInput, OutputUsage};
+use crate::function::FuncBehavior;
 use crate::graph::InputPort;
 
 use crate::execution::RunError;
@@ -137,23 +138,31 @@ impl Executor {
 
             collect_inputs(program, cache, e_node_idx, &mut inputs);
 
-            // Runtime early-cutoff: a node with a pre-check that reports `Unchanged`,
-            // whose Bind-producers all stayed unchanged this run and which holds a
-            // prior output to reuse, skips its lambda and serves that output — staying
-            // "clean" (`dirty` unset) so its own pre-check consumers can skip in turn.
-            // The topological order means every producer is already decided here.
+            // Runtime early-cutoff. A node reuses its prior output — skipping its
+            // lambda and staying "clean" (`dirty` unset) so its own consumers can skip
+            // in turn — when its inputs are wholly unchanged: every Bind-producer
+            // stayed clean this run (the topological order means they're all decided),
+            // AND its own local inputs (consts + wiring) match (`local_unchanged`),
+            // AND it can vouch its output is then unchanged — a `Pure` node by
+            // determinism, an impure node via a pre-check reporting `Unchanged`.
+            // Requires a prior output to serve (never the first run).
             let e_node = &program.e_nodes[e_node_idx];
             let upstream_dirty = program.inputs[e_node.inputs.range()].iter().any(|input| {
                 matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[addr.target_idx].is_dirty())
             });
-            let has_prior = cache.slots[e_node_idx].output_values().is_some();
-            let unchanged = !e_node.pre_check.is_none()
-                && has_prior
+            let can_reuse = cache.slots[e_node_idx].output_values().is_some()
                 && !upstream_dirty
-                && e_node
-                    .pre_check
-                    .check(&mut cache.slots[e_node_idx].state, &inputs)
-                    == ChangeCheck::Unchanged;
+                && cache.slots[e_node_idx].local_unchanged();
+            let unchanged = can_reuse
+                && if e_node.behavior == FuncBehavior::Pure {
+                    true
+                } else {
+                    !e_node.pre_check.is_none()
+                        && e_node
+                            .pre_check
+                            .check(&mut cache.slots[e_node_idx].state, &inputs)
+                            == ChangeCheck::Unchanged
+                };
             if unchanged {
                 outcomes[e_node_idx] = NodeRun::Reused;
                 continue;

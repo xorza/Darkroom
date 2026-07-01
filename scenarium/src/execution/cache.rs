@@ -10,7 +10,7 @@ use common::{KeyIndexKey, KeyIndexVec};
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::data::DynamicValue;
-use crate::execution::digest::{Digest, DigestEngine};
+use crate::execution::digest::{Digest, DigestEngine, local_digest};
 use crate::execution::program::{ExecutionNode, ExecutionProgram, NodeIdx};
 use crate::graph::NodeId;
 use crate::prelude::AnyState;
@@ -54,6 +54,16 @@ pub(crate) struct RuntimeSlot {
     /// equals this — so a flipped-back parameter can't serve a stale value; the run
     /// stamps it on success.
     pub(crate) current_digest: Option<Digest>,
+    /// The node's current *local* digest (`digest::local_digest`), recomputed at
+    /// `update`. Non-tainting: it captures func id/version, output types, const
+    /// inputs, and wiring — everything *except* producer outputs. Paired with the
+    /// executor's runtime `dirty` bits, an unchanged local digest lets a `Pure` node
+    /// reuse its output even when it's tainted (no content digest).
+    pub(crate) current_local: Digest,
+    /// The local digest the resident output was produced under, stamped on a
+    /// successful run. `Some(current_local)` means the node's own inputs are unchanged
+    /// since it last produced. Only consulted when a value is resident.
+    pub(crate) produced_local: Option<Digest>,
     pub(crate) value: ValueCache,
 }
 
@@ -95,6 +105,16 @@ impl RuntimeSlot {
         }
     }
 
+    /// Whether the node's *local* inputs (func + const values + wiring) are unchanged
+    /// since its resident output was produced — the part of its identity that doesn't
+    /// depend on producer outputs. The caller pairs this with clean upstream (all
+    /// producers unchanged this run) to let a `Pure` node reuse. Meaningful only when
+    /// a value is resident; a cleared slot's stale `produced_local` is guarded by the
+    /// caller's `output_values().is_some()` check.
+    pub(crate) fn local_unchanged(&self) -> bool {
+        self.produced_local == Some(self.current_local)
+    }
+
     /// Prepare the slot for a lambda invocation and hand back *disjoint* mutable
     /// borrows of `state` and the output buffer — the lambda writes both at once,
     /// which a single whole-slot borrow couldn't allow. A resident buffer is reused
@@ -124,12 +144,16 @@ impl RuntimeSlot {
         }
     }
 
-    /// Stamp the resident value with the node's current digest on a successful run,
-    /// turning it into a cache hit for the next plan. No-op if not `Resident`.
+    /// Stamp the resident value with the node's current content + local digests on a
+    /// successful run: `produced_under` turns it into a cache hit for the next plan,
+    /// `produced_local` records that its own inputs are unchanged as of now (for the
+    /// executor's runtime reuse). No-op if not `Resident`.
     pub(crate) fn stamp_produced(&mut self) {
         let digest = self.current_digest;
+        let local = self.current_local;
         if let ValueCache::Resident { produced_under, .. } = &mut self.value {
             *produced_under = digest;
+            self.produced_local = Some(local);
         }
     }
 }
@@ -169,12 +193,12 @@ impl Cache {
         }
     }
 
-    /// Refresh every slot's `current_digest`. Compile-stable (consts / bindings / func
-    /// versions / output signatures are fixed between updates), so the engine calls
-    /// this once per `update`; the planner and run read the stored value rather than
-    /// re-walking the cone each execute. The digest folds the program's resolved
-    /// output types (`ExecutionProgram::resolve_output_types`, run earlier this
-    /// update), so a redefined output re-keys the cache.
+    /// Refresh every slot's `current_digest` and `current_local`. Compile-stable
+    /// (consts / bindings / func versions / output signatures are fixed between
+    /// updates), so the engine calls this once per `update`; the planner and run read
+    /// the stored values rather than re-walking the cone each execute. The digest
+    /// folds the program's resolved output types (`ExecutionProgram::resolve_output_types`,
+    /// run earlier this update), so a redefined output re-keys the cache.
     pub(crate) fn recompute_digests(&mut self, program: &ExecutionProgram) {
         // The output-type pool is resolved by a separate `update` step
         // (`ExecutionProgram::resolve_output_types`) that must run first — the digest
@@ -188,6 +212,7 @@ impl Cache {
         self.digest_engine.reset(program);
         for idx in program.node_indices() {
             self.slots[idx].current_digest = self.digest_engine.node_digest(program, idx);
+            self.slots[idx].current_local = local_digest(program, idx);
         }
     }
 
