@@ -61,10 +61,11 @@ pub(crate) struct ExecutionPlan {
     /// each lambda as [`OutputUsage`](crate::func_lambda::OutputUsage) so a node can
     /// skip computing outputs nobody reads.
     pub(crate) output_usage: Vec<u32>,
-    /// The deduped nodes the backward walk started from — terminals, event subscribers,
-    /// and event-trigger owners. The schedule's "must be available" set: the executor's
-    /// pre-run cut seeds its `needed` mask from these and prunes any cone reachable only
-    /// through cache-hit consumers (see [`Executor`](crate::execution::executor::Executor)).
+    /// The nodes the backward walk started from — terminals, event subscribers, and
+    /// event-trigger owners (a node seeding via several categories may repeat; harmless).
+    /// The schedule's "must be available" set: the executor's pre-run cut seeds its `needed`
+    /// mask from these and prunes any cone reachable only through cache-hit consumers (see
+    /// [`Executor`](crate::execution::executor::Executor)).
     pub(crate) roots: Vec<NodeIdx>,
 }
 
@@ -122,9 +123,6 @@ pub(crate) struct Planner {
     color: NodeColumn<Color>,
     /// DFS work stack.
     stack: Vec<Visit>,
-    /// Root-membership marker column (dedup without hashing). The deduped roots
-    /// themselves land in `plan.roots` — they're an output the executor's cut reads.
-    is_root: NodeColumn<bool>,
 }
 
 impl Planner {
@@ -140,63 +138,13 @@ impl Planner {
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
-        self.collect_roots(program, seeds, plan);
+        collect_roots(program, seeds, plan);
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
             validate::schedule(program, plan);
         }
         result
-    }
-
-    /// Mark `idx` as a walk root in `plan.roots`, deduping via the `is_root` marker column.
-    fn mark_root(&mut self, plan: &mut ExecutionPlan, idx: NodeIdx) {
-        if !self.is_root[idx] {
-            self.is_root[idx] = true;
-            plan.roots.push(idx);
-        }
-    }
-
-    fn collect_roots(
-        &mut self,
-        program: &ExecutionProgram,
-        seeds: &RunSeeds,
-        plan: &mut ExecutionPlan,
-    ) {
-        self.is_root.reset(program.e_nodes.len(), false);
-        plan.roots.clear();
-
-        // Add event subscribers
-        for event in &seeds.events {
-            let e_node = program.e_nodes.by_key(&event.node_id).unwrap();
-            let subs = program.events[e_node.events.range()][event.event_idx]
-                .subscribers
-                .clone();
-            for sub in subs {
-                self.mark_root(plan, sub);
-            }
-        }
-
-        // Add terminal nodes
-        if seeds.terminals {
-            for (idx, e) in program.e_nodes.iter().enumerate() {
-                if e.terminal {
-                    self.mark_root(plan, idx.into());
-                }
-            }
-        }
-
-        // Add nodes with event triggers
-        if seeds.event_triggers {
-            for (idx, e) in program.e_nodes.iter().enumerate() {
-                if program.events[e.events.range()]
-                    .iter()
-                    .any(|ev| !ev.subscribers.is_empty())
-                {
-                    self.mark_root(plan, idx.into());
-                }
-            }
-        }
     }
 
     /// Backward post-order DFS from the roots: builds `process_order` (deps before
@@ -281,6 +229,43 @@ impl Planner {
         }
 
         Ok(())
+    }
+}
+
+/// Collect the run's walk roots into `plan.roots` — the seeds for both the backward walk and
+/// the executor's cut: every event subscriber, every terminal node, and (for the event loop)
+/// every node owning a subscribed event. Not deduped: a node seeding via several categories
+/// appears more than once, which is harmless — the walk's `Color` check skips a revisited root
+/// and the cut's `needed[root] = true` seeding is idempotent, so neither cares about repeats.
+fn collect_roots(program: &ExecutionProgram, seeds: &RunSeeds, plan: &mut ExecutionPlan) {
+    plan.roots.clear();
+
+    // Event subscribers.
+    for event in &seeds.events {
+        let e_node = program.e_nodes.by_key(&event.node_id).unwrap();
+        let subs = &program.events[e_node.events.range()][event.event_idx].subscribers;
+        plan.roots.extend(subs.iter().copied());
+    }
+
+    // Terminal nodes.
+    if seeds.terminals {
+        for (idx, e) in program.e_nodes.iter().enumerate() {
+            if e.terminal {
+                plan.roots.push(idx.into());
+            }
+        }
+    }
+
+    // Nodes owning a subscribed event (drives the event loop).
+    if seeds.event_triggers {
+        for (idx, e) in program.e_nodes.iter().enumerate() {
+            if program.events[e.events.range()]
+                .iter()
+                .any(|ev| !ev.subscribers.is_empty())
+            {
+                plan.roots.push(idx.into());
+            }
+        }
     }
 }
 

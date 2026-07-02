@@ -1,6 +1,1 @@
-  color: NodeColumn<Color>,
-      is_root: NodeColumn<bool>,
-
-
-
      needed: &NodeColumn<bool>, -> indices
