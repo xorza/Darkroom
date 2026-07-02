@@ -53,23 +53,126 @@ impl Digest {
         Digest(blake3::hash(bytes).into())
     }
 
+    /// Start a [`DigestHasher`] — the fluent builder for combining several values into one
+    /// digest (a [`PreCheck`](crate::func_lambda::PreCheck) fingerprinting its inputs, or
+    /// the framework's own structural fold).
+    pub fn hasher() -> DigestHasher {
+        DigestHasher::new()
+    }
+
     /// Fingerprint an `FsPath`'s external identity — a file's `(len, mtime)` or a
     /// directory's sorted entries — the *same* content fold the framework's structural
     /// digest uses for an `FsPath` input ([`hash_fs_path_identity`]). Exposed so a
-    /// [`PreCheck`](crate::func_lambda::PreCheck) that reads files can key on their
-    /// content without re-implementing the directory walk. Combine several with
-    /// [`Digest::hash`] over their [`as_bytes`](Self::as_bytes).
+    /// [`PreCheck`](crate::func_lambda::PreCheck) that reads files can key on their content
+    /// without re-implementing the directory walk (or fold it into a multi-field digest via
+    /// [`DigestHasher::write_fs_path`]).
     pub fn fs_path(path: &str) -> Digest {
-        let mut hasher = Hasher::new();
-        hash_fs_path_identity(&mut hasher, path);
-        Digest(hasher.finalize().into())
+        let mut hasher = DigestHasher::new();
+        hasher.write_fs_path(path);
+        hasher.finish()
     }
 
-    /// The raw 32 bytes, for folding this digest into another (e.g. a pre-check
-    /// combining several sub-digests). Read-only — a `Digest` still can't be *forged*
-    /// from arbitrary bytes, only made by hashing.
+    /// The raw 32 bytes, for folding this digest into another. Read-only — a `Digest` still
+    /// can't be *forged* from arbitrary bytes, only made by hashing.
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+}
+
+/// A fixed-size value that folds into a [`DigestHasher`] as its **little-endian** bytes, so
+/// a digest is stable across architectures. Implemented for the primitive number types plus
+/// `f32`/`f64` (by bit pattern) and `bool`. `usize`/`isize` are deliberately *not* included
+/// — their width is platform-dependent; cast to a fixed width (`x as u64`) first.
+pub trait DigestPod {
+    fn write_le(self, hasher: &mut DigestHasher);
+}
+
+macro_rules! digest_pod_ints {
+    ($($t:ty),*) => {
+        $(impl DigestPod for $t {
+            fn write_le(self, hasher: &mut DigestHasher) {
+                hasher.write_bytes(&self.to_le_bytes());
+            }
+        })*
+    };
+}
+digest_pod_ints!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
+
+impl DigestPod for f32 {
+    fn write_le(self, hasher: &mut DigestHasher) {
+        hasher.write_bytes(&self.to_bits().to_le_bytes());
+    }
+}
+impl DigestPod for f64 {
+    fn write_le(self, hasher: &mut DigestHasher) {
+        hasher.write_bytes(&self.to_bits().to_le_bytes());
+    }
+}
+impl DigestPod for bool {
+    fn write_le(self, hasher: &mut DigestHasher) {
+        hasher.write_bytes(&[self as u8]);
+    }
+}
+
+/// A fluent builder for a [`Digest`] — a thin wrapper over the BLAKE3 hasher with
+/// digest-friendly writers. Both the framework's structural fold and a
+/// [`PreCheck`](crate::func_lambda::PreCheck)'s own digest computation build through it, so
+/// the two encode values identically. Deterministic and cross-architecture stable: PODs
+/// fold little-endian ([`DigestPod`]), and variable-length data is length-prefixed
+/// ([`write_str`](Self::write_str)) so `"ab"+"c"` can't collide with `"a"+"bc"`.
+#[derive(Clone, Debug)]
+pub struct DigestHasher(Hasher);
+
+impl DigestHasher {
+    pub fn new() -> Self {
+        DigestHasher(Hasher::new())
+    }
+
+    /// Fold raw bytes verbatim (no length prefix) — for fixed-size data: a discriminant
+    /// tag, a domain separator, an already-fixed-width field.
+    pub fn write_bytes(&mut self, bytes: &[u8]) -> &mut Self {
+        self.0.update(bytes);
+        self
+    }
+
+    /// Fold a fixed-size plain-old-data value ([`DigestPod`]) as its little-endian bytes.
+    pub fn write_pod<T: DigestPod>(&mut self, value: T) -> &mut Self {
+        value.write_le(self);
+        self
+    }
+
+    /// Fold a length-prefixed byte string (a `u64` length then the bytes), so
+    /// concatenations of variable-length data can't collide.
+    pub fn write_len_prefixed(&mut self, bytes: &[u8]) -> &mut Self {
+        self.write_pod(bytes.len() as u64).write_bytes(bytes)
+    }
+
+    /// Fold a length-prefixed string.
+    pub fn write_str(&mut self, s: &str) -> &mut Self {
+        self.write_len_prefixed(s.as_bytes())
+    }
+
+    /// Fold another digest (its fixed 32 bytes).
+    pub fn write_digest(&mut self, digest: &Digest) -> &mut Self {
+        self.write_bytes(&digest.0)
+    }
+
+    /// Fold an `FsPath`'s external identity — a file's `(len, mtime)` or a directory's
+    /// sorted entries (see [`Digest::fs_path`]).
+    pub fn write_fs_path(&mut self, path: &str) -> &mut Self {
+        hash_fs_path_identity(self, path);
+        self
+    }
+
+    /// Finalize into a [`Digest`].
+    pub fn finish(&self) -> Digest {
+        Digest(self.0.finalize().into())
+    }
+}
+
+impl Default for DigestHasher {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -103,10 +206,9 @@ fn file_id_from_meta(meta: &std::fs::Metadata) -> FileId {
 /// port index, so two consumers reading different ports of one node hash apart. Folded
 /// by [`node_digest`] for each `Bind` producer.
 fn port_digest_of(node: Digest, port_idx: usize) -> Digest {
-    let mut hasher = Hasher::new();
-    hasher.update(&node.0);
-    hasher.update(&(port_idx as u64).to_le_bytes());
-    Digest(hasher.finalize().into())
+    let mut hasher = DigestHasher::new();
+    hasher.write_digest(&node).write_pod(port_idx as u64);
+    hasher.finish()
 }
 
 /// Fold one constant's *own value* into `hasher`: a discriminant tag plus
@@ -114,36 +216,28 @@ fn port_digest_of(node: Digest, port_idx: usize) -> Digest {
 /// `FsPath` this is the path *string* only — the external file/dir it points at is a
 /// separate concern folded by [`hash_fs_content`], so this stays a pure, no-I/O
 /// structural fold. A free helper like [`hash_data_type`].
-fn hash_static(hasher: &mut Hasher, value: &StaticValue) {
+fn hash_static(hasher: &mut DigestHasher, value: &StaticValue) {
     match value {
         StaticValue::Null => {
-            hasher.update(&[0u8]);
+            hasher.write_bytes(&[0]);
         }
         StaticValue::Float(v) => {
-            hasher.update(&[1u8]);
-            hasher.update(&v.to_bits().to_le_bytes());
+            hasher.write_bytes(&[1]).write_pod(*v);
         }
         StaticValue::Int(v) => {
-            hasher.update(&[2u8]);
-            hasher.update(&v.to_le_bytes());
+            hasher.write_bytes(&[2]).write_pod(*v);
         }
         StaticValue::Bool(v) => {
-            hasher.update(&[3u8, *v as u8]);
+            hasher.write_bytes(&[3]).write_pod(*v);
         }
         StaticValue::String(s) => {
-            hasher.update(&[4u8]);
-            hasher.update(&(s.len() as u64).to_le_bytes());
-            hasher.update(s.as_bytes());
+            hasher.write_bytes(&[4]).write_str(s);
         }
         StaticValue::FsPath(path) => {
-            hasher.update(&[5u8]);
-            hasher.update(&(path.len() as u64).to_le_bytes());
-            hasher.update(path.as_bytes());
+            hasher.write_bytes(&[5]).write_str(path);
         }
         StaticValue::Enum(name) => {
-            hasher.update(&[6u8]);
-            hasher.update(&(name.len() as u64).to_le_bytes());
-            hasher.update(name.as_bytes());
+            hasher.write_bytes(&[6]).write_str(name);
         }
     }
 }
@@ -154,7 +248,7 @@ fn hash_static(hasher: &mut Hasher, value: &StaticValue) {
 /// [`hash_static`] (which folds only the const string, no I/O). A **pre-check** node never
 /// reaches here — it replaces the whole structural fold and does its own (possibly finer)
 /// file fingerprinting via [`Digest::fs_path`], so it can ignore an irrelevant `.txt`.
-fn hash_fs_content(hasher: &mut Hasher, value: &StaticValue) {
+fn hash_fs_content(hasher: &mut DigestHasher, value: &StaticValue) {
     if let StaticValue::FsPath(path) = value {
         hash_fs_path_identity(hasher, path);
     }
@@ -164,7 +258,7 @@ fn hash_fs_content(hasher: &mut Hasher, value: &StaticValue) {
 /// type id for `Custom`/`Enum` (so two distinct custom types don't collide). The
 /// `FsPath` config is identity-irrelevant to the cached bytes, so only the tag is
 /// hashed.
-fn hash_data_type(hasher: &mut Hasher, ty: &DataType) {
+fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
     let tag: u8 = match ty {
         DataType::Null => 0,
         DataType::Float => 1,
@@ -175,9 +269,9 @@ fn hash_data_type(hasher: &mut Hasher, ty: &DataType) {
         DataType::Custom(_) => 6,
         DataType::Enum(_) => 7,
     };
-    hasher.update(&[tag]);
+    hasher.write_bytes(&[tag]);
     if let DataType::Custom(type_id) | DataType::Enum(type_id) = ty {
-        hasher.update(&type_id.as_u128().to_le_bytes());
+        hasher.write_pod(type_id.as_u128());
     }
 }
 
@@ -215,29 +309,29 @@ pub(crate) fn node_digest(
         return None;
     }
 
-    let mut hasher = Hasher::new();
-    hasher.update(DOMAIN);
-    hasher.update(&e_node.func_id.as_u128().to_le_bytes());
-    hasher.update(&e_node.func_version.to_le_bytes());
+    let mut hasher = DigestHasher::new();
+    hasher
+        .write_bytes(DOMAIN)
+        .write_pod(e_node.func_id.as_u128())
+        .write_pod(e_node.func_version);
 
     let out_types = program.node_output_types(e_node);
-    hasher.update(&(out_types.len() as u64).to_le_bytes());
+    hasher.write_pod(out_types.len() as u64);
     for ty in out_types {
         hash_data_type(&mut hasher, ty);
     }
 
     if let PreCheckDigest::Computed(digest) = pre_check {
         // The pre-check owns the entire input contribution — no structural fold.
-        hasher.update(&[3u8]);
-        hasher.update(&digest.0);
+        hasher.write_bytes(&[3]).write_digest(&digest);
     } else {
         for pool_idx in e_node.inputs.range() {
             match &program.inputs[pool_idx].binding {
                 ExecutionBinding::None => {
-                    hasher.update(&[0u8]);
+                    hasher.write_bytes(&[0]);
                 }
                 ExecutionBinding::Const(value) => {
-                    hasher.update(&[1u8]);
+                    hasher.write_bytes(&[1]);
                     hash_static(&mut hasher, value);
                     hash_fs_content(&mut hasher, value);
                 }
@@ -245,13 +339,14 @@ pub(crate) fn node_digest(
                     // The producer was visited first (topological execute order), so its
                     // `current_digest` is set; a `None` taints this node.
                     let node = cache.slots[addr.target_idx].current_digest?;
-                    hasher.update(&[2u8]);
-                    hasher.update(&port_digest_of(node, addr.port_idx).0);
+                    hasher
+                        .write_bytes(&[2])
+                        .write_digest(&port_digest_of(node, addr.port_idx));
                 }
             }
         }
     }
-    Some(Digest(hasher.finalize().into()))
+    Some(hasher.finish())
 }
 
 /// Fold an `FsPath` input's external identity into `hasher`: for a regular file its
@@ -263,22 +358,23 @@ pub(crate) fn node_digest(
 /// stat'd folds a distinct "missing" marker. Same `(len, mtime)` trust boundary as the
 /// file case, and non-recursive — enough for the flat frame folders these inputs point
 /// at; a nested layout only tracks its subdirectories' own mtimes.
-fn hash_fs_path_identity(hasher: &mut Hasher, path: &str) {
+fn hash_fs_path_identity(hasher: &mut DigestHasher, path: &str) {
     match std::fs::metadata(path) {
         Ok(meta) if meta.is_dir() => {
-            hasher.update(&[1u8]);
+            hasher.write_bytes(&[1]);
             hash_dir_entries(hasher, path);
         }
         Ok(meta) => {
-            hasher.update(&[0u8]);
             let id = file_id_from_meta(&meta);
-            hasher.update(&id.len.to_le_bytes());
-            hasher.update(&id.mtime_ns.to_le_bytes());
+            hasher
+                .write_bytes(&[0])
+                .write_pod(id.len)
+                .write_pod(id.mtime_ns);
         }
         // Missing/unreadable — distinct from both a file and a dir. The path string
         // is folded by the caller, so distinct missing paths stay distinct.
         Err(_) => {
-            hasher.update(&[2u8]);
+            hasher.write_bytes(&[2]);
         }
     }
 }
@@ -287,9 +383,9 @@ fn hash_fs_path_identity(hasher: &mut Hasher, path: &str) {
 /// entry count, then each entry's name and `(len, mtime)`, sorted by name
 /// (`read_dir` order isn't stable across platforms). An unreadable directory folds
 /// only its (zero) count.
-fn hash_dir_entries(hasher: &mut Hasher, dir: &str) {
+fn hash_dir_entries(hasher: &mut DigestHasher, dir: &str) {
     let Ok(read) = std::fs::read_dir(dir) else {
-        hasher.update(&0u64.to_le_bytes());
+        hasher.write_pod(0u64);
         return;
     };
     let mut entries: Vec<(String, FileId)> = read
@@ -304,12 +400,12 @@ fn hash_dir_entries(hasher: &mut Hasher, dir: &str) {
         })
         .collect();
     entries.sort_by(|a, b| a.0.cmp(&b.0));
-    hasher.update(&(entries.len() as u64).to_le_bytes());
+    hasher.write_pod(entries.len() as u64);
     for (name, id) in &entries {
-        hasher.update(&(name.len() as u64).to_le_bytes());
-        hasher.update(name.as_bytes());
-        hasher.update(&id.len.to_le_bytes());
-        hasher.update(&id.mtime_ns.to_le_bytes());
+        hasher
+            .write_str(name)
+            .write_pod(id.len)
+            .write_pod(id.mtime_ns);
     }
 }
 
@@ -338,11 +434,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.to_string_lossy().into_owned();
 
-        let fingerprint = |p: &str| {
-            let mut h = Hasher::new();
-            hash_fs_path_identity(&mut h, p);
-            h.finalize()
-        };
+        let fingerprint = Digest::fs_path;
 
         std::fs::write(dir.join("a.fits"), b"one").unwrap();
         let base = fingerprint(&path);
@@ -785,6 +877,78 @@ mod tests {
             ),
             None,
             "a declined pre-check has no digest"
+        );
+    }
+
+    /// The [`DigestHasher`] builder is deterministic, encodes PODs little-endian and
+    /// width-typed, length-prefixes strings so concatenations can't collide, and folds a
+    /// nested digest as its raw bytes.
+    #[test]
+    fn digest_hasher_encodes_deterministically_and_without_collisions() {
+        let build = || {
+            let mut h = DigestHasher::new();
+            h.write_bytes(&[9]).write_pod(7u64).write_str("ab");
+            h.finish()
+        };
+        assert_eq!(build(), build(), "same writes ⇒ same digest");
+
+        let hash_with = |f: &dyn Fn(&mut DigestHasher)| {
+            let mut h = DigestHasher::new();
+            f(&mut h);
+            h.finish()
+        };
+
+        // Length-prefixed strings: "ab"+"c" can't collide with "a"+"bc".
+        assert_ne!(
+            hash_with(&|h| {
+                h.write_str("ab").write_str("c");
+            }),
+            hash_with(&|h| {
+                h.write_str("a").write_str("bc");
+            }),
+            "write_str length-prefixes, so concatenations don't collide"
+        );
+
+        // write_pod is width-typed and value-sensitive: 1u64 ≠ 1u32 ≠ 2u64.
+        let u64_1 = hash_with(&|h| {
+            h.write_pod(1u64);
+        });
+        assert_ne!(
+            u64_1,
+            hash_with(&|h| {
+                h.write_pod(1u32);
+            }),
+            "different widths encode differently"
+        );
+        assert_ne!(
+            u64_1,
+            hash_with(&|h| {
+                h.write_pod(2u64);
+            }),
+            "different values encode differently"
+        );
+
+        // bool folds as one byte; a flip re-keys.
+        assert_ne!(
+            hash_with(&|h| {
+                h.write_pod(true);
+            }),
+            hash_with(&|h| {
+                h.write_pod(false);
+            }),
+            "a bool flip changes the digest"
+        );
+
+        // write_digest folds the nested digest's raw 32 bytes — same as write_bytes(as_bytes()).
+        let inner = Digest::hash(b"inner");
+        assert_eq!(
+            hash_with(&|h| {
+                h.write_digest(&inner);
+            }),
+            hash_with(&|h| {
+                h.write_bytes(inner.as_bytes());
+            }),
+            "write_digest folds the digest's raw bytes"
         );
     }
 }

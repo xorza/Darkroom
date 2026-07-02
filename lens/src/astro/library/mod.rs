@@ -24,7 +24,7 @@ use scenarium::data::{
 use scenarium::func_lambda::{FuncLambda, InvokeError, InvokeResult, PreCheck};
 use scenarium::function::{Func, FuncInput, ValueVariant};
 use scenarium::library::{Library, TypeEntry};
-use scenarium::prelude::Digest;
+use scenarium::prelude::DigestHasher;
 
 use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,
@@ -174,21 +174,22 @@ pub fn astro_library() -> Library {
             .output("masters", MASTERS_DATA_TYPE.clone())
             // Fingerprint the actual frame folders + params, so the digest tracks values
             // rather than the upstream computation (see `.pure()` above). A present folder
-            // folds its directory-content digest; an absent/empty one a distinct marker.
+            // folds a `1` marker + its directory-content identity; an absent/empty one a `0`.
             .pre_check(PreCheck::compute(|_, inputs| {
-                let mut buf = Vec::new();
+                let mut hasher = DigestHasher::new();
                 for dir in inputs.iter().take(4) {
                     match dir.value.as_fs_path() {
                         Some(p) if !p.is_empty() => {
-                            buf.push(1);
-                            buf.extend_from_slice(Digest::fs_path(p).as_bytes());
+                            hasher.write_pod(1u8).write_fs_path(p);
                         }
-                        _ => buf.push(0),
+                        _ => {
+                            hasher.write_pod(0u8);
+                        }
                     }
                 }
-                buf.extend_from_slice(&inputs[4].value.as_f64()?.to_bits().to_le_bytes());
-                buf.push(inputs[5].value.as_bool()? as u8);
-                Some(Digest::hash(&buf))
+                hasher.write_pod(inputs[4].value.as_f64()?);
+                hasher.write_pod(inputs[5].value.as_bool()?);
+                Some(hasher.finish())
             }))
             .lambda(FuncLambda::new(move |ctx, _, _, inputs, _, outputs| {
                 let cancel = ctx.cancel_flag();
