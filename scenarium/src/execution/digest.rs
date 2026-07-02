@@ -3,7 +3,7 @@
 //!
 //! A node's output is a pure function of its function (identity + version), its
 //! resolved input values, the outputs of its upstream producers, and the content of
-//! any external files it reads. [`output_digest`] folds exactly that into a 256-bit
+//! any external files it reads. [`node_digest`] folds exactly that into a 256-bit
 //! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
 //! (the executor computes digests producer-first, so no recursion or memoization is
 //! needed). Equal digests ⇒ identical computation, so the digest is at once the cache
@@ -83,7 +83,7 @@ fn file_id_from_meta(meta: &std::fs::Metadata) -> FileId {
 
 /// One output *port*'s digest from its node's digest — the node digest mixed with the
 /// port index, so two consumers reading different ports of one node hash apart. Folded
-/// by [`output_digest`] for each `Bind` producer.
+/// by [`node_digest`] for each `Bind` producer.
 fn port_digest_of(node: Digest, port_idx: usize) -> Digest {
     let mut hasher = Hasher::new();
     hasher.update(&node.0);
@@ -163,9 +163,9 @@ fn hash_data_type(hasher: &mut Hasher, ty: &DataType) {
     }
 }
 
-/// A node's **output digest** — the one content key it's cached under, folding its
+/// A node's **content digest** — the one content key it's cached under, folding its
 /// identity (func id/version + output types), each input (a `Const`'s value, an unbound
-/// marker, or a `Bind` producer's own output digest), and a `pre_check` fingerprint of
+/// marker, or a `Bind` producer's own content digest), and a `pre_check` fingerprint of
 /// the external content the func read. The single digest the whole cache keys on: RAM
 /// reuse ([`Cache::is_resident_hit`]), disk load/store, and downstream folding all read
 /// the node's stamped `current_digest`.
@@ -178,7 +178,7 @@ fn hash_data_type(hasher: &mut Hasher, ty: &DataType) {
 /// **pre-check** node folds its `Const` `FsPath`s *shallowly* (path string only — its
 /// pre-check owns their content, so an irrelevant `.txt` doesn't re-key it), while a
 /// pre-check-less node folds the directory walk.
-pub(crate) fn output_digest(
+pub(crate) fn node_digest(
     program: &ExecutionProgram,
     idx: NodeIdx,
     cache: &Cache,
@@ -393,7 +393,7 @@ mod tests {
             self.add_with(FuncBehavior::Pure, func, 0, types, bindings)
         }
 
-        /// Add an `Impure` node — its `output_digest` is always `None`.
+        /// Add an `Impure` node — its `node_digest` is always `None`.
         fn add_impure(&mut self, func: u128, outputs: u32, bindings: &[ExecutionBinding]) -> usize {
             self.add_with(
                 FuncBehavior::Impure,
@@ -456,18 +456,18 @@ mod tests {
         let mut cache = Cache::default();
         cache.reconcile(&program.e_nodes);
         for idx in program.node_indices().take(through.idx() + 1) {
-            let d = output_digest(program, idx, &cache, None);
+            let d = node_digest(program, idx, &cache, None);
             cache.slots[idx].current_digest = d;
         }
         cache
     }
 
-    /// One node's output digest, computing only the producer-first prefix it needs.
+    /// One node's content digest, computing only the producer-first prefix it needs.
     fn digest_at(program: &ExecutionProgram, idx: NodeIdx) -> Option<Digest> {
         digested_cache(program, idx).slots[idx].current_digest
     }
 
-    /// Every node's output digest, indexed by position.
+    /// Every node's content digest, indexed by position.
     fn digests(prog: &Prog) -> Vec<Option<Digest>> {
         let last = NodeIdx::from(prog.program.e_nodes.len().saturating_sub(1));
         let cache = digested_cache(&prog.program, last);

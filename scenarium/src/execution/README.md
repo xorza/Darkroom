@@ -251,7 +251,7 @@ as `ExecutionNode.persist`. `Disk` is a **request**, honored only when:
 
 A node's output is a pure function of: its func (`func_id` + `func_version`), its
 resolved input values, the outputs of its upstream producers, and the content of any
-external files it reads. `output_digest` (`digest.rs`) folds exactly that into a 256-bit
+external files it reads. `node_digest` (`digest.rs`) folds exactly that into a 256-bit
 BLAKE3 `Digest`. The **executor** computes it for each node as it reaches the node
 (producer-first order), reading each `Bind` producer's *already-stamped* `current_digest`
 — so no recursion, no memoization, and it's the single place any digest is computed.
@@ -308,7 +308,7 @@ never yields a half-real output set.
 Each node has a `RuntimeSlot` (index-aligned to `e_nodes`):
 
 ```
-current_digest: Option<Digest>   // this run's output digest, stamped by the executor
+current_digest: Option<Digest>   // this run's content digest, stamped by the executor
 value:          ValueCache        // Empty | Resident { values, produced_under } | OnDisk
 ```
 

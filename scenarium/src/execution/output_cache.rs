@@ -166,7 +166,7 @@ impl OutputCache {
     /// this run and the *next* reopen recomputes the node + rewrites a fresh blob —
     /// without the delete, `store_node`'s skip-if-exists would keep the broken file
     /// forever. Returns `false`. A blob can't be of the *wrong type* for a matching
-    /// digest: the output signature is folded into the digest ([`digest::output_digest`]),
+    /// digest: the output signature is folded into the digest ([`digest::node_digest`]),
     /// so a redefined output re-keys rather than colliding.
     pub(crate) fn hydrate_slot(
         &self,

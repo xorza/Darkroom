@@ -23,7 +23,7 @@ use crate::graph::InputPort;
 use crate::prelude::FuncId;
 
 use crate::execution::cache::Cache;
-use crate::execution::digest::output_digest;
+use crate::execution::digest::node_digest;
 use crate::execution::output_cache::OutputCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
@@ -119,7 +119,7 @@ impl Executor {
     }
 
     /// Walk `plan.process_order` (producer-first). For each node: compute its output
-    /// digest ([`digest::output_digest`], stamped as its `current_digest`), reuse from
+    /// digest ([`digest::node_digest`], stamped as its `current_digest`), reuse from
     /// RAM/disk if unchanged, else invoke its lambda and persist the result to
     /// `output_cache` right away (so a long run's earlier caches survive a later failure
     /// or cancel). The `program` and `plan` are read-only. Returns per-run stats.
@@ -327,7 +327,7 @@ enum Readiness {
     Run,
 }
 
-/// Compute node `idx`'s output digest, stamp it as the slot's `current_digest`, and
+/// Compute node `idx`'s content digest, stamp it as the slot's `current_digest`, and
 /// decide whether the node reuses a cached output or must run. Producer-first order means
 /// every `Bind` producer's digest is already stamped, so this fold is the *one and only*
 /// digest computation — the planner does none.
@@ -357,7 +357,7 @@ fn prepare_node(
         None
     };
 
-    let digest = output_digest(program, idx, cache, pre_check);
+    let digest = node_digest(program, idx, cache, pre_check);
     cache.slots[idx].current_digest = digest;
 
     // A disk blob is loaded lazily only when a running consumer reads it (so a disk-cached

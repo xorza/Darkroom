@@ -439,7 +439,7 @@ impl ExecutionEngine {
     }
 
     /// Seed a node's cached output (simulating a prior run): set the value and
-    /// stamp `output_digest` from the current digest, so the planner sees a hit.
+    /// stamp `produced_under` from the current digest, so the planner sees a hit.
     pub(crate) fn set_output_values(&mut self, node_name: &str, values: Vec<DynamicValue>) {
         let idx = self
             .program

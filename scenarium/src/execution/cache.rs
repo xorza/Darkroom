@@ -48,9 +48,9 @@ pub(crate) struct RuntimeSlot {
     pub(crate) id: NodeId,
     pub(crate) state: AnyState,
     pub(crate) event_state: SharedAnyState,
-    /// The node's current output digest — its content-addressed key (`None` when not
+    /// The node's current content digest — its content-addressed key (`None` when not
     /// reproducible), computed and stamped by the executor as it reaches the node during
-    /// the run ([`digest::output_digest`]). A resident value hits iff its
+    /// the run ([`digest::node_digest`]). A resident value hits iff its
     /// `produced_under` equals this — so a flipped-back input can't serve a stale value.
     pub(crate) current_digest: Option<Digest>,
     pub(crate) value: ValueCache,
@@ -117,7 +117,7 @@ impl RuntimeSlot {
         }
     }
 
-    /// Stamp the resident value with the node's current output digest on a successful
+    /// Stamp the resident value with the node's current content digest on a successful
     /// run: `produced_under` turns it into a cache hit for the next run (RAM) and the
     /// key its disk blob is stored under. No-op if not `Resident`.
     pub(crate) fn stamp_produced(&mut self) {
@@ -189,7 +189,7 @@ mod tests {
     /// current digest, holds values, and those values were produced under that
     /// exact digest. The four cases below are the full truth table.
     #[test]
-    fn is_hit_requires_current_digest_values_and_matching_output_digest() {
+    fn is_hit_requires_current_digest_values_and_matching_node_digest() {
         let d = Digest([7u8; 32]);
         let other = Digest([8u8; 32]);
         let mut cache = Cache::default();
