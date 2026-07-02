@@ -146,7 +146,9 @@ impl GpuImage {
             .expect("map_async callback not invoked after device.poll")
             .map_err(|err| Error::Gpu(err.to_string()))?;
 
-        let data = buffer_slice.get_mapped_range();
+        let data = buffer_slice
+            .get_mapped_range()
+            .expect("map staging read range");
         let bytes = data.to_vec();
         drop(data);
         staging_buffer.unmap();
@@ -193,7 +195,9 @@ impl GpuImage {
             .unwrap()
             .map_err(|err| Error::Gpu(err.to_string()))?;
 
-        let data = buffer_slice.get_mapped_range();
+        let data = buffer_slice
+            .get_mapped_range()
+            .expect("map staging read range");
         let bytes = data.to_vec();
         drop(data);
         staging_buffer.unmap();

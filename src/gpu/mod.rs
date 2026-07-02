@@ -24,6 +24,7 @@ impl Gpu {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         }))
         .map_err(|e| Error::Gpu(format!("failed to find suitable GPU adapter: {e}")))?;
 
