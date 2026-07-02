@@ -25,17 +25,15 @@ impl ExecutionEngine {
             .map(|input| match &input.binding {
                 ExecutionBinding::None => None,
                 ExecutionBinding::Const(v) => Some(DynamicValue::from(v)),
-                ExecutionBinding::Bind(addr) => self
-                    .cache
-                    .output_values(addr.target_idx)
+                ExecutionBinding::Bind(addr) => self.cache.slots[addr.target_idx]
+                    .output_values()
                     .and_then(|o| o.get(addr.port_idx))
                     .cloned(),
             })
             .collect();
 
-        let outputs = self
-            .cache
-            .output_values(idx)
+        let outputs = self.cache.slots[idx]
+            .output_values()
             .map(|o| o.to_vec())
             .unwrap_or_default();
 
@@ -43,9 +41,9 @@ impl ExecutionEngine {
     }
 
     /// `get_argument_values` plus awaited preview resolution. Reads any disk-cached
-    /// value this node shows (its own outputs and its inputs' producers) into RAM
-    /// first — `mark_available` flags them without loading, so an inspected node a
-    /// run never touched still resolves.
+    /// value this node shows (its own outputs and its inputs' producers) into RAM first
+    /// via [`hydrate_for_inspection`](crate::execution::output_cache::OutputCache::hydrate_for_inspection),
+    /// so an inspected node the run reused-from-disk (or never touched) still resolves.
     pub async fn get_argument_values_with_previews(
         &mut self,
         node_id: &NodeId,
@@ -83,14 +81,10 @@ impl ExecutionEngine {
             .copied()
             .chain(stats.executed_nodes.iter().map(|n| n.node_id))
             .flat_map(|node_id| {
-                let e_node = self.by_id(&node_id).unwrap();
-                let event_state = self
-                    .cache
-                    .slots
-                    .by_key(&node_id)
-                    .unwrap()
-                    .event_state
-                    .clone();
+                // One key lookup: `e_nodes` and `cache.slots` are index-aligned.
+                let idx = self.program.e_nodes.index_of_key(&node_id).unwrap();
+                let e_node = &self.program.e_nodes[idx];
+                let event_state = self.cache.slots[idx].event_state.clone();
                 let id = e_node.id;
                 self.program.events[e_node.events.range()]
                     .iter()

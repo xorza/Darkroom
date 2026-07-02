@@ -251,30 +251,38 @@ as `ExecutionNode.persist`. `Disk` is a **request**, honored only when:
 
 A node's output is a pure function of: its func (`func_id` + `func_version`), its
 resolved input values, the outputs of its upstream producers, and the content of any
-external files it reads. `DigestEngine` folds exactly that into a 256-bit BLAKE3
-`Digest`, memoized per node over the flattened program.
+external files it reads. `output_digest` (`digest.rs`) folds exactly that into a 256-bit
+BLAKE3 `Digest`. The **executor** computes it for each node as it reaches the node
+(producer-first order), reading each `Bind` producer's *already-stamped* `current_digest`
+— so no recursion, no memoization, and it's the single place any digest is computed.
 
 - **Equal digest ⇒ identical computation**, on any machine — so the digest is at once
   the cache *key* and the *invalidation* signal. Change any const, binding, func
   version, or upstream output and every downstream digest changes.
-- **Reproducibility taint.** Only `Pure` nodes are hashed; an `Impure` node (or any
-  node with a non-reproducible producer) has digest `None` = "always recompute, never
-  cache", for RAM and disk alike. The `NodeDigest` memo distinguishes
-  `Pending`/`NotCacheable`/`Digest(d)`.
-- **File inputs.** An `FsPath` const folds the path string *and* the file's identity
-  (`FileId`, default `(len, mtime)`; opt-in content hash) so the same path holding
-  different bytes invalidates.
-- **Output ports** of a multi-output node are disambiguated (`port_digest`); a `DOMAIN`
-  separator versions the hashing scheme itself.
+- **Reproducibility taint.** Only `Pure` nodes (or ones vouched by a pre-check) are
+  hashed; an `Impure` node, or any node with a non-reproducible producer, has digest
+  `None` = "always recompute, never cache", for RAM and disk alike (a `None` producer
+  folds to a `None` consumer).
+- **Pre-check nodes.** A node with a `PreCheck` (`func_lambda.rs`) folds a `Digest` its
+  probe returns — a fingerprint of the external content it actually read (e.g. just the
+  frame files in a folder, ignoring a stray `.txt`) — instead of a directory walk, so it
+  reuses across irrelevant changes and re-keys only on a real one. Its `Const` `FsPath`s
+  fold *shallowly* (path string only; the pre-check owns their content). See the
+  `CLAUDE.md` execution section.
+- **File inputs.** A pre-check-less node's `FsPath` const folds the path string *and* the
+  file's identity (`FileId`, default `(len, mtime)`; opt-in content hash) so the same
+  path holding different bytes invalidates.
+- **Output ports** of a multi-output node are disambiguated (`port_digest_of`); a
+  `DOMAIN` separator versions the hashing scheme itself.
 - **Output signature.** Each node's resolved output types (arity + each type, wildcards
   followed) are folded in, so redefining a func's outputs (`Int → Float`, an added port)
   re-keys it *without* a version bump. This is what makes "a blob exists for this digest
   but is the wrong type" impossible by construction: a type change is a key change, so
   the stale blob is never looked up.
 
-Digests are **compile-stable**, so the engine recomputes them once per `update`
-(`Cache::recompute_digests`, which resolves the output types it folds in first) and the
-planner/run read the stored value.
+A node's digest is computed at **execution**, not `update`: only then are its producers'
+outputs known, and a pre-check needs its (possibly bound) inputs resolved. The planner is
+purely structural and never touches digests.
 
 ## B.3 Storage (`blob.rs`)
 
@@ -295,53 +303,46 @@ registers a `CustomValueCodec` on its `Library` type-table entry; that one entry
 custom output whose type has no codec makes the whole node uncacheable, so a reload
 never yields a half-real output set.
 
-## B.5 The RAM tier and the availability predicate (`cache.rs`)
+## B.5 The RAM tier (`cache.rs`)
 
 Each node has a `RuntimeSlot` (index-aligned to `e_nodes`):
 
 ```
-output_values:  Option<Vec<DynamicValue>>   // resident value, if any
-current_digest: Option<Digest>              // recomputed at update
-output_digest:  Option<Digest>              // digest output_values were produced under
-disk_available: bool                        // a decodable blob exists for current_digest
+current_digest: Option<Digest>   // this run's output digest, stamped by the executor
+value:          ValueCache        // Empty | Resident { values, produced_under } | OnDisk
 ```
 
-Two predicates, deliberately separated:
+`ValueCache` is one enum, not the old three loosely-coupled fields — so the previously
+representable bad combos ("resident *and* flagged on disk", a stale RAM value masking a
+fresh blob) can't be built. The reuse test is **`is_resident_hit`** — the slot is
+`Resident` *and* its `produced_under` equals the current digest — the true "bytes are
+here for this key" predicate the executor's input read and disk store rely on. A `None`
+`current_digest` (impure cone) never hits. `OnDisk` means "a decodable blob exists for
+this digest, not yet loaded": a cheap `stat` result, so a disk-cached value behind
+another reused node is served without entering RAM (B.6).
 
-- **`is_resident_hit`** — value in RAM *and* produced under the current digest. The
-  executor's input read and the disk store rely on this being the true "bytes are here"
-  test.
-- **`is_available`** = `is_resident_hit || disk_available` — what the **planner** prunes
-  on: a node servable from *either* tier need not execute.
+## B.6 Execution-time lifecycle (`output_cache.rs`)
 
-Separating them is the point: the planner prunes knowing only that a blob *exists* (a
-cheap `stat`, no bytes), so a disk-cached value behind another disk-cached value is
-pruned without ever entering RAM.
+All of it happens *during the run*, as the executor reaches each node (producer-first);
+the planner is structural and does no cache work. Per node, once its digest is computed:
 
-## B.6 Lazy lifecycle (`output_cache.rs`)
-
-The engine drives a fixed sequence; the ordering *is* the contract.
-
-1. **`update` → `mark_available`.** For each cacheable node, flag `disk_available` iff a
-   blob exists for the current digest **and** the outputs are decodable (every custom
-   output type has a codec — predicted without reading). A `stat` + a codec check, **no
-   bytes**. The planner can now prune disk-cached cones.
-2. **`execute` → plan, then `hydrate_frontier` (looped).** Read into RAM only the
-   **frontier** — the cached producers an executing node's inputs `Bind` to. Producers
-   *behind* a pruned producer are never referenced, so a chain loads only its frontier.
-   A frontier blob can't be of the *wrong type* — the output signature is in the digest
-   (§B.2), so a mismatched type would have re-keyed — but it can still fail to *load*
-   (corrupt/deleted/undecodable); that clears its own `disk_available` and makes
-   `hydrate_frontier` return `false`, so the engine **re-plans**, rescheduling that node
-   to recompute instead of pruning it behind an absent value (which would trip the
-   executor's "value present" invariant). Each failure clears one flag, so the
-   plan/hydrate loop converges.
-3. **run → `store`.** Write executed nodes' outputs (blobs already present are skipped).
-4. **after store → `evict_unused`.** Demote resident values the run neither executed nor
-   read as a frontier — prior-run leftovers — back to disk-only, **iff** a blob can serve
-   them again. Lossless (a later run or inspection reloads); a value with no blob
-   (Memory-only, impure) is kept, so eviction never forces a recompute. Runs after
-   `store` so a value computed this run is on disk before its RAM copy is reclaimed.
+1. **`is_resident_hit`?** — reuse the RAM value, done.
+2. **else `mark_on_disk_if_present`.** If a blob exists for the digest **and** the
+   outputs are decodable (every custom output type has a codec — predicted without
+   reading), flag the slot `OnDisk` and reuse it — a `stat` + codec check, **no bytes**.
+   The value loads only if a running consumer actually reads it.
+3. **else run**, then **`store_node`** writes the fresh blob (a content-addressed blob
+   already on disk is the same bytes → skipped).
+4. **Lazy load — `hydrate_slot`.** When a *running* node reads a bound input whose
+   producer is `OnDisk`, `collect_inputs` pulls that one blob into RAM. Producers behind
+   a *reused* consumer are never read, so a disk-cached chain loads only its frontier — a
+   blob can't be the wrong type (the signature is in the digest, §B.2), but if it fails
+   to *load* (corrupt/deleted) the bad file is deleted and the demanding consumer is
+   dropped for this run; the next reopen recomputes it.
+5. **after the run → `evict_unused`.** Demote resident values the run's *executed* nodes
+   didn't produce or read — prior-run leftovers — back to `OnDisk`, **iff** a blob can
+   serve them again. Lossless (a later run or inspection reloads); a value with no blob
+   (Memory-only, impure) is kept, so eviction never forces a recompute.
 
 **Off-run path — inspection.** `get_argument_values_with_previews` loads on demand via
 `hydrate_for_inspection`, so a disk-cached node no run touched still shows its value when
@@ -349,12 +350,14 @@ the editor selects it.
 
 ### Worked example
 
-`A → B → terminal`, `A` and `B` both `persist = Disk`, after a cold run that stored
-both: `update` flags both available; the plan finds `B` available → prunes its cone
-(`A`); the terminal executes and reads `B`, so `B` is the frontier and `A` is behind it;
-`hydrate_frontier` reads **only** `B`. `A`'s bytes never enter RAM — the win. If a later
-edit invalidates `B`, the next plan schedules `B` to recompute, `A` becomes the frontier,
-and `A` hydrates from disk then.
+`A → B → terminal`, `A` and `B` both `persist = Disk`, after a cold run that stored both.
+On reopen the executor walks `A`, `B`, terminal in order: `A`'s blob exists → `OnDisk`,
+reused (bytes stay on disk); `B`'s blob exists → `OnDisk`, reused; the terminal runs and
+reads `B`, so `hydrate_slot` pulls **only** `B` into RAM. `A`'s bytes never enter RAM —
+the win. A `Memory` (non-persist) node feeding `A`, though, *does* recompute on reopen
+(it has no cross-session cache and the reused `A` ignores its value) — the reopen
+tradeoff (see `CLAUDE.md`). If a later edit invalidates `B`, `B` misses and recomputes,
+reading `A` from disk (`A` becomes the frontier) then.
 
 ### Invalidation summary
 
@@ -365,8 +368,8 @@ and `A` hydrates from disk then.
   bump needed, no runtime type check: wrong-type-for-key is impossible by construction.
 - Impure cone → no digest → never cached.
 - Missing codec / corrupt / deleted blob → treated as a miss, not a failure
-  (`mark_available`'s codec check + `hydrate_frontier`'s re-plan keep it off the hot and
-  the panic paths).
+  (`mark_on_disk_if_present`'s codec check keeps a codec-less blob off the hot path; a
+  failed load deletes the bad blob and self-heals on the next reopen).
 
 The **file cache** is the one exception: its digest is the path alone (Part C), so a
 type-changing input rewire is *not* caught by the digest — it's the documented
@@ -403,8 +406,12 @@ A cache node's content digest is a hash of its `Const` `FsPath` **alone** (domai
 - `input[0]` may be impure or expensive and the node still presents a digest — the path
   *is* the reproducibility boundary.
 - **Presence, not content, decides the hit:** the file's `(len, mtime)` is *not* folded
-  in. While the file exists, the value is served from it and `input[0]`'s upstream is
-  pruned. A non-const or empty path ⇒ no digest ⇒ never a hit, never stored.
+  in. While the file exists, the node is served from it and its passthrough lambda is
+  skipped. A non-const or empty path ⇒ no digest ⇒ never a hit, never stored.
+- **Reopen caveat.** The served node's `input[0]` cone still *runs* on a reopen — pruning
+  it relied on the removed plan-time cache pass, so a `Memory` input recomputes even
+  though the served node ignores its value (the reopen tradeoff, Part B). Within a
+  session the input stays RAM-resident and reuses.
 
 ## C.3 Load / store and `bypass`
 
@@ -417,7 +424,7 @@ Load/store go through the same `OutputCache` as Part B, via `Target::Explicit(pa
   a content-addressed blob already on disk is skipped (same digest ⇒ same bytes).
 
 `bypass` (a per-instance flag riding in the `SpecialNode` variant, toggled in the UI)
-forces a recompute + overwrite every run, ignoring any existing file — so it's never
-flagged available and never hydrated.
+forces a recompute + overwrite every run, ignoring any existing file —
+`mark_on_disk_if_present` returns `false` for it, so it's never reused from the file.
 
 Invalidation is **user-managed**: delete the file, or flip `bypass`.

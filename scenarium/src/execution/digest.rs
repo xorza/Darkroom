@@ -2,13 +2,13 @@
 //! the content-addressed disk cache.
 //!
 //! A node's output is a pure function of its function (identity + version), its
-//! resolved input values, the outputs of its upstream producers, and the content
-//! of any external files it reads. [`DigestEngine`] folds exactly that into a
-//! 256-bit BLAKE3 digest over the flattened [`ExecutionProgram`], memoized per
-//! node. Equal digests ⇒ identical computation, so the digest is at once the
-//! cache key *and* the invalidation signal: change anything upstream and every
-//! downstream digest changes — on this machine or any other. See
-//! `README.md` Part B.
+//! resolved input values, the outputs of its upstream producers, and the content of
+//! any external files it reads. [`output_digest`] folds exactly that into a 256-bit
+//! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
+//! (the executor computes digests producer-first, so no recursion or memoization is
+//! needed). Equal digests ⇒ identical computation, so the digest is at once the cache
+//! key *and* the invalidation signal: change anything upstream and every downstream
+//! digest changes — on this machine or any other. See `README.md` Part B.
 //!
 //! **Trust boundary (what is *not* folded).** The digest is only as honest as these
 //! assumptions; violating one is a *false hit* (a stale value served):
@@ -29,6 +29,7 @@ use blake3::Hasher;
 
 use crate::data::{DataType, StaticValue};
 use crate::elements::cache_passthrough::file_cache_digest;
+use crate::execution::cache::Cache;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::function::FuncBehavior;
 use crate::special::SpecialNode;
@@ -52,29 +53,6 @@ impl Digest {
     pub fn hash(bytes: &[u8]) -> Digest {
         Digest(blake3::hash(bytes).into())
     }
-}
-
-/// A node's two identity digests, recomputed together at each `update` and stored on
-/// its [`RuntimeSlot`](crate::execution::cache::RuntimeSlot). `content` is the
-/// reproducibility / cache key (`None` for an impure node or one tainted by an impure
-/// producer); `local` is the non-tainting per-node digest the executor's runtime
-/// reuse pairs with the `dirty` bits. Bundled so a slot refreshes both in one call.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct NodeDigests {
-    pub(crate) content: Option<Digest>,
-    pub(crate) local: Digest,
-}
-
-/// One node's memoized digest result. A node has a digest iff its whole cone is
-/// reproducible; an impure node (or any impure ancestor) is `NotCacheable`, which
-/// is at once "never RAM-cache" and "never disk-cache" — `Some`/`None` carry
-/// exactly that. The `Pending` state distinguishes "not computed yet" from a
-/// computed `NotCacheable`.
-#[derive(Clone, Copy, Debug)]
-enum NodeDigest {
-    Pending,
-    NotCacheable,
-    Digest(Digest),
 }
 
 /// Identity of an external file an `FsPath` input points at, folded into the
@@ -103,161 +81,21 @@ fn file_id_from_meta(meta: &std::fs::Metadata) -> FileId {
     }
 }
 
-/// Memoized digest computation, owning its per-node working columns so the
-/// [`Cache`](crate::execution::cache::Cache) keeps one engine across updates and a
-/// recompile reuses the buffers ([`reset`](Self::reset)) instead of reallocating two
-/// graph-sized `Vec`s. The program is *not* held — it's passed to [`node_digest`](Self::node_digest)
-/// per recompute, so the engine carries no lifetime. File and directory identity are
-/// resolved with [`hash_fs_path_identity`] directly.
-#[derive(Debug, Default)]
-pub(crate) struct DigestEngine {
-    memo: Vec<NodeDigest>,
-    /// Per-node in-progress marker — a node re-entered while still on the
-    /// recursion stack is a cycle (the planner rejects these upstream; the digest
-    /// pass treats it as non-reproducible rather than looping).
-    visiting: Vec<bool>,
+/// One output *port*'s digest from its node's digest — the node digest mixed with the
+/// port index, so two consumers reading different ports of one node hash apart. Folded
+/// by [`output_digest`] for each `Bind` producer.
+fn port_digest_of(node: Digest, port_idx: usize) -> Digest {
+    let mut hasher = Hasher::new();
+    hasher.update(&node.0);
+    hasher.update(&(port_idx as u64).to_le_bytes());
+    Digest(hasher.finalize().into())
 }
 
-impl DigestEngine {
-    /// Size the working columns to `program` and clear them — call once before the
-    /// [`node_digest`](Self::node_digest) loop of a fresh recompute (the memo persists
-    /// *within* that loop so a shared upstream node is hashed once).
-    pub(crate) fn reset(&mut self, program: &ExecutionProgram) {
-        let n = program.e_nodes.len();
-        self.memo.clear();
-        self.memo.resize(n, NodeDigest::Pending);
-        self.visiting.clear();
-        self.visiting.resize(n, false);
-    }
-
-    /// Content digest of node `idx`, or `None` when its output isn't reproducible
-    /// — the node is `Impure`, or *any* upstream producer is non-reproducible (the
-    /// taint flows up). `None` is the "always recompute, never cache" signal — for
-    /// RAM and disk alike. Memoized.
-    pub(crate) fn node_digest(
-        &mut self,
-        program: &ExecutionProgram,
-        idx: NodeIdx,
-    ) -> Option<Digest> {
-        match self.memo[idx.idx()] {
-            NodeDigest::Digest(d) => return Some(d),
-            NodeDigest::NotCacheable => return None,
-            NodeDigest::Pending => {}
-        }
-        // A file-cache node is keyed on its path input alone, *not* its input
-        // cone — so input 0 can be impure/expensive and the node still presents a
-        // digest (the reproducibility boundary). Resolve it before recursing.
-        if matches!(
-            program.e_nodes[idx].special,
-            Some(SpecialNode::CachePassthrough { .. })
-        ) {
-            let e_node = &program.e_nodes[idx];
-            let digest = file_cache_digest(program.node_inputs(e_node));
-            self.memo[idx.idx()] = match digest {
-                Some(d) => NodeDigest::Digest(d),
-                None => NodeDigest::NotCacheable,
-            };
-            return digest;
-        }
-
-        if self.visiting[idx.idx()] {
-            // Cycle (the planner rejects these) — treat as non-reproducible.
-            return None;
-        }
-        self.visiting[idx.idx()] = true;
-
-        let e_node = &program.e_nodes[idx];
-
-        // Only a `Pure` node is content-cacheable; `Impure` varies per run.
-        let digest = if e_node.behavior != FuncBehavior::Pure {
-            None
-        } else {
-            let mut hasher = Hasher::new();
-            hasher.update(DOMAIN);
-            hasher.update(&e_node.func_id.as_u128().to_le_bytes());
-            hasher.update(&e_node.func_version.to_le_bytes());
-
-            // Output signature: arity + each resolved output type. A node that
-            // produces a different shape (a flipped type, an added port) re-keys
-            // here, so a stale blob can never be served under a key whose type no
-            // longer matches — and the change propagates downstream through the
-            // port digests below. A type change in a wildcard output already flows
-            // in via its mirrored input; folding it again is harmless.
-            let out_types = program.node_output_types(e_node);
-            hasher.update(&(out_types.len() as u64).to_le_bytes());
-            for ty in out_types {
-                hash_data_type(&mut hasher, ty);
-            }
-
-            let mut tainted = false;
-            for pool_idx in e_node.inputs.range() {
-                match &program.inputs[pool_idx].binding {
-                    // Unbound optional input — the runtime substitutes the func's
-                    // `default_value`, which `func_version` stands in for, so a
-                    // default change ships with a version bump.
-                    ExecutionBinding::None => {
-                        hasher.update(&[0u8]);
-                    }
-                    ExecutionBinding::Const(value) => {
-                        hasher.update(&[1u8]);
-                        hash_static(&mut hasher, value);
-                    }
-                    ExecutionBinding::Bind(addr) => {
-                        match self.port_digest(program, addr.target_idx, addr.port_idx) {
-                            Some(upstream) => {
-                                hasher.update(&[2u8]);
-                                hasher.update(&upstream.0);
-                            }
-                            // A non-reproducible producer taints this node.
-                            None => {
-                                tainted = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            (!tainted).then(|| Digest(hasher.finalize().into()))
-        };
-
-        self.visiting[idx.idx()] = false;
-        self.memo[idx.idx()] = match digest {
-            Some(d) => NodeDigest::Digest(d),
-            None => NodeDigest::NotCacheable,
-        };
-        digest
-    }
-
-    /// A node's two identity digests, computed together for a slot refresh: the
-    /// reproducibility `content` digest (memoized/recursive) and the non-tainting
-    /// `local` digest (a flat pass). The single call `recompute_digests` makes.
-    pub(crate) fn node_digests(&mut self, program: &ExecutionProgram, idx: NodeIdx) -> NodeDigests {
-        NodeDigests {
-            content: self.node_digest(program, idx),
-            local: local_digest(program, idx),
-        }
-    }
-
-    /// Digest of one output *port* of node `idx`, or `None` if the node has no
-    /// digest. Disambiguates ports of a multi-output node sharing one node digest.
-    fn port_digest(
-        &mut self,
-        program: &ExecutionProgram,
-        idx: NodeIdx,
-        port_idx: usize,
-    ) -> Option<Digest> {
-        let node = self.node_digest(program, idx)?;
-        let mut hasher = Hasher::new();
-        hasher.update(&node.0);
-        hasher.update(&(port_idx as u64).to_le_bytes());
-        Some(Digest(hasher.finalize().into()))
-    }
-}
-
-/// Fold one constant into `hasher`: a discriminant tag plus length-prefixed payload
-/// (so `"ab"`+`"c"` can't collide with `"a"`+`"bc"`), and for an `FsPath` the resolved
-/// file identity on top of the path string. A free helper like [`hash_data_type`] —
-/// used by both [`DigestEngine::node_digest`] and [`local_digest`].
+/// Fold one constant's *own value* into `hasher`: a discriminant tag plus
+/// length-prefixed payload (so `"ab"`+`"c"` can't collide with `"a"`+`"bc"`). For an
+/// `FsPath` this is the path *string* only — the external file/dir it points at is a
+/// separate concern folded by [`hash_fs_content`], so this stays a pure, no-I/O
+/// structural fold. A free helper like [`hash_data_type`].
 fn hash_static(hasher: &mut Hasher, value: &StaticValue) {
     match value {
         StaticValue::Null => {
@@ -283,13 +121,24 @@ fn hash_static(hasher: &mut Hasher, value: &StaticValue) {
             hasher.update(&[5u8]);
             hasher.update(&(path.len() as u64).to_le_bytes());
             hasher.update(path.as_bytes());
-            hash_fs_path_identity(hasher, path);
         }
         StaticValue::Enum(name) => {
             hasher.update(&[6u8]);
             hasher.update(&(name.len() as u64).to_le_bytes());
             hasher.update(name.as_bytes());
         }
+    }
+}
+
+/// Fold the external identity an `FsPath` const points at — a file's `(len, mtime)` or
+/// a directory's entry fingerprint ([`hash_fs_path_identity`]) — so a folder-reading
+/// node re-keys on its contents. A no-op for any non-`FsPath` value. Kept separate from
+/// [`hash_static`] (which folds only the const itself) because a **pre-check** node
+/// fingerprints just the files that matter and so *skips* this: folding the whole
+/// directory would re-key it on an irrelevant `.txt`.
+fn hash_fs_content(hasher: &mut Hasher, value: &StaticValue) {
+    if let StaticValue::FsPath(path) = value {
+        hash_fs_path_identity(hasher, path);
     }
 }
 
@@ -314,22 +163,42 @@ fn hash_data_type(hasher: &mut Hasher, ty: &DataType) {
     }
 }
 
-/// A node's *local* content digest — its identity plus its own inputs' structure,
-/// **without** recursing into producer outputs. Folds func id + version + output
-/// types, then per input: a marker for unbound, the value for a `Const`, and the
-/// producer's stable node id + port for a `Bind` (the *wiring*, not the producer's
-/// content). Unlike [`DigestEngine::node_digest`] it never taints — it's always
-/// `Some`, because it deliberately excludes the one thing that taints (a producer's
-/// reproducibility). The executor pairs it with the runtime `dirty` bits: a `Pure`
-/// node whose local digest is unchanged *and* whose producers all stayed clean this
-/// run has entirely-unchanged inputs, so it can reuse its prior output even when it's
-/// tainted (no content digest) and has no pre-check. A distinct domain tag keeps it
-/// from ever colliding with a `node_digest`.
-fn local_digest(program: &ExecutionProgram, idx: NodeIdx) -> Digest {
+/// A node's **output digest** — the one content key it's cached under, folding its
+/// identity (func id/version + output types), each input (a `Const`'s value, an unbound
+/// marker, or a `Bind` producer's own output digest), and a `pre_check` fingerprint of
+/// the external content the func read. The single digest the whole cache keys on: RAM
+/// reuse ([`Cache::is_resident_hit`]), disk load/store, and downstream folding all read
+/// the node's stamped `current_digest`.
+///
+/// Computed by the executor as it reaches each node — producer-first (topological), so a
+/// `Bind` reads the producer's *already-stamped* `current_digest` (`None` there taints
+/// this node to `None`). `None` for a non-reproducible node — `Impure` with no pre-check
+/// — so it never caches and always runs. Two special cases:
+/// a **`CachePassthrough`** node is keyed on its path input alone (not its cone); a
+/// **pre-check** node folds its `Const` `FsPath`s *shallowly* (path string only — its
+/// pre-check owns their content, so an irrelevant `.txt` doesn't re-key it), while a
+/// pre-check-less node folds the directory walk.
+pub(crate) fn output_digest(
+    program: &ExecutionProgram,
+    idx: NodeIdx,
+    cache: &Cache,
+    pre_check: Option<Digest>,
+) -> Option<Digest> {
     let e_node = &program.e_nodes[idx];
+
+    // A file-cache node is keyed on its path input alone — input 0 can be
+    // impure/expensive and it still presents a digest (the reproducibility boundary).
+    if matches!(e_node.special, Some(SpecialNode::CachePassthrough { .. })) {
+        return file_cache_digest(program.node_inputs(e_node));
+    }
+    // Only a `Pure` node — or one vouched by a pre-check — is content-cacheable;
+    // an `Impure` node varies per run, so it has no digest and always recomputes.
+    if e_node.behavior != FuncBehavior::Pure && pre_check.is_none() {
+        return None;
+    }
+
     let mut hasher = Hasher::new();
     hasher.update(DOMAIN);
-    hasher.update(b"local");
     hasher.update(&e_node.func_id.as_u128().to_le_bytes());
     hasher.update(&e_node.func_version.to_le_bytes());
 
@@ -347,18 +216,28 @@ fn local_digest(program: &ExecutionProgram, idx: NodeIdx) -> Digest {
             ExecutionBinding::Const(value) => {
                 hasher.update(&[1u8]);
                 hash_static(&mut hasher, value);
+                // A pre-check node fingerprints its own files, so it skips the folder
+                // walk (which would re-key on an irrelevant `.txt`); a pre-check-less
+                // deferred node has no other way to track them, so it folds them.
+                if pre_check.is_none() {
+                    hash_fs_content(&mut hasher, value);
+                }
             }
-            // The wiring only — a rewire (different producer/port) re-keys here; a
-            // change in the producer's *output* is carried by the runtime `dirty` bit
-            // instead, so it isn't folded here.
             ExecutionBinding::Bind(addr) => {
+                // The producer was visited first (topological execute order) or was
+                // plan-keyed, so its `current_digest` is set; a `None` taints this node.
+                let node = cache.slots[addr.target_idx].current_digest?;
                 hasher.update(&[2u8]);
-                hasher.update(&program.e_nodes[addr.target_idx].id.as_u128().to_le_bytes());
-                hasher.update(&(addr.port_idx as u64).to_le_bytes());
+                hasher.update(&port_digest_of(node, addr.port_idx).0);
             }
         }
     }
-    Digest(hasher.finalize().into())
+    // The external fingerprint the framework can't see (which files actually matter).
+    if let Some(pre_check) = pre_check {
+        hasher.update(&[3u8]);
+        hasher.update(&pre_check.0);
+    }
+    Some(Digest(hasher.finalize().into()))
 }
 
 /// Fold an `FsPath` input's external identity into `hasher`: for a regular file its
@@ -514,7 +393,7 @@ mod tests {
             self.add_with(FuncBehavior::Pure, func, 0, types, bindings)
         }
 
-        /// Add an `Impure` node — its `node_digest` is always `None`.
+        /// Add an `Impure` node — its `output_digest` is always `None`.
         fn add_impure(&mut self, func: u128, outputs: u32, bindings: &[ExecutionBinding]) -> usize {
             self.add_with(
                 FuncBehavior::Impure,
@@ -569,19 +448,32 @@ mod tests {
         ExecutionBinding::Const(value)
     }
 
-    /// One node's digest with a one-shot engine (a fresh recompute), re-statting any
-    /// `FsPath` const each call.
-    fn digest_at(program: &ExecutionProgram, idx: NodeIdx) -> Option<Digest> {
-        let mut engine = DigestEngine::default();
-        engine.reset(program);
-        engine.node_digest(program, idx)
+    /// Fold node digests into a fresh cache the way the executor does — producer-first
+    /// in `e_node` order (the test `Prog`s are built that way), each node reading its
+    /// producers' just-stamped `current_digest` — stopping after `through`. Re-stats any
+    /// `FsPath` const each call. Returns the cache, holding every computed digest.
+    fn digested_cache(program: &ExecutionProgram, through: NodeIdx) -> Cache {
+        let mut cache = Cache::default();
+        cache.reconcile(&program.e_nodes);
+        for idx in program.node_indices().take(through.idx() + 1) {
+            let d = output_digest(program, idx, &cache, None);
+            cache.slots[idx].current_digest = d;
+        }
+        cache
     }
 
+    /// One node's output digest, computing only the producer-first prefix it needs.
+    fn digest_at(program: &ExecutionProgram, idx: NodeIdx) -> Option<Digest> {
+        digested_cache(program, idx).slots[idx].current_digest
+    }
+
+    /// Every node's output digest, indexed by position.
     fn digests(prog: &Prog) -> Vec<Option<Digest>> {
-        let mut engine = DigestEngine::default();
-        engine.reset(&prog.program);
-        (0..prog.program.e_nodes.len())
-            .map(|i| engine.node_digest(&prog.program, i.into()))
+        let last = NodeIdx::from(prog.program.e_nodes.len().saturating_sub(1));
+        let cache = digested_cache(&prog.program, last);
+        prog.program
+            .node_indices()
+            .map(|i| cache.slots[i].current_digest)
             .collect()
     }
 
@@ -709,16 +601,14 @@ mod tests {
         p.add(20, 0, 1, &[bind(0, 0)]); // B binds A.0
         p.add(20, 0, 1, &[bind(0, 1)]); // C binds A.1 (same func as B)
 
-        let mut engine = DigestEngine::default();
-        engine.reset(&p.program);
+        let a = digest_at(&p.program, NodeIdx(0)).unwrap();
         assert_ne!(
-            engine.port_digest(&p.program, NodeIdx(0), 0),
-            engine.port_digest(&p.program, NodeIdx(0), 1),
+            port_digest_of(a, 0),
+            port_digest_of(a, 1),
             "ports of one node must hash apart"
         );
-        let db = engine.node_digest(&p.program, NodeIdx(1));
-        let dc = engine.node_digest(&p.program, NodeIdx(2));
-        assert_ne!(db, dc, "consumers reading different ports must differ");
+        let d = digests(&p);
+        assert_ne!(d[1], d[2], "consumers reading different ports must differ");
     }
 
     /// The output signature is part of the key: a flipped type, an added port, or a

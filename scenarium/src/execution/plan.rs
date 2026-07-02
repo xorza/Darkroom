@@ -6,17 +6,14 @@
 
 use crate::execution::program::{ExecutionBinding, ExecutionInput, NodeColumn, NodeIdx};
 
-/// The planner's verdict for one node this run, indexed by `e_node_idx`. The three
-/// states are mutually exclusive *by construction* — unlike the prior three-bool
-/// struct, which could represent contradictions (`cached && wants_execute`) that
-/// `validate` had to assert away. The default (`MissingInputs`) is the conservative
-/// "not yet established as runnable" value for nodes outside `process_order`, whose
-/// verdict is never read.
+/// The planner's structural verdict for one node this run, indexed by `e_node_idx`.
+/// The planner decides only *runnable vs blocked on inputs*; *cached vs recompute* is an
+/// execution-time call (the executor computes the node's digest and reuses from RAM/disk
+/// or runs). The default (`MissingInputs`) is the conservative "not yet established as
+/// runnable" value for nodes outside `process_order`, whose verdict is never read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum NodeVerdict {
-    /// Served from cache (resident or disk-available) — not executed.
-    Cached,
-    /// Runnable this round: scheduled into `execute_order`.
+    /// Runnable this round (the executor then reuses its cached output or recomputes it).
     Execute,
     /// A required input is unsatisfied (unbound, or fed by a non-runnable producer);
     /// can't run, and the "missing" verdict propagates to its consumers.
@@ -25,9 +22,6 @@ pub(crate) enum NodeVerdict {
 }
 
 impl NodeVerdict {
-    pub(crate) fn is_cached(self) -> bool {
-        self == NodeVerdict::Cached
-    }
     pub(crate) fn wants_execute(self) -> bool {
         self == NodeVerdict::Execute
     }
@@ -52,12 +46,11 @@ pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeColumn<NodeVe
 
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionPlan {
-    /// Post-order DFS over the dependency graph (deps before consumers),
-    /// seeded from the terminals. Superset of `execute_order`.
+    /// The schedule: post-order DFS over the dependency graph (deps before consumers),
+    /// seeded from the terminals — every reachable node, producer-first. The executor
+    /// walks this and skips `MissingInputs` nodes (and reuses cached ones) inline.
     pub(crate) process_order: Vec<NodeIdx>,
-    /// Pruned to only nodes whose output is read by an executing consumer.
-    pub(crate) execute_order: Vec<NodeIdx>,
-    /// Per-node verdict (cached / execute / missing-inputs), indexed by node position.
+    /// Per-node verdict (execute / missing-inputs), indexed by node position.
     pub(crate) verdicts: NodeColumn<NodeVerdict>,
     /// Per-output consumer counts, indexed by output-pool index. `> 0` ⇒ the output
     /// is `Needed` this run; `0` ⇒ `Skip`. The executor passes the count through to
@@ -69,17 +62,14 @@ pub(crate) struct ExecutionPlan {
 impl ExecutionPlan {
     pub(crate) fn clear(&mut self) {
         self.process_order.clear();
-        self.execute_order.clear();
         self.verdicts.clear();
         self.output_usage.clear();
     }
 
-    /// Clear the orders and reset every per-node verdict to default at the given
-    /// pool sizes. Called at the start of each planning pass.
+    /// Clear the order and reset every per-node verdict to default at the given pool
+    /// sizes. Called at the start of each planning pass.
     pub(crate) fn reset(&mut self, n_nodes: usize, n_outputs: usize) {
         self.process_order.clear();
-        self.execute_order.clear();
-
         self.verdicts.reset(n_nodes, NodeVerdict::default());
         self.output_usage.clear();
         self.output_usage.resize(n_outputs, 0);

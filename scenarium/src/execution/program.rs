@@ -76,6 +76,10 @@ impl<T> NodeColumn<T> {
     pub(crate) fn clear(&mut self) {
         self.values.clear();
     }
+
+    pub(crate) fn len(&self) -> usize {
+        self.values.len()
+    }
 }
 
 impl<T: Clone> NodeColumn<T> {
@@ -127,15 +131,6 @@ pub(crate) enum ExecutionBinding {
     Bind(ExecutionPortAddress),
 }
 
-impl ExecutionBinding {
-    pub(crate) fn as_bind(&self) -> Option<&ExecutionPortAddress> {
-        match self {
-            ExecutionBinding::Bind(addr) => Some(addr),
-            _ => None,
-        }
-    }
-}
-
 // === Execution Node Components ===
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -161,6 +156,13 @@ pub(crate) struct ExecutionEvent {
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub(crate) struct ExecutionNode {
     pub id: NodeId,
+    /// Flatten's per-node reuse marker: `true` once this flat node has been emitted in
+    /// the engine's lifetime, so a *later* recompile that reuses the same flat id
+    /// preserves its bindings and skips re-cloning the lambda (see `flatten.rs`).
+    /// Compile scratch — persists across recompiles in memory, but `#[serde(skip)]` so a
+    /// deserialized program (whose `lambda`/`pre_check` are also skipped) re-initializes
+    /// fully on its next flatten rather than being treated as an already-built node.
+    #[serde(skip)]
     pub(crate) inited: bool,
 
     pub terminal: bool,

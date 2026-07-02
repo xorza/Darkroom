@@ -2,10 +2,12 @@
 //!
 //! 1. **compile** — [`ExecutionEngine::update`] flattens the authoring `Graph`
 //!    into an immutable [`ExecutionProgram`](program::ExecutionProgram).
-//! 2. **plan** — the [`Planner`](planner::Planner) turns the program + current
-//!    cache state into an [`ExecutionPlan`](plan::ExecutionPlan) (the schedule).
-//! 3. **execute** — the [`Executor`](executor::Executor) runs the plan,
-//!    invoking each scheduled node and updating its runtime cache.
+//! 2. **plan** — the [`Planner`](planner::Planner) turns the program into an
+//!    [`ExecutionPlan`](plan::ExecutionPlan) (the schedule). Purely structural —
+//!    reachability + topological order + output usage, no cache/digest state.
+//! 3. **execute** — the [`Executor`](executor::Executor) walks the schedule
+//!    producer-first, computing each node's content digest and deciding reuse
+//!    (RAM / disk) or recompute inline, then updating its runtime cache.
 //!
 //! [`ExecutionEngine`] owns every piece (program, plan, planner, the cross-run
 //! cache, and executor) and exposes `update` (phase 1) and `execute` (phases
@@ -19,6 +21,7 @@ use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::data::DynamicValue;
+use crate::execution::flatten::Flattener;
 use crate::execution_stats::{ExecutionStats, FlattenMap, RunProgress};
 use crate::graph::{Graph, NodeId};
 use crate::library::Library;
@@ -45,7 +48,9 @@ use executor::Executor;
 use output_cache::OutputCache;
 use plan::ExecutionPlan;
 use planner::Planner;
-use program::{ExecutionNode, ExecutionProgram};
+#[cfg(test)]
+use program::ExecutionNode;
+use program::ExecutionProgram;
 
 // === Error Types ===
 
@@ -116,7 +121,7 @@ pub struct RunSeeds {
 pub struct ExecutionEngine {
     pub(crate) program: ExecutionProgram,
     /// Reusable subgraph-flattening scratch (kept across compiles).
-    flattener: flatten::Flattener,
+    flattener: Flattener,
     /// How the last `update` flattened the graph (authoring↔execution id map).
     /// Rebuilt each compile via `Arc::make_mut` (no clone when no prior run's stats
     /// still hold it), and handed to each run's `ExecutionStats` by refcount bump.
@@ -129,20 +134,16 @@ pub struct ExecutionEngine {
     planner: Planner,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
-    /// Output cache: flags which `persist` (content-addressed) and `CachePassthrough`
-    /// (explicit-path) node outputs are available on disk at `update` (so the planner
-    /// prunes), reads only the ones a run consumes into RAM at execute time, and
-    /// persists fresh ones after a run. Holds the one codec registry and the optional
-    /// disk root; empty default is memory-only. Set via [`Self::set_output_cache`].
+    /// Output cache: at execution time serves `persist` (content-addressed) and
+    /// `CachePassthrough` (explicit-path) nodes from disk when a blob for their digest
+    /// exists, reads only the ones a run consumes into RAM, and persists fresh ones after
+    /// a run. Holds the one codec registry and the optional disk root; empty default is
+    /// memory-only. Set via [`Self::set_output_cache`].
     output_cache: OutputCache,
 }
 
 impl ExecutionEngine {
     // === Accessors ===
-
-    pub(crate) fn by_id(&self, node_id: &NodeId) -> Option<&ExecutionNode> {
-        self.program.e_nodes.by_key(node_id)
-    }
 
     pub fn is_empty(&self) -> bool {
         self.program.e_nodes.is_empty()
@@ -155,10 +156,6 @@ impl ExecutionEngine {
         self.plan.clear();
         self.cache.clear();
         Arc::make_mut(&mut self.flatten_map).reset();
-    }
-
-    pub fn reset_states(&mut self) {
-        self.cache.reset_states();
     }
 
     /// Swap the [`OutputCache`] — the library snapshot (its type table supplies
@@ -217,18 +214,6 @@ impl ExecutionEngine {
         self.program.resolve_output_types(library);
 
         validate::compiled(&self.program, &self.cache, library);
-
-        // A node's digest is compile-stable (consts/bindings/func versions/output
-        // types are fixed between updates), so recompute it now — off the per-execute
-        // path. The trade-off is that an external file change with no graph edit isn't
-        // noticed until the next update/reopen.
-        self.cache.recompute_digests(&self.program);
-        // Flag which cached outputs (content-addressed `persist` + explicit-path
-        // `CachePassthrough`) are available on disk for the current digest, so the
-        // planner prunes their cones — *without* reading them. The bytes load lazily
-        // at execute time, and only for the values a run actually consumes.
-        self.output_cache
-            .mark_available(&self.program, &mut self.cache);
         Ok(())
     }
 
@@ -244,23 +229,12 @@ impl ExecutionEngine {
         progress: Option<&UnboundedSender<RunProgress>>,
         cancel: CancelToken,
     ) -> Result<ExecutionStats> {
-        // Phase 2 + 2b: schedule into the reusable plan buffer (node digests were
-        // recomputed at `update` and persist across re-executes), then read the
-        // disk-cached values the schedule will consume (the frontier feeding
-        // executing nodes) into RAM — values behind a pruned producer stay on disk.
-        // A frontier blob that fails to load clears its own availability, so we
-        // re-plan to schedule that node for recompute instead of pruning it behind an
-        // absent value; each failure clears one flag, so this converges.
-        loop {
-            self.planner
-                .plan(&self.program, &self.cache, &seeds, &mut self.plan)?;
-            if self
-                .output_cache
-                .hydrate_frontier(&self.program, &self.plan, &mut self.cache)
-            {
-                break;
-            }
-        }
+        // Phase 2: schedule into the reusable plan buffer. Purely structural now —
+        // reachability + topological order + output usage, no cache/digest state. Every
+        // reachable node is scheduled; the executor computes each node's digest as it
+        // reaches it (producers first) and decides reuse-from-RAM / load-from-disk /
+        // recompute inline, so the disk frontier is materialized lazily during the run.
+        self.planner.plan(&self.program, &seeds, &mut self.plan)?;
 
         // Phase 3: run the schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), not batched here — so a long run's earlier
@@ -280,8 +254,11 @@ impl ExecutionEngine {
 
         // Phase 3b: reclaim RAM from prior-run values this run left untouched and
         // that the disk store (written per-node above) can serve again on demand.
+        let executor = &self.executor;
         self.output_cache
-            .evict_unused(&self.program, &self.plan, &mut self.cache);
+            .evict_unused(&self.program, &self.plan, &mut self.cache, |idx| {
+                executor.ran(idx)
+            });
 
         stats.triggered_events = seeds.events;
         // Annotate with how the graph was flattened so the stats' flat ids
@@ -365,8 +342,11 @@ impl ExecutionEngine {
             event_triggers,
             events: events.to_vec(),
         };
-        self.planner
-            .plan(&self.program, &self.cache, &seeds, &mut self.plan)
+        self.planner.plan(&self.program, &seeds, &mut self.plan)
+    }
+
+    pub(crate) fn by_id(&self, node_id: &NodeId) -> Option<&ExecutionNode> {
+        self.program.e_nodes.by_key(node_id)
     }
 
     pub(crate) fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
@@ -393,13 +373,13 @@ impl ExecutionEngine {
         &self.plan.output_usage[e_node.outputs.range()]
     }
 
-    pub(crate) fn runtime_slot(&self, e_node: &ExecutionNode) -> &cache::RuntimeSlot {
-        self.cache.slots.by_key(&e_node.id).unwrap()
+    /// Whether node `idx` recomputed (rather than reused a cache) in the last run.
+    pub(crate) fn node_ran(&self, idx: program::NodeIdx) -> bool {
+        self.executor.ran(idx)
     }
 
-    /// Iterator over runtime slots, index-aligned to `e_nodes`.
-    pub(crate) fn runtime_slots(&self) -> std::slice::Iter<'_, cache::RuntimeSlot> {
-        self.cache.slots.iter()
+    pub(crate) fn runtime_slot(&self, e_node: &ExecutionNode) -> &cache::RuntimeSlot {
+        self.cache.slots.by_key(&e_node.id).unwrap()
     }
 
     /// Seed a node's cached output (simulating a prior run): set the value and

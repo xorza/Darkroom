@@ -1,0 +1,22 @@
+    // A file-cache node is keyed on its path input alone — input 0 can be
+    // impure/expensive and it still presents a digest (the reproducibility boundary).
+    if matches!(e_node.special, Some(SpecialNode::CachePassthrough { .. })) {
+        return file_cache_digest(program.node_inputs(e_node));
+    } - replace with precheck
+
+
+      if pre_check.is_none() {
+                    hash_fs_content(&mut hasher, value);
+                }
+
+
+
+                    let executor = &self.executor;
+        self.output_cache
+            .evict_unused(&self.program, &self.plan, &mut self.cache, |idx| {
+                executor.ran(idx)
+            });
+
+
+
+            ExecutionPlan

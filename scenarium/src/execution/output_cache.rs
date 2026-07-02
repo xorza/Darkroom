@@ -1,10 +1,8 @@
-//! The unified output cache: persist a node's outputs to a file and hydrate them
-//! back so the planner prunes the node's recompute. Loading is two-staged — a cheap
-//! `update`-time availability flag ([`OutputCache::mark_available`], a `stat` + codec
-//! check, no bytes) that lets the planner prune, then an on-demand read of only the
-//! values a run or an inspection touches ([`OutputCache::hydrate_frontier`]) — so a
-//! disk-cached value behind another never enters RAM. Two policies over the one
-//! storage primitive ([`blob`]), sharing the availability/load path and one store loop:
+//! The unified output cache: persist a node's outputs to a file and hydrate them back
+//! so the executor reuses them instead of recomputing. Driven entirely at *execution*
+//! time — the planner is structural and knows nothing about the cache. Two policies over
+//! the one storage primitive ([`blob`]), differing only in [`OutputCache::target`] (how
+//! a node maps to a file) and whether a present blob is rewritten:
 //!
 //! - **content-addressed** — a `persist` node's outputs at `<disk_root>/<hex(digest)>`,
 //!   keyed by its content digest. Reproducible: any upstream change re-keys it (so
@@ -14,24 +12,22 @@
 //!   manages invalidation (delete the file, or the `bypass` toggle). See
 //!   `README.md` Part C.
 //!
-//! The two differ only in [`OutputCache::target`] (how a node maps to a file) and
-//! whether a present blob is rewritten — everything else is shared.
-//!
-//! **Lifecycle (the call order is the contract).** The engine drives these in a
-//! fixed sequence; each step depends on the previous:
-//! 1. `update` → [`mark_available`](OutputCache::mark_available): flag on-disk blobs
-//!    (no read), so the next plan can prune them.
-//! 2. `execute`, per attempt → plan, then
-//!    [`hydrate_frontier`](OutputCache::hydrate_frontier): read the frontier the
-//!    schedule consumes. A failed read clears that flag and returns `false`, so the
-//!    engine re-plans (the failed node then recomputes) — this is why hydration runs
-//!    *after* planning and the two loop until it succeeds.
-//! 3. run → [`store_node`](OutputCache::store_node): the executor calls this for each
-//!    node the moment it finishes, so its blob is durable before the next node runs (a
-//!    later failure or cancel can't lose the earlier nodes' caches).
+//! **Lifecycle (all execution-time).** As the executor reaches each node (producer
+//! first) and computes its digest:
+//! 1. [`mark_on_disk_if_present`](OutputCache::mark_on_disk_if_present): if a decodable
+//!    blob exists for that digest, flag the slot [`ValueCache::OnDisk`] and reuse the
+//!    node without running it — a cheap `stat`, no read.
+//! 2. [`hydrate_slot`](OutputCache::hydrate_slot): a running consumer reading a bound
+//!    input pulls the producer's blob into RAM on demand (`collect_inputs`), so a
+//!    disk-cached value behind another reused node never enters RAM. A failed read
+//!    deletes the bad blob and drops the consumer for this run (it recomputes next
+//!    reopen).
+//! 3. [`store_node`](OutputCache::store_node): the executor calls this the moment a node
+//!    finishes, so its blob is durable before the next node runs (a later failure or
+//!    cancel can't lose the earlier nodes' caches).
 //! 4. after the run → [`evict_unused`](OutputCache::evict_unused): drop RAM copies the
-//!    run didn't touch but disk can serve again — lossless, because the per-node stores
-//!    already put this run's values on disk.
+//!    run's *executed* nodes didn't produce or read but disk can serve again — lossless,
+//!    because the per-node stores already put this run's values on disk.
 //!
 //! [`hydrate_for_inspection`](OutputCache::hydrate_for_inspection) is the off-run
 //! path: an editor query reads a node's value, loading its blob on demand.
@@ -47,7 +43,7 @@ use crate::execution::blob;
 use crate::execution::cache::{Cache, ValueCache};
 use crate::execution::digest::Digest;
 use crate::execution::plan::ExecutionPlan;
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeColumn, NodeIdx};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::library::Library;
 use crate::special::SpecialNode;
 
@@ -84,9 +80,6 @@ pub struct OutputCache {
     library: Arc<Library>,
     /// Root of the content-addressed store; `None` ⇒ `persist` nodes memory-only.
     disk_root: Option<PathBuf>,
-    /// Reused "executed or read as frontier" bitset for [`Self::evict_unused`],
-    /// reset per run so eviction doesn't allocate a node-sized `Vec` each time.
-    protected: NodeColumn<bool>,
 }
 
 impl OutputCache {
@@ -95,11 +88,7 @@ impl OutputCache {
     /// `persist` nodes are memory-only; `CachePassthrough` nodes always use their
     /// explicit path).
     pub fn new(library: Arc<Library>, disk_root: Option<PathBuf>) -> Self {
-        Self {
-            library,
-            disk_root,
-            protected: NodeColumn::default(),
-        }
+        Self { library, disk_root }
     }
 
     /// The file node `idx` caches to, or `None` when it doesn't: a
@@ -112,7 +101,7 @@ impl OutputCache {
                 .map(|p| Target::Explicit(PathBuf::from(p)));
         }
         if e_node.persist {
-            let digest = cache.current_digest(idx)?;
+            let digest = cache.slots[idx].current_digest?;
             let mut buf = [0u8; 64];
             return Some(Target::Addressed(
                 self.disk_root.as_ref()?.join(hex(&digest, &mut buf)),
@@ -121,84 +110,41 @@ impl OutputCache {
         None
     }
 
-    /// `update` pass: set each cacheable node whose blob is present on disk and
-    /// decodable for the current digest to [`ValueCache::OnDisk`] — **without reading
-    /// it**. The planner prunes such a node's cone like any cache hit, but the bytes
-    /// are deserialized only on demand (the execution frontier via
-    /// [`Self::hydrate_frontier`], or an inspection read), so a disk-cached value
-    /// sitting behind another disk-cached value never enters RAM. A bypassed cache
-    /// node, a resident hit, a node with no current digest, or one whose outputs lack
-    /// a registered codec is left alone (it recomputes). Reads the node's resolved
-    /// output types off the program's `output_types` pool, so no library is needed
-    /// here for resolution — only this cache's own codec table.
-    ///
-    /// Marking `OnDisk` *drops* any stale resident value the slot held: a value
-    /// produced under a now-superseded digest can't mask the fresh blob at hydrate
-    /// time (the bug the old three-field shape allowed).
-    pub(crate) fn mark_available(&self, program: &ExecutionProgram, cache: &mut Cache) {
-        for idx in program.node_indices() {
-            // Re-evaluate the on-disk claim from scratch each update: drop a stale one
-            // (the blob has since gone), but never a resident value.
-            if matches!(cache.slots[idx].value, ValueCache::OnDisk) {
-                cache.slots[idx].clear_output();
-            }
-            if is_bypassed(program, idx) || cache.is_resident_hit(idx) {
-                continue;
-            }
-            if cache.current_digest(idx).is_none() {
-                continue;
-            }
-            let Some(target) = self.target(program, idx, cache) else {
-                continue;
-            };
-            if self.outputs_decodable(program.node_output_types(&program.e_nodes[idx]))
-                && target.path().exists()
-            {
-                cache.slots[idx].value = ValueCache::OnDisk;
-            }
-        }
-    }
-
-    /// Read into RAM every disk-cached value an executing node will actually
-    /// consume: walk `execute_order`, and for each `Bind` input whose producer the
-    /// planner serves from cache, deserialize its blob now. Producers *behind* a
-    /// pruned producer are never referenced here, so a disk-cached chain loads only
-    /// its frontier.
-    ///
-    /// Returns whether every such producer is now resident. A blob that fails to
-    /// load (corrupt, deleted, undecodable) has its `disk_available` cleared by
-    /// [`Self::hydrate_slot`] and makes this return `false`, so the caller re-plans:
-    /// the cleared node is then scheduled to recompute rather than pruned behind a
-    /// value that isn't there (which would trip the executor's "value present"
-    /// invariant). Each failure clears one flag, so the re-plan loop converges.
-    pub(crate) fn hydrate_frontier(
+    /// The executor's per-node "reuse from disk?" check, run once a node's digest is
+    /// computed: if a decodable blob exists on disk for that digest, flag the slot
+    /// [`ValueCache::OnDisk`] (dropping any stale resident value produced under a
+    /// superseded digest) and return `true` — the node is served without running. The
+    /// bytes stay on disk; they load lazily only when a running consumer reads the value
+    /// ([`Self::hydrate_slot`], driven from `collect_inputs`), so a disk-cached value
+    /// behind another never enters RAM. A bypassed cache-passthrough always recomputes.
+    /// Reads the node's resolved output types off the program's `output_types` pool, so
+    /// only this cache's codec table is needed.
+    pub(crate) fn mark_on_disk_if_present(
         &self,
         program: &ExecutionProgram,
-        plan: &ExecutionPlan,
+        idx: NodeIdx,
         cache: &mut Cache,
     ) -> bool {
-        let mut all_loaded = true;
-        for &e_idx in &plan.execute_order {
-            let span = program.e_nodes[e_idx].inputs;
-            for input in &program.inputs[span.range()] {
-                if let ExecutionBinding::Bind(addr) = &input.binding {
-                    // Only a producer the planner serves from cache needs loading; a
-                    // producer that will execute fills its own slot during the run.
-                    if plan.verdicts[addr.target_idx].is_cached()
-                        && !self.hydrate_slot(program, cache, addr.target_idx)
-                    {
-                        all_loaded = false;
-                    }
-                }
-            }
+        if is_bypassed(program, idx) {
+            return false;
         }
-        all_loaded
+        let Some(target) = self.target(program, idx, cache) else {
+            return false;
+        };
+        if self.outputs_decodable(program.node_output_types(&program.e_nodes[idx]))
+            && target.path().exists()
+        {
+            cache.slots[idx].value = ValueCache::OnDisk;
+            true
+        } else {
+            false
+        }
     }
 
     /// Materialize node `idx` plus the producers feeding its inputs — the values an
     /// inspection of `idx` reads (its own outputs and its inputs' resolved values).
     /// Lets a disk-cached node no run touched still show its value when the editor
-    /// selects it, without `mark_available` having eagerly loaded every blob.
+    /// selects it, without the run having eagerly loaded every blob.
     pub(crate) fn hydrate_for_inspection(
         &self,
         program: &ExecutionProgram,
@@ -217,17 +163,21 @@ impl OutputCache {
     /// Deserialize node `idx`'s disk blob into its slot. Returns whether the slot is
     /// resident afterward: `true` if already resident or the read succeeded. On a read
     /// failure (codec gone, corrupt, an incompatible blob format, or deleted) the file is
-    /// **deleted** and the stale `OnDisk` flag cleared, so the re-plan recomputes the
-    /// node *and* its store writes a fresh blob — without the delete, `store_node`'s
-    /// skip-if-exists would keep the broken file and the node would recompute on every
-    /// run. Returns `false`. A blob can't be of the *wrong type* for a matching digest:
-    /// the output signature is folded into the digest
-    /// ([`Cache::recompute_digests`](crate::execution::cache::Cache::recompute_digests)),
+    /// **deleted** and the `OnDisk` flag cleared, so the demanding consumer is dropped
+    /// this run and the *next* reopen recomputes the node + rewrites a fresh blob —
+    /// without the delete, `store_node`'s skip-if-exists would keep the broken file
+    /// forever. Returns `false`. A blob can't be of the *wrong type* for a matching
+    /// digest: the output signature is folded into the digest ([`digest::output_digest`]),
     /// so a redefined output re-keys rather than colliding.
-    fn hydrate_slot(&self, program: &ExecutionProgram, cache: &mut Cache, idx: NodeIdx) -> bool {
+    pub(crate) fn hydrate_slot(
+        &self,
+        program: &ExecutionProgram,
+        cache: &mut Cache,
+        idx: NodeIdx,
+    ) -> bool {
         // A fresh value already in RAM needs no load. A *stale* resident value can't
-        // reach here: `mark_available` demotes "stale + blob on disk" to `OnDisk`, and
-        // "stale, no blob" isn't pruned (so it's never a cached frontier producer).
+        // reach here: `mark_on_disk_if_present` demotes "stale + blob on disk" to
+        // `OnDisk` (dropping the stale value) before a consumer would read it.
         if cache.is_resident_hit(idx) {
             return true;
         }
@@ -235,7 +185,7 @@ impl OutputCache {
             return false;
         }
         // The slot claimed an on-disk blob. Load it; on success it's resident.
-        if let Some(digest) = cache.current_digest(idx)
+        if let Some(digest) = cache.slots[idx].current_digest
             && let Some(target) = self.target(program, idx, cache)
         {
             if let Some(values) = blob::read(target.path(), &self.library) {
@@ -259,26 +209,33 @@ impl OutputCache {
     /// Lossless: a value with no blob (Memory-only, impure) is kept, so eviction never
     /// forces a recompute.
     pub(crate) fn evict_unused(
-        &mut self,
+        &self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
         cache: &mut Cache,
+        ran: impl Fn(NodeIdx) -> bool,
     ) {
-        // Protected = nodes this run executed, plus the cached producers it read as
-        // frontier inputs. Any other resident value is an untouched prior-run leftover.
-        // The bitset is a reused scratch column, reset to the node count each run.
-        self.protected.reset(program.e_nodes.len(), false);
-        for &e_idx in &plan.execute_order {
-            self.protected[e_idx] = true;
+        // Protected = nodes this run actually recomputed, plus the producers they read
+        // as frontier inputs. A *reused* node (served from cache, its lambda skipped)
+        // isn't protected on its own account — only if a node that ran read its value —
+        // so a disk-cached value behind another reused node is reclaimed. Any other
+        // resident value is an untouched prior-run leftover. One node-sized bitset, local
+        // to the call (this runs once per run, so a fresh `Vec<bool>` is cheap enough).
+        let mut protected = vec![false; program.e_nodes.len()];
+        for &e_idx in &plan.process_order {
+            if !ran(e_idx) {
+                continue;
+            }
+            protected[e_idx.idx()] = true;
             let span = program.e_nodes[e_idx].inputs;
             for input in &program.inputs[span.range()] {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
-                    self.protected[addr.target_idx] = true;
+                    protected[addr.target_idx.idx()] = true;
                 }
             }
         }
         for idx in program.node_indices() {
-            if self.protected[idx] || cache.slots[idx].output_values().is_none() {
+            if protected[idx.idx()] || cache.slots[idx].output_values().is_none() {
                 continue;
             }
             // Reloadable iff a blob for the current digest is on disk — only then is
@@ -293,10 +250,10 @@ impl OutputCache {
     }
 
     /// Whether every output of node `idx` could be decoded back from a blob: each
-    /// `Custom` output type has a codec in this cache's library. `types` are the
-    /// node's resolved output types off its slot, so this predicts (without reading)
-    /// whether `blob::read` would succeed — `mark_available` never flags a node whose
-    /// later frontier load would fail and trip the executor's "value present"
+    /// `Custom` output type has a codec in this cache's library. `types` are the node's
+    /// resolved output types off the program pool, so this predicts (without reading)
+    /// whether `blob::read` would succeed — `mark_on_disk_if_present` never flags a node
+    /// whose later on-demand load would fail and trip the executor's "value present"
     /// invariant. An unresolved type (`Null`) imposes no constraint.
     fn outputs_decodable(&self, types: &[DataType]) -> bool {
         types.iter().all(|ty| match ty {
@@ -332,7 +289,7 @@ impl OutputCache {
         let target = self.target(program, idx, cache);
         let outputs = cache
             .is_resident_hit(idx)
-            .then(|| cache.output_values(idx))
+            .then(|| cache.slots[idx].output_values())
             .flatten();
         async move {
             let (Some(target), Some(outputs)) = (target, outputs) else {

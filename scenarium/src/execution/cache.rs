@@ -1,8 +1,8 @@
 //! The per-node cross-run runtime cache: output values + content digests + node
 //! state, keyed by `NodeId` and index-aligned to the program's `e_nodes`. Owned
-//! by the [`ExecutionEngine`](crate::execution::ExecutionEngine); written by the
-//! executor's run loop, read by the planner's availability check
-//! ([`Cache::is_available`]), and reconciled against the node set at each `update`.
+//! by the [`ExecutionEngine`](crate::execution::ExecutionEngine); the executor's run
+//! loop computes each node's digest, writes its outputs, and reads its reuse state
+//! ([`Cache::is_resident_hit`]). Reconciled against the node set at each `update`.
 //! Per-run results (errors, timings) are *not* here — they belong to a single run
 //! and live on the run, not the cache.
 
@@ -10,17 +10,15 @@ use common::{KeyIndexKey, KeyIndexVec};
 
 use crate::common::shared_any_state::SharedAnyState;
 use crate::data::DynamicValue;
-use crate::execution::digest::{Digest, DigestEngine, NodeDigests};
-use crate::execution::program::{ExecutionNode, ExecutionProgram, NodeIdx};
+use crate::execution::digest::Digest;
+use crate::execution::program::{ExecutionNode, NodeIdx};
 use crate::graph::NodeId;
 use crate::prelude::AnyState;
 
-/// One node's cached output: an explicit three-state machine replacing what were
-/// three loosely-coupled fields (`output_values` / `output_digest` /
-/// `disk_available`). The states are mutually exclusive, so the previously-
-/// representable bad combinations — "resident *and* flagged on disk", "value present
-/// but no digest tracked", a stale resident value masking a fresh disk blob — can't
-/// be built. The node's *identity* digest is a separate axis
+/// One node's cached output as an explicit three-state machine. The states are mutually
+/// exclusive, so the bad combinations — "resident *and* flagged on disk", "value present
+/// but no digest tracked", a stale resident value masking a fresh disk blob — can't be
+/// built. The node's *identity* digest is a separate axis
 /// ([`RuntimeSlot::current_digest`]); this models only the value.
 #[derive(Default, Debug)]
 pub(crate) enum ValueCache {
@@ -33,10 +31,11 @@ pub(crate) enum ValueCache {
         values: Vec<DynamicValue>,
         produced_under: Option<Digest>,
     },
-    /// Not in RAM, but a decodable blob exists on disk for the slot's *current*
-    /// digest — flagged at `update` without loading (see [`Cache::is_available`]),
-    /// deserialized on demand (execution frontier / inspection). Lets a disk-cached
-    /// value behind another disk-cached value never enter RAM.
+    /// Not in RAM, but a decodable blob exists on disk for the slot's *current* digest —
+    /// flagged during the run by [`OutputCache::mark_on_disk_if_present`](crate::execution::output_cache::OutputCache::mark_on_disk_if_present)
+    /// (or demoted here from a resident value by `evict_unused`) without loading,
+    /// deserialized on demand (a running consumer's `collect_inputs`, or an inspection).
+    /// Lets a disk-cached value behind another disk-cached value never enter RAM.
     OnDisk,
 }
 
@@ -49,21 +48,11 @@ pub(crate) struct RuntimeSlot {
     pub(crate) id: NodeId,
     pub(crate) state: AnyState,
     pub(crate) event_state: SharedAnyState,
-    /// The node's current content digest (`None` when not reproducible), recomputed
-    /// by the engine at `update`. A resident value hits iff its `produced_under`
-    /// equals this — so a flipped-back parameter can't serve a stale value; the run
-    /// stamps it on success.
+    /// The node's current output digest — its content-addressed key (`None` when not
+    /// reproducible), computed and stamped by the executor as it reaches the node during
+    /// the run ([`digest::output_digest`]). A resident value hits iff its
+    /// `produced_under` equals this — so a flipped-back input can't serve a stale value.
     pub(crate) current_digest: Option<Digest>,
-    /// The node's current *local* digest (`digest::local_digest`), recomputed at
-    /// `update`. Non-tainting: it captures func id/version, output types, const
-    /// inputs, and wiring — everything *except* producer outputs. Paired with the
-    /// executor's runtime `dirty` bits, an unchanged local digest lets a `Pure` node
-    /// reuse its output even when it's tainted (no content digest).
-    pub(crate) current_local: Digest,
-    /// The local digest the resident output was produced under, stamped on a
-    /// successful run. `Some(current_local)` means the node's own inputs are unchanged
-    /// since it last produced. Only consulted when a value is resident.
-    pub(crate) produced_local: Option<Digest>,
     pub(crate) value: ValueCache,
 }
 
@@ -82,12 +71,6 @@ impl KeyIndexKey<NodeId> for RuntimeSlot {
 }
 
 impl RuntimeSlot {
-    fn reset_state(&mut self) {
-        self.state = AnyState::default();
-        self.event_state = SharedAnyState::default();
-        self.value = ValueCache::Empty;
-    }
-
     /// Drop the cached output, leaving the persistent `state`/`event_state` intact.
     /// The run loop calls this on the failure paths — a node that errored or was
     /// skipped for an errored dependency — so a stale prior value isn't left resident
@@ -103,16 +86,6 @@ impl RuntimeSlot {
             ValueCache::Resident { values, .. } => Some(values),
             _ => None,
         }
-    }
-
-    /// Whether the node's *local* inputs (func + const values + wiring) are unchanged
-    /// since its resident output was produced — the part of its identity that doesn't
-    /// depend on producer outputs. The caller pairs this with clean upstream (all
-    /// producers unchanged this run) to let a `Pure` node reuse. Meaningful only when
-    /// a value is resident; a cleared slot's stale `produced_local` is guarded by the
-    /// caller's `output_values().is_some()` check.
-    pub(crate) fn local_unchanged(&self) -> bool {
-        self.produced_local == Some(self.current_local)
     }
 
     /// Prepare the slot for a lambda invocation and hand back *disjoint* mutable
@@ -144,36 +117,23 @@ impl RuntimeSlot {
         }
     }
 
-    /// Stamp the resident value with the node's current content + local digests on a
-    /// successful run: `produced_under` turns it into a cache hit for the next plan,
-    /// `produced_local` records that its own inputs are unchanged as of now (for the
-    /// executor's runtime reuse). No-op if not `Resident`.
+    /// Stamp the resident value with the node's current output digest on a successful
+    /// run: `produced_under` turns it into a cache hit for the next run (RAM) and the
+    /// key its disk blob is stored under. No-op if not `Resident`.
     pub(crate) fn stamp_produced(&mut self) {
         let digest = self.current_digest;
-        let local = self.current_local;
         if let ValueCache::Resident { produced_under, .. } = &mut self.value {
             *produced_under = digest;
-            self.produced_local = Some(local);
         }
-    }
-
-    /// Store both freshly-recomputed identity digests (see [`NodeDigests`]), keeping
-    /// `current_digest` and `current_local` in sync from one `recompute` call.
-    pub(crate) fn set_digests(&mut self, digests: NodeDigests) {
-        self.current_digest = digests.content;
-        self.current_local = digests.local;
     }
 }
 
 /// The per-node cross-run cache. `slots` is index-aligned to `program.e_nodes`
-/// via [`Self::reconcile`]; the executor mutates a slot's outputs/state in its
-/// run loop, while the planner reads only [`Self::is_available`].
+/// via [`Self::reconcile`]; the executor computes each node's digest, mutates its
+/// outputs/state, and reads reuse state ([`Self::is_resident_hit`]) in its run loop.
 #[derive(Default, Debug)]
 pub(crate) struct Cache {
     pub(crate) slots: KeyIndexVec<NodeId, RuntimeSlot>,
-    /// One digest engine kept across updates; its working columns are reused (sized
-    /// per recompile) instead of reallocated. Holds no program — that's passed in.
-    digest_engine: DigestEngine,
 }
 
 impl Cache {
@@ -194,42 +154,6 @@ impl Cache {
         }
     }
 
-    pub(crate) fn reset_states(&mut self) {
-        for slot in self.slots.iter_mut() {
-            slot.reset_state();
-        }
-    }
-
-    /// Refresh every slot's `current_digest` and `current_local`. Compile-stable
-    /// (consts / bindings / func versions / output signatures are fixed between
-    /// updates), so the engine calls this once per `update`; the planner and run read
-    /// the stored values rather than re-walking the cone each execute. The digest
-    /// folds the program's resolved output types (`ExecutionProgram::resolve_output_types`,
-    /// run earlier this update), so a redefined output re-keys the cache.
-    pub(crate) fn recompute_digests(&mut self, program: &ExecutionProgram) {
-        // The output-type pool is resolved by a separate `update` step
-        // (`ExecutionProgram::resolve_output_types`) that must run first — the digest
-        // folds it. Catch a forgotten/incomplete resolve loudly here rather than as a
-        // cryptic out-of-range slice deep in the recursion. O(1), so a release assert.
-        assert_eq!(
-            program.output_types.len(),
-            program.n_outputs,
-            "output types must be resolved before digesting"
-        );
-        self.digest_engine.reset(program);
-        for idx in program.node_indices() {
-            self.slots[idx].set_digests(self.digest_engine.node_digests(program, idx));
-        }
-    }
-
-    pub(crate) fn current_digest(&self, idx: NodeIdx) -> Option<Digest> {
-        self.slots[idx].current_digest
-    }
-
-    pub(crate) fn output_values(&self, idx: NodeIdx) -> Option<&Vec<DynamicValue>> {
-        self.slots[idx].output_values()
-    }
-
     /// Whether node `idx` holds a *resident* output valid for its current digest:
     /// the value is in RAM and was produced under this digest. A `None` current
     /// digest (impure cone) never hits, and a value produced under a *different*
@@ -242,18 +166,8 @@ impl Cache {
         }
     }
 
-    /// Whether node `idx`'s output is *available* for the current digest — resident
-    /// in RAM, or sitting on disk as a decodable blob ([`ValueCache::OnDisk`], flagged
-    /// at `update` without loading it). This is what the planner prunes on: a node
-    /// whose value can be served — from either tier — needn't be executed. The disk
-    /// tier is materialized lazily, so a disk-cached cone behind another disk-cached
-    /// node is pruned here without ever being read into RAM.
-    pub(crate) fn is_available(&self, idx: NodeIdx) -> bool {
-        self.is_resident_hit(idx) || matches!(self.slots[idx].value, ValueCache::OnDisk)
-    }
-
     /// Install a disk-loaded output into a slot under `digest` (the node's current
-    /// digest), turning the next planner check into a plain RAM hit.
+    /// digest), turning a later reuse check into a plain RAM hit.
     pub(crate) fn hydrate(&mut self, idx: NodeIdx, values: Vec<DynamicValue>, digest: Digest) {
         self.slots[idx].value = ValueCache::Resident {
             values,
@@ -329,58 +243,6 @@ mod tests {
         assert!(
             cache.is_resident_hit(NodeIdx(3)),
             "values under the current digest is a hit"
-        );
-    }
-
-    /// `is_available` widens the resident hit with the disk tier: a node with no
-    /// resident value but a `disk_available` flag is *available* (the planner prunes
-    /// it) yet not a resident hit (its bytes aren't in RAM until hydrated). The flag
-    /// never resurrects a value the resident check would reject for a stale digest —
-    /// it's an independent "a blob exists" bit, gated by the same `update`.
-    #[test]
-    fn is_available_unions_resident_hit_and_disk_flag() {
-        let d = Digest([7u8; 32]);
-        let mut cache = Cache::default();
-
-        // 0: nothing resident, but a decodable blob was flagged on disk.
-        cache.slots.add(RuntimeSlot {
-            id: NodeId::from_u128(1),
-            current_digest: Some(d),
-            value: ValueCache::OnDisk,
-            ..Default::default()
-        });
-        // 1: a plain resident hit, no disk flag.
-        cache.slots.add(RuntimeSlot {
-            id: NodeId::from_u128(2),
-            current_digest: Some(d),
-            value: ValueCache::Resident {
-                values: out(),
-                produced_under: Some(d),
-            },
-            ..Default::default()
-        });
-        // 2: neither — a true miss.
-        cache.slots.add(RuntimeSlot {
-            id: NodeId::from_u128(3),
-            current_digest: Some(d),
-            ..Default::default()
-        });
-
-        assert!(
-            !cache.is_resident_hit(NodeIdx(0)),
-            "disk-only is not resident"
-        );
-        assert!(
-            cache.is_available(NodeIdx(0)),
-            "disk-only is available (prunable)"
-        );
-        assert!(
-            cache.is_resident_hit(NodeIdx(1)) && cache.is_available(NodeIdx(1)),
-            "resident ⇒ both"
-        );
-        assert!(
-            !cache.is_available(NodeIdx(2)),
-            "no value, no blob ⇒ unavailable"
         );
     }
 

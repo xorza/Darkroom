@@ -5,7 +5,6 @@
 //! propagation that resolves each node's cached/wants-execute state. The
 //! `Planner` owns the reusable DFS scratch so a repeated plan allocates nothing.
 
-use crate::execution::cache::Cache;
 use crate::execution::plan::{ExecutionPlan, NodeVerdict, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeColumn, NodeIdx};
 use crate::execution::{Error, Result, RunSeeds, validate};
@@ -59,7 +58,6 @@ impl Planner {
     pub(crate) fn plan(
         &mut self,
         program: &ExecutionProgram,
-        cache: &Cache,
         seeds: &RunSeeds,
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
@@ -67,9 +65,8 @@ impl Planner {
 
         self.collect_roots(program, seeds);
 
-        let result = self.walk_backward_collect_order(program, cache, plan);
+        let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
-            self.walk_backward_collect_execute_order(program, plan);
             validate::schedule(program, plan);
         }
         result
@@ -129,7 +126,6 @@ impl Planner {
     fn walk_backward_collect_order(
         &mut self,
         program: &ExecutionProgram,
-        cache: &Cache,
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
         plan.process_order.clear();
@@ -152,22 +148,18 @@ impl Planner {
                     assert_eq!(self.color[idx], Color::Gray);
                     self.color[idx] = Color::Black;
                     plan.process_order.push(idx);
-                    // Cached if the output is available (resident or a flagged disk
-                    // blob); otherwise runnable unless a required input is unbound or
-                    // fed by a non-runnable producer. Post-order ⇒ deps already
-                    // verdicted, so `input_missing` reads settled values.
-                    plan.verdicts[idx] = if cache.is_available(idx) {
-                        NodeVerdict::Cached
+                    // Runnable unless a required input is unbound or fed by a
+                    // non-runnable producer. Post-order ⇒ deps already verdicted, so
+                    // `input_missing` reads settled values. Whether the node's output is
+                    // reused from cache is decided at execution, not here.
+                    let inputs = program.e_nodes[idx].inputs;
+                    let missing = program.inputs[inputs.range()]
+                        .iter()
+                        .any(|e_input| input_missing(e_input, &plan.verdicts));
+                    plan.verdicts[idx] = if missing {
+                        NodeVerdict::MissingInputs
                     } else {
-                        let inputs = program.e_nodes[idx].inputs;
-                        let missing = program.inputs[inputs.range()]
-                            .iter()
-                            .any(|e_input| input_missing(e_input, &plan.verdicts));
-                        if missing {
-                            NodeVerdict::MissingInputs
-                        } else {
-                            NodeVerdict::Execute
-                        }
+                        NodeVerdict::Execute
                     };
                     continue;
                 }
@@ -208,83 +200,11 @@ impl Planner {
 
         Ok(())
     }
-
-    // Prunes `process_order` to only nodes whose output is actually read by an
-    // executing consumer this run. A filter over `wants_execute` is not
-    // equivalent: a node can have `wants_execute = true` while its sole consumer
-    // is cached and won't read it — the forward pass can't see that because
-    // "needed by consumer" is a backward fact.
-    fn walk_backward_collect_execute_order(
-        &mut self,
-        program: &ExecutionProgram,
-        plan: &mut ExecutionPlan,
-    ) {
-        plan.execute_order.clear();
-        self.stack.clear();
-
-        self.color.reset(program.e_nodes.len(), Color::White);
-
-        for e_node_idx in self.roots.iter().copied() {
-            self.stack.push(Visit {
-                e_node_idx,
-                cause: VisitCause::Root,
-            });
-        }
-
-        while let Some(visit) = self.stack.pop() {
-            let idx = visit.e_node_idx;
-
-            match visit.cause {
-                VisitCause::Root | VisitCause::Visit => {}
-                VisitCause::Done => {
-                    assert_eq!(self.color[idx], Color::Gray);
-                    plan.execute_order.push(idx);
-                    self.color[idx] = Color::Black;
-                    continue;
-                }
-            }
-
-            match self.color[idx] {
-                Color::White => {}
-                Color::Black => continue,
-                // Pass 1 would have rejected any cycle; a Gray revisit in pass 2
-                // means our DFS invariant is broken.
-                Color::Gray => unreachable!("cycle should be detected in pass 1"),
-            }
-
-            if !plan.verdicts[idx].wants_execute() {
-                self.color[idx] = Color::Black;
-                continue;
-            }
-
-            self.color[idx] = Color::Gray;
-            self.stack.push(Visit {
-                e_node_idx: idx,
-                cause: VisitCause::Done,
-            });
-
-            let span = program.e_nodes[idx].inputs;
-            for e_input in &program.inputs[span.range()] {
-                // Recurse only into a producer that will itself run; a cached
-                // producer's value is already available, so its cone is pruned.
-                if let Some(addr) = e_input.binding.as_bind()
-                    && plan.verdicts[addr.target_idx].wants_execute()
-                {
-                    self.stack.push(Visit {
-                        e_node_idx: addr.target_idx,
-                        cause: VisitCause::Visit,
-                    });
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution::cache::ValueCache;
-    use crate::execution::digest::Digest;
     use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
     use crate::graph::NodeId;
     use crate::prelude::FuncId;
@@ -334,18 +254,9 @@ mod tests {
         })
     }
 
-    /// Plan `terminals` over `fix`, with the slots at `cached` marked as RAM hits.
-    fn plan_with_cached(fix: &Fix, cached: &[NodeIdx]) -> ExecutionPlan {
-        let mut cache = Cache::default();
-        cache.reconcile(&fix.program.e_nodes);
-        for &idx in cached {
-            let digest = Digest([idx.idx() as u8 + 1; 32]);
-            cache.slots[idx].current_digest = Some(digest);
-            cache.slots[idx].value = ValueCache::Resident {
-                values: Vec::new(),
-                produced_under: Some(digest),
-            };
-        }
+    /// Plan `terminals` over `fix`. Purely structural — no cache state; the executor
+    /// decides cached-vs-recompute at run time.
+    fn plan(fix: &Fix) -> ExecutionPlan {
         let mut planner = Planner::default();
         let mut plan = ExecutionPlan::default();
         let seeds = RunSeeds {
@@ -353,18 +264,15 @@ mod tests {
             ..Default::default()
         };
         planner
-            .plan(&fix.program, &cache, &seeds, &mut plan)
+            .plan(&fix.program, &seeds, &mut plan)
             .expect("no cycle");
         plan
     }
 
-    fn plan(fix: &Fix) -> ExecutionPlan {
-        plan_with_cached(fix, &[])
-    }
-
     #[test]
     fn chain_orders_deps_before_consumers_and_schedules_all() {
-        // A → B → C (C terminal), nothing cached.
+        // A → B → C (C terminal). Every reachable node is scheduled — the planner is
+        // structural, so nothing is pruned as "cached" here (that's the executor's call).
         let mut f = Fix::default();
         let a = f.node(false, &[], 1);
         let b = f.node(false, &[(false, bind(a, 0))], 1);
@@ -372,30 +280,10 @@ mod tests {
 
         let p = plan(&f);
         assert_eq!(p.process_order, vec![a, b, c], "post-order: deps first");
-        assert_eq!(p.execute_order, vec![a, b, c]);
         for idx in [a, b, c] {
             assert!(p.verdicts[idx].wants_execute());
-            assert!(!p.verdicts[idx].is_cached());
             assert!(!p.verdicts[idx].missing_required_inputs());
         }
-    }
-
-    #[test]
-    fn cached_consumer_prunes_its_producer_from_execute_order() {
-        // A → B (B terminal). B is cached. A "wants" to run, but its only consumer
-        // won't read it, so A must not be scheduled — the case a plain
-        // filter(wants_execute) would get wrong.
-        let mut f = Fix::default();
-        let a = f.node(false, &[], 1);
-        let b = f.node(true, &[(false, bind(a, 0))], 1);
-
-        let p = plan_with_cached(&f, &[b]);
-        assert!(p.verdicts[b].is_cached());
-        assert!(p.verdicts[a].wants_execute(), "A wants to run…");
-        assert!(
-            p.execute_order.is_empty(),
-            "…but isn't scheduled: its sole consumer is cached"
-        );
     }
 
     #[test]
@@ -416,7 +304,6 @@ mod tests {
                 "node {idx:?} not runnable"
             );
         }
-        assert!(p.execute_order.is_empty());
     }
 
     #[test]
@@ -428,7 +315,7 @@ mod tests {
         let p = plan(&f);
         assert!(!p.verdicts[a].missing_required_inputs());
         assert!(p.verdicts[a].wants_execute());
-        assert_eq!(p.execute_order, vec![a]);
+        assert_eq!(p.process_order, vec![a]);
     }
 
     #[test]
@@ -450,15 +337,13 @@ mod tests {
         f.node(true, &[(false, bind(NodeIdx(1), 0))], 1); // A (idx 0) binds B
         f.node(false, &[(false, bind(NodeIdx(0), 0))], 1); // B (idx 1) binds A
 
-        let mut cache = Cache::default();
-        cache.reconcile(&f.program.e_nodes);
         let mut planner = Planner::default();
         let mut plan = ExecutionPlan::default();
         let seeds = RunSeeds {
             terminals: true,
             ..Default::default()
         };
-        let result = planner.plan(&f.program, &cache, &seeds, &mut plan);
+        let result = planner.plan(&f.program, &seeds, &mut plan);
         assert!(matches!(result, Err(Error::CycleDetected { .. })));
     }
 }

@@ -84,45 +84,46 @@ plus flat `inputs`/`events` pools indexed by `Span` slices per node; outputs are
 span-only. `ExecutionBinding` (`program.rs:26`) is `None`/`Const`/`Bind(address)`.
 
 **2. Plan — `Planner::plan()` → `ExecutionPlan`** (`planner.rs`, `plan.rs`).
-Reusable `Planner` (`planner.rs:43`) runs backward DFS passes: collect terminals
-(terminal nodes, event subscribers, triggerable events) → post-order
-`process_order` (deps first) → forward pass resolving cached / wants-execute →
-pruned `execute_order` (only nodes whose output a running consumer reads). The
-cache decision is content-addressed: a node is cached iff its `slot.current_digest`
-(recomputed at `update`) matches its `slot.output_digest`; a `None` digest (impure
-cone) never matches. See `docs/disk-cache-design.md`. `ExecutionPlan` (`plan.rs:24`)
-holds the two orders plus SoA flag columns: `node_flags` and `output_usage`
-(per-output consumer counts; 0 = skip).
+Reusable `Planner` (`planner.rs:43`) is **purely structural** — no cache/digest state.
+One backward DFS: collect terminals (terminal nodes, event subscribers, triggerable
+events) → post-order `process_order` (deps first) — the single schedule, every reachable
+node, producer-first. Whether a node *reuses* a cache or recomputes, and whether it's
+skipped (`MissingInputs`), is decided at execution, not here. `NodeVerdict` (`plan.rs`)
+is just `Execute`/`MissingInputs`. `ExecutionPlan` holds `process_order` + `verdicts` +
+`output_usage` (per-output consumer counts; 0 = skip).
 
 **3. Execute — `Executor::run(program, plan)`** (`executor.rs`).
-`Executor` (`executor.rs:53`) owns cross-run state: `slots: KeyIndexVec<NodeId, RuntimeSlot>`
-(reconciled by id against `e_nodes` after each flatten), the `ContextManager`, and
-the per-node `current_digests` column. `RuntimeSlot` (`executor.rs:29`) caches
-`output_values` + the `output_digest` they were produced under, per-node
-`AnyState`/`SharedAnyState`, and per-run `error`/`run_time`.
-The run loop walks `execute_order`: skip if an upstream errored, resolve each input
-(None/Const/Bind→upstream cached output), set `ctx_manager.current_node` for log
-attribution, await the lambda, store results, and stamp `output_digest` from the
-node's current digest. **Runtime early-cutoff** (`func_lambda::PreCheck`, `NodeRun`
-outcomes): a node reuses its prior output — skipping its lambda and staying clean so
-its own consumers skip in turn (propagation down the cone) — when its inputs are
-wholly unchanged: every Bind-producer stayed clean this run (`NodeRun::Ran` is the
-per-node "dirty" signal, set as each node settles) **and** its own local digest matches
-(`RuntimeSlot::current_local`/`produced_local`) **and** it can vouch its output is then
-unchanged — a **`Pure` node by determinism** (so a Pure node tainted by an impure
-ancestor auto-skips with no pre-check once its upstream is clean), or **any node with a
-pre-check**. A [`PreCheck`](func_lambda.rs) returns a **content `Digest`** of what the
-func actually reads (execution time, so it sees resolved/bound inputs; `Digest::hash`
-builds one); the executor uses it *in place of* the coarse plan-time `local_digest`, so
-an irrelevant file the fingerprint ignores (a `build_masters` `.lcm`, a stray `.txt`)
-can't block reuse even though the plan-time content digest coarsely re-keyed and
-scheduled the node. Being a content key (not a relative "changed?" bit), it's also what
-a disk cache can be keyed on. `local_digest` (`digest.rs`) is the non-tainting
-fallback digest — func id/version, output types, const values, wiring — for
-pre-check-less nodes. Output buffers are never wiped or evicted, so a prior output is
-always there to reuse; a reused node counts as `cached` in stats. This complements the
-plan-time digest cache (which prunes reproducible `Pure` cache-hits before the run
-entirely). When `execute` is given
+`Executor` owns the `ctx_manager` + per-run scratch (invoke buffers + one `outcomes`
+column of [`NodeOutcome`], each `Pending`/`Reused`/`Ran`/`Failed`/`Skipped` carrying its
+own elapsed/error); the cross-run `slots` live on the `Cache`. `RuntimeSlot` (`cache.rs`)
+caches `output_values` + the `produced_under` digest, per-node `AnyState`/`SharedAnyState`.
+
+**One output digest, computed at execution time.** The whole cache keys off a single
+`RuntimeSlot::current_digest` (`digest.rs`), and the executor computes it as it reaches
+each node — the *only* digest computation, replacing the old plan-time `recompute_digests`
++ `mark_available`/`hydrate_frontier`/`is_available` machinery. Walking `process_order`
+producer-first (skipping `MissingInputs` nodes), per node: `digest::output_digest` folds
+func id/version + output types +
+each input (a `Const`'s value, or a `Bind` producer's already-stamped `current_digest`) +,
+for a [`PreCheck`](func_lambda.rs) node, the `Digest` its pre-check returns — a fingerprint
+of the external content it actually read (`Digest::hash` builds one; runs at execution so
+it sees resolved/**bound** inputs). `None` for an `Impure` node with no pre-check
+(never cached). A pre-check node folds its `Const` `FsPath`s *shallowly* (path string only;
+the pre-check owns their content via `hash_fs_content`), so an irrelevant file (a
+`build_masters` `.lcm`, a stray `.txt`) leaves the digest unchanged — it reuses — while a
+real frame change re-keys it. Reuse is uniform: a resident value whose `produced_under ==
+current_digest` (`is_resident_hit`) is served from RAM; else `OutputCache::mark_on_disk_if_present`
+stats a blob for that digest and reuses it (loaded lazily by `hydrate_slot` only when a
+running consumer reads it, so a disk-cached value behind another never enters RAM — this
+is what survives a reopen); else the node runs and `store_node` writes the blob. Downstream
+skip is just digest folding: a producer whose `current_digest` is unchanged leaves its
+consumers' digests unchanged, so an `Impure` pre-check node's clean run lets a `Pure`
+consumer reuse. **Reopen tradeoff:** the planner no longer prunes cached cones, so a
+`Memory` (non-persist) node feeding a disk-cached node *recomputes on reopen* (fresh RAM,
+no blob) even though the reused consumer ignores its value — redundant but outputs-correct;
+within a session it stays RAM-resident and reuses. Output buffers aren't wiped; `evict_unused`
+demotes to disk only values the run's *executed* nodes didn't produce/read. A reused node
+counts as `cached` in stats. When `execute` is given
 a progress `UnboundedSender<RunProgress>`, the loop sends `RunPhase::Started`
 before each lambda and `Finished{elapsed}` after — node ids resolved to authoring
 attribution via the `FlattenMap` so the consumer needn't be. Stats (executed,

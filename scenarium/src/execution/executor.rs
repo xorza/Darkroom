@@ -4,7 +4,7 @@
 //! [`ExecutionProgram`](crate::execution::program::ExecutionProgram), a prepared
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), and that `Cache`,
 //! [`Executor::run`] invokes each scheduled node's lambda and gathers stats.
-//! Per-run results (errors, timings) are columns local to the run, not cache.
+//! Each node's per-run result is one [`NodeOutcome`] in a column local to the run.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -19,63 +19,82 @@ use crate::execution_stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
 use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage};
-use crate::function::FuncBehavior;
 use crate::graph::InputPort;
+use crate::prelude::FuncId;
 
 use crate::execution::RunError;
 use crate::execution::cache::Cache;
+use crate::execution::digest::output_digest;
 use crate::execution::output_cache::OutputCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeColumn, NodeIdx};
 
-/// What became of a node this run — the runtime early-cutoff state, set as each node
-/// settles. Merges the two mutually-exclusive facts a node carries: `Ran` (it
-/// recomputed — the "dirty" signal a consumer's pre-check reads to know a producer
-/// changed) and `Reused` (its pre-check reported unchanged, so its prior output was
-/// served — counted as cached, not executed). `Pending` (default) is a node not
-/// reached this run: cached, or below a cancel/error. "Both dirty and reused" can't
-/// be built.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum NodeRun {
+/// What became of a node this run — the single per-node result column, so the run-time
+/// facts can't contradict (a node can't be `Reused` yet carry a run time, or `Ran` yet
+/// also flagged errored). Carries its own `RunError`/elapsed, so nothing lives in a side
+/// column.
+#[derive(Debug, Clone, Default)]
+enum NodeOutcome {
+    /// Not reached this run: skipped for missing inputs, below a cancel, or unscheduled.
     #[default]
     Pending,
-    Ran,
+    /// Served from a RAM/disk cache under an unchanged digest — counted as cached.
     Reused,
+    /// Its lambda ran and succeeded, taking `secs`.
+    Ran { secs: f64 },
+    /// Its lambda ran but errored — an invoke failure, or a cancel mid-invoke.
+    Failed { secs: f64, error: RunError },
+    /// Never ran — an upstream dependency errored, or a bound input's blob failed to load.
+    Skipped { error: RunError },
 }
 
-impl NodeRun {
-    /// The node recomputed — its consumers must treat its output as changed.
-    fn is_dirty(self) -> bool {
-        matches!(self, NodeRun::Ran)
+impl NodeOutcome {
+    /// The node recomputed its lambda (whether it then succeeded or errored).
+    fn ran(&self) -> bool {
+        matches!(self, NodeOutcome::Ran { .. } | NodeOutcome::Failed { .. })
     }
-    /// The node reused its prior output (pre-check unchanged).
-    fn is_reused(self) -> bool {
-        matches!(self, NodeRun::Reused)
+    /// Elapsed lambda time, for a node that ran.
+    fn elapsed(&self) -> Option<f64> {
+        match self {
+            NodeOutcome::Ran { secs } | NodeOutcome::Failed { secs, .. } => Some(*secs),
+            _ => None,
+        }
+    }
+    /// The run error the node carries — a failed run, or a node skipped for an error.
+    fn error(&self) -> Option<&RunError> {
+        match self {
+            NodeOutcome::Failed { error, .. } | NodeOutcome::Skipped { error } => Some(error),
+            _ => None,
+        }
     }
 }
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
     pub(crate) ctx_manager: ContextManager,
-    /// Per-node invoke scratch, refilled per executed node.
+    /// Per-*invoke* scratch, refilled for each node that runs: its resolved inputs and
+    /// its ports' [`OutputUsage`] flags (sliced from the plan's `output_usage` counts —
+    /// a different, per-output-pool thing, hence the `_scratch` suffix here).
     inputs: Vec<InvokeInput>,
-    output_usage: Vec<OutputUsage>,
-    /// Per-run result columns, indexed by `e_node_idx`. Reused across runs and
-    /// reset to node count at each run's start.
-    errors: NodeColumn<Option<RunError>>,
-    run_times: NodeColumn<f64>,
-    /// Per-run early-cutoff outcome per node (see [`NodeRun`]): a producer's `Ran` is
-    /// the "dirty" signal a consumer's pre-check reads; `Reused` makes stats count the
-    /// node as cached.
-    outcomes: NodeColumn<NodeRun>,
+    output_usage_scratch: Vec<OutputUsage>,
+    /// Per-run outcome per node (see [`NodeOutcome`]), indexed by `e_node_idx`. Reused
+    /// across runs, reset to node count each run. The one per-node result column.
+    outcomes: NodeColumn<NodeOutcome>,
 }
 
 impl Executor {
-    /// Execute every node in `plan.execute_order`, invoking its lambda with the
-    /// collected inputs. Mutates the `cache` (output values + digests) and stamps
-    /// each executed node's `output_digest` from its `current_digest`, then persists
-    /// it to `output_cache` right away (so a long run's earlier caches survive a later
-    /// failure or cancel). The `program` and `plan` are read-only. Returns per-run stats.
+    /// Whether node `idx` actually recomputed its lambda in the last run — i.e. wasn't
+    /// reused from RAM/disk. Before any run (empty column) every node reads as "ran", so
+    /// plan-only introspection still sees the full schedule. Test/stats introspection.
+    pub(crate) fn ran(&self, idx: NodeIdx) -> bool {
+        idx.idx() >= self.outcomes.len() || self.outcomes[idx].ran()
+    }
+
+    /// Walk `plan.process_order` (producer-first). For each node: compute its output
+    /// digest ([`digest::output_digest`], stamped as its `current_digest`), reuse from
+    /// RAM/disk if unchanged, else invoke its lambda and persist the result to
+    /// `output_cache` right away (so a long run's earlier caches survive a later failure
+    /// or cancel). The `program` and `plan` are read-only. Returns per-run stats.
     #[allow(clippy::too_many_arguments)] // an orchestration entry point; each arg is a distinct collaborator
     pub(crate) async fn run(
         &mut self,
@@ -99,24 +118,25 @@ impl Executor {
         // context and these columns without aliasing `self`. The per-run result
         // columns start fresh at the current node count.
         let mut inputs = std::mem::take(&mut self.inputs);
-        let mut output_usage = std::mem::take(&mut self.output_usage);
-        let mut errors = std::mem::take(&mut self.errors);
-        let mut run_times = std::mem::take(&mut self.run_times);
+        let mut output_usage_scratch = std::mem::take(&mut self.output_usage_scratch);
         let mut outcomes = std::mem::take(&mut self.outcomes);
-        errors.reset(n_nodes, None);
-        run_times.reset(n_nodes, 0.0);
-        outcomes.reset(n_nodes, NodeRun::Pending);
+        outcomes.reset(n_nodes, NodeOutcome::Pending);
 
-        // How far down `execute_order` the run got. Stays the full length on a
+        // How far down `process_order` the run got. Stays the full length on a
         // normal run; on cancel it's the count reached before bailing, so the
         // stats report only the nodes that actually ran (not the unrun tail).
-        let mut executed_count = plan.execute_order.len();
+        let mut executed_count = plan.process_order.len();
         // The node (if any) that was mid-invoke when the run was cancelled. Its
         // result is untrustworthy (a cancellable lambda bails with Ok + partial
         // output), so it's dropped from the cache and the stats below.
         let mut cancelled_in_flight: Option<NodeIdx> = None;
 
-        for (pos, e_node_idx) in plan.execute_order.iter().copied().enumerate() {
+        // The schedule is `process_order` (all reachable, producer-first). A
+        // `MissingInputs` node can't run, so it's skipped here rather than pruned by a
+        // separate pass; a runnable node whose *only* consumer is one of those may then
+        // run needlessly (its output is unread — harmless, and missing inputs are an
+        // error state anyway).
+        for (pos, e_node_idx) in plan.process_order.iter().copied().enumerate() {
             // Coarse cancel: stop scheduling further nodes. A node already
             // mid-invoke isn't interrupted (it finishes), but nothing after
             // it starts. The unrun nodes simply don't appear in the stats.
@@ -124,60 +144,39 @@ impl Executor {
                 executed_count = pos;
                 break;
             }
-            if program.e_nodes[e_node_idx].lambda.is_none() {
+            if program.e_nodes[e_node_idx].lambda.is_none()
+                || !plan.verdicts[e_node_idx].wants_execute()
+            {
                 continue;
             }
 
             let func_id = program.e_nodes[e_node_idx].func_id;
 
-            if has_errored_dependency(program, &errors, e_node_idx) {
-                cache.slots[e_node_idx].clear_output();
-                errors[e_node_idx] = Some(RunError::SkippedUpstream { func_id });
+            if has_errored_dependency(program, &outcomes, e_node_idx) {
+                mark_skipped(cache, &mut outcomes, e_node_idx, func_id);
                 continue;
             }
 
-            collect_inputs(program, cache, e_node_idx, &mut inputs);
-
-            // Runtime early-cutoff. A node reuses its prior output — skipping its
-            // lambda and staying "clean" (`dirty` unset) so its own consumers can skip
-            // in turn — when its inputs are wholly unchanged: every Bind-producer stayed
-            // clean this run (topological order ⇒ all decided), AND its own local inputs
-            // match, AND it can vouch its output is then unchanged (a `Pure` node by
-            // determinism, or any node with a pre-check). Requires a prior output.
-            //
-            // A pre-check contributes a precise, execution-time content digest of what
-            // the func actually reads; it overrides the coarse plan-time local digest,
-            // so both the reuse comparison and the produced stamp key on it — an
-            // irrelevant file its fingerprint ignores can't block reuse — and, being a
-            // content key, it's what a disk cache would key on.
-            let e_node = &program.e_nodes[e_node_idx];
-            let has_pre_check = if let Some(hash) = e_node
-                .pre_check
-                .check(&mut cache.slots[e_node_idx].state, &inputs)
-            {
-                cache.slots[e_node_idx].current_local = hash;
-                true
-            } else {
-                false
-            };
-            let upstream_dirty = program.inputs[e_node.inputs.range()].iter().any(|input| {
-                matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[addr.target_idx].is_dirty())
-            });
-            let can_reuse = cache.slots[e_node_idx].output_values().is_some()
-                && !upstream_dirty
-                && cache.slots[e_node_idx].local_unchanged();
-            let unchanged = can_reuse && (has_pre_check || e_node.behavior == FuncBehavior::Pure);
-            if unchanged {
-                outcomes[e_node_idx] = NodeRun::Reused;
-                continue;
+            // Resolve the node's digest and cache state — the one and only digest
+            // computation (see [`prepare_node`]) — then act on the verdict. On `Run`,
+            // `inputs` has been populated with the node's resolved arguments.
+            match prepare_node(program, output_cache, cache, e_node_idx, &mut inputs) {
+                Readiness::Reuse => {
+                    outcomes[e_node_idx] = NodeOutcome::Reused;
+                    continue;
+                }
+                Readiness::InputsUnavailable => {
+                    mark_skipped(cache, &mut outcomes, e_node_idx, func_id);
+                    continue;
+                }
+                Readiness::Run => {}
             }
-            outcomes[e_node_idx] = NodeRun::Ran;
 
-            collect_output_usage(program, plan, e_node_idx, &mut output_usage);
+            collect_output_usage(program, plan, e_node_idx, &mut output_usage_scratch);
 
             let output_count = program.e_nodes[e_node_idx].outputs.len as usize;
             let event_state = cache.slots[e_node_idx].event_state.clone();
-            assert!(errors[e_node_idx].is_none());
+            debug_assert!(matches!(outcomes[e_node_idx], NodeOutcome::Pending));
 
             // Attribute any logs this node emits to it (read by
             // `ContextManager::log`).
@@ -199,7 +198,7 @@ impl Executor {
                         slot.state,
                         &event_state,
                         &inputs,
-                        &output_usage,
+                        &output_usage_scratch,
                         slot.outputs,
                     )
                     .await
@@ -231,18 +230,21 @@ impl Executor {
             if cancelled {
                 cancelled_in_flight = Some(e_node_idx);
             }
-            run_times[e_node_idx] = run_time;
             let slot = &mut cache.slots[e_node_idx];
             let succeeded = match result {
-                // The fresh output now corresponds to this node's current digest;
-                // record it so the planner's next cache check is a RAM hit.
+                // The fresh output now corresponds to this node's current digest; record
+                // it so the next run's reuse check is a RAM hit.
                 Ok(()) => {
                     slot.stamp_produced();
+                    outcomes[e_node_idx] = NodeOutcome::Ran { secs: run_time };
                     true
                 }
-                Err(err) => {
-                    errors[e_node_idx] = Some(err);
+                Err(error) => {
                     slot.clear_output();
+                    outcomes[e_node_idx] = NodeOutcome::Failed {
+                        secs: run_time,
+                        error,
+                    };
                     false
                 }
             };
@@ -271,8 +273,6 @@ impl Executor {
         let mut stats = collect_execution_stats(
             program,
             plan,
-            &errors,
-            &run_times,
             &outcomes,
             start,
             executed_count,
@@ -281,55 +281,135 @@ impl Executor {
         stats.logs = std::mem::take(&mut self.ctx_manager.logs);
         stats.cancelled = self.ctx_manager.cancel.is_cancelled();
         self.inputs = inputs;
-        self.output_usage = output_usage;
-        self.errors = errors;
-        self.run_times = run_times;
+        self.output_usage_scratch = output_usage_scratch;
         self.outcomes = outcomes;
         stats
     }
 }
 
+/// A node's cache verdict once its digest is resolved, produced by [`prepare_node`].
+enum Readiness {
+    /// An unchanged output is cached (resident in RAM, or a blob on disk) — serve it
+    /// without running the lambda.
+    Reuse,
+    /// A bound producer's disk blob failed to load (corrupt/deleted) — drop this node for
+    /// the run like an errored dependency; the removed blob recomputes next reopen.
+    InputsUnavailable,
+    /// The node must run; `inputs` has been filled with its resolved arguments.
+    Run,
+}
+
+/// Compute node `idx`'s output digest, stamp it as the slot's `current_digest`, and
+/// decide whether the node reuses a cached output or must run. Producer-first order means
+/// every `Bind` producer's digest is already stamped, so this fold is the *one and only*
+/// digest computation — the planner does none.
+///
+/// Input collection is ordered to touch as little as possible, which is the whole reason
+/// for the branch on `has_pre_check`: a **pre-check** node's probe reads its inputs, so
+/// they're resolved *before* the digest (its fingerprint folds in); every other node
+/// folds producer digests + consts without values and defers collection until *after* the
+/// reuse check, so a node that turns out to reuse never loads its producers' outputs. On
+/// [`Readiness::Run`], `inputs` holds the resolved arguments.
+fn prepare_node(
+    program: &ExecutionProgram,
+    output_cache: &OutputCache,
+    cache: &mut Cache,
+    idx: NodeIdx,
+    inputs: &mut Vec<InvokeInput>,
+) -> Readiness {
+    let e_node = &program.e_nodes[idx];
+    let has_pre_check = !e_node.pre_check.is_none();
+
+    let pre_check = if has_pre_check {
+        if !collect_inputs(program, output_cache, cache, idx, inputs) {
+            return Readiness::InputsUnavailable;
+        }
+        e_node.pre_check.check(&mut cache.slots[idx].state, inputs)
+    } else {
+        None
+    };
+
+    let digest = output_digest(program, idx, cache, pre_check);
+    cache.slots[idx].current_digest = digest;
+
+    // A disk blob is loaded lazily only when a running consumer reads it (so a disk-cached
+    // value behind another never enters RAM). A `None` digest (impure, no pre-check) never
+    // reuses.
+    if digest.is_some()
+        && (cache.is_resident_hit(idx) || output_cache.mark_on_disk_if_present(program, idx, cache))
+    {
+        return Readiness::Reuse;
+    }
+
+    // Not reusing: a non-pre-check node still needs its inputs, loading any disk-cached
+    // producer on demand (the lazy frontier read). A pre-check node already collected them.
+    if !has_pre_check && !collect_inputs(program, output_cache, cache, idx, inputs) {
+        return Readiness::InputsUnavailable;
+    }
+    Readiness::Run
+}
+
+/// Drop node `idx` from this run as skipped-for-upstream: clear any stale cached output so
+/// it isn't served as this run's result, and record the outcome. Shared by the
+/// errored-dependency and failed-input-load paths, which are indistinguishable downstream.
+fn mark_skipped(
+    cache: &mut Cache,
+    outcomes: &mut NodeColumn<NodeOutcome>,
+    idx: NodeIdx,
+    func_id: FuncId,
+) {
+    cache.slots[idx].clear_output();
+    outcomes[idx] = NodeOutcome::Skipped {
+        error: RunError::SkippedUpstream { func_id },
+    };
+}
+
 fn has_errored_dependency(
     program: &ExecutionProgram,
-    errors: &NodeColumn<Option<RunError>>,
+    outcomes: &NodeColumn<NodeOutcome>,
     e_node_idx: NodeIdx,
 ) -> bool {
     let span = program.e_nodes[e_node_idx].inputs;
     program.inputs[span.range()].iter().any(|input| {
-        matches!(&input.binding, ExecutionBinding::Bind(addr) if errors[addr.target_idx].is_some())
+        matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[addr.target_idx].error().is_some())
     })
 }
 
+/// Resolve `e_node_idx`'s inputs into `inputs`. Returns `false` if a bound producer's
+/// value can't be materialized — its disk blob was reused-from-disk but failed to load
+/// (corrupt/deleted): [`hydrate_slot`](OutputCache::hydrate_slot) then removes the bad
+/// blob, so this run drops the consumer (like an errored dependency) and the next reopen
+/// recomputes the producer fresh. Any other missing value is a planner bug.
 fn collect_inputs(
     program: &ExecutionProgram,
-    cache: &Cache,
+    output_cache: &OutputCache,
+    cache: &mut Cache,
     e_node_idx: NodeIdx,
     inputs: &mut Vec<InvokeInput>,
-) {
+) -> bool {
     inputs.clear();
     let span = program.e_nodes[e_node_idx].inputs;
-    for input in &program.inputs[span.range()] {
-        let value = match &input.binding {
+    for pool_idx in span.range() {
+        let value = match &program.inputs[pool_idx].binding {
             ExecutionBinding::None => DynamicValue::Unbound,
             ExecutionBinding::Const(v) => v.into(),
             ExecutionBinding::Bind(addr) => {
-                // Invariant: any node in `execute_order` has every bound upstream
-                // producing output — the planner gates a consumer
-                // (`missing_required_inputs`) whenever a bind target can't run,
-                // *including* optional binds, so a `None` here is a planner bug,
-                // not a graph the user can author.
-                let outputs = cache.slots[addr.target_idx]
-                    .output_values()
-                    .expect("missing output values");
-                assert_eq!(
-                    outputs.len(),
-                    program.e_nodes[addr.target_idx].outputs.len as usize
-                );
-                outputs[addr.port_idx].clone()
+                let (target, port) = (addr.target_idx, addr.port_idx);
+                // The producer settled earlier this run: it either ran (resident) or was
+                // reused-from-disk (marked `OnDisk`, not yet loaded) — hydrate the latter
+                // now, the lazy frontier read. A resident value is a no-op load; a failed
+                // one leaves the slot empty and drops this consumer for the run.
+                output_cache.hydrate_slot(program, cache, target);
+                let Some(outputs) = cache.slots[target].output_values() else {
+                    return false;
+                };
+                assert_eq!(outputs.len(), program.e_nodes[target].outputs.len as usize);
+                outputs[port].clone()
             }
         };
         inputs.push(InvokeInput { value });
     }
+    true
 }
 
 fn collect_output_usage(
@@ -349,13 +429,10 @@ fn collect_output_usage(
     }));
 }
 
-#[allow(clippy::too_many_arguments)] // stats projection over several distinct per-run columns
 fn collect_execution_stats(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
-    errors: &NodeColumn<Option<RunError>>,
-    run_times: &NodeColumn<f64>,
-    outcomes: &NodeColumn<NodeRun>,
+    outcomes: &NodeColumn<NodeOutcome>,
     start: Instant,
     executed_count: usize,
     cancelled_in_flight: Option<NodeIdx>,
@@ -365,42 +442,36 @@ fn collect_execution_stats(
     let mut cached_nodes = Vec::new();
     let mut node_errors = Vec::new();
 
-    for &idx in &plan.execute_order[..executed_count] {
-        // The node interrupted mid-invoke by a cancel didn't complete — omit it
-        // so the consumer doesn't paint it as executed.
-        if Some(idx) == cancelled_in_flight {
-            continue;
-        }
+    // The schedule (and its per-node outcomes) is `process_order`; `executed_count` bounds
+    // it to what ran before a cancel. Each node's outcome is the sole source of truth.
+    for &idx in &plan.process_order[..executed_count] {
+        // The node interrupted mid-invoke by a cancel didn't complete — omit it from the
+        // executed set so the consumer doesn't paint it as executed (it stays in errors).
         let e = &program.e_nodes[idx];
-        // A node whose pre-check reported unchanged reused its prior output rather
-        // than running, so it reads as cached, not executed.
-        if outcomes[idx].is_reused() {
-            cached_nodes.push(e.id);
-            continue;
+        match &outcomes[idx] {
+            NodeOutcome::Reused => cached_nodes.push(e.id),
+            outcome if outcome.ran() && Some(idx) != cancelled_in_flight => {
+                executed_nodes.push(ExecutedNodeStats {
+                    node_id: e.id,
+                    elapsed_secs: outcome.elapsed().unwrap_or(0.0),
+                });
+            }
+            _ => {}
         }
-        executed_nodes.push(ExecutedNodeStats {
-            node_id: e.id,
-            elapsed_secs: run_times[idx],
-        });
     }
 
     for &idx in &plan.process_order {
         let e = &program.e_nodes[idx];
-        let verdict = plan.verdicts[idx];
-        if verdict.missing_required_inputs() {
-            // Recompute which ports are unsatisfied (shares `input_missing` with
-            // the planner) — only for the rare missing node, so it isn't worth a
-            // stored column.
+        if plan.verdicts[idx].missing_required_inputs() {
+            // Recompute which ports are unsatisfied (shares `input_missing` with the
+            // planner) — only for the rare missing node, so it isn't worth a stored column.
             for (i, pool_idx) in e.inputs.range().enumerate() {
                 if input_missing(&program.inputs[pool_idx], &plan.verdicts) {
                     missing_inputs.push(InputPort::new(e.id, i));
                 }
             }
         }
-        if verdict.is_cached() {
-            cached_nodes.push(e.id);
-        }
-        if let Some(err) = &errors[idx] {
+        if let Some(err) = outcomes[idx].error() {
             node_errors.push(NodeError {
                 node_id: e.id,
                 error: err.clone(),
@@ -483,7 +554,6 @@ mod tests {
         let n = program.e_nodes.len();
         ExecutionPlan {
             process_order: (0..n).map(NodeIdx::from).collect(),
-            execute_order: (0..n).map(NodeIdx::from).collect(),
             verdicts: vec![NodeVerdict::Execute; n].into(),
             output_usage: vec![1; program.n_outputs],
         }

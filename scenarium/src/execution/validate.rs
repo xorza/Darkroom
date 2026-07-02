@@ -8,8 +8,8 @@ use common::is_debug;
 use hashbrown::HashSet;
 
 use crate::execution::cache::Cache;
-use crate::execution::plan::{ExecutionPlan, NodeVerdict};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
+use crate::execution::plan::ExecutionPlan;
+use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::graph::NodeId;
 use crate::library::Library;
 
@@ -54,10 +54,8 @@ pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, library: &Libr
     }
 }
 
-/// A planned schedule is well-formed: `process_order` is a post-order DFS
-/// (unique, every Bind dep before its consumer), the missing/execute flags are
-/// consistent, and `execute_order` lists each node once with all its bound deps
-/// already executed.
+/// A planned schedule is well-formed: `process_order` is a post-order DFS (unique, every
+/// Bind dep before its consumer) and all binding addresses are in range.
 pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
     if !is_debug() {
         return;
@@ -71,44 +69,22 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
     for &idx in &plan.process_order {
         assert!(idx.idx() < program.e_nodes.len());
         for input in program.node_inputs(&program.e_nodes[idx]) {
+            // Every Bind dep must be earlier in the order (bounds are re-checked, with
+            // the port index, in the all-nodes loop below).
             if let ExecutionBinding::Bind(addr) = &input.binding {
-                assert!(addr.target_idx.idx() < program.e_nodes.len());
                 assert!(seen_in_order.contains(&addr.target_idx));
             }
         }
         assert!(seen_in_order.insert(idx));
     }
 
-    // (Per-node verdict consistency — the old "missing ⇒ !wants_execute" — is now a
-    // property of the `NodeVerdict` enum: one of three mutually exclusive states, so
-    // the contradiction can't be represented. Only binding bounds remain to check.)
+    // Per-node verdict consistency is unrepresentable by construction (`NodeVerdict` is a
+    // plain enum of mutually exclusive states), so only binding bounds remain to check.
     for e_node in program.e_nodes.iter() {
         for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(addr) = &e_input.binding {
                 assert!(addr.target_idx.idx() < program.e_nodes.len());
                 assert!(addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize);
-            }
-        }
-    }
-
-    assert!(plan.execute_order.len() <= plan.process_order.len());
-
-    let mut pending: HashSet<NodeIdx> = plan.execute_order.iter().copied().collect();
-    assert_eq!(pending.len(), plan.execute_order.len());
-
-    for &idx in &plan.execute_order {
-        assert!(idx.idx() < program.e_nodes.len());
-        pending.remove(&idx);
-
-        let e_node = &program.e_nodes[idx];
-        // A scheduled node is exactly `Execute` — never `Cached` (load-bearing for the
-        // disk cache, which hydrates only the cached *producers* an executing node
-        // reads) and never `MissingInputs`. One enum check covers all three.
-        assert_eq!(plan.verdicts[idx], NodeVerdict::Execute);
-
-        for e_input in program.node_inputs(e_node) {
-            if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                assert!(!pending.contains(&addr.target_idx));
             }
         }
     }
