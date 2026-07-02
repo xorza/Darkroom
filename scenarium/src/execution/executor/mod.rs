@@ -30,7 +30,6 @@ use crate::graph::InputPort;
 use crate::prelude::FuncId;
 
 use crate::execution::cache::Cache;
-use crate::execution::digest::node_digest;
 use crate::execution::output_cache::OutputCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
@@ -132,8 +131,8 @@ impl Executor {
 
     /// Walk `plan.process_order` (producer-first). For each node: skip it as
     /// [`NodeOutcome::Cut`] if it's outside the `needed` mask (the resolver pruned its cone),
-    /// else compute its output digest ([`digest::node_digest`], stamped as its
-    /// `current_digest`), reuse from RAM/disk if unchanged, else invoke its lambda and persist
+    /// else stamp its output digest and decide reuse ([`OutputCache::stamp_and_check_reuse`]),
+    /// reuse from RAM/disk if unchanged, else invoke its lambda and persist
     /// the result to `output_cache` right away (so a long run's earlier caches survive a later
     /// failure or cancel). The `program`, `plan`, and `needed` mask are read-only. Returns
     /// per-run stats.
@@ -351,12 +350,12 @@ enum Readiness {
     Run,
 }
 
-/// Compute node `idx`'s content digest, stamp it as the slot's `current_digest`, and decide
-/// whether the node reuses a cached output or must run. Producer-first order means every
-/// `Bind` producer's digest is already stamped when this runs. The pre-run
-/// [`resolve`](crate::execution::resolve) sweep already stamped the same digest; this
-/// re-derives it idempotently (a cheap fold), so the run loop needs no special case for
-/// surviving reuse-vs-run nodes.
+/// Stamp node `idx`'s content digest and decide whether it reuses a cached output or must
+/// run, via [`OutputCache::stamp_and_check_reuse`] — the same call the pre-run
+/// [`resolve`](crate::execution::resolve) sweep makes, so the two can't diverge. Producer-first
+/// order means every `Bind` producer's digest is already stamped when this runs; the sweep
+/// already stamped the same digest, and this re-derives it idempotently (a cheap fold), so the
+/// run loop needs no special case for surviving reuse-vs-run nodes.
 ///
 /// The digest folds producer digests + consts *without values*, and input collection is
 /// deferred until *after* the reuse check — so a node that turns out to reuse never loads its
@@ -369,14 +368,11 @@ fn prepare_node(
     idx: NodeIdx,
     inputs: &mut Vec<InvokeInput>,
 ) -> Readiness {
-    let digest = node_digest(program, idx, cache);
-    cache.slots[idx].current_digest = digest;
-
-    // A disk blob is loaded lazily only when a running consumer reads it (so a disk-cached
-    // value behind another never enters RAM). A `None` digest (impure) never reuses.
-    if digest.is_some()
-        && (cache.is_resident_hit(idx) || output_cache.mark_on_disk_if_present(program, idx, cache))
-    {
+    // Stamp the digest and decide reuse through the one shared helper — the pre-run cut's
+    // `resolve_structural` makes the identical call, so the two verdicts can't drift. A disk
+    // hit is flagged but its bytes load lazily only when a running consumer reads them (so a
+    // disk-cached value behind another never enters RAM); a `None` digest (impure) never reuses.
+    if output_cache.stamp_and_check_reuse(program, idx, cache) {
         return Readiness::Reuse;
     }
 

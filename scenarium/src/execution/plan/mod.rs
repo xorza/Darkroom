@@ -97,15 +97,13 @@ enum Color {
     Black,
 }
 
-/// Why a node sits on the DFS stack. `Root`/`Visit` both mean "discover this node"
-/// (a walk root vs. a producer reached from a consumer); they differ only as
-/// documentation. `Done` is the post-order marker pushed under a node's children.
-/// Output-usage is counted at push time (per consumer edge), so the producer-visit
-/// carries no port.
+/// Why a node sits on the DFS stack. `Discover` means "reach this node" — as a walk root
+/// or as a producer reached from a consumer, handled identically. `Done` is the post-order
+/// marker pushed under a node's children. Output-usage is counted at push time (per consumer
+/// edge), so the discovery carries no port.
 #[derive(Debug)]
 enum VisitCause {
-    Root,
-    Visit,
+    Discover,
     Done,
 }
 
@@ -134,7 +132,7 @@ impl Planner {
         seeds: &RunSeeds,
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
-        plan.reset(program.e_nodes.len(), program.n_outputs);
+        plan.reset(program.e_nodes.len(), program.n_outputs());
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
@@ -158,21 +156,21 @@ impl Planner {
         program: &ExecutionProgram,
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
-        plan.process_order.clear();
+        // `plan.reset` (called at the top of `plan`) already cleared `process_order` and
+        // `roots`; this pass only needs to reset its own scratch.
         self.stack.clear();
-
         self.color.reset(program.e_nodes.len(), Color::White);
 
         for e_node_idx in plan.roots.iter().copied() {
             self.stack.push(Visit {
                 e_node_idx,
-                cause: VisitCause::Root,
+                cause: VisitCause::Discover,
             });
         }
 
         while let Some(visit) = self.stack.pop() {
             match visit.cause {
-                VisitCause::Root | VisitCause::Visit => {}
+                VisitCause::Discover => {}
                 VisitCause::Done => {
                     let idx = visit.e_node_idx;
                     assert_eq!(self.color[idx], Color::Gray);
@@ -222,7 +220,7 @@ impl Planner {
                     plan.output_usage[outputs.start as usize + addr.port_idx] += 1;
                     self.stack.push(Visit {
                         e_node_idx: addr.target_idx,
-                        cause: VisitCause::Visit,
+                        cause: VisitCause::Discover,
                     });
                 }
             }
@@ -238,7 +236,7 @@ impl Planner {
 /// appears more than once, which is harmless — the walk's `Color` check skips a revisited root
 /// and the cut's `needed[root] = true` seeding is idempotent, so neither cares about repeats.
 fn collect_roots(program: &ExecutionProgram, seeds: &RunSeeds, plan: &mut ExecutionPlan) {
-    plan.roots.clear();
+    // `plan.reset` already cleared `roots`; this only pushes into it.
 
     // Event subscribers.
     for event in &seeds.events {

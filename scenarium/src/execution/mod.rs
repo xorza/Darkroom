@@ -254,8 +254,9 @@ impl ExecutionEngine {
         // and the next run. `clear()` is reserved for full teardown (`Self::clear`).
 
         // Flatten subgraphs straight into execution nodes — no intermediate
-        // `Graph`. Everything below is boundary-agnostic (func nodes only).
-        self.program.n_outputs = self.flattener.build(
+        // `Graph`. Everything below is boundary-agnostic (func nodes only). The output
+        // count is derived from the resolved `output_types` pool below, not stored.
+        self.flattener.build(
             &mut self.program.e_nodes,
             flatten::Pools {
                 inputs: &mut self.program.inputs,
@@ -264,7 +265,7 @@ impl ExecutionEngine {
             graph,
             library,
             Arc::make_mut(&mut self.flatten_map),
-        ) as usize;
+        );
 
         // Realign the runtime cache to the rebuilt node set (preserve by id,
         // default new, trim gone).

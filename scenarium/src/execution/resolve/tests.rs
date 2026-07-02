@@ -1,4 +1,5 @@
 use super::*;
+use crate::data::DataType;
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
 use crate::graph::NodeId;
@@ -26,8 +27,8 @@ impl Fix {
             });
         }
         let idx = self.program.e_nodes.len();
-        let outputs_start = self.program.n_outputs as u32;
-        self.program.n_outputs += 1;
+        let outputs_start = self.program.output_types.len() as u32;
+        self.program.output_types.push(DataType::Null);
         self.program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),
             inited: true,
@@ -47,7 +48,7 @@ fn needed_of(fix: &Fix, roots: &[NodeIdx], resolved: &[Resolved]) -> Vec<bool> {
         // added before its consumer), matching the planner's post-order.
         process_order: (0..fix.program.e_nodes.len()).map(NodeIdx::from).collect(),
         verdicts: vec![NodeVerdict::Execute; fix.program.e_nodes.len()].into(),
-        output_usage: vec![0; fix.program.n_outputs],
+        output_usage: vec![0; fix.program.n_outputs()],
         roots: roots.to_vec(),
     };
     let resolved: NodeColumn<Resolved> = resolved.to_vec().into();

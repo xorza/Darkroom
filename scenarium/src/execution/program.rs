@@ -166,13 +166,10 @@ pub(crate) struct ExecutionProgram {
     /// from the func library (which the program doesn't retain), so the compiled
     /// program is self-describing. Read by the digest (an output-signature change
     /// re-keys) and the disk cache's codec check. An unresolved wildcard port is
-    /// `DataType::Null`. `len()` is also `n_outputs`.
+    /// `DataType::Null`. Its `len()` is the program's total output count
+    /// ([`Self::n_outputs`]).
     #[serde(default)]
     pub(crate) output_types: Vec<DataType>,
-    /// Total output count across all nodes (sum of every output span length) — the
-    /// size of `output_types` and the plan's `output_usage` column.
-    #[serde(default)]
-    pub(crate) n_outputs: usize,
 }
 
 impl ExecutionProgram {
@@ -181,7 +178,13 @@ impl ExecutionProgram {
         self.inputs.clear();
         self.events.clear();
         self.output_types.clear();
-        self.n_outputs = 0;
+    }
+
+    /// The program's total output count: the length of the `output_types` pool and the
+    /// plan's `output_usage` column (every node's output span summed). Derived from
+    /// `output_types` rather than stored, so it can't disagree with the pool it sizes.
+    pub(crate) fn n_outputs(&self) -> usize {
+        self.output_types.len()
     }
 
     /// Every node position, typed — `for idx in program.node_indices()` instead of
@@ -206,10 +209,11 @@ impl ExecutionProgram {
     /// resolved them). An unresolved wildcard port stores `DataType::Null`. Builds
     /// into a fresh buffer first so the per-node reads don't alias the write-back.
     pub(crate) fn resolve_output_types(&mut self, library: &Library) {
-        let mut types = Vec::with_capacity(self.n_outputs);
+        let capacity: usize = self.e_nodes.iter().map(|n| n.outputs.len as usize).sum();
+        let mut types = Vec::with_capacity(capacity);
         for idx in self.node_indices() {
-            let n_outputs = self.e_nodes[idx].outputs.len as usize;
-            for port in 0..n_outputs {
+            let port_count = self.e_nodes[idx].outputs.len as usize;
+            for port in 0..port_count {
                 types.push(
                     effective_output_type(self, library, idx, port, 0).unwrap_or(DataType::Null),
                 );

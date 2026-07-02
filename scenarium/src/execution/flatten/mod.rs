@@ -71,8 +71,9 @@ pub(crate) struct Pools<'a> {
 impl Flattener {
     /// Flatten `root` into `e_nodes` (via compact insert, preserving caches),
     /// rebuilding the SoA pools. Inputs carry over each reused node's `binding`;
-    /// outputs/events are rebuilt fresh. Returns the total output count assigned
-    /// across all nodes.
+    /// outputs/events are rebuilt fresh. Output spans are assigned from a running
+    /// counter local to the build; the program's total output count is then
+    /// `output_types.len()`, resolved separately.
     pub(crate) fn build(
         &mut self,
         e_nodes: &mut KeyIndexVec<NodeId, ExecutionNode>,
@@ -80,7 +81,7 @@ impl Flattener {
         root: &Graph,
         library: &Library,
         flatten: &mut FlattenMap,
-    ) -> u32 {
+    ) {
         self.path.clear();
         self.seen.clear();
         self.subs.clear();
@@ -93,7 +94,6 @@ impl Flattener {
         let mut new_inputs = std::mem::take(&mut self.inputs_scratch);
         new_inputs.clear();
         pools.events.clear();
-        let n_outputs;
         {
             let mut run = Run {
                 root,
@@ -111,7 +111,6 @@ impl Flattener {
                 events: pools.events,
             };
             run.emit();
-            n_outputs = run.n_outputs;
             // `compact` finalizes on drop, trimming nodes that disappeared.
         }
         // Swap the freshly built pools in; recycle the old ones as scratch.
@@ -133,8 +132,6 @@ impl Flattener {
                     .push(subscriber.into());
             }
         }
-
-        n_outputs
     }
 }
 

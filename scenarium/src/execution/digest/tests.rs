@@ -113,8 +113,7 @@ impl Prog {
             });
         }
         let idx = self.program.e_nodes.len();
-        let outputs_start = self.program.n_outputs as u32;
-        self.program.n_outputs += types.len();
+        let outputs_start = self.program.output_types.len() as u32;
         self.program.output_types.extend_from_slice(types);
         self.program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),

@@ -1,4 +1,5 @@
 use super::*;
+use crate::data::DataType;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::graph::NodeId;
 use crate::prelude::FuncId;
@@ -25,8 +26,10 @@ impl Fix {
                 binding: binding.clone(),
             });
         }
-        let outputs_start = self.program.n_outputs as u32;
-        self.program.n_outputs += outputs as usize;
+        let outputs_start = self.program.output_types.len() as u32;
+        self.program
+            .output_types
+            .resize(outputs_start as usize + outputs as usize, DataType::Null);
         let idx = self.program.e_nodes.len();
         self.program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),

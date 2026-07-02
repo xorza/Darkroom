@@ -41,7 +41,7 @@ use crate::data::DataType;
 use crate::elements::cache_passthrough::cache_node_path;
 use crate::execution::blob;
 use crate::execution::cache::{Cache, ValueCache};
-use crate::execution::digest::Digest;
+use crate::execution::digest::{Digest, node_digest};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::library::Library;
 use crate::special::SpecialNode;
@@ -107,6 +107,25 @@ impl OutputCache {
             ));
         }
         None
+    }
+
+    /// Stamp node `idx`'s content digest into its slot and return whether an unchanged
+    /// output can be reused this run — resident in RAM ([`Cache::is_resident_hit`]) or a
+    /// blob on disk flagged now ([`Self::mark_on_disk_if_present`]). The single place the
+    /// digest is folded and the reuse verdict formed, shared by the pre-run cut
+    /// ([`Resolver`](crate::execution::resolve::Resolver)) and the run loop (`prepare_node`)
+    /// so the two decisions can't drift. A `None` digest (an impure cone) never reuses.
+    /// Mutates the cache: stamps `current_digest`, and may flag a slot `OnDisk`.
+    pub(crate) fn stamp_and_check_reuse(
+        &self,
+        program: &ExecutionProgram,
+        idx: NodeIdx,
+        cache: &mut Cache,
+    ) -> bool {
+        let digest = node_digest(program, idx, cache);
+        cache.slots[idx].current_digest = digest;
+        digest.is_some()
+            && (cache.is_resident_hit(idx) || self.mark_on_disk_if_present(program, idx, cache))
     }
 
     /// The executor's per-node "reuse from disk?" check, run once a node's digest is

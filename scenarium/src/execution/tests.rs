@@ -2413,7 +2413,7 @@ mod invalidation {
         assert!(execution_graph.plan.process_order.is_empty());
         // The SoA pools are emptied too (not just the node list).
         assert!(execution_graph.program.inputs.is_empty());
-        assert_eq!(execution_graph.program.n_outputs, 0);
+        assert_eq!(execution_graph.program.n_outputs(), 0);
         assert!(execution_graph.program.events.is_empty());
 
         Ok(())

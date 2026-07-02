@@ -18,7 +18,6 @@
 
 use crate::execution::NodeColumn;
 use crate::execution::cache::Cache;
-use crate::execution::digest::node_digest;
 use crate::execution::output_cache::OutputCache;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
@@ -91,14 +90,14 @@ fn resolve_structural(
         if !plan.verdicts[idx].wants_execute() {
             continue;
         }
-        // Fold the digest (reading producers' just-stamped digests) and decide reuse exactly
-        // as the run loop's `prepare_node` will.
-        let digest = node_digest(program, idx, cache);
-        cache.slots[idx].current_digest = digest;
-        let hit = digest.is_some()
-            && (cache.is_resident_hit(idx)
-                || output_cache.mark_on_disk_if_present(program, idx, cache));
-        resolved[idx] = if hit { Resolved::Reuse } else { Resolved::Run };
+        // Fold the digest (reading producers' just-stamped digests) and decide reuse through
+        // the one shared helper — the run loop's `prepare_node` makes the identical call, so
+        // the two verdicts can't drift.
+        resolved[idx] = if output_cache.stamp_and_check_reuse(program, idx, cache) {
+            Resolved::Reuse
+        } else {
+            Resolved::Run
+        };
     }
 }
 

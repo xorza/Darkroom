@@ -1,6 +1,6 @@
 use super::*;
 use crate::async_lambda;
-use crate::data::StaticValue;
+use crate::data::{DataType, StaticValue};
 use crate::execution::cache::Cache;
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
@@ -26,8 +26,10 @@ impl Prog {
                 binding: binding.clone(),
             });
         }
-        let outputs_start = self.program.n_outputs as u32;
-        self.program.n_outputs += outputs as usize;
+        let outputs_start = self.program.output_types.len() as u32;
+        self.program
+            .output_types
+            .resize(outputs_start as usize + outputs as usize, DataType::Null);
         let idx = self.program.e_nodes.len();
         self.program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),
@@ -57,7 +59,7 @@ fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
     ExecutionPlan {
         process_order: (0..n).map(NodeIdx::from).collect(),
         verdicts: vec![NodeVerdict::Execute; n].into(),
-        output_usage: vec![1; program.n_outputs],
+        output_usage: vec![1; program.n_outputs()],
         roots: (0..n).map(NodeIdx::from).collect(),
     }
 }
