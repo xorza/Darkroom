@@ -22,12 +22,12 @@ use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage};
 use crate::graph::InputPort;
 use crate::prelude::FuncId;
 
-use crate::execution::RunError;
 use crate::execution::cache::Cache;
 use crate::execution::digest::output_digest;
 use crate::execution::output_cache::OutputCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeColumn, NodeIdx};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
+use crate::execution::{NodeColumn, RunError};
 
 /// What became of a node this run — the single per-node result column, so the run-time
 /// facts can't contradict (a node can't be `Reused` yet carry a run time, or `Ran` yet

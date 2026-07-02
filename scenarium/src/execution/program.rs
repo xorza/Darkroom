@@ -54,63 +54,6 @@ impl<V: KeyIndexKey<NodeId>> IndexMut<NodeIdx> for KeyIndexVec<NodeId, V> {
     }
 }
 
-/// A per-node column: a `Vec<T>` addressable *only* by [`NodeIdx`], never a raw
-/// `usize`. The per-run/per-update columns that aren't part of a keyed structure —
-/// the plan's verdicts, the executor's error/timing columns, the planner's DFS
-/// scratch — use this so they can't be indexed by an output-pool index or a port
-/// number, and so [`reset`](Self::reset) ties their length to the node count.
-#[derive(Debug, Clone)]
-pub(crate) struct NodeColumn<T> {
-    values: Vec<T>,
-}
-
-// Manual (not derived): `#[derive(Default)]` would add a spurious `T: Default` bound,
-// but an empty column needs none — the element type is only ever supplied by `reset`.
-impl<T> Default for NodeColumn<T> {
-    fn default() -> Self {
-        NodeColumn { values: Vec::new() }
-    }
-}
-
-impl<T> NodeColumn<T> {
-    pub(crate) fn clear(&mut self) {
-        self.values.clear();
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.values.len()
-    }
-}
-
-impl<T: Clone> NodeColumn<T> {
-    /// Resize to exactly `len` nodes, every entry `value` — sizing the column to the
-    /// node count at the start of a pass. The one supported way to grow it, so its
-    /// length always equals the node count it was reset to.
-    pub(crate) fn reset(&mut self, len: usize, value: T) {
-        self.values.clear();
-        self.values.resize(len, value);
-    }
-}
-
-impl<T> From<Vec<T>> for NodeColumn<T> {
-    fn from(values: Vec<T>) -> Self {
-        NodeColumn { values }
-    }
-}
-
-impl<T> Index<NodeIdx> for NodeColumn<T> {
-    type Output = T;
-    fn index(&self, i: NodeIdx) -> &T {
-        &self.values[i.idx()]
-    }
-}
-
-impl<T> IndexMut<NodeIdx> for NodeColumn<T> {
-    fn index_mut(&mut self, i: NodeIdx) -> &mut T {
-        &mut self.values[i.idx()]
-    }
-}
-
 // === Execution Binding ===
 
 /// A flat output address: producer node `target_idx` (a [`NodeIdx`], resolved at

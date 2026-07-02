@@ -2,7 +2,7 @@
 //!
 //! 1. **compile** — [`ExecutionEngine::update`] flattens the authoring `Graph`
 //!    into an immutable [`ExecutionProgram`](program::ExecutionProgram).
-//! 2. **plan** — the [`Planner`](planner::Planner) turns the program into an
+//! 2. **plan** — the [`Planner`](plan::Planner) turns the program into an
 //!    [`ExecutionPlan`](plan::ExecutionPlan) (the schedule). Purely structural —
 //!    reachability + topological order + output usage, no cache/digest state.
 //! 3. **execute** — the [`Executor`](executor::Executor) walks the schedule
@@ -13,6 +13,7 @@
 //! cache, and executor) and exposes `update` (phase 1) and `execute` (phases
 //! 2–3, run back-to-back).
 
+use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
 use common::CancelToken;
@@ -35,7 +36,6 @@ pub(crate) mod executor;
 mod flatten;
 pub(crate) mod output_cache;
 pub(crate) mod plan;
-pub(crate) mod planner;
 pub(crate) mod program;
 mod query;
 #[cfg(test)]
@@ -46,11 +46,67 @@ use cache::Cache;
 use event::EventRef;
 use executor::Executor;
 use output_cache::OutputCache;
-use plan::ExecutionPlan;
-use planner::Planner;
+use plan::{ExecutionPlan, Planner};
 #[cfg(test)]
 use program::ExecutionNode;
-use program::ExecutionProgram;
+use program::{ExecutionProgram, NodeIdx};
+
+/// A per-node column: a `Vec<T>` addressable *only* by [`NodeIdx`], never a raw
+/// `usize`. The per-run/per-update columns that aren't part of a keyed structure —
+/// the plan's verdicts, the executor's outcome column, the planner's DFS scratch —
+/// use this so they can't be indexed by an output-pool index or a port number, and so
+/// [`reset`](Self::reset) ties their length to the node count.
+#[derive(Debug, Clone)]
+pub(crate) struct NodeColumn<T> {
+    values: Vec<T>,
+}
+
+// Manual (not derived): `#[derive(Default)]` would add a spurious `T: Default` bound,
+// but an empty column needs none — the element type is only ever supplied by `reset`.
+impl<T> Default for NodeColumn<T> {
+    fn default() -> Self {
+        NodeColumn { values: Vec::new() }
+    }
+}
+
+impl<T> NodeColumn<T> {
+    pub(crate) fn clear(&mut self) {
+        self.values.clear();
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.values.len()
+    }
+}
+
+impl<T: Clone> NodeColumn<T> {
+    /// Resize to exactly `len` nodes, every entry `value` — sizing the column to the
+    /// node count at the start of a pass. The one supported way to grow it, so its
+    /// length always equals the node count it was reset to.
+    pub(crate) fn reset(&mut self, len: usize, value: T) {
+        self.values.clear();
+        self.values.resize(len, value);
+    }
+}
+
+impl<T> From<Vec<T>> for NodeColumn<T> {
+    fn from(values: Vec<T>) -> Self {
+        NodeColumn { values }
+    }
+}
+
+impl<T> Index<NodeIdx> for NodeColumn<T> {
+    type Output = T;
+    fn index(&self, i: NodeIdx) -> &T {
+        &self.values[i.idx()]
+    }
+}
+
+impl<T> IndexMut<NodeIdx> for NodeColumn<T> {
+    fn index_mut(&mut self, i: NodeIdx) -> &mut T {
+        &mut self.values[i.idx()]
+    }
+}
 
 // === Error Types ===
 
