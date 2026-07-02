@@ -5,6 +5,13 @@
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), and that `Cache`,
 //! [`Executor::run`] invokes each scheduled node's lambda and gathers stats.
 //! Each node's per-run result is one [`NodeOutcome`] in a column local to the run.
+//!
+//! **Pre-run cut.** [`run`](Executor::run) takes a `needed` mask precomputed by the
+//! [`Resolver`](crate::execution::resolve::Resolver): the pruned set of nodes some running
+//! node will read, with cones that feed only cache hits cut out (so a disk-cached node's
+//! stale upstream isn't recomputed on reopen). A pruned node gets [`NodeOutcome::Cut`]; the
+//! run loop otherwise walks the schedule unchanged, [`prepare_node`] re-deriving each
+//! surviving node's digest.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -40,6 +47,11 @@ enum NodeOutcome {
     Pending,
     /// Served from a RAM/disk cache under an unchanged digest — counted as cached.
     Reused,
+    /// Pruned by the pre-run cut: every consumer that would read this node reused a cache,
+    /// so its output is never read and its lambda is skipped. `cached` is whether it still
+    /// holds a usable value (a deeper disk cache) — reported cached — vs. a memory-only
+    /// upstream with nothing resident, which is simply not computed this run.
+    Cut { cached: bool },
     /// Its lambda ran and succeeded, taking `secs`.
     Ran { secs: f64 },
     /// Its lambda ran but errored — an invoke failure, or a cancel mid-invoke.
@@ -118,16 +130,19 @@ impl Executor {
         protected
     }
 
-    /// Walk `plan.process_order` (producer-first). For each node: compute its output
-    /// digest ([`digest::node_digest`], stamped as its `current_digest`), reuse from
-    /// RAM/disk if unchanged, else invoke its lambda and persist the result to
-    /// `output_cache` right away (so a long run's earlier caches survive a later failure
-    /// or cancel). The `program` and `plan` are read-only. Returns per-run stats.
+    /// Walk `plan.process_order` (producer-first). For each node: skip it as
+    /// [`NodeOutcome::Cut`] if it's outside the `needed` mask (the resolver pruned its cone),
+    /// else compute its output digest ([`digest::node_digest`], stamped as its
+    /// `current_digest`), reuse from RAM/disk if unchanged, else invoke its lambda and persist
+    /// the result to `output_cache` right away (so a long run's earlier caches survive a later
+    /// failure or cancel). The `program`, `plan`, and `needed` mask are read-only. Returns
+    /// per-run stats.
     #[allow(clippy::too_many_arguments)] // an orchestration entry point; each arg is a distinct collaborator
     pub(crate) async fn run(
         &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
+        needed: &NodeColumn<bool>,
         cache: &mut Cache,
         output_cache: &OutputCache,
         flatten: &FlattenMap,
@@ -171,6 +186,15 @@ impl Executor {
             if self.ctx_manager.cancel.is_cancelled() {
                 executed_count = pos;
                 break;
+            }
+            if !needed[e_node_idx] {
+                // Pruned by the pre-run cut: every consumer that would read this node reused
+                // a cache, so its output is never read. Report it cached iff it still holds a
+                // usable value (a deeper disk cache), else it's simply not computed this run.
+                outcomes[e_node_idx] = NodeOutcome::Cut {
+                    cached: cache.has_available_value(e_node_idx),
+                };
+                continue;
             }
             if program.e_nodes[e_node_idx].lambda.is_none()
                 || !plan.verdicts[e_node_idx].wants_execute()
@@ -329,8 +353,11 @@ enum Readiness {
 
 /// Compute node `idx`'s content digest, stamp it as the slot's `current_digest`, and
 /// decide whether the node reuses a cached output or must run. Producer-first order means
-/// every `Bind` producer's digest is already stamped, so this fold is the *one and only*
-/// digest computation — the planner does none.
+/// every `Bind` producer's digest is already stamped when this runs (the planner does none).
+/// For a pure-structural node the pre-run [`resolve_structural`] sweep already stamped the
+/// same digest; this re-derives it idempotently (a cheap fold) so the run loop needs no
+/// special case for surviving reuse-vs-run nodes. A **pre-check** (`Deferred`) node is
+/// resolved *only* here — its digest needs a run-time value.
 ///
 /// Input collection is ordered to touch as little as possible, which is the whole reason
 /// for the branch on `has_pre_check`: a **pre-check** node's probe reads its inputs, so
@@ -477,7 +504,10 @@ fn collect_execution_stats(
         // executed set so the consumer doesn't paint it as executed (it stays in errors).
         let e = &program.e_nodes[idx];
         match &outcomes[idx] {
-            NodeOutcome::Reused => cached_nodes.push(e.id),
+            // A reuse hit, or a node the cut pruned that still holds a value, are both
+            // "available, not recomputed" — reported cached. A pruned memory-only node
+            // (`Cut { cached: false }`) has no value this run and falls through, uncounted.
+            NodeOutcome::Reused | NodeOutcome::Cut { cached: true } => cached_nodes.push(e.id),
             outcome if outcome.ran() && Some(idx) != cancelled_in_flight => {
                 executed_nodes.push(ExecutedNodeStats {
                     node_id: e.id,
@@ -577,13 +607,16 @@ mod tests {
         })
     }
 
-    /// A plan that runs every node in index order, each output marked needed.
+    /// A plan that runs every node in index order, each output marked needed. These tests
+    /// drive the run loop directly with an all-`needed` mask (the reuse/cut logic is
+    /// unit-tested in `resolve.rs`), so `roots` is irrelevant here.
     fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
         let n = program.e_nodes.len();
         ExecutionPlan {
             process_order: (0..n).map(NodeIdx::from).collect(),
             verdicts: vec![NodeVerdict::Execute; n].into(),
             output_usage: vec![1; program.n_outputs],
+            roots: (0..n).map(NodeIdx::from).collect(),
         }
     }
 
@@ -592,10 +625,13 @@ mod tests {
         cache.reconcile(&program.e_nodes);
         let output_cache = OutputCache::default();
         let mut executor = Executor::default();
+        // Every node needed — drive the run loop directly, not the cut.
+        let needed: NodeColumn<bool> = vec![true; program.e_nodes.len()].into();
         let stats = executor
             .run(
                 program,
                 plan,
+                &needed,
                 &mut cache,
                 &output_cache,
                 &FlattenMap::default(),

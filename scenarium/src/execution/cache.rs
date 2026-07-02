@@ -166,6 +166,16 @@ impl Cache {
         }
     }
 
+    /// Whether the slot currently holds a *usable* cached value for its digest — resident
+    /// under the current digest, or a disk blob already flagged [`ValueCache::OnDisk`] this
+    /// run. Unlike [`is_resident_hit`](Self::is_resident_hit) (RAM only), this also counts a
+    /// stat'd-but-unloaded disk blob, so a node the executor's cut pruned (its consumers all
+    /// reused, so it never ran) is still reported as *cached* when its value can be served —
+    /// while a pruned memory-only node with no value reports `false`.
+    pub(crate) fn has_available_value(&self, idx: NodeIdx) -> bool {
+        self.is_resident_hit(idx) || matches!(self.slots[idx].value, ValueCache::OnDisk)
+    }
+
     /// Install a disk-loaded output into a slot under `digest` (the node's current
     /// digest), turning a later reuse check into a plain RAM hit.
     pub(crate) fn hydrate(&mut self, idx: NodeIdx, values: Vec<DynamicValue>, digest: Digest) {

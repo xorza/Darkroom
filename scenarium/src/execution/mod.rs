@@ -5,9 +5,11 @@
 //! 2. **plan** — the [`Planner`](plan::Planner) turns the program into an
 //!    [`ExecutionPlan`](plan::ExecutionPlan) (the schedule). Purely structural —
 //!    reachability + topological order + output usage, no cache/digest state.
-//! 3. **execute** — the [`Executor`](executor::Executor) walks the schedule
-//!    producer-first, computing each node's content digest and deciding reuse
-//!    (RAM / disk) or recompute inline, then updating its runtime cache.
+//! 3. **execute** — the [`Executor`](executor::Executor) first resolves which
+//!    pure-structural nodes reuse a cache and cuts every cone that feeds only
+//!    reuse hits (so a cached node's stale upstream isn't recomputed on reopen),
+//!    then walks the surviving schedule producer-first, computing each node's
+//!    content digest and deciding reuse (RAM / disk) or recompute inline.
 //!
 //! [`ExecutionEngine`] owns every piece (program, plan, planner, the cross-run
 //! cache, and executor) and exposes `update` (phase 1) and `execute` (phases
@@ -38,6 +40,7 @@ pub(crate) mod output_cache;
 pub(crate) mod plan;
 pub(crate) mod program;
 mod query;
+pub(crate) mod resolve;
 #[cfg(test)]
 mod tests;
 pub(crate) mod validate;
@@ -50,6 +53,7 @@ use plan::{ExecutionPlan, Planner};
 #[cfg(test)]
 use program::ExecutionNode;
 use program::{ExecutionProgram, NodeIdx};
+use resolve::Resolver;
 
 /// A per-node column: a `Vec<T>` addressable *only* by [`NodeIdx`], never a raw
 /// `usize`. The per-run/per-update columns that aren't part of a keyed structure —
@@ -188,6 +192,9 @@ pub struct ExecutionEngine {
     cache: Cache,
     executor: Executor,
     planner: Planner,
+    /// Cache-aware refinement of the plan: resolves reuse + cuts cones feeding only cache
+    /// hits, between plan and execute. Owns reusable per-run scratch (see `resolve.rs`).
+    resolver: Resolver,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
     /// Output cache: at execution time serves `persist` (content-addressed) and
@@ -285,14 +292,24 @@ impl ExecutionEngine {
         progress: Option<&UnboundedSender<RunProgress>>,
         cancel: CancelToken,
     ) -> Result<ExecutionStats> {
-        // Phase 2: schedule into the reusable plan buffer. Purely structural now —
-        // reachability + topological order + output usage, no cache/digest state. Every
-        // reachable node is scheduled; the executor computes each node's digest as it
-        // reaches it (producers first) and decides reuse-from-RAM / load-from-disk /
-        // recompute inline, so the disk frontier is materialized lazily during the run.
+        // Phase 2: schedule into the reusable plan buffer. Purely structural —
+        // reachability + topological order + output usage + the walk roots, no cache/digest
+        // state.
         self.planner.plan(&self.program, &seeds, &mut self.plan)?;
 
-        // Phase 3: run the schedule. Each node's disk cache is written the moment it
+        // Phase 2b: cache-aware refinement. Resolve which pure-structural nodes reuse a cache
+        // and cut every cone feeding only cache hits, yielding the `needed` mask — so a
+        // disk-cached node's stale upstream isn't recomputed on reopen. Mutates the cache
+        // (stamps digests, flags disk hits); the run loop re-derives each surviving node's
+        // digest as it reaches it (producers first) and materializes the disk frontier lazily.
+        let needed = self.resolver.resolve(
+            &self.program,
+            &self.plan,
+            &mut self.cache,
+            &self.output_cache,
+        );
+
+        // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), not batched here — so a long run's earlier
         // caches are durable even if a later node fails or the run is cancelled.
         let mut stats = self
@@ -300,6 +317,7 @@ impl ExecutionEngine {
             .run(
                 &self.program,
                 &self.plan,
+                needed,
                 &mut self.cache,
                 &self.output_cache,
                 &self.flatten_map,

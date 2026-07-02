@@ -135,16 +135,21 @@ mod cache_persistence {
         engine.execute_terminals().await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
 
-        // Reopen: a fresh engine over the same store. `mult` loads from disk (reused).
-        // `get_a` is a `Memory` source with no cross-session cache, so it recomputes on
-        // reopen — even though the reused `mult` never reads its fresh value.
+        // Reopen: a fresh engine over the same store. `mult` loads from disk (reused). Its
+        // only consumer of `get_a` is the reused `mult`, which never reads it, so the pre-run
+        // cut prunes `get_a` — a `Memory` source with no cross-session cache is *not*
+        // recomputed on reopen (the win the removed plan-time pass used to give).
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
         let stats = engine.execute_terminals().await.unwrap();
         assert_eq!(
             get_a_calls.load(Ordering::SeqCst),
-            2,
-            "a Memory source recomputes on reopen"
+            1,
+            "the cut prunes the Memory source upstream of a disk-cache hit on reopen"
+        );
+        assert!(
+            !stats.executed_nodes.iter().any(|n| n.node_id == get_a_id),
+            "get_a was cut, not executed"
         );
         assert!(
             stats.cached_nodes.contains(&mult_id),
@@ -155,8 +160,8 @@ mod cache_persistence {
             "mult did not recompute"
         );
 
-        // Digest change: bump `mult`'s func version ⇒ miss ⇒ mult recomputes (and so
-        // does get_a, its input).
+        // Digest change: bump `mult`'s func version ⇒ miss ⇒ mult recomputes, which now needs
+        // `get_a` again — so the cut keeps it alive and it runs.
         let mut bumped = make_lib();
         bumped.by_name_mut("mult").unwrap().version = 1;
         let mut engine = disk_engine(&dir);
@@ -164,12 +169,76 @@ mod cache_persistence {
         let stats = engine.execute_terminals().await.unwrap();
         assert_eq!(
             get_a_calls.load(Ordering::SeqCst),
-            3,
+            2,
             "version bump ⇒ mult misses and recomputes from get_a"
         );
         assert!(
             !stats.cached_nodes.contains(&mult_id),
             "mult should not be cached after a digest change"
+        );
+    }
+
+    /// Fan-out: a producer feeding both a reuse hit *and* a running consumer must survive
+    /// the cut — the running consumer still reads it. Proves the cut is a backward union
+    /// over consumers, not a forward "all consumers reused" filter (which would wrongly
+    /// prune the shared producer and starve the executing branch).
+    #[tokio::test]
+    async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
+        let dir = TempDir::new("fanout");
+
+        let get_a_calls = Arc::new(AtomicUsize::new(0));
+        let make_lib = || {
+            let calls = get_a_calls.clone();
+            test_func_lib(TestFuncHooks {
+                get_a: Arc::new(move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(7)
+                }),
+                ..default_hooks()
+            })
+        };
+
+        // get_a → mult(persist Disk) → print_mult ;  get_a → print_direct.
+        let lib = make_lib();
+        let mut graph = Graph::default();
+        graph.add(node(&lib, "get_a", NodeId::unique()));
+        let mut mult = node(&lib, "mult", NodeId::unique());
+        mult.persist = CachePersistence::Disk;
+        graph.add(mult);
+        let print_mult_id = NodeId::unique();
+        graph.add(node(&lib, "print", print_mult_id));
+        let print_direct_id = NodeId::unique();
+        graph.add(node(&lib, "print", print_direct_id));
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let mult_id = graph.by_name("mult").unwrap().id;
+        graph.set_input_binding(InputPort::new(mult_id, 0), (get_a_id, 0).into());
+        graph.set_input_binding(InputPort::new(mult_id, 1), (get_a_id, 0).into());
+        graph.set_input_binding(InputPort::new(print_mult_id, 0), (mult_id, 0).into());
+        graph.set_input_binding(InputPort::new(print_direct_id, 0), (get_a_id, 0).into());
+
+        // Cold run: everything computes; mult is stored to disk.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
+
+        // Reopen: mult reuses from disk, so the get_a→mult edge is cut — but print_direct
+        // still reads get_a, so the union keeps get_a alive and it recomputes.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib()).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            2,
+            "get_a is still read by print_direct, so the cut must keep it"
+        );
+        assert!(
+            stats.executed_nodes.iter().any(|n| n.node_id == get_a_id),
+            "the shared producer runs for its executing consumer"
+        );
+        assert!(
+            stats.cached_nodes.contains(&mult_id),
+            "mult still reuses from disk"
         );
     }
 
@@ -226,13 +295,13 @@ mod cache_persistence {
         engine.update(&graph, &make_lib()).unwrap();
         let stats = engine.execute_terminals().await.unwrap();
 
-        // The persist'd sum + mult reuse from disk. `get_a` is a `Memory` source with no
-        // cross-session cache, so on reopen it recomputes — its value feeds only the
-        // reused `sum`, which never reads it, so the work is redundant but harmless.
+        // The persist'd sum + mult reuse from disk. `get_a` feeds only the reused `sum` and
+        // `mult` (neither reads it), so the pre-run cut prunes it — the `Memory` source is
+        // not recomputed on reopen.
         assert_eq!(
             get_a_calls.load(Ordering::SeqCst),
-            2,
-            "a Memory source recomputes on reopen (no cross-session cache)"
+            1,
+            "the cut prunes the Memory source feeding only disk-cache hits"
         );
         assert!(
             stats.cached_nodes.contains(&sum_id) && stats.cached_nodes.contains(&mult_id),
@@ -1145,10 +1214,11 @@ mod file_cache {
     }
 
     /// The three behaviors in one flow over a shared cache file: a cold run
-    /// computes + writes; a present file is served without recomputing input 0
-    /// (its upstream pruned); bypass forces a recompute despite the file.
+    /// computes + writes; a present file serves the cache node from disk (its own
+    /// passthrough lambda skipped) — though as a pre-check node its input cone still
+    /// runs on reopen; bypass forces a recompute despite the file.
     #[tokio::test]
-    async fn present_prunes_input_absent_writes_bypass_recomputes() {
+    async fn present_serves_from_file_absent_writes_bypass_recomputes() {
         let file = temp_file("e2e");
         let path = file.0.clone();
         let calls = Arc::new(AtomicUsize::new(0));
@@ -1165,9 +1235,11 @@ mod file_cache {
             "get_a runs on the cold pass"
         );
 
-        // Reopen (file present): the cache node is served from its file. Its input `get_a`
-        // is a `Memory` node with no cross-session cache, so on reopen it recomputes even
-        // though the served cache node ignores the fresh value — the reopen tradeoff.
+        // Reopen (file present): the cache node is served from its file. It's a *pre-check*
+        // node, so the executor's structural-only cut leaves it (and its input cone) alone:
+        // `get_a` still recomputes on reopen even though the served cache node ignores the
+        // fresh value. (Only pure-structural disk-cache hits prune their upstream; a
+        // pre-check node's cone deliberately does not — see the executor's `Resolved`.)
         let (graph, lib, get_a_id, cache_id) = graph_with_cache(&path, calls.clone(), false);
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &lib).unwrap();
@@ -1175,7 +1247,7 @@ mod file_cache {
         assert_eq!(
             calls.load(Ordering::SeqCst),
             2,
-            "the Memory input recomputes on reopen"
+            "a pre-check (file-cache) node's input cone is not cut — get_a recomputes"
         );
         assert!(
             stats.cached_nodes.contains(&cache_id),
@@ -1195,7 +1267,7 @@ mod file_cache {
         assert_eq!(
             calls.load(Ordering::SeqCst),
             3,
-            "bypass recomputes the cache node (and its input runs on reopen anyway)"
+            "bypass recomputes the cache node (its pre-check input cone runs regardless)"
         );
     }
 }

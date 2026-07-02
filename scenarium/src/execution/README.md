@@ -323,8 +323,14 @@ another reused node is served without entering RAM (B.6).
 
 ## B.6 Execution-time lifecycle (`output_cache.rs`)
 
-All of it happens *during the run*, as the executor reaches each node (producer-first);
-the planner is structural and does no cache work. Per node, once its digest is computed:
+All of it happens *during the run*, not at plan time — the planner is structural and does no
+cache work. The executor first does a **pre-run cut** (`executor.rs`): fold every
+pure-structural node's digest producer-first (from upstream digests — no lambda, no value
+load), decide reuse, then prune any cone that feeds *only* reuse hits (a backward walk from
+the plan's roots). So a disk-cached node's now-unneeded upstream — a memory-only source, say
+— isn't recomputed on reopen. The cut is **structural-only**: a pre-check node and anything
+downstream of one is deferred to the run loop and never cut (Part C). Then, per surviving
+node, once its digest is computed:
 
 1. **`is_resident_hit`?** — reuse the RAM value, done.
 2. **else `mark_on_disk_if_present`.** If a blob exists for the digest **and** the
@@ -351,13 +357,14 @@ the editor selects it.
 ### Worked example
 
 `A → B → terminal`, `A` and `B` both `persist = Disk`, after a cold run that stored both.
-On reopen the executor walks `A`, `B`, terminal in order: `A`'s blob exists → `OnDisk`,
-reused (bytes stay on disk); `B`'s blob exists → `OnDisk`, reused; the terminal runs and
-reads `B`, so `hydrate_slot` pulls **only** `B` into RAM. `A`'s bytes never enter RAM —
-the win. A `Memory` (non-persist) node feeding `A`, though, *does* recompute on reopen
-(it has no cross-session cache and the reused `A` ignores its value) — the reopen
-tradeoff (see `CLAUDE.md`). If a later edit invalidates `B`, `B` misses and recomputes,
-reading `A` from disk (`A` becomes the frontier) then.
+On reopen the pre-run cut resolves `A` and `B` as disk hits; the terminal runs and reads
+`B`, so `B` is kept and `hydrate_slot` pulls **only** `B` into RAM, while `A` — read only by
+the reused `B` — is pruned (flagged `OnDisk`, still reported cached, its bytes never enter
+RAM). A `Memory` (non-persist) node feeding *only* `A` is cut too: it has no cross-session
+cache and the reused `A` ignores it, so it is **not** recomputed on reopen (the win the
+removed plan-time pass used to give). If a later edit invalidates `B`, `B` misses and
+recomputes, reading `A` from disk (`A` becomes the frontier) and re-needing that memory-only
+source, which then runs.
 
 ### Invalidation summary
 
@@ -411,10 +418,12 @@ mechanism `build_masters` uses to key on frame content — no `SpecialNode`-spec
 - **Presence, not content, decides the hit:** the file's `(len, mtime)` is *not* folded
   in. While the file exists, the node is served from it and its passthrough lambda is
   skipped. A non-const or empty path ⇒ no digest ⇒ never a hit, never stored.
-- **Reopen caveat.** The served node's `input[0]` cone still *runs* on a reopen — pruning
-  it relied on the removed plan-time cache pass, so a `Memory` input recomputes even
-  though the served node ignores its value (the reopen tradeoff, Part B). Within a
-  session the input stays RAM-resident and reuses.
+- **Reopen caveat.** The served node's `input[0]` cone still *runs* on a reopen. The
+  executor's pre-run cut (Part B.6) is **structural-only**: a pre-check node — and the file
+  cache is one — is *deferred* (its digest needs a run-time value), so it's never treated as
+  a plan-time hit and its cone is not pruned. A `Memory` input therefore recomputes even
+  though the served node ignores its value. Within a session the input stays RAM-resident and
+  reuses; the cut applies only to pure-structural `persist = Disk` cones.
 
 ## C.3 Load / store and `bypass`
 

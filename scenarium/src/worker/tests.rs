@@ -1648,14 +1648,18 @@ async fn disk_cache_persists_node_across_worker_restart() {
     );
     assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
 
-    // Reopen on a fresh worker over the same store: mult loads from disk and is reused.
-    // Its input `get_a` is a `Memory` node with no cross-session cache, so it recomputes
-    // on reopen even though the reused mult never reads its fresh value.
+    // Reopen on a fresh worker over the same store: mult loads from disk and is reused. Its
+    // input `get_a` feeds only the reused mult, which never reads it, so the pre-run cut
+    // prunes `get_a` — the `Memory` source is not recomputed on reopen.
     let stats = run(&dir.0, graph.clone(), Arc::new(make_lib())).await;
     assert_eq!(
         get_a_calls.load(Ordering::SeqCst),
-        2,
-        "a Memory input recomputes on reopen"
+        1,
+        "the cut prunes the Memory input feeding only a disk-cache hit"
+    );
+    assert!(
+        !stats.executed_nodes.iter().any(|n| n.node_id == get_a_id),
+        "get_a was cut, not recomputed"
     );
     assert!(
         stats.cached_nodes.contains(&mult_id),
@@ -1665,5 +1669,4 @@ async fn disk_cache_persists_node_across_worker_restart() {
         !stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
         "mult itself is not recomputed"
     );
-    let _ = get_a_id;
 }

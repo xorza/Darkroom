@@ -61,6 +61,11 @@ pub(crate) struct ExecutionPlan {
     /// each lambda as [`OutputUsage`](crate::func_lambda::OutputUsage) so a node can
     /// skip computing outputs nobody reads.
     pub(crate) output_usage: Vec<u32>,
+    /// The deduped nodes the backward walk started from — terminals, event subscribers,
+    /// and event-trigger owners. The schedule's "must be available" set: the executor's
+    /// pre-run cut seeds its `needed` mask from these and prunes any cone reachable only
+    /// through cache-hit consumers (see [`Executor`](crate::execution::executor::Executor)).
+    pub(crate) roots: Vec<NodeIdx>,
 }
 
 impl ExecutionPlan {
@@ -68,6 +73,7 @@ impl ExecutionPlan {
         self.process_order.clear();
         self.verdicts.clear();
         self.output_usage.clear();
+        self.roots.clear();
     }
 
     /// Clear the order and reset every per-node verdict to default at the given pool
@@ -77,6 +83,7 @@ impl ExecutionPlan {
         self.verdicts.reset(n_nodes, NodeVerdict::default());
         self.output_usage.clear();
         self.output_usage.resize(n_outputs, 0);
+        self.roots.clear();
     }
 }
 
@@ -115,11 +122,9 @@ pub(crate) struct Planner {
     color: NodeColumn<Color>,
     /// DFS work stack.
     stack: Vec<Visit>,
-    /// Root-membership marker column (dedup without hashing).
+    /// Root-membership marker column (dedup without hashing). The deduped roots
+    /// themselves land in `plan.roots` — they're an output the executor's cut reads.
     is_root: NodeColumn<bool>,
-    /// Deduped indices of the nodes the backward walks start from — terminals,
-    /// event subscribers, and event-trigger owners. *Not* only `terminal` nodes.
-    roots: Vec<NodeIdx>,
 }
 
 impl Planner {
@@ -133,7 +138,9 @@ impl Planner {
     ) -> Result<()> {
         plan.reset(program.e_nodes.len(), program.n_outputs);
 
-        self.collect_roots(program, seeds);
+        // Collect the walk roots straight into `plan.roots` — they seed the backward walk
+        // below *and* the executor's pre-run cut, so they live on the plan as an output.
+        self.collect_roots(program, seeds, plan);
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
@@ -142,17 +149,22 @@ impl Planner {
         result
     }
 
-    /// Mark `idx` as a walk root, deduping via the marker column.
-    fn mark_root(&mut self, idx: NodeIdx) {
+    /// Mark `idx` as a walk root in `plan.roots`, deduping via the `is_root` marker column.
+    fn mark_root(&mut self, plan: &mut ExecutionPlan, idx: NodeIdx) {
         if !self.is_root[idx] {
             self.is_root[idx] = true;
-            self.roots.push(idx);
+            plan.roots.push(idx);
         }
     }
 
-    fn collect_roots(&mut self, program: &ExecutionProgram, seeds: &RunSeeds) {
+    fn collect_roots(
+        &mut self,
+        program: &ExecutionProgram,
+        seeds: &RunSeeds,
+        plan: &mut ExecutionPlan,
+    ) {
         self.is_root.reset(program.e_nodes.len(), false);
-        self.roots.clear();
+        plan.roots.clear();
 
         // Add event subscribers
         for event in &seeds.events {
@@ -161,7 +173,7 @@ impl Planner {
                 .subscribers
                 .clone();
             for sub in subs {
-                self.mark_root(sub);
+                self.mark_root(plan, sub);
             }
         }
 
@@ -169,7 +181,7 @@ impl Planner {
         if seeds.terminals {
             for (idx, e) in program.e_nodes.iter().enumerate() {
                 if e.terminal {
-                    self.mark_root(idx.into());
+                    self.mark_root(plan, idx.into());
                 }
             }
         }
@@ -181,7 +193,7 @@ impl Planner {
                     .iter()
                     .any(|ev| !ev.subscribers.is_empty())
                 {
-                    self.mark_root(idx.into());
+                    self.mark_root(plan, idx.into());
                 }
             }
         }
@@ -203,7 +215,7 @@ impl Planner {
 
         self.color.reset(program.e_nodes.len(), Color::White);
 
-        for e_node_idx in self.roots.iter().copied() {
+        for e_node_idx in plan.roots.iter().copied() {
             self.stack.push(Visit {
                 e_node_idx,
                 cause: VisitCause::Root,
