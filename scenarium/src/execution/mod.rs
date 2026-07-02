@@ -309,12 +309,12 @@ impl ExecutionEngine {
             .await;
 
         // Phase 3b: reclaim RAM from prior-run values this run left untouched and
-        // that the disk store (written per-node above) can serve again on demand.
-        let executor = &self.executor;
+        // that the disk store (written per-node above) can serve again on demand. The
+        // executor owns which nodes ran, so it computes the keep-set; the output cache
+        // just demotes the rest.
+        let keep = self.executor.protected_after_run(&self.program, &self.plan);
         self.output_cache
-            .evict_unused(&self.program, &self.plan, &mut self.cache, |idx| {
-                executor.ran(idx)
-            });
+            .evict_unused(&self.program, &mut self.cache, &keep);
 
         stats.triggered_events = seeds.events;
         // Annotate with how the graph was flattened so the stats' flat ids

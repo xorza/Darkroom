@@ -42,7 +42,6 @@ use crate::elements::cache_passthrough::cache_node_path;
 use crate::execution::blob;
 use crate::execution::cache::{Cache, ValueCache};
 use crate::execution::digest::Digest;
-use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::library::Library;
 use crate::special::SpecialNode;
@@ -203,39 +202,21 @@ impl OutputCache {
 
     /// After a run, demote resident values the run neither executed nor read as a
     /// frontier input back to disk-only — reclaiming RAM that merely duplicates a
-    /// disk blob. Such a value is a prior run's leftover, pruned behind a cache this
-    /// run, so nothing read it; if its blob is still on disk it's dropped from RAM and
+    /// disk blob. `keep[idx]` marks the nodes to retain — the run's executed nodes plus
+    /// the producers they read (see [`Executor::protected_after_run`](crate::execution::executor::Executor::protected_after_run));
+    /// any other resident value is a prior run's leftover, pruned behind a cache this
+    /// run, so nothing read it. If its blob is still on disk it's dropped from RAM and
     /// re-marked [`ValueCache::OnDisk`], so a later run or an inspection reloads it.
     /// Lossless: a value with no blob (Memory-only, impure) is kept, so eviction never
     /// forces a recompute.
     pub(crate) fn evict_unused(
         &self,
         program: &ExecutionProgram,
-        plan: &ExecutionPlan,
         cache: &mut Cache,
-        ran: impl Fn(NodeIdx) -> bool,
+        keep: &[bool],
     ) {
-        // Protected = nodes this run actually recomputed, plus the producers they read
-        // as frontier inputs. A *reused* node (served from cache, its lambda skipped)
-        // isn't protected on its own account — only if a node that ran read its value —
-        // so a disk-cached value behind another reused node is reclaimed. Any other
-        // resident value is an untouched prior-run leftover. One node-sized bitset, local
-        // to the call (this runs once per run, so a fresh `Vec<bool>` is cheap enough).
-        let mut protected = vec![false; program.e_nodes.len()];
-        for &e_idx in &plan.process_order {
-            if !ran(e_idx) {
-                continue;
-            }
-            protected[e_idx.idx()] = true;
-            let span = program.e_nodes[e_idx].inputs;
-            for input in &program.inputs[span.range()] {
-                if let ExecutionBinding::Bind(addr) = &input.binding {
-                    protected[addr.target_idx.idx()] = true;
-                }
-            }
-        }
         for idx in program.node_indices() {
-            if protected[idx.idx()] || cache.slots[idx].output_values().is_none() {
+            if keep[idx.idx()] || cache.slots[idx].output_values().is_none() {
                 continue;
             }
             // Reloadable iff a blob for the current digest is on disk — only then is

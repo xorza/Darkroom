@@ -90,6 +90,34 @@ impl Executor {
         idx.idx() >= self.outcomes.len() || self.outcomes[idx].ran()
     }
 
+    /// The nodes whose resident value the last run must keep, as a per-node mask:
+    /// everything the run recomputed, plus the producers those nodes read as frontier
+    /// inputs. A *reused* node (served from cache, its lambda skipped) isn't kept on its
+    /// own account — only if a node that ran read its value — so a disk-cached value
+    /// behind another reused node is reclaimed. Everything else resident is an untouched
+    /// prior-run leftover that [`OutputCache::evict_unused`] may demote to disk. Reads the
+    /// run's `outcomes`, so it's the executor's to compute, not the cache's.
+    pub(crate) fn protected_after_run(
+        &self,
+        program: &ExecutionProgram,
+        plan: &ExecutionPlan,
+    ) -> Vec<bool> {
+        let mut protected = vec![false; program.e_nodes.len()];
+        for &e_idx in &plan.process_order {
+            if !self.ran(e_idx) {
+                continue;
+            }
+            protected[e_idx.idx()] = true;
+            let span = program.e_nodes[e_idx].inputs;
+            for input in &program.inputs[span.range()] {
+                if let ExecutionBinding::Bind(addr) = &input.binding {
+                    protected[addr.target_idx.idx()] = true;
+                }
+            }
+        }
+        protected
+    }
+
     /// Walk `plan.process_order` (producer-first). For each node: compute its output
     /// digest ([`digest::output_digest`], stamped as its `current_digest`), reuse from
     /// RAM/disk if unchanged, else invoke its lambda and persist the result to
