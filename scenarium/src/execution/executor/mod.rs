@@ -25,7 +25,7 @@ use crate::data::DynamicValue;
 use crate::execution_stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
-use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage, PreCheckDigest};
+use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage};
 use crate::graph::InputPort;
 use crate::prelude::FuncId;
 
@@ -351,20 +351,17 @@ enum Readiness {
     Run,
 }
 
-/// Compute node `idx`'s content digest, stamp it as the slot's `current_digest`, and
-/// decide whether the node reuses a cached output or must run. Producer-first order means
-/// every `Bind` producer's digest is already stamped when this runs (the planner does none).
-/// For a pure-structural node the pre-run [`resolve_structural`] sweep already stamped the
-/// same digest; this re-derives it idempotently (a cheap fold) so the run loop needs no
-/// special case for surviving reuse-vs-run nodes. A **pre-check** (`Deferred`) node is
-/// resolved *only* here — its digest needs a run-time value.
+/// Compute node `idx`'s content digest, stamp it as the slot's `current_digest`, and decide
+/// whether the node reuses a cached output or must run. Producer-first order means every
+/// `Bind` producer's digest is already stamped when this runs. The pre-run
+/// [`resolve`](crate::execution::resolve) sweep already stamped the same digest; this
+/// re-derives it idempotently (a cheap fold), so the run loop needs no special case for
+/// surviving reuse-vs-run nodes.
 ///
-/// Input collection is ordered to touch as little as possible, which is the whole reason
-/// for the branch on `has_pre_check`: a **pre-check** node's probe reads its inputs, so
-/// they're resolved *before* the digest (its fingerprint folds in); every other node
-/// folds producer digests + consts without values and defers collection until *after* the
-/// reuse check, so a node that turns out to reuse never loads its producers' outputs. On
-/// [`Readiness::Run`], `inputs` holds the resolved arguments.
+/// The digest folds producer digests + consts *without values*, and input collection is
+/// deferred until *after* the reuse check — so a node that turns out to reuse never loads its
+/// producers' outputs (and its now-unread producers can have been cut). On [`Readiness::Run`],
+/// `inputs` holds the resolved arguments.
 fn prepare_node(
     program: &ExecutionProgram,
     output_cache: &OutputCache,
@@ -372,33 +369,20 @@ fn prepare_node(
     idx: NodeIdx,
     inputs: &mut Vec<InvokeInput>,
 ) -> Readiness {
-    let e_node = &program.e_nodes[idx];
-    let has_pre_check = !e_node.pre_check.is_none();
-
-    let pre_check = if has_pre_check {
-        if !collect_inputs(program, output_cache, cache, idx, inputs) {
-            return Readiness::InputsUnavailable;
-        }
-        e_node.pre_check.run(&mut cache.slots[idx].state, inputs)
-    } else {
-        PreCheckDigest::None
-    };
-
-    let digest = node_digest(program, idx, cache, pre_check);
+    let digest = node_digest(program, idx, cache);
     cache.slots[idx].current_digest = digest;
 
     // A disk blob is loaded lazily only when a running consumer reads it (so a disk-cached
-    // value behind another never enters RAM). A `None` digest (impure, no pre-check) never
-    // reuses.
+    // value behind another never enters RAM). A `None` digest (impure) never reuses.
     if digest.is_some()
         && (cache.is_resident_hit(idx) || output_cache.mark_on_disk_if_present(program, idx, cache))
     {
         return Readiness::Reuse;
     }
 
-    // Not reusing: a non-pre-check node still needs its inputs, loading any disk-cached
-    // producer on demand (the lazy frontier read). A pre-check node already collected them.
-    if !has_pre_check && !collect_inputs(program, output_cache, cache, idx, inputs) {
+    // Not reusing: load the node's inputs, pulling any disk-cached producer in on demand (the
+    // lazy frontier read).
+    if !collect_inputs(program, output_cache, cache, idx, inputs) {
         return Readiness::InputsUnavailable;
     }
     Readiness::Run

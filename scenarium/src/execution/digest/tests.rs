@@ -149,7 +149,7 @@ fn digested_cache(program: &ExecutionProgram, through: NodeIdx) -> Cache {
     let mut cache = Cache::default();
     cache.reconcile(&program.e_nodes);
     for idx in program.node_indices().take(through.idx() + 1) {
-        let d = node_digest(program, idx, &cache, PreCheckDigest::None);
+        let d = node_digest(program, idx, &cache);
         cache.slots[idx].current_digest = d;
     }
     cache
@@ -377,94 +377,6 @@ fn impure_node_and_its_dependents_are_none() {
     assert_eq!(d[1], None, "pure node under impure ⇒ None");
     assert_eq!(d[2], None, "taint flows the whole way up");
     assert!(d[3].is_some(), "independent pure node is unaffected");
-}
-
-/// A `Computed` pre-check owns the entire input contribution: the structural input
-/// fold is skipped, so the node is keyed on the pre-check digest alone — unaffected by
-/// *which* producer feeds it, and **not** tainted by an impure one (unlike the
-/// structural fold, whose `?` short-circuits on a `None` producer digest). A declined
-/// pre-check (`Uncacheable`) has no digest.
-#[test]
-fn computed_pre_check_owns_inputs_and_ignores_taint() {
-    let probe = Digest::hash(b"probe");
-
-    // Consumer (func 20) binding a PURE producer.
-    let mut pure = Prog::default();
-    pure.add(10, 0, 1, &[]); // 0: pure producer
-    pure.add(20, 0, 1, &[bind(0, 0)]); // 1: consumer binds it
-    let pure_cache = digested_cache(&pure.program, NodeIdx(1));
-
-    // Same consumer (func 20) binding an IMPURE producer — digest `None`, which would
-    // taint the consumer to `None` under the structural fold.
-    let mut impure = Prog::default();
-    impure.add_impure(10, 1, &[]); // 0: impure producer
-    impure.add(20, 0, 1, &[bind(0, 0)]); // 1: consumer binds it
-    let impure_cache = digested_cache(&impure.program, NodeIdx(1));
-
-    // Sanity: under the *structural* fold (no pre-check), the impure input taints the
-    // consumer to None.
-    assert!(
-        node_digest(
-            &impure.program,
-            NodeIdx(1),
-            &impure_cache,
-            PreCheckDigest::None
-        )
-        .is_none(),
-        "structural fold: an impure producer taints the consumer to None"
-    );
-
-    // Computed: keyed on the probe alone — Some in both cases, and IDENTICAL despite
-    // one producer being pure and the other impure.
-    let c_pure = node_digest(
-        &pure.program,
-        NodeIdx(1),
-        &pure_cache,
-        PreCheckDigest::Computed(probe),
-    );
-    let c_impure = node_digest(
-        &impure.program,
-        NodeIdx(1),
-        &impure_cache,
-        PreCheckDigest::Computed(probe),
-    );
-    assert!(
-        c_impure.is_some(),
-        "a Computed pre-check is not tainted by an impure input"
-    );
-    assert_eq!(
-        c_pure, c_impure,
-        "Computed ignores which producer feeds the input"
-    );
-
-    // It also ignores the structural inputs entirely, so it differs from the
-    // no-pre-check structural digest of the same node.
-    let structural = node_digest(&pure.program, NodeIdx(1), &pure_cache, PreCheckDigest::None);
-    assert_ne!(
-        c_pure, structural,
-        "Computed (probe only) ≠ the structural input fold"
-    );
-
-    // A different probe re-keys — the Computed digest *is* the key.
-    let c_other = node_digest(
-        &pure.program,
-        NodeIdx(1),
-        &pure_cache,
-        PreCheckDigest::Computed(Digest::hash(b"other")),
-    );
-    assert_ne!(c_pure, c_other, "the Computed digest is the key");
-
-    // A declined pre-check ⇒ not cacheable.
-    assert_eq!(
-        node_digest(
-            &pure.program,
-            NodeIdx(1),
-            &pure_cache,
-            PreCheckDigest::Uncacheable
-        ),
-        None,
-        "a declined pre-check has no digest"
-    );
 }
 
 /// The [`DigestHasher`] builder is deterministic, encodes PODs little-endian and

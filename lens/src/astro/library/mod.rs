@@ -21,10 +21,9 @@ use lumos::{
 use scenarium::data::{
     DataType, DynamicValue, EnumVariants, FsPathConfig, FsPathMode, StaticValue,
 };
-use scenarium::func_lambda::{FuncLambda, InvokeError, InvokeResult, PreCheck};
+use scenarium::func_lambda::{FuncLambda, InvokeError, InvokeResult};
 use scenarium::function::{Func, FuncInput, ValueVariant};
 use scenarium::library::{Library, TypeEntry};
-use scenarium::prelude::DigestHasher;
 
 use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,
@@ -154,11 +153,11 @@ pub fn astro_library() -> Library {
                  next run instead of re-stacking.",
             )
             .category("astro")
-            // Pure, keyed by a pre-check (see `.pre_check` below) on the *content*
-            // of the four calibration folders plus the scalar params: a stable folder +
-            // params caches and any add/remove/edit re-keys. Because it keys on values, not
-            // the upstream computation, the masters reuse across any upstream change that
-            // leaves the effective frames/params unchanged.
+            // `Pure`: its digest is the structural fold of its inputs, so the directory-aware
+            // `FsPath` resolver keys it on each calibration folder's *contents* (sorted entry
+            // `(name, len, mtime)`). A stable folder caches; any add/remove/edit re-keys it and
+            // it recomputes. (Its `cache` toggle still reloads masters from the `.lcm` files it
+            // writes next to the frames, keeping the recompute cheap.)
             .pure()
             .inputs([
                 dir_input("darks"),
@@ -172,25 +171,6 @@ pub fn astro_library() -> Library {
             )
             .input(FuncInput::required("cache", DataType::Bool).default(true))
             .output("masters", MASTERS_DATA_TYPE.clone())
-            // Fingerprint the actual frame folders + params, so the digest tracks values
-            // rather than the upstream computation (see `.pure()` above). A present folder
-            // folds a `1` marker + its directory-content identity; an absent/empty one a `0`.
-            .pre_check(PreCheck::compute(|_, inputs| {
-                let mut hasher = DigestHasher::new();
-                for dir in inputs.iter().take(4) {
-                    match dir.value.as_fs_path() {
-                        Some(p) if !p.is_empty() => {
-                            hasher.write_pod(1u8).write_fs_path(p);
-                        }
-                        _ => {
-                            hasher.write_pod(0u8);
-                        }
-                    }
-                }
-                hasher.write_pod(inputs[4].value.as_f64()?);
-                hasher.write_pod(inputs[5].value.as_bool()?);
-                Some(hasher.finish())
-            }))
             .lambda(FuncLambda::new(move |ctx, _, _, inputs, _, outputs| {
                 let cancel = ctx.cancel_flag();
                 Box::pin(async move {

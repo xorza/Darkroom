@@ -99,37 +99,28 @@ column of [`NodeOutcome`], each `Pending`/`Reused`/`Cut`/`Ran`/`Failed`/`Skipped
 its own elapsed/error); the cross-run `slots` live on the `Cache`. `RuntimeSlot` (`cache.rs`)
 caches `output_values` + the `produced_under` digest, per-node `AnyState`/`SharedAnyState`.
 
-**One output digest, computed at execution time.** The whole cache keys off a single
-`RuntimeSlot::current_digest` (`digest.rs`), and the executor computes it as it reaches
-each node — the *only* digest computation, replacing the old plan-time `recompute_digests`
-+ `mark_available`/`hydrate_frontier`/`is_available` machinery. Walking `process_order`
-producer-first (skipping `MissingInputs` nodes), per node: `digest::output_digest` folds
-func id/version + output types +
-each input (a `Const`'s value, or a `Bind` producer's already-stamped `current_digest`) +,
-for a [`PreCheck`](func_lambda.rs) node, the `Digest` its pre-check returns — a fingerprint
-of the external content it actually read (`Digest::hash` builds one; runs at execution so
-it sees resolved/**bound** inputs). `None` for an `Impure` node with no pre-check
-(never cached). A pre-check node folds its `Const` `FsPath`s *shallowly* (path string only;
-the pre-check owns their content via `hash_fs_content`), so an irrelevant file (a
-`build_masters` `.lcm`, a stray `.txt`) leaves the digest unchanged — it reuses — while a
-real frame change re-keys it. Reuse is uniform: a resident value whose `produced_under ==
-current_digest` (`is_resident_hit`) is served from RAM; else `OutputCache::mark_on_disk_if_present`
-stats a blob for that digest and reuses it (loaded lazily by `hydrate_slot` only when a
-running consumer reads it, so a disk-cached value behind another never enters RAM — this
-is what survives a reopen); else the node runs and `store_node` writes the blob. Downstream
-skip is just digest folding: a producer whose `current_digest` is unchanged leaves its
-consumers' digests unchanged, so an `Impure` pre-check node's clean run lets a `Pure`
-consumer reuse. **Pre-run cut:** before the run loop the executor resolves which
-pure-structural nodes reuse a cache (`resolve_structural` — folding each digest producer-first
-from upstream digests, no lambda, no value load) and prunes every cone that feeds *only*
-reuse hits (`compute_needed`, a backward walk seeded from the plan's `roots`), so a `Memory`
-(non-persist) node feeding a disk-cached *hit* is **not** recomputed on reopen. The cut is
-**structural-only**: a pre-check node (file cache, `build_masters`) and anything downstream
-of one is `Deferred` — resolved inline in the run loop and never cut — so a pre-check node's
-input cone still runs on reopen. A cut node is reported `cached` iff it still holds a value
-(a deeper disk cache), else it's not computed this run. Output buffers aren't wiped;
-`evict_unused` demotes to disk only values the run's *executed* nodes didn't produce/read. A
-reused node counts as `cached` in stats. When `execute` is given
+**One output digest.** The whole cache keys off a single `RuntimeSlot::current_digest`
+(`digest.rs`). `node_digest` folds func id/version + output types + each input (a `Const`'s
+value + `FsPath` directory content, or a `Bind` producer's already-stamped `current_digest`).
+`None` for an `Impure` node (never cached; a `None` producer taints its consumer to `None`).
+The one special case: a `CachePassthrough` (file-cache) node is keyed on its `Const` path
+*alone* (`file_cache_digest`), excluding its `input[0]` cone. Reuse is uniform: a resident
+value whose `produced_under == current_digest` (`is_resident_hit`) is served from RAM; else
+`OutputCache::mark_on_disk_if_present` stats a blob for that digest and reuses it (loaded
+lazily by `hydrate_slot` only when a running consumer reads it, so a disk-cached value behind
+another never enters RAM — this is what survives a reopen); else the node runs and
+`store_node` writes the blob. Downstream skip is just digest folding: a producer whose
+`current_digest` is unchanged leaves its consumers' digests unchanged. **Pre-run cut**
+(`resolve.rs`): before the run loop the executor resolves *every* node's digest + reuse
+(`resolve_structural` — folding each digest producer-first from upstream digests, no lambda,
+no value load — every digest being structural or the file-cache path key) and prunes every
+cone that feeds *only* reuse hits (`compute_needed`, a backward walk seeded from the plan's
+`roots`), so a `Memory` (non-persist) node feeding a disk-cached *hit* is **not** recomputed
+on reopen. A cut node is reported `cached` iff it still holds a value (a deeper disk cache),
+else it's not computed this run. The run loop then re-derives each surviving node's digest
+idempotently (`prepare_node`). Output buffers aren't wiped; `evict_unused` demotes to disk
+only values the run's *executed* nodes didn't produce/read. A reused node counts as `cached`
+in stats. When `execute` is given
 a progress `UnboundedSender<RunProgress>`, the loop sends `RunPhase::Started`
 before each lambda and `Finished{elapsed}` after — node ids resolved to authoring
 attribution via the `FlattenMap` so the consumer needn't be. Stats (executed,

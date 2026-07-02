@@ -250,7 +250,7 @@ impl<'a> Run<'a> {
                 NodeKind::Func(func_id) => (
                     library
                         .by_id(func_id)
-                        .expect("func resolved by update's check_with pre-check"),
+                        .expect("func resolved by update's check_with validation"),
                     None,
                 ),
                 NodeKind::Special(s) => (s.func(), Some(*s)),
@@ -319,7 +319,6 @@ impl<'a> Run<'a> {
             e_node.func_version = func.version;
             if !was_inited {
                 e_node.lambda = func.lambda.clone();
-                e_node.pre_check = func.pre_check.clone();
             }
             e_node.inputs = Span::new(inputs_start, input_count as u32);
             e_node.outputs = Span::new(outputs_start, func.outputs.len() as u32);

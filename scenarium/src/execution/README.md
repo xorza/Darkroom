@@ -259,19 +259,15 @@ BLAKE3 `Digest`. The **executor** computes it for each node as it reaches the no
 - **Equal digest ⇒ identical computation**, on any machine — so the digest is at once
   the cache *key* and the *invalidation* signal. Change any const, binding, func
   version, or upstream output and every downstream digest changes.
-- **Reproducibility taint.** Only `Pure` nodes (or ones vouched by a pre-check) are
-  hashed; an `Impure` node, or any node with a non-reproducible producer, has digest
-  `None` = "always recompute, never cache", for RAM and disk alike (a `None` producer
-  folds to a `None` consumer).
-- **Pre-check nodes.** A node with a `PreCheck` (`func_lambda.rs`) folds a `Digest` its
-  probe returns — a fingerprint of the external content it actually read (e.g. just the
-  frame files in a folder, ignoring a stray `.txt`) — instead of a directory walk, so it
-  reuses across irrelevant changes and re-keys only on a real one. Its `Const` `FsPath`s
-  fold *shallowly* (path string only; the pre-check owns their content). See the
-  `CLAUDE.md` execution section.
-- **File inputs.** A pre-check-less node's `FsPath` const folds the path string *and* the
-  file's identity (`FileId`, default `(len, mtime)`; opt-in content hash) so the same
-  path holding different bytes invalidates.
+- **Equal digest ⇒ identical computation**, on any machine.
+- **Reproducibility taint.** Only `Pure` nodes are hashed; an `Impure` node, or any node
+  with a non-reproducible producer, has digest `None` = "always recompute, never cache",
+  for RAM and disk alike (a `None` producer folds to a `None` consumer).
+- **File inputs.** An `FsPath` const folds the path string *and* the file's identity
+  (`FileId`, default `(len, mtime)`; opt-in content hash), or — for a **directory** — a
+  fingerprint of its entries (§`hash_dir_entries`), so the same path holding different
+  bytes, or a folder gaining/losing/editing a file, invalidates. This is what re-keys
+  `build_masters` when its calibration folders change.
 - **Output ports** of a multi-output node are disambiguated (`port_digest_of`); a
   `DOMAIN` separator versions the hashing scheme itself.
 - **Output signature.** Each node's resolved output types (arity + each type, wildcards
@@ -279,10 +275,13 @@ BLAKE3 `Digest`. The **executor** computes it for each node as it reaches the no
   re-keys it *without* a version bump. This is what makes "a blob exists for this digest
   but is the wrong type" impossible by construction: a type change is a key change, so
   the stale blob is never looked up.
+- **File-cache node.** The one special case: a `CachePassthrough` node is keyed on its
+  `Const` path *alone* (`file_cache_digest`), deliberately excluding its `input[0]` cone —
+  the path is the reproducibility boundary (Part C).
 
-A node's digest is computed at **execution**, not `update`: only then are its producers'
-outputs known, and a pre-check needs its (possibly bound) inputs resolved. The planner is
-purely structural and never touches digests.
+A node's digest is computed at **execution** (the pre-run resolve sweep, then re-derived in
+the run loop), not `update`: only then are its producers' `current_digest`s stamped. The
+planner is purely structural and never touches digests.
 
 ## B.3 Storage (`blob.rs`)
 
@@ -324,13 +323,12 @@ another reused node is served without entering RAM (B.6).
 ## B.6 Execution-time lifecycle (`output_cache.rs`)
 
 All of it happens *during the run*, not at plan time — the planner is structural and does no
-cache work. The executor first does a **pre-run cut** (`executor.rs`): fold every
-pure-structural node's digest producer-first (from upstream digests — no lambda, no value
-load), decide reuse, then prune any cone that feeds *only* reuse hits (a backward walk from
-the plan's roots). So a disk-cached node's now-unneeded upstream — a memory-only source, say
-— isn't recomputed on reopen. The cut is **structural-only**: a pre-check node and anything
-downstream of one is deferred to the run loop and never cut (Part C). Then, per surviving
-node, once its digest is computed:
+cache work. The executor first does a **pre-run cut** (`resolve.rs`): fold every node's digest
+producer-first (from upstream digests — no lambda, no value load), decide reuse, then prune
+any cone that feeds *only* reuse hits (a backward walk from the plan's roots). So a disk-cached
+node's now-unneeded upstream — a memory-only source, say — isn't recomputed on reopen. Every
+digest is structural (or the file-cache node's path key), so the whole graph resolves here —
+there are no deferred nodes. Then, per surviving node, once its digest is computed:
 
 1. **`is_resident_hit`?** — reuse the RAM value, done.
 2. **else `mark_on_disk_if_present`.** If a blob exists for the digest **and** the
@@ -405,25 +403,22 @@ not a registered `FuncId`. Its hardcoded interface + lambda come from
 - The func is `uncacheable()` — it owns its caching, so the editor's generic
   `persist = Disk` toggle doesn't apply.
 
-## C.2 The path is the key (a pre-check)
+## C.2 The path is the key (`file_cache_digest`)
 
-A cache node's content digest comes from a **pre-check** (`func_lambda.rs`) on the func: it
-hashes the `Const` `FsPath` **alone**, so the framework skips the structural input fold and
-keys the node on the path, deliberately ignoring `input[0]`'s cone. (This is the same
-mechanism `build_masters` uses to key on frame content — no `SpecialNode`-specific branch in
-`node_digest`.) So:
+A cache node's content digest is its `Const` `FsPath` **alone** (`file_cache_digest`,
+dispatched from `node_digest` on the `CachePassthrough` special kind) — the framework skips
+the structural input fold and keys the node on the path, deliberately ignoring `input[0]`'s
+cone. So:
 
 - `input[0]` may be impure or expensive and the node still presents a digest — the path
   *is* the reproducibility boundary.
 - **Presence, not content, decides the hit:** the file's `(len, mtime)` is *not* folded
   in. While the file exists, the node is served from it and its passthrough lambda is
   skipped. A non-const or empty path ⇒ no digest ⇒ never a hit, never stored.
-- **Reopen caveat.** The served node's `input[0]` cone still *runs* on a reopen. The
-  executor's pre-run cut (Part B.6) is **structural-only**: a pre-check node — and the file
-  cache is one — is *deferred* (its digest needs a run-time value), so it's never treated as
-  a plan-time hit and its cone is not pruned. A `Memory` input therefore recomputes even
-  though the served node ignores its value. Within a session the input stays RAM-resident and
-  reuses; the cut applies only to pure-structural `persist = Disk` cones.
+- **The input cone is cut.** Because the node presents a path-keyed digest, the pre-run cut
+  (Part B.6) resolves it like any other node: a served (reused) cache node prunes its
+  `input[0]` cone, so that upstream is *not* recomputed on reopen. The path key is what makes
+  this safe — the served value doesn't depend on the cone.
 
 ## C.3 Load / store and `bypass`
 

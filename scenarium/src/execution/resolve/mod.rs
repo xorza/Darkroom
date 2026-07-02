@@ -12,11 +12,9 @@
 //! the run loop. [`compute_needed`] is literally a mark-sweep from the run's roots that stops
 //! descending at a cache hit.
 //!
-//! The cut is deliberately **structural-only**: a node with a pre-check — or a pre-check
-//! ancestor — is [`Resolved::Deferred`], its digest needing a run-time value, so the executor
-//! resolves it inline and its cone is never cut. Since every consumer of a `Deferred` node is
-//! itself `Deferred`, deferred nodes are never pruned, so the cut only ever touches the
-//! pure-structural region where reuse is decidable ahead of the run.
+//! Every node's digest is either structural (a fold of its inputs) or a contained special
+//! case (the file-cache node keys on its path), so the sweep can resolve the *whole* graph
+//! ahead of the run — there is nothing it must defer.
 
 use crate::execution::NodeColumn;
 use crate::execution::cache::Cache;
@@ -24,29 +22,22 @@ use crate::execution::digest::node_digest;
 use crate::execution::output_cache::OutputCache;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::func_lambda::PreCheckDigest;
 
-/// The pre-run structural resolution of one node. It classifies only the *pure-structural*
-/// region (nodes whose whole upstream cone is pre-check-free), which is the region where reuse
-/// can be decided — and a cone cut is safe — *before* running anything.
+/// The pre-run resolution of one node: does its cached output reuse this run, or must it run?
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Resolved {
-    /// Not resolved here: the node has a pre-check, or a pre-check ancestor, so its digest
-    /// needs a run-time value. The executor's run loop computes it inline (`prepare_node`, the
-    /// pre-refactor behavior). Never a reuse hit — and since every consumer of a deferred node
-    /// is itself deferred, a deferred node is never cut (its cone always runs).
-    #[default]
-    Deferred,
     /// Resolved to a cache hit (resident, or a disk blob flagged this run) — its consumers can
     /// reuse it without reading its producers, so a cone feeding *only* reuse hits is pruned.
     Reuse,
-    /// Resolved with a stamped digest but no cache hit — the node must run.
+    /// A stamped digest but no cache hit — the node must run. The default: a node outside
+    /// `process_order` (never resolved) reads as `Run`, the conservative "keep its cone alive".
+    #[default]
     Run,
 }
 
 impl Resolved {
     /// A reuse hit doesn't read its producers, so the backward cut stops descending through
-    /// it; a `Run`/`Deferred`/missing node does read them, keeping its cone alive.
+    /// it; a `Run` (or missing) node does read them, keeping its cone alive.
     fn reads_producers(self) -> bool {
         self != Resolved::Reuse
     }
@@ -82,12 +73,10 @@ impl Resolver {
     }
 }
 
-/// Producer-first pass classifying every *pure-structural* node (no pre-check, and no
-/// pre-check ancestor) as [`Resolved::Reuse`] or [`Resolved::Run`], stamping its content
-/// digest as it goes so a consumer folds an already-stamped producer digest — the
-/// producer-first invariant the run loop also relies on. A node carrying a pre-check, or fed
-/// by any `Deferred` producer (whose digest isn't settled until it runs), stays
-/// [`Resolved::Deferred`]: the run loop resolves it inline and its cone is never cut.
+/// Producer-first pass classifying every node as [`Resolved::Reuse`] or [`Resolved::Run`],
+/// stamping its content digest as it goes so a consumer folds an already-stamped producer
+/// digest — the producer-first invariant the run loop also relies on. Every digest is a
+/// structural fold (or the file-cache node's path key), so the whole graph resolves here.
 fn resolve_structural(
     program: &ExecutionProgram,
     output_cache: &OutputCache,
@@ -95,31 +84,16 @@ fn resolve_structural(
     plan: &ExecutionPlan,
     resolved: &mut NodeColumn<Resolved>,
 ) {
-    resolved.reset(program.e_nodes.len(), Resolved::Deferred);
+    resolved.reset(program.e_nodes.len(), Resolved::Run);
     for &idx in &plan.process_order {
         // A node blocked on a missing required input can't run and isn't a reuse hit; leave it
-        // Deferred so the backward cut keeps its cone alive (matches the prior behavior of
-        // running everything reachable).
+        // `Run` so the backward cut keeps its cone alive.
         if !plan.verdicts[idx].wants_execute() {
             continue;
         }
-        let e_node = &program.e_nodes[idx];
-        // A pre-check keys the node on a run-time value, so its digest can't be resolved here
-        // — defer it (this is the structural-only bound on the cut).
-        if !e_node.pre_check.is_none() {
-            continue;
-        }
-        // A digest folding a Deferred producer can't be computed structurally (that producer's
-        // digest isn't stamped until it runs), so this node is Deferred too.
-        let deferred_producer = program.inputs[e_node.inputs.range()].iter().any(|input| {
-            matches!(&input.binding, ExecutionBinding::Bind(addr) if resolved[addr.target_idx] == Resolved::Deferred)
-        });
-        if deferred_producer {
-            continue;
-        }
-        // Pure-structural: fold the digest (reading producers' just-stamped digests) and decide
-        // reuse exactly as the run loop's `prepare_node` will.
-        let digest = node_digest(program, idx, cache, PreCheckDigest::None);
+        // Fold the digest (reading producers' just-stamped digests) and decide reuse exactly
+        // as the run loop's `prepare_node` will.
+        let digest = node_digest(program, idx, cache);
         cache.slots[idx].current_digest = digest;
         let hit = digest.is_some()
             && (cache.is_resident_hit(idx)

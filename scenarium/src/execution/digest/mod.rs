@@ -28,10 +28,11 @@
 use blake3::Hasher;
 
 use crate::data::{DataType, StaticValue};
+use crate::elements::cache_passthrough::file_cache_digest;
 use crate::execution::cache::Cache;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
-use crate::func_lambda::PreCheckDigest;
 use crate::function::FuncBehavior;
+use crate::special::SpecialNode;
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
@@ -45,27 +46,21 @@ const DOMAIN: &[u8] = b"scenarium-cache-v1";
 pub struct Digest(pub(crate) [u8; 32]);
 
 impl Digest {
-    /// A content digest of arbitrary bytes — the public constructor a func's
-    /// [`PreCheck`](crate::func_lambda::PreCheck) uses to turn its input fingerprint
-    /// into a digest. The inner bytes stay `pub(crate)`, so a digest can only be
-    /// *made* by hashing, never forged from an arbitrary array.
+    /// A content digest of arbitrary bytes. The inner bytes stay `pub(crate)`, so a digest
+    /// can only be *made* by hashing, never forged from an arbitrary array.
     pub fn hash(bytes: &[u8]) -> Digest {
         Digest(blake3::hash(bytes).into())
     }
 
     /// Start a [`DigestHasher`] — the fluent builder for combining several values into one
-    /// digest (a [`PreCheck`](crate::func_lambda::PreCheck) fingerprinting its inputs, or
-    /// the framework's own structural fold).
+    /// digest (the framework's structural fold, or the file-cache node's path key).
     pub fn hasher() -> DigestHasher {
         DigestHasher::new()
     }
 
     /// Fingerprint an `FsPath`'s external identity — a file's `(len, mtime)` or a
     /// directory's sorted entries — the *same* content fold the framework's structural
-    /// digest uses for an `FsPath` input ([`hash_fs_path_identity`]). Exposed so a
-    /// [`PreCheck`](crate::func_lambda::PreCheck) that reads files can key on their content
-    /// without re-implementing the directory walk (or fold it into a multi-field digest via
-    /// [`DigestHasher::write_fs_path`]).
+    /// digest uses for an `FsPath` input ([`hash_fs_path_identity`]).
     pub fn fs_path(path: &str) -> Digest {
         let mut hasher = DigestHasher::new();
         hasher.write_fs_path(path);
@@ -115,10 +110,9 @@ impl DigestPod for bool {
 }
 
 /// A fluent builder for a [`Digest`] — a thin wrapper over the BLAKE3 hasher with
-/// digest-friendly writers. Both the framework's structural fold and a
-/// [`PreCheck`](crate::func_lambda::PreCheck)'s own digest computation build through it, so
-/// the two encode values identically. Deterministic and cross-architecture stable: PODs
-/// fold little-endian ([`DigestPod`]), and variable-length data is length-prefixed
+/// digest-friendly writers, used by the framework's structural fold and the file-cache
+/// node's path key. Deterministic and cross-architecture stable: PODs fold little-endian
+/// ([`DigestPod`]), and variable-length data is length-prefixed
 /// ([`write_str`](Self::write_str)) so `"ab"+"c"` can't collide with `"a"+"bc"`.
 #[derive(Clone, Debug)]
 pub struct DigestHasher(Hasher);
@@ -245,9 +239,8 @@ fn hash_static(hasher: &mut DigestHasher, value: &StaticValue) {
 /// Fold the external identity an `FsPath` const points at — a file's `(len, mtime)` or
 /// a directory's entry fingerprint ([`hash_fs_path_identity`]) — so a folder-reading
 /// node re-keys on its contents. A no-op for any non-`FsPath` value. Kept separate from
-/// [`hash_static`] (which folds only the const string, no I/O). A **pre-check** node never
-/// reaches here — it replaces the whole structural fold and does its own (possibly finer)
-/// file fingerprinting via [`Digest::fs_path`], so it can ignore an irrelevant `.txt`.
+/// [`hash_static`] (which folds only the const string, no I/O). This is what lets
+/// `build_masters` re-key when its calibration folders change.
 fn hash_fs_content(hasher: &mut DigestHasher, value: &StaticValue) {
     if let StaticValue::FsPath(path) = value {
         hash_fs_path_identity(hasher, path);
@@ -275,37 +268,33 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
     }
 }
 
-/// A node's **content digest** — the one content key it's cached under, folding its
-/// identity (func id/version + output types) plus either its structural inputs or a
-/// pre-check's computed digest. The single digest the whole cache keys on: RAM reuse
-/// ([`Cache::is_resident_hit`]), disk load/store, and downstream folding all read the
-/// node's stamped `current_digest`.
+/// A node's **content digest** — the one content key it's cached under, folding its identity
+/// (func id/version + output types) plus its structural inputs. The single digest the whole
+/// cache keys on: RAM reuse ([`Cache::is_resident_hit`]), disk load/store, and downstream
+/// folding all read the node's stamped `current_digest`. Computed producer-first
+/// (topological), so a `Bind` producer's `current_digest` is already stamped when read.
 ///
-/// Computed by the executor as it reaches each node — producer-first (topological). The
-/// pre-check (see [`PreCheckDigest`]) decides how inputs fold:
-/// - [`None`](PreCheckDigest::None) — no pre-check: fold every input structurally (a
-///   `Const`'s value + `FsPath` directory content, or a `Bind` producer's *already-stamped*
-///   `current_digest`, whose `None` taints this node to `None`). `None` for an `Impure`
-///   node, so it never caches and always runs.
-/// - [`Computed`](PreCheckDigest::Computed) — the pre-check owns the whole input
-///   contribution: skip the structural fold and mix its digest in instead, so an upstream
-///   change that leaves the effective inputs the same doesn't re-key.
-/// - [`Uncacheable`](PreCheckDigest::Uncacheable) — the pre-check declined ⇒ `None`.
+/// - **`CachePassthrough`** (the *file cache* node) is keyed on its `Const` path input alone
+///   ([`file_cache_digest`]) — its `input[0]` cone is deliberately excluded (the path is the
+///   reproducibility boundary), so it presents a digest even over an impure/expensive input.
+/// - An **`Impure`** node has no digest (`None`) — it varies per run, so it never caches and
+///   always recomputes; a `Bind` producer with a `None` digest taints this node to `None`.
+/// - Otherwise fold every input structurally: a `Const`'s value + `FsPath` directory content
+///   ([`hash_fs_content`]), or a `Bind` producer's stamped `current_digest`.
 pub(crate) fn node_digest(
     program: &ExecutionProgram,
     idx: NodeIdx,
     cache: &Cache,
-    pre_check: PreCheckDigest,
 ) -> Option<Digest> {
     let e_node = &program.e_nodes[idx];
 
-    // The pre-check declined this run (e.g. no valid key) — not cacheable.
-    if matches!(pre_check, PreCheckDigest::Uncacheable) {
-        return None;
+    // The file-cache node is keyed on its path alone, not its input cone (§Part C).
+    if matches!(e_node.special, Some(SpecialNode::CachePassthrough { .. })) {
+        return file_cache_digest(program.node_inputs(e_node));
     }
-    // Only a `Pure` node — or one a pre-check computes a digest for — is content-cacheable;
-    // an `Impure` node varies per run, so it has no digest and always recomputes.
-    if e_node.behavior != FuncBehavior::Pure && matches!(pre_check, PreCheckDigest::None) {
+    // Only a `Pure` node is content-cacheable; an `Impure` node varies per run, so it has no
+    // digest and always recomputes.
+    if e_node.behavior != FuncBehavior::Pure {
         return None;
     }
 
@@ -321,28 +310,23 @@ pub(crate) fn node_digest(
         hash_data_type(&mut hasher, ty);
     }
 
-    if let PreCheckDigest::Computed(digest) = pre_check {
-        // The pre-check owns the entire input contribution — no structural fold.
-        hasher.write_bytes(&[3]).write_digest(&digest);
-    } else {
-        for pool_idx in e_node.inputs.range() {
-            match &program.inputs[pool_idx].binding {
-                ExecutionBinding::None => {
-                    hasher.write_bytes(&[0]);
-                }
-                ExecutionBinding::Const(value) => {
-                    hasher.write_bytes(&[1]);
-                    hash_static(&mut hasher, value);
-                    hash_fs_content(&mut hasher, value);
-                }
-                ExecutionBinding::Bind(addr) => {
-                    // The producer was visited first (topological execute order), so its
-                    // `current_digest` is set; a `None` taints this node.
-                    let node = cache.slots[addr.target_idx].current_digest?;
-                    hasher
-                        .write_bytes(&[2])
-                        .write_digest(&port_digest_of(node, addr.port_idx));
-                }
+    for pool_idx in e_node.inputs.range() {
+        match &program.inputs[pool_idx].binding {
+            ExecutionBinding::None => {
+                hasher.write_bytes(&[0]);
+            }
+            ExecutionBinding::Const(value) => {
+                hasher.write_bytes(&[1]);
+                hash_static(&mut hasher, value);
+                hash_fs_content(&mut hasher, value);
+            }
+            ExecutionBinding::Bind(addr) => {
+                // The producer was visited first (topological order), so its `current_digest`
+                // is set; a `None` taints this node.
+                let node = cache.slots[addr.target_idx].current_digest?;
+                hasher
+                    .write_bytes(&[2])
+                    .write_digest(&port_digest_of(node, addr.port_idx));
             }
         }
     }

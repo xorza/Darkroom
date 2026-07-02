@@ -107,27 +107,6 @@ fn shared_producer_survives_when_one_consumer_runs() {
 }
 
 #[test]
-fn deferred_node_keeps_its_cone_even_below_a_reuse_hit() {
-    // src → deferred(pre-check) → sink(root). A Deferred node reads its producers, so src
-    // is never cut — the structural-only bound, even though a hit could sit above.
-    let mut f = Fix::default();
-    let src = f.node(&[]);
-    let deferred = f.node(&[src]);
-    let sink = f.node(&[deferred]);
-
-    let needed = needed_of(
-        &f,
-        &[sink],
-        &[Resolved::Run, Resolved::Deferred, Resolved::Run],
-    );
-    assert_eq!(
-        needed,
-        vec![true, true, true],
-        "a Deferred node reads its producers, so its cone is kept"
-    );
-}
-
-#[test]
 fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
     // deep → src → cached(hit) → sink(root). The whole chain above `cached` is cut.
     let mut f = Fix::default();

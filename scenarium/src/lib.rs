@@ -29,7 +29,7 @@ pub mod prelude {
         ExecutedNodeStats, ExecutionStats, FlattenMap, LogEntry, LogLevel, NodeError, RunPhase,
         RunProgress,
     };
-    pub use crate::func_lambda::{FuncLambda, InvokeError, InvokeInput, InvokeResult, PreCheck};
+    pub use crate::func_lambda::{FuncLambda, InvokeError, InvokeInput, InvokeResult};
     pub use crate::function::{Func, FuncBehavior, FuncId};
     pub use crate::graph::{
         Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort,

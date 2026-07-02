@@ -14,7 +14,7 @@ use crate::event_lambda::EventLambda;
 use crate::function::{Func, FuncBehavior, OutputType};
 use crate::graph::NodeId;
 use crate::library::Library;
-use crate::prelude::{FuncId, FuncLambda, PreCheck};
+use crate::prelude::{FuncId, FuncLambda};
 use crate::special::SpecialNode;
 
 /// A position into the flat node table — `e_nodes`, the cache's `slots`, and the
@@ -103,7 +103,7 @@ pub(crate) struct ExecutionNode {
     /// the engine's lifetime, so a *later* recompile that reuses the same flat id
     /// preserves its bindings and skips re-cloning the lambda (see `flatten.rs`).
     /// Compile scratch — persists across recompiles in memory, but `#[serde(skip)]` so a
-    /// deserialized program (whose `lambda`/`pre_check` are also skipped) re-initializes
+    /// deserialized program (whose `lambda` is also skipped) re-initializes
     /// fully on its next flatten rather than being treated as an already-built node.
     #[serde(skip)]
     pub(crate) inited: bool,
@@ -142,11 +142,6 @@ pub(crate) struct ExecutionNode {
 
     #[serde(skip)]
     pub lambda: FuncLambda,
-
-    /// Copied from [`Func::pre_check`](crate::function::Func::pre_check) at flatten,
-    /// like `lambda`. `PreCheck::None` for a node without one.
-    #[serde(skip)]
-    pub pre_check: PreCheck,
 
     #[serde(default)]
     pub name: String,

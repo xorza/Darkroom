@@ -10,7 +10,6 @@ use std::sync::{Arc, OnceLock};
 use crate::data::{DataType, FsPathConfig, FsPathMode, StaticValue};
 use crate::execution::digest::Digest;
 use crate::execution::program::{ExecutionBinding, ExecutionInput};
-use crate::func_lambda::PreCheck;
 use crate::function::{Func, FuncInput};
 
 /// Input index of a `CachePassthrough` node's `path` (the second input declared by
@@ -30,6 +29,20 @@ pub(crate) fn cache_node_path(node_inputs: &[ExecutionInput]) -> Option<&str> {
         return None;
     };
     (!path.is_empty()).then_some(path.as_str())
+}
+
+/// A file-cache node's content digest: its `Const` path **alone** ([`cache_node_path`]),
+/// under a distinct domain. `input[0]`'s cone is deliberately excluded — the path *is* the
+/// reproducibility boundary — so the node presents a digest (and so caches, and lets its
+/// upstream be cut) even over an impure/expensive input. `None` for a non-const / empty path
+/// ⇒ never cached. Called from [`node_digest`](crate::execution::digest::node_digest).
+pub(crate) fn file_cache_digest(node_inputs: &[ExecutionInput]) -> Option<Digest> {
+    let path = cache_node_path(node_inputs)?;
+    let mut hasher = Digest::hasher();
+    hasher
+        .write_bytes(b"scenarium-filecache-v1")
+        .write_str(path);
+    Some(hasher.finish())
 }
 
 /// Stable `FuncId` standing in for the cache node in the flattened program (digest
@@ -72,20 +85,11 @@ fn build_func() -> Func {
             .default(StaticValue::FsPath(String::new())),
         )
         .wildcard_output("value", 0)
-        // Keyed on the explicit path *alone* — a pre-check that replaces the structural
-        // fold, so `input[0]` may be impure/expensive and the node still presents a digest
-        // (the path is the
-        // reproducibility boundary). Presence, not content, decides the hit; an
-        // empty/absent path ⇒ not cacheable. `input[1]` is `const_only`, so the resolved
-        // value is the literal path.
-        .pre_check(PreCheck::compute(|_, inputs| {
-            let path = inputs
-                .get(CACHE_PATH_INPUT)?
-                .value
-                .as_fs_path()
-                .filter(|p| !p.is_empty())?;
-            Some(Digest::hash(path.as_bytes()))
-        }))
+        // Keyed on the explicit path *alone* (see [`file_cache_digest`], dispatched from
+        // `node_digest` on the `CachePassthrough` special kind), so `input[0]` may be
+        // impure/expensive and the node still presents a digest — the path is the
+        // reproducibility boundary. Presence, not content, decides the disk hit; an
+        // empty/absent path ⇒ not cacheable.
         .lambda(crate::async_lambda!(|_, _, _, inputs, _, outputs| {
             // The engine does the path-keyed file I/O; the node is a plain
             // passthrough of `input[0]`.
