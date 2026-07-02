@@ -2156,9 +2156,10 @@ mod behavior {
         use crate::graph::Graph;
         use crate::library::Library;
 
-        // `a`'s pre-check hashes a "version" flag into its content digest; `b`'s digest
-        // is constant. So `b` reruns iff `a` stayed dirty — its skip is the
-        // *propagation* of `a`'s, not its own pre-check.
+        // Two chained pre-check nodes. `a`'s pre-check hashes a "version" flag into its
+        // content digest; `b`'s pre-check fingerprints its *input value*. So `b` reruns iff
+        // `a`'s output changed — which, since `a`'s output changes only when `a` reruns,
+        // tracks `a`'s dirtiness by value rather than by any framework-level propagation.
         let a_changed = Arc::new(AtomicBool::new(false));
         let a_runs = Arc::new(AtomicUsize::new(0));
         let b_runs = Arc::new(AtomicUsize::new(0));
@@ -2166,8 +2167,8 @@ mod behavior {
         let a_changed_pc = Arc::clone(&a_changed);
         let a_runs_l = Arc::clone(&a_runs);
         let a = Func::new("a4baacc3-6c23-4e3b-aef7-32290f614a14", "a")
-            .pre_check(PreCheck::new(move |_state, _inputs| {
-                Digest::hash(&[a_changed_pc.load(Ordering::Relaxed) as u8])
+            .pre_check(PreCheck::compute(move |_state, _inputs| {
+                Some(Digest::hash(&[a_changed_pc.load(Ordering::Relaxed) as u8]))
             }))
             .output("out", DataType::Int)
             .lambda(async_lambda!(
@@ -2181,7 +2182,11 @@ mod behavior {
         let b_runs_l = Arc::clone(&b_runs);
         let b = Func::new("58ee3b43-f774-41f0-acfa-054ce0205e2e", "b")
             .terminal()
-            .pre_check(PreCheck::new(|_state, _inputs| Digest::hash(&[0u8])))
+            .pre_check(PreCheck::compute(|_state, inputs| {
+                Some(Digest::hash(
+                    &inputs[0].value.as_i64().unwrap_or(0).to_le_bytes(),
+                ))
+            }))
             .input(FuncInput::required("in", DataType::Int))
             .output("out", DataType::Int)
             .lambda(async_lambda!(
@@ -2226,8 +2231,8 @@ mod behavior {
         assert_eq!(runs(&a_runs, &b_runs), (1, 1), "both run first time");
         assert_eq!(b_out(&eg), 1000);
 
-        // Run 2: a's pre-check says unchanged ⇒ a skips; b's pre-check says unchanged
-        // and a is clean ⇒ b skips too (the skip propagated).
+        // Run 2: a's pre-check says unchanged ⇒ a skips (output stays 10); b's input is
+        // therefore unchanged ⇒ b's value-fingerprint is unchanged ⇒ b skips too.
         eg.execute_terminals().await?;
         assert_eq!(
             runs(&a_runs, &b_runs),
@@ -2236,15 +2241,15 @@ mod behavior {
         );
         assert_eq!(b_out(&eg), 1000, "b serves its reused prior output");
 
-        // Flip `a` to changed. Run 3: a recomputes (→11); b's own pre-check STILL says
-        // unchanged, but a is now dirty, so the propagation forces b to recompute.
+        // Flip `a` to changed. Run 3: a recomputes (→11); b's input value changes (10→11),
+        // so b's fingerprint changes and b recomputes.
         a_changed.store(true, Ordering::Relaxed);
         eg.execute_terminals().await?;
         assert_eq!(
             runs(&a_runs, &b_runs),
             (2, 2),
-            "a changed ⇒ a reruns, and its dirty bit forces b to rerun despite b's own \
-             unchanged pre-check"
+            "a changed ⇒ a reruns, and its new output re-keys b's value-fingerprint so b \
+             reruns too"
         );
         assert_eq!(b_out(&eg), 11 * 100 + 1, "b recomputes from a's new output");
 
@@ -2255,6 +2260,121 @@ mod behavior {
             runs(&a_runs, &b_runs),
             (2, 2),
             "both skip again once a's digest settles"
+        );
+
+        Ok(())
+    }
+
+    /// A pre-check keys a node on the *value* of its inputs, not on the computation that
+    /// produced them — so `sink` reuses across an **impure** upstream whenever that
+    /// upstream's value is stable, which the structural fold (which taints on any impure
+    /// producer) could never do. Change the value and it re-keys.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pre_check_reuses_across_impure_upstream_on_stable_value() -> anyhow::Result<()> {
+        use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+
+        use crate::async_lambda;
+        use crate::execution::digest::Digest;
+        use crate::func_lambda::PreCheck;
+        use crate::function::{Func, FuncInput};
+        use crate::graph::Graph;
+        use crate::library::Library;
+
+        // `src` is Impure (the default — no `.pure()`) and has no pre-check, so it has no
+        // digest of its own: a non-reproducible source that recomputes every run.
+        let src_value = Arc::new(AtomicI64::new(7));
+        let src_runs = Arc::new(AtomicUsize::new(0));
+        let sink_runs = Arc::new(AtomicUsize::new(0));
+
+        let src_value_l = Arc::clone(&src_value);
+        let src_runs_l = Arc::clone(&src_runs);
+        let src = Func::new("20932948-4caf-498d-a5ee-3d1a9f84324a", "src")
+            .output("out", DataType::Int)
+            .lambda(async_lambda!(
+                move |_, _, _, _, _, outputs| {
+                    src_value_l = Arc::clone(&src_value_l),
+                    src_runs_l = Arc::clone(&src_runs_l)
+                } => {
+                    src_runs_l.fetch_add(1, Ordering::Relaxed);
+                    let v = src_value_l.load(Ordering::Relaxed);
+                    outputs[0] = DynamicValue::Static(StaticValue::Int(v));
+                    Ok(())
+                }
+            ));
+
+        // `sink` is Pure with a pre-check that fingerprints its input *value*.
+        let sink_runs_l = Arc::clone(&sink_runs);
+        let sink = Func::new("3d11a78b-4717-4a93-8b13-3143c42a03be", "sink")
+            .terminal()
+            .pure()
+            .pre_check(PreCheck::compute(|_state, inputs| {
+                Some(Digest::hash(
+                    &inputs[0].value.as_i64().unwrap_or(0).to_le_bytes(),
+                ))
+            }))
+            .input(FuncInput::required("in", DataType::Int))
+            .output("out", DataType::Int)
+            .lambda(async_lambda!(
+                move |_, _, _, inputs, _, outputs| { sink_runs_l = Arc::clone(&sink_runs_l) } => {
+                    sink_runs_l.fetch_add(1, Ordering::Relaxed);
+                    let v = inputs[0].value.as_i64().unwrap();
+                    outputs[0] = DynamicValue::Static(StaticValue::Int(v * 2));
+                    Ok(())
+                }
+            ));
+
+        let library: Library = [src, sink].into();
+        let mut graph = Graph::default();
+        let mut src_node: Node = library.by_name("src").unwrap().into();
+        src_node.id = "f49b8795-cb12-4bf8-aad1-7774e1503f5f".into();
+        let src_id = src_node.id;
+        graph.add(src_node);
+        let mut sink_node: Node = library.by_name("sink").unwrap().into();
+        sink_node.id = "0339e487-2021-4f8d-b175-6dbfd53c078b".into();
+        let sink_id = sink_node.id;
+        graph.add(sink_node);
+        graph.set_input_binding(InputPort::new(sink_id, 0), (src_id, 0).into());
+        graph.validate();
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library).unwrap();
+        let runs = || {
+            (
+                src_runs.load(Ordering::Relaxed),
+                sink_runs.load(Ordering::Relaxed),
+            )
+        };
+
+        // Run 1: both run. src → 7; sink → 14.
+        eg.execute_terminals().await?;
+        assert_eq!(runs(), (1, 1), "both run first time");
+
+        // Run 2: impure src recomputes (→ 7 again), but sink's pre-check fingerprints
+        // the value 7 = unchanged, so sink REUSES — despite its upstream being
+        // non-reproducible. The structural fold would taint sink and force a recompute.
+        eg.execute_terminals().await?;
+        assert_eq!(
+            runs(),
+            (2, 1),
+            "impure src reruns, but the pre-check reuses sink on the stable value"
+        );
+
+        // Change the source value. Run 3: src → 8, the fingerprint changes ⇒ sink recomputes.
+        src_value.store(8, Ordering::Relaxed);
+        eg.execute_terminals().await?;
+        assert_eq!(
+            runs(),
+            (3, 2),
+            "a changed input value re-keys the pre-check ⇒ sink recomputes"
+        );
+        assert_eq!(
+            eg.runtime_slot(eg.by_name("sink").unwrap())
+                .output_values()
+                .unwrap()[0]
+                .as_i64()
+                .unwrap(),
+            16,
+            "sink recomputes from the new value"
         );
 
         Ok(())
@@ -2283,8 +2403,8 @@ mod behavior {
         let p_changed_pc = Arc::clone(&p_changed);
         let p_runs_l = Arc::clone(&p_runs);
         let p = Func::new("78a4b1b6-f894-4a9c-85c7-ab8417a8b31c", "p")
-            .pre_check(PreCheck::new(move |_state, _inputs| {
-                Digest::hash(&[p_changed_pc.load(Ordering::Relaxed) as u8])
+            .pre_check(PreCheck::compute(move |_state, _inputs| {
+                Some(Digest::hash(&[p_changed_pc.load(Ordering::Relaxed) as u8]))
             }))
             .output("out", DataType::Int)
             .lambda(async_lambda!(
@@ -2432,7 +2552,7 @@ mod behavior {
             ))
             .output("out", DataType::Int)
             // Fingerprint only the relevant frames, ignoring any stray file in the folder.
-            .pre_check(PreCheck::new(|_state, inputs| {
+            .pre_check(PreCheck::compute(|_state, inputs| {
                 let dir = match &inputs[0].value {
                     DynamicValue::Static(StaticValue::FsPath(p)) => p.clone(),
                     _ => String::new(),
@@ -2453,7 +2573,7 @@ mod behavior {
                     buf.extend_from_slice(name.as_bytes());
                     buf.extend_from_slice(&len.to_le_bytes());
                 }
-                Digest::hash(&buf)
+                Some(Digest::hash(&buf))
             }))
             .lambda(async_lambda!(
                 move |_, _, _, _, _, outputs| { s_runs_l = Arc::clone(&s_runs_l) } => {

@@ -21,9 +21,10 @@ use lumos::{
 use scenarium::data::{
     DataType, DynamicValue, EnumVariants, FsPathConfig, FsPathMode, StaticValue,
 };
-use scenarium::func_lambda::{FuncLambda, InvokeError, InvokeResult};
+use scenarium::func_lambda::{FuncLambda, InvokeError, InvokeResult, PreCheck};
 use scenarium::function::{Func, FuncInput, ValueVariant};
 use scenarium::library::{Library, TypeEntry};
+use scenarium::prelude::Digest;
 
 use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,
@@ -153,9 +154,11 @@ pub fn astro_library() -> Library {
                  next run instead of re-stacking.",
             )
             .category("astro")
-            // Pure: the digest folds each calibration folder's contents (the
-            // directory-aware `FsPath` resolver), so a stable folder caches and a
-            // changed one re-keys — no purity override needed.
+            // Pure, keyed by a pre-check (see `.pre_check` below) on the *content*
+            // of the four calibration folders plus the scalar params: a stable folder +
+            // params caches and any add/remove/edit re-keys. Because it keys on values, not
+            // the upstream computation, the masters reuse across any upstream change that
+            // leaves the effective frames/params unchanged.
             .pure()
             .inputs([
                 dir_input("darks"),
@@ -169,6 +172,24 @@ pub fn astro_library() -> Library {
             )
             .input(FuncInput::required("cache", DataType::Bool).default(true))
             .output("masters", MASTERS_DATA_TYPE.clone())
+            // Fingerprint the actual frame folders + params, so the digest tracks values
+            // rather than the upstream computation (see `.pure()` above). A present folder
+            // folds its directory-content digest; an absent/empty one a distinct marker.
+            .pre_check(PreCheck::compute(|_, inputs| {
+                let mut buf = Vec::new();
+                for dir in inputs.iter().take(4) {
+                    match dir.value.as_fs_path() {
+                        Some(p) if !p.is_empty() => {
+                            buf.push(1);
+                            buf.extend_from_slice(Digest::fs_path(p).as_bytes());
+                        }
+                        _ => buf.push(0),
+                    }
+                }
+                buf.extend_from_slice(&inputs[4].value.as_f64()?.to_bits().to_le_bytes());
+                buf.push(inputs[5].value.as_bool()? as u8);
+                Some(Digest::hash(&buf))
+            }))
             .lambda(FuncLambda::new(move |ctx, _, _, inputs, _, outputs| {
                 let cancel = ctx.cancel_flag();
                 Box::pin(async move {

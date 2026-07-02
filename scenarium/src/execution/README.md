@@ -398,10 +398,13 @@ not a registered `FuncId`. Its hardcoded interface + lambda come from
 - The func is `uncacheable()` — it owns its caching, so the editor's generic
   `persist = Disk` toggle doesn't apply.
 
-## C.2 The path is the key (`file_cache_digest`)
+## C.2 The path is the key (a pre-check)
 
-A cache node's content digest is a hash of its `Const` `FsPath` **alone** (domain
-`scenarium-filecache-v1`), deliberately ignoring `input[0]`'s cone. So:
+A cache node's content digest comes from a **pre-check** (`func_lambda.rs`) on the func: it
+hashes the `Const` `FsPath` **alone**, so the framework skips the structural input fold and
+keys the node on the path, deliberately ignoring `input[0]`'s cone. (This is the same
+mechanism `build_masters` uses to key on frame content — no `SpecialNode`-specific branch in
+`node_digest`.) So:
 
 - `input[0]` may be impure or expensive and the node still presents a digest — the path
   *is* the reproducibility boundary.

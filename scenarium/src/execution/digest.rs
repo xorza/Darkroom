@@ -28,11 +28,10 @@
 use blake3::Hasher;
 
 use crate::data::{DataType, StaticValue};
-use crate::elements::cache_passthrough::file_cache_digest;
 use crate::execution::cache::Cache;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
+use crate::func_lambda::PreCheckDigest;
 use crate::function::FuncBehavior;
-use crate::special::SpecialNode;
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
@@ -52,6 +51,25 @@ impl Digest {
     /// *made* by hashing, never forged from an arbitrary array.
     pub fn hash(bytes: &[u8]) -> Digest {
         Digest(blake3::hash(bytes).into())
+    }
+
+    /// Fingerprint an `FsPath`'s external identity — a file's `(len, mtime)` or a
+    /// directory's sorted entries — the *same* content fold the framework's structural
+    /// digest uses for an `FsPath` input ([`hash_fs_path_identity`]). Exposed so a
+    /// [`PreCheck`](crate::func_lambda::PreCheck) that reads files can key on their
+    /// content without re-implementing the directory walk. Combine several with
+    /// [`Digest::hash`] over their [`as_bytes`](Self::as_bytes).
+    pub fn fs_path(path: &str) -> Digest {
+        let mut hasher = Hasher::new();
+        hash_fs_path_identity(&mut hasher, path);
+        Digest(hasher.finalize().into())
+    }
+
+    /// The raw 32 bytes, for folding this digest into another (e.g. a pre-check
+    /// combining several sub-digests). Read-only — a `Digest` still can't be *forged*
+    /// from arbitrary bytes, only made by hashing.
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
     }
 }
 
@@ -133,9 +151,9 @@ fn hash_static(hasher: &mut Hasher, value: &StaticValue) {
 /// Fold the external identity an `FsPath` const points at — a file's `(len, mtime)` or
 /// a directory's entry fingerprint ([`hash_fs_path_identity`]) — so a folder-reading
 /// node re-keys on its contents. A no-op for any non-`FsPath` value. Kept separate from
-/// [`hash_static`] (which folds only the const itself) because a **pre-check** node
-/// fingerprints just the files that matter and so *skips* this: folding the whole
-/// directory would re-key it on an irrelevant `.txt`.
+/// [`hash_static`] (which folds only the const string, no I/O). A **pre-check** node never
+/// reaches here — it replaces the whole structural fold and does its own (possibly finer)
+/// file fingerprinting via [`Digest::fs_path`], so it can ignore an irrelevant `.txt`.
 fn hash_fs_content(hasher: &mut Hasher, value: &StaticValue) {
     if let StaticValue::FsPath(path) = value {
         hash_fs_path_identity(hasher, path);
@@ -164,36 +182,36 @@ fn hash_data_type(hasher: &mut Hasher, ty: &DataType) {
 }
 
 /// A node's **content digest** — the one content key it's cached under, folding its
-/// identity (func id/version + output types), each input (a `Const`'s value, an unbound
-/// marker, or a `Bind` producer's own content digest), and a `pre_check` fingerprint of
-/// the external content the func read. The single digest the whole cache keys on: RAM
-/// reuse ([`Cache::is_resident_hit`]), disk load/store, and downstream folding all read
-/// the node's stamped `current_digest`.
+/// identity (func id/version + output types) plus either its structural inputs or a
+/// pre-check's computed digest. The single digest the whole cache keys on: RAM reuse
+/// ([`Cache::is_resident_hit`]), disk load/store, and downstream folding all read the
+/// node's stamped `current_digest`.
 ///
-/// Computed by the executor as it reaches each node — producer-first (topological), so a
-/// `Bind` reads the producer's *already-stamped* `current_digest` (`None` there taints
-/// this node to `None`). `None` for a non-reproducible node — `Impure` with no pre-check
-/// — so it never caches and always runs. Two special cases:
-/// a **`CachePassthrough`** node is keyed on its path input alone (not its cone); a
-/// **pre-check** node folds its `Const` `FsPath`s *shallowly* (path string only — its
-/// pre-check owns their content, so an irrelevant `.txt` doesn't re-key it), while a
-/// pre-check-less node folds the directory walk.
+/// Computed by the executor as it reaches each node — producer-first (topological). The
+/// pre-check (see [`PreCheckDigest`]) decides how inputs fold:
+/// - [`None`](PreCheckDigest::None) — no pre-check: fold every input structurally (a
+///   `Const`'s value + `FsPath` directory content, or a `Bind` producer's *already-stamped*
+///   `current_digest`, whose `None` taints this node to `None`). `None` for an `Impure`
+///   node, so it never caches and always runs.
+/// - [`Computed`](PreCheckDigest::Computed) — the pre-check owns the whole input
+///   contribution: skip the structural fold and mix its digest in instead, so an upstream
+///   change that leaves the effective inputs the same doesn't re-key.
+/// - [`Uncacheable`](PreCheckDigest::Uncacheable) — the pre-check declined ⇒ `None`.
 pub(crate) fn node_digest(
     program: &ExecutionProgram,
     idx: NodeIdx,
     cache: &Cache,
-    pre_check: Option<Digest>,
+    pre_check: PreCheckDigest,
 ) -> Option<Digest> {
     let e_node = &program.e_nodes[idx];
 
-    // A file-cache node is keyed on its path input alone — input 0 can be
-    // impure/expensive and it still presents a digest (the reproducibility boundary).
-    if matches!(e_node.special, Some(SpecialNode::CachePassthrough { .. })) {
-        return file_cache_digest(program.node_inputs(e_node));
+    // The pre-check declined this run (e.g. no valid key) — not cacheable.
+    if matches!(pre_check, PreCheckDigest::Uncacheable) {
+        return None;
     }
-    // Only a `Pure` node — or one vouched by a pre-check — is content-cacheable;
+    // Only a `Pure` node — or one a pre-check computes a digest for — is content-cacheable;
     // an `Impure` node varies per run, so it has no digest and always recomputes.
-    if e_node.behavior != FuncBehavior::Pure && pre_check.is_none() {
+    if e_node.behavior != FuncBehavior::Pure && matches!(pre_check, PreCheckDigest::None) {
         return None;
     }
 
@@ -208,34 +226,30 @@ pub(crate) fn node_digest(
         hash_data_type(&mut hasher, ty);
     }
 
-    for pool_idx in e_node.inputs.range() {
-        match &program.inputs[pool_idx].binding {
-            ExecutionBinding::None => {
-                hasher.update(&[0u8]);
-            }
-            ExecutionBinding::Const(value) => {
-                hasher.update(&[1u8]);
-                hash_static(&mut hasher, value);
-                // A pre-check node fingerprints its own files, so it skips the folder
-                // walk (which would re-key on an irrelevant `.txt`); a pre-check-less
-                // deferred node has no other way to track them, so it folds them.
-                if pre_check.is_none() {
+    if let PreCheckDigest::Computed(digest) = pre_check {
+        // The pre-check owns the entire input contribution — no structural fold.
+        hasher.update(&[3u8]);
+        hasher.update(&digest.0);
+    } else {
+        for pool_idx in e_node.inputs.range() {
+            match &program.inputs[pool_idx].binding {
+                ExecutionBinding::None => {
+                    hasher.update(&[0u8]);
+                }
+                ExecutionBinding::Const(value) => {
+                    hasher.update(&[1u8]);
+                    hash_static(&mut hasher, value);
                     hash_fs_content(&mut hasher, value);
                 }
-            }
-            ExecutionBinding::Bind(addr) => {
-                // The producer was visited first (topological execute order) or was
-                // plan-keyed, so its `current_digest` is set; a `None` taints this node.
-                let node = cache.slots[addr.target_idx].current_digest?;
-                hasher.update(&[2u8]);
-                hasher.update(&port_digest_of(node, addr.port_idx).0);
+                ExecutionBinding::Bind(addr) => {
+                    // The producer was visited first (topological execute order), so its
+                    // `current_digest` is set; a `None` taints this node.
+                    let node = cache.slots[addr.target_idx].current_digest?;
+                    hasher.update(&[2u8]);
+                    hasher.update(&port_digest_of(node, addr.port_idx).0);
+                }
             }
         }
-    }
-    // The external fingerprint the framework can't see (which files actually matter).
-    if let Some(pre_check) = pre_check {
-        hasher.update(&[3u8]);
-        hasher.update(&pre_check.0);
     }
     Some(Digest(hasher.finalize().into()))
 }
@@ -456,7 +470,7 @@ mod tests {
         let mut cache = Cache::default();
         cache.reconcile(&program.e_nodes);
         for idx in program.node_indices().take(through.idx() + 1) {
-            let d = node_digest(program, idx, &cache, None);
+            let d = node_digest(program, idx, &cache, PreCheckDigest::None);
             cache.slots[idx].current_digest = d;
         }
         cache
@@ -684,5 +698,93 @@ mod tests {
         assert_eq!(d[1], None, "pure node under impure ⇒ None");
         assert_eq!(d[2], None, "taint flows the whole way up");
         assert!(d[3].is_some(), "independent pure node is unaffected");
+    }
+
+    /// A `Computed` pre-check owns the entire input contribution: the structural input
+    /// fold is skipped, so the node is keyed on the pre-check digest alone — unaffected by
+    /// *which* producer feeds it, and **not** tainted by an impure one (unlike the
+    /// structural fold, whose `?` short-circuits on a `None` producer digest). A declined
+    /// pre-check (`Uncacheable`) has no digest.
+    #[test]
+    fn computed_pre_check_owns_inputs_and_ignores_taint() {
+        let probe = Digest::hash(b"probe");
+
+        // Consumer (func 20) binding a PURE producer.
+        let mut pure = Prog::default();
+        pure.add(10, 0, 1, &[]); // 0: pure producer
+        pure.add(20, 0, 1, &[bind(0, 0)]); // 1: consumer binds it
+        let pure_cache = digested_cache(&pure.program, NodeIdx(1));
+
+        // Same consumer (func 20) binding an IMPURE producer — digest `None`, which would
+        // taint the consumer to `None` under the structural fold.
+        let mut impure = Prog::default();
+        impure.add_impure(10, 1, &[]); // 0: impure producer
+        impure.add(20, 0, 1, &[bind(0, 0)]); // 1: consumer binds it
+        let impure_cache = digested_cache(&impure.program, NodeIdx(1));
+
+        // Sanity: under the *structural* fold (no pre-check), the impure input taints the
+        // consumer to None.
+        assert!(
+            node_digest(
+                &impure.program,
+                NodeIdx(1),
+                &impure_cache,
+                PreCheckDigest::None
+            )
+            .is_none(),
+            "structural fold: an impure producer taints the consumer to None"
+        );
+
+        // Computed: keyed on the probe alone — Some in both cases, and IDENTICAL despite
+        // one producer being pure and the other impure.
+        let c_pure = node_digest(
+            &pure.program,
+            NodeIdx(1),
+            &pure_cache,
+            PreCheckDigest::Computed(probe),
+        );
+        let c_impure = node_digest(
+            &impure.program,
+            NodeIdx(1),
+            &impure_cache,
+            PreCheckDigest::Computed(probe),
+        );
+        assert!(
+            c_impure.is_some(),
+            "a Computed pre-check is not tainted by an impure input"
+        );
+        assert_eq!(
+            c_pure, c_impure,
+            "Computed ignores which producer feeds the input"
+        );
+
+        // It also ignores the structural inputs entirely, so it differs from the
+        // no-pre-check structural digest of the same node.
+        let structural = node_digest(&pure.program, NodeIdx(1), &pure_cache, PreCheckDigest::None);
+        assert_ne!(
+            c_pure, structural,
+            "Computed (probe only) ≠ the structural input fold"
+        );
+
+        // A different probe re-keys — the Computed digest *is* the key.
+        let c_other = node_digest(
+            &pure.program,
+            NodeIdx(1),
+            &pure_cache,
+            PreCheckDigest::Computed(Digest::hash(b"other")),
+        );
+        assert_ne!(c_pure, c_other, "the Computed digest is the key");
+
+        // A declined pre-check ⇒ not cacheable.
+        assert_eq!(
+            node_digest(
+                &pure.program,
+                NodeIdx(1),
+                &pure_cache,
+                PreCheckDigest::Uncacheable
+            ),
+            None,
+            "a declined pre-check has no digest"
+        );
     }
 }

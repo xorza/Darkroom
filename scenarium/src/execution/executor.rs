@@ -18,7 +18,7 @@ use crate::data::DynamicValue;
 use crate::execution_stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
-use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage};
+use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage, PreCheckDigest};
 use crate::graph::InputPort;
 use crate::prelude::FuncId;
 
@@ -352,9 +352,9 @@ fn prepare_node(
         if !collect_inputs(program, output_cache, cache, idx, inputs) {
             return Readiness::InputsUnavailable;
         }
-        e_node.pre_check.check(&mut cache.slots[idx].state, inputs)
+        e_node.pre_check.run(&mut cache.slots[idx].state, inputs)
     } else {
-        None
+        PreCheckDigest::None
     };
 
     let digest = node_digest(program, idx, cache, pre_check);
