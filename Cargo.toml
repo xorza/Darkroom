@@ -31,7 +31,7 @@ lumos = { path = "lumos" }
 palantir = { path = "palantir" }
 fits-well = { path = "fits-well" }
 
-wgpu = { version = "29.0", features = ["metal", "vulkan", "dx12"] }
+wgpu = { version = "30.0", features = ["metal", "vulkan", "dx12"] }
 
 libraw-rs-sys = { version = "0.0.4" }
 
@@ -133,7 +133,7 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.naga]
 opt-level = 3
-[profile.dev.package.gpu-descriptor]
+[profile.dev.package.gpu-allocator]
 opt-level = 3
 [profile.dev.package.image]
 opt-level = 3
