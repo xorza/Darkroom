@@ -1,7 +1,7 @@
 use super::*;
 use crate::core::document::{Document, TabRef};
 use crate::core::edit::intent::{Intent, apply_step, build_step};
-use scenarium::prelude::SubgraphId;
+use scenarium::graph::subgraph::SubgraphId;
 use scenarium::testing::test_graph;
 
 /// A document with three tab slots so `active` can move 0→1→2. The
@@ -429,8 +429,8 @@ fn history_bounded_by_byte_budget() {
 /// `[A]` and outputs `[R]`, plus that `Local` target.
 fn doc_with_def() -> (Document, GraphRef) {
     use scenarium::data::DataType;
+    use scenarium::graph::subgraph::SubgraphDef;
     use scenarium::node::function::{FuncInput, FuncOutput};
-    use scenarium::prelude::SubgraphDef;
 
     let mut doc: Document = test_graph().into();
     let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000bb", "S")
@@ -539,8 +539,8 @@ fn rename_undo_survives_interface_compaction() {
     use crate::core::document::BoundarySide;
     use crate::core::edit::intent::revert_step;
     use scenarium::data::DataType;
+    use scenarium::graph::subgraph::SubgraphDef;
     use scenarium::node::function::FuncInput;
-    use scenarium::prelude::SubgraphDef;
 
     let finput = |n: &str| FuncInput::optional(n, DataType::Int);
     let mut doc: Document = test_graph().into();

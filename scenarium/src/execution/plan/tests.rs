@@ -2,7 +2,7 @@ use super::*;
 use crate::data::DataType;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::graph::NodeId;
-use crate::prelude::FuncId;
+use crate::node::function::FuncId;
 use common::Span;
 
 /// Hand-built program for planner tests. Node `idx` gets id `from_u128(idx+1)`.

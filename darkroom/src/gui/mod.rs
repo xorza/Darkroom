@@ -73,7 +73,7 @@ impl PortKind {
 /// without threading any cache.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PortRef {
-    pub(crate) node_id: scenarium::prelude::NodeId,
+    pub(crate) node_id: scenarium::graph::NodeId,
     pub(crate) kind: PortKind,
     pub(crate) port_idx: usize,
 }
@@ -84,6 +84,6 @@ pub(crate) struct PortRef {
 /// glyph's `WidgetId` (`event_glyph_wid`) without a cache.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct EventRef {
-    pub(crate) node_id: scenarium::prelude::NodeId,
+    pub(crate) node_id: scenarium::graph::NodeId,
     pub(crate) event_idx: usize,
 }

@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use common::{SerdeFormat, deserialize, serialize};
-use scenarium::prelude::SubgraphDef;
+use scenarium::graph::subgraph::SubgraphDef;
 
 /// Library file name, resolved relative to the process working directory.
 /// Rhai so it's hand-editable and matches the doc / theme / config format.

@@ -1,6 +1,6 @@
 use palantir::{MenuItem, Ui};
+use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphRef;
-use scenarium::prelude::NodeId;
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppCommand;

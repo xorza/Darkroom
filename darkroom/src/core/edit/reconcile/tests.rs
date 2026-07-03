@@ -1,7 +1,8 @@
 use super::*;
 use scenarium::data::StaticValue;
+use scenarium::graph::Graph;
 use scenarium::graph::Node;
-use scenarium::prelude::{Graph, SubgraphRef};
+use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::testing::{TestFuncHooks, test_func_lib};
 
 fn lib() -> Library {

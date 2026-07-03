@@ -1,10 +1,10 @@
 use glam::Vec2;
 use palantir::{Configure, MenuItem, Panel, PopupHandle, Sizing, Text, Ui};
+use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
 use scenarium::graph::{Binding, InputPort, Node, NodeKind};
 use scenarium::node::function::FuncInput;
 use scenarium::node::special::{ALL as SPECIAL_NODES, SpecialNode};
-use scenarium::prelude::NodeId;
 
 use crate::core::document::view_node::ViewNode;
 use crate::core::edit::intent::Intent;

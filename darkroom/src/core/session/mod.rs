@@ -14,8 +14,8 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
+use scenarium::graph::Graph as CoreGraph;
 use scenarium::library::Library;
-use scenarium::prelude::Graph as CoreGraph;
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::{Intent, commit_intent_cascading};

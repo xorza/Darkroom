@@ -10,7 +10,7 @@ use palantir::{
     Align, Background, Configure, Corners, InternedStr, Panel, Sense, Sizing, Spacing, Text,
     TextStyle, Ui, VAlign, WidgetId,
 };
-use scenarium::prelude::SubgraphId;
+use scenarium::graph::subgraph::SubgraphId;
 
 use crate::core::document::{GraphRef, TabRef};
 use crate::core::edit::intent::Intent;

@@ -11,10 +11,11 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use palantir::Ui;
 use scenarium::data::{FsPathConfig, FsPathMode, StaticValue};
+use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphRef;
+use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
 use scenarium::graph::{Binding, NodeKind};
 use scenarium::library::Library;
-use scenarium::prelude::{NodeId, SubgraphDef, SubgraphId};
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::Intent;
@@ -436,7 +437,7 @@ fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotab
 mod tests {
     use super::*;
     use scenarium::graph::Node;
-    use scenarium::prelude::SubgraphDef;
+    use scenarium::graph::subgraph::SubgraphDef;
 
     /// Add a local subgraph def `def` to `doc`'s root graph plus an
     /// instance node referencing it; return the node id.
@@ -566,7 +567,7 @@ mod tests {
 
     #[test]
     fn publish_non_subgraph_node_is_a_noop() {
-        use scenarium::prelude::FuncId;
+        use scenarium::node::function::FuncId;
         let library = ArcSwap::from_pointee(Library::default());
         let mut doc = Document::default();
         let node = Node::new(scenarium::graph::NodeKind::Func(FuncId::unique()));

@@ -26,7 +26,7 @@ use crate::execution::stats::{
 };
 use crate::graph::InputPort;
 use crate::node::func_lambda::{InvokeError, InvokeInput, OutputUsage};
-use crate::prelude::FuncId;
+use crate::node::function::FuncId;
 use crate::runtime::context::ContextManager;
 
 use crate::execution::cache::Cache;

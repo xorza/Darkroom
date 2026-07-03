@@ -4,8 +4,10 @@ use anyhow::{Result, bail};
 use common::{KeyIndexVec, SerdeFormat, is_debug};
 use glam::Vec2;
 use scenarium::graph::subgraph::SubgraphRef;
+use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
+use scenarium::graph::{Graph as CoreGraph, NodeId};
 use scenarium::graph::{Node, NodeKind};
-use scenarium::prelude::{Graph as CoreGraph, Library, NodeId, SubgraphDef, SubgraphId};
+use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
@@ -628,7 +630,7 @@ impl From<CoreGraph> for Document {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::prelude::FuncId;
+    use scenarium::node::function::FuncId;
     use scenarium::testing::test_graph as core_test_graph;
 
     /// A childless local def with the given id/name.

@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use palantir::Ui;
 use scenarium::data::FsPathConfig;
-use scenarium::prelude::{Graph as CoreGraph, Library, NodeId};
+use scenarium::graph::{Graph as CoreGraph, NodeId};
+use scenarium::library::Library;
 
 use crate::core::document::Document;
 use crate::core::engine::Engine;

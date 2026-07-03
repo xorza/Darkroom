@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui};
+use scenarium::graph::NodeId;
 use scenarium::graph::{Binding, InputPort, Subscription};
-use scenarium::prelude::NodeId;
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;

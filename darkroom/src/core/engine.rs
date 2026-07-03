@@ -6,7 +6,8 @@
 
 use std::path::Path;
 
-use scenarium::prelude::{Graph, OutputCache};
+use scenarium::execution::output_cache::OutputCache;
+use scenarium::graph::Graph;
 
 use crate::core::io::cache::prepare_document_cache_root;
 use crate::core::library::{SharedLibrary, runtime_func_lib};

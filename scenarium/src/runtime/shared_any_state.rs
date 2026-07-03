@@ -3,7 +3,7 @@ use std::ops::{Deref, DerefMut};
 use common::Shared;
 use tokio::sync::MutexGuard;
 
-use crate::prelude::AnyState;
+use crate::runtime::any_state::AnyState;
 
 #[derive(Debug, Clone, Default)]
 pub struct SharedAnyState {

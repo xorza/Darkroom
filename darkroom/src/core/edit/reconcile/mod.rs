@@ -20,9 +20,11 @@
 use std::collections::HashMap;
 
 use scenarium::data::DataType;
+use scenarium::graph::NodeId;
+use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
 use scenarium::graph::{Binding, Graph, InputPort, NodeKind};
+use scenarium::library::Library;
 use scenarium::node::function::{FuncInput, FuncOutput};
-use scenarium::prelude::{Library, NodeId, SubgraphDef, SubgraphId};
 
 use crate::core::document::{Document, GraphRef};
 

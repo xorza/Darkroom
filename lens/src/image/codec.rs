@@ -8,8 +8,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use imaginarium::{ALL_FORMATS, ImageDesc};
 use scenarium::data::CustomValue;
+use scenarium::data::CustomValueCodec;
 use scenarium::library::TypeEntry;
-use scenarium::prelude::CustomValueCodec;
 use scenarium::runtime::context::ContextManager;
 
 use super::Image;

@@ -1,7 +1,7 @@
 use super::*;
 use arc_swap::ArcSwap;
 use scenarium::graph::{Binding, NodeKind, OutputPort};
-use scenarium::prelude::Library;
+use scenarium::library::Library;
 
 /// Build an `InboundSender` paired with the receiver tests assert on.
 /// `notify` is a no-op — tests don't drive a real host loop.

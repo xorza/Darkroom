@@ -29,8 +29,9 @@ use palantir::{
     Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
+use scenarium::execution::stats::LogLevel;
+use scenarium::graph::NodeId;
 use scenarium::library::Library;
-use scenarium::prelude::{LogLevel, NodeId};
 
 use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::node::header::fmt_elapsed;

@@ -8,7 +8,7 @@ use palantir::{
     Align, Background, Color, Configure, Corners, HAlign, Panel, Sense, Shape, Sizing, Spacing,
     Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
-use scenarium::prelude::{CachePersistence, NodeId};
+use scenarium::graph::{CachePersistence, NodeId};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};

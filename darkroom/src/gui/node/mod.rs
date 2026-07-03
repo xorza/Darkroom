@@ -22,8 +22,9 @@ use palantir::{
 };
 use scenarium::data::{DataType, FsPathConfig, StaticValue};
 use scenarium::graph::Binding;
+use scenarium::graph::NodeId;
+use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::library::Library;
-use scenarium::prelude::{NodeId, SubgraphRef};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 

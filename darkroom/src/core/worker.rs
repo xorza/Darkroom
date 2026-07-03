@@ -12,9 +12,11 @@
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use scenarium::execution::output_cache::OutputCache;
+use scenarium::execution::stats::{ExecutionStats, RunProgress};
 use scenarium::execution::{ArgumentValues, Error as ExecError};
-use scenarium::prelude::{ExecutionStats, RunProgress};
-use scenarium::prelude::{Graph, Library, NodeId, OutputCache};
+use scenarium::graph::{Graph, NodeId};
+use scenarium::library::Library;
 use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;

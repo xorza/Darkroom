@@ -3,7 +3,7 @@ use crate::data::DataType;
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
 use crate::graph::NodeId;
-use crate::prelude::FuncId;
+use crate::node::function::FuncId;
 use common::Span;
 
 /// Hand-built program for cut tests: each node is `(terminal, &[producer_idx])` — an edge

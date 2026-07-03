@@ -13,9 +13,9 @@ use palantir::{
 };
 use scenarium::data::{DataType, FsPathMode, StaticValue};
 use scenarium::graph::Binding;
+use scenarium::graph::NodeId;
 use scenarium::library::Library;
 use scenarium::node::function::ValueVariant;
-use scenarium::prelude::NodeId;
 
 use crate::core::document::BoundarySide;
 use crate::core::edit::intent::Intent;

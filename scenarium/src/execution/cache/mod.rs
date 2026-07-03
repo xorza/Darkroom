@@ -12,7 +12,7 @@ use crate::data::DynamicValue;
 use crate::execution::digest::Digest;
 use crate::execution::program::{ExecutionNode, NodeIdx};
 use crate::graph::NodeId;
-use crate::prelude::AnyState;
+use crate::runtime::any_state::AnyState;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 /// One node's cached output as an explicit three-state machine. The states are mutually

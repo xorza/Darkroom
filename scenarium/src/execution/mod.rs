@@ -28,22 +28,22 @@ use crate::execution::flatten::Flattener;
 use crate::execution::stats::{ExecutionStats, FlattenMap, RunProgress};
 use crate::graph::{Graph, NodeId};
 use crate::library::Library;
-use crate::prelude::FuncId;
+use crate::node::function::FuncId;
 
 pub(crate) mod blob;
 pub(crate) mod cache;
 pub(crate) mod cache_node;
 pub(crate) mod codec;
-pub(crate) mod digest;
-pub(crate) mod event;
+pub mod digest;
+pub mod event;
 pub(crate) mod executor;
 mod flatten;
-pub(crate) mod output_cache;
+pub mod output_cache;
 pub(crate) mod plan;
 pub(crate) mod program;
 mod query;
 pub(crate) mod resolve;
-pub(crate) mod stats;
+pub mod stats;
 #[cfg(test)]
 mod tests;
 pub(crate) mod validate;

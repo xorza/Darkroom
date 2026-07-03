@@ -1,7 +1,7 @@
 use glam::Vec2;
 use scenarium::data::StaticValue;
 use scenarium::graph::{Binding, InputPort, Node, NodeId, NodeKind};
-use scenarium::prelude::FuncId;
+use scenarium::node::function::FuncId;
 
 use super::*;
 use crate::core::document::view_node::ViewNode;

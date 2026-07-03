@@ -24,8 +24,9 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use palantir::Ui;
+use scenarium::execution::stats::{ExecutionStats, LogEntry, RunPhase, RunProgress};
 use scenarium::execution::{ArgumentValues, RunError};
-use scenarium::prelude::{ExecutionStats, LogEntry, NodeId, RunPhase, RunProgress};
+use scenarium::graph::NodeId;
 
 use crate::core::worker::{RunId, ValueRequest};
 use crate::gui::node_values::{NodeValueView, build_view};
@@ -254,7 +255,8 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    use scenarium::prelude::{ExecutedNodeStats, FlattenMap, FuncId, LogLevel, NodeError};
+    use scenarium::execution::stats::{ExecutedNodeStats, FlattenMap, LogLevel, NodeError};
+    use scenarium::node::function::FuncId;
 
     fn nid(n: u128) -> NodeId {
         NodeId::from_u128(n)

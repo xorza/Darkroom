@@ -3,7 +3,7 @@ use std::hash::Hash;
 
 use glam::Vec2;
 use palantir::{Rect, ResponseState, Ui};
-use scenarium::prelude::NodeId;
+use scenarium::graph::NodeId;
 
 use crate::gui::canvas::node_ports;
 use crate::gui::node::header::subscription_glyph_wid;

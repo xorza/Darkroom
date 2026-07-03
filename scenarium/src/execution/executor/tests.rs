@@ -6,7 +6,7 @@ use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
 use crate::graph::NodeId;
 use crate::node::func_lambda::FuncLambda;
-use crate::prelude::FuncId;
+use crate::node::function::FuncId;
 use common::Span;
 
 /// Hand-built program with real lambdas. Node `idx` gets id `from_u128(idx+1)`,

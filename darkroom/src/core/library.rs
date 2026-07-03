@@ -7,7 +7,7 @@ use lens::{astro_library, image_library};
 use scenarium::elements::basic_library::basic_library;
 use scenarium::elements::fs_watch_library::fs_watch_library;
 use scenarium::elements::worker_events_library::worker_events_library;
-use scenarium::prelude::Library;
+use scenarium::library::Library;
 
 use crate::core::io::library;
 

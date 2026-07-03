@@ -11,8 +11,8 @@ use crate::data::{DataType, FsPathConfig, FsPathMode, StaticValue};
 use crate::library::Library;
 use crate::node::event_lambda::EventLambda;
 use crate::node::func_lambda::FuncLambda;
+use crate::node::function::FuncId;
 use crate::node::function::{Func, FuncInput};
-use crate::prelude::FuncId;
 
 pub const WATCH_DIRECTORY_FUNC_ID: FuncId = FuncId::from_u128(0x1318c24c2ac74a9aa454281bdbdc4ffc);
 
@@ -182,8 +182,9 @@ mod tests {
     use crate::data::{DynamicValue, StaticValue};
     use crate::node::func_lambda::{FuncLambda, InvokeInput, OutputUsage};
     use crate::node::function::FuncBehavior;
-    use crate::prelude::{AnyState, SharedAnyState};
+    use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
+    use crate::runtime::shared_any_state::SharedAnyState;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Instant;

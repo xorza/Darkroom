@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use palantir::{Corners, PointerButton, Rect, Shape, Stroke, Ui};
-use scenarium::prelude::NodeId;
+use scenarium::graph::NodeId;
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;

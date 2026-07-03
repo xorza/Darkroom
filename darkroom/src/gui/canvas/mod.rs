@@ -16,7 +16,7 @@ use glam::Vec2;
 use palantir::{
     Background, Configure, Panel, PointerButton, Sense, Sizing, TranslateScale, Ui, WidgetId,
 };
-use scenarium::prelude::NodeId;
+use scenarium::graph::NodeId;
 use std::collections::BTreeSet;
 
 use crate::core::edit::intent::Intent;

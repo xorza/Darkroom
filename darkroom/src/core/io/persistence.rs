@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use common::{SerdeFormat, deserialize, serialize};
-use scenarium::prelude::SubgraphDef;
+use scenarium::graph::subgraph::SubgraphDef;
 
 use crate::core::document::Document;
 

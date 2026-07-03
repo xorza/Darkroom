@@ -31,11 +31,11 @@ use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
 use scenarium::graph::subgraph::SubgraphRef;
+use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
 use scenarium::graph::{
     Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, Subscription,
 };
 use scenarium::library::Library;
-use scenarium::prelude::{SubgraphDef, SubgraphId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::view_node::ViewNode;
@@ -1296,7 +1296,7 @@ pub enum GestureKey {
 mod tests {
     use super::*;
     use scenarium::data::StaticValue;
-    use scenarium::prelude::FuncId;
+    use scenarium::node::function::FuncId;
 
     /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
     /// `pos`, returning its id.

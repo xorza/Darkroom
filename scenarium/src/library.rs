@@ -232,7 +232,7 @@ mod tests {
     use super::Library;
     use crate::data::{DynamicValue, StaticValue};
     use crate::node::func_lambda::{InvokeInput, OutputUsage};
-    use crate::prelude::AnyState;
+    use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::testing::{TestFuncHooks, test_func_lib};
     use common::SerdeFormat;

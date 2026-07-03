@@ -5,11 +5,12 @@ use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
-use scenarium::node::function::{FuncInput, FuncOutput, OutputType, ValueVariant};
-use scenarium::prelude::{
-    Binding, CachePersistence, Graph, Library, NodeId, NodeKind, OutputPort, SubgraphDef,
-    SubgraphRef, Subscription,
+use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
+use scenarium::graph::{
+    Binding, CachePersistence, Graph, NodeId, NodeKind, OutputPort, Subscription,
 };
+use scenarium::library::Library;
+use scenarium::node::function::{FuncInput, FuncOutput, OutputType, ValueVariant};
 
 use crate::core::document::GraphView;
 use crate::gui::run_state::{ExecStatus, RunState};
@@ -548,7 +549,8 @@ fn extend_pool<T>(pool: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Span
 mod tests {
     use super::*;
     use scenarium::data::DataType;
-    use scenarium::prelude::{InputPort, Node, SubgraphDef};
+    use scenarium::graph::subgraph::SubgraphDef;
+    use scenarium::graph::{InputPort, Node};
 
     fn finput(name: &str, ty: DataType) -> FuncInput {
         FuncInput::optional(name, ty)
@@ -671,7 +673,7 @@ mod tests {
     #[test]
     fn missing_func_and_subgraph_render_as_deletable_stubs() {
         use scenarium::elements::basic_library::basic_library;
-        use scenarium::prelude::SubgraphRef;
+        use scenarium::graph::subgraph::SubgraphRef;
 
         // A resolvable func, plus two unresolvable nodes (e.g. a document
         // saved against an older library): a func id and a linked subgraph
@@ -800,7 +802,7 @@ mod tests {
     #[test]
     fn persist_flag_projects_disk_as_true_memory_as_false() {
         use scenarium::elements::basic_library::basic_library;
-        use scenarium::prelude::CachePersistence;
+        use scenarium::graph::CachePersistence;
 
         // Two identical funcs differing only in cache policy: one default
         // (Memory), one Disk. The projection must mirror each.

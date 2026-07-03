@@ -13,9 +13,9 @@ use crate::data::{DataType, StaticValue};
 use crate::graph::NodeId;
 use crate::library::Library;
 use crate::node::event_lambda::EventLambda;
-use crate::node::function::{Func, FuncBehavior, OutputType};
+use crate::node::func_lambda::FuncLambda;
+use crate::node::function::{Func, FuncBehavior, FuncId, OutputType};
 use crate::node::special::SpecialNode;
-use crate::prelude::{FuncId, FuncLambda};
 
 /// A position into the flat node table — `e_nodes`, the cache's `slots`, and the
 /// per-node plan/cache columns are all indexed by it. Resolved at flatten and stable

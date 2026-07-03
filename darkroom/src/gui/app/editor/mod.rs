@@ -12,7 +12,9 @@
 //! [`App`]: crate::gui::app::App
 
 use palantir::Ui;
-use scenarium::prelude::{Library, NodeId, SubgraphDef};
+use scenarium::graph::NodeId;
+use scenarium::graph::subgraph::SubgraphDef;
+use scenarium::library::Library;
 
 use crate::core::document::{Document, GraphRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
