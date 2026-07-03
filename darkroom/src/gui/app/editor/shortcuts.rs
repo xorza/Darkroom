@@ -22,6 +22,11 @@ const SAVE_AS_SHORTCUT: Shortcut = Shortcut::ctrl_shift('S');
 const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
 const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 const RUN_SHORTCUT: Shortcut = Shortcut::ctrl('R');
+/// ⌘Q on macOS, Ctrl+Q elsewhere. Routes through `AppCommand::Quit` →
+/// `App::request_quit`, so it prompts to save when the document is dirty
+/// — same path as File ▸ Quit. (palantir drops winit's default macOS menu
+/// so ⌘Q reaches us instead of hard-terminating.)
+const QUIT_SHORTCUT: Shortcut = Shortcut::ctrl('Q');
 
 impl Editor {
     /// Ctrl+Z / Ctrl+Shift+Z. Replays undo/redo against the document
@@ -118,7 +123,7 @@ impl Editor {
     /// focus, so Ctrl+S still saves while a node's value editor is
     /// focused (TextEdit doesn't bind S/O/N, so nothing is stolen).
     /// Every chord is sampled with `key_pressed` each frame so all
-    /// stay subscribed for palantir's wake-gate (sampling all four up
+    /// stay subscribed for palantir's wake-gate (sampling them all up
     /// front, not short-circuited, so one chord firing doesn't drop
     /// the others' subscription that frame). Save-As (Ctrl+Shift+S) is
     /// checked before Save (Ctrl+S) so the shift variant wins its
@@ -129,6 +134,7 @@ impl Editor {
         let save_as = ui.key_pressed(SAVE_AS_SHORTCUT);
         let save = ui.key_pressed(SAVE_SHORTCUT);
         let run = ui.key_pressed(RUN_SHORTCUT);
+        let quit = ui.key_pressed(QUIT_SHORTCUT);
         if new {
             Some(AppCommand::NewDocument)
         } else if open {
@@ -139,6 +145,8 @@ impl Editor {
             Some(AppCommand::SaveDocument)
         } else if run {
             Some(AppCommand::Run)
+        } else if quit {
+            Some(AppCommand::Quit)
         } else {
             None
         }
