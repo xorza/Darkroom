@@ -117,7 +117,6 @@ pub(crate) fn show(
             for (i, tab) in tabs.iter().enumerate() {
                 tab_chip(ui, theme, tab, i, i == active, out);
             }
-            new_tab_chip(ui, theme);
         });
 }
 
@@ -129,6 +128,10 @@ const NEW_TAB_CHIP_SIDE: f32 = 13.0 * 1.2 + 8.0;
 /// The trailing "+" chip that creates and opens a fresh subgraph. A square,
 /// tab-shaped chip (top corners rounded like the tabs, bottom square) that
 /// reads as an inactive tab; the click is consumed in [`emit_tab_actions`].
+///
+/// Hidden from the tab strip for now — kept intact (and its click still
+/// wired in `emit_tab_actions`) so it can be re-enabled without rebuilding it.
+#[allow(dead_code)]
 fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
     let r = theme.tab_corner_radius;
     let hover_bg = if ui.response_for(tab_new_wid()).hovered {
