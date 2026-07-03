@@ -27,6 +27,11 @@ const TOOLBAR_MARGIN: f32 = 8.0;
 const BUTTON_GAP: f32 = 6.0;
 /// Corner radius of a button's rounded-rect background.
 const BUTTON_RADIUS: f32 = 6.0;
+/// Opacity of a button's frosted backdrop. Keeps the toolbar readable over an
+/// empty canvas *and* over a node it happens to sit on — the backdrop color
+/// sits between the canvas and node fills, so a bit of translucency still
+/// contrasts against both while the node stays faintly visible through it.
+const BUTTON_BG_ALPHA: f32 = 0.7;
 
 fn run_button_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.graph.run_button")
@@ -130,8 +135,8 @@ pub(crate) fn show(
     command
 }
 
-/// One square glyph toggle. `toggled` inverts it like a filled chip (the
-/// running-glow fill with a dark glyph); idle is a neutral fill (lighter on
+/// One square glyph toggle. `toggled` inverts it like a filled chip (the solid
+/// running-glow fill with a dark glyph); idle is a frosted backdrop (lighter on
 /// hover) with the green "go" glyph. Returns whether it was clicked.
 fn toggle_button(
     ui: &mut Ui,
@@ -145,14 +150,20 @@ fn toggle_button(
     let (fill, glyph) = if toggled {
         (theme.exec_running_glow, theme.chrome_fill)
     } else if hovered {
-        (theme.header_fill, theme.exec_executed_glow)
+        (
+            theme.header_fill.with_alpha(BUTTON_BG_ALPHA),
+            theme.exec_executed_glow,
+        )
     } else {
-        (theme.node_fill, theme.exec_executed_glow)
+        (
+            theme.chrome_fill.with_alpha(BUTTON_BG_ALPHA),
+            theme.exec_executed_glow,
+        )
     };
     glyph_button(ui, wid, fill, glyph, tip, draw_glyph)
 }
 
-/// One square momentary button (no toggled state): neutral fill that lifts
+/// One square momentary button (no toggled state): frosted backdrop that lifts
 /// on hover, with a muted glyph. Used by the view-framing actions. Returns
 /// whether it was clicked.
 fn action_button(
@@ -164,9 +175,9 @@ fn action_button(
 ) -> bool {
     let hovered = ui.response_for(wid).hovered;
     let fill = if hovered {
-        theme.header_fill
+        theme.header_fill.with_alpha(BUTTON_BG_ALPHA)
     } else {
-        theme.node_fill
+        theme.chrome_fill.with_alpha(BUTTON_BG_ALPHA)
     };
     glyph_button(ui, wid, fill, theme.text_muted, tip, draw_glyph)
 }
