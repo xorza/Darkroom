@@ -36,7 +36,6 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::context::ContextManager;
 use crate::data::DataType;
 use crate::elements::cache_passthrough::cache_node_path;
 use crate::execution::blob;
@@ -44,6 +43,7 @@ use crate::execution::cache::{Cache, ValueCache};
 use crate::execution::digest::{Digest, node_digest};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::library::Library;
+use crate::runtime::context::ContextManager;
 use crate::special::SpecialNode;
 
 /// Where a node's outputs cache, and how a present blob is treated on store.

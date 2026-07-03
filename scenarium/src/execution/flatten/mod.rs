@@ -22,7 +22,7 @@ use crate::data::StaticValue;
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
 };
-use crate::execution_stats::FlattenMap;
+use crate::execution::stats::FlattenMap;
 use crate::function::Func;
 use crate::graph::{Binding, CachePersistence, Graph, InputPort, NodeId, NodeKind, Subscription};
 use crate::library::Library;

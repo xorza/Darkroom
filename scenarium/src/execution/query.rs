@@ -6,8 +6,8 @@
 use crate::data::DynamicValue;
 use crate::execution::event::{EventRef, EventTrigger};
 use crate::execution::program::{ExecutionBinding, NodeIdx};
+use crate::execution::stats::ExecutionStats;
 use crate::execution::{ArgumentValues, ExecutionEngine};
-use crate::execution_stats::ExecutionStats;
 use crate::graph::NodeId;
 
 impl ExecutionEngine {

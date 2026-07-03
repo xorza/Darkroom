@@ -1,6 +1,6 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use crate::common::shared_any_state::SharedAnyState;
+use crate::runtime::shared_any_state::SharedAnyState;
 
 type AsyncEventFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 

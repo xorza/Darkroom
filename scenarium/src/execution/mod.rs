@@ -25,7 +25,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::data::DynamicValue;
 use crate::execution::flatten::Flattener;
-use crate::execution_stats::{ExecutionStats, FlattenMap, RunProgress};
+use crate::execution::stats::{ExecutionStats, FlattenMap, RunProgress};
 use crate::graph::{Graph, NodeId};
 use crate::library::Library;
 use crate::prelude::FuncId;
@@ -41,6 +41,7 @@ pub(crate) mod plan;
 pub(crate) mod program;
 mod query;
 pub(crate) mod resolve;
+pub(crate) mod stats;
 #[cfg(test)]
 mod tests;
 pub(crate) mod validate;
@@ -119,7 +120,7 @@ impl<T> IndexMut<NodeIdx> for NodeColumn<T> {
 /// ([`CycleDetected`](Error::CycleDetected)), or the event loop's lambda panicked
 /// ([`EventLambdaPanic`](Error::EventLambdaPanic)). It's the error type of the engine's
 /// `Result`-returning entry points. A *single node's* run failure is a [`RunError`]
-/// (collected into [`ExecutionStats::node_errors`](crate::execution_stats::ExecutionStats)),
+/// (collected into [`ExecutionStats::node_errors`](crate::execution::stats::ExecutionStats)),
 /// never one of these — the two phases can't be confused at the type level.
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum Error {
@@ -132,7 +133,7 @@ pub enum Error {
 }
 
 /// A **single node's** run-time failure, collected per-node into
-/// [`ExecutionStats::node_errors`](crate::execution_stats::ExecutionStats). Distinct
+/// [`ExecutionStats::node_errors`](crate::execution::stats::ExecutionStats). Distinct
 /// from [`Error`] (whole-operation failures): a `RunError` always concerns exactly one
 /// node, so it can't carry a compile/plan failure, and a caller reading `node_errors`
 /// can't mistake a setup failure for a node's outcome.

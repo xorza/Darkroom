@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use scenarium::execution::{ArgumentValues, Error as ExecError};
-use scenarium::execution_stats::{ExecutionStats, RunProgress};
+use scenarium::prelude::{ExecutionStats, RunProgress};
 use scenarium::prelude::{Graph, Library, NodeId, OutputCache};
 use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
 use tokio::runtime::Runtime;

@@ -8,12 +8,12 @@
 
 use common::{KeyIndexKey, KeyIndexVec};
 
-use crate::common::shared_any_state::SharedAnyState;
 use crate::data::DynamicValue;
 use crate::execution::digest::Digest;
 use crate::execution::program::{ExecutionNode, NodeIdx};
 use crate::graph::NodeId;
 use crate::prelude::AnyState;
+use crate::runtime::shared_any_state::SharedAnyState;
 
 /// One node's cached output as an explicit three-state machine. The states are mutually
 /// exclusive, so the bad combinations — "resident *and* flagged on disk", "value present

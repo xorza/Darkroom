@@ -7,7 +7,7 @@ use common::CancelToken;
 use common::id_type;
 use hashbrown::HashMap;
 
-use crate::execution_stats::{LogEntry, LogLevel};
+use crate::execution::stats::{LogEntry, LogLevel};
 use crate::graph::NodeId;
 
 type ContextCtor = dyn Fn() -> Box<dyn Any + Send> + Send + Sync;
@@ -142,9 +142,9 @@ impl ContextManager {
 mod tests {
     use std::{any::Any, sync::Arc};
 
-    use crate::context::ContextCtor;
+    use crate::runtime::context::ContextCtor;
 
-    use crate::context::{ContextManager, ContextType};
+    use crate::runtime::context::{ContextManager, ContextType};
 
     #[derive(Debug, Default)]
     struct TestCtx {

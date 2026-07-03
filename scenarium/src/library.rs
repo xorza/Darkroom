@@ -230,10 +230,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::Library;
-    use crate::context::ContextManager;
     use crate::data::{DynamicValue, StaticValue};
     use crate::func_lambda::{InvokeInput, OutputUsage};
     use crate::prelude::AnyState;
+    use crate::runtime::context::ContextManager;
     use crate::testing::{TestFuncHooks, test_func_lib};
     use common::SerdeFormat;
 
@@ -272,7 +272,7 @@ mod tests {
         ];
         let mut outputs = vec![DynamicValue::Unbound];
         let outputs_meta = vec![OutputUsage::Needed(1); outputs.len()];
-        let event_state = crate::common::shared_any_state::SharedAnyState::default();
+        let event_state = crate::runtime::shared_any_state::SharedAnyState::default();
         library
             .by_id(&sum_id)
             .unwrap()

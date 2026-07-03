@@ -12,8 +12,8 @@ use common::ReadyState;
 
 use crate::execution::event::{EventRef, EventTrigger};
 use crate::execution::output_cache::OutputCache;
+use crate::execution::stats::{ExecutionStats, RunProgress};
 use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result, RunSeeds};
-use crate::execution_stats::{ExecutionStats, RunProgress};
 use crate::graph::{Graph, NodeId};
 use crate::library::Library;
 

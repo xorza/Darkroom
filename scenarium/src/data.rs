@@ -8,7 +8,7 @@ use strum::VariantNames;
 
 use common::id_type;
 
-use crate::context::ContextManager;
+use crate::runtime::context::ContextManager;
 
 /// Trait for enums that can be used with `DataType::Enum`.
 pub trait EnumVariants {

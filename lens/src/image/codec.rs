@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use imaginarium::{ALL_FORMATS, ImageDesc};
-use scenarium::context::ContextManager;
 use scenarium::data::CustomValue;
 use scenarium::library::TypeEntry;
+use scenarium::runtime::context::ContextManager;
 use scenarium::value_codec::CustomValueCodec;
 
 use super::Image;

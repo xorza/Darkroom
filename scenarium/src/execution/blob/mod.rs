@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use thiserror::Error;
 
-use crate::context::ContextManager;
 use crate::data::DynamicValue;
 use crate::library::Library;
+use crate::runtime::context::ContextManager;
 use crate::value_codec::{self, deserialize_outputs, serialize_outputs};
 
 /// A real failure while storing outputs (a skipped non-cacheable value is *not* an

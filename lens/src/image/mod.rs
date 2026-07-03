@@ -14,8 +14,8 @@ use std::sync::LazyLock;
 
 use common::Slot;
 use imaginarium::Preview;
-use scenarium::context::ContextManager;
 use scenarium::data::{CustomValue, DataType, PendingPreview, TypeId};
+use scenarium::runtime::context::ContextManager;
 
 use crate::image::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 

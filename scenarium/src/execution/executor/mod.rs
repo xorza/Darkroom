@@ -20,14 +20,14 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use common::CancelToken;
 
-use crate::context::ContextManager;
 use crate::data::DynamicValue;
-use crate::execution_stats::{
+use crate::execution::stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
 use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage};
 use crate::graph::InputPort;
 use crate::prelude::FuncId;
+use crate::runtime::context::ContextManager;
 
 use crate::execution::cache::Cache;
 use crate::execution::output_cache::OutputCache;

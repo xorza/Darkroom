@@ -1003,10 +1003,10 @@ mod cache_persistence {
         use async_trait::async_trait;
 
         use crate::async_lambda;
-        use crate::context::ContextManager;
         use crate::data::{CustomValue, TypeId};
         use crate::function::Func;
         use crate::library::{Library, TypeEntry};
+        use crate::runtime::context::ContextManager;
         use crate::value_codec::CustomValueCodec;
 
         type CodecError = Box<dyn std::error::Error + Send + Sync>;
@@ -1899,7 +1899,7 @@ mod behavior {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_emits_started_then_finished_progress_per_node() -> anyhow::Result<()> {
-        use crate::execution_stats::{RunPhase, RunProgress};
+        use crate::execution::stats::{RunPhase, RunProgress};
         use tokio::sync::mpsc::unbounded_channel;
 
         let graph = test_graph();
@@ -2023,7 +2023,7 @@ mod behavior {
         use common::CancelToken;
 
         use crate::async_lambda;
-        use crate::execution_stats::NodeError;
+        use crate::execution::stats::NodeError;
         use crate::function::Func;
         use crate::graph::{Graph, NodeId};
         use crate::library::Library;
@@ -2117,7 +2117,7 @@ mod behavior {
     #[tokio::test(flavor = "multi_thread")]
     async fn lambda_cancelled_error_maps_to_error_cancelled() -> anyhow::Result<()> {
         use crate::async_lambda;
-        use crate::execution_stats::NodeError;
+        use crate::execution::stats::NodeError;
         use crate::func_lambda::InvokeError;
         use crate::function::Func;
         use crate::graph::{Graph, NodeId};

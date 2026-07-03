@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use scenarium::context::ContextType;
+use scenarium::runtime::context::ContextType;
 
 #[derive(Debug)]
 pub struct VisionCtx {
