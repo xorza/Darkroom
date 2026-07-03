@@ -1,9 +1,9 @@
 //! The "save changes before quitting?" confirmation dialog. Rendered by
 //! [`App::handle_exit`](super::App) when a quit is requested with unsaved
-//! changes; the returned [`ExitChoice`] drives whether the app saves,
-//! discards, or stays.
+//! changes; the returned [`ExitOutcome`] drives whether the app saves,
+//! discards, or stays — and whether to stop asking in future.
 
-use palantir::{Button, Configure, Modal, Panel, Text, Ui};
+use palantir::{Button, Checkbox, Configure, Modal, Panel, Text, Ui, WidgetId};
 
 /// The user's answer to the unsaved-changes prompt for one frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,14 +18,30 @@ pub(crate) enum ExitChoice {
     Save,
 }
 
+/// What the exit dialog reported this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ExitOutcome {
+    pub choice: ExitChoice,
+    /// "Don't ask again" checkbox state. Honored only when `choice` is a
+    /// proceed action (`Save`/`Discard`) — a `Cancel` leaves the
+    /// preference untouched.
+    pub dont_ask_again: bool,
+}
+
 /// Render the modal over the current frame. `file_name` names the document
 /// in the prompt (`None` for a never-saved one). Returns the choice the
-/// user made this frame.
-pub(crate) fn show(ui: &mut Ui, file_name: Option<&str>) -> ExitChoice {
+/// user made this frame plus the "Don't ask again" state.
+pub(crate) fn show(ui: &mut Ui, file_name: Option<&str>) -> ExitOutcome {
     let title = match file_name {
         Some(name) => ui.fmt(format_args!("Save changes to “{name}” before quitting?")),
         None => ui.fmt(format_args!("Save changes before quitting?")),
     };
+
+    // Checkbox state lives across the frames the dialog is up; the id isn't
+    // recorded once the dialog closes, so the row is swept and the next
+    // open starts unchecked.
+    let dont_ask_id = WidgetId::from_hash("exit_dialog::dont_ask_again");
+    let mut dont_ask_again = *ui.state_mut::<bool>(dont_ask_id);
 
     let mut choice = ExitChoice::Stay;
     let resp = Modal::new()
@@ -37,6 +53,10 @@ pub(crate) fn show(ui: &mut Ui, file_name: Option<&str>) -> ExitChoice {
                 .padding(8.0)
                 .show(ui, |ui| {
                     Text::new(title).id_salt(("exit_dialog", "title")).show(ui);
+                    Checkbox::new(&mut dont_ask_again)
+                        .id_salt(("exit_dialog", "dont_ask"))
+                        .label("Don't ask again")
+                        .show(ui);
                     Panel::hstack()
                         .id_salt(("exit_dialog", "row"))
                         .gap(8.0)
@@ -72,5 +92,10 @@ pub(crate) fn show(ui: &mut Ui, file_name: Option<&str>) -> ExitChoice {
     if resp.dismissed {
         choice = ExitChoice::Cancel;
     }
-    choice
+
+    *ui.state_mut::<bool>(dont_ask_id) = dont_ask_again;
+    ExitOutcome {
+        choice,
+        dont_ask_again,
+    }
 }

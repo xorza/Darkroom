@@ -90,6 +90,10 @@ pub(crate) enum AppCommand {
     /// Toggle whether launch reopens the last document. Raised by the
     /// Preferences tab's "Load last document on startup" checkbox; persisted.
     SetLoadLastDocument(bool),
+    /// Toggle whether quitting with unsaved changes prompts to save. Raised
+    /// by the Preferences tab's checkbox and the exit dialog's "Don't ask
+    /// again"; persisted.
+    SetConfirmUnsavedOnExit(bool),
     /// Quit the app (File ▸ Quit). Routed through `App::request_quit`, which
     /// prompts to save first if the document has unsaved changes.
     Quit,
@@ -318,7 +322,10 @@ impl App {
     /// File ▸ Quit, which set `confirm_quit` via `request_quit` earlier this
     /// frame.
     fn handle_exit(&mut self, ui: &mut Ui) {
-        if ui.close_requested() && self.editor.dirty {
+        // A window-close request (titlebar X) with unsaved changes raises
+        // the prompt and vetoes the close — unless the user turned
+        // confirmation off, in which case the close proceeds.
+        if ui.close_requested() && self.editor.dirty && self.preferences.confirm_unsaved_on_exit {
             ui.keep_open();
             self.confirm_quit = true;
         }
@@ -331,12 +338,21 @@ impl App {
             .as_deref()
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str());
-        match exit_dialog::show(ui, file_name) {
+        let outcome = exit_dialog::show(ui, file_name);
+        match outcome.choice {
             ExitChoice::Stay => {}
             ExitChoice::Cancel => self.confirm_quit = false,
-            ExitChoice::Discard => self.host_handle.quit(),
+            ExitChoice::Discard => {
+                if outcome.dont_ask_again {
+                    self.set_confirm_exit(false);
+                }
+                self.host_handle.quit();
+            }
             ExitChoice::Save => {
                 self.confirm_quit = false;
+                if outcome.dont_ask_again {
+                    self.set_confirm_exit(false);
+                }
                 self.save_current();
                 // Save As can be cancelled, leaving the doc dirty — only
                 // quit once the save actually landed.

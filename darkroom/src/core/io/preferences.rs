@@ -28,6 +28,11 @@ pub struct Preferences {
     /// an empty document (the path is still remembered, just not opened).
     /// Defaults to `true` — the historical reopen-where-you-left-off behavior.
     pub load_last_document: bool,
+    /// Prompt to save unsaved changes before quitting (window close, ⌘Q,
+    /// File ▸ Quit). When `false`, quitting discards unsaved changes without
+    /// asking. The exit dialog's "Don't ask again" checkbox clears it; the
+    /// Preferences tab can restore it. Defaults to `true`.
+    pub confirm_unsaved_on_exit: bool,
     /// ONNX model paths for lens's ML nodes (`ml_denoise` / `remove_stars`).
     /// A TOML `[ml_models]` table — must stay the **last** field, as TOML
     /// tables follow all scalar keys at the same level.
@@ -40,6 +45,7 @@ impl Default for Preferences {
             theme: ThemeChoice::default(),
             document_path: None,
             load_last_document: true,
+            confirm_unsaved_on_exit: true,
             ml_models: MlModelPreferences::default(),
         }
     }
@@ -136,8 +142,9 @@ mod tests {
         let cfg = Preferences {
             theme: ThemeChoice::Light,
             document_path: Some(PathBuf::from("/tmp/graph.rhai")),
-            // Non-default (default is `true`) so the round-trip is meaningful.
+            // Non-defaults (defaults are `true`) so the round-trip is meaningful.
             load_last_document: false,
+            confirm_unsaved_on_exit: false,
             ml_models: MlModelPreferences {
                 denoise: PathBuf::from("/models/d.onnx"),
                 star_removal: PathBuf::from("/models/s.onnx"),
@@ -147,6 +154,7 @@ mod tests {
         assert_eq!(back.theme, ThemeChoice::Light);
         assert_eq!(back.document_path, Some(PathBuf::from("/tmp/graph.rhai")));
         assert!(!back.load_last_document);
+        assert!(!back.confirm_unsaved_on_exit);
         assert_eq!(back.ml_models.denoise, PathBuf::from("/models/d.onnx"));
         assert_eq!(back.ml_models.star_removal, PathBuf::from("/models/s.onnx"));
     }
@@ -162,6 +170,8 @@ mod tests {
         assert_eq!(back.document_path, None);
         // Defaults to reopening the last document (historical behavior).
         assert!(back.load_last_document);
+        // Defaults to prompting before quitting with unsaved changes.
+        assert!(back.confirm_unsaved_on_exit);
         // ML model paths default to lens's canonical bare filenames.
         assert_eq!(
             back.ml_models.denoise,

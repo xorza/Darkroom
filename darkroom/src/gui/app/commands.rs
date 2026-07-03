@@ -71,16 +71,25 @@ impl App {
                 self.preferences.load_last_document = on;
                 self.preferences.save();
             }
+            AppCommand::SetConfirmUnsavedOnExit(on) => self.set_confirm_exit(on),
             AppCommand::Quit => self.request_quit(),
         }
     }
 
-    /// A quit was requested (File ▸ Quit, or a window close that reached
-    /// here). Prompt to save when the document has unsaved changes,
-    /// otherwise exit now. The confirm dialog is rendered by
-    /// [`App::exit_dialog`] and resolved by [`App::resolve_exit`].
+    /// Persist whether quitting with unsaved changes prompts to save.
+    /// Shared by the Preferences checkbox and the exit dialog's "Don't ask
+    /// again".
+    pub(crate) fn set_confirm_exit(&mut self, on: bool) {
+        self.preferences.confirm_unsaved_on_exit = on;
+        self.preferences.save();
+    }
+
+    /// A quit was requested (File ▸ Quit, ⌘Q, or a window close that reached
+    /// here). Prompt to save when the document has unsaved changes *and* the
+    /// confirm-on-exit preference is on; otherwise exit now. The confirm
+    /// dialog is rendered and resolved by [`App::handle_exit`].
     pub(crate) fn request_quit(&mut self) {
-        if self.editor.dirty {
+        if self.editor.dirty && self.preferences.confirm_unsaved_on_exit {
             self.confirm_quit = true;
         } else {
             self.host_handle.quit();

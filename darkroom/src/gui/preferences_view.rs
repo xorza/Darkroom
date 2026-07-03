@@ -68,6 +68,16 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
                 command = Some(AppCommand::SetLoadLastDocument(load_last));
             }
 
+            // Quitting — whether unsaved changes prompt before exit.
+            subheading(ui, theme, "Quitting");
+            let mut confirm_exit = ctx.preferences.confirm_unsaved_on_exit;
+            Checkbox::new(&mut confirm_exit)
+                .label("Ask to save changes before quitting")
+                .show(ui);
+            if confirm_exit != ctx.preferences.confirm_unsaved_on_exit {
+                command = Some(AppCommand::SetConfirmUnsavedOnExit(confirm_exit));
+            }
+
             // ML models — caller-supplied ONNX files the ml_denoise /
             // remove_stars nodes load (lumos ships none).
             subheading(ui, theme, "ML Models (ONNX)");
