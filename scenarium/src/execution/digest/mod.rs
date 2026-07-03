@@ -28,8 +28,8 @@
 use blake3::Hasher;
 
 use crate::data::{DataType, StaticValue};
-use crate::elements::cache_passthrough::file_cache_digest;
 use crate::execution::cache::Cache;
+use crate::execution::cache_node::file_cache_digest;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::function::FuncBehavior;
 use crate::special::SpecialNode;

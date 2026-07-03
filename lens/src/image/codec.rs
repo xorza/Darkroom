@@ -9,8 +9,8 @@ use async_trait::async_trait;
 use imaginarium::{ALL_FORMATS, ImageDesc};
 use scenarium::data::CustomValue;
 use scenarium::library::TypeEntry;
+use scenarium::prelude::CustomValueCodec;
 use scenarium::runtime::context::ContextManager;
-use scenarium::value_codec::CustomValueCodec;
 
 use super::Image;
 use super::vision_ctx::{VISION_CTX_TYPE, VisionCtx};

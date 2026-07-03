@@ -32,6 +32,8 @@ use crate::prelude::FuncId;
 
 pub(crate) mod blob;
 pub(crate) mod cache;
+pub(crate) mod cache_node;
+pub(crate) mod codec;
 pub(crate) mod digest;
 pub(crate) mod event;
 pub(crate) mod executor;

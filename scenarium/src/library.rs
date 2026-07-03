@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::data::CustomValueCodec;
 use crate::data::{DataType, EnumVariants, TypeId};
 use crate::function::{Func, FuncId};
 use crate::subgraph::{SubgraphDef, SubgraphId};
-use crate::value_codec::CustomValueCodec;
 use common::KeyIndexVec;
 use common::{SerdeFormat, deserialize, serialize};
 

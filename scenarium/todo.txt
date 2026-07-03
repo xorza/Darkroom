@@ -1,0 +1,1 @@
+blobs and serialization directly to file to avoid memallocs

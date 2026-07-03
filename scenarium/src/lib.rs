@@ -11,11 +11,12 @@ pub mod runtime;
 pub mod special;
 pub mod subgraph;
 pub mod testing;
-pub mod value_codec;
 pub mod worker;
 
 pub mod prelude {
-    pub use crate::data::{CustomValue, DataType, DynamicValue, StaticValue, TypeId};
+    pub use crate::data::{
+        CustomValue, CustomValueCodec, DataType, DynamicValue, StaticValue, TypeId,
+    };
     pub use crate::execution::ExecutionEngine;
     pub use crate::execution::digest::{Digest, DigestHasher};
     pub use crate::execution::event::{EventRef, EventTrigger};
@@ -36,5 +37,4 @@ pub mod prelude {
     pub use crate::runtime::shared_any_state::SharedAnyState;
     pub use crate::special::SpecialNode;
     pub use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
-    pub use crate::value_codec::CustomValueCodec;
 }

@@ -1003,11 +1003,11 @@ mod cache_persistence {
         use async_trait::async_trait;
 
         use crate::async_lambda;
+        use crate::data::CustomValueCodec;
         use crate::data::{CustomValue, TypeId};
         use crate::function::Func;
         use crate::library::{Library, TypeEntry};
         use crate::runtime::context::ContextManager;
-        use crate::value_codec::CustomValueCodec;
 
         type CodecError = Box<dyn std::error::Error + Send + Sync>;
 

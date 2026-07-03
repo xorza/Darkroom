@@ -11,16 +11,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
 
 use crate::data::DynamicValue;
+use crate::execution::codec::{self, deserialize_outputs, serialize_outputs};
 use crate::library::Library;
 use crate::runtime::context::ContextManager;
-use crate::value_codec::{self, deserialize_outputs, serialize_outputs};
 
 /// A real failure while storing outputs (a skipped non-cacheable value is *not* an
 /// error — see [`write`]'s `Ok(false)`).
 #[derive(Debug, Error)]
 pub(crate) enum Error {
     #[error("encoding outputs for the cache failed: {0}")]
-    Encode(#[from] value_codec::Error),
+    Encode(#[from] codec::Error),
     #[error("writing a cache blob failed: {0}")]
     Write(#[from] io::Error),
 }
@@ -59,7 +59,7 @@ pub(crate) async fn write(
 ) -> Result<bool, Error> {
     let bytes = match serialize_outputs(outputs, library, ctx).await {
         Ok(bytes) => bytes,
-        Err(value_codec::Error::UnknownType(_)) => return Ok(false),
+        Err(codec::Error::UnknownType(_)) => return Ok(false),
         Err(e) => return Err(Error::Encode(e)),
     };
     // `atomic_write` is blocking `std::fs`; run it off the async worker thread so a

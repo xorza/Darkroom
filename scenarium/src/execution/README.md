@@ -6,7 +6,7 @@ design home that the module's `//!` docs point at. Three parts:
 - **A. Subgraphs** — how composite nodes are authored and flattened away
   (`flatten.rs`; authoring types in `subgraph.rs`/`graph.rs`).
 - **B. Disk cache** — the content-addressed output cache for `persist = Disk` nodes
-  (`digest.rs`, `cache.rs`, `output_cache.rs`, `blob.rs`, `value_codec.rs`).
+  (`digest.rs`, `cache.rs`, `output_cache.rs`, `blob.rs`, `codec.rs`).
 - **C. File cache** — the explicit-path `file cache` passthrough node
   (`elements/cache_passthrough.rs`, `special.rs`).
 
@@ -291,7 +291,7 @@ A node's blob lives at `<disk_root>/<hex(digest)>` — so identical computations
 (temp file + rename), so a reader never sees a half-written blob. A content-addressed
 blob already on disk is the same bytes, so the store skips re-serializing it.
 
-## B.4 Values ↔ bytes (`value_codec.rs`)
+## B.4 Values ↔ bytes (`codec.rs`)
 
 `DynamicValue` isn't `Serialize`: `Unbound`/`Static` are trivial, but
 `Custom(Arc<dyn CustomValue>)` is an opaque runtime payload. Each custom *type*

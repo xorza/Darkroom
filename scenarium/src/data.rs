@@ -58,6 +58,42 @@ pub trait CustomValue: Send + Sync + Display + 'static {
     fn as_any(&self) -> &dyn Any;
 }
 
+/// Error a codec hands back to the framework. The codec lives in a downstream
+/// crate, so its concrete failure stays type-erased here.
+pub(crate) type CodecError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Bidirectional disk codec for one custom-value type, registered once on a type
+/// entry in the [`Library`](crate::library::Library) type table — the disk-cache
+/// counterpart of a [`CustomValue`]. Encode takes `&dyn CustomValue` (downcast to the
+/// codec's concrete type) and is async + context-aware like [`CustomValue::gen_preview`],
+/// so a GPU-resident value can read back through the [`ContextManager`]. Decode has only
+/// bytes — there is no value on reload, which is why dispatch goes through the library
+/// rather than a method on the value. The blob framing that calls this lives in
+/// [`execution::codec`](crate::execution::codec).
+#[async_trait::async_trait]
+pub trait CustomValueCodec: Send + Sync + std::fmt::Debug {
+    /// Encode `value` (always this codec's concrete type) for the cache, or `Err` if
+    /// encoding failed (e.g. a GPU readback error) — surfaced to the caller rather than
+    /// silently dropped. Whether a *type* is cacheable at all is decided by whether a
+    /// codec is registered for it, not here.
+    async fn encode(
+        &self,
+        value: &dyn CustomValue,
+        ctx: &mut ContextManager,
+    ) -> std::result::Result<Vec<u8>, CodecError>;
+
+    /// Rebuild a value from bytes a prior [`Self::encode`] produced. Errors are expected
+    /// when a blob outlives the binary that wrote it (corrupt or layout-changed bytes).
+    ///
+    /// **Contract:** a codec must *reject bytes it didn't write* — version its own frame
+    /// and return `Err` on a mismatch. The framework treats a decode error as a cache miss
+    /// and recomputes, but it can't tell a layout-changed blob from a valid one, so an
+    /// unversioned codec that changes its byte format for the same `TypeId` (without the
+    /// framework's `FORMAT_VERSION` or digest `DOMAIN` being bumped) would decode stale
+    /// bytes into a wrong value — a silent false hit.
+    fn decode(&self, bytes: Vec<u8>) -> std::result::Result<Arc<dyn CustomValue>, CodecError>;
+}
+
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FsPathMode {
     #[default]
