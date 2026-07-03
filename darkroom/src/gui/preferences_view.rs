@@ -1,9 +1,9 @@
-//! The Config tab's content: a settings window for [`AppConfig`] (theme
+//! The Preferences tab's content: a settings window for [`Preferences`] (theme
 //! preference + the lens ML model paths). Rendered by `main_window` when
-//! the active tab is `TabRef::Config`. Pure view — it reads the current
+//! the active tab is `TabRef::Preferences`. Pure view — it reads the current
 //! settings from [`AppContext`] and surfaces edits as [`AppCommand`]s for
 //! `App` to apply and persist *outside* the record, exactly like the menu
-//! bar (the editor tree doesn't own `AppConfig`).
+//! bar (the editor tree doesn't own `Preferences`).
 
 use std::path::{Path, PathBuf};
 
@@ -17,12 +17,12 @@ use crate::gui::app::AppContext;
 use crate::gui::app::{AppCommand, MlModelKind};
 use crate::gui::theme::Theme;
 
-/// Draw the config window and return the edit the user requested, if any.
+/// Draw the preferences window and return the edit the user requested, if any.
 pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
     let theme = ctx.theme;
     let mut command: Option<AppCommand> = None;
     Panel::vstack()
-        .id_salt("config_view")
+        .id_salt("preferences_view")
         .size((Sizing::FILL, Sizing::FILL))
         .padding(Spacing::all(20.0))
         .gap(14.0)
@@ -31,7 +31,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
             ..Default::default()
         })
         .show(ui, |ui| {
-            heading(ui, "Configuration");
+            heading(ui, "Preferences");
 
             // Appearance — the theme preference (the sole home for theme
             // settings now that the Theme menu is gone).
@@ -40,7 +40,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
             // preference becomes a `SetTheme` for `App` to apply + persist.
             let mut selected = ctx.theme_choice;
             Panel::hstack()
-                .id_salt("config_theme_row")
+                .id_salt("preferences_theme_row")
                 .size((Sizing::Hug, Sizing::Hug))
                 .gap(16.0)
                 .show(ui, |ui| {
@@ -60,11 +60,11 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
 
             // Startup — whether launch reopens the last document.
             subheading(ui, theme, "Startup");
-            let mut load_last = ctx.config.load_last_document;
+            let mut load_last = ctx.preferences.load_last_document;
             Checkbox::new(&mut load_last)
                 .label("Load last document on startup")
                 .show(ui);
-            if load_last != ctx.config.load_last_document {
+            if load_last != ctx.preferences.load_last_document {
                 command = Some(AppCommand::SetLoadLastDocument(load_last));
             }
 
@@ -74,7 +74,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
             if let Some(c) = model_row(
                 ui,
                 "Denoise (DeepSNR)",
-                &ctx.config.ml_models.denoise,
+                &ctx.preferences.ml_models.denoise,
                 MlModelKind::Denoise,
             ) {
                 command = Some(c);
@@ -82,7 +82,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
             if let Some(c) = model_row(
                 ui,
                 "Star removal (StarNet)",
-                &ctx.config.ml_models.star_removal,
+                &ctx.preferences.ml_models.star_removal,
                 MlModelKind::StarRemoval,
             ) {
                 command = Some(c);
@@ -127,7 +127,7 @@ fn model_row(
     kind: MlModelKind,
 ) -> Option<AppCommand> {
     let mut command = None;
-    let id = WidgetId::from_hash(("config.ml_model_path", label));
+    let id = WidgetId::from_hash(("preferences.ml_model_path", label));
     Panel::hstack()
         .id_salt(label)
         .size((Sizing::FILL, Sizing::Hug))

@@ -2,7 +2,7 @@
 //! events side effects `App` runs *outside* the record pass (after the
 //! frame's record + drain), so a blocking file dialog or worker call holds no
 //! frame borrows. Kept apart from the per-frame pipeline in `mod.rs` — these
-//! touch `Document`/`Theme`/`AppConfig`/`Engine` + persistence, never the
+//! touch `Document`/`Theme`/`Preferences`/`Engine` + persistence, never the
 //! gesture or scene state.
 
 use std::path::{Path, PathBuf};
@@ -45,8 +45,8 @@ impl App {
                 // restores it.
                 self.theme = Theme::from_preset(choice.resolve());
                 ui.theme = self.theme.palantir_theme.clone();
-                self.config.theme = choice;
-                self.config.save();
+                self.preferences.theme = choice;
+                self.preferences.save();
             }
             AppCommand::ExportSubgraph => self.export_active_subgraph(),
             AppCommand::ImportSubgraph => self.import_subgraph(),
@@ -61,15 +61,15 @@ impl App {
             AppCommand::CancelRun => self.engine.cancel_run(),
             AppCommand::StartEvents => self.start_events(),
             AppCommand::StopEvents => self.stop_events(),
-            AppCommand::OpenConfig => {
+            AppCommand::OpenPreferences => {
                 let library = self.engine.library.load();
-                self.editor.open_config(&library);
+                self.editor.open_preferences(&library);
             }
             AppCommand::PickMlModel(kind) => self.pick_ml_model(kind),
             AppCommand::SetMlModelPath { kind, path } => self.set_ml_model_path(kind, path),
             AppCommand::SetLoadLastDocument(on) => {
-                self.config.load_last_document = on;
-                self.config.save();
+                self.preferences.load_last_document = on;
+                self.preferences.save();
             }
         }
     }
@@ -86,16 +86,16 @@ impl App {
         }
     }
 
-    /// Record `path` for `kind`, persist the config, and republish the paths
+    /// Record `path` for `kind`, persist the preferences, and republish the paths
     /// to lens so the next node run uses it. Shared by the Browse dialog and
-    /// the Config tab's editable path field.
+    /// the Preferences tab's editable path field.
     fn set_ml_model_path(&mut self, kind: MlModelKind, path: PathBuf) {
         match kind {
-            MlModelKind::Denoise => self.config.ml_models.denoise = path,
-            MlModelKind::StarRemoval => self.config.ml_models.star_removal = path,
+            MlModelKind::Denoise => self.preferences.ml_models.denoise = path,
+            MlModelKind::StarRemoval => self.preferences.ml_models.star_removal = path,
         }
-        self.config.save();
-        self.config.apply_ml_model_paths();
+        self.preferences.save();
+        self.preferences.apply_ml_model_paths();
     }
 
     /// Open a file dialog for a node's `FsPath` const input and, if the
@@ -235,15 +235,15 @@ impl App {
     }
 
     /// Record `path` as both the dialog-anchor `current_path` and the
-    /// persisted `config.document_path`, then write the config so the
+    /// persisted `preferences.document_path`, then write the preferences so the
     /// next launch reopens this document. Also repoints the worker's disk
     /// cache at the document's project-local store (or memory-only when the
     /// path is cleared / never saved).
     fn set_document_path(&mut self, path: Option<PathBuf>) {
         self.current_path = path.clone();
         self.engine.set_document_cache(self.current_path.as_deref());
-        self.config.document_path = path;
-        self.config.save();
+        self.preferences.document_path = path;
+        self.preferences.save();
     }
 }
 

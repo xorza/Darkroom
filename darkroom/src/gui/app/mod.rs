@@ -9,7 +9,7 @@ use scenarium::library::Library;
 
 use crate::core::document::Document;
 use crate::core::engine::Engine;
-use crate::core::io::config::AppConfig;
+use crate::core::io::preferences::Preferences;
 use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::theme_pref::ThemeChoice;
 use crate::core::wake::Wake;
@@ -25,7 +25,7 @@ pub(crate) mod editor;
 use editor::Editor;
 
 /// A deferred, side-effecting command a UI surface (the menu bar, the graph
-/// toolbar, the Config tab, a node's S-badge, an inline path-picker) hands to
+/// toolbar, the Preferences tab, a node's S-badge, an inline path-picker) hands to
 /// [`App`] to perform *outside* the record pass — after the frame's record +
 /// drain, so a blocking file dialog or worker call holds no frame borrows.
 /// The producing UI never touches `Document` / `Theme` / `Engine` directly;
@@ -39,7 +39,7 @@ pub(crate) enum AppCommand {
     /// Always prompt for a destination.
     SaveDocumentAs,
     /// Set the theme preference: `System` follows the OS light/dark
-    /// setting, `Dark`/`Light` pin a palette. Persisted to config.
+    /// setting, `Dark`/`Light` pin a palette. Persisted to preferences.
     SetTheme(ThemeChoice),
     /// Export the active subgraph (plus its local-def dependencies) to a
     /// file. No-op when the active tab isn't a subgraph.
@@ -74,19 +74,19 @@ pub(crate) enum AppCommand {
     StartEvents,
     /// Stop the worker's event loop.
     StopEvents,
-    /// Open (or focus) the Config tab — the app-settings window.
-    OpenConfig,
+    /// Open (or focus) the Preferences tab — the app-settings window.
+    OpenPreferences,
     /// Open an ONNX file dialog for one of the ML model paths and persist
-    /// the choice. Raised by the Config tab's "Browse…" buttons.
+    /// the choice. Raised by the Preferences tab's "Browse…" buttons.
     PickMlModel(MlModelKind),
-    /// Set an ML model path directly from the Config tab's editable field
+    /// Set an ML model path directly from the Preferences tab's editable field
     /// (a typed or pasted path), then persist + republish it.
     SetMlModelPath {
         kind: MlModelKind,
         path: PathBuf,
     },
     /// Toggle whether launch reopens the last document. Raised by the
-    /// Config tab's "Load last document on startup" checkbox; persisted.
+    /// Preferences tab's "Load last document on startup" checkbox; persisted.
     SetLoadLastDocument(bool),
 }
 
@@ -114,9 +114,9 @@ pub(crate) struct AppContext<'a> {
     /// keyed by authoring `NodeId`. Read by the inspection panel's Log and
     /// Inputs/Outputs sections.
     pub(crate) run_state: &'a RunState,
-    /// Persisted app config (theme + ML model paths), so a non-graph view
-    /// like the Config tab can display the current settings.
-    pub(crate) config: &'a AppConfig,
+    /// Persisted app preferences (theme + ML model paths), so a non-graph view
+    /// like the Preferences tab can display the current settings.
+    pub(crate) preferences: &'a Preferences,
     /// Whether the worker's event loop is running — drives the events
     /// toggle's on/off look. App-side intent rather than the worker's atomic,
     /// so the button can't lag a frame behind (and `Update` from a one-shot
@@ -127,7 +127,7 @@ pub(crate) struct AppContext<'a> {
 /// Thin shell around the [`Editor`] (which owns the document + its edit
 /// pipeline + the GUI tree): `App` holds only the runtime/IO the editor
 /// borrows each frame — the [`Engine`] (func lib + worker + script host),
-/// the active theme, session config + file path, and the host handle. Its
+/// the active theme, session preferences + file path, and the host handle. Its
 /// `frame` drains the engine's worker + script queues into the editor's
 /// projections, runs one `Editor::frame`, and actions the [`AppCommand`]
 /// it surfaces (file / theme / subgraph dialogs, run) outside the record.
@@ -148,7 +148,7 @@ pub(crate) struct App {
     /// Persisted session state (active theme name + last document).
     /// Written on every doc/theme change so the next launch reopens
     /// where the user left off.
-    pub(crate) config: AppConfig,
+    pub(crate) preferences: Preferences,
     /// Whether the worker's event loop is currently running (toggled by the
     /// events button). Reset whenever a one-shot run's `Update` tears the
     /// loop down, so it tracks the worker's real state.
@@ -157,10 +157,10 @@ pub(crate) struct App {
 
 impl App {
     /// Build the app before the first frame: assemble the func lib +
-    /// seed document, then restore persisted config (saved theme +
+    /// seed document, then restore persisted preferences (saved theme +
     /// last document) and push the resolved palantir theme onto `Ui`.
     /// Restore failures degrade silently to defaults — a missing or
-    /// corrupt config, or a deleted document, must not block launch.
+    /// corrupt preferences, or a deleted document, must not block launch.
     ///
     /// Handed to [`palantir::WinitHost::run`], which calls it once the
     /// `Ui` + [`HostHandle`] exist (before the first frame).
@@ -180,24 +180,24 @@ impl App {
             theme: Theme::default(),
             host_handle: handle,
             current_path: None,
-            config: AppConfig::default(),
+            preferences: Preferences::default(),
             events_running: false,
         };
-        app.config = AppConfig::load();
+        app.preferences = Preferences::load();
         // Resolve the saved preference: `System` (the default) follows
         // the OS light/dark setting, re-queried each launch.
-        app.theme = Theme::from_preset(app.config.theme.resolve());
+        app.theme = Theme::from_preset(app.preferences.theme.resolve());
         // Reopen the last document unless the user turned that off. A failed
         // load (the file moved or was deleted) clears the stale path, so the
         // next launch starts clean instead of retrying the broken path.
-        if app.config.load_last_document
-            && let Some(path) = app.config.document_path.clone()
+        if app.preferences.load_last_document
+            && let Some(path) = app.preferences.document_path.clone()
             && !app.load_document(&path)
         {
-            app.config.document_path = None;
-            app.config.save();
+            app.preferences.document_path = None;
+            app.preferences.save();
         }
-        // Resolved theme (default, or whatever the config restored)
+        // Resolved theme (default, or whatever the preferences restored)
         // onto the Ui so palantir widgets paint correctly frame 1.
         ui.theme = app.theme.palantir_theme.clone();
         // ui.debug_overlay.damage_rect = true;
@@ -327,8 +327,8 @@ impl palantir::App for App {
             ui,
             &library,
             &self.theme,
-            self.config.theme,
-            &self.config,
+            self.preferences.theme,
+            &self.preferences,
             self.events_running,
             &self.host_handle,
         );

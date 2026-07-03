@@ -20,8 +20,8 @@ use scenarium::library::Library;
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::{Intent, commit_intent_cascading};
 use crate::core::engine::Engine;
-use crate::core::io::config::AppConfig;
 use crate::core::io::persistence;
+use crate::core::io::preferences::Preferences;
 use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::worker::WorkerEvent;
@@ -54,13 +54,13 @@ pub(crate) struct Session {
 impl Session {
     /// Build the core: assemble the func lib, spin up the worker + script
     /// host (both woken through `wake`), and reopen the last document from
-    /// the saved config (or seed an empty graph). The script host is `None`
+    /// the saved preferences (or seed an empty graph). The script host is `None`
     /// unless `script_cfg` enabled a listener.
     pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
         let engine = Engine::new(script_cfg, wake);
 
-        let config = AppConfig::load();
-        let (document, current_path) = match config.document_path.as_deref() {
+        let preferences = Preferences::load();
+        let (document, current_path) = match preferences.document_path.as_deref() {
             Some(path) => match persistence::load_document(path) {
                 Some(doc) => (doc, Some(path.to_path_buf())),
                 None => (empty_document(), None),

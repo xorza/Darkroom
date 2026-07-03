@@ -3,7 +3,7 @@
 //! `Editor` owns the document being edited, its undo history, the derived
 //! [`Scene`] projection (plus the per-run status/log projections), the GUI
 //! tree state, and the transient frame-coordination scratch. [`App`] is a
-//! thin shell around it: it owns the runtime/IO (func lib, theme, config,
+//! thin shell around it: it owns the runtime/IO (func lib, theme, preferences,
 //! file path, worker, host handle), drains the worker into the editor's
 //! projections, runs one `Editor::frame`, and handles the [`AppCommand`]
 //! that frame surfaces. Everything the GUI tree reads or mutates lives
@@ -19,7 +19,7 @@ use scenarium::library::Library;
 use crate::core::document::{Document, GraphRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::{Intent, build_duplicate_intent_for, commit_intent_cascading};
-use crate::core::io::config::AppConfig;
+use crate::core::io::preferences::Preferences;
 use crate::core::theme_pref::ThemeChoice;
 use crate::core::worker::ValueRequest;
 use crate::gui::HostHandle;
@@ -207,7 +207,7 @@ impl Editor {
         library: &Library,
         theme: &Theme,
         theme_choice: ThemeChoice,
-        config: &AppConfig,
+        preferences: &Preferences,
         events_running: bool,
         host: &HostHandle,
     ) -> Option<AppCommand> {
@@ -221,7 +221,7 @@ impl Editor {
         // frame's `scene` to resolve tab/chip clicks, so it must run before
         // this frame's rebuild. After it, the active tab is fixed.
         self.navigate(ui, library);
-        // `Some` for a graph pane, `None` for a non-graph view (Config):
+        // `Some` for a graph pane, `None` for a non-graph view (Preferences):
         // the scene projection + canvas edit pipeline run only when a graph
         // tab is active.
         let graph_target = self.document.active_target();
@@ -262,7 +262,7 @@ impl Editor {
             theme_choice,
             library,
             run_state: &self.run_state,
-            config,
+            preferences,
             events_running,
         };
         let command = self
@@ -492,16 +492,21 @@ impl Editor {
         self.intents.push(Intent::SwitchTab { to: index });
     }
 
-    /// Open the [`TabRef::Config`] settings tab and focus it (reusing the
+    /// Open the [`TabRef::Preferences`] settings tab and focus it (reusing the
     /// existing tab if already open). Mirrors [`open_graph`]: adding the
     /// tab is the non-undoable part; the focus routes through a recorded
-    /// `SwitchTab`. Called from the View ▸ Config menu via `App`, so it
+    /// `SwitchTab`. Called from the File ▸ Preferences menu via `App`, so it
     /// records the switch and drains it immediately like every external edit.
-    pub(crate) fn open_config(&mut self, library: &Library) {
-        let index = match self.document.tabs.iter().position(|t| *t == TabRef::Config) {
+    pub(crate) fn open_preferences(&mut self, library: &Library) {
+        let index = match self
+            .document
+            .tabs
+            .iter()
+            .position(|t| *t == TabRef::Preferences)
+        {
             Some(index) => index,
             None => {
-                self.document.tabs.push(TabRef::Config);
+                self.document.tabs.push(TabRef::Preferences);
                 self.document.tabs.len() - 1
             }
         };

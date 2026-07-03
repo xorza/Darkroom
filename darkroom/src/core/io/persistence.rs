@@ -1,7 +1,7 @@
 //! Byte ⇄ type plumbing for documents and subgraphs — the GUI-free half
 //! of on-disk I/O. The file-picker dialogs and theme I/O live in
 //! `crate::gui::dialogs`. Pure persistence — no app state, no undo stack,
-//! no config; callers orchestrate (when to load/save, what to do with the
+//! no preferences; callers orchestrate (when to load/save, what to do with the
 //! result), this only turns paths into values and values into files.
 //! Failures log to stderr and return `None`/`false` so a bad read/write
 //! degrades instead of crashing the session.

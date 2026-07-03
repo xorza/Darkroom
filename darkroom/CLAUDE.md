@@ -61,8 +61,8 @@ everything else is grouped by responsibility:
 - **`edit/`** — the mutation machinery: `intent.rs` (intents + undo steps),
   `action_stack/` (packed undo history), `reconcile/` (derived subgraph-
   interface reconciliation).
-- **`io/`** — `persistence.rs` (file-dialog + serde I/O), `config.rs`
-  (`AppConfig` session state), `library.rs` (shared subgraph library file),
+- **`io/`** — `persistence.rs` (file-dialog + serde I/O), `preferences.rs`
+  (`Preferences` session state), `library.rs` (shared subgraph library file),
   `cache.rs` (per-document disk-cache root: `<stem>.darkroom-cache/` beside the
   file, with a self-ignoring `.gitignore`).
 - **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/
@@ -78,7 +78,7 @@ everything else is grouped by responsibility:
 - `editor: Editor` — everything document-related and the per-frame pipeline.
 - `library: Arc<Library>` — shared runtime library (builtins + loaded library
   subgraph defs), built at startup.
-- `theme: Theme`, `config: AppConfig`, `current_path: Option<PathBuf>`.
+- `theme: Theme`, `preferences: Preferences`, `current_path: Option<PathBuf>`.
 - `host_handle: HostHandle` — winit integration for file dialogs + repaints.
 - `worker: WorkerBridge` — drives the headless graph-execution worker.
 
@@ -313,7 +313,7 @@ Key cross-cutting mechanisms:
   draws so intersection tests run inline; hits drain into intents on release.
 
 ### Persistence + library (`src/io/`, `src/theme.rs`)
-`persistence.rs` is pure path⇄type I/O (dialogs + serde), no `App`/undo/config
+`persistence.rs` is pure path⇄type I/O (dialogs + serde), no `App`/undo/preferences
 coupling — `commands.rs` orchestrates. Documents round-trip through any
 `SerdeFormat` (Rhai is canonical). `library.rs` reads/writes the shared
 subgraph library (`darkroom.library.rhai`): a set of `SubgraphDef`s loaded into
@@ -321,7 +321,7 @@ subgraph library (`darkroom.library.rhai`): a set of `SubgraphDef`s loaded into
 subgraph defs track lineage via an `origin` field — "Publish" updates the
 linked library entry in place, else creates a new one.
 
-`AppConfig` (`darkroom.config.toml` in cwd) persists last-theme-name +
+`Preferences` (`darkroom.preferences.toml` in cwd) persists last-theme-name +
 last-document so the next launch reopens where you left off. I/O failures log
 to stderr and degrade — there is no user-facing error surface yet.
 

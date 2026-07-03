@@ -1,7 +1,7 @@
 //! The shared subgraph library: `Linked` subgraph defs that live in the
 //! runtime `Library` (where `SubgraphRef::Linked` resolves) rather than in
 //! any one document, so they're reusable across documents. Persisted in
-//! the working dir as Rhai, like the config — loaded into
+//! the working dir as Rhai, like the preferences — loaded into
 //! `library.subgraphs` at startup, saved when "promote" grows it.
 
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use common::{SerdeFormat, deserialize, serialize};
 use scenarium::graph::subgraph::SubgraphDef;
 
 /// Library file name, resolved relative to the process working directory.
-/// Rhai so it's hand-editable and matches the doc / theme / config format.
+/// Rhai so it's hand-editable and matches the doc / theme / preferences format.
 const LIBRARY_FILE: &str = "darkroom.library.rhai";
 
 /// On-disk wrapper so the file is a named table rather than a bare

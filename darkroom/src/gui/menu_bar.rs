@@ -16,9 +16,7 @@ pub(crate) fn show(ui: &mut Ui, host: Option<&HostHandle>) -> Option<AppCommand>
         .padding(Spacing::xy(4.0, 4.0))
         .gap(2.0)
         .show(ui, |ui| {
-            command = file_menu(ui, host)
-                .or_else(|| view_menu(ui))
-                .or_else(|| subgraph_menu(ui));
+            command = file_menu(ui, host);
         });
     command
 }
@@ -65,6 +63,10 @@ fn file_menu(ui: &mut Ui, host: Option<&HostHandle>) -> Option<AppCommand> {
             command = Some(AppCommand::SaveDocumentAs);
         }
         MenuItem::separator(ui);
+        if MenuItem::new("Preferences").show(ui, popup).clicked() {
+            command = Some(AppCommand::OpenPreferences);
+        }
+        MenuItem::separator(ui);
         if MenuItem::new("Quit").show(ui, popup).clicked()
             && let Some(h) = host
         {
@@ -74,16 +76,9 @@ fn file_menu(ui: &mut Ui, host: Option<&HostHandle>) -> Option<AppCommand> {
     })
 }
 
-fn view_menu(ui: &mut Ui) -> Option<AppCommand> {
-    dropdown(ui, "View", |ui, popup| {
-        let mut command = None;
-        if MenuItem::new("Config").show(ui, popup).clicked() {
-            command = Some(AppCommand::OpenConfig);
-        }
-        command
-    })
-}
-
+/// Subgraph import/export/promote actions. Hidden from the menu bar for
+/// now — kept intact so it can be re-enabled without rebuilding it.
+#[allow(dead_code)]
 fn subgraph_menu(ui: &mut Ui) -> Option<AppCommand> {
     dropdown(ui, "Subgraph", |ui, popup| {
         let mut command = None;

@@ -9,10 +9,10 @@ use crate::gui::UiAction;
 use crate::gui::app::AppCommand;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::GraphUI;
-use crate::gui::config_view;
 use crate::gui::graph_toolbar;
 use crate::gui::menu_bar;
 use crate::gui::node::emit_subgraph_opens;
+use crate::gui::preferences_view;
 use crate::gui::scene::Scene;
 use crate::gui::tab_bar::{self, TabLabel};
 
@@ -83,8 +83,8 @@ impl MainWindow {
                     });
                 tab_bar::show(ui, ctx.theme, &tabs, doc.active, out);
                 // The content pane below the strip is the active tab's view:
-                // the graph canvas for a graph tab, or the config window for
-                // the non-graph Config tab.
+                // the graph canvas for a graph tab, or the preferences window for
+                // the non-graph Preferences tab.
                 match doc.active_tab() {
                     TabRef::Graph(_) => {
                         // Overlay the run/cancel toggle on the canvas's
@@ -100,8 +100,8 @@ impl MainWindow {
                                 }
                             });
                     }
-                    TabRef::Config => {
-                        if let Some(c) = config_view::show(ui, ctx) {
+                    TabRef::Preferences => {
+                        if let Some(c) = preferences_view::show(ui, ctx) {
                             command = Some(c);
                         }
                     }
@@ -148,8 +148,8 @@ fn tab_labels(doc: &Document) -> Vec<TabLabel> {
                     closable: true,
                 }
             }
-            TabRef::Config => TabLabel {
-                text: "config".into(),
+            TabRef::Preferences => TabLabel {
+                text: "preferences".into(),
                 subgraph_id: None,
                 closable: true,
             },

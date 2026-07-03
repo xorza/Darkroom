@@ -24,7 +24,7 @@ const SUBGRAPH_NAME_MAX_CHARS: usize = 32;
 /// One tab's display state, built by `main_window` from the open-tab list.
 /// `subgraph_id.is_some()` marks an inline-renamable subgraph tab;
 /// `closable` marks a tab that carries a close button (every tab except
-/// the `Main` graph — subgraph *and* non-graph views like Config).
+/// the `Main` graph — subgraph *and* non-graph views like Preferences).
 pub(crate) struct TabLabel {
     pub(crate) text: InternedStr,
     pub(crate) subgraph_id: Option<SubgraphId>,

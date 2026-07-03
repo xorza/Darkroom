@@ -41,7 +41,7 @@ log/
 **/*.log
 **/__pycache__/
 .tmp/
-darkroom.config.rhai
+darkroom.preferences.rhai
 darkroom.library.rhai
-darkroom.config.toml
+darkroom.preferences.toml
 .cargo/config.toml

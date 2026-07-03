@@ -41,15 +41,15 @@ pub enum GraphRef {
 
 /// What an editor tab shows. Most tabs are graphs — the root and any
 /// opened subgraph interiors ([`TabRef::Graph`]) — but a tab can also be
-/// a non-graph app view like [`TabRef::Config`] (the settings window).
+/// a non-graph app view like [`TabRef::Preferences`] (the settings window).
 /// Persisted + undoable like the rest of the tab/view state, so reopening
 /// a document restores its open tabs and Ctrl+Z walks tab open/close.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TabRef {
     /// A graph pane (root or a local subgraph interior).
     Graph(GraphRef),
-    /// The app-config / settings view — no graph, no canvas.
-    Config,
+    /// The app-preferences / settings view — no graph, no canvas.
+    Preferences,
 }
 
 /// Which side of a subgraph def's interface a boundary-port edit targets:
@@ -345,11 +345,11 @@ impl Document {
     }
 
     /// The graph the active tab points at, or `None` when the active tab
-    /// is a non-graph view (e.g. `Config`).
+    /// is a non-graph view (e.g. `Preferences`).
     pub fn active_target(&self) -> Option<GraphRef> {
         match self.tabs[self.active] {
             TabRef::Graph(target) => Some(target),
-            TabRef::Config => None,
+            TabRef::Preferences => None,
         }
     }
 
@@ -386,16 +386,16 @@ impl Document {
     pub fn ensure_valid_active(&mut self) {
         // Common case: every tab still resolves — touch nothing (no
         // per-frame allocation). Only rebuild the list when a tab's
-        // graph actually vanished. Non-graph tabs (e.g. `Config`) always
+        // graph actually vanished. Non-graph tabs (e.g. `Preferences`) always
         // resolve.
         if self.tabs.iter().any(|t| match t {
             TabRef::Graph(g) => self.graph_for(*g).is_none(),
-            TabRef::Config => false,
+            TabRef::Preferences => false,
         }) {
             // Split the borrow so `retain` (mut `tabs`) can read `graph`.
             let Document { graph, tabs, .. } = self;
             tabs.retain(|t| match t {
-                TabRef::Graph(GraphRef::Main) | TabRef::Config => true,
+                TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
                 TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(id).is_some(),
             });
         }
@@ -953,13 +953,13 @@ mod tests {
     }
 
     #[test]
-    fn config_tab_has_no_graph_target_and_survives_validation() {
+    fn preferences_tab_has_no_graph_target_and_survives_validation() {
         let mut doc = Document::default();
-        // A graph tab resolves to a target; the appended Config tab does not.
+        // A graph tab resolves to a target; the appended Preferences tab does not.
         assert_eq!(doc.active_target(), Some(GraphRef::Main));
-        doc.tabs.push(TabRef::Config);
+        doc.tabs.push(TabRef::Preferences);
         doc.active = 1;
-        assert_eq!(doc.active_tab(), TabRef::Config);
+        assert_eq!(doc.active_tab(), TabRef::Preferences);
         assert_eq!(doc.active_target(), None, "a non-graph tab has no target");
 
         // A non-graph tab always resolves, so it's never pruned and the
@@ -967,42 +967,44 @@ mod tests {
         doc.ensure_valid_active();
         assert_eq!(
             doc.tabs,
-            vec![TabRef::Graph(GraphRef::Main), TabRef::Config]
+            vec![TabRef::Graph(GraphRef::Main), TabRef::Preferences]
         );
         assert_eq!(doc.active, 1);
         doc.validate();
     }
 
     #[test]
-    fn ensure_valid_active_keeps_config_when_a_subgraph_tab_vanishes() {
+    fn ensure_valid_active_keeps_preferences_when_a_subgraph_tab_vanishes() {
         let mut doc = Document::default();
         let id = doc.create_subgraph();
         doc.tabs
-            .extend([TabRef::Graph(GraphRef::Local(id)), TabRef::Config]);
-        doc.active = 2; // viewing the config tab
+            .extend([TabRef::Graph(GraphRef::Local(id)), TabRef::Preferences]);
+        doc.active = 2; // viewing the preferences tab
         // Drop the subgraph out from under its open tab.
         doc.graph.subgraphs.remove_by_key(&id);
 
         doc.ensure_valid_active();
-        // The dead subgraph tab is pruned; Main + Config remain, and active
+        // The dead subgraph tab is pruned; Main + Preferences remain, and active
         // is clamped back into range.
         assert_eq!(
             doc.tabs,
-            vec![TabRef::Graph(GraphRef::Main), TabRef::Config]
+            vec![TabRef::Graph(GraphRef::Main), TabRef::Preferences]
         );
         assert_eq!(doc.active, 1);
     }
 
     #[test]
-    fn config_tab_round_trips_in_every_format() {
+    fn preferences_tab_round_trips_in_every_format() {
         let mut doc: Document = core_test_graph().into();
-        doc.tabs.push(TabRef::Config);
+        doc.tabs.push(TabRef::Preferences);
         for format in SerdeFormat::all_formats_for_testing() {
-            let bytes = doc.serialize(format).expect("serialize with a config tab");
+            let bytes = doc
+                .serialize(format)
+                .expect("serialize with a preferences tab");
             let back = Document::deserialize(format, &bytes).expect("deserialize");
             assert_eq!(
                 back.tabs, doc.tabs,
-                "tabs (including Config) round-trip for {format:?}"
+                "tabs (including Preferences) round-trip for {format:?}"
             );
         }
     }

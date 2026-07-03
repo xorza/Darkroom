@@ -891,7 +891,7 @@ mod tests {
 
     /// The whole bundle — darkroom's own fields *and* the nested
     /// palantir palette — must survive a TOML round-trip; that's the
-    /// on-disk format the Theme → Load / Export menu and the config
+    /// on-disk format the Theme → Load / Export menu and the preferences
     /// rely on. Exercises the formerly-fragile case too: the tooltip's
     /// infinite max-size axis (handled by `Size`'s custom serde).
     #[test]
