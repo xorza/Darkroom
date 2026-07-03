@@ -4,8 +4,8 @@ use crate::data::{DataType, StaticValue};
 use crate::execution::cache::Cache;
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
-use crate::func_lambda::FuncLambda;
 use crate::graph::NodeId;
+use crate::node::func_lambda::FuncLambda;
 use crate::prelude::FuncId;
 use common::Span;
 

@@ -429,7 +429,7 @@ fn history_bounded_by_byte_budget() {
 /// `[A]` and outputs `[R]`, plus that `Local` target.
 fn doc_with_def() -> (Document, GraphRef) {
     use scenarium::data::DataType;
-    use scenarium::function::{FuncInput, FuncOutput};
+    use scenarium::node::function::{FuncInput, FuncOutput};
     use scenarium::prelude::SubgraphDef;
 
     let mut doc: Document = test_graph().into();
@@ -539,7 +539,7 @@ fn rename_undo_survives_interface_compaction() {
     use crate::core::document::BoundarySide;
     use crate::core::edit::intent::revert_step;
     use scenarium::data::DataType;
-    use scenarium::function::FuncInput;
+    use scenarium::node::function::FuncInput;
     use scenarium::prelude::SubgraphDef;
 
     let finput = |n: &str| FuncInput::optional(n, DataType::Int);

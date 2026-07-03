@@ -3,9 +3,9 @@ pub mod view_node;
 use anyhow::{Result, bail};
 use common::{KeyIndexVec, SerdeFormat, is_debug};
 use glam::Vec2;
+use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::graph::{Node, NodeKind};
 use scenarium::prelude::{Graph as CoreGraph, Library, NodeId, SubgraphDef, SubgraphId};
-use scenarium::subgraph::SubgraphRef;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 

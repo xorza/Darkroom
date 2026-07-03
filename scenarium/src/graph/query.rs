@@ -6,8 +6,8 @@ use hashbrown::HashSet;
 
 use super::*;
 use crate::data::{DataType, StaticValue};
-use crate::function::{FuncInput, FuncOutput, OutputType};
 use crate::library::Library;
+use crate::node::function::{FuncInput, FuncOutput, OutputType};
 
 impl Graph {
     /// The declared type of input `port`, or `None` when it can't be resolved —
@@ -39,7 +39,7 @@ impl Graph {
 
     /// The effective type produced at output `port`, following *wildcard*
     /// outputs up the graph: a wildcard output (e.g. a `CachePassthrough` /
-    /// reroute — see [`OutputType::Wildcard`](crate::function::OutputType))
+    /// reroute — see [`OutputType::Wildcard`](crate::node::function::OutputType))
     /// reports the resolved type of whatever feeds the input it mirrors, so a
     /// value's type survives the hop: a `Bind` follows the producer up, while a
     /// `Const` takes the mirrored input's declared type (which carries the full

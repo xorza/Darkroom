@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::elements::cache_passthrough::cache_passthrough_func;
-use crate::function::Func;
+use crate::node::function::Func;
 
 /// A built-in node identified by *kind*, not by a `FuncId`. Its ports + lambda
 /// come from [`func`](SpecialNode::func) (which ignores any per-instance config

@@ -58,7 +58,7 @@ pub(crate) struct ExecutionPlan {
     pub(crate) verdicts: NodeColumn<NodeVerdict>,
     /// Per-output consumer counts, indexed by output-pool index. `> 0` ⇒ the output
     /// is `Needed` this run; `0` ⇒ `Skip`. The executor passes the count through to
-    /// each lambda as [`OutputUsage`](crate::func_lambda::OutputUsage) so a node can
+    /// each lambda as [`OutputUsage`](crate::node::func_lambda::OutputUsage) so a node can
     /// skip computing outputs nobody reads.
     pub(crate) output_usage: Vec<u32>,
     /// The nodes the backward walk started from — terminals, event subscribers, and

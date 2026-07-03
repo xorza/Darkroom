@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::CustomValueCodec;
 use crate::data::{DataType, EnumVariants, TypeId};
-use crate::function::{Func, FuncId};
-use crate::subgraph::{SubgraphDef, SubgraphId};
+use crate::graph::subgraph::{SubgraphDef, SubgraphId};
+use crate::node::function::{Func, FuncId};
 use common::KeyIndexVec;
 use common::{SerdeFormat, deserialize, serialize};
 
@@ -231,7 +231,7 @@ where
 mod tests {
     use super::Library;
     use crate::data::{DynamicValue, StaticValue};
-    use crate::func_lambda::{InvokeInput, OutputUsage};
+    use crate::node::func_lambda::{InvokeInput, OutputUsage};
     use crate::prelude::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::testing::{TestFuncHooks, test_func_lib};

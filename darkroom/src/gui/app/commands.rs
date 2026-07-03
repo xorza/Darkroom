@@ -11,10 +11,10 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use palantir::Ui;
 use scenarium::data::{FsPathConfig, FsPathMode, StaticValue};
+use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::graph::{Binding, NodeKind};
 use scenarium::library::Library;
 use scenarium::prelude::{NodeId, SubgraphDef, SubgraphId};
-use scenarium::subgraph::SubgraphRef;
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::Intent;

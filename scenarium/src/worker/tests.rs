@@ -6,11 +6,11 @@ use tokio::time::{Duration, timeout};
 
 use crate::elements::basic_library::basic_library;
 use crate::elements::worker_events_library::worker_events_library;
-use crate::event_lambda::EventLambda;
 use crate::execution::stats::{ExecutionStats, RunPhase};
 use crate::execution::{Error, Result as ExecResult};
 use crate::graph::{Graph, InputPort, Node, NodeId, NodeKind};
 use crate::library::Library;
+use crate::node::event_lambda::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 use crate::worker::{

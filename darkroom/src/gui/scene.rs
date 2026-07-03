@@ -5,7 +5,7 @@ use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
 use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
-use scenarium::function::{FuncInput, FuncOutput, OutputType, ValueVariant};
+use scenarium::node::function::{FuncInput, FuncOutput, OutputType, ValueVariant};
 use scenarium::prelude::{
     Binding, CachePersistence, Graph, Library, NodeId, NodeKind, OutputPort, SubgraphDef,
     SubgraphRef, Subscription,

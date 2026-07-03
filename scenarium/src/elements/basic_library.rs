@@ -4,9 +4,9 @@ use strum_macros::{Display, EnumIter};
 
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::func_lambda::InvokeInput;
-use crate::function::{Func, FuncInput, ValueVariant};
 use crate::library::Library;
+use crate::node::func_lambda::InvokeInput;
+use crate::node::function::{Func, FuncInput, ValueVariant};
 
 #[repr(u32)]
 #[derive(Debug, Display, EnumIter, Copy, Clone)]

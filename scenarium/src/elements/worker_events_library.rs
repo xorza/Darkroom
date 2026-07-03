@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 
 use crate::data::DataType;
-use crate::event_lambda::EventLambda;
-use crate::func_lambda::FuncLambda;
-use crate::function::{Func, FuncInput};
 use crate::library::Library;
+use crate::node::event_lambda::EventLambda;
+use crate::node::func_lambda::FuncLambda;
+use crate::node::function::{Func, FuncInput};
 use crate::prelude::FuncId;
 use common::FloatExt;
 use common::Slot;

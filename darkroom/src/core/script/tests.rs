@@ -27,7 +27,7 @@ fn expect_apply(rx: &mut mpsc::UnboundedReceiver<ScriptMessage>) -> Vec<Intent> 
 
 #[test]
 fn list_funcs_returns_full_func_objects_in_insertion_order() {
-    use scenarium::function::{Func, FuncId};
+    use scenarium::node::function::{Func, FuncId};
 
     let mut lib = Library::default();
     lib.add(Func::new(FuncId::unique(), "alpha").category("math"));
@@ -112,7 +112,7 @@ fn create_node_unknown_id_returns_rhai_error_and_no_action() {
 
 #[test]
 fn create_node_known_id_enqueues_add_node() {
-    use scenarium::function::{Func, FuncId};
+    use scenarium::node::function::{Func, FuncId};
 
     let alpha_id = FuncId::unique();
     let mut lib = Library::default();

@@ -15,7 +15,7 @@ use crate::execution::program::{ExecutionBinding, ExecutionInput};
 pub(crate) const CACHE_PATH_INPUT: usize = 1;
 
 /// The `Const` `FsPath` at `node_inputs`'s [`CACHE_PATH_INPUT`] — for a
-/// [`CachePassthrough`](crate::special::SpecialNode) node, its cache key and
+/// [`CachePassthrough`](crate::node::special::SpecialNode) node, its cache key and
 /// load/store location. The single resolver, shared with the output cache, so the
 /// path-keyed digest and the load/store can't disagree on the key. `node_inputs` is
 /// the node's slice of the program input pool. `None` for a non-const / empty path.

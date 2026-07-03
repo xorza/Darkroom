@@ -22,8 +22,8 @@ use palantir::{
     Button, Checkbox, ComboBox, Configure, Sizing, Spacing, TextEdit, TextWrap, Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
-use scenarium::function::ValueVariant;
 use scenarium::library::Library;
+use scenarium::node::function::ValueVariant;
 
 use crate::gui::theme::StaticValueEditorTheme;
 

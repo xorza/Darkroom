@@ -3,8 +3,8 @@ use std::sync::Arc;
 use super::*;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::function::FuncBehavior;
 use crate::graph::{Binding, CachePersistence, InputPort, Node};
+use crate::node::function::FuncBehavior;
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::{FloatExt, SerdeFormat};
 use tokio::sync::Mutex;
@@ -813,8 +813,8 @@ mod cache_persistence {
 
         use crate::async_lambda;
         use crate::execution::output_cache::OutputCache;
-        use crate::function::{Func, FuncInput};
         use crate::library::Library;
+        use crate::node::function::{Func, FuncInput};
 
         const PRODUCE: &str = "63b7a83c-d7fc-46f4-805a-4bf2695e3763";
         const CONSUME: &str = "39bbd6b3-b919-4095-b3d0-79a4515de75e";
@@ -1005,8 +1005,8 @@ mod cache_persistence {
         use crate::async_lambda;
         use crate::data::CustomValueCodec;
         use crate::data::{CustomValue, TypeId};
-        use crate::function::Func;
         use crate::library::{Library, TypeEntry};
+        use crate::node::function::Func;
         use crate::runtime::context::ContextManager;
 
         type CodecError = Box<dyn std::error::Error + Send + Sync>;
@@ -1158,7 +1158,7 @@ mod cache_persistence {
 mod file_cache {
     use super::*;
     use crate::graph::NodeKind;
-    use crate::special::SpecialNode;
+    use crate::node::special::SpecialNode;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -2024,9 +2024,9 @@ mod behavior {
 
         use crate::async_lambda;
         use crate::execution::stats::NodeError;
-        use crate::function::Func;
         use crate::graph::{Graph, NodeId};
         use crate::library::Library;
+        use crate::node::function::Func;
 
         // Trips the cancel on its first invoke only, so the re-run completes.
         let cancel_first = Arc::new(AtomicBool::new(true));
@@ -2118,10 +2118,10 @@ mod behavior {
     async fn lambda_cancelled_error_maps_to_error_cancelled() -> anyhow::Result<()> {
         use crate::async_lambda;
         use crate::execution::stats::NodeError;
-        use crate::func_lambda::InvokeError;
-        use crate::function::Func;
         use crate::graph::{Graph, NodeId};
         use crate::library::Library;
+        use crate::node::func_lambda::InvokeError;
+        use crate::node::function::Func;
 
         let library: Library = [
             Func::new("8003e30b-0417-474d-a77f-1d3ea71ac6b3", "always_cancel")
@@ -2225,9 +2225,9 @@ mod behavior {
 
 mod composite_behavior {
     use super::*;
-    use crate::function::FuncOutput;
     use crate::graph::NodeKind;
-    use crate::subgraph::{SubgraphDef, SubgraphRef};
+    use crate::graph::subgraph::{SubgraphDef, SubgraphRef};
+    use crate::node::function::FuncOutput;
 
     fn func_node(library: &Library, func_name: &str, node_name: &str) -> Node {
         let id = library.by_name(func_name).unwrap().id;
@@ -2589,9 +2589,9 @@ mod execution {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         use crate::async_lambda;
-        use crate::function::Func;
         use crate::graph::Graph;
         use crate::library::Library;
+        use crate::node::function::Func;
 
         let invocations = Arc::new(AtomicUsize::new(0));
         let library: Library = [Func::new(
@@ -2969,9 +2969,9 @@ mod stats {
 mod events {
     use super::*;
     use crate::async_lambda;
-    use crate::event_lambda::EventLambda;
     use crate::execution::event::EventRef;
-    use crate::function::{Func, FuncInput};
+    use crate::node::event_lambda::EventLambda;
+    use crate::node::function::{Func, FuncInput};
 
     const EMIT_FUNC: FuncId = FuncId::from_u128(0xE311);
     const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);
@@ -3141,11 +3141,9 @@ mod events {
 
 mod output_usage {
     use super::*;
-    use crate::func_lambda::OutputUsage;
-    use crate::{
-        async_lambda,
-        function::{Func, FuncInput},
-    };
+    use crate::async_lambda;
+    use crate::node::func_lambda::OutputUsage;
+    use crate::node::function::{Func, FuncInput};
 
     const SPLIT_FUNC: FuncId = FuncId::from_u128(0x5911);
     const SINK_FUNC: FuncId = FuncId::from_u128(0x5922);
@@ -3480,10 +3478,10 @@ mod previews {
 
 mod subgraph {
     use super::*;
-    use crate::event_lambda::EventLambda;
-    use crate::function::{Func, FuncId, FuncInput, FuncOutput};
     use crate::graph::NodeKind;
-    use crate::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
+    use crate::graph::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
+    use crate::node::event_lambda::EventLambda;
+    use crate::node::function::{Func, FuncId, FuncInput, FuncOutput};
     use std::sync::Mutex as StdMutex;
 
     fn fnode(library: &Library, name: &str) -> Node {

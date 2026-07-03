@@ -31,8 +31,8 @@ use crate::data::{DataType, StaticValue};
 use crate::execution::cache::Cache;
 use crate::execution::cache_node::file_cache_digest;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
-use crate::function::FuncBehavior;
-use crate::special::SpecialNode;
+use crate::node::function::FuncBehavior;
+use crate::node::special::SpecialNode;
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.

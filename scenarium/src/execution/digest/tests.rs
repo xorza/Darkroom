@@ -1,8 +1,8 @@
 use super::*;
 use crate::data::StaticValue;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
-use crate::function::FuncId;
 use crate::graph::NodeId;
+use crate::node::function::FuncId;
 use common::Span;
 
 /// A folder-input node stays `Pure` and cacheable, but its digest tracks the

@@ -1,8 +1,8 @@
 use crate::runtime::context::ContextType;
 
 use crate::data::*;
-use crate::event_lambda::EventLambda;
-use crate::func_lambda::FuncLambda;
+use crate::node::event_lambda::EventLambda;
+use crate::node::func_lambda::FuncLambda;
 use common::KeyIndexKey;
 use common::id_type;
 use serde::{Deserialize, Serialize};
@@ -284,7 +284,7 @@ impl Func {
 
 #[cfg(test)]
 mod tests {
-    use crate::function::Func;
+    use crate::node::function::Func;
     use common::{SerdeFormat, deserialize};
 
     #[test]

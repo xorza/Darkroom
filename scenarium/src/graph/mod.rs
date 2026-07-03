@@ -4,10 +4,10 @@ use common::{KeyIndexKey, KeyIndexVec};
 use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
-use crate::function::{Func, FuncId};
+use crate::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use crate::library::Library;
-use crate::special::SpecialNode;
-use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
+use crate::node::function::{Func, FuncId};
+use crate::node::special::SpecialNode;
 use anyhow::ensure;
 use common::id_type;
 use common::{Result, SerdeFormat, deserialize, serialize};
@@ -16,6 +16,7 @@ use hashbrown::HashSet;
 id_type!(NodeId);
 
 mod query;
+pub mod subgraph;
 #[cfg(test)]
 mod tests;
 mod validate;

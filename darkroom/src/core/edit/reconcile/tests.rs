@@ -278,7 +278,7 @@ fn passthrough_ports_are_null_typed() {
 
 #[test]
 fn passthrough_in_subgraph_exposes_the_resolved_output_type() {
-    use scenarium::special::SpecialNode;
+    use scenarium::node::special::SpecialNode;
 
     // Interior: SubgraphInput → sum → CachePassthrough → SubgraphOutput. The
     // passthrough's output statically declares the wildcard `Null`, but the

@@ -1,4 +1,4 @@
-//! The [`CachePassthrough`](crate::special::SpecialNode::CachePassthrough) special
+//! The [`CachePassthrough`](crate::node::special::SpecialNode::CachePassthrough) special
 //! node: a passthrough that caches `output[0]` to the file named by the `Const`
 //! `FsPath` in `input[1]`. When that file exists, the value is loaded from it and
 //! `input[0]`'s upstream is pruned (not computed). The engine does the path-keyed
@@ -8,7 +8,7 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::data::{DataType, FsPathConfig, FsPathMode, StaticValue};
-use crate::function::{Func, FuncInput};
+use crate::node::function::{Func, FuncInput};
 
 /// Stable `FuncId` standing in for the cache node in the flattened program (digest
 /// memo / stats attribution). Not registered in any `Library`.
@@ -67,7 +67,7 @@ fn build_func() -> Func {
 mod tests {
     use super::*;
     use crate::execution::cache_node::CACHE_PATH_INPUT;
-    use crate::special::SpecialNode;
+    use crate::node::special::SpecialNode;
 
     #[test]
     fn path_input_is_const_only_with_empty_default() {

@@ -8,10 +8,10 @@ use tokio::sync::Notify;
 use tokio::time::timeout;
 
 use crate::data::{DataType, FsPathConfig, FsPathMode, StaticValue};
-use crate::event_lambda::EventLambda;
-use crate::func_lambda::FuncLambda;
-use crate::function::{Func, FuncInput};
 use crate::library::Library;
+use crate::node::event_lambda::EventLambda;
+use crate::node::func_lambda::FuncLambda;
+use crate::node::function::{Func, FuncInput};
 use crate::prelude::FuncId;
 
 pub const WATCH_DIRECTORY_FUNC_ID: FuncId = FuncId::from_u128(0x1318c24c2ac74a9aa454281bdbdc4ffc);
@@ -180,8 +180,8 @@ pub fn fs_watch_library() -> Library {
 mod tests {
     use super::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
     use crate::data::{DynamicValue, StaticValue};
-    use crate::func_lambda::{FuncLambda, InvokeInput, OutputUsage};
-    use crate::function::FuncBehavior;
+    use crate::node::func_lambda::{FuncLambda, InvokeInput, OutputUsage};
+    use crate::node::function::FuncBehavior;
     use crate::prelude::{AnyState, SharedAnyState};
     use crate::runtime::context::ContextManager;
     use std::sync::Arc;

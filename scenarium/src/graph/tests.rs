@@ -1,10 +1,10 @@
 use crate::data::DataType;
-use crate::function::{Func, FuncId, FuncInput};
+use crate::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use crate::graph::{
     Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort, Subscription,
     closes_data_cycle,
 };
-use crate::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
+use crate::node::function::{Func, FuncId, FuncInput};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::SerdeFormat;
 
@@ -71,8 +71,8 @@ fn check_rejects_dangling_binding() {
 
 #[test]
 fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
-    use crate::function::FuncId;
     use crate::library::Library;
+    use crate::node::function::FuncId;
 
     // One Int-in / Int-out func, so a wire between two instances is otherwise
     // valid — only the `const_only` flag decides whether check accepts it.
@@ -107,7 +107,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
     use crate::data::{DataType, StaticValue};
     use crate::library::Library;
-    use crate::special::SpecialNode;
+    use crate::node::special::SpecialNode;
 
     // Int and String never coerce (numerics coerce among themselves, but a
     // string is a distinct kind), so this pair exercises a real rejection.
@@ -200,7 +200,7 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
 fn resolve_output_type_follows_passthrough_chain() {
     use crate::data::{DataType, StaticValue};
     use crate::library::Library;
-    use crate::special::SpecialNode;
+    use crate::node::special::SpecialNode;
 
     // Int-out producer → pass1 → pass2. Both passthroughs declare a `Null`
     // (wildcard) output, but the resolved type must be the producer's `Int`.
@@ -324,7 +324,7 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
 fn edges_invalidated_by_follows_wildcard_chains() {
     use crate::data::DataType;
     use crate::library::Library;
-    use crate::special::SpecialNode;
+    use crate::node::special::SpecialNode;
 
     let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
     let str_src = Func::new(FuncId::unique(), "ssrc").output("o", DataType::String);
@@ -414,7 +414,7 @@ fn would_create_cycle_detects_direct_and_transitive_loops() {
 fn resolve_output_type_breaks_a_binding_cycle() {
     use crate::data::DataType;
     use crate::library::Library;
-    use crate::special::SpecialNode;
+    use crate::node::special::SpecialNode;
 
     // A passthrough whose value input binds to its own output — a cycle the
     // editor can momentarily hold. Resolution must terminate as `Null`.
@@ -752,8 +752,8 @@ fn resolve_def_picks_local_or_linked_source() {
 
 #[test]
 fn prune_subscriptions_drops_out_of_range_and_missing_emitter() {
-    use crate::event_lambda::EventLambda;
     use crate::library::Library;
+    use crate::node::event_lambda::EventLambda;
 
     // A func exposing exactly one event: idx 0 is valid, idx 1+ are not.
     let func_id = FuncId::from_u128(0xe0e0);

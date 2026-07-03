@@ -10,12 +10,12 @@ use common::{KeyIndexKey, KeyIndexVec, Span};
 use serde::{Deserialize, Serialize};
 
 use crate::data::{DataType, StaticValue};
-use crate::event_lambda::EventLambda;
-use crate::function::{Func, FuncBehavior, OutputType};
 use crate::graph::NodeId;
 use crate::library::Library;
+use crate::node::event_lambda::EventLambda;
+use crate::node::function::{Func, FuncBehavior, OutputType};
+use crate::node::special::SpecialNode;
 use crate::prelude::{FuncId, FuncLambda};
-use crate::special::SpecialNode;
 
 /// A position into the flat node table — `e_nodes`, the cache's `slots`, and the
 /// per-node plan/cache columns are all indexed by it. Resolved at flatten and stable
@@ -134,7 +134,7 @@ pub(crate) struct ExecutionNode {
 
     pub func_id: FuncId,
 
-    /// Copied from [`Func::version`](crate::function::Func::version) at flatten
+    /// Copied from [`Func::version`](crate::node::function::Func::version) at flatten
     /// time so the content digest is self-contained in the program. Bumping a
     /// func's version flows here and invalidates its disk-cached outputs.
     #[serde(default)]

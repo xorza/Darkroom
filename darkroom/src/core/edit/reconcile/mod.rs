@@ -20,8 +20,8 @@
 use std::collections::HashMap;
 
 use scenarium::data::DataType;
-use scenarium::function::{FuncInput, FuncOutput};
 use scenarium::graph::{Binding, Graph, InputPort, NodeKind};
+use scenarium::node::function::{FuncInput, FuncOutput};
 use scenarium::prelude::{Library, NodeId, SubgraphDef, SubgraphId};
 
 use crate::core::document::{Document, GraphRef};

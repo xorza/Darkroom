@@ -11,9 +11,9 @@ use crate::image::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 use crate::image::{IMAGE_DATA_TYPE, IMAGE_TYPE_ID, Image};
 use imaginarium::{Blend, BlendMode, ContrastBrightness, SUPPORTED_EXTENSIONS, Transform, Vec2};
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
-use scenarium::func_lambda::FuncLambda;
-use scenarium::function::{Func, FuncInput};
 use scenarium::library::{Library, TypeEntry};
+use scenarium::node::func_lambda::FuncLambda;
+use scenarium::node::function::{Func, FuncInput};
 
 /// The imaginarium image-processing nodes (category `image`).
 pub fn image_library() -> Library {

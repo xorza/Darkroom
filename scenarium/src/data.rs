@@ -460,7 +460,7 @@ impl DataType {
     /// wired bindings at the compile boundary, so it must permit exactly what
     /// the engine can execute:
     /// - `Null` is the wildcard — a polymorphic passthrough / reroute port (see
-    ///   [`OutputType::Wildcard`](crate::function::OutputType)) — and matches
+    ///   [`OutputType::Wildcard`](crate::node::function::OutputType)) — and matches
     ///   anything on either side.
     /// - the scalar numerics (`Float`/`Int`/`Bool`) coerce among themselves at
     ///   runtime (`DynamicValue::as_f64`/`as_i64`/`as_bool` all accept the three),

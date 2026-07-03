@@ -7,7 +7,7 @@
 //! - **content-addressed** — a `persist` node's outputs at `<disk_root>/<hex(digest)>`,
 //!   keyed by its content digest. Reproducible: any upstream change re-keys it (so
 //!   it's auto-invalidated), and identical computations dedup across nodes/machines.
-//! - **explicit-path** — a [`CachePassthrough`](crate::special::SpecialNode) node's
+//! - **explicit-path** — a [`CachePassthrough`](crate::node::special::SpecialNode) node's
 //!   outputs at the `Const` `FsPath` in `input[1]`. The path *is* the key; the user
 //!   manages invalidation (delete the file, or the `bypass` toggle). See
 //!   `README.md` Part C.
@@ -43,8 +43,8 @@ use crate::execution::cache_node::cache_node_path;
 use crate::execution::digest::{Digest, node_digest};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::library::Library;
+use crate::node::special::SpecialNode;
 use crate::runtime::context::ContextManager;
-use crate::special::SpecialNode;
 
 /// Where a node's outputs cache, and how a present blob is treated on store.
 #[derive(Debug)]

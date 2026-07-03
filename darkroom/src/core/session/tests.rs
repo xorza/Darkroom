@@ -119,9 +119,9 @@ fn apply_intents_batches_multiple() {
 #[test]
 fn apply_intents_severs_incompatible_passthrough_output_edges() {
     use scenarium::data::DataType;
-    use scenarium::function::{Func, FuncInput};
     use scenarium::library::Library;
-    use scenarium::special::SpecialNode;
+    use scenarium::node::function::{Func, FuncInput};
+    use scenarium::node::special::SpecialNode;
 
     // Float producer → cache passthrough → Float sink, all headless.
     let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
@@ -175,9 +175,9 @@ fn apply_intents_severs_incompatible_passthrough_output_edges() {
 #[test]
 fn apply_intents_severs_through_a_passthrough_chain() {
     use scenarium::data::DataType;
-    use scenarium::function::{Func, FuncInput};
     use scenarium::library::Library;
-    use scenarium::special::SpecialNode;
+    use scenarium::node::function::{Func, FuncInput};
+    use scenarium::node::special::SpecialNode;
 
     // Float producer → pass1 → pass2 → Float sink: a valid two-passthrough chain.
     let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);

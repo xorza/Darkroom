@@ -23,11 +23,11 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
 };
 use crate::execution::stats::FlattenMap;
-use crate::function::Func;
+use crate::graph::subgraph::SubgraphId;
 use crate::graph::{Binding, CachePersistence, Graph, InputPort, NodeId, NodeKind, Subscription};
 use crate::library::Library;
-use crate::special::SpecialNode;
-use crate::subgraph::SubgraphId;
+use crate::node::function::Func;
+use crate::node::special::SpecialNode;
 
 /// Hard cap on nesting depth — a release backstop for the output-resolution
 /// walk (which follows composite edges and isn't covered by the emit-descent

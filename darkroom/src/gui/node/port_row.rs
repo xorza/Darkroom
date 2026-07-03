@@ -12,9 +12,9 @@ use palantir::{
     Shape, Sizing, Spacing, Stroke, Text, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use scenarium::data::{DataType, FsPathMode, StaticValue};
-use scenarium::function::ValueVariant;
 use scenarium::graph::Binding;
 use scenarium::library::Library;
+use scenarium::node::function::ValueVariant;
 use scenarium::prelude::NodeId;
 
 use crate::core::document::BoundarySide;

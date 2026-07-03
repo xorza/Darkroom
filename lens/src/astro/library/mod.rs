@@ -21,9 +21,9 @@ use lumos::{
 use scenarium::data::{
     DataType, DynamicValue, EnumVariants, FsPathConfig, FsPathMode, StaticValue,
 };
-use scenarium::func_lambda::{FuncLambda, InvokeError, InvokeResult};
-use scenarium::function::{Func, FuncInput, ValueVariant};
 use scenarium::library::{Library, TypeEntry};
+use scenarium::node::func_lambda::{FuncLambda, InvokeError, InvokeResult};
+use scenarium::node::function::{Func, FuncInput, ValueVariant};
 
 use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,

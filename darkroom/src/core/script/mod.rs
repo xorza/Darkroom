@@ -30,8 +30,8 @@ use std::time::Instant;
 
 use glam::Vec2;
 use rhai::{Array, Dynamic, Engine};
-use scenarium::function::FuncId;
 use scenarium::graph::{Node, NodeId};
+use scenarium::node::function::FuncId;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::view_node::ViewNode;

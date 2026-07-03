@@ -24,8 +24,8 @@ use crate::data::DynamicValue;
 use crate::execution::stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
-use crate::func_lambda::{InvokeError, InvokeInput, OutputUsage};
 use crate::graph::InputPort;
+use crate::node::func_lambda::{InvokeError, InvokeInput, OutputUsage};
 use crate::prelude::FuncId;
 use crate::runtime::context::ContextManager;
 

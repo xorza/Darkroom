@@ -1,7 +1,7 @@
 //! Registration tests for the astro library.
 
 use scenarium::data::StaticValue;
-use scenarium::function::FuncBehavior;
+use scenarium::node::function::FuncBehavior;
 
 use super::*;
 

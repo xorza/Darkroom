@@ -19,9 +19,9 @@ use std::sync::LazyLock;
 
 use common::{FieldKind, FieldValue, Introspect};
 use scenarium::data::{CustomValue, DataType, DynamicValue, EnumVariants, StaticValue, TypeId};
-use scenarium::func_lambda::FuncLambda;
-use scenarium::function::{Func, FuncInput};
 use scenarium::library::{Library, TypeEntry};
+use scenarium::node::func_lambda::FuncLambda;
+use scenarium::node::function::{Func, FuncInput};
 
 /// A config type that can back a config-builder node: introspectable, plus a
 /// stable identity for the value it travels on.

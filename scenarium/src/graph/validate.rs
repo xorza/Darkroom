@@ -9,9 +9,9 @@ use hashbrown::HashSet;
 
 use super::*;
 use crate::data::{DataType, StaticValue};
-use crate::function::FuncInput;
+use crate::graph::subgraph::{SubgraphDef, SubgraphId};
 use crate::library::Library;
-use crate::subgraph::{SubgraphDef, SubgraphId};
+use crate::node::function::FuncInput;
 
 impl Graph {
     /// Debug-only internal-invariant gate (compiled out in release, so the

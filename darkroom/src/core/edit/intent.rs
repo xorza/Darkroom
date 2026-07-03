@@ -30,12 +30,12 @@
 use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
+use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::graph::{
     Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, Subscription,
 };
 use scenarium::library::Library;
 use scenarium::prelude::{SubgraphDef, SubgraphId};
-use scenarium::subgraph::SubgraphRef;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::view_node::ViewNode;

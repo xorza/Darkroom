@@ -579,10 +579,10 @@ mod tests {
     #[test]
     fn undo_of_a_passthrough_rewire_restores_the_severed_edge() {
         use scenarium::data::DataType;
-        use scenarium::function::{Func, FuncId, FuncInput};
         use scenarium::graph::{Binding, Graph, InputPort, Node, NodeKind};
         use scenarium::library::Library;
-        use scenarium::special::SpecialNode;
+        use scenarium::node::function::{Func, FuncId, FuncInput};
+        use scenarium::node::special::SpecialNode;
 
         let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
         let string_src = Func::new(FuncId::unique(), "ssrc").output("o", DataType::String);
