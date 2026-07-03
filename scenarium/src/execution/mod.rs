@@ -34,7 +34,7 @@ pub(crate) mod blob;
 pub(crate) mod cache;
 pub(crate) mod cache_node;
 pub(crate) mod codec;
-pub mod digest;
+pub(crate) mod digest;
 pub mod event;
 pub(crate) mod executor;
 mod flatten;
@@ -163,7 +163,7 @@ pub struct ArgumentValues {
 /// are independent and combine: a run can target terminal nodes, the event loop's
 /// triggerable events, and/or a set of injected events, all at once.
 #[derive(Debug, Default, Clone)]
-pub struct RunSeeds {
+pub(crate) struct RunSeeds {
     /// Include all terminal nodes — the ordinary "produce the outputs" trigger.
     pub terminals: bool,
     /// Include every node owning a subscribed event — drives the event loop.
@@ -181,7 +181,7 @@ pub struct RunSeeds {
 /// the `output_cache` (file persistence). Not serializable — the persistent form
 /// is the [`ExecutionProgram`] alone.
 #[derive(Debug, Default)]
-pub struct ExecutionEngine {
+pub(crate) struct ExecutionEngine {
     pub(crate) program: ExecutionProgram,
     /// Reusable subgraph-flattening scratch (kept across compiles).
     flattener: Flattener,
@@ -211,13 +211,13 @@ pub struct ExecutionEngine {
 impl ExecutionEngine {
     // === Accessors ===
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.program.e_nodes.is_empty()
     }
 
     // === State Management ===
 
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.program.clear();
         self.plan.clear();
         self.cache.clear();
@@ -231,13 +231,13 @@ impl ExecutionEngine {
     /// files on a hit (skipping recompute), and freshly-computed ones are stored
     /// after a run. The RAM cache is keyed by node id + digest, independent of the
     /// root, so swapping keeps any warm in-memory outputs.
-    pub fn set_output_cache(&mut self, cache: OutputCache) {
+    pub(crate) fn set_output_cache(&mut self, cache: OutputCache) {
         self.output_cache = cache;
     }
 
     // === Phase 1: compile ===
 
-    pub fn update(&mut self, graph: &Graph, library: &Library) -> Result<()> {
+    pub(crate) fn update(&mut self, graph: &Graph, library: &Library) -> Result<()> {
         // Validate the graph against the library before touching any state.
         // The graph+library pair is untrusted input here (a document can be
         // stale against an evolved library — a dropped func, a shrunk port
@@ -290,7 +290,7 @@ impl ExecutionEngine {
     /// each node's lambda runs, for live per-node feedback ahead of the final
     /// stats. When `cancel` is `Some` and gets set mid-run, scheduling stops
     /// after the in-flight node and the returned stats are marked `cancelled`.
-    pub async fn execute(
+    pub(crate) async fn execute(
         &mut self,
         seeds: RunSeeds,
         progress: Option<&UnboundedSender<RunProgress>>,
@@ -358,7 +358,7 @@ impl ExecutionEngine {
     /// Explicit-path (`CachePassthrough`) nodes are deliberately excluded here — their
     /// file is (re)written by their own execution, so flushing them would overwrite an
     /// identical file. Also a no-op for a node with no resident value.
-    pub async fn store_resident_caches(&mut self) {
+    pub(crate) async fn store_resident_caches(&mut self) {
         for idx in self.program.node_indices() {
             if !self.program.e_nodes[idx].persist {
                 continue;

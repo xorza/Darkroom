@@ -135,14 +135,14 @@ mod binding_map_serde {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::collections::BTreeMap;
 
-    pub fn serialize<S: Serializer>(
+    pub(crate) fn serialize<S: Serializer>(
         map: &BTreeMap<InputPort, Binding>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         map.iter().collect::<Vec<_>>().serialize(serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<BTreeMap<InputPort, Binding>, D::Error> {
         Ok(Vec::<(InputPort, Binding)>::deserialize(deserializer)?
@@ -265,9 +265,9 @@ pub struct Graph {
 /// A graph cloned with fresh node ids, plus the old→new id map (so
 /// callers can remap ids the graph doesn't own, e.g. a subgraph def's
 /// exposed-event emitters). Result of [`Graph::with_fresh_node_ids`].
-pub struct FreshGraph {
-    pub graph: Graph,
-    pub id_map: HashMap<NodeId, NodeId>,
+pub(crate) struct FreshGraph {
+    pub(crate) graph: Graph,
+    pub(crate) id_map: HashMap<NodeId, NodeId>,
 }
 
 impl Graph {
@@ -348,7 +348,7 @@ impl Graph {
     /// graph's table. Returns the clone plus the old→new id map (callers
     /// like subgraph localization need it to remap exposed-event
     /// emitters). Used to make an independent copy of a subgraph interior.
-    pub fn with_fresh_node_ids(&self) -> FreshGraph {
+    pub(crate) fn with_fresh_node_ids(&self) -> FreshGraph {
         let mut id_map = HashMap::with_capacity(self.nodes.len());
         let mut nodes = KeyIndexVec::with_capacity(self.nodes.len());
         for node in self.nodes.iter() {

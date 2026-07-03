@@ -14,7 +14,8 @@ use crate::node::func_lambda::FuncLambda;
 use crate::node::function::FuncId;
 use crate::node::function::{Func, FuncInput};
 
-pub const WATCH_DIRECTORY_FUNC_ID: FuncId = FuncId::from_u128(0x1318c24c2ac74a9aa454281bdbdc4ffc);
+pub(crate) const WATCH_DIRECTORY_FUNC_ID: FuncId =
+    FuncId::from_u128(0x1318c24c2ac74a9aa454281bdbdc4ffc);
 
 /// Per-node state shared between the func lambda (which builds the OS watcher)
 /// and the `changed` event lambda (which awaits the next notification).

@@ -21,7 +21,11 @@ fn dir_fingerprint_tracks_entry_changes() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.to_string_lossy().into_owned();
 
-    let fingerprint = Digest::fs_path;
+    let fingerprint = |p: &str| {
+        let mut hasher = DigestHasher::new();
+        hash_fs_path_identity(&mut hasher, p);
+        hasher.finish()
+    };
 
     std::fs::write(dir.join("a.fits"), b"one").unwrap();
     let base = fingerprint(&path);
@@ -437,14 +441,18 @@ fn digest_hasher_encodes_deterministically_and_without_collisions() {
         "a bool flip changes the digest"
     );
 
-    // write_digest folds the nested digest's raw 32 bytes — same as write_bytes(as_bytes()).
-    let inner = Digest::hash(b"inner");
+    // write_digest folds the nested digest's raw 32 bytes — same as write_bytes(&inner.0).
+    let inner = {
+        let mut h = DigestHasher::new();
+        h.write_bytes(b"inner");
+        h.finish()
+    };
     assert_eq!(
         hash_with(&|h| {
             h.write_digest(&inner);
         }),
         hash_with(&|h| {
-            h.write_bytes(inner.as_bytes());
+            h.write_bytes(&inner.0);
         }),
         "write_digest folds the digest's raw bytes"
     );

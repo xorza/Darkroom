@@ -43,34 +43,13 @@ const DOMAIN: &[u8] = b"scenarium-cache-v1";
 /// A newtype, not a bare `[u8; 32]`, so an arbitrary byte array can't silently pose
 /// as a digest where one is expected.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Digest(pub(crate) [u8; 32]);
+pub(crate) struct Digest(pub(crate) [u8; 32]);
 
 impl Digest {
-    /// A content digest of arbitrary bytes. The inner bytes stay `pub(crate)`, so a digest
-    /// can only be *made* by hashing, never forged from an arbitrary array.
-    pub fn hash(bytes: &[u8]) -> Digest {
-        Digest(blake3::hash(bytes).into())
-    }
-
     /// Start a [`DigestHasher`] — the fluent builder for combining several values into one
     /// digest (the framework's structural fold, or the file-cache node's path key).
-    pub fn hasher() -> DigestHasher {
+    pub(crate) fn hasher() -> DigestHasher {
         DigestHasher::new()
-    }
-
-    /// Fingerprint an `FsPath`'s external identity — a file's `(len, mtime)` or a
-    /// directory's sorted entries — the *same* content fold the framework's structural
-    /// digest uses for an `FsPath` input ([`hash_fs_path_identity`]).
-    pub fn fs_path(path: &str) -> Digest {
-        let mut hasher = DigestHasher::new();
-        hasher.write_fs_path(path);
-        hasher.finish()
-    }
-
-    /// The raw 32 bytes, for folding this digest into another. Read-only — a `Digest` still
-    /// can't be *forged* from arbitrary bytes, only made by hashing.
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
     }
 }
 
@@ -78,7 +57,7 @@ impl Digest {
 /// a digest is stable across architectures. Implemented for the primitive number types plus
 /// `f32`/`f64` (by bit pattern) and `bool`. `usize`/`isize` are deliberately *not* included
 /// — their width is platform-dependent; cast to a fixed width (`x as u64`) first.
-pub trait DigestPod {
+pub(crate) trait DigestPod {
     fn write_le(self, hasher: &mut DigestHasher);
 }
 
@@ -115,51 +94,44 @@ impl DigestPod for bool {
 /// ([`DigestPod`]), and variable-length data is length-prefixed
 /// ([`write_str`](Self::write_str)) so `"ab"+"c"` can't collide with `"a"+"bc"`.
 #[derive(Clone, Debug)]
-pub struct DigestHasher(Hasher);
+pub(crate) struct DigestHasher(Hasher);
 
 impl DigestHasher {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         DigestHasher(Hasher::new())
     }
 
     /// Fold raw bytes verbatim (no length prefix) — for fixed-size data: a discriminant
     /// tag, a domain separator, an already-fixed-width field.
-    pub fn write_bytes(&mut self, bytes: &[u8]) -> &mut Self {
+    pub(crate) fn write_bytes(&mut self, bytes: &[u8]) -> &mut Self {
         self.0.update(bytes);
         self
     }
 
     /// Fold a fixed-size plain-old-data value ([`DigestPod`]) as its little-endian bytes.
-    pub fn write_pod<T: DigestPod>(&mut self, value: T) -> &mut Self {
+    pub(crate) fn write_pod<T: DigestPod>(&mut self, value: T) -> &mut Self {
         value.write_le(self);
         self
     }
 
     /// Fold a length-prefixed byte string (a `u64` length then the bytes), so
     /// concatenations of variable-length data can't collide.
-    pub fn write_len_prefixed(&mut self, bytes: &[u8]) -> &mut Self {
+    fn write_len_prefixed(&mut self, bytes: &[u8]) -> &mut Self {
         self.write_pod(bytes.len() as u64).write_bytes(bytes)
     }
 
     /// Fold a length-prefixed string.
-    pub fn write_str(&mut self, s: &str) -> &mut Self {
+    pub(crate) fn write_str(&mut self, s: &str) -> &mut Self {
         self.write_len_prefixed(s.as_bytes())
     }
 
     /// Fold another digest (its fixed 32 bytes).
-    pub fn write_digest(&mut self, digest: &Digest) -> &mut Self {
+    pub(crate) fn write_digest(&mut self, digest: &Digest) -> &mut Self {
         self.write_bytes(&digest.0)
     }
 
-    /// Fold an `FsPath`'s external identity — a file's `(len, mtime)` or a directory's
-    /// sorted entries (see [`Digest::fs_path`]).
-    pub fn write_fs_path(&mut self, path: &str) -> &mut Self {
-        hash_fs_path_identity(self, path);
-        self
-    }
-
     /// Finalize into a [`Digest`].
-    pub fn finish(&self) -> Digest {
+    pub(crate) fn finish(&self) -> Digest {
         Digest(self.0.finalize().into())
     }
 }
