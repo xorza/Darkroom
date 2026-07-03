@@ -95,7 +95,7 @@ impl MainWindow {
                             .size((Sizing::FILL, Sizing::FILL))
                             .show(ui, |ui| {
                                 self.graph_ui.frame(ui, ctx, scene, out, &mut command);
-                                if let Some(c) = graph_toolbar::show(ui, ctx) {
+                                if let Some(c) = graph_toolbar::show(ui, ctx, scene, out) {
                                     command = Some(c);
                                 }
                             });

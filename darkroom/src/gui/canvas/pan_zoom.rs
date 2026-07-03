@@ -6,10 +6,11 @@
 
 use common::FloatExt;
 use glam::Vec2;
-use palantir::{PointerButton, Ui};
+use palantir::{PointerButton, Rect, Size, Ui};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
+use crate::gui::node::node_widget_id;
 use crate::gui::scene::Scene;
 
 /// Bounds on the canvas zoom factor. Pinch / scroll-zoom deltas
@@ -125,6 +126,108 @@ fn zoom_about(pan: &mut Vec2, zoom: &mut f32, pivot_local: Vec2, factor: f32) {
 /// spinning up a UI.
 fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
     SCROLL_ZOOM_BASE.powf(-delta_y)
+}
+
+/// Breathing room (logical px) left on every side when fitting content
+/// to the viewport, so framed nodes don't butt against the pane edge.
+const FIT_MARGIN: f32 = 40.0;
+
+/// A one-shot viewport-framing request from the graph toolbar. Each
+/// resolves to an `Intent::SetViewport`, so a reframe rides the same
+/// undo path as a manual pan/zoom (and coalesces with it).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ViewAction {
+    /// Reset to 1:1 zoom, centered on all nodes (world origin when empty).
+    Reset,
+    /// Fit every node in the view.
+    ShowAll,
+    /// Fit the selected nodes; a no-op when nothing is selected.
+    ShowSelected,
+}
+
+/// A resolved viewport (the two fields of `Intent::SetViewport`).
+struct ViewTarget {
+    pan: Vec2,
+    scale: f32,
+}
+
+/// Compute the `SetViewport` intent a [`ViewAction`] implies, or `None`
+/// when there's nothing to frame — `ShowSelected` with an empty
+/// selection, no nodes to fit, or the viewport not yet measured. Reads
+/// last frame's node/canvas geometry via `Ui::response_for`; node world
+/// size comes from the body's pre-transform `layout_rect`, position from
+/// `SceneNode::pos`.
+pub(crate) fn view_action_intent(ui: &Ui, scene: &Scene, action: ViewAction) -> Option<Intent> {
+    let vp = ui.response_for(outer_canvas_widget_id()).layout_rect?.size;
+    let viewport = Vec2::new(vp.w, vp.h);
+    let ViewTarget { pan, scale } = match action {
+        ViewAction::Reset => reset_target(ui, scene, viewport),
+        ViewAction::ShowAll => fit_target(node_bounds(ui, scene, false)?, viewport),
+        ViewAction::ShowSelected => {
+            if scene.selected_nodes.is_empty() {
+                return None;
+            }
+            fit_target(node_bounds(ui, scene, true)?, viewport)
+        }
+    };
+    Some(Intent::SetViewport { pan, scale })
+}
+
+/// 1:1 zoom, centered on all content (world origin when the graph is empty).
+fn reset_target(ui: &Ui, scene: &Scene, viewport: Vec2) -> ViewTarget {
+    let pan = match node_bounds(ui, scene, false) {
+        Some(b) => viewport * 0.5 - b.center(),
+        None => Vec2::ZERO,
+    };
+    ViewTarget { pan, scale: 1.0 }
+}
+
+/// World-space (inner-canvas pre-transform) bounding box of the framed
+/// nodes — every node, or only the selected ones. Position is
+/// `SceneNode::pos` (document world coords); extent is the node body's
+/// last-arranged `layout_rect` size (pre-transform, so unscaled), or a
+/// point when it hasn't measured yet. `None` when no node qualifies.
+fn node_bounds(ui: &Ui, scene: &Scene, selected_only: bool) -> Option<Rect> {
+    let mut acc: Option<Rect> = None;
+    for n in &scene.nodes {
+        if selected_only && !scene.selected_nodes.contains(&n.id) {
+            continue;
+        }
+        let size = ui
+            .response_for(node_widget_id(n.id))
+            .layout_rect
+            .map(|r| r.size)
+            .unwrap_or(Size::ZERO);
+        let rect = Rect { min: n.pos, size };
+        acc = Some(acc.map_or(rect, |a| a.union(rect)));
+    }
+    acc
+}
+
+/// Fit `bounds` (world coords) centered in a `viewport`-sized pane,
+/// leaving [`FIT_MARGIN`] on every side. The scale is the tighter of the
+/// two per-axis fits, never magnified past 1:1 (a lone small node
+/// shouldn't balloon), and clamped to `[MIN_ZOOM, MAX_ZOOM]`. Placing the
+/// bbox center at the viewport center uses the same `outer_local = pan +
+/// scale * world` mapping the inner-canvas transform applies.
+fn fit_target(bounds: Rect, viewport: Vec2) -> ViewTarget {
+    let avail_x = (viewport.x - 2.0 * FIT_MARGIN).max(1.0);
+    let avail_y = (viewport.y - 2.0 * FIT_MARGIN).max(1.0);
+    // A sub-pixel extent (single node, or a flat row/column) doesn't
+    // constrain its axis — treat it as unbounded so the other axis wins.
+    let sx = if bounds.size.w > 1.0 {
+        avail_x / bounds.size.w
+    } else {
+        f32::INFINITY
+    };
+    let sy = if bounds.size.h > 1.0 {
+        avail_y / bounds.size.h
+    } else {
+        f32::INFINITY
+    };
+    let scale = sx.min(sy).min(1.0).clamp(MIN_ZOOM, MAX_ZOOM);
+    let pan = viewport * 0.5 - bounds.center() * scale;
+    ViewTarget { pan, scale }
 }
 
 #[cfg(test)]
@@ -249,6 +352,77 @@ mod tests {
             (zoom - MIN_ZOOM).abs() < 1e-5,
             "expected saturation at MIN_ZOOM={MIN_ZOOM}, got {zoom}",
         );
+    }
+
+    /// The world point at the bbox center must land on the viewport
+    /// center after applying the fitted `pan`/`scale`
+    /// (`outer_local = pan + scale * world`).
+    fn assert_centered(t: &ViewTarget, bounds: Rect, viewport: Vec2) {
+        let mapped = t.pan + bounds.center() * t.scale;
+        let drift = (mapped - viewport * 0.5).length();
+        assert!(drift < 1e-3, "bbox center off viewport center by {drift}");
+    }
+
+    #[test]
+    fn fit_target_shrinks_oversized_bounds() {
+        // 1000×500 world bbox at origin into an 800×600 pane. Margin 40 →
+        // avail 720×520. sx = 720/1000 = 0.72, sy = 520/500 = 1.04; the
+        // width binds, so scale = 0.72.
+        let bounds = Rect::new(0.0, 0.0, 1000.0, 500.0);
+        let viewport = Vec2::new(800.0, 600.0);
+        let t = fit_target(bounds, viewport);
+        assert!((t.scale - 0.72).abs() < 1e-4, "scale {}", t.scale);
+        // pan = (400,300) - (500,250)*0.72 = (40, 120).
+        assert!(
+            (t.pan - Vec2::new(40.0, 120.0)).length() < 1e-3,
+            "pan {}",
+            t.pan
+        );
+        assert_centered(&t, bounds, viewport);
+    }
+
+    #[test]
+    fn fit_target_never_magnifies_past_one_to_one() {
+        // A small bbox would fit at 5.2×, but fitting must not zoom in
+        // past 1:1 — scale caps at 1.0, still centered.
+        let bounds = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let viewport = Vec2::new(800.0, 600.0);
+        let t = fit_target(bounds, viewport);
+        assert_eq!(t.scale, 1.0);
+        // pan = (400,300) - (50,50)*1.0 = (350, 250).
+        assert!(
+            (t.pan - Vec2::new(350.0, 250.0)).length() < 1e-3,
+            "pan {}",
+            t.pan
+        );
+        assert_centered(&t, bounds, viewport);
+    }
+
+    #[test]
+    fn fit_target_degenerate_point_holds_scale_and_centers() {
+        // A zero-size bbox (single unmeasured node) can't fit-scale — both
+        // axes are unbounded → scale falls back to 1.0, point recentred.
+        let bounds = Rect::new(200.0, 200.0, 0.0, 0.0);
+        let viewport = Vec2::new(800.0, 600.0);
+        let t = fit_target(bounds, viewport);
+        assert_eq!(t.scale, 1.0);
+        assert!(
+            (t.pan - Vec2::new(200.0, 100.0)).length() < 1e-3,
+            "pan {}",
+            t.pan
+        );
+        assert_centered(&t, bounds, viewport);
+    }
+
+    #[test]
+    fn fit_target_clamps_to_min_zoom() {
+        // A bbox far larger than any reachable zoom saturates at MIN_ZOOM
+        // rather than the (smaller) exact fit; still centered.
+        let bounds = Rect::new(0.0, 0.0, 100_000.0, 100_000.0);
+        let viewport = Vec2::new(800.0, 600.0);
+        let t = fit_target(bounds, viewport);
+        assert!((t.scale - MIN_ZOOM).abs() < 1e-6, "scale {}", t.scale);
+        assert_centered(&t, bounds, viewport);
     }
 
     #[test]
