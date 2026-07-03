@@ -1187,6 +1187,37 @@ impl UndoStep {
         }
     }
 
+    /// Whether applying or reverting this step changes *saved* document
+    /// content — graph data or node layout — as opposed to pure
+    /// navigation (camera, selection, tab focus), which isn't worth
+    /// prompting to save on exit. Drives `Editor::dirty`. Exhaustive so a
+    /// new step variant must declare which side it's on rather than
+    /// silently defaulting.
+    pub fn dirties_document(&self) -> bool {
+        match self {
+            // Navigation only — panning, zooming, selecting, switching or
+            // closing tabs is view state the user doesn't "save".
+            UndoStep::Graph(GraphStep::SetSelection { .. } | GraphStep::SetViewport { .. })
+            | UndoStep::Doc(DocStep::SwitchTab { .. } | DocStep::CloseTab { .. }) => false,
+            // Graph data + node layout — real edits worth persisting.
+            UndoStep::Graph(
+                GraphStep::AddNode { .. }
+                | GraphStep::DuplicateNodes { .. }
+                | GraphStep::RemoveNode { .. }
+                | GraphStep::MoveNodes { .. }
+                | GraphStep::RenameNode { .. }
+                | GraphStep::SetInput { .. }
+                | GraphStep::SetDisabled { .. }
+                | GraphStep::SetPersist { .. }
+                | GraphStep::DetachSubgraph { .. }
+                | GraphStep::SetSubscription { .. },
+            )
+            | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameSubgraph { .. }) => {
+                true
+            }
+        }
+    }
+
     /// Identifies "same continuous gesture" for undo coalescing. The undo
     /// stack collapses consecutive steps with the same key into one entry
     /// (keeping the *first* "from" payload). Two viewport changes coalesce;
@@ -1306,6 +1337,60 @@ mod tests {
         doc.graph.add(node);
         doc.main_view.view_nodes.add(ViewNode { id, pos });
         id
+    }
+
+    #[test]
+    fn dirties_document_splits_edits_from_navigation() {
+        use scenarium::graph::subgraph::SubgraphId;
+
+        // Navigation-only steps: camera, selection, tab focus — the user
+        // doesn't "save" these, so they must not flip the unsaved flag.
+        let navigation = [
+            UndoStep::Graph(GraphStep::SetSelection {
+                from: BTreeSet::new(),
+                to: BTreeSet::from([NodeId::unique()]),
+            }),
+            UndoStep::Graph(GraphStep::SetViewport {
+                from_pan: Vec2::ZERO,
+                from_scale: 1.0,
+                to_pan: Vec2::new(10.0, 20.0),
+                to_scale: 2.0,
+            }),
+            UndoStep::Doc(DocStep::SwitchTab { from: 0, to: 1 }),
+            UndoStep::Doc(DocStep::CloseTab {
+                index: 1,
+                target: TabRef::Graph(GraphRef::Main),
+                from_active: 1,
+                to_active: 0,
+            }),
+        ];
+        for step in &navigation {
+            assert!(
+                !step.dirties_document(),
+                "navigation step must not dirty: {step:?}",
+            );
+        }
+
+        // Content steps: graph data + node layout — real, savable work.
+        let content = [
+            UndoStep::Graph(GraphStep::RenameNode {
+                node_id: NodeId::unique(),
+                from: "a".into(),
+                to: "b".into(),
+            }),
+            UndoStep::Graph(GraphStep::MoveNodes {
+                grabbed: NodeId::unique(),
+                moves: vec![(NodeId::unique(), Vec2::ZERO, Vec2::new(5.0, 5.0))],
+            }),
+            UndoStep::Doc(DocStep::RenameSubgraph {
+                id: SubgraphId::unique(),
+                from: "s".into(),
+                to: "t".into(),
+            }),
+        ];
+        for step in &content {
+            assert!(step.dirties_document(), "content step must dirty: {step:?}",);
+        }
     }
 
     #[test]

@@ -43,9 +43,11 @@ impl Editor {
         }
         let mut relayout = false;
         let mut reconcile = false;
+        let mut dirtied = false;
         let mut on_step = |step: &intent::UndoStep| {
             relayout |= step.requires_relayout();
             reconcile |= step.requires_reconcile();
+            dirtied |= step.dirties_document();
         };
         if undo {
             self.action_stack.undo(&mut self.document, &mut on_step);
@@ -54,6 +56,10 @@ impl Editor {
         }
         self.needs_relayout |= relayout;
         self.needs_reconcile |= reconcile;
+        // A content edit undone/redone leaves the doc differing from the
+        // last save (barring the exact round-trip back to it — we accept a
+        // stale "dirty" there rather than tracking saved state precisely).
+        self.dirty |= dirtied;
     }
 
     /// Esc-deselect and Ctrl+0 reset-zoom — both act on the active view,

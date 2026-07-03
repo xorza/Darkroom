@@ -21,8 +21,10 @@ use crate::gui::theme::Theme;
 
 mod commands;
 pub(crate) mod editor;
+mod exit_dialog;
 
 use editor::Editor;
+use exit_dialog::ExitChoice;
 
 /// A deferred, side-effecting command a UI surface (the menu bar, the graph
 /// toolbar, the Preferences tab, a node's S-badge, an inline path-picker) hands to
@@ -88,6 +90,9 @@ pub(crate) enum AppCommand {
     /// Toggle whether launch reopens the last document. Raised by the
     /// Preferences tab's "Load last document on startup" checkbox; persisted.
     SetLoadLastDocument(bool),
+    /// Quit the app (File ▸ Quit). Routed through `App::request_quit`, which
+    /// prompts to save first if the document has unsaved changes.
+    Quit,
 }
 
 /// Which ML model path an [`AppCommand::PickMlModel`] targets.
@@ -153,6 +158,10 @@ pub(crate) struct App {
     /// events button). Reset whenever a one-shot run's `Update` tears the
     /// loop down, so it tracks the worker's real state.
     pub(crate) events_running: bool,
+    /// Whether the "save changes before quitting?" dialog is currently up.
+    /// Raised when a quit is requested (window close, File ▸ Quit) with
+    /// unsaved changes; cleared when the user answers.
+    confirm_quit: bool,
 }
 
 impl App {
@@ -182,6 +191,7 @@ impl App {
             current_path: None,
             preferences: Preferences::default(),
             events_running: false,
+            confirm_quit: false,
         };
         app.preferences = Preferences::load();
         // Resolve the saved preference: `System` (the default) follows
@@ -300,6 +310,42 @@ impl App {
             self.run_graph();
         }
     }
+
+    /// Resolve a pending quit. A window-close request (titlebar X) with
+    /// unsaved changes raises the confirm dialog and vetoes the close
+    /// ([`Ui::keep_open`]); a clean document lets the close proceed. While
+    /// the dialog is up, render it and act on the choice. Also finishes
+    /// File ▸ Quit, which set `confirm_quit` via `request_quit` earlier this
+    /// frame.
+    fn handle_exit(&mut self, ui: &mut Ui) {
+        if ui.close_requested() && self.editor.dirty {
+            ui.keep_open();
+            self.confirm_quit = true;
+        }
+        if !self.confirm_quit {
+            return;
+        }
+
+        let file_name = self
+            .current_path
+            .as_deref()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str());
+        match exit_dialog::show(ui, file_name) {
+            ExitChoice::Stay => {}
+            ExitChoice::Cancel => self.confirm_quit = false,
+            ExitChoice::Discard => self.host_handle.quit(),
+            ExitChoice::Save => {
+                self.confirm_quit = false;
+                self.save_current();
+                // Save As can be cancelled, leaving the doc dirty — only
+                // quit once the save actually landed.
+                if !self.editor.dirty {
+                    self.host_handle.quit();
+                }
+            }
+        }
+    }
 }
 
 impl palantir::App for App {
@@ -330,7 +376,6 @@ impl palantir::App for App {
             self.preferences.theme,
             &self.preferences,
             self.events_running,
-            &self.host_handle,
         );
 
         // A disk-cache toggle this frame: flush the node's resident value to disk now
@@ -351,5 +396,11 @@ impl palantir::App for App {
             self.handle_command(ui, command);
             ui.request_relayout();
         }
+
+        // Catch a window-close request and, with unsaved changes, prompt
+        // instead of quitting. Runs after `handle_command` so a File ▸ Quit
+        // (which set `confirm_quit` via `request_quit`) draws its dialog the
+        // same frame.
+        self.handle_exit(ui);
     }
 }

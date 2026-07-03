@@ -1,14 +1,13 @@
 use glam::Vec2;
 use palantir::{Button, Configure, ContextMenu, MenuItem, Panel, PopupHandle, Sizing, Spacing, Ui};
 
-use crate::gui::HostHandle;
 use crate::gui::app::AppCommand;
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
 /// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.
-/// `Quit` calls into [`HostHandle::quit`]; everything else returns a
-/// [`AppCommand`] for `App` to consume.
-pub(crate) fn show(ui: &mut Ui, host: Option<&HostHandle>) -> Option<AppCommand> {
+/// Every item — `Quit` included — returns an [`AppCommand`] for `App` to
+/// consume; `App` routes `Quit` through its unsaved-changes check.
+pub(crate) fn show(ui: &mut Ui) -> Option<AppCommand> {
     let mut command = None;
     Panel::hstack()
         .auto_id()
@@ -16,7 +15,7 @@ pub(crate) fn show(ui: &mut Ui, host: Option<&HostHandle>) -> Option<AppCommand>
         .padding(Spacing::xy(4.0, 4.0))
         .gap(2.0)
         .show(ui, |ui| {
-            command = file_menu(ui, host);
+            command = file_menu(ui);
         });
     command
 }
@@ -47,7 +46,7 @@ fn dropdown(
     command
 }
 
-fn file_menu(ui: &mut Ui, host: Option<&HostHandle>) -> Option<AppCommand> {
+fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
     dropdown(ui, "File", |ui, popup| {
         let mut command = None;
         if MenuItem::new("New").show(ui, popup).clicked() {
@@ -67,10 +66,8 @@ fn file_menu(ui: &mut Ui, host: Option<&HostHandle>) -> Option<AppCommand> {
             command = Some(AppCommand::OpenPreferences);
         }
         MenuItem::separator(ui);
-        if MenuItem::new("Quit").show(ui, popup).clicked()
-            && let Some(h) = host
-        {
-            h.quit();
+        if MenuItem::new("Quit").show(ui, popup).clicked() {
+            command = Some(AppCommand::Quit);
         }
         command
     })

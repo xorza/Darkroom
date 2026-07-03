@@ -22,7 +22,6 @@ use crate::core::edit::intent::{Intent, build_duplicate_intent_for, commit_inten
 use crate::core::io::preferences::Preferences;
 use crate::core::theme_pref::ThemeChoice;
 use crate::core::worker::ValueRequest;
-use crate::gui::HostHandle;
 use crate::gui::UiAction;
 use crate::gui::app::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
@@ -46,6 +45,15 @@ const UNDO_HISTORY_BYTES: usize = 1 << 20;
 #[derive(Debug)]
 pub(crate) struct Editor {
     pub(crate) document: Document,
+    /// Unsaved-changes flag: set whenever a content-changing step is
+    /// applied (via [`Document`]'s edit paths — new edits, undo/redo
+    /// replay, and the direct subgraph mutations), cleared on save. Only
+    /// steps that alter saved content flip it — pure navigation (camera,
+    /// selection, tab focus) doesn't (see [`UndoStep::dirties_document`]).
+    /// Read by `App` on exit to decide whether to prompt. It can read
+    /// "dirty" after an undo returns the document to its saved state — the
+    /// safe direction (prompt rather than silently discard).
+    pub(crate) dirty: bool,
     action_stack: ActionStack,
     scene: Scene,
     main_window: MainWindow,
@@ -108,6 +116,7 @@ impl Editor {
     pub(crate) fn new(document: Document) -> Self {
         Self {
             document,
+            dirty: false,
             action_stack: ActionStack::new(UNDO_HISTORY_BYTES),
             scene: Scene::default(),
             main_window: MainWindow::default(),
@@ -171,6 +180,7 @@ impl Editor {
             for step in commit_intent_cascading(intent, &mut self.document, target, library) {
                 self.needs_relayout |= step.requires_relayout();
                 self.needs_reconcile |= step.requires_reconcile();
+                self.dirty |= step.dirties_document();
                 batch.push(step);
             }
         }
@@ -189,6 +199,7 @@ impl Editor {
     pub(crate) fn import_subgraph(&mut self, def: SubgraphDef) {
         self.document.import_subgraph(def);
         self.needs_reconcile = true;
+        self.dirty = true;
     }
 
     /// Run one frame of the edit pipeline against the borrowed runtime
@@ -209,7 +220,6 @@ impl Editor {
         theme_choice: ThemeChoice,
         preferences: &Preferences,
         events_running: bool,
-        host: &HostHandle,
     ) -> Option<AppCommand> {
         self.intents.clear();
         self.actions.clear();
@@ -267,14 +277,7 @@ impl Editor {
         };
         let command = self
             .main_window
-            .frame(
-                ui,
-                &ctx,
-                &self.scene,
-                Some(host),
-                &self.document,
-                &mut self.intents,
-            )
+            .frame(ui, &ctx, &self.scene, &self.document, &mut self.intents)
             .or(command_from_shortcut);
 
         // A node context-menu pick resolves here, where the Document is
@@ -462,7 +465,9 @@ impl Editor {
                     // Creating the def + instance isn't undoable (no undo
                     // history references the fresh def, so the stack stays
                     // valid); `open_graph` still records the focus switch.
+                    // Not routed through a step, so flag the edit directly.
                     let id = self.document.create_subgraph();
+                    self.dirty = true;
                     self.open_graph(GraphRef::Local(id));
                 }
             }
@@ -532,6 +537,63 @@ mod tests {
 
     fn redo(editor: &mut Editor) -> bool {
         editor.action_stack.redo(&mut editor.document, &mut |_| {})
+    }
+
+    #[test]
+    fn dirty_flag_tracks_content_edits_not_navigation() {
+        use std::collections::BTreeSet;
+
+        use glam::Vec2;
+        use scenarium::graph::{Node, NodeKind};
+        use scenarium::node::function::FuncId;
+
+        use crate::core::document::view_node::ViewNode;
+
+        let lib = Library::default();
+        let mut editor = Editor::new(Document::default());
+        assert!(!editor.dirty, "a freshly opened document is clean");
+
+        // Seed a node, then rename it — a content edit must dirty.
+        let node = Node::new(NodeKind::Func(FuncId::unique()));
+        let id = node.id;
+        editor.document.graph.add(node);
+        editor.document.main_view.view_nodes.add(ViewNode {
+            id,
+            pos: Vec2::ZERO,
+        });
+        editor.apply_edit(
+            Intent::RenameNode {
+                node_id: id,
+                to: "renamed".into(),
+            },
+            &lib,
+        );
+        assert!(editor.dirty, "renaming a node is unsaved work");
+
+        // Clear (as a save would), then a pure selection change: applied,
+        // but navigation — it must not mark the document dirty again.
+        editor.dirty = false;
+        editor.apply_edit(
+            Intent::SetSelection {
+                to: BTreeSet::from([id]),
+            },
+            &lib,
+        );
+        assert_eq!(
+            editor.document.main_view.selected_nodes,
+            BTreeSet::from([id]),
+            "the selection edit did apply",
+        );
+        assert!(
+            !editor.dirty,
+            "selecting a node must not dirty the document"
+        );
+
+        // Creating a subgraph takes the direct (non-undoable) path, which
+        // must still flag the edit.
+        editor.actions.push(UiAction::NewSubgraph);
+        editor.apply_view_actions();
+        assert!(editor.dirty, "creating a subgraph is unsaved work");
     }
 
     #[test]

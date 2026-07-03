@@ -71,6 +71,19 @@ impl App {
                 self.preferences.load_last_document = on;
                 self.preferences.save();
             }
+            AppCommand::Quit => self.request_quit(),
+        }
+    }
+
+    /// A quit was requested (File ▸ Quit, or a window close that reached
+    /// here). Prompt to save when the document has unsaved changes,
+    /// otherwise exit now. The confirm dialog is rendered by
+    /// [`App::exit_dialog`] and resolved by [`App::resolve_exit`].
+    pub(crate) fn request_quit(&mut self) {
+        if self.editor.dirty {
+            self.confirm_quit = true;
+        } else {
+            self.host_handle.quit();
         }
     }
 
@@ -143,6 +156,9 @@ impl App {
     /// nor an open subgraph resolves.
     fn promote_active_subgraph(&mut self) {
         if promote_to_library(&mut self.editor.document, &self.engine.library) {
+            // Re-points the local def's `origin` in the document — an
+            // unsaved change (may over-flag when the link already existed).
+            self.editor.dirty = true;
             library::save_library(self.engine.library.load().subgraphs.iter());
         } else {
             eprintln!("subgraph promote: no subgraph selected or open");
@@ -169,6 +185,10 @@ impl App {
             target,
             node_id,
         ) {
+            // Publishing a fresh entry re-points the local def's `origin`
+            // in the document — an unsaved change (an update-in-place
+            // publish touches only the library, so this may over-flag).
+            self.editor.dirty = true;
             library::save_library(self.engine.library.load().subgraphs.iter());
         } else {
             eprintln!("subgraph publish: node is not a local subgraph");
@@ -214,7 +234,7 @@ impl App {
 
     /// Cmd+S: overwrite the current file if there is one, else fall
     /// back to Save As (first save of a fresh document).
-    fn save_current(&mut self) {
+    pub(crate) fn save_current(&mut self) {
         match self.current_path.clone() {
             Some(path) => self.save_document(&path),
             None => self.save_document_as(),
@@ -230,6 +250,7 @@ impl App {
 
     fn save_document(&mut self, path: &Path) {
         if persistence::save_document(&self.editor.document, path) {
+            self.editor.dirty = false;
             self.set_document_path(Some(path.to_path_buf()));
         }
     }

@@ -4,7 +4,6 @@ use palantir::{Background, Configure, Panel, Sizing, Ui};
 
 use crate::core::document::{Document, GraphRef, TabRef};
 use crate::core::edit::intent::Intent;
-use crate::gui::HostHandle;
 use crate::gui::UiAction;
 use crate::gui::app::AppCommand;
 use crate::gui::app::AppContext;
@@ -55,7 +54,6 @@ impl MainWindow {
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &Scene,
-        host: Option<&HostHandle>,
         doc: &Document,
         out: &mut Vec<Intent>,
     ) -> Option<AppCommand> {
@@ -79,7 +77,7 @@ impl MainWindow {
                         ..Default::default()
                     })
                     .show(ui, |ui| {
-                        command = menu_bar::show(ui, host);
+                        command = menu_bar::show(ui);
                     });
                 tab_bar::show(ui, ctx.theme, &tabs, doc.active, out);
                 // The content pane below the strip is the active tab's view:
