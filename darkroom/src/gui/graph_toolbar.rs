@@ -1,10 +1,12 @@
 //! The floating toolbar pinned to the graph view's top-left corner: a
-//! run/cancel toggle and an event-loop start/stop toggle side by side, with
-//! three view-framing buttons (reset view, show all, show selected) stacked
-//! beneath. All are square glyph buttons with hover tooltips; the toggles
-//! paint "toggled" while their action is in flight and map to an
-//! [`AppCommand`], while the framing buttons emit an `Intent::SetViewport`
-//! directly.
+//! run/cancel toggle and an event-loop start/stop toggle side by side on one
+//! chrome pill, with three view-framing buttons (reset view, show all, show
+//! selected) stacked beneath on a second pill. The frosted pills keep the
+//! toolbar legible over both the canvas and any node under it; the buttons
+//! themselves are transparent glyphs until hovered/toggled. All carry hover
+//! tooltips; the toggles paint "toggled" while their action is in flight and
+//! map to an [`AppCommand`], while the framing buttons emit an
+//! `Intent::SetViewport` directly.
 
 use glam::Vec2;
 use palantir::{
@@ -27,11 +29,17 @@ const TOOLBAR_MARGIN: f32 = 8.0;
 const BUTTON_GAP: f32 = 6.0;
 /// Corner radius of a button's rounded-rect background.
 const BUTTON_RADIUS: f32 = 6.0;
-/// Opacity of a button's frosted backdrop. Keeps the toolbar readable over an
-/// empty canvas *and* over a node it happens to sit on — the backdrop color
-/// sits between the canvas and node fills, so a bit of translucency still
-/// contrasts against both while the node stays faintly visible through it.
-const BUTTON_BG_ALPHA: f32 = 0.7;
+/// Opacity of a group pill's frosted chrome backdrop. Keeps the toolbar
+/// readable over an empty canvas *and* over a node it happens to sit on — the
+/// backdrop color sits between the canvas and node fills, so a bit of
+/// translucency still contrasts against both while the node stays faintly
+/// visible through it.
+const PILL_BG_ALPHA: f32 = 0.7;
+/// Padding between a group pill's chrome edge and the buttons inside it.
+const PILL_PADDING: f32 = 4.0;
+/// Corner radius of a group pill's chrome backdrop — the button radius grown
+/// by the padding so the pill's rounding stays concentric with the buttons'.
+const PILL_RADIUS: f32 = BUTTON_RADIUS + PILL_PADDING;
 
 fn run_button_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.graph.run_button")
@@ -72,11 +80,14 @@ pub(crate) fn show(
         .margin(Spacing::new(TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0, 0.0))
         .gap(BUTTON_GAP)
         .show(ui, |ui| {
-            // Top row: run/cancel + event-loop toggles, side by side.
+            // Top row: run/cancel + event-loop toggles, side by side on their
+            // own chrome pill.
             Panel::hstack()
                 .id_salt("graph_toolbar_run")
                 .size((Sizing::Hug, Sizing::Hug))
                 .gap(BUTTON_GAP)
+                .padding(Spacing::all(PILL_PADDING))
+                .background(pill_background(ctx.theme))
                 .show(ui, |ui| {
                     // Run / cancel: toggled while a one-shot run is in flight.
                     let running = ctx.run_state.is_running();
@@ -109,35 +120,46 @@ pub(crate) fn show(
                         });
                     }
                 });
-            // View-framing actions, stacked under the run button. Each emits a
-            // `SetViewport` intent (undoable), so they ride the same path as a
-            // manual pan/zoom rather than mutating the viewport out of band.
-            if action_button(ui, ctx.theme, reset_view_wid(), "Reset view", draw_reset) {
-                out.extend(pan_zoom::view_action_intent(ui, scene, ViewAction::Reset));
-            }
-            if action_button(ui, ctx.theme, show_all_wid(), "Show all", draw_show_all) {
-                out.extend(pan_zoom::view_action_intent(ui, scene, ViewAction::ShowAll));
-            }
-            if action_button(
-                ui,
-                ctx.theme,
-                show_selected_wid(),
-                "Show selected",
-                draw_show_selected,
-            ) {
-                out.extend(pan_zoom::view_action_intent(
-                    ui,
-                    scene,
-                    ViewAction::ShowSelected,
-                ));
-            }
+            // View-framing actions, stacked under the run row on their own
+            // chrome pill. Each emits a `SetViewport` intent (undoable), so they
+            // ride the same path as a manual pan/zoom rather than mutating the
+            // viewport out of band.
+            Panel::vstack()
+                .id_salt("graph_toolbar_framing")
+                .size((Sizing::Hug, Sizing::Hug))
+                .child_align(Align::new(HAlign::Left, VAlign::Top))
+                .gap(BUTTON_GAP)
+                .padding(Spacing::all(PILL_PADDING))
+                .background(pill_background(ctx.theme))
+                .show(ui, |ui| {
+                    if action_button(ui, ctx.theme, reset_view_wid(), "Reset view", draw_reset) {
+                        out.extend(pan_zoom::view_action_intent(ui, scene, ViewAction::Reset));
+                    }
+                    if action_button(ui, ctx.theme, show_all_wid(), "Show all", draw_show_all) {
+                        out.extend(pan_zoom::view_action_intent(ui, scene, ViewAction::ShowAll));
+                    }
+                    if action_button(
+                        ui,
+                        ctx.theme,
+                        show_selected_wid(),
+                        "Show selected",
+                        draw_show_selected,
+                    ) {
+                        out.extend(pan_zoom::view_action_intent(
+                            ui,
+                            scene,
+                            ViewAction::ShowSelected,
+                        ));
+                    }
+                });
         });
     command
 }
 
-/// One square glyph toggle. `toggled` inverts it like a filled chip (the solid
-/// running-glow fill with a dark glyph); idle is a frosted backdrop (lighter on
-/// hover) with the green "go" glyph. Returns whether it was clicked.
+/// One square glyph toggle sitting on the group pill. `toggled` fills it like a
+/// solid chip (the running-glow fill with a dark glyph); hover lifts a lighter
+/// patch out of the pill; idle is transparent so the pill shows through. The
+/// glyph is the green "go" color except when toggled. Returns whether clicked.
 fn toggle_button(
     ui: &mut Ui,
     theme: &Theme,
@@ -150,22 +172,16 @@ fn toggle_button(
     let (fill, glyph) = if toggled {
         (theme.exec_running_glow, theme.chrome_fill)
     } else if hovered {
-        (
-            theme.header_fill.with_alpha(BUTTON_BG_ALPHA),
-            theme.exec_executed_glow,
-        )
+        (theme.header_fill, theme.exec_executed_glow)
     } else {
-        (
-            theme.chrome_fill.with_alpha(BUTTON_BG_ALPHA),
-            theme.exec_executed_glow,
-        )
+        (Color::TRANSPARENT, theme.exec_executed_glow)
     };
     glyph_button(ui, wid, fill, glyph, tip, draw_glyph)
 }
 
-/// One square momentary button (no toggled state): frosted backdrop that lifts
-/// on hover, with a muted glyph. Used by the view-framing actions. Returns
-/// whether it was clicked.
+/// One square momentary button (no toggled state) sitting on the group pill:
+/// transparent until hover, when it lifts a lighter patch out of the pill.
+/// Muted glyph. Used by the view-framing actions. Returns whether it was clicked.
 fn action_button(
     ui: &mut Ui,
     theme: &Theme,
@@ -175,11 +191,20 @@ fn action_button(
 ) -> bool {
     let hovered = ui.response_for(wid).hovered;
     let fill = if hovered {
-        theme.header_fill.with_alpha(BUTTON_BG_ALPHA)
+        theme.header_fill
     } else {
-        theme.chrome_fill.with_alpha(BUTTON_BG_ALPHA)
+        Color::TRANSPARENT
     };
     glyph_button(ui, wid, fill, theme.text_muted, tip, draw_glyph)
+}
+
+/// The frosted chrome backdrop shared by both toolbar group pills.
+fn pill_background(theme: &Theme) -> Background {
+    Background {
+        fill: theme.chrome_fill.with_alpha(PILL_BG_ALPHA).into(),
+        corners: Corners::all(PILL_RADIUS),
+        ..Default::default()
+    }
 }
 
 /// Shared square-button body: a `fill` rounded-rect background, the icon
