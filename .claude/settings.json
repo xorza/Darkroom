@@ -5,64 +5,7 @@
   },
   "skipAutoPermissionPrompt": true,
   "permissions": {
-    "defaultMode": "auto",
-    "allow": [
-      "WebSearch",
-      "WebFetch",
-      "WebFetch(*)",
-
-      "Bash(cargo build:*)",
-      "Bash(cargo check:*)",
-      "Bash(cargo clippy:*)",
-      "Bash(cargo fmt:*)",
-      "Bash(cargo run:*)",
-      "Bash(cargo test:*)",
-      "Bash(cargo nextest:*)",
-      "Bash(cargo bench *)",
-      "Bash(cargo metadata *)",
-      "Bash(UPDATE_GOLDEN=1 cargo test*)",
-      "Bash(env UPDATE_GOLDEN=1 cargo test*)",
-
-      "Bash(perf annotate *)",
-      "Bash(perf report *)",
-      "Bash(perf record *)",
-      "Bash(perf script *)",
-      "Bash(perf stat *)",
-
-      "Bash(addr2line *)",
-      "Bash(delta *)",
-      "Bash(nm *)",
-      "Bash(objdump *)",
-      "Bash(readelf *)",
-
-      "Bash(rustc --version)",
-      "Bash(rustup target *)",
-
-      "Bash(gh api *)",
-      "Bash(gh search *)",
-
-      "Bash(git --no-pager diff*)",
-      "Bash(git check-ignore *)",
-      "Bash(git mv *)",
-      "Bash(git rm *)",
-      "Bash(git stash *)",
-      "Bash(git fsck *)",
-
-      "Bash(./scripts/test-all.sh)",
-      "Bash(bash scripts/test-all.sh)",
-      "Bash(FAST=1 ./scripts/test-all.sh)",
-
-      "Bash(awk *)",
-      "Bash(mkdir -p .tmp)",
-      "Bash(scc *)",
-      "Bash(sd *)",
-      "Bash(tee *)",
-
-      "Read(//proc/sys/kernel/**)",
-
-      "Skill(*)"
-    ],
-    "deny": ["Read(./.env)"]
+    "defaultMode": "auto"
   },
   "sandbox": {
     "enabled": false,
