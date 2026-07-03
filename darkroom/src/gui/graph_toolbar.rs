@@ -2,11 +2,10 @@
 //! run/cancel toggle and an event-loop start/stop toggle side by side on one
 //! chrome pill, with three view-framing buttons (reset view, show all, show
 //! selected) stacked beneath on a second pill. The frosted pills keep the
-//! toolbar legible over both the canvas and any node under it; the buttons
-//! themselves are transparent glyphs until hovered/toggled. All carry hover
-//! tooltips; the toggles paint "toggled" while their action is in flight and
-//! map to an [`AppCommand`], while the framing buttons emit an
-//! `Intent::SetViewport` directly.
+//! toolbar legible over both the canvas and any node under it; the buttons are
+//! opaque chips raised off the pill. All carry hover tooltips; the toggles
+//! paint "toggled" while their action is in flight and map to an [`AppCommand`],
+//! while the framing buttons emit an `Intent::SetViewport` directly.
 
 use glam::Vec2;
 use palantir::{
@@ -156,10 +155,9 @@ pub(crate) fn show(
     command
 }
 
-/// One square glyph toggle sitting on the group pill. `toggled` fills it like a
-/// solid chip (the running-glow fill with a dark glyph); hover lifts a lighter
-/// patch out of the pill; idle is transparent so the pill shows through. The
-/// glyph is the green "go" color except when toggled. Returns whether clicked.
+/// One square glyph toggle, an opaque chip raised off the group pill. `toggled`
+/// inverts it (the running-glow fill with a dark glyph); idle is a neutral fill
+/// (lighter on hover) with the green "go" glyph. Returns whether it was clicked.
 fn toggle_button(
     ui: &mut Ui,
     theme: &Theme,
@@ -174,14 +172,14 @@ fn toggle_button(
     } else if hovered {
         (theme.header_fill, theme.exec_executed_glow)
     } else {
-        (Color::TRANSPARENT, theme.exec_executed_glow)
+        (theme.node_fill, theme.exec_executed_glow)
     };
     glyph_button(ui, wid, fill, glyph, tip, draw_glyph)
 }
 
-/// One square momentary button (no toggled state) sitting on the group pill:
-/// transparent until hover, when it lifts a lighter patch out of the pill.
-/// Muted glyph. Used by the view-framing actions. Returns whether it was clicked.
+/// One square momentary button (no toggled state), an opaque chip raised off the
+/// group pill: neutral fill that lifts on hover, with a muted glyph. Used by the
+/// view-framing actions. Returns whether it was clicked.
 fn action_button(
     ui: &mut Ui,
     theme: &Theme,
@@ -193,7 +191,7 @@ fn action_button(
     let fill = if hovered {
         theme.header_fill
     } else {
-        Color::TRANSPARENT
+        theme.node_fill
     };
     glyph_button(ui, wid, fill, theme.text_muted, tip, draw_glyph)
 }
