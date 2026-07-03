@@ -20,7 +20,6 @@ use crate::core::document::{Document, GraphRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::{Intent, build_duplicate_intent_for, commit_intent_cascading};
 use crate::core::io::preferences::Preferences;
-use crate::core::theme_pref::ThemeChoice;
 use crate::core::worker::ValueRequest;
 use crate::gui::UiAction;
 use crate::gui::app::AppCommand;
@@ -217,8 +216,7 @@ impl Editor {
         ui: &mut Ui,
         library: &Library,
         theme: &Theme,
-        theme_choice: ThemeChoice,
-        preferences: &Preferences,
+        preferences: &mut Preferences,
         events_running: bool,
     ) -> Option<AppCommand> {
         self.intents.clear();
@@ -269,15 +267,20 @@ impl Editor {
         }
         let ctx = AppContext {
             theme,
-            theme_choice,
             library,
             run_state: &self.run_state,
-            preferences,
             events_running,
         };
         let command = self
             .main_window
-            .frame(ui, &ctx, &self.scene, &self.document, &mut self.intents)
+            .frame(
+                ui,
+                &ctx,
+                &self.scene,
+                preferences,
+                &self.document,
+                &mut self.intents,
+            )
             .or(command_from_shortcut);
 
         // A node context-menu pick resolves here, where the Document is

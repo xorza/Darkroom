@@ -4,6 +4,7 @@ use palantir::{Background, Configure, Panel, Sizing, Ui};
 
 use crate::core::document::{Document, GraphRef, TabRef};
 use crate::core::edit::intent::Intent;
+use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
 use crate::gui::app::AppCommand;
 use crate::gui::app::AppContext;
@@ -54,6 +55,7 @@ impl MainWindow {
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &Scene,
+        prefs: &mut Preferences,
         doc: &Document,
         out: &mut Vec<Intent>,
     ) -> Option<AppCommand> {
@@ -99,7 +101,7 @@ impl MainWindow {
                             });
                     }
                     TabRef::Preferences => {
-                        if let Some(c) = preferences_view::show(ui, ctx) {
+                        if let Some(c) = preferences_view::show(ui, ctx.theme, prefs) {
                             command = Some(c);
                         }
                     }

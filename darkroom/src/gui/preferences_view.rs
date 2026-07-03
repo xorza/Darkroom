@@ -1,25 +1,31 @@
-//! The Preferences tab's content: a settings window for [`Preferences`] (theme
-//! preference + the lens ML model paths). Rendered by `main_window` when
-//! the active tab is `TabRef::Preferences`. Pure view — it reads the current
-//! settings from [`AppContext`] and surfaces edits as [`AppCommand`]s for
-//! `App` to apply and persist *outside* the record, exactly like the menu
-//! bar (the editor tree doesn't own `Preferences`).
+//! The Preferences tab's content: a settings window for [`Preferences`]
+//! (theme preference, startup + exit toggles, the lens ML model paths).
+//! Rendered by `main_window` when the active tab is `TabRef::Preferences`.
+//!
+//! It edits the borrowed [`Preferences`] **in place** and reports a single
+//! [`AppCommand::PreferencesChanged`] whenever any field moved — `App`
+//! re-syncs derived state (theme palette, ML paths) and persists once,
+//! outside the record. So adding a preference is just another widget here;
+//! no new command or handler. The "Browse…" buttons are the exception:
+//! they open a blocking file dialog, so they return
+//! [`AppCommand::PickMlModel`] for `App` to run after the record.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use palantir::{
     Align, Background, Button, Checkbox, Configure, Panel, RadioButton, Sizing, Spacing, Text,
     TextEdit, TextStyle, Ui, VAlign, WidgetId,
 };
 
+use crate::core::io::preferences::Preferences;
 use crate::core::theme_pref::ThemeChoice;
-use crate::gui::app::AppContext;
 use crate::gui::app::{AppCommand, MlModelKind};
 use crate::gui::theme::Theme;
 
-/// Draw the preferences window and return the edit the user requested, if any.
-pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
-    let theme = ctx.theme;
+/// Draw the preferences window, editing `prefs` in place. Returns the
+/// command the edit needs `App` to run (persist + re-sync, or a Browse
+/// dialog), if any.
+pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Option<AppCommand> {
     let mut command: Option<AppCommand> = None;
     Panel::vstack()
         .id_salt("preferences_view")
@@ -33,12 +39,10 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
         .show(ui, |ui| {
             heading(ui, "Preferences");
 
-            // Appearance — the theme preference (the sole home for theme
-            // settings now that the Theme menu is gone).
+            // Appearance — the theme preference. The radios write
+            // `prefs.theme` directly; a move re-resolves the palette.
             subheading(ui, theme, "Appearance");
-            // The radios mutate a local copy; a change from the current
-            // preference becomes a `SetTheme` for `App` to apply + persist.
-            let mut selected = ctx.theme_choice;
+            let before = prefs.theme;
             Panel::hstack()
                 .id_salt("preferences_theme_row")
                 .size((Sizing::Hug, Sizing::Hug))
@@ -49,33 +53,33 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
                         (ThemeChoice::Dark, "Dark"),
                         (ThemeChoice::Light, "Light"),
                     ] {
-                        RadioButton::new(&mut selected, choice)
+                        RadioButton::new(&mut prefs.theme, choice)
                             .label(label)
                             .show(ui);
                     }
                 });
-            if selected != ctx.theme_choice {
-                command = Some(AppCommand::SetTheme(selected));
+            if prefs.theme != before {
+                command = Some(AppCommand::PreferencesChanged);
             }
 
             // Startup — whether launch reopens the last document.
             subheading(ui, theme, "Startup");
-            let mut load_last = ctx.preferences.load_last_document;
-            Checkbox::new(&mut load_last)
+            if Checkbox::new(&mut prefs.load_last_document)
                 .label("Load last document on startup")
-                .show(ui);
-            if load_last != ctx.preferences.load_last_document {
-                command = Some(AppCommand::SetLoadLastDocument(load_last));
+                .show(ui)
+                .clicked()
+            {
+                command = Some(AppCommand::PreferencesChanged);
             }
 
             // Quitting — whether unsaved changes prompt before exit.
             subheading(ui, theme, "Quitting");
-            let mut confirm_exit = ctx.preferences.confirm_unsaved_on_exit;
-            Checkbox::new(&mut confirm_exit)
+            if Checkbox::new(&mut prefs.confirm_unsaved_on_exit)
                 .label("Ask to save changes before quitting")
-                .show(ui);
-            if confirm_exit != ctx.preferences.confirm_unsaved_on_exit {
-                command = Some(AppCommand::SetConfirmUnsavedOnExit(confirm_exit));
+                .show(ui)
+                .clicked()
+            {
+                command = Some(AppCommand::PreferencesChanged);
             }
 
             // ML models — caller-supplied ONNX files the ml_denoise /
@@ -84,7 +88,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
             if let Some(c) = model_row(
                 ui,
                 "Denoise (DeepSNR)",
-                &ctx.preferences.ml_models.denoise,
+                &mut prefs.ml_models.denoise,
                 MlModelKind::Denoise,
             ) {
                 command = Some(c);
@@ -92,7 +96,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) -> Option<AppCommand> {
             if let Some(c) = model_row(
                 ui,
                 "Star removal (StarNet)",
-                &ctx.preferences.ml_models.star_removal,
+                &mut prefs.ml_models.star_removal,
                 MlModelKind::StarRemoval,
             ) {
                 command = Some(c);
@@ -127,13 +131,14 @@ fn subheading(ui: &mut Ui, theme: &Theme, text: &'static str) {
 const ML_PATH_FIELD_WIDTH: f32 = 520.0;
 
 /// One model-path row: a fixed-width label, an **editable** path field (type
-/// or paste a path; Enter or click-away commits), and a "Browse…" button.
-/// Returns a [`AppCommand::SetMlModelPath`] on an edited path or a
+/// or paste a path; Enter or click-away commits into `path`), and a
+/// "Browse…" button. Writes `path` in place and returns
+/// [`AppCommand::PreferencesChanged`] on an edited path, or
 /// [`AppCommand::PickMlModel`] when Browse is clicked.
 fn model_row(
     ui: &mut Ui,
     label: &'static str,
-    path: &Path,
+    path: &mut PathBuf,
     kind: MlModelKind,
 ) -> Option<AppCommand> {
     let mut command = None;
@@ -175,10 +180,8 @@ fn model_row(
             let commit = resp.submitted || resp.lost_focus;
             ui.state_mut::<String>(id).replace_range(.., &draft);
             if commit && draft != canonical {
-                command = Some(AppCommand::SetMlModelPath {
-                    kind,
-                    path: PathBuf::from(draft),
-                });
+                *path = PathBuf::from(draft);
+                command = Some(AppCommand::PreferencesChanged);
             }
 
             if Button::new()

@@ -11,7 +11,6 @@ use crate::core::document::Document;
 use crate::core::engine::Engine;
 use crate::core::io::preferences::Preferences;
 use crate::core::script::{ScriptConfig, ScriptMessage};
-use crate::core::theme_pref::ThemeChoice;
 use crate::core::wake::Wake;
 use crate::core::worker::WorkerEvent;
 use crate::gui::HostHandle;
@@ -40,9 +39,6 @@ pub(crate) enum AppCommand {
     SaveDocument,
     /// Always prompt for a destination.
     SaveDocumentAs,
-    /// Set the theme preference: `System` follows the OS light/dark
-    /// setting, `Dark`/`Light` pin a palette. Persisted to preferences.
-    SetTheme(ThemeChoice),
     /// Export the active subgraph (plus its local-def dependencies) to a
     /// file. No-op when the active tab isn't a subgraph.
     ExportSubgraph,
@@ -79,21 +75,15 @@ pub(crate) enum AppCommand {
     /// Open (or focus) the Preferences tab — the app-settings window.
     OpenPreferences,
     /// Open an ONNX file dialog for one of the ML model paths and persist
-    /// the choice. Raised by the Preferences tab's "Browse…" buttons.
+    /// the choice. Raised by the Preferences tab's "Browse…" buttons — the
+    /// blocking dialog runs outside the record, unlike the in-place field
+    /// edits that report [`Self::PreferencesChanged`].
     PickMlModel(MlModelKind),
-    /// Set an ML model path directly from the Preferences tab's editable field
-    /// (a typed or pasted path), then persist + republish it.
-    SetMlModelPath {
-        kind: MlModelKind,
-        path: PathBuf,
-    },
-    /// Toggle whether launch reopens the last document. Raised by the
-    /// Preferences tab's "Load last document on startup" checkbox; persisted.
-    SetLoadLastDocument(bool),
-    /// Toggle whether quitting with unsaved changes prompts to save. Raised
-    /// by the Preferences tab's checkbox and the exit dialog's "Don't ask
-    /// again"; persisted.
-    SetConfirmUnsavedOnExit(bool),
+    /// The Preferences tab edited a field of [`Preferences`] in place (any
+    /// checkbox / radio / path field). `App` re-syncs derived state (theme
+    /// palette, ML paths) and persists — one command for every field, so
+    /// adding a preference needs no new command.
+    PreferencesChanged,
     /// Quit the app (File ▸ Quit). Routed through `App::request_quit`, which
     /// prompts to save first if the document has unsaved changes.
     Quit,
@@ -114,18 +104,11 @@ pub(crate) enum MlModelKind {
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct AppContext<'a> {
     pub(crate) theme: &'a Theme,
-    /// The user's persisted theme preference (`system`/`dark`/`light`),
-    /// so the Theme menu can mark the active choice. Distinct from
-    /// `theme`, the concrete palette `System` resolved to.
-    pub(crate) theme_choice: ThemeChoice,
     pub(crate) library: &'a Library,
     /// Last run's per-node state (status, logs, fetched runtime values),
     /// keyed by authoring `NodeId`. Read by the inspection panel's Log and
     /// Inputs/Outputs sections.
     pub(crate) run_state: &'a RunState,
-    /// Persisted app preferences (theme + ML model paths), so a non-graph view
-    /// like the Preferences tab can display the current settings.
-    pub(crate) preferences: &'a Preferences,
     /// Whether the worker's event loop is running — drives the events
     /// toggle's on/off look. App-side intent rather than the worker's atomic,
     /// so the button can't lag a frame behind (and `Update` from a one-shot
@@ -389,8 +372,7 @@ impl palantir::App for App {
             ui,
             &library,
             &self.theme,
-            self.preferences.theme,
-            &self.preferences,
+            &mut self.preferences,
             self.events_running,
         );
 

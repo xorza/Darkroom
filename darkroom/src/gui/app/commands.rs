@@ -38,16 +38,6 @@ impl App {
             }
             AppCommand::SaveDocument => self.save_current(),
             AppCommand::SaveDocumentAs => self.save_document_as(),
-            AppCommand::SetTheme(choice) => {
-                // Resolve the choice to a concrete palette (`System`
-                // queries the OS), push the matching palantir palette onto
-                // the Ui, and persist the preference so the next launch
-                // restores it.
-                self.theme = Theme::from_preset(choice.resolve());
-                ui.theme = self.theme.palantir_theme.clone();
-                self.preferences.theme = choice;
-                self.preferences.save();
-            }
             AppCommand::ExportSubgraph => self.export_active_subgraph(),
             AppCommand::ImportSubgraph => self.import_subgraph(),
             AppCommand::PromoteSubgraph => self.promote_active_subgraph(),
@@ -66,14 +56,22 @@ impl App {
                 self.editor.open_preferences(&library);
             }
             AppCommand::PickMlModel(kind) => self.pick_ml_model(kind),
-            AppCommand::SetMlModelPath { kind, path } => self.set_ml_model_path(kind, path),
-            AppCommand::SetLoadLastDocument(on) => {
-                self.preferences.load_last_document = on;
-                self.preferences.save();
-            }
-            AppCommand::SetConfirmUnsavedOnExit(on) => self.set_confirm_exit(on),
+            AppCommand::PreferencesChanged => self.apply_preferences(ui),
             AppCommand::Quit => self.request_quit(),
         }
+    }
+
+    /// Re-derive everything that depends on [`Preferences`] and persist —
+    /// the single sink for the Preferences tab's in-place edits, so every
+    /// field flows through one path (no per-field command). Re-resolves the
+    /// theme palette (`System` queries the OS) onto `self.theme` + the `Ui`,
+    /// republishes the ML paths to lens, and writes the file. Idempotent, so
+    /// running it for a field whose derived bit didn't move is harmless.
+    fn apply_preferences(&mut self, ui: &mut Ui) {
+        self.theme = Theme::from_preset(self.preferences.theme.resolve());
+        ui.theme = self.theme.palantir_theme.clone();
+        self.preferences.apply_ml_model_paths();
+        self.preferences.save();
     }
 
     /// Persist whether quitting with unsaved changes prompts to save.
