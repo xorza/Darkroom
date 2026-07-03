@@ -121,14 +121,20 @@ pub(crate) fn show(
         });
 }
 
-/// The trailing "+" chip that creates and opens a fresh subgraph. Reads
-/// as an inactive tab (flat on the chrome strip); the click is consumed
-/// in [`emit_tab_actions`].
+/// Side of the square "+" chip. Matches the tab chips' content height —
+/// the 13px label's 1.2× line box plus their 4px top/bottom insets — so it
+/// stands exactly as tall as a tab while being square.
+const NEW_TAB_CHIP_SIDE: f32 = 13.0 * 1.2 + 8.0;
+
+/// The trailing "+" chip that creates and opens a fresh subgraph. A square,
+/// tab-shaped chip (top corners rounded like the tabs, bottom square) that
+/// reads as an inactive tab; the click is consumed in [`emit_tab_actions`].
 fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
+    let r = theme.tab_corner_radius;
     let hover_bg = if ui.response_for(tab_new_wid()).hovered {
         Background {
             fill: theme.header_fill.into(),
-            corners: Corners::all(3.0),
+            corners: Corners::new(r, r, 0.0, 0.0),
             ..Default::default()
         }
     } else {
@@ -136,9 +142,11 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
     };
     Panel::zstack()
         .id(tab_new_wid())
-        .size((Sizing::Fixed(20.0), Sizing::Hug))
+        .size((
+            Sizing::Fixed(NEW_TAB_CHIP_SIDE),
+            Sizing::Fixed(NEW_TAB_CHIP_SIDE),
+        ))
         .sense(Sense::CLICK)
-        .padding(Spacing::xy(0.0, 4.0))
         .child_align(Align::CENTER)
         .background(hover_bg)
         .show(ui, |ui| {
