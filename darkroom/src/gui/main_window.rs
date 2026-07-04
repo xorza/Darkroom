@@ -1,6 +1,6 @@
 use std::mem::take;
 
-use palantir::{Background, Configure, Panel, Sizing, Ui};
+use palantir::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
 
 use crate::core::document::{Document, GraphRef, TabRef};
 use crate::core::edit::intent::Intent;
@@ -61,27 +61,28 @@ impl MainWindow {
     ) -> Option<AppCommand> {
         let mut command = None;
         let tabs = tab_labels(doc);
-        // Top-to-bottom: menu bar, then the tab strip, then the graph.
-        // Menu bar + tabs share the `chrome_fill` color so they read as
-        // one top bar; the graph pane (canvas_bg) fills the rest, and the
-        // active tab punches through to that same color so it looks
-        // continuous with the canvas below it.
+        // Menu bar and tab strip share one row: "File" hugs the left, the
+        // tab strip fills the rest. Both read on the `chrome_fill` band;
+        // the graph pane (canvas_bg) fills the rest below, and the active
+        // tab punches through to that same color so it looks continuous
+        // with the canvas below it.
         let chrome = ctx.theme.chrome_fill;
         Panel::vstack()
             .auto_id()
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
                 Panel::hstack()
-                    .id_salt("menu_chrome")
+                    .id_salt("chrome_row")
                     .size((Sizing::FILL, Sizing::Hug))
+                    .child_align(Align::v(VAlign::Bottom))
                     .background(Background {
                         fill: chrome.into(),
                         ..Default::default()
                     })
                     .show(ui, |ui| {
                         command = menu_bar::show(ui);
+                        tab_bar::show(ui, ctx.theme, &tabs, doc.active, out);
                     });
-                tab_bar::show(ui, ctx.theme, &tabs, doc.active, out);
                 // The content pane below the strip is the active tab's view:
                 // the graph canvas for a graph tab, or the preferences window for
                 // the non-graph Preferences tab.
