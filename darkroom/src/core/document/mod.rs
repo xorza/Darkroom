@@ -66,6 +66,26 @@ pub enum BoundarySide {
     Output,
 }
 
+/// A graph's camera: pan offset (canvas-local px) + zoom factor. One
+/// value shared by the persisted per-graph [`GraphView`], the per-frame
+/// `Scene` projection, and the `SetViewport` edit, so the three can't
+/// drift on field names or semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Viewport {
+    pub pan: Vec2,
+    pub zoom: f32,
+}
+
+impl Default for Viewport {
+    /// Origin pan, 1:1 zoom.
+    fn default() -> Self {
+        Self {
+            pan: Vec2::ZERO,
+            zoom: 1.0,
+        }
+    }
+}
+
 /// Editor-side view metadata for one graph: per-node positions, the
 /// viewport, and the selection. One of these exists per open/edited
 /// graph (the root in `Document::main_view`, each subgraph interior in
@@ -79,8 +99,7 @@ pub enum BoundarySide {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphView {
     pub view_nodes: KeyIndexVec<NodeId, ViewNode>,
-    pub pan: Vec2,
-    pub scale: f32,
+    pub viewport: Viewport,
     /// `BTreeSet` so equality and serialization are order-independent
     /// (no spurious undo entries from reordering).
     pub selected_nodes: BTreeSet<NodeId>,
@@ -90,8 +109,7 @@ impl Default for GraphView {
     fn default() -> Self {
         Self {
             view_nodes: KeyIndexVec::default(),
-            pan: Vec2::ZERO,
-            scale: 1.0,
+            viewport: Viewport::default(),
             selected_nodes: BTreeSet::new(),
         }
     }
@@ -156,11 +174,11 @@ impl GraphView {
 
     fn validate(&self, graph: &CoreGraph) {
         assert!(
-            self.scale.is_finite() && self.scale > 0.0,
+            self.viewport.zoom.is_finite() && self.viewport.zoom > 0.0,
             "graph zoom must be finite and positive"
         );
         assert!(
-            self.pan.x.is_finite() && self.pan.y.is_finite(),
+            self.viewport.pan.x.is_finite() && self.viewport.pan.y.is_finite(),
             "graph pan must be finite"
         );
 
@@ -1051,11 +1069,11 @@ mod tests {
             "graph nodes should round-trip"
         );
         assert_eq!(
-            doc.main_view.scale, deserialized.main_view.scale,
+            doc.main_view.viewport.zoom, deserialized.main_view.viewport.zoom,
             "zoom should round-trip"
         );
         assert_eq!(
-            doc.main_view.pan, deserialized.main_view.pan,
+            doc.main_view.viewport.pan, deserialized.main_view.viewport.pan,
             "pan should round-trip"
         );
     }

@@ -39,7 +39,9 @@ use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::view_node::ViewNode;
-use crate::core::document::{BoundarySide, Document, EditScope, EditScopeRef, GraphRef, TabRef};
+use crate::core::document::{
+    BoundarySide, Document, EditScope, EditScopeRef, GraphRef, TabRef, Viewport,
+};
 
 /// What the caller wants to change. Forward-only — no `from` fields.
 /// Each variant says "set X to Y"; the consumer captures the previous
@@ -137,8 +139,7 @@ pub enum Intent {
         node_id: NodeId,
     },
     SetViewport {
-        pan: Vec2,
-        scale: f32,
+        to: Viewport,
     },
     /// Make the tab at index `to` active. Document-global (not scoped to
     /// any one graph); undoable and coalescing so a flurry of switches
@@ -282,10 +283,8 @@ pub enum GraphStep {
         def: Box<SubgraphDef>,
     },
     SetViewport {
-        from_pan: Vec2,
-        from_scale: f32,
-        to_pan: Vec2,
-        to_scale: f32,
+        from: Viewport,
+        to: Viewport,
     },
     /// Add or remove an event subscription. `from`/`to` are the
     /// subscribed-state booleans, so apply/revert just (un)subscribe to
@@ -382,14 +381,9 @@ impl GraphStep {
             GraphStep::SetSelection { from, to } => from == to,
             GraphStep::SetDisabled { from, to, .. } => from == to,
             GraphStep::SetPersist { from, to, .. } => from == to,
-            GraphStep::SetViewport {
-                from_pan,
-                from_scale,
-                to_pan,
-                to_scale,
-            } => {
-                (*from_pan - *to_pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
-                    && (*from_scale - *to_scale).abs() < VIEWPORT_EPS
+            GraphStep::SetViewport { from, to } => {
+                (from.pan - to.pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
+                    && (from.zoom - to.zoom).abs() < VIEWPORT_EPS
             }
             GraphStep::SetSubscription { from, to, .. } => from == to,
         }
@@ -567,11 +561,9 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
                 def: Box::new(copy),
             }
         }
-        Intent::SetViewport { pan, scale } => GraphStep::SetViewport {
-            from_pan: view.pan,
-            from_scale: view.scale,
-            to_pan: pan,
-            to_scale: scale,
+        Intent::SetViewport { to } => GraphStep::SetViewport {
+            from: view.viewport,
+            to,
         },
         Intent::Subscribe {
             emitter,
@@ -932,11 +924,8 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.graph.by_id_mut(node_id).unwrap().kind =
                 NodeKind::Subgraph(SubgraphRef::Local(def.id));
         }
-        GraphStep::SetViewport {
-            to_pan, to_scale, ..
-        } => {
-            scope.view.pan = *to_pan;
-            scope.view.scale = *to_scale;
+        GraphStep::SetViewport { to, .. } => {
+            scope.view.viewport = *to;
         }
         GraphStep::SetSubscription {
             emitter,
@@ -1081,13 +1070,8 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 NodeKind::Subgraph(SubgraphRef::Local(*from_id));
             scope.graph.subgraphs.remove_by_key(&def.id);
         }
-        GraphStep::SetViewport {
-            from_pan,
-            from_scale,
-            ..
-        } => {
-            scope.view.pan = *from_pan;
-            scope.view.scale = *from_scale;
+        GraphStep::SetViewport { from, .. } => {
+            scope.view.viewport = *from;
         }
         GraphStep::SetSubscription {
             emitter,
@@ -1265,19 +1249,11 @@ impl UndoStep {
     pub fn coalesce(&self, next: &UndoStep) -> Option<UndoStep> {
         match (self, next) {
             (
-                UndoStep::Graph(GraphStep::SetViewport {
-                    from_pan,
-                    from_scale,
-                    ..
-                }),
-                UndoStep::Graph(GraphStep::SetViewport {
-                    to_pan, to_scale, ..
-                }),
+                UndoStep::Graph(GraphStep::SetViewport { from, .. }),
+                UndoStep::Graph(GraphStep::SetViewport { to, .. }),
             ) => Some(UndoStep::Graph(GraphStep::SetViewport {
-                from_pan: *from_pan,
-                from_scale: *from_scale,
-                to_pan: *to_pan,
-                to_scale: *to_scale,
+                from: *from,
+                to: *to,
             })),
             (
                 UndoStep::Graph(GraphStep::MoveNodes {
@@ -1351,10 +1327,14 @@ mod tests {
                 to: BTreeSet::from([NodeId::unique()]),
             }),
             UndoStep::Graph(GraphStep::SetViewport {
-                from_pan: Vec2::ZERO,
-                from_scale: 1.0,
-                to_pan: Vec2::new(10.0, 20.0),
-                to_scale: 2.0,
+                from: Viewport {
+                    pan: Vec2::ZERO,
+                    zoom: 1.0,
+                },
+                to: Viewport {
+                    pan: Vec2::new(10.0, 20.0),
+                    zoom: 2.0,
+                },
             }),
             UndoStep::Doc(DocStep::SwitchTab { from: 0, to: 1 }),
             UndoStep::Doc(DocStep::CloseTab {

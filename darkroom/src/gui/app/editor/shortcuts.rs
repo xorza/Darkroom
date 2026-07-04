@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use palantir::{Key, Shortcut, Ui};
 
-use crate::core::document::GraphRef;
+use crate::core::document::{GraphRef, Viewport};
 use crate::core::edit::intent::{self, Intent, build_duplicate_intent};
 use crate::gui::app::editor::Editor;
 use crate::gui::app::{AppCommand, FileCommand, RunCommand, ShellCommand};
@@ -87,14 +87,16 @@ impl Editor {
         }
         let view = self.document.view(target).expect("active tab view exists");
         let has_selection = !view.selected_nodes.is_empty();
-        let pan = view.pan;
+        let pan = view.viewport.pan;
         if escape && has_selection {
             self.intents.push(Intent::SetSelection {
                 to: BTreeSet::new(),
             });
         }
         if reset_zoom {
-            self.intents.push(Intent::SetViewport { pan, scale: 1.0 });
+            self.intents.push(Intent::SetViewport {
+                to: Viewport { pan, zoom: 1.0 },
+            });
         }
         if duplicate && let Some(intent) = build_duplicate_intent(&self.document, target) {
             self.intents.push(intent);

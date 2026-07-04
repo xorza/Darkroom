@@ -254,8 +254,8 @@ impl GraphUI {
                     pan_anchor: _,
                 },
         } = self;
-        let pan_val = scene.pan;
-        let zoom_val = scene.zoom;
+        let pan_val = scene.viewport.pan;
+        let zoom_val = scene.viewport.zoom;
         // Effective selection to paint: the live rubber-band preview while
         // a band is in flight, else the committed set. Kept off `Scene` so
         // the projection stays a read-only mirror of `Document`.
@@ -429,8 +429,12 @@ pub(crate) fn node_ports(node: &SceneNode, kind: PortKind) -> impl Iterator<Item
 /// coords. Inner canvas applies `TranslateScale::new(pan, zoom)`,
 /// so `outer = pan + zoom * world`.
 pub(crate) fn to_world(outer_local: Vec2, scene: &Scene) -> Vec2 {
-    let zoom = if scene.zoom > 0.0 { scene.zoom } else { 1.0 };
-    (outer_local - scene.pan) / zoom
+    let zoom = if scene.viewport.zoom > 0.0 {
+        scene.viewport.zoom
+    } else {
+        1.0
+    };
+    (outer_local - scene.viewport.pan) / zoom
 }
 
 /// The pointer in inner-canvas world coords, or `None` when it's off-window.

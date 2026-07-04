@@ -12,7 +12,7 @@ use scenarium::graph::{
 use scenarium::library::Library;
 use scenarium::node::function::{FuncInput, FuncOutput, OutputType, ValueVariant};
 
-use crate::core::document::GraphView;
+use crate::core::document::{GraphView, Viewport};
 use crate::gui::run_state::{ExecStatus, RunState};
 
 #[derive(Debug)]
@@ -44,13 +44,11 @@ pub struct Scene {
     /// One flat pool of every input's picker options across all nodes, sliced
     /// per input by [`SceneInput::value_variants`].
     pub value_variants_pool: Vec<ValueVariant>,
-    /// Live viewport, mirrored from `Document::{pan, scale}` each
-    /// `rebuild`. Read by the canvas transform and the pointer↔world
-    /// mapping; the pan/zoom gesture writes it back here, and `App`
-    /// copies it onto the document so it persists (single owner =
-    /// `Document`).
-    pub pan: Vec2,
-    pub zoom: f32,
+    /// Live viewport, mirrored from the active `GraphView` each `rebuild`.
+    /// Read by the canvas transform and the pointer↔world mapping; the
+    /// pan/zoom gesture writes it back here, and `App` copies it onto the
+    /// document so it persists (single owner = `Document`).
+    pub viewport: Viewport,
     /// Currently-selected nodes, the committed set mirrored from
     /// `Document` each rebuild so `node_ui` can pick a different paint
     /// without taking a `&Document`. Read-only, like the rest of `Scene`:
@@ -89,8 +87,7 @@ impl Default for Scene {
             outputs: Vec::new(),
             events: Vec::new(),
             value_variants_pool: Vec::new(),
-            pan: Vec2::ZERO,
-            zoom: 1.0,
+            viewport: Viewport::default(),
             selected_nodes: BTreeSet::new(),
         }
     }
@@ -218,12 +215,11 @@ impl Scene {
         run_state: &RunState,
     ) {
         self.selected_nodes = view.selected_nodes.clone();
-        // Mirror the persisted viewport. The gesture overwrites these
-        // later this frame and `App` copies them back onto the doc, so
+        // Mirror the persisted viewport. The gesture overwrites this
+        // later this frame and `App` copies it back onto the doc, so
         // a fresh value (e.g. just-loaded document) shows up here while
         // an active pan/zoom isn't clobbered (it re-persists each frame).
-        self.pan = view.pan;
-        self.zoom = view.scale;
+        self.viewport = view.viewport;
         self.nodes.clear();
         self.connections.clear();
         self.subscriptions.clear();
