@@ -92,8 +92,8 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                 "Denoise (DeepSNR)",
                 &mut prefs.ml_models.denoise,
                 MlModelKind::Denoise,
-                "Download DeepSNR \u{2197}",
-                "https://www.deepsnrastro.com/download/",
+                "Download DeepSNR CLI \u{2197}",
+                "https://starnetastro.com/cli-tools/deepsnr/",
             ) {
                 command = Some(c);
             }
@@ -103,8 +103,8 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                 "Star removal (StarNet)",
                 &mut prefs.ml_models.star_removal,
                 MlModelKind::StarRemoval,
-                "Download StarNet++ \u{2197}",
-                "https://www.starnetastro.com/download/",
+                "Download StarNet CLI \u{2197}",
+                "https://starnetastro.com/cli-tools/starnet/",
             ) {
                 command = Some(c);
             }
@@ -145,10 +145,10 @@ const ML_ROW_GAP: f32 = 8.0;
 
 /// One model-path row: a fixed-width label, an **editable** path field (type
 /// or paste a path; Enter or click-away commits into `path`), a "Browse…"
-/// button, and — beneath, indented under the field — a download link for the
-/// backing tool (opens the browser directly on click). Writes `path` in place
-/// and returns [`AppCommand::PreferencesChanged`] on an edited path or
-/// [`AppCommand::PickMlModel`] when Browse is clicked.
+/// button, and — beneath, indented under the field — a download hint (a
+/// browser link to the CLI tool plus unzip/point-at-the-`.onnx` guidance).
+/// Writes `path` in place and returns [`AppCommand::PreferencesChanged`] on an
+/// edited path or [`AppCommand::PickMlModel`] when Browse is clicked.
 fn model_row(
     ui: &mut Ui,
     theme: &Theme,
@@ -216,39 +216,60 @@ fn model_row(
                     }
                 });
 
-            download_link(ui, theme, download_label, download_url);
+            download_hint(ui, theme, download_label, download_url);
         });
     command
 }
 
-/// A "Download …" link under a model row, indented past the label column to
-/// sit under the path field. Accent-colored, brightening on hover; opens
-/// `url` in the browser on click.
-fn download_link(ui: &mut Ui, theme: &Theme, label: &'static str, url: &'static str) {
-    let id = WidgetId::from_hash(("preferences.download_link", label));
+/// The CLI tools ship as a zip of self-contained binaries plus the model
+/// weights; only the `.onnx` matters to us, so the guidance is the same for
+/// every model.
+const DOWNLOAD_HINT: &str = " \u{2014} unzip and point the field above at the .onnx file inside";
+
+/// Guidance line under a model row, indented past the label column to sit
+/// under the path field: a clickable "Download … CLI ↗" link (accent-colored,
+/// brightening on hover; opens `url` in the browser on click) followed by
+/// muted instructions to unzip the download and point the field at the
+/// `.onnx` inside.
+fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'static str) {
+    let id = WidgetId::from_hash(("preferences.download_hint", link_label));
     // Last frame's hover drives the brighten — this frame's response isn't
     // known until after `show`.
-    let color = if ui.response_for(id).hovered {
+    let link_color = if ui.response_for(id).hovered {
         theme.badge_subgraph.midpoint(Color::hex(0xffffff))
     } else {
         theme.badge_subgraph
     };
-    let clicked = Panel::hstack()
-        .id(id)
-        .size((Sizing::Hug, Sizing::Hug))
-        .sense(Sense::CLICK)
+    Panel::hstack()
+        .id_salt(link_label)
+        .size((Sizing::FILL, Sizing::Hug))
         .padding(Spacing::new(ML_LABEL_WIDTH + ML_ROW_GAP, 0.0, 0.0, 0.0))
+        .gap(0.0)
+        .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            Text::new(label)
+            let clicked = Panel::hstack()
+                .id(id)
+                .size((Sizing::Hug, Sizing::Hug))
+                .sense(Sense::CLICK)
+                .show(ui, |ui| {
+                    Text::new(link_label)
+                        .style(TextStyle {
+                            color: link_color,
+                            font_size_px: 12.0,
+                            ..ui.theme.text
+                        })
+                        .show(ui);
+                })
+                .clicked();
+            if clicked {
+                dialogs::open_url(url);
+            }
+            Text::new(DOWNLOAD_HINT)
                 .style(TextStyle {
-                    color,
+                    color: theme.text_muted,
                     font_size_px: 12.0,
                     ..ui.theme.text
                 })
                 .show(ui);
-        })
-        .clicked();
-    if clicked {
-        dialogs::open_url(url);
-    }
+        });
 }
