@@ -17,6 +17,10 @@ Scenarium is a Cargo workspace for a node-based data processing pipeline framewo
 
 **`darkroom` + `palantir`.** `darkroom/` is the editor, built on **Palantir** — our own in-tree immediate-mode GUI library in `palantir/`. Palantir is a sibling project (workspace member + git submodule) with its own conventions in `palantir/CLAUDE.md`; changes to `darkroom/` may require coordinated changes in `palantir/`. Both are pre-1.0 and break freely.
 
+## Dev tools (`tools/`)
+
+- **`tools/rust-outline`** — generates a Markdown structural outline of Rust source (type defs with fields/types/visibility, `impl`/`trait` method signatures). Parses the real AST via `syn` and renders through `prettyplease`. Standalone: its own empty `[workspace]` keeps it out of the root `cargo build`, so it's neither a member nor `exclude`d. Run `tools/rust-outline/outline <PATH> [-o OUT.md] [--tests]` (respects `.gitignore`, skips `#[cfg(test)]` by default). Conventions in `tools/rust-outline/CLAUDE.md`. Useful for handing an agent a whole crate's shape without dumping every file.
+
 ## Conventions
 
 **UUIDs / IDs.** Every new UUID literal (a `TypeId`, `FuncId`, `SubgraphId`, or any other `id_type!`-backed id) must be generated with the real `uuidgen` tool, lowercased — `uuidgen | tr 'A-Z' 'a-z'` — never hand-typed or model-invented. Hand-made ids look unique but aren't drawn from any entropy source and risk silently colliding with an existing id. After adding one, `rg` the new value across the repo to confirm it's unique. These ids are the stable identity that persisted graphs bind to, so once an id ships in a saved document it must not change.
