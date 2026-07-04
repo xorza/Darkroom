@@ -13,13 +13,14 @@
 use std::path::PathBuf;
 
 use palantir::{
-    Align, Background, Button, Checkbox, Configure, Panel, RadioButton, Sizing, Spacing, Text,
-    TextEdit, TextStyle, Ui, VAlign, WidgetId,
+    Align, Background, Button, Checkbox, Color, Configure, Panel, RadioButton, Sense, Sizing,
+    Spacing, Text, TextEdit, TextStyle, Ui, VAlign, WidgetId,
 };
 
 use crate::core::io::preferences::Preferences;
 use crate::core::theme_pref::ThemeChoice;
 use crate::gui::app::{AppCommand, MlModelKind};
+use crate::gui::dialogs;
 use crate::gui::theme::Theme;
 
 /// Draw the preferences window, editing `prefs` in place. Returns the
@@ -87,17 +88,23 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
             subheading(ui, theme, "ML Models (ONNX)");
             if let Some(c) = model_row(
                 ui,
+                theme,
                 "Denoise (DeepSNR)",
                 &mut prefs.ml_models.denoise,
                 MlModelKind::Denoise,
+                "Download DeepSNR \u{2197}",
+                "https://www.deepsnrastro.com/download/",
             ) {
                 command = Some(c);
             }
             if let Some(c) = model_row(
                 ui,
+                theme,
                 "Star removal (StarNet)",
                 &mut prefs.ml_models.star_removal,
                 MlModelKind::StarRemoval,
+                "Download StarNet++ \u{2197}",
+                "https://www.starnetastro.com/download/",
             ) {
                 command = Some(c);
             }
@@ -130,68 +137,118 @@ fn subheading(ui: &mut Ui, theme: &Theme, text: &'static str) {
 /// doesn't span the whole settings panel.
 const ML_PATH_FIELD_WIDTH: f32 = 520.0;
 
+/// Width of a model row's fixed label column.
+const ML_LABEL_WIDTH: f32 = 150.0;
+
+/// Gap between the label column and the path field.
+const ML_ROW_GAP: f32 = 8.0;
+
 /// One model-path row: a fixed-width label, an **editable** path field (type
-/// or paste a path; Enter or click-away commits into `path`), and a
-/// "Browse…" button. Writes `path` in place and returns
-/// [`AppCommand::PreferencesChanged`] on an edited path, or
+/// or paste a path; Enter or click-away commits into `path`), a "Browse…"
+/// button, and — beneath, indented under the field — a download link for the
+/// backing tool (opens the browser directly on click). Writes `path` in place
+/// and returns [`AppCommand::PreferencesChanged`] on an edited path or
 /// [`AppCommand::PickMlModel`] when Browse is clicked.
 fn model_row(
     ui: &mut Ui,
+    theme: &Theme,
     label: &'static str,
     path: &mut PathBuf,
     kind: MlModelKind,
+    download_label: &'static str,
+    download_url: &'static str,
 ) -> Option<AppCommand> {
     let mut command = None;
     let id = WidgetId::from_hash(("preferences.ml_model_path", label));
-    Panel::hstack()
+    Panel::vstack()
         .id_salt(label)
         .size((Sizing::FILL, Sizing::Hug))
-        .gap(8.0)
-        .child_align(Align::v(VAlign::Center))
+        .gap(4.0)
         .show(ui, |ui| {
             Panel::hstack()
-                .id_salt("label")
-                .size((Sizing::Fixed(150.0), Sizing::Hug))
+                .id_salt("row")
+                .size((Sizing::FILL, Sizing::Hug))
+                .gap(ML_ROW_GAP)
+                .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
-                    Text::new(label)
-                        .style(TextStyle {
-                            font_size_px: 13.0,
-                            ..ui.theme.text
-                        })
+                    Panel::hstack()
+                        .id_salt("label")
+                        .size((Sizing::Fixed(ML_LABEL_WIDTH), Sizing::Hug))
+                        .show(ui, |ui| {
+                            Text::new(label)
+                                .style(TextStyle {
+                                    font_size_px: 13.0,
+                                    ..ui.theme.text
+                                })
+                                .show(ui);
+                        });
+
+                    // Editable path field. The draft lives across frames in the
+                    // state map, mirroring the current path while unfocused (so a
+                    // Browse pick shows up); `TextEdit`'s own submit/blur signals
+                    // drive the commit — no focus or key polling.
+                    let canonical = path.display().to_string();
+                    if ui.focused_id() != Some(id) {
+                        let buf = ui.state_mut::<String>(id);
+                        if *buf != canonical {
+                            buf.replace_range(.., &canonical);
+                        }
+                    }
+                    let mut draft = std::mem::take(ui.state_mut::<String>(id));
+                    let resp = TextEdit::new(&mut draft)
+                        .id(id)
+                        .size((Sizing::Fixed(ML_PATH_FIELD_WIDTH), Sizing::Hug))
                         .show(ui);
+                    let commit = resp.submitted || resp.lost_focus;
+                    ui.state_mut::<String>(id).replace_range(.., &draft);
+                    if commit && draft != canonical {
+                        *path = PathBuf::from(draft);
+                        command = Some(AppCommand::PreferencesChanged);
+                    }
+
+                    if Button::new()
+                        .id_salt("browse")
+                        .label("Browse…")
+                        .show(ui)
+                        .clicked()
+                    {
+                        command = Some(AppCommand::PickMlModel(kind));
+                    }
                 });
 
-            // Editable path field. The draft lives across frames in the state
-            // map, mirroring the current path while unfocused (so a Browse pick
-            // shows up); `TextEdit`'s own submit/blur signals drive the commit —
-            // no focus or key polling.
-            let canonical = path.display().to_string();
-            if ui.focused_id() != Some(id) {
-                let buf = ui.state_mut::<String>(id);
-                if *buf != canonical {
-                    buf.replace_range(.., &canonical);
-                }
-            }
-            let mut draft = std::mem::take(ui.state_mut::<String>(id));
-            let resp = TextEdit::new(&mut draft)
-                .id(id)
-                .size((Sizing::Fixed(ML_PATH_FIELD_WIDTH), Sizing::Hug))
-                .show(ui);
-            let commit = resp.submitted || resp.lost_focus;
-            ui.state_mut::<String>(id).replace_range(.., &draft);
-            if commit && draft != canonical {
-                *path = PathBuf::from(draft);
-                command = Some(AppCommand::PreferencesChanged);
-            }
-
-            if Button::new()
-                .id_salt("browse")
-                .label("Browse…")
-                .show(ui)
-                .clicked()
-            {
-                command = Some(AppCommand::PickMlModel(kind));
-            }
+            download_link(ui, theme, download_label, download_url);
         });
     command
+}
+
+/// A "Download …" link under a model row, indented past the label column to
+/// sit under the path field. Accent-colored, brightening on hover; opens
+/// `url` in the browser on click.
+fn download_link(ui: &mut Ui, theme: &Theme, label: &'static str, url: &'static str) {
+    let id = WidgetId::from_hash(("preferences.download_link", label));
+    // Last frame's hover drives the brighten — this frame's response isn't
+    // known until after `show`.
+    let color = if ui.response_for(id).hovered {
+        theme.badge_subgraph.midpoint(Color::hex(0xffffff))
+    } else {
+        theme.badge_subgraph
+    };
+    let clicked = Panel::hstack()
+        .id(id)
+        .size((Sizing::Hug, Sizing::Hug))
+        .sense(Sense::CLICK)
+        .padding(Spacing::new(ML_LABEL_WIDTH + ML_ROW_GAP, 0.0, 0.0, 0.0))
+        .show(ui, |ui| {
+            Text::new(label)
+                .style(TextStyle {
+                    color,
+                    font_size_px: 12.0,
+                    ..ui.theme.text
+                })
+                .show(ui);
+        })
+        .clicked();
+    if clicked {
+        dialogs::open_url(url);
+    }
 }

@@ -1,8 +1,8 @@
-//! File-picker dialogs (rfd) — the GUI-only half of on-disk I/O. The
-//! document/subgraph byte⇄type plumbing lives in
-//! `crate::core::io::persistence` (no GUI deps); this side opens native dialogs.
-//! Failures log to stderr and return `None` so a cancelled/failed pick degrades
-//! instead of crashing.
+//! GUI-side OS shell integration: native file-picker dialogs (rfd) and
+//! opening URLs in the user's browser. The document/subgraph byte⇄type
+//! plumbing lives in `crate::core::io::persistence` (no GUI deps); this side
+//! hands off to the OS. Failures degrade — a cancelled/failed pick returns
+//! `None`, a failed URL open logs — rather than crashing.
 
 use std::path::{Path, PathBuf};
 
@@ -52,5 +52,27 @@ pub(crate) fn pick_path(config: &FsPathConfig) -> Option<PathBuf> {
         FsPathMode::ExistingFile => dialog.pick_file(),
         FsPathMode::NewFile => dialog.save_file(),
         FsPathMode::Directory => dialog.pick_folder(),
+    }
+}
+
+/// Open `url` in the user's default browser via the platform opener. Non-
+/// blocking (the spawn returns immediately, so it's safe to call mid-record,
+/// unlike the modal file dialogs). A missing opener just logs and degrades —
+/// there's no user-facing error surface yet.
+pub(crate) fn open_url(url: &str) {
+    #[cfg(target_os = "linux")]
+    let mut cmd = std::process::Command::new("xdg-open");
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        // `start` treats its first quoted arg as the window title, so pass an
+        // empty title before the URL.
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", ""]);
+        c
+    };
+    if let Err(e) = cmd.arg(url).spawn() {
+        tracing::warn!("failed to open url {url}: {e}");
     }
 }
