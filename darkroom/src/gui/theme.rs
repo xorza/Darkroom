@@ -659,91 +659,54 @@ fn recolour_palantir(t: &mut palantir::Theme, p: &PalantirPalette) {
     t.tooltip.text.color = p.text;
 }
 
-/// Colour swatches a [`Theme`] needs from a palette mod. Borrowed by
-/// [`Theme::build`] so the two presets share one assembly path — only
-/// the colour values diverge, every dimension and sub-theme comes from
-/// the shared block.
-struct PaletteColors {
-    canvas_bg: Color,
-    selection_rect: Color,
-    canvas_dot: Color,
-    connection_broken: Color,
-    breaker_stroke: Color,
-    node_fill: Color,
-    node_border: Color,
-    header_fill: Color,
-    text_muted: Color,
-    chrome_fill: Color,
-    badge_subgraph: Color,
-    badge_terminal: Color,
-    badge_cache: Color,
-    exec_executed_glow: Color,
-    exec_cached_glow: Color,
-    exec_running_glow: Color,
-    exec_missing_glow: Color,
-    exec_errored_glow: Color,
-    input_port: Color,
-    output_port: Color,
-    input_port_hover: Color,
-    output_port_hover: Color,
-    event_port: Color,
-    event_port_hover: Color,
+/// Declares [`PaletteColors`] — the chrome-colour roster [`Theme::build`]
+/// reads — from one `field => CONST` list, expanding it into the struct
+/// plus its two built-in instances (`DARK` / `LIGHT`, pulling
+/// `dark::CONST` / `light::CONST`). One roster, so a colour can't sit in
+/// the struct while a preset forgets it (or vice-versa) — the presets
+/// won't compile until every field is filled.
+macro_rules! palette_colors {
+    ($($field:ident => $konst:ident),+ $(,)?) => {
+        /// Colour swatches a [`Theme`] needs from a palette mod. Borrowed by
+        /// [`Theme::build`] so the two presets share one assembly path — only
+        /// the colour values diverge; every dimension and sub-theme comes
+        /// from the shared block.
+        struct PaletteColors {
+            $($field: Color,)+
+        }
+
+        impl PaletteColors {
+            const DARK: Self = Self { $($field: dark::$konst),+ };
+            const LIGHT: Self = Self { $($field: light::$konst),+ };
+        }
+    };
 }
 
-impl PaletteColors {
-    const DARK: Self = Self {
-        canvas_bg: dark::CANVAS_BG,
-        selection_rect: dark::SELECTION_RECT,
-        canvas_dot: dark::CANVAS_DOT,
-        connection_broken: dark::CONNECTION_BROKEN,
-        breaker_stroke: dark::BREAKER_STROKE,
-        node_fill: dark::NODE_FILL,
-        node_border: dark::NODE_BORDER,
-        header_fill: dark::HEADER_FILL,
-        text_muted: dark::TEXT_MUTED,
-        chrome_fill: dark::CHROME_FILL,
-        badge_subgraph: dark::BADGE_SUBGRAPH,
-        badge_terminal: dark::BADGE_TERMINAL,
-        badge_cache: dark::BADGE_CACHE,
-        exec_executed_glow: dark::EXEC_EXECUTED_GLOW,
-        exec_cached_glow: dark::EXEC_CACHED_GLOW,
-        exec_running_glow: dark::EXEC_RUNNING_GLOW,
-        exec_missing_glow: dark::EXEC_MISSING_GLOW,
-        exec_errored_glow: dark::EXEC_ERRORED_GLOW,
-        input_port: dark::INPUT_PORT,
-        output_port: dark::OUTPUT_PORT,
-        input_port_hover: dark::INPUT_PORT_HOVER,
-        output_port_hover: dark::OUTPUT_PORT_HOVER,
-        event_port: dark::EVENT_PORT,
-        event_port_hover: dark::EVENT_PORT_HOVER,
-    };
-
-    const LIGHT: Self = Self {
-        canvas_bg: light::CANVAS_BG,
-        selection_rect: light::SELECTION_RECT,
-        canvas_dot: light::CANVAS_DOT,
-        connection_broken: light::CONNECTION_BROKEN,
-        breaker_stroke: light::BREAKER_STROKE,
-        node_fill: light::NODE_FILL,
-        node_border: light::NODE_BORDER,
-        header_fill: light::HEADER_FILL,
-        text_muted: light::TEXT_MUTED,
-        chrome_fill: light::CHROME_FILL,
-        badge_subgraph: light::BADGE_SUBGRAPH,
-        badge_terminal: light::BADGE_TERMINAL,
-        badge_cache: light::BADGE_CACHE,
-        exec_executed_glow: light::EXEC_EXECUTED_GLOW,
-        exec_cached_glow: light::EXEC_CACHED_GLOW,
-        exec_running_glow: light::EXEC_RUNNING_GLOW,
-        exec_missing_glow: light::EXEC_MISSING_GLOW,
-        exec_errored_glow: light::EXEC_ERRORED_GLOW,
-        input_port: light::INPUT_PORT,
-        output_port: light::OUTPUT_PORT,
-        input_port_hover: light::INPUT_PORT_HOVER,
-        output_port_hover: light::OUTPUT_PORT_HOVER,
-        event_port: light::EVENT_PORT,
-        event_port_hover: light::EVENT_PORT_HOVER,
-    };
+palette_colors! {
+    canvas_bg => CANVAS_BG,
+    selection_rect => SELECTION_RECT,
+    canvas_dot => CANVAS_DOT,
+    connection_broken => CONNECTION_BROKEN,
+    breaker_stroke => BREAKER_STROKE,
+    node_fill => NODE_FILL,
+    node_border => NODE_BORDER,
+    header_fill => HEADER_FILL,
+    text_muted => TEXT_MUTED,
+    chrome_fill => CHROME_FILL,
+    badge_subgraph => BADGE_SUBGRAPH,
+    badge_terminal => BADGE_TERMINAL,
+    badge_cache => BADGE_CACHE,
+    exec_executed_glow => EXEC_EXECUTED_GLOW,
+    exec_cached_glow => EXEC_CACHED_GLOW,
+    exec_running_glow => EXEC_RUNNING_GLOW,
+    exec_missing_glow => EXEC_MISSING_GLOW,
+    exec_errored_glow => EXEC_ERRORED_GLOW,
+    input_port => INPUT_PORT,
+    output_port => OUTPUT_PORT,
+    input_port_hover => INPUT_PORT_HOVER,
+    output_port_hover => OUTPUT_PORT_HOVER,
+    event_port => EVENT_PORT,
+    event_port_hover => EVENT_PORT_HOVER,
 }
 
 impl Theme {

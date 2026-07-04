@@ -15,7 +15,7 @@ use scenarium::node::function::{FuncInput, FuncOutput, OutputType, ValueVariant}
 use crate::core::document::{GraphView, Viewport};
 use crate::gui::run_state::{ExecStatus, RunState};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Scene {
     /// Insertion-ordered (draw order) with an `id → index` map, so per-frame
     /// lookups by `NodeId` (`by_key`) are O(1) without losing the ordered
@@ -73,22 +73,6 @@ impl From<&Binding> for InputBindingView {
             Binding::None => Self::None,
             Binding::Const(v) => Self::Const(v.clone()),
             Binding::Bind(_) => Self::Bind,
-        }
-    }
-}
-
-impl Default for Scene {
-    fn default() -> Self {
-        Self {
-            nodes: KeyIndexVec::default(),
-            connections: Vec::new(),
-            subscriptions: Vec::new(),
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            events: Vec::new(),
-            value_variants_pool: Vec::new(),
-            viewport: Viewport::default(),
-            selected_nodes: BTreeSet::new(),
         }
     }
 }

@@ -96,23 +96,13 @@ impl Default for Viewport {
 /// a file restores the exact camera and selection, and Ctrl+Z walks
 /// camera/selection changes alongside structural edits (see the long
 /// note that used to live on `Document`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct GraphView {
     pub view_nodes: KeyIndexVec<NodeId, ViewNode>,
     pub viewport: Viewport,
     /// `BTreeSet` so equality and serialization are order-independent
     /// (no spurious undo entries from reordering).
     pub selected_nodes: BTreeSet<NodeId>,
-}
-
-impl Default for GraphView {
-    fn default() -> Self {
-        Self {
-            view_nodes: KeyIndexVec::default(),
-            viewport: Viewport::default(),
-            selected_nodes: BTreeSet::new(),
-        }
-    }
 }
 
 impl Eq for GraphView {}
