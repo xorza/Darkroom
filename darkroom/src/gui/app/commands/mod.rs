@@ -1,4 +1,4 @@
-//! [`AppCommand`](crate::gui::app::AppCommand) handling: the file / subgraph /
+//! [`AppCommand`] handling: the file / subgraph /
 //! run / preferences / edit / shell side effects `App` runs *outside* the
 //! record pass (after the frame's record + drain), so a blocking file dialog
 //! or worker call holds no frame borrows.
@@ -12,14 +12,44 @@
 use palantir::Ui;
 
 use crate::gui::app::App;
-use crate::gui::app::AppCommand;
 
-mod edit;
-mod file;
-mod prefs;
-mod run;
-mod shell;
-mod subgraph;
+pub(crate) mod edit;
+pub(crate) mod file;
+pub(crate) mod prefs;
+pub(crate) mod run;
+pub(crate) mod shell;
+pub(crate) mod subgraph;
+
+use edit::EditCommand;
+use file::FileCommand;
+use prefs::PrefsCommand;
+use run::RunCommand;
+use shell::ShellCommand;
+use subgraph::SubgraphCommand;
+
+/// A deferred, side-effecting command a UI surface (the menu bar, the graph
+/// toolbar, the Preferences tab, a node's S-badge, an inline path-picker)
+/// hands to [`App`] to perform *outside* the record pass — after the frame's
+/// record + drain, so a blocking file dialog or worker call holds no frame
+/// borrows. The producing UI never touches `Document` / `Theme` / `Engine`
+/// directly; it returns one of these and [`App::handle_command`] dispatches
+/// it to the matching group handler (one submodule of `gui::app::commands`
+/// per variant here).
+#[derive(Clone, Debug)]
+pub(crate) enum AppCommand {
+    /// Document file lifecycle — [`file`].
+    File(FileCommand),
+    /// Subgraph → library publishing — [`subgraph`].
+    Subgraph(SubgraphCommand),
+    /// Graph execution + worker event loop — [`run`].
+    Run(RunCommand),
+    /// Preferences edits — [`prefs`].
+    Prefs(PrefsCommand),
+    /// Node edits raised via a dialog — [`edit`].
+    Edit(EditCommand),
+    /// App shell: navigation + lifecycle — [`shell`].
+    Shell(ShellCommand),
+}
 
 impl App {
     /// Dispatch a deferred command to its group handler. Runs after the

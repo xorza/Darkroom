@@ -7,8 +7,24 @@ use scenarium::graph::NodeId;
 use crate::core::edit::publish;
 use crate::core::io::{library, persistence};
 use crate::gui::app::App;
-use crate::gui::app::SubgraphCommand;
 use crate::gui::dialogs;
+
+/// Publishing subgraphs into the shared library. Handled by
+/// [`App::handle_subgraph`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum SubgraphCommand {
+    /// Export the active subgraph (plus its local-def dependencies) to a
+    /// file. No-op when the active tab isn't a subgraph.
+    Export,
+    /// Import a subgraph bundle from a file into the current document.
+    Import,
+    /// Publish a copy of the active subgraph into the shared library, so it
+    /// can be instanced as `Linked` anywhere. No-op off a subgraph.
+    Promote,
+    /// Publish a node's local subgraph def to the library (the S-badge
+    /// "Publish" action): update in place when linked, else create + link.
+    PublishNode { node_id: NodeId },
+}
 
 impl App {
     pub(crate) fn handle_subgraph(&mut self, command: SubgraphCommand) {

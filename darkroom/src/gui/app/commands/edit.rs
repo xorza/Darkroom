@@ -9,8 +9,21 @@ use scenarium::graph::{Binding, NodeId};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::App;
-use crate::gui::app::EditCommand;
 use crate::gui::dialogs;
+
+/// Node edits that need a dialog before applying. Handled by
+/// [`App::handle_edit`].
+#[derive(Clone, Debug)]
+pub(crate) enum EditCommand {
+    /// Open a file dialog (filtered by `config`) for a node's `FsPath`
+    /// const input, applying the chosen path as a `SetInput` edit. Raised
+    /// by the inline pick button (see `gui::node::emit_path_picks`).
+    PickInputPath {
+        node_id: NodeId,
+        port_idx: usize,
+        config: Arc<FsPathConfig>,
+    },
+}
 
 impl App {
     pub(crate) fn handle_edit(&mut self, command: EditCommand) {

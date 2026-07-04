@@ -21,7 +21,8 @@ use std::collections::BTreeSet;
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
-use crate::gui::app::{AppCommand, EditCommand};
+use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::edit::EditCommand;
 use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;

@@ -24,7 +24,6 @@
 //! CPU when idle), runs it, then yields back to the scheduler.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -32,7 +31,6 @@ use glam::Vec2;
 use rhai::{Array, Dynamic, Engine};
 use scenarium::graph::{Node, NodeId};
 use scenarium::node::function::FuncId;
-use serde::{Deserialize, Serialize};
 
 use crate::core::document::view_node::ViewNode;
 use crate::core::edit::intent::Intent;
@@ -50,6 +48,7 @@ pub mod tcp;
 mod tests;
 
 pub use session::{SessionError, SessionRef, SessionStore};
+use tcp::TcpScriptConfig;
 
 /// Runtime configuration for the scripting surface. Built from CLI flags in
 /// `main.rs`. `tcp.is_none()` means the TCP listener is off (no transport
@@ -57,22 +56,6 @@ pub use session::{SessionError, SessionRef, SessionStore};
 #[derive(Debug, Clone, Default)]
 pub struct ScriptConfig {
     pub tcp: Option<TcpScriptConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TcpScriptConfig {
-    /// Socket address to bind. Port `0` lets the OS pick a free port;
-    /// a non-loopback IP widens exposure beyond the local machine and
-    /// will emit a warning at startup.
-    pub bind: SocketAddr,
-    /// Required token clients must present. `None` means `--script-no-auth`
-    /// was passed; the listener accepts any client without a handshake.
-    /// On the wire the token is 16 raw bytes (the UUID's u128 big-endian
-    /// repr). Treat as a secret.
-    pub token: Option<Uuid>,
-    /// Optional JSON discovery file (`{"port": N, "token": "..."}`) written
-    /// atomically at startup.
-    pub token_file: Option<PathBuf>,
 }
 
 /// Log a successful bind: the listening line, the auth-disabled warning,

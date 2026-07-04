@@ -4,7 +4,19 @@
 //! lag the worker's real state.
 
 use crate::gui::app::App;
-use crate::gui::app::RunCommand;
+
+/// Graph execution + the worker event loop. Handled by [`App::handle_run`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RunCommand {
+    /// Evaluate the graph once on the worker.
+    Once,
+    /// Request cancellation of the in-flight run.
+    Cancel,
+    /// Start the worker's event loop (emitter events → run subscribers).
+    StartEvents,
+    /// Stop the worker's event loop.
+    StopEvents,
+}
 
 impl App {
     pub(crate) fn handle_run(&mut self, command: RunCommand) {

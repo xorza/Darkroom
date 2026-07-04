@@ -44,7 +44,7 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::core::script::{CancellableTask, ScriptRequest, TcpScriptConfig};
+use crate::core::script::{CancellableTask, ScriptRequest};
 
 /// Hard cap on a single frame so a malicious `u32::MAX` doesn't OOM
 /// the server. 1 MiB is plenty for user scripts. Applied to both the
@@ -124,6 +124,25 @@ impl TcpTransport {
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
         self.listener.local_addr()
     }
+}
+
+/// TCP listener config: bind address, optional auth token, and optional
+/// discovery file. Built from CLI flags in `main.rs`; wrapped by
+/// [`crate::core::script::ScriptConfig`] and consumed by [`start`].
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TcpScriptConfig {
+    /// Socket address to bind. Port `0` lets the OS pick a free port;
+    /// a non-loopback IP widens exposure beyond the local machine and
+    /// will emit a warning at startup.
+    pub bind: SocketAddr,
+    /// Required token clients must present. `None` means `--script-no-auth`
+    /// was passed; the listener accepts any client without a handshake.
+    /// On the wire the token is 16 raw bytes (the UUID's u128 big-endian
+    /// repr). Treat as a secret.
+    pub token: Option<Uuid>,
+    /// Optional JSON discovery file (`{"port": N, "token": "..."}`) written
+    /// atomically at startup.
+    pub token_file: Option<PathBuf>,
 }
 
 /// Side-effect-free summary of a successful [`start`] call. The caller

@@ -22,7 +22,7 @@ use crate::core::edit::intent::{Intent, build_duplicate_intent_for, commit_inten
 use crate::core::io::preferences::Preferences;
 use crate::core::worker::ValueRequest;
 use crate::gui::UiAction;
-use crate::gui::app::AppCommand;
+use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::run_state::RunState;

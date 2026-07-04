@@ -10,8 +10,11 @@ use palantir::{Key, Shortcut, Ui};
 
 use crate::core::document::{GraphRef, Viewport};
 use crate::core::edit::intent::{self, Intent, build_duplicate_intent};
+use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::file::FileCommand;
+use crate::gui::app::commands::run::RunCommand;
+use crate::gui::app::commands::shell::ShellCommand;
 use crate::gui::app::editor::Editor;
-use crate::gui::app::{AppCommand, FileCommand, RunCommand, ShellCommand};
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
 const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');

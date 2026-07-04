@@ -3,8 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use palantir::Ui;
-use scenarium::data::FsPathConfig;
-use scenarium::graph::{Graph as CoreGraph, NodeId};
+use scenarium::graph::Graph as CoreGraph;
 use scenarium::library::Library;
 
 use crate::core::document::Document;
@@ -18,126 +17,12 @@ use crate::gui::MAIN_WINDOW;
 use crate::gui::run_state::RunState;
 use crate::gui::theme::Theme;
 
-mod commands;
+pub(crate) mod commands;
 pub(crate) mod editor;
 mod exit_dialog;
 
 use editor::Editor;
 use exit_dialog::ExitChoice;
-
-/// A deferred, side-effecting command a UI surface (the menu bar, the graph
-/// toolbar, the Preferences tab, a node's S-badge, an inline path-picker)
-/// hands to [`App`] to perform *outside* the record pass — after the frame's
-/// record + drain, so a blocking file dialog or worker call holds no frame
-/// borrows. The producing UI never touches `Document` / `Theme` / `Engine`
-/// directly; it returns one of these and [`App::handle_command`] dispatches
-/// it to the matching group handler (one submodule of `gui::app::commands`
-/// per variant here).
-#[derive(Clone, Debug)]
-pub(crate) enum AppCommand {
-    /// Document file lifecycle — `commands::file`.
-    File(FileCommand),
-    /// Subgraph → library publishing — `commands::subgraph`.
-    Subgraph(SubgraphCommand),
-    /// Graph execution + worker event loop — `commands::run`.
-    Run(RunCommand),
-    /// Preferences edits — `commands::prefs`.
-    Prefs(PrefsCommand),
-    /// Node edits raised via a dialog — `commands::edit`.
-    Edit(EditCommand),
-    /// App shell: navigation + lifecycle — `commands::shell`.
-    Shell(ShellCommand),
-}
-
-/// Document file lifecycle. Handled by `App::handle_file`.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum FileCommand {
-    /// Replace the document with an empty one.
-    New,
-    /// Prompt for a file and load it.
-    Load,
-    /// Save to the current file, or prompt (Save As) if there isn't one.
-    Save,
-    /// Always prompt for a destination.
-    SaveAs,
-}
-
-/// Publishing subgraphs into the shared library. Handled by
-/// `App::handle_subgraph`.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum SubgraphCommand {
-    /// Export the active subgraph (plus its local-def dependencies) to a
-    /// file. No-op when the active tab isn't a subgraph.
-    Export,
-    /// Import a subgraph bundle from a file into the current document.
-    Import,
-    /// Publish a copy of the active subgraph into the shared library, so it
-    /// can be instanced as `Linked` anywhere. No-op off a subgraph.
-    Promote,
-    /// Publish a node's local subgraph def to the library (the S-badge
-    /// "Publish" action): update in place when linked, else create + link.
-    PublishNode { node_id: NodeId },
-}
-
-/// Graph execution + the worker event loop. Handled by `App::handle_run`.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum RunCommand {
-    /// Evaluate the graph once on the worker.
-    Once,
-    /// Request cancellation of the in-flight run.
-    Cancel,
-    /// Start the worker's event loop (emitter events → run subscribers).
-    StartEvents,
-    /// Stop the worker's event loop.
-    StopEvents,
-}
-
-/// Preferences edits. Handled by `App::handle_prefs`.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum PrefsCommand {
-    /// The Preferences tab edited a field of [`Preferences`] in place (any
-    /// checkbox / radio / path field). `App` re-syncs derived state (theme
-    /// palette, ML paths) and persists — one command for every field, so
-    /// adding a preference needs no new command.
-    Changed,
-    /// Open an ONNX file dialog for one of the ML model paths (the "Browse…"
-    /// buttons) — the blocking dialog runs outside the record, unlike the
-    /// in-place field edits that report [`Self::Changed`].
-    PickMlModel(MlModelKind),
-}
-
-/// Node edits that need a dialog before applying. Handled by
-/// `App::handle_edit`.
-#[derive(Clone, Debug)]
-pub(crate) enum EditCommand {
-    /// Open a file dialog (filtered by `config`) for a node's `FsPath`
-    /// const input, applying the chosen path as a `SetInput` edit. Raised
-    /// by the inline pick button (see `gui::node::emit_path_picks`).
-    PickInputPath {
-        node_id: NodeId,
-        port_idx: usize,
-        config: Arc<FsPathConfig>,
-    },
-}
-
-/// App shell: navigation + lifecycle. Handled by `App::handle_shell`.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum ShellCommand {
-    /// Open (or focus) the Preferences tab — the app-settings window.
-    OpenPreferences,
-    /// Quit the app. Routed through `App::request_quit`, which prompts to
-    /// save first if the document has unsaved changes.
-    Quit,
-}
-
-/// Which ML model path a [`PrefsCommand::PickMlModel`] targets.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MlModelKind {
-    /// The `ml_denoise` node's model (DeepSNR).
-    Denoise,
-    /// The `remove_stars` node's model (StarNet).
-    StarRemoval,
-}
 
 /// Shared per-frame context threaded down the UI tree. Holds borrows
 /// of state owned higher up so child subtrees don't take a growing
@@ -162,8 +47,9 @@ pub(crate) struct AppContext<'a> {
 /// borrows each frame — the [`Engine`] (func lib + worker + script host),
 /// the active theme, session preferences + file path, and the host handle. Its
 /// `frame` drains the engine's worker + script queues into the editor's
-/// projections, runs one `Editor::frame`, and actions the [`AppCommand`]
-/// it surfaces (file / theme / subgraph dialogs, run) outside the record.
+/// projections, runs one `Editor::frame`, and actions the
+/// [`AppCommand`](commands::AppCommand) it surfaces (file / theme /
+/// subgraph dialogs, run) outside the record.
 #[derive(Debug)]
 pub(crate) struct App {
     pub(crate) editor: Editor,

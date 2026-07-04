@@ -19,7 +19,8 @@ use palantir::{
 
 use crate::core::io::preferences::Preferences;
 use crate::core::theme_pref::ThemeChoice;
-use crate::gui::app::{AppCommand, MlModelKind, PrefsCommand};
+use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::prefs::{MlModelKind, PrefsCommand};
 use crate::gui::dialogs;
 use crate::gui::theme::Theme;
 

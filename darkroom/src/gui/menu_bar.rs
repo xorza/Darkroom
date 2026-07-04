@@ -1,7 +1,10 @@
 use glam::Vec2;
 use palantir::{Button, Configure, ContextMenu, MenuItem, Panel, PopupHandle, Sizing, Spacing, Ui};
 
-use crate::gui::app::{AppCommand, FileCommand, ShellCommand, SubgraphCommand};
+use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::file::FileCommand;
+use crate::gui::app::commands::shell::ShellCommand;
+use crate::gui::app::commands::subgraph::SubgraphCommand;
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
 /// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.

@@ -9,9 +9,31 @@ use palantir::Ui;
 use scenarium::data::{FsPathConfig, FsPathMode};
 
 use crate::gui::app::App;
-use crate::gui::app::{MlModelKind, PrefsCommand};
 use crate::gui::dialogs;
 use crate::gui::theme::Theme;
+
+/// Preferences edits. Handled by [`App::handle_prefs`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum PrefsCommand {
+    /// The Preferences tab edited a field of [`crate::core::io::preferences::Preferences`]
+    /// in place (any checkbox / radio / path field). `App` re-syncs derived
+    /// state (theme palette, ML paths) and persists — one command for every
+    /// field, so adding a preference needs no new command.
+    Changed,
+    /// Open an ONNX file dialog for one of the ML model paths (the "Browse…"
+    /// buttons) — the blocking dialog runs outside the record, unlike the
+    /// in-place field edits that report [`Self::Changed`].
+    PickMlModel(MlModelKind),
+}
+
+/// Which ML model path a [`PrefsCommand::PickMlModel`] targets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MlModelKind {
+    /// The `ml_denoise` node's model (DeepSNR).
+    Denoise,
+    /// The `remove_stars` node's model (StarNet).
+    StarRemoval,
+}
 
 impl App {
     pub(crate) fn handle_prefs(&mut self, ui: &mut Ui, command: PrefsCommand) {

@@ -7,9 +7,21 @@ use std::path::{Path, PathBuf};
 use crate::core::document::Document;
 use crate::core::io::persistence;
 use crate::gui::app::App;
-use crate::gui::app::FileCommand;
 use crate::gui::app::editor::Editor;
 use crate::gui::dialogs;
+
+/// Document file lifecycle. Handled by [`App::handle_file`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum FileCommand {
+    /// Replace the document with an empty one.
+    New,
+    /// Prompt for a file and load it.
+    Load,
+    /// Save to the current file, or prompt (Save As) if there isn't one.
+    Save,
+    /// Always prompt for a destination.
+    SaveAs,
+}
 
 impl App {
     pub(crate) fn handle_file(&mut self, command: FileCommand) {

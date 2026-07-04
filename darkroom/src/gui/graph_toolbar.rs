@@ -15,7 +15,8 @@ use palantir::{
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
-use crate::gui::app::{AppCommand, RunCommand};
+use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;

@@ -2,7 +2,16 @@
 //! quit request (which routes through the unsaved-changes prompt).
 
 use crate::gui::app::App;
-use crate::gui::app::ShellCommand;
+
+/// App shell: navigation + lifecycle. Handled by [`App::handle_shell`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ShellCommand {
+    /// Open (or focus) the Preferences tab — the app-settings window.
+    OpenPreferences,
+    /// Quit the app. Routed through `App::request_quit`, which prompts to
+    /// save first if the document has unsaved changes.
+    Quit,
+}
 
 impl App {
     pub(crate) fn handle_shell(&mut self, command: ShellCommand) {

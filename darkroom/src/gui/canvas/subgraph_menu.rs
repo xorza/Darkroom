@@ -3,7 +3,8 @@ use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphRef;
 
 use crate::core::edit::intent::Intent;
-use crate::gui::app::{AppCommand, SubgraphCommand};
+use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::subgraph::SubgraphCommand;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::node::header::subgraph_badge_wid;
 use crate::gui::scene::Scene;

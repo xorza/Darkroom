@@ -13,7 +13,8 @@ use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::core::io::preferences::Preferences;
-use crate::core::script::{DEFAULT_BIND, ScriptConfig, TcpScriptConfig};
+use crate::core::script::tcp::TcpScriptConfig;
+use crate::core::script::{DEFAULT_BIND, ScriptConfig};
 use crate::core::session::Session;
 use crate::core::wake;
 use crate::gui::MAIN_WINDOW;
