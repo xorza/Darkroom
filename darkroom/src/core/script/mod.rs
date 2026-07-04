@@ -232,17 +232,18 @@ impl InboundSender {
 /// `run_script` after each request and shipped as `ScriptResult.print`.
 type StdoutBuffer = Arc<Mutex<String>>;
 
-/// Owns a transport's background task. Dropping it cancels the token
-/// (cooperative stop) and aborts the task (hard stop) so sockets and
-/// discovery files get cleaned up without blocking shutdown of the
-/// whole app.
+/// A background tokio task paired with its cooperative cancel token.
+/// Dropping it cancels the token (soft stop) then aborts the task (hard
+/// stop), so sockets and discovery files get cleaned up without blocking
+/// shutdown of the whole app. Both the transport listener and the executor
+/// loop are exactly this — "a task you cancel on drop" — so they share it.
 #[derive(Debug)]
-pub struct TransportHandle {
+pub struct CancellableTask {
     cancel: CancellationToken,
     task: Option<JoinHandle<()>>,
 }
 
-impl TransportHandle {
+impl CancellableTask {
     pub fn new(cancel: CancellationToken, task: JoinHandle<()>) -> Self {
         Self {
             cancel,
@@ -251,7 +252,7 @@ impl TransportHandle {
     }
 }
 
-impl Drop for TransportHandle {
+impl Drop for CancellableTask {
     fn drop(&mut self) {
         self.cancel.cancel();
         if let Some(task) = self.task.take() {
@@ -261,12 +262,12 @@ impl Drop for TransportHandle {
 }
 
 /// Owns the background executor task plus the TCP transport feeding it.
-/// Dropping it cancels everything and aborts the tasks.
+/// Both are [`CancellableTask`]s, so dropping this cancels + aborts each
+/// (executor first, then transport) with no hand-written `Drop`.
 #[derive(Debug)]
 pub struct ScriptExecutor {
-    cancel: CancellationToken,
-    task: Option<JoinHandle<()>>,
-    _transport: TransportHandle,
+    _executor: CancellableTask,
+    _transport: CancellableTask,
 }
 
 impl ScriptExecutor {
@@ -293,18 +294,8 @@ impl ScriptExecutor {
         });
 
         Self {
-            cancel,
-            task: Some(task),
+            _executor: CancellableTask::new(cancel, task),
             _transport: transport,
-        }
-    }
-}
-
-impl Drop for ScriptExecutor {
-    fn drop(&mut self) {
-        self.cancel.cancel();
-        if let Some(task) = self.task.take() {
-            task.abort();
         }
     }
 }

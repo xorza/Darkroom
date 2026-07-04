@@ -44,7 +44,7 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::core::script::{ScriptRequest, TcpScriptConfig, TransportHandle};
+use crate::core::script::{CancellableTask, ScriptRequest, TcpScriptConfig};
 
 /// Hard cap on a single frame so a malicious `u32::MAX` doesn't OOM
 /// the server. 1 MiB is plenty for user scripts. Applied to both the
@@ -208,7 +208,7 @@ impl TcpTransport {
         self,
         tx: mpsc::Sender<ScriptRequest>,
         cancel: CancellationToken,
-    ) -> TransportHandle {
+    ) -> CancellableTask {
         let Self {
             listener,
             token,
@@ -221,7 +221,7 @@ impl TcpTransport {
             }
         });
 
-        TransportHandle::new(cancel, task)
+        CancellableTask::new(cancel, task)
     }
 }
 
