@@ -172,7 +172,7 @@ fn input_label_cell(
         && input.required
         && matches!(input.binding, InputBindingView::None);
     let fill = if missing {
-        theme.exec_missing_glow
+        theme.colors.exec_missing_glow
     } else {
         port_color(
             theme,

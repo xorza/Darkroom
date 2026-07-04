@@ -286,7 +286,7 @@ impl BreakerUI {
         }
         ui.add_shape(Shape::Polyline {
             points: &b.points,
-            colors: PolylineColors::Single(ctx.theme.breaker_stroke),
+            colors: PolylineColors::Single(ctx.theme.colors.breaker_stroke),
             width: ctx.theme.breaker_stroke_width,
             cap: LineCap::Round,
             join: LineJoin::Round,

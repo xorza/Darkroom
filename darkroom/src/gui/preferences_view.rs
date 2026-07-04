@@ -34,7 +34,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
         .padding(Spacing::all(20.0))
         .gap(14.0)
         .background(Background {
-            fill: theme.canvas_bg.into(),
+            fill: theme.colors.canvas_bg.into(),
             ..Default::default()
         })
         .show(ui, |ui| {
@@ -126,7 +126,7 @@ fn heading(ui: &mut Ui, text: &'static str) {
 fn subheading(ui: &mut Ui, theme: &Theme, text: &'static str) {
     Text::new(text)
         .style(TextStyle {
-            color: theme.text_muted,
+            color: theme.colors.text_muted,
             font_size_px: 13.0,
             ..ui.theme.text
         })
@@ -236,9 +236,9 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
     // Last frame's hover drives the brighten — this frame's response isn't
     // known until after `show`.
     let link_color = if ui.response_for(id).hovered {
-        theme.badge_subgraph.midpoint(Color::hex(0xffffff))
+        theme.colors.badge_subgraph.midpoint(Color::hex(0xffffff))
     } else {
-        theme.badge_subgraph
+        theme.colors.badge_subgraph
     };
     Panel::hstack()
         .id_salt(link_label)
@@ -269,7 +269,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
             Tooltip::for_(&snapshot).text(url).show(ui);
             Text::new(DOWNLOAD_HINT)
                 .style(TextStyle {
-                    color: theme.text_muted,
+                    color: theme.colors.text_muted,
                     font_size_px: 12.0,
                     ..ui.theme.text
                 })

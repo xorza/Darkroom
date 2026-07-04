@@ -197,7 +197,7 @@ impl SubscriptionUI {
             // The neutral event color matches the emitter/subscriber glyphs;
             // the broken alarm color wins while the breaker crosses it.
             let brush = if broken {
-                Brush::Solid(ctx.theme.connection_broken)
+                Brush::Solid(ctx.theme.colors.connection_broken)
             } else {
                 Brush::Solid(event_color(ctx.theme, false))
             };

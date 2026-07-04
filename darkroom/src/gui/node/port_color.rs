@@ -35,9 +35,9 @@ pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: 
 /// (not a type hue); `hovered` lifts it like the positional port colors.
 pub(crate) fn event_color(theme: &Theme, hovered: bool) -> Color {
     if hovered {
-        theme.event_port_hover
+        theme.colors.event_port_hover
     } else {
-        theme.event_port
+        theme.colors.event_port
     }
 }
 
@@ -45,10 +45,10 @@ pub(crate) fn event_color(theme: &Theme, hovered: bool) -> Color {
 /// swatch, hover variant included.
 fn fallback(theme: &Theme, kind: PortKind, hovered: bool) -> Color {
     match (kind, hovered) {
-        (PortKind::Input, false) => theme.input_port,
-        (PortKind::Input, true) => theme.input_port_hover,
-        (PortKind::Output, false) => theme.output_port,
-        (PortKind::Output, true) => theme.output_port_hover,
+        (PortKind::Input, false) => theme.colors.input_port,
+        (PortKind::Input, true) => theme.colors.input_port_hover,
+        (PortKind::Output, false) => theme.colors.output_port,
+        (PortKind::Output, true) => theme.colors.output_port_hover,
     }
 }
 
@@ -165,19 +165,19 @@ mod tests {
         let t = Theme::dark();
         assert_eq!(
             port_color(&t, &DataType::Null, PortKind::Input, false),
-            t.input_port
+            t.colors.input_port
         );
         assert_eq!(
             port_color(&t, &DataType::Null, PortKind::Output, false),
-            t.output_port
+            t.colors.output_port
         );
         assert_eq!(
             port_color(&t, &DataType::Null, PortKind::Input, true),
-            t.input_port_hover
+            t.colors.input_port_hover
         );
         assert_eq!(
             port_color(&t, &DataType::Null, PortKind::Output, true),
-            t.output_port_hover
+            t.colors.output_port_hover
         );
     }
 
@@ -212,8 +212,8 @@ mod tests {
         for t in [Theme::dark(), Theme::light()] {
             let rest = event_color(&t, false);
             let hov = event_color(&t, true);
-            assert_eq!(rest, t.event_port);
-            assert_eq!(hov, t.event_port_hover);
+            assert_eq!(rest, t.colors.event_port);
+            assert_eq!(hov, t.colors.event_port_hover);
             assert_ne!(rest, hov, "hover must visibly differ from rest");
         }
     }

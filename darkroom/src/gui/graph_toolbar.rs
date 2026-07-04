@@ -168,11 +168,11 @@ fn toggle_button(
 ) -> bool {
     let hovered = ui.response_for(wid).hovered;
     let (fill, glyph) = if toggled {
-        (theme.exec_running_glow, theme.chrome_fill)
+        (theme.colors.exec_running_glow, theme.colors.chrome_fill)
     } else if hovered {
-        (theme.header_fill, theme.exec_executed_glow)
+        (theme.colors.header_fill, theme.colors.exec_executed_glow)
     } else {
-        (theme.node_fill, theme.exec_executed_glow)
+        (theme.colors.node_fill, theme.colors.exec_executed_glow)
     };
     glyph_button(ui, wid, fill, glyph, tip, draw_glyph)
 }
@@ -189,17 +189,17 @@ fn action_button(
 ) -> bool {
     let hovered = ui.response_for(wid).hovered;
     let fill = if hovered {
-        theme.header_fill
+        theme.colors.header_fill
     } else {
-        theme.node_fill
+        theme.colors.node_fill
     };
-    glyph_button(ui, wid, fill, theme.text_muted, tip, draw_glyph)
+    glyph_button(ui, wid, fill, theme.colors.text_muted, tip, draw_glyph)
 }
 
 /// The frosted chrome backdrop shared by both toolbar group pills.
 fn pill_background(theme: &Theme) -> Background {
     Background {
-        fill: theme.chrome_fill.with_alpha(PILL_BG_ALPHA).into(),
+        fill: theme.colors.chrome_fill.with_alpha(PILL_BG_ALPHA).into(),
         corners: Corners::all(PILL_RADIUS),
         ..Default::default()
     }

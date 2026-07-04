@@ -1,21 +1,29 @@
 preset = "dark"
-canvas_bg = "#1a1a1a"
-selection_rect = "#9adbfb"
-canvas_dot = "#363636"
 canvas_dot_spacing = 18.0
 canvas_dot_radius = 0.6
-connection_broken = "#ff5e44"
 connection_width = 2.0
-breaker_stroke = "#ff5e44"
 breaker_stroke_width = 2.0
-node_fill = "#343434"
-node_border = "#363636"
 node_border_width = 1.0
 node_corner_radius = 6.0
 node_min_width = 160.0
 node_min_height = 10.0
-header_fill = "#414141"
 tab_corner_radius = 6.0
+port_size = 13.0
+port_col_pad_top = 6.0
+port_col_pad_x = 8.0
+port_gap = 6.0
+port_cols_gap = 12.0
+new_node_popup_max_height = 400.0
+
+[colors]
+canvas_bg = "#1a1a1a"
+selection_rect = "#9adbfb"
+canvas_dot = "#363636"
+connection_broken = "#ff5e44"
+breaker_stroke = "#ff5e44"
+node_fill = "#343434"
+node_border = "#363636"
+header_fill = "#414141"
 text_muted = "#aaaaa8"
 chrome_fill = "#252525"
 badge_subgraph = "#9adbfb"
@@ -32,12 +40,6 @@ input_port_hover = "#e9ff8e"
 output_port_hover = "#ffc878"
 event_port = "#e6e6e6"
 event_port_hover = "#ffffff"
-port_size = 13.0
-port_col_pad_top = 6.0
-port_col_pad_x = 8.0
-port_gap = 6.0
-port_cols_gap = 12.0
-new_node_popup_max_height = 400.0
 
 [static_value_editor]
 width = 100.0

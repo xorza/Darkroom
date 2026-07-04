@@ -157,7 +157,7 @@ impl SelectionUI {
         if rect.area() <= f32::EPSILON {
             return;
         }
-        let tint = ctx.theme.selection_rect;
+        let tint = ctx.theme.colors.selection_rect;
         ui.add_shape(Shape::RoundedRect {
             local_rect: Some(rect),
             corners: Corners::all(0.0),

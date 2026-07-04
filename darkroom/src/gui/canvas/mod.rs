@@ -287,7 +287,7 @@ impl GraphUI {
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
             .background(Background {
-                fill: ctx.theme.canvas_bg.into(),
+                fill: ctx.theme.colors.canvas_bg.into(),
                 ..Default::default()
             })
             .show(ui, |ui| {

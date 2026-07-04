@@ -66,7 +66,7 @@ impl MainWindow {
         // the graph pane (canvas_bg) fills the rest below, and the active
         // tab punches through to that same color so it looks continuous
         // with the canvas below it.
-        let chrome = ctx.theme.chrome_fill;
+        let chrome = ctx.theme.colors.chrome_fill;
         Panel::vstack()
             .auto_id()
             .size((Sizing::FILL, Sizing::FILL))

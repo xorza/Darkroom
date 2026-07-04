@@ -46,7 +46,7 @@ struct DotKey {
 impl DotKey {
     fn from_theme(ctx: &AppContext<'_>) -> Self {
         Self {
-            color: ctx.theme.canvas_dot.to_srgb_u8(),
+            color: ctx.theme.colors.canvas_dot.to_srgb_u8(),
             radius_bits: ctx.theme.canvas_dot_radius.to_bits(),
             spacing_bits: ctx.theme.canvas_dot_spacing.to_bits(),
         }
@@ -122,7 +122,7 @@ fn wrap_multiplier(zoom: f32) -> f32 {
 fn build_tile(ctx: &AppContext<'_>) -> Image {
     let n = TILE_PX;
     let radius = (ctx.theme.canvas_dot_radius * n as f32 / ctx.theme.canvas_dot_spacing).max(0.5);
-    let c = ctx.theme.canvas_dot.to_srgb_u8();
+    let c = ctx.theme.colors.canvas_dot.to_srgb_u8();
     let center = n as f32 * 0.5;
     let r2 = radius * radius;
     let mut pixels = Vec::with_capacity((n * n * 4) as usize);

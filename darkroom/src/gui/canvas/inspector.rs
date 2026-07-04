@@ -183,11 +183,11 @@ impl Inspectors {
         let logs = ctx.run_state.logs(node.id);
         let values = ctx.run_state.values(node.id);
         let border = match mode {
-            InspectMode::Pinned => theme.text_muted,
-            InspectMode::Open => theme.node_border,
+            InspectMode::Pinned => theme.colors.text_muted,
+            InspectMode::Open => theme.colors.node_border,
         };
         let chrome = Background {
-            fill: theme.node_fill.into(),
+            fill: theme.colors.node_fill.into(),
             stroke: Stroke::solid(border, 1.0),
             corners: Corners::all(theme.node_corner_radius),
             shadow: Shadow {
@@ -302,8 +302,8 @@ impl Inspectors {
 fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
     match level {
         LogLevel::Info => ui.theme.text.color.with_alpha(0.85),
-        LogLevel::Warn => theme.exec_missing_glow,
-        LogLevel::Error => theme.exec_errored_glow,
+        LogLevel::Warn => theme.colors.exec_missing_glow,
+        LogLevel::Error => theme.colors.exec_errored_glow,
     }
 }
 

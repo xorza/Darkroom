@@ -180,15 +180,15 @@ impl NodeUI {
         // the fill).
         let border_width = theme.node_border_width * 2.0;
         let border = if broken {
-            theme.connection_broken
+            theme.colors.connection_broken
         } else if node.missing {
             // A stub for a node whose func is gone from the library: paint it
             // in the error color so it reads as broken-but-deletable.
-            theme.exec_errored_glow
+            theme.colors.exec_errored_glow
         } else if selected {
-            theme.text_muted
+            theme.colors.text_muted
         } else {
-            theme.node_border
+            theme.colors.node_border
         };
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).
@@ -204,7 +204,7 @@ impl NodeUI {
             .size((Sizing::Hug, Sizing::Hug))
             .sense(Sense::CLICK | Sense::DRAG)
             .background(Background {
-                fill: theme.node_fill.into(),
+                fill: theme.colors.node_fill.into(),
                 stroke: Stroke::solid(border, border_width),
                 corners: Corners::all(theme.node_corner_radius),
                 shadow,
@@ -451,11 +451,11 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>)
 pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
     match status {
         ExecStatus::None => None,
-        ExecStatus::Cached => Some(theme.exec_cached_glow),
-        ExecStatus::Executed(_) => Some(theme.exec_executed_glow),
-        ExecStatus::Running(_) => Some(theme.exec_running_glow),
-        ExecStatus::MissingInputs => Some(theme.exec_missing_glow),
-        ExecStatus::Errored => Some(theme.exec_errored_glow),
+        ExecStatus::Cached => Some(theme.colors.exec_cached_glow),
+        ExecStatus::Executed(_) => Some(theme.colors.exec_executed_glow),
+        ExecStatus::Running(_) => Some(theme.colors.exec_running_glow),
+        ExecStatus::MissingInputs => Some(theme.colors.exec_missing_glow),
+        ExecStatus::Errored => Some(theme.colors.exec_errored_glow),
     }
 }
 

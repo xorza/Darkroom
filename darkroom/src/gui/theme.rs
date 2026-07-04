@@ -215,38 +215,24 @@ impl ThemeChoice {
 /// Export menu.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Theme {
-    // Scalar (`Color` / `f32`) fields come first; `palantir_theme`
-    // (a nested table) is last. TOML serialization requires every
-    // scalar value to precede any table at the same level — otherwise
-    // the serializer errors with `ValueAfterTable`.
+    // Scalar fields (`preset` + the layout `f32`s) come first; the tables
+    // (`colors`, the per-widget sub-themes, `palantir_theme`) follow. TOML
+    // serialization requires every scalar value to precede any table at the
+    // same level — otherwise the serializer errors with `ValueAfterTable`.
     /// Which built-in preset assembled this theme. Round-trips
     /// through TOML so a user-loaded file restores the same toggle
     /// behaviour the original `Theme::dark` / `light` had.
     pub preset: ThemePreset,
 
-    // ── canvas ────────────────────────────────────────────────────
-    pub canvas_bg: Color,
-    /// Tint of the rubber-band multi-selection rectangle. Drawn as a
-    /// translucent fill plus a near-opaque 1px border, both derived
-    /// from this single color (palette accent).
-    pub selection_rect: Color,
-    /// Dotted backdrop grid: dot color, world-space base spacing
-    /// between dots, and on-screen dot radius (px). Spacing is wrapped
-    /// by a power-of-2 multiplier as the user zooms so the field never
-    /// collapses into noise — see `gui::background`.
-    pub canvas_dot: Color,
+    // ── layout dimensions ────────────────────────────────────────
+    /// Dotted backdrop grid: world-space base spacing between dots, and
+    /// on-screen dot radius (px). Spacing is wrapped by a power-of-2
+    /// multiplier as the user zooms so the field never collapses into
+    /// noise — see `gui::background`. (Dot colour is `colors.canvas_dot`.)
     pub canvas_dot_spacing: f32,
     pub canvas_dot_radius: f32,
-
-    // ── connections ──────────────────────────────────────────────
-    pub connection_broken: Color,
     pub connection_width: f32,
-    pub breaker_stroke: Color,
     pub breaker_stroke_width: f32,
-
-    // ── node chrome ──────────────────────────────────────────────
-    pub node_fill: Color,
-    pub node_border: Color,
     pub node_border_width: f32,
     pub node_corner_radius: f32,
     /// Minimum content size for a node body. Caps how tightly a node
@@ -254,58 +240,9 @@ pub struct Theme {
     /// header stays legible at any zoom.
     pub node_min_width: f32,
     pub node_min_height: f32,
-
-    pub header_fill: Color,
     /// Corner radius of the tab-strip tabs (the header derives its own
     /// radius from `node_corner_radius`, so it doesn't read this).
     pub tab_corner_radius: f32,
-
-    /// Muted secondary foreground (palette `text_muted`, `#aaaaa8`). The
-    /// de-emphasized accent shared across chrome: the selected-node halo,
-    /// inactive/disabled header chips, the pinned-inspector outline, and
-    /// active-tab text — visible without competing with the bright accent
-    /// (`badge_subgraph`) or full-strength text.
-    pub text_muted: Color,
-
-    /// Top-chrome fill behind the menu bar + tab strip. A notch darker
-    /// than the node surface, sitting between the graph (`canvas_bg`)
-    /// and the nodes, so the chrome recedes and the active tab (which
-    /// uses `canvas_bg`) reads as continuous with the graph below it.
-    pub chrome_fill: Color,
-
-    // ── header badges ────────────────────────────────────────────
-    /// Subgraph (composite instance) chip — accent cyan.
-    pub badge_subgraph: Color,
-    /// Terminal (sink) chip — error red.
-    pub badge_terminal: Color,
-    /// Cache (persist-to-disk) chip — warning yellow.
-    pub badge_cache: Color,
-
-    // ── execution-status glow ────────────────────────────────────
-    // Color of the soft glow shadow behind a node, by the last run's
-    // outcome.
-    // Palette swatches: `success`/`accent`/`syn_keyword`/`error`.
-    /// Node computed this run — palette `success` (green).
-    pub exec_executed_glow: Color,
-    /// Node reused its cached result — palette `accent` (cyan).
-    pub exec_cached_glow: Color,
-    /// Node is computing this run (live) — palette `constant` (purple).
-    pub exec_running_glow: Color,
-    /// Node has unfilled required inputs — palette `syn_keyword` (orange).
-    pub exec_missing_glow: Color,
-    /// Node errored — palette `error` (red).
-    pub exec_errored_glow: Color,
-
-    // ── ports ────────────────────────────────────────────────────
-    pub input_port: Color,
-    pub output_port: Color,
-    pub input_port_hover: Color,
-    pub output_port_hover: Color,
-    /// Event emitter glyphs, subscription pins, and event wires (neutral,
-    /// distinct from the type-colored data ports). `_hover` lifts it like the
-    /// positional port colors do.
-    pub event_port: Color,
-    pub event_port_hover: Color,
     /// Side of the port circle quad. The circle's corner radius is
     /// derived as `port_size * 0.5` (see [`Self::port_radius`]).
     pub port_size: f32,
@@ -320,11 +257,14 @@ pub struct Theme {
     pub port_gap: f32,
     /// Horizontal gap between the input and output port columns.
     pub port_cols_gap: f32,
-
-    // ── inline editors / popups ─────────────────────────────────
     /// Cap on the new-node popup's height. Inner scroll handles
     /// overflow when the function list exceeds the cap.
     pub new_node_popup_max_height: f32,
+
+    // ── tables ───────────────────────────────────────────────────
+    /// Every chrome colour — the palette half of the theme, serialized as
+    /// the `[colors]` sub-table.
+    pub colors: PaletteColors,
 
     /// Look + dimensions for the inline static-value editor that hugs a
     /// `Binding::Const` input port (number/string field, file-pick chip).
@@ -659,20 +599,21 @@ fn recolour_palantir(t: &mut palantir::Theme, p: &PalantirPalette) {
     t.tooltip.text.color = p.text;
 }
 
-/// Declares [`PaletteColors`] — the chrome-colour roster [`Theme::build`]
-/// reads — from one `field => CONST` list, expanding it into the struct
-/// plus its two built-in instances (`DARK` / `LIGHT`, pulling
-/// `dark::CONST` / `light::CONST`). One roster, so a colour can't sit in
-/// the struct while a preset forgets it (or vice-versa) — the presets
-/// won't compile until every field is filled.
+/// Declares [`PaletteColors`] — the chrome-colour roster a [`Theme`]
+/// carries — from one `field => CONST` list, expanding it into the struct
+/// (each field keeping its own doc) plus the two built-in instances
+/// (`DARK` / `LIGHT`, pulling `dark::CONST` / `light::CONST`). One roster,
+/// so a colour can't sit in the struct while a preset forgets it (or
+/// vice-versa) — the presets won't compile until every field is filled.
 macro_rules! palette_colors {
-    ($($field:ident => $konst:ident),+ $(,)?) => {
-        /// Colour swatches a [`Theme`] needs from a palette mod. Borrowed by
-        /// [`Theme::build`] so the two presets share one assembly path — only
-        /// the colour values diverge; every dimension and sub-theme comes
-        /// from the shared block.
-        struct PaletteColors {
-            $($field: Color,)+
+    ($($(#[$meta:meta])* $field:ident => $konst:ident),+ $(,)?) => {
+        /// Every darkroom chrome colour — the palette half of a [`Theme`]
+        /// (the other half is layout dimensions). Serialized as the theme's
+        /// `[colors]` table. Deliberately not `Copy` (24 colours): moved,
+        /// not silently bit-copied.
+        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+        pub struct PaletteColors {
+            $($(#[$meta])* pub $field: Color,)+
         }
 
         impl PaletteColors {
@@ -684,27 +625,52 @@ macro_rules! palette_colors {
 
 palette_colors! {
     canvas_bg => CANVAS_BG,
+    /// Tint of the rubber-band multi-selection rectangle. Drawn as a
+    /// translucent fill plus a near-opaque 1px border, both derived
+    /// from this single color (palette accent).
     selection_rect => SELECTION_RECT,
+    /// Dotted backdrop grid dot color. Spacing + radius are layout
+    /// dimensions on `Theme` (`canvas_dot_spacing` / `canvas_dot_radius`).
     canvas_dot => CANVAS_DOT,
     connection_broken => CONNECTION_BROKEN,
     breaker_stroke => BREAKER_STROKE,
     node_fill => NODE_FILL,
     node_border => NODE_BORDER,
     header_fill => HEADER_FILL,
+    /// Muted secondary foreground (palette `text_muted`, `#aaaaa8`). The
+    /// de-emphasized accent shared across chrome: the selected-node halo,
+    /// inactive/disabled header chips, the pinned-inspector outline, and
+    /// active-tab text — visible without competing with the bright accent
+    /// (`badge_subgraph`) or full-strength text.
     text_muted => TEXT_MUTED,
+    /// Top-chrome fill behind the menu bar + tab strip. A notch darker
+    /// than the node surface, sitting between the graph (`canvas_bg`)
+    /// and the nodes, so the chrome recedes and the active tab (which
+    /// uses `canvas_bg`) reads as continuous with the graph below it.
     chrome_fill => CHROME_FILL,
+    /// Subgraph (composite instance) chip — accent cyan.
     badge_subgraph => BADGE_SUBGRAPH,
+    /// Terminal (sink) chip — error red.
     badge_terminal => BADGE_TERMINAL,
+    /// Cache (persist-to-disk) chip — warning yellow.
     badge_cache => BADGE_CACHE,
+    /// Soft glow behind a node computed this run — palette `success` (green).
     exec_executed_glow => EXEC_EXECUTED_GLOW,
+    /// Node reused its cached result — palette `accent` (cyan).
     exec_cached_glow => EXEC_CACHED_GLOW,
+    /// Node is computing this run (live) — palette `constant` (purple).
     exec_running_glow => EXEC_RUNNING_GLOW,
+    /// Node has unfilled required inputs — palette `syn_keyword` (orange).
     exec_missing_glow => EXEC_MISSING_GLOW,
+    /// Node errored — palette `error` (red).
     exec_errored_glow => EXEC_ERRORED_GLOW,
     input_port => INPUT_PORT,
     output_port => OUTPUT_PORT,
     input_port_hover => INPUT_PORT_HOVER,
     output_port_hover => OUTPUT_PORT_HOVER,
+    /// Event emitter glyphs, subscription pins, and event wires (neutral,
+    /// distinct from the type-colored data ports). `_hover` lifts it like
+    /// the positional port colors do.
     event_port => EVENT_PORT,
     event_port_hover => EVENT_PORT_HOVER,
 }
@@ -742,7 +708,7 @@ impl Theme {
     pub fn dark() -> Self {
         Self::build(
             ThemePreset::Dark,
-            &PaletteColors::DARK,
+            PaletteColors::DARK,
             &PalantirPalette::DARK,
             StaticValueEditorTheme::dark(),
             InlineRenameTheme::dark(),
@@ -754,68 +720,45 @@ impl Theme {
     pub fn light() -> Self {
         Self::build(
             ThemePreset::Light,
-            &PaletteColors::LIGHT,
+            PaletteColors::LIGHT,
             &PalantirPalette::LIGHT,
             StaticValueEditorTheme::light(),
             InlineRenameTheme::light(),
         )
     }
 
-    /// Shared assembly path: dimensions are palette-independent; `c`
-    /// drives darkroom chrome, `p` drives the palantir widget
-    /// recolouring, and `sve` / `inline_rename` are the per-palette
-    /// per-widget bundles (handed in rather than rebuilt here so their
-    /// hex values stay alongside the rest of the palette). `preset`
-    /// tags which built-in produced this theme so the toggle command
-    /// doesn't have to guess.
+    /// Shared assembly path: dimensions are palette-independent; `colors`
+    /// (moved in, not copied) drives darkroom chrome, `p` drives the
+    /// palantir widget recolouring, and `sve` / `inline_rename` are the
+    /// per-palette per-widget bundles (handed in rather than rebuilt here
+    /// so their hex values stay alongside the rest of the palette).
+    /// `preset` tags which built-in produced this theme so the toggle
+    /// command doesn't have to guess.
     fn build(
         preset: ThemePreset,
-        c: &PaletteColors,
+        colors: PaletteColors,
         p: &PalantirPalette,
         sve: StaticValueEditorTheme,
         inline_rename: InlineRenameTheme,
     ) -> Self {
         Self {
             preset,
-            canvas_bg: c.canvas_bg,
-            selection_rect: c.selection_rect,
-            canvas_dot: c.canvas_dot,
             canvas_dot_spacing: CANVAS_DOT_SPACING,
             canvas_dot_radius: CANVAS_DOT_RADIUS,
-            connection_broken: c.connection_broken,
             connection_width: CONNECTION_WIDTH,
-            breaker_stroke: c.breaker_stroke,
             breaker_stroke_width: BREAKER_STROKE_WIDTH,
-            node_fill: c.node_fill,
-            node_border: c.node_border,
             node_border_width: NODE_BORDER_WIDTH,
             node_corner_radius: NODE_CORNER_RADIUS,
             node_min_width: NODE_MIN_WIDTH,
             node_min_height: NODE_MIN_HEIGHT,
-            header_fill: c.header_fill,
             tab_corner_radius: TAB_CORNER_RADIUS,
-            text_muted: c.text_muted,
-            chrome_fill: c.chrome_fill,
-            badge_subgraph: c.badge_subgraph,
-            badge_terminal: c.badge_terminal,
-            badge_cache: c.badge_cache,
-            exec_executed_glow: c.exec_executed_glow,
-            exec_cached_glow: c.exec_cached_glow,
-            exec_running_glow: c.exec_running_glow,
-            exec_missing_glow: c.exec_missing_glow,
-            exec_errored_glow: c.exec_errored_glow,
-            input_port: c.input_port,
-            output_port: c.output_port,
-            input_port_hover: c.input_port_hover,
-            output_port_hover: c.output_port_hover,
-            event_port: c.event_port,
-            event_port_hover: c.event_port_hover,
             port_size: PORT_SIZE,
             port_col_pad_top: PORT_COL_PAD_TOP,
             port_col_pad_x: PORT_COL_PAD_X,
             port_gap: PORT_GAP,
             port_cols_gap: PORT_COLS_GAP,
             new_node_popup_max_height: NEW_NODE_POPUP_MAX_HEIGHT,
+            colors,
             static_value_editor: sve,
             inline_rename,
             palantir_theme: palantir_theme_for(p),
@@ -861,9 +804,9 @@ mod tests {
     fn theme_roundtrips_through_toml() {
         let mut theme = Theme {
             node_min_width: 137.5,
-            text_muted: Color::hex(0x123456),
             ..Theme::default()
         };
+        theme.colors.text_muted = Color::hex(0x123456);
         theme.palantir_theme.window_clear = Color::hex(0xabcdef);
 
         let bytes = common::serialize(&theme, SerdeFormat::Toml).expect("serialize theme");
@@ -871,8 +814,8 @@ mod tests {
             .expect("theme should deserialize from its own TOML output");
 
         assert_eq!(back.node_min_width, 137.5);
-        assert_eq!(back.text_muted, Color::hex(0x123456));
-        assert_eq!(back.canvas_bg, theme.canvas_bg);
+        assert_eq!(back.colors.text_muted, Color::hex(0x123456));
+        assert_eq!(back.colors.canvas_bg, theme.colors.canvas_bg);
         // Nested palantir palette round-trips too.
         assert_eq!(back.palantir_theme.window_clear, Color::hex(0xabcdef));
         // The infinite tooltip-height axis survives `Size`'s serde.
@@ -887,11 +830,11 @@ mod tests {
     #[test]
     fn default_palette_and_menu_tweak() {
         let theme = Theme::default();
-        assert_eq!(theme.canvas_bg, Color::hex(0x1a1a1a));
-        assert_eq!(theme.input_port, Color::hex(0xdaff58));
-        assert_eq!(theme.output_port, Color::hex(0xffa63d));
+        assert_eq!(theme.colors.canvas_bg, Color::hex(0x1a1a1a));
+        assert_eq!(theme.colors.input_port, Color::hex(0xdaff58));
+        assert_eq!(theme.colors.output_port, Color::hex(0xffa63d));
         // Cache (persist-to-disk) chip is the palette `warning` yellow.
-        assert_eq!(theme.badge_cache, Color::hex(0xffd44a));
+        assert_eq!(theme.colors.badge_cache, Color::hex(0xffd44a));
         assert_eq!(theme.node_min_width, 160.0);
         assert!(theme.palantir_theme.tooltip.max_size.h.is_infinite());
         // The menu-bar font was shrunk from palantir's default to ours.
@@ -916,8 +859,8 @@ mod tests {
         assert_eq!(Theme::dark().preset, ThemePreset::Dark);
         assert_eq!(Theme::light().preset, ThemePreset::Light);
         // Full palette swapped, not just the tag.
-        assert_eq!(dark.canvas_bg, Color::hex(0x1a1a1a));
-        assert_eq!(light.canvas_bg, Color::hex(0xfcfcfc));
+        assert_eq!(dark.colors.canvas_bg, Color::hex(0x1a1a1a));
+        assert_eq!(light.colors.canvas_bg, Color::hex(0xfcfcfc));
     }
 
     /// System detection must always resolve to one of the two built-in

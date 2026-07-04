@@ -110,7 +110,7 @@ pub(crate) fn show(
         .gap(3.0)
         .child_align(Align::v(VAlign::Bottom))
         .background(Background {
-            fill: theme.chrome_fill.into(),
+            fill: theme.colors.chrome_fill.into(),
             ..Default::default()
         })
         .show(ui, |ui| {
@@ -136,7 +136,7 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
     let r = theme.tab_corner_radius;
     let hover_bg = if ui.response_for(tab_new_wid()).hovered {
         Background {
-            fill: theme.header_fill.into(),
+            fill: theme.colors.header_fill.into(),
             corners: Corners::new(r, r, 0.0, 0.0),
             ..Default::default()
         }
@@ -155,7 +155,7 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
         .show(ui, |ui| {
             Text::new("+")
                 .style(TextStyle {
-                    color: theme.text_muted,
+                    color: theme.colors.text_muted,
                     font_size_px: 15.0,
                     line_height_mult: 1.0,
                     ..ui.theme.text
@@ -179,7 +179,7 @@ fn tab_chip(
     // (transparent fill = just a label) so the active one reads clearly.
     let background = if active {
         Background {
-            fill: theme.canvas_bg.into(),
+            fill: theme.colors.canvas_bg.into(),
             corners: Corners::new(r, r, 0.0, 0.0),
             ..Default::default()
         }
@@ -241,7 +241,7 @@ fn tab_chip(
                 // highlight chip behind the `×` when pointed at.
                 let hover_bg = if ui.response_for(close_wid).hovered {
                     Background {
-                        fill: theme.header_fill.into(),
+                        fill: theme.colors.header_fill.into(),
                         corners: Corners::all(3.0),
                         ..Default::default()
                     }
@@ -265,7 +265,7 @@ fn tab_chip(
                         // border color it was before.
                         Text::new("\u{00d7}")
                             .style(TextStyle {
-                                color: theme.text_muted,
+                                color: theme.colors.text_muted,
                                 font_size_px: 13.0,
                                 // Hug the glyph (no 1.2× leading) so the
                                 // line box ≈ the glyph and it centers in

@@ -306,7 +306,7 @@ impl ConnectionUI {
             // 0.0. Broken-state still wins as a flat color so the alarm
             // read doesn't get diluted by the gradient.
             let brush = if broken {
-                Brush::Solid(ctx.theme.connection_broken)
+                Brush::Solid(ctx.theme.colors.connection_broken)
             } else {
                 let src_ty = port_data_type(scene, src_port).unwrap_or_default();
                 let tgt_ty = port_data_type(scene, tgt_port).unwrap_or_default();

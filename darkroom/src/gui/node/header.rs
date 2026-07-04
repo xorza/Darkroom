@@ -133,7 +133,7 @@ fn header_bar(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<I
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .background(Background {
-            fill: theme.header_fill.into(),
+            fill: theme.colors.header_fill.into(),
             corners: Corners::new(r, r, 0.0, 0.0),
             ..Default::default()
         })
@@ -155,9 +155,9 @@ fn header_bar(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<I
             if !node.boundary {
                 let mode = rcx.inspectors.mode(node.id);
                 let color = if mode.is_some() {
-                    theme.badge_subgraph
+                    theme.colors.badge_subgraph
                 } else {
-                    theme.text_muted
+                    theme.colors.text_muted
                 };
                 Badge {
                     salt: "badge_inspect",
@@ -223,7 +223,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 Badge {
                     salt: "badge_sg",
                     glyph: "S",
-                    color: theme.badge_subgraph,
+                    color: theme.colors.badge_subgraph,
                     filled: true,
                     wid: Some(subgraph_badge_wid(node.id)),
                     tip: "Open subgraph",
@@ -234,7 +234,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 Badge {
                     salt: "badge_t",
                     glyph: "T",
-                    color: theme.badge_terminal,
+                    color: theme.colors.badge_terminal,
                     filled: true,
                     wid: None,
                     tip: "Terminal — output sink",
@@ -246,7 +246,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             let disable_toggled = Badge {
                 salt: "badge_d",
                 glyph: "D",
-                color: theme.text_muted,
+                color: theme.colors.text_muted,
                 filled: node.disabled,
                 wid: Some(disable_badge_wid(node.id)),
                 tip: "Disable — exclude from the run",
@@ -269,7 +269,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 let persist_toggled = Badge {
                     salt: "badge_c",
                     glyph: "C",
-                    color: theme.badge_cache,
+                    color: theme.colors.badge_cache,
                     filled: node.persist,
                     wid: Some(persist_badge_wid(node.id)),
                     tip: "Cache to disk — persist output across runs",
@@ -367,7 +367,11 @@ impl Badge {
         };
         // Solid chips carry dark glyphs (contrast against the swatch);
         // hollow chips ink the glyph in the accent itself.
-        let glyph_color = if filled { theme.header_fill } else { color };
+        let glyph_color = if filled {
+            theme.colors.header_fill
+        } else {
+            color
+        };
         let mut panel = Panel::zstack()
             .size((Sizing::Fixed(BADGE_SIZE), Sizing::Fixed(BADGE_SIZE)))
             .child_align(Align::CENTER)
