@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::{Button, Configure, ContextMenu, MenuItem, Panel, PopupHandle, Sizing, Spacing, Ui};
 
-use crate::gui::app::AppCommand;
+use crate::gui::app::{AppCommand, FileCommand, ShellCommand, SubgraphCommand};
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
 /// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.
@@ -50,24 +50,24 @@ fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
     dropdown(ui, "File", |ui, popup| {
         let mut command = None;
         if MenuItem::new("New").show(ui, popup).clicked() {
-            command = Some(AppCommand::NewDocument);
+            command = Some(AppCommand::File(FileCommand::New));
         }
         if MenuItem::new("Load…").show(ui, popup).clicked() {
-            command = Some(AppCommand::LoadDocument);
+            command = Some(AppCommand::File(FileCommand::Load));
         }
         if MenuItem::new("Save").show(ui, popup).clicked() {
-            command = Some(AppCommand::SaveDocument);
+            command = Some(AppCommand::File(FileCommand::Save));
         }
         if MenuItem::new("Save As…").show(ui, popup).clicked() {
-            command = Some(AppCommand::SaveDocumentAs);
+            command = Some(AppCommand::File(FileCommand::SaveAs));
         }
         MenuItem::separator(ui);
         if MenuItem::new("Preferences").show(ui, popup).clicked() {
-            command = Some(AppCommand::OpenPreferences);
+            command = Some(AppCommand::Shell(ShellCommand::OpenPreferences));
         }
         MenuItem::separator(ui);
         if MenuItem::new("Quit").show(ui, popup).clicked() {
-            command = Some(AppCommand::Quit);
+            command = Some(AppCommand::Shell(ShellCommand::Quit));
         }
         command
     })
@@ -80,16 +80,16 @@ fn subgraph_menu(ui: &mut Ui) -> Option<AppCommand> {
     dropdown(ui, "Subgraph", |ui, popup| {
         let mut command = None;
         if MenuItem::new("Export…").show(ui, popup).clicked() {
-            command = Some(AppCommand::ExportSubgraph);
+            command = Some(AppCommand::Subgraph(SubgraphCommand::Export));
         }
         if MenuItem::new("Import…").show(ui, popup).clicked() {
-            command = Some(AppCommand::ImportSubgraph);
+            command = Some(AppCommand::Subgraph(SubgraphCommand::Import));
         }
         if MenuItem::new("Promote to Library…")
             .show(ui, popup)
             .clicked()
         {
-            command = Some(AppCommand::PromoteSubgraph);
+            command = Some(AppCommand::Subgraph(SubgraphCommand::Promote));
         }
         command
     })

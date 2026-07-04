@@ -3,7 +3,7 @@ use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphRef;
 
 use crate::core::edit::intent::Intent;
-use crate::gui::app::AppCommand;
+use crate::gui::app::{AppCommand, SubgraphCommand};
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::node::header::subgraph_badge_wid;
 use crate::gui::scene::Scene;
@@ -60,7 +60,9 @@ impl SubgraphMenuUi {
         {
             match choice {
                 MenuChoice::Publish => {
-                    *cmd = Some(AppCommand::PublishNodeSubgraph { node_id });
+                    *cmd = Some(AppCommand::Subgraph(SubgraphCommand::PublishNode {
+                        node_id,
+                    }));
                 }
                 MenuChoice::Detach => out.push(Intent::DetachSubgraph { node_id }),
             }

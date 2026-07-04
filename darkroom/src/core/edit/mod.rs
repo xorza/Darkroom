@@ -5,4 +5,5 @@
 
 pub mod action_stack;
 pub mod intent;
+pub mod publish;
 pub mod reconcile;

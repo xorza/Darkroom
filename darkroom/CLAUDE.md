@@ -53,9 +53,10 @@ everything else is grouped by responsibility:
 - **`app/`** — `mod.rs` (the `App`: runtime owner + per-frame entry +
   `AppContext`), `editor/` (the `Editor`: document + undo + scene + UI tree +
   the edit pipeline; `shortcuts.rs` maps chords → intents/commands),
-  `worker.rs` (`WorkerBridge`: tokio worker + result channel), `commands.rs`
-  (`MenuCommand` side effects: file/theme/subgraph/library I/O + run, *outside*
-  the record).
+  `worker.rs` (`WorkerBridge`: tokio worker + result channel), `commands/`
+  (`AppCommand` side effects, run *outside* the record — grouped into nested
+  sub-enums with one handler submodule each: `file` / `subgraph` / `run` /
+  `prefs` / `edit` / `shell`; `mod.rs` is the dispatcher).
 - **`document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
   `EditScope`), `view_node.rs` (per-node position record).
 - **`edit/`** — the mutation machinery: `intent.rs` (intents + undo steps),
@@ -195,9 +196,11 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   `gesture_key`, `coalesce`) are methods on `UndoStep`, exhaustive over the
   variants so a new one won't compile until it declares its behavior.
 - Every variant is emitted by some UI (node-title rename →
-  `RenameNode`, tab-strip rename → `RenameSubgraph`, etc.). Promote/export
-  resolution (`subgraph_to_export` / `promote_source`) lives in
-  `app/commands.rs` beside its only callers, not on `Document`.
+  `RenameNode`, tab-strip rename → `RenameSubgraph`, etc.). Promote/publish/
+  export resolution (`subgraph_to_export` / `promote_to_library` /
+  `publish_local_def`) is pure document↔library logic in
+  `core/edit/publish.rs` (unit-tested against bare types), not on `Document`;
+  `app/commands/subgraph.rs` is the thin GUI orchestration (dialogs + disk).
 
 ### Reconciliation (`src/edit/reconcile/`)
 Derived state, like `Scene`. Runs in the pre-record drain when

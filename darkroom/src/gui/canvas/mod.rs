@@ -20,8 +20,8 @@ use scenarium::graph::NodeId;
 use std::collections::BTreeSet;
 
 use crate::core::edit::intent::Intent;
-use crate::gui::app::AppCommand;
 use crate::gui::app::AppContext;
+use crate::gui::app::{AppCommand, EditCommand};
 use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
@@ -209,11 +209,11 @@ impl GraphUI {
         if cmd.is_none()
             && let Some(req) = emit_path_picks(ui, scene)
         {
-            *cmd = Some(AppCommand::PickInputPath {
+            *cmd = Some(AppCommand::Edit(EditCommand::PickInputPath {
                 node_id: req.node_id,
                 port_idx: req.port_idx,
                 config: req.config,
-            });
+            }));
         }
         // Bake the snap target into `PortFrame.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it

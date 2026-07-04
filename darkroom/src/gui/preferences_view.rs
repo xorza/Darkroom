@@ -3,12 +3,12 @@
 //! Rendered by `main_window` when the active tab is `TabRef::Preferences`.
 //!
 //! It edits the borrowed [`Preferences`] **in place** and reports a single
-//! [`AppCommand::PreferencesChanged`] whenever any field moved — `App`
-//! re-syncs derived state (theme palette, ML paths) and persists once,
-//! outside the record. So adding a preference is just another widget here;
-//! no new command or handler. The "Browse…" buttons are the exception:
-//! they open a blocking file dialog, so they return
-//! [`AppCommand::PickMlModel`] for `App` to run after the record.
+//! [`PrefsCommand::Changed`] whenever any field moved — `App` re-syncs
+//! derived state (theme palette, ML paths) and persists once, outside the
+//! record. So adding a preference is just another widget here; no new
+//! command or handler. The "Browse…" buttons are the exception: they open a
+//! blocking file dialog, so they return [`PrefsCommand::PickMlModel`] for
+//! `App` to run after the record.
 
 use std::path::PathBuf;
 
@@ -19,7 +19,7 @@ use palantir::{
 
 use crate::core::io::preferences::Preferences;
 use crate::core::theme_pref::ThemeChoice;
-use crate::gui::app::{AppCommand, MlModelKind};
+use crate::gui::app::{AppCommand, MlModelKind, PrefsCommand};
 use crate::gui::dialogs;
 use crate::gui::theme::Theme;
 
@@ -60,7 +60,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                     }
                 });
             if prefs.theme != before {
-                command = Some(AppCommand::PreferencesChanged);
+                command = Some(AppCommand::Prefs(PrefsCommand::Changed));
             }
 
             // Startup — whether launch reopens the last document.
@@ -70,7 +70,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                 .show(ui)
                 .clicked()
             {
-                command = Some(AppCommand::PreferencesChanged);
+                command = Some(AppCommand::Prefs(PrefsCommand::Changed));
             }
 
             // Quitting — whether unsaved changes prompt before exit.
@@ -80,7 +80,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                 .show(ui)
                 .clicked()
             {
-                command = Some(AppCommand::PreferencesChanged);
+                command = Some(AppCommand::Prefs(PrefsCommand::Changed));
             }
 
             // ML models — caller-supplied ONNX files the ml_denoise /
@@ -147,8 +147,8 @@ const ML_ROW_GAP: f32 = 8.0;
 /// or paste a path; Enter or click-away commits into `path`), a "Browse…"
 /// button, and — beneath, indented under the field — a download hint (a
 /// browser link to the CLI tool plus unzip/point-at-the-`.onnx` guidance).
-/// Writes `path` in place and returns [`AppCommand::PreferencesChanged`] on an
-/// edited path or [`AppCommand::PickMlModel`] when Browse is clicked.
+/// Writes `path` in place and returns [`PrefsCommand::Changed`] on an
+/// edited path or [`PrefsCommand::PickMlModel`] when Browse is clicked.
 fn model_row(
     ui: &mut Ui,
     theme: &Theme,
@@ -203,7 +203,7 @@ fn model_row(
                     ui.state_mut::<String>(id).replace_range(.., &draft);
                     if commit && draft != canonical {
                         *path = PathBuf::from(draft);
-                        command = Some(AppCommand::PreferencesChanged);
+                        command = Some(AppCommand::Prefs(PrefsCommand::Changed));
                     }
 
                     if Button::new()
@@ -212,7 +212,7 @@ fn model_row(
                         .show(ui)
                         .clicked()
                     {
-                        command = Some(AppCommand::PickMlModel(kind));
+                        command = Some(AppCommand::Prefs(PrefsCommand::PickMlModel(kind)));
                     }
                 });
 

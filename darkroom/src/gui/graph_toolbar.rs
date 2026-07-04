@@ -14,8 +14,8 @@ use palantir::{
 };
 
 use crate::core::edit::intent::Intent;
-use crate::gui::app::AppCommand;
 use crate::gui::app::AppContext;
+use crate::gui::app::{AppCommand, RunCommand};
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
@@ -93,9 +93,9 @@ pub(crate) fn show(
                     let run_tip = if running { "Cancel run" } else { "Run" };
                     if toggle_button(ui, ctx.theme, run_button_wid(), running, run_tip, draw_play) {
                         command = Some(if running {
-                            AppCommand::CancelRun
+                            AppCommand::Run(RunCommand::Cancel)
                         } else {
-                            AppCommand::Run
+                            AppCommand::Run(RunCommand::Once)
                         });
                     }
                     // Event loop start / stop: toggled while the loop runs.
@@ -113,9 +113,9 @@ pub(crate) fn show(
                         draw_play_bar,
                     ) {
                         command = Some(if ctx.events_running {
-                            AppCommand::StopEvents
+                            AppCommand::Run(RunCommand::StopEvents)
                         } else {
-                            AppCommand::StartEvents
+                            AppCommand::Run(RunCommand::StartEvents)
                         });
                     }
                 });

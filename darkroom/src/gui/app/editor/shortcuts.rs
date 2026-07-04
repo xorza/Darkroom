@@ -10,8 +10,8 @@ use palantir::{Key, Shortcut, Ui};
 
 use crate::core::document::GraphRef;
 use crate::core::edit::intent::{self, Intent, build_duplicate_intent};
-use crate::gui::app::AppCommand;
 use crate::gui::app::editor::Editor;
+use crate::gui::app::{AppCommand, FileCommand, RunCommand, ShellCommand};
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
 const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');
@@ -22,7 +22,7 @@ const SAVE_AS_SHORTCUT: Shortcut = Shortcut::ctrl_shift('S');
 const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
 const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 const RUN_SHORTCUT: Shortcut = Shortcut::ctrl('R');
-/// ⌘Q on macOS, Ctrl+Q elsewhere. Routes through `AppCommand::Quit` →
+/// ⌘Q on macOS, Ctrl+Q elsewhere. Routes through `AppCommand::Shell(ShellCommand::Quit)` →
 /// `App::request_quit`, so it prompts to save when the document is dirty
 /// — same path as File ▸ Quit. (palantir drops winit's default macOS menu
 /// so ⌘Q reaches us instead of hard-terminating.)
@@ -136,17 +136,17 @@ impl Editor {
         let run = ui.key_pressed(RUN_SHORTCUT);
         let quit = ui.key_pressed(QUIT_SHORTCUT);
         if new {
-            Some(AppCommand::NewDocument)
+            Some(AppCommand::File(FileCommand::New))
         } else if open {
-            Some(AppCommand::LoadDocument)
+            Some(AppCommand::File(FileCommand::Load))
         } else if save_as {
-            Some(AppCommand::SaveDocumentAs)
+            Some(AppCommand::File(FileCommand::SaveAs))
         } else if save {
-            Some(AppCommand::SaveDocument)
+            Some(AppCommand::File(FileCommand::Save))
         } else if run {
-            Some(AppCommand::Run)
+            Some(AppCommand::Run(RunCommand::Once))
         } else if quit {
-            Some(AppCommand::Quit)
+            Some(AppCommand::Shell(ShellCommand::Quit))
         } else {
             None
         }
