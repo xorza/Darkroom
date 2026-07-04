@@ -23,7 +23,7 @@ impl App {
         if self.editor.dirty && self.preferences.confirm_unsaved_on_exit {
             self.confirm_quit = true;
         } else {
-            self.host_handle.quit();
+            self.quit();
         }
     }
 }

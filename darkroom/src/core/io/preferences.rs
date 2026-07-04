@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use common::{SerdeFormat, deserialize, serialize};
+use glam::{IVec2, UVec2};
 
 use crate::core::theme_pref::ThemeChoice;
 
@@ -33,10 +34,31 @@ pub struct Preferences {
     /// asking. The exit dialog's "Don't ask again" checkbox clears it; the
     /// Preferences tab can restore it. Defaults to `true`.
     pub confirm_unsaved_on_exit: bool,
+    /// Main window geometry from the last session, restored at launch so
+    /// the editor reopens at the same size / position. `None` on first run
+    /// (platform picks). A TOML `[window]` table — a table field, so it
+    /// sits with `ml_models` after every scalar key.
+    pub window: Option<WindowState>,
     /// ONNX model paths for lens's ML nodes (`ml_denoise` / `remove_stars`).
     /// A TOML `[ml_models]` table — must stay the **last** field, as TOML
     /// tables follow all scalar keys at the same level.
     pub ml_models: MlModelPreferences,
+}
+
+/// Persisted main-window geometry. `size` is logical pixels (DPI-independent,
+/// so it restores to the same apparent size on a differently-scaled
+/// monitor); `position` is physical pixels, absent when the platform
+/// doesn't report it (Wayland). `maximized` restores the maximized state
+/// while `size` remains what to return to when un-maximized. glam vecs
+/// serialize as `[x, y]` arrays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct WindowState {
+    /// Logical inner size `[w, h]`.
+    pub size: UVec2,
+    pub maximized: bool,
+    /// Physical outer position `[x, y]`; `None` on Wayland.
+    pub position: Option<IVec2>,
 }
 
 impl Default for Preferences {
@@ -46,6 +68,7 @@ impl Default for Preferences {
             document_path: None,
             load_last_document: true,
             confirm_unsaved_on_exit: true,
+            window: None,
             ml_models: MlModelPreferences::default(),
         }
     }
@@ -145,6 +168,11 @@ mod tests {
             // Non-defaults (defaults are `true`) so the round-trip is meaningful.
             load_last_document: false,
             confirm_unsaved_on_exit: false,
+            window: Some(WindowState {
+                size: UVec2::new(1440, 900),
+                maximized: true,
+                position: Some(IVec2::new(120, -40)),
+            }),
             ml_models: MlModelPreferences {
                 denoise: PathBuf::from("/models/d.onnx"),
                 star_removal: PathBuf::from("/models/s.onnx"),
@@ -155,6 +183,14 @@ mod tests {
         assert_eq!(back.document_path, Some(PathBuf::from("/tmp/graph.rhai")));
         assert!(!back.load_last_document);
         assert!(!back.confirm_unsaved_on_exit);
+        assert_eq!(
+            back.window,
+            Some(WindowState {
+                size: UVec2::new(1440, 900),
+                maximized: true,
+                position: Some(IVec2::new(120, -40)),
+            })
+        );
         assert_eq!(back.ml_models.denoise, PathBuf::from("/models/d.onnx"));
         assert_eq!(back.ml_models.star_removal, PathBuf::from("/models/s.onnx"));
     }
@@ -172,6 +208,8 @@ mod tests {
         assert!(back.load_last_document);
         // Defaults to prompting before quitting with unsaved changes.
         assert!(back.confirm_unsaved_on_exit);
+        // No remembered window geometry until a session saves one.
+        assert_eq!(back.window, None);
         // ML model paths default to lens's canonical bare filenames.
         assert_eq!(
             back.ml_models.denoise,
@@ -196,5 +234,23 @@ mod tests {
         // A preferences file predating this key still defaults to reopening the document.
         assert!(cfg.load_last_document);
         assert_eq!(cfg.ml_models.denoise, lens::MlModelPaths::default().denoise);
+    }
+
+    #[test]
+    fn partial_window_table_fills_missing_fields_and_omits_position() {
+        // A hand-edited `[window]` table with only a size (glam vec → `[w, h]`
+        // array): the missing `maximized` defaults to `false` and, with no
+        // `position` key, the physical position stays `None` (the Wayland case).
+        let toml = b"[window]\nsize = [800, 600]\n";
+        let cfg: Preferences =
+            deserialize(toml, SerdeFormat::Toml).expect("partial window table deserializes");
+        assert_eq!(
+            cfg.window,
+            Some(WindowState {
+                size: UVec2::new(800, 600),
+                maximized: false,
+                position: None,
+            })
+        );
     }
 }

@@ -12,6 +12,7 @@ use palantir::{WinitHost, WinitHostConfig};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
+use crate::core::io::preferences::Preferences;
 use crate::core::script::{DEFAULT_BIND, ScriptConfig, TcpScriptConfig};
 use crate::core::session::Session;
 use crate::core::wake;
@@ -132,15 +133,22 @@ fn main() {
 /// Launch the Palantir desktop editor. The winit event loop owns the main
 /// thread, so this doesn't return until the window closes.
 fn run_gui(script_cfg: ScriptConfig) {
-    WinitHost::new(
-        MAIN_WINDOW,
-        WinitHostConfig::new("darkroom"),
-        move |ui, handle| {
-            // ui.debug_overlay_mut().damage_rect = true;
+    // Load preferences here, before the window exists, so a saved size /
+    // position seeds the window at creation (`App::new` runs after the
+    // first window is already up, too late to size it). Reuse the same
+    // instance for the app so we don't read the file twice.
+    let preferences = Preferences::load();
+    let mut config = WinitHostConfig::new("darkroom");
+    if let Some(w) = &preferences.window {
+        config.window.inner_size = Some(w.size);
+        config.window.position = w.position;
+        config.window.maximized = w.maximized;
+    }
+    WinitHost::new(MAIN_WINDOW, config, move |ui, handle| {
+        // ui.debug_overlay_mut().damage_rect = true;
 
-            App::new(ui, handle, script_cfg)
-        },
-    )
+        App::new(ui, handle, script_cfg, preferences)
+    })
     .run();
 }
 

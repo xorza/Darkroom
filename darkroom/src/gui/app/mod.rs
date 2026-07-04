@@ -9,7 +9,7 @@ use scenarium::library::Library;
 
 use crate::core::document::Document;
 use crate::core::engine::Engine;
-use crate::core::io::preferences::Preferences;
+use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::script::{ScriptConfig, ScriptMessage};
 use crate::core::wake::Wake;
 use crate::core::worker::WorkerEvent;
@@ -201,7 +201,12 @@ impl App {
     ///
     /// Handed to [`palantir::WinitHost::run`], which calls it once the
     /// `Ui` + [`HostHandle`] exist (before the first frame).
-    pub(crate) fn new(ui: &mut Ui, handle: HostHandle, script_cfg: ScriptConfig) -> Self {
+    pub(crate) fn new(
+        ui: &mut Ui,
+        handle: HostHandle,
+        script_cfg: ScriptConfig,
+        preferences: Preferences,
+    ) -> Self {
         let mut document: Document = CoreGraph::default().into();
         document.main_view.auto_layout_default(&document.graph);
         // The worker + script host wake the winit loop via the host handle;
@@ -211,17 +216,20 @@ impl App {
             let handle = handle.clone();
             Arc::new(move || handle.request_repaint(MAIN_WINDOW))
         };
+        // `preferences` is loaded in `run_gui` (before the window exists, so
+        // its saved geometry can size the window at creation) and handed in
+        // here — the `Preferences::load()` there already published the ML
+        // model paths into lens.
         let mut app = Self {
             editor: Editor::new(document),
             engine: Engine::new(&script_cfg, wake),
             theme: Theme::default(),
             host_handle: handle,
             current_path: None,
-            preferences: Preferences::default(),
+            preferences,
             events_running: false,
             confirm_quit: false,
         };
-        app.preferences = Preferences::load();
         // Resolve the saved preference: `System` (the default) follows
         // the OS light/dark setting, re-queried each launch.
         app.theme = Theme::from_preset(app.preferences.theme.resolve());
@@ -300,7 +308,7 @@ impl App {
                 // Shutdown is terminal: quit and drop the rest of the batch
                 // (the app is closing, so any remaining edits/runs are moot).
                 ScriptMessage::Shutdown => {
-                    self.host_handle.quit();
+                    self.quit();
                     return;
                 }
             }
@@ -311,6 +319,42 @@ impl App {
         }
     }
 
+    /// Mirror the window's live geometry into the persisted preferences
+    /// (in memory only). Called each frame so any later `preferences.save()`
+    /// — on quit — writes the current size / position. Size and position
+    /// are refreshed only while the window is floating; a maximized window
+    /// keeps its last floating geometry so un-maximizing on the next launch
+    /// lands at the right size.
+    fn track_window_state(&mut self, ui: &Ui) {
+        let geom = ui.window_geometry();
+        match &mut self.preferences.window {
+            Some(w) => {
+                w.maximized = geom.maximized;
+                if !geom.maximized {
+                    w.size = geom.inner_size;
+                    w.position = geom.outer_position;
+                }
+            }
+            None => {
+                self.preferences.window = Some(WindowState {
+                    size: geom.inner_size,
+                    maximized: geom.maximized,
+                    position: geom.outer_position,
+                });
+            }
+        }
+    }
+
+    /// Persist preferences (including the window geometry mirrored by
+    /// [`Self::track_window_state`]) and ask the host to exit. Every
+    /// explicit quit path routes through here so geometry is saved on the
+    /// way out; the titlebar-X clean close — which never calls this —
+    /// saves in [`Self::handle_exit`] instead.
+    fn quit(&mut self) {
+        self.preferences.save();
+        self.host_handle.quit();
+    }
+
     /// Resolve a pending quit. A window-close request (titlebar X) with
     /// unsaved changes raises the confirm dialog and vetoes the close
     /// ([`Ui::keep_open`]); a clean document lets the close proceed. While
@@ -318,12 +362,18 @@ impl App {
     /// File ▸ Quit, which set `confirm_quit` via `request_quit` earlier this
     /// frame.
     fn handle_exit(&mut self, ui: &mut Ui) {
-        // A window-close request (titlebar X) with unsaved changes raises
-        // the prompt and vetoes the close — unless the user turned
-        // confirmation off, in which case the close proceeds.
-        if ui.close_requested() && self.editor.dirty && self.preferences.confirm_unsaved_on_exit {
-            ui.keep_open();
-            self.confirm_quit = true;
+        if ui.close_requested() {
+            // The titlebar X closes the window after this frame unless we
+            // veto. A clean close never routes through `quit`, so persist
+            // geometry here — `track_window_state` already mirrored the
+            // current size / position into `preferences` this frame.
+            self.preferences.save();
+            // Unsaved changes raise the prompt and veto the close — unless
+            // the user turned confirmation off, in which case it proceeds.
+            if self.editor.dirty && self.preferences.confirm_unsaved_on_exit {
+                ui.keep_open();
+                self.confirm_quit = true;
+            }
         }
         if !self.confirm_quit {
             return;
@@ -342,7 +392,7 @@ impl App {
                 if outcome.dont_ask_again {
                     self.set_confirm_exit(false);
                 }
-                self.host_handle.quit();
+                self.quit();
             }
             ExitChoice::Save => {
                 self.confirm_quit = false;
@@ -353,7 +403,7 @@ impl App {
                 // Save As can be cancelled, leaving the doc dirty — only
                 // quit once the save actually landed.
                 if !self.editor.dirty {
-                    self.host_handle.quit();
+                    self.quit();
                 }
             }
         }
@@ -362,6 +412,10 @@ impl App {
 
 impl palantir::App for App {
     fn frame(&mut self, _win: palantir::WindowToken, ui: &mut Ui) {
+        // Keep the persisted window geometry current so a save on quit
+        // captures the latest size / position.
+        self.track_window_state(ui);
+
         // Drain anything the worker posted since last frame, before the
         // editor rebuilds its scene so the status/log projections it
         // reads reflect the latest run.
