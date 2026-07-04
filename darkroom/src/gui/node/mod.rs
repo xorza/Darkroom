@@ -357,6 +357,7 @@ pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAc
 /// produces the domain request (node + port + picker config) and stays
 /// unaware of the app-level `AppCommand` enum — the canvas, which already
 /// owns the command channel, does the translation.
+#[derive(Clone, Debug)]
 pub(crate) struct PathPickRequest {
     pub(crate) node_id: NodeId,
     pub(crate) port_idx: usize,

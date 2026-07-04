@@ -78,10 +78,10 @@ impl std::fmt::Debug for WorkerBridge {
 
 impl WorkerBridge {
     /// Spin up the worker on a fresh multi-thread runtime. Starts memory-only; the
-    /// host installs the codec registry via [`Self::set_value_registry`] and points
-    /// it at a document's store via [`Self::set_disk_root`]. The callback runs on a
-    /// worker thread: it forwards the result over `tx` and asks the host to paint,
-    /// so the next frame drains it.
+    /// host installs the content-addressed output cache (codec registry + store
+    /// root) via [`Self::set_output_cache`]. The callback runs on a worker thread:
+    /// it forwards the result over `tx` and asks the host to paint, so the next
+    /// frame drains it.
     pub(crate) fn new(wake: Wake) -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

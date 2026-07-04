@@ -60,6 +60,7 @@ pub(crate) struct Inspectors {
 
 /// Cross-cutting refs every inspector panel reads, bundled so `draw_one`
 /// takes a context rather than a fistful of loose arguments.
+#[derive(Debug)]
 struct PanelDraw<'a> {
     theme: &'a Theme,
     library: &'a Library,

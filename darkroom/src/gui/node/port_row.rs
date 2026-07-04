@@ -178,7 +178,7 @@ fn input_label_cell(
             theme,
             &input.ty,
             PortKind::Input,
-            rcx.port_frame.is_hovered(port),
+            rcx.port_frame.ports.is_hovered(port),
         )
     };
     let overhang = theme.port_overhang();
@@ -292,7 +292,7 @@ fn output_cell(
         theme,
         &output.ty,
         PortKind::Output,
-        rcx.port_frame.is_hovered(port),
+        rcx.port_frame.ports.is_hovered(port),
     );
     let tip = type_label(rcx.library, &output.ty);
     let wid = port_circle_wid(port);
@@ -335,7 +335,7 @@ fn event_cell(
     let overhang = theme.port_overhang();
     let wid = event_glyph_wid(node_id, event_idx);
     let ev = EventRef { node_id, event_idx };
-    let fill = event_color(theme, rcx.port_frame.event_is_hovered(ev));
+    let fill = event_color(theme, rcx.port_frame.events.is_hovered(ev));
     let tip = format!("event: {}", event.name.as_str(""));
     Panel::hstack()
         .id_salt(("event", event_idx))

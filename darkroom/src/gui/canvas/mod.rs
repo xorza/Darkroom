@@ -210,11 +210,7 @@ impl GraphUI {
         if cmd.is_none()
             && let Some(req) = emit_path_picks(ui, scene)
         {
-            *cmd = Some(AppCommand::Edit(EditCommand::PickInputPath {
-                node_id: req.node_id,
-                port_idx: req.port_idx,
-                config: req.config,
-            }));
+            *cmd = Some(AppCommand::Edit(EditCommand::PickInputPath(req)));
         }
         // Bake the snap target into `PortFrame.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it
@@ -223,15 +219,15 @@ impl GraphUI {
         // while a drag is live, so without this override the
         // snapped-but-not-captured target stays at its idle color.
         if let Some(snap) = self.gestures.connection_ui.snap_port() {
-            self.port_frame.set_hovered(snap);
+            self.port_frame.ports.set_hovered(snap);
         }
         // Same for an event drag's snapped subscription pin (emitter-started
         // drag) or snapped emitter glyph (subscriber-started drag).
         if let Some(sub) = self.gestures.subscription_ui.snap_sub() {
-            self.port_frame.set_sub_hovered(sub);
+            self.port_frame.subs.set_hovered(sub);
         }
         if let Some(emitter) = self.gestures.subscription_ui.snap_emitter() {
-            self.port_frame.set_event_hovered(emitter);
+            self.port_frame.events.set_hovered(emitter);
         }
         // Cycle inspector toggles + close transient panels on outside
         // actions, all from last-frame responses (same timing as every

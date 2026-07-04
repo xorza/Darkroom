@@ -18,7 +18,7 @@ const LIBRARY_FILE: &str = "darkroom.library.rhai";
 /// `Vec` — each def carries its own `id`, and we only ever iterate to
 /// feed `Library::add_subgraph`.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
-struct Library {
+struct LibraryFile {
     #[serde(default)]
     subgraphs: Vec<SubgraphDef>,
 }
@@ -36,7 +36,7 @@ pub(crate) fn load_library() -> Vec<SubgraphDef> {
     let Ok(bytes) = std::fs::read(path()) else {
         return Vec::new();
     };
-    deserialize::<Library>(&bytes, SerdeFormat::Rhai)
+    deserialize::<LibraryFile>(&bytes, SerdeFormat::Rhai)
         .map(|lib| lib.subgraphs)
         .unwrap_or_default()
 }
@@ -44,7 +44,7 @@ pub(crate) fn load_library() -> Vec<SubgraphDef> {
 /// Write the shared subgraph defs to the working dir. Errors print to
 /// stderr — a failed persist shouldn't interrupt the session.
 pub(crate) fn save_library<'a>(subgraphs: impl Iterator<Item = &'a SubgraphDef>) {
-    let lib = Library {
+    let lib = LibraryFile {
         subgraphs: subgraphs.cloned().collect(),
     };
     let bytes = match serialize(&lib, SerdeFormat::Rhai) {

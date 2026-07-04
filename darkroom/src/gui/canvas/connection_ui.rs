@@ -160,7 +160,7 @@ impl ConnectionUI {
     ) {
         // `PortFrame::dragging` rolls up `drag_delta().is_some() ||
         // drag_started()`; its transition to `false` is the release edge.
-        if port_frame.dragging(start) {
+        if port_frame.ports.dragging(start) {
             return;
         }
         if let Some(end) = snap_end {
@@ -281,8 +281,8 @@ impl ConnectionUI {
                 port_idx: c.tgt_port,
             };
             let (Some(p0), Some(p3)) = (
-                port_frame.center_canvas_local(src_port),
-                port_frame.center_canvas_local(tgt_port),
+                port_frame.ports.center(src_port),
+                port_frame.ports.center(tgt_port),
             ) else {
                 continue;
             };
@@ -333,11 +333,11 @@ impl ConnectionUI {
     ) {
         let Some(state) = self.state else { return };
         let start_port = state.start;
-        let Some(start) = port_frame.center_canvas_local(start_port) else {
+        let Some(start) = port_frame.ports.center(start_port) else {
             return;
         };
         let end = match state.snap_end {
-            Some(snap) => port_frame.center_canvas_local(snap),
+            Some(snap) => port_frame.ports.center(snap),
             None => pointer_world(ui, scene, canvas_origin),
         };
         let Some(end) = end else { return };
@@ -382,7 +382,7 @@ fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<PortRef> {
     for n in &scene.nodes {
         for kind in [PortKind::Input, PortKind::Output] {
             for port in node_ports(n, kind) {
-                if frame.drag_started(port) {
+                if frame.ports.drag_started(port) {
                     return Some(port);
                 }
             }
@@ -440,7 +440,7 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
             if input_const_only(scene, port) {
                 continue;
             }
-            if frame.contains_pointer(port, pointer) {
+            if frame.ports.contains_pointer(port, pointer) {
                 // Reject a drop onto an incompatible port so the wire
                 // won't latch. Geometrically only one port sits under the
                 // pointer, so a reject here falls through to `None` (drop)

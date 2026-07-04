@@ -71,6 +71,7 @@ impl SubgraphMenuUi {
     }
 }
 
+#[derive(Debug)]
 enum MenuChoice {
     Publish,
     Detach,

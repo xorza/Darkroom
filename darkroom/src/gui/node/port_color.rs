@@ -101,6 +101,7 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
 /// A per-palette data-type color set. Hand-tuned to harmonize with the
 /// Ayu palettes; centralized here so retuning is a one-line edit. `ramp`
 /// backs the open-ended `Custom`/`Enum` families.
+#[derive(Debug)]
 struct TypePalette {
     boolean: u32,
     int: u32,

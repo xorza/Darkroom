@@ -14,6 +14,7 @@ use crate::gui::scene::Scene;
 /// matching the breaker's polyline) and the optional active gesture.
 /// Passed as `&mut BreakerProbe<'_>` so Rust auto-reborrows at each
 /// nested call.
+#[derive(Debug)]
 pub(crate) struct BreakerProbe<'a> {
     pub(crate) origin: Vec2,
     pub(crate) state: Option<&'a mut BreakerState>,

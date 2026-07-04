@@ -13,6 +13,7 @@ pub(crate) const MIN_HANDLE: f32 = 40.0;
 
 /// The two interior control points of a connection cubic — the named result
 /// of each renderer's handle-placement function.
+#[derive(Debug)]
 pub(crate) struct CubicHandles {
     pub(crate) p1: Vec2,
     pub(crate) p2: Vec2,

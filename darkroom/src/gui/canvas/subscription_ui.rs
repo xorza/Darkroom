@@ -106,14 +106,14 @@ impl SubscriptionUI {
         let still_dragging = match &mut state {
             InFlight::FromEmitter { emitter, snap_sub } => {
                 *snap_sub = scan_sub_target(port_frame, ui, scene, *emitter);
-                port_frame.event_dragging(*emitter)
+                port_frame.events.dragging(*emitter)
             }
             InFlight::FromSubscriber {
                 subscriber,
                 snap_emitter,
             } => {
                 *snap_emitter = scan_emitter_target(port_frame, ui, scene, *subscriber);
-                port_frame.sub_dragging(*subscriber)
+                port_frame.subs.dragging(*subscriber)
             }
         };
         self.state = Some(state);
@@ -178,8 +178,8 @@ impl SubscriptionUI {
                 event_idx: s.event_idx,
             };
             let (Some(p0), Some(p3)) = (
-                port_frame.event_center_canvas_local(emitter),
-                port_frame.sub_center_canvas_local(s.subscriber),
+                port_frame.events.center(emitter),
+                port_frame.subs.center(s.subscriber),
             ) else {
                 continue;
             };
@@ -221,11 +221,11 @@ impl SubscriptionUI {
         let (p0, p3) = match self.state {
             None => return,
             Some(InFlight::FromEmitter { emitter, snap_sub }) => {
-                let Some(p0) = port_frame.event_center_canvas_local(emitter) else {
+                let Some(p0) = port_frame.events.center(emitter) else {
                     return;
                 };
                 let free = match snap_sub {
-                    Some(sub) => port_frame.sub_center_canvas_local(sub),
+                    Some(sub) => port_frame.subs.center(sub),
                     None => pointer_world(ui, scene, canvas_origin),
                 };
                 let Some(p3) = free else { return };
@@ -235,11 +235,11 @@ impl SubscriptionUI {
                 subscriber,
                 snap_emitter,
             }) => {
-                let Some(p3) = port_frame.sub_center_canvas_local(subscriber) else {
+                let Some(p3) = port_frame.subs.center(subscriber) else {
                     return;
                 };
                 let free = match snap_emitter {
-                    Some(e) => port_frame.event_center_canvas_local(e),
+                    Some(e) => port_frame.events.center(e),
                     None => pointer_world(ui, scene, canvas_origin),
                 };
                 let Some(p0) = free else { return };
@@ -265,7 +265,7 @@ fn scan_event_drag_start(frame: &PortFrame, scene: &Scene) -> Option<EventRef> {
                 node_id: n.id,
                 event_idx,
             };
-            if frame.event_drag_started(e) {
+            if frame.events.drag_started(e) {
                 return Some(e);
             }
         }
@@ -277,7 +277,7 @@ fn scan_event_drag_start(frame: &PortFrame, scene: &Scene) -> Option<EventRef> {
 /// terminal nodes render a pin, so only they can start a reverse event drag.
 fn scan_sub_drag_start(frame: &PortFrame, scene: &Scene) -> Option<NodeId> {
     for n in &scene.nodes {
-        if n.terminal && frame.sub_drag_started(n.id) {
+        if n.terminal && frame.subs.drag_started(n.id) {
             return Some(n.id);
         }
     }
@@ -294,7 +294,7 @@ fn scan_sub_target(frame: &PortFrame, ui: &Ui, scene: &Scene, emitter: EventRef)
         if n.id == emitter.node_id || !n.terminal {
             continue;
         }
-        if frame.sub_contains_pointer(n.id, pointer) {
+        if frame.subs.contains_pointer(n.id, pointer) {
             return Some(n.id);
         }
     }
@@ -321,7 +321,7 @@ fn scan_emitter_target(
                 node_id: n.id,
                 event_idx,
             };
-            if frame.event_contains_pointer(e, pointer) {
+            if frame.events.contains_pointer(e, pointer) {
                 return Some(e);
             }
         }

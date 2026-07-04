@@ -55,7 +55,7 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
         .show(ui, |ui| {
             header_bar(ui, rcx, node, out);
             // Highlighted while an event drag is snapped to this pin.
-            let snapped = rcx.port_frame.sub_is_hovered(node.id);
+            let snapped = rcx.port_frame.subs.is_hovered(node.id);
             subscription_glyph(ui, theme, node.id, snapped);
         });
 }
@@ -332,6 +332,7 @@ pub(crate) fn subgraph_badge_wid(node_id: NodeId) -> WidgetId {
 /// it's a hollow outline (inactive toggle). A `wid` makes it clickable and
 /// [`Badge::show`] returns whether it was clicked this frame; decorative
 /// chips set `wid: None` (relying on `salt` for a stable id) and ignore it.
+#[derive(Debug)]
 struct Badge {
     /// Stable id salt — used only for decorative (`wid: None`) chips.
     salt: &'static str,
