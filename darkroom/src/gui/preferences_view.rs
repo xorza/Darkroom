@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use palantir::{
     Align, Background, Button, Checkbox, Color, Configure, Panel, RadioButton, Sense, Sizing,
-    Spacing, Text, TextEdit, TextStyle, Ui, VAlign, WidgetId,
+    Spacing, Text, TextEdit, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 
 use crate::core::io::preferences::Preferences;
@@ -247,7 +247,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
         .gap(0.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            let clicked = Panel::hstack()
+            let link = Panel::hstack()
                 .id(id)
                 .size((Sizing::Hug, Sizing::Hug))
                 .sense(Sense::CLICK)
@@ -259,11 +259,14 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
                             ..ui.theme.text
                         })
                         .show(ui);
-                })
-                .clicked();
-            if clicked {
+                });
+            let snapshot = link.response.snapshot();
+            if link.response.clicked() {
                 dialogs::open_url(url);
             }
+            // Surface the destination on hover so the user sees where the
+            // link goes before clicking — the URL isn't otherwise visible.
+            Tooltip::for_(&snapshot).text(url).show(ui);
             Text::new(DOWNLOAD_HINT)
                 .style(TextStyle {
                     color: theme.text_muted,
