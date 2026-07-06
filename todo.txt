@@ -3,3 +3,5 @@ interned_string.as_str(""
 Tooltip::for_(&resp.snapshot()).text(desc.clone()).show(ui);  - String instead of internedstring
 
 tooltips from other ui layers
+
+scrolview on newnode popup
