@@ -8,8 +8,8 @@
 //!   budget selects is an implementation detail that must never change the result. This exercises
 //!   the real [`load_to_disk`]/[`load_in_memory`] loaders that the in-memory `stack_images` bypasses.
 //!
-//! The live peak-RSS measurement is the `master_stack_mem` example; here we assert the deterministic
-//! invariants instead.
+//! The live peak-RSS measurement is the `#[ignore]`d `master_stack_memory_probe` test in
+//! `mem_budget_probe`; here we assert the deterministic invariants instead.
 //!
 //! [`load_to_disk`]: super::cache
 //! [`load_in_memory`]: super::cache
@@ -29,7 +29,7 @@ use crate::stacking::combine::stack::stack;
 /// the chosen concurrency must not let peak *load* heap exceed the usable budget. Project that peak
 /// — resident set + concurrency × the real 2× per-decode transient — and assert it fits, except at
 /// the irreducible floor where not even one decode fits the budget (concurrency pinned to 1). This
-/// is what the `master_stack_mem` probe measured live; here it's deterministic. It fails if the
+/// is what the `master_stack_memory_probe` measured live; here it's deterministic. It fails if the
 /// divisor ever reverts to the resident frame size (the ~2× overshoot bug), since concurrency would
 /// then double and the projection blow the budget.
 #[test]
