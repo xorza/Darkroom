@@ -34,8 +34,10 @@ pub const MIN_CHUNK_ROWS: usize = 64;
 const MEMORY_PERCENT: u64 = 75;
 
 /// Bytes of `available_memory` the cache may use ([`MEMORY_PERCENT`] of it). The single place the
-/// budget fraction is applied — every tier calculator sizes against this.
-fn memory_budget(available_memory: u64) -> u64 {
+/// budget fraction is applied — every tier calculator sizes against this. `pub(crate)` so the
+/// budget-respecting invariant test (`mem_budget_tests`) asserts against the real usable budget
+/// rather than re-deriving the 75%.
+pub(crate) fn memory_budget(available_memory: u64) -> u64 {
     available_memory * MEMORY_PERCENT / 100
 }
 
@@ -228,50 +230,6 @@ mod tests {
             two_x < one_frame,
             "a larger per-decode transient must lower concurrency — the overshoot fix"
         );
-    }
-
-    #[test]
-    fn load_budget_is_respected_across_configs() {
-        // The tiered loader's core guarantee, as an invariant sweep: for any (frame size, count,
-        // budget), the chosen concurrency must not let peak *load* heap exceed the usable budget.
-        // Project that peak — resident set + concurrency × the real 2× per-decode transient — and
-        // assert it fits, except at the irreducible floor where not even one decode fits the budget
-        // (concurrency pinned to 1). This is what the `master_stack_mem` probe measured live; here
-        // it's deterministic. It fails if the divisor ever reverts to the resident frame size (the
-        // ~2× overshoot bug), since concurrency would then double and the projection blow the budget.
-        const MIB: u64 = 1024 * 1024;
-        let workers = 32;
-        for &frame_mb in &[16u64, 64, 137, 512] {
-            let frame = (frame_mb * MIB) as usize;
-            let transient = 2 * frame; // matches DECODE_TRANSIENT_FACTOR in `cache`
-            for &count in &[4usize, 12, 24, 60] {
-                for &budget_gb in &[1u64, 2, 4, 8, 16] {
-                    let budget = budget_gb * 1024 * MIB;
-                    let usable = memory_budget(budget);
-                    let resident_frames = if fits_in_memory(frame, count, budget) {
-                        count
-                    } else {
-                        0
-                    };
-                    let c = compute_load_concurrency(
-                        frame,
-                        transient,
-                        resident_frames,
-                        budget,
-                        workers,
-                    );
-                    let projected =
-                        resident_frames as u64 * frame as u64 + c as u64 * transient as u64;
-                    assert!(
-                        projected <= usable || c == 1,
-                        "frame={frame_mb}MB count={count} budget={budget_gb}GB: concurrency {c} \
-                         projects {}MB peak > {}MB usable",
-                        projected / MIB,
-                        usable / MIB,
-                    );
-                }
-            }
-        }
     }
 
     #[test]
