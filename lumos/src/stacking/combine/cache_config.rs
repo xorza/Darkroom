@@ -231,6 +231,50 @@ mod tests {
     }
 
     #[test]
+    fn load_budget_is_respected_across_configs() {
+        // The tiered loader's core guarantee, as an invariant sweep: for any (frame size, count,
+        // budget), the chosen concurrency must not let peak *load* heap exceed the usable budget.
+        // Project that peak — resident set + concurrency × the real 2× per-decode transient — and
+        // assert it fits, except at the irreducible floor where not even one decode fits the budget
+        // (concurrency pinned to 1). This is what the `master_stack_mem` probe measured live; here
+        // it's deterministic. It fails if the divisor ever reverts to the resident frame size (the
+        // ~2× overshoot bug), since concurrency would then double and the projection blow the budget.
+        const MIB: u64 = 1024 * 1024;
+        let workers = 32;
+        for &frame_mb in &[16u64, 64, 137, 512] {
+            let frame = (frame_mb * MIB) as usize;
+            let transient = 2 * frame; // matches DECODE_TRANSIENT_FACTOR in `cache`
+            for &count in &[4usize, 12, 24, 60] {
+                for &budget_gb in &[1u64, 2, 4, 8, 16] {
+                    let budget = budget_gb * 1024 * MIB;
+                    let usable = memory_budget(budget);
+                    let resident_frames = if fits_in_memory(frame, count, budget) {
+                        count
+                    } else {
+                        0
+                    };
+                    let c = compute_load_concurrency(
+                        frame,
+                        transient,
+                        resident_frames,
+                        budget,
+                        workers,
+                    );
+                    let projected =
+                        resident_frames as u64 * frame as u64 + c as u64 * transient as u64;
+                    assert!(
+                        projected <= usable || c == 1,
+                        "frame={frame_mb}MB count={count} budget={budget_gb}GB: concurrency {c} \
+                         projects {}MB peak > {}MB usable",
+                        projected / MIB,
+                        usable / MIB,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn load_concurrency_disk_tier_keeps_nothing_resident() {
         // resident_frames = 0 (disk tier): only the in-flight decodes count. usable = 3 GB, at the
         // 2× transient 3 GB / 192 MB = 16 in-flight fit, so the 8-worker cap binds.
