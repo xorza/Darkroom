@@ -21,7 +21,7 @@ use common::{FieldKind, FieldValue, Introspect};
 use scenarium::data::{CustomValue, DataType, DynamicValue, EnumVariants, StaticValue, TypeId};
 use scenarium::library::{Library, TypeEntry};
 use scenarium::node::func_lambda::FuncLambda;
-use scenarium::node::function::{Func, FuncInput};
+use scenarium::node::function::{Func, FuncInput, FuncOutput};
 
 /// A config type that can back a config-builder node: introspectable, plus a
 /// stable identity for the value it travels on.
@@ -87,7 +87,7 @@ pub(crate) fn add_config_builder<T: NodeConfig>(
         register_field_enum(library, &field.kind);
     }
     let mut func = Func::new(node_id, node_name)
-        .category("astro")
+        .category("Astro")
         .description(description)
         .pure();
     for field in &fields {
@@ -102,7 +102,7 @@ pub(crate) fn add_config_builder<T: NodeConfig>(
     // The lambda needs each field's kind to read its input value back.
     let kinds: Vec<FieldKind> = fields.iter().map(|f| f.kind.clone()).collect();
     let func = func
-        .output("config", config_data_type::<T>())
+        .output(FuncOutput::new("Config", config_data_type::<T>()))
         .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             let kinds = kinds.clone();
             Box::pin(async move {

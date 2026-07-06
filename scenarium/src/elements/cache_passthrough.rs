@@ -25,31 +25,35 @@ pub(crate) fn cache_passthrough_func() -> &'static Func {
 }
 
 fn build_func() -> Func {
-    Func::new(CACHE_PASSTHROUGH_FUNC_ID, "file cache")
-        .category("cache")
+    Func::new(CACHE_PASSTHROUGH_FUNC_ID, "File Cache")
+        .category("Cache")
         // It owns its caching (explicit-path store), so the editor's generic
         // disk-cache toggle doesn't apply.
         .uncacheable()
         .description(
-            "Passes its input through unchanged and caches it to the file at `path`. \
+            "Passes its input through unchanged and caches it to the file at `Path`. \
              While that file exists the value is loaded from it and the input's \
              upstream is not recomputed.",
         )
-        .input(FuncInput::required("value", DataType::Null))
+        .input(
+            FuncInput::required("Value", DataType::Null)
+                .description("Value to cache and pass through."),
+        )
         // The path input — its index is [`CACHE_PATH_INPUT`]. Const-only: the
         // engine reads it as a literal `FsPath`, so a wired binding would silently
         // disable caching (see `cache_node_path`).
         .input(
             FuncInput::required(
-                "path",
+                "Path",
                 DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::NewFile))),
             )
+            .description("File the value is cached to; empty means not caching yet.")
             .const_only()
             // Seed an empty path so a freshly-dropped node shows its (const-only)
             // path editor right away; an empty path just means "not caching yet".
             .default(StaticValue::FsPath(String::new())),
         )
-        .wildcard_output("value", 0)
+        .wildcard_output("Value", 0)
         // Keyed on the explicit path *alone* (see [`file_cache_digest`], dispatched from
         // `node_digest` on the `CachePassthrough` special kind), so `input[0]` may be
         // impure/expensive and the node still presents a digest — the path is the
@@ -75,7 +79,7 @@ mod tests {
         assert_eq!(func.inputs.len(), 2);
 
         let path = &func.inputs[CACHE_PATH_INPUT];
-        assert_eq!(path.name, "path");
+        assert_eq!(path.name, "Path");
         assert!(path.const_only, "the cache path must reject wired bindings");
         // Seeded empty so a freshly-dropped node shows its path editor.
         assert_eq!(path.default_value, Some(StaticValue::FsPath(String::new())));

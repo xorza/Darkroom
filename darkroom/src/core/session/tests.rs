@@ -120,15 +120,17 @@ fn apply_intents_batches_multiple() {
 fn apply_intents_severs_incompatible_passthrough_output_edges() {
     use scenarium::data::DataType;
     use scenarium::library::Library;
-    use scenarium::node::function::{Func, FuncInput};
+    use scenarium::node::function::{Func, FuncInput, FuncOutput};
     use scenarium::node::special::SpecialNode;
 
     // Float producer → cache passthrough → Float sink, all headless.
-    let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
-    let string_src = Func::new(FuncId::unique(), "ssrc").output("o", DataType::String);
+    let float_src =
+        Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float));
+    let string_src =
+        Func::new(FuncId::unique(), "ssrc").output(FuncOutput::new("o", DataType::String));
     let float_sink = Func::new(FuncId::unique(), "fsink")
         .input(FuncInput::required("x", DataType::Float))
-        .output("o", DataType::Float);
+        .output(FuncOutput::new("o", DataType::Float));
     let library = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
 
     let mut doc = empty_document();
@@ -176,15 +178,17 @@ fn apply_intents_severs_incompatible_passthrough_output_edges() {
 fn apply_intents_severs_through_a_passthrough_chain() {
     use scenarium::data::DataType;
     use scenarium::library::Library;
-    use scenarium::node::function::{Func, FuncInput};
+    use scenarium::node::function::{Func, FuncInput, FuncOutput};
     use scenarium::node::special::SpecialNode;
 
     // Float producer → pass1 → pass2 → Float sink: a valid two-passthrough chain.
-    let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
-    let string_src = Func::new(FuncId::unique(), "ssrc").output("o", DataType::String);
+    let float_src =
+        Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float));
+    let string_src =
+        Func::new(FuncId::unique(), "ssrc").output(FuncOutput::new("o", DataType::String));
     let float_sink = Func::new(FuncId::unique(), "fsink")
         .input(FuncInput::required("x", DataType::Float))
-        .output("o", DataType::Float);
+        .output(FuncOutput::new("o", DataType::Float));
     let library = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
 
     let add_pass = |doc: &mut Document| {

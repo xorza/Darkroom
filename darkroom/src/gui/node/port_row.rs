@@ -164,7 +164,10 @@ fn input_label_cell(
 ) {
     let theme = rcx.theme;
     let allow_const = !node.boundary;
-    let tip = type_label(rcx.library, &input.ty);
+    let tip = port_tip(
+        input.description.as_str(""),
+        type_label(rcx.library, &input.ty),
+    );
     // Flag a required input's port only once a run actually failed on it (the
     // node is `MissingInputs`) — not on every unbound edit — so the port keeps
     // its data-type color while editing instead of flipping as you bind/unbind.
@@ -294,7 +297,10 @@ fn output_cell(
         PortKind::Output,
         rcx.port_frame.ports.is_hovered(port),
     );
-    let tip = type_label(rcx.library, &output.ty);
+    let tip = port_tip(
+        output.description.as_str(""),
+        type_label(rcx.library, &output.ty),
+    );
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     Panel::hstack()
@@ -444,6 +450,17 @@ fn circle_frame(
         Tooltip::for_(&circle.response.snapshot())
             .text(tip.to_owned())
             .show(ui);
+    }
+}
+
+/// A port's hover tooltip: its `description` (when the func declares one) above a
+/// dimmer type line, else just the type. `description` is the resolved
+/// [`crate::gui::scene::SceneInput::description`] text (empty = none).
+fn port_tip(description: &str, type_label: String) -> String {
+    if description.is_empty() {
+        type_label
+    } else {
+        format!("{description}\n{type_label}")
     }
 }
 

@@ -326,7 +326,7 @@ mod tests {
     fn zero_output_subgraph_omits_output_boundary() {
         // in(msg) -> print (terminal). No SubgraphOutput node.
         let library = test_func_lib(TestFuncHooks::default());
-        let print_id = library.by_name("print").unwrap().id;
+        let print_id = library.by_name("Print").unwrap().id;
 
         let in_node = Node::new(NodeKind::SubgraphInput);
         let in_id = in_node.id;

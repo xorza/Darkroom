@@ -13,7 +13,7 @@ use imaginarium::{Blend, BlendMode, ContrastBrightness, SUPPORTED_EXTENSIONS, Tr
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::library::{Library, TypeEntry};
 use scenarium::node::func_lambda::FuncLambda;
-use scenarium::node::function::{Func, FuncInput};
+use scenarium::node::function::{Func, FuncInput, FuncOutput};
 
 /// The imaginarium image-processing nodes (category `image`).
 pub fn image_library() -> Library {
@@ -23,19 +23,26 @@ pub fn image_library() -> Library {
     library.add(
         Func::new(
             "b8c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
-            "brightness_contrast",
+            "Brightness / Contrast",
         )
-        .description(
-            "Adjusts brightness and contrast of an image. Contrast multiplier (1.0 = no change), \
-             brightness offset [-1.0, 1.0]",
-        )
-        .category("image")
+        .description("Adjusts the brightness and contrast of an image.")
+        .category("Image")
         .pure()
         .context(VISION_CTX_TYPE.clone())
-        .input(FuncInput::required("image", IMAGE_DATA_TYPE.clone()))
-        .input(FuncInput::required("brightness", DataType::Float).default(0.0))
-        .input(FuncInput::required("contrast", DataType::Float).default(1.0))
-        .output("image", IMAGE_DATA_TYPE.clone())
+        .input(
+            FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to adjust."),
+        )
+        .input(
+            FuncInput::required("Brightness", DataType::Float)
+                .description("Brightness offset in [−1, 1]. 0 leaves it unchanged.")
+                .default(0.0),
+        )
+        .input(
+            FuncInput::required("Contrast", DataType::Float)
+                .description("Contrast multiplier. 1 leaves it unchanged.")
+                .default(1.0),
+        )
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Adjusted image."))
         .lambda(FuncLambda::new(
             move |ctx_manager, _, _, inputs, _, outputs| {
                 Box::pin(async move {
@@ -69,18 +76,21 @@ pub fn image_library() -> Library {
 
     // load_image
     library.add(
-        Func::new("a4d9bf87-9d98-44f1-a162-7483c298be3d", "load_image")
-            .description("Loads an image from file")
-            .category("image")
+        Func::new("a4d9bf87-9d98-44f1-a162-7483c298be3d", "Load Image")
+            .description("Loads an image from a file on disk.")
+            .category("Image")
             .pure()
-            .input(FuncInput::required(
-                "path",
-                DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
-                    FsPathMode::ExistingFile,
-                    SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
-                ))),
-            ))
-            .output("image", IMAGE_DATA_TYPE.clone())
+            .input(
+                FuncInput::required(
+                    "Path",
+                    DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
+                        FsPathMode::ExistingFile,
+                        SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
+                    ))),
+                )
+                .description("Image file to load."),
+            )
+            .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Loaded image."))
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
                     assert_eq!(inputs.len(), 1);
@@ -98,18 +108,23 @@ pub fn image_library() -> Library {
 
     // save_image
     library.add(
-        Func::new("0c17bcbe-d757-43be-b184-27b429e8b434", "save_image")
-            .description("Saves an image to file")
-            .category("image")
+        Func::new("0c17bcbe-d757-43be-b184-27b429e8b434", "Save Image")
+            .description("Writes an image to a file on disk.")
+            .category("Image")
             .terminal()
-            .input(FuncInput::required("image", IMAGE_DATA_TYPE.clone()))
-            .input(FuncInput::required(
-                "path",
-                DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
-                    FsPathMode::NewFile,
-                    SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
-                ))),
-            ))
+            .input(
+                FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to save."),
+            )
+            .input(
+                FuncInput::required(
+                    "Path",
+                    DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
+                        FsPathMode::NewFile,
+                        SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
+                    ))),
+                )
+                .description("Destination file; the extension picks the format."),
+            )
             .context(VISION_CTX_TYPE.clone())
             .lambda(FuncLambda::new(move |ctx_manager, _, _, inputs, _, _| {
                 Box::pin(async move {
@@ -131,17 +146,22 @@ pub fn image_library() -> Library {
 
     // convert
     library.add(
-        Func::new("80aa1ee7-3b75-4200-b480-b9db913bd6eb", "convert")
-            .description("Converts image to a different color format")
-            .category("image")
+        Func::new("80aa1ee7-3b75-4200-b480-b9db913bd6eb", "Convert")
+            .description("Converts an image to a different color format.")
+            .category("Image")
             .pure()
             .context(VISION_CTX_TYPE.clone())
-            .input(FuncInput::required("image", IMAGE_DATA_TYPE.clone()))
-            .input(enum_input::<ConversionFormat>(
-                "format",
-                &CONVERSION_FORMAT_DATATYPE,
-            ))
-            .output("image", IMAGE_DATA_TYPE.clone())
+            .input(
+                FuncInput::required("Image", IMAGE_DATA_TYPE.clone())
+                    .description("Image to convert."),
+            )
+            .input(
+                enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
+                    .description("Target color format."),
+            )
+            .output(
+                FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Converted image."),
+            )
             .lambda(FuncLambda::new(
                 move |ctx_manager, _, _, inputs, _, outputs| {
                     Box::pin(async move {
@@ -175,16 +195,26 @@ pub fn image_library() -> Library {
 
     // blend
     library.add(
-        Func::new("975cc74b-8412-4293-b2cb-ef8d41fdd9b3", "blend")
-            .description("Blends two images")
-            .category("image")
+        Func::new("975cc74b-8412-4293-b2cb-ef8d41fdd9b3", "Blend")
+            .description("Blends two images using the selected blend mode.")
+            .category("Image")
             .pure()
             .context(VISION_CTX_TYPE.clone())
-            .input(FuncInput::required("source", IMAGE_DATA_TYPE.clone()))
-            .input(FuncInput::required("destination", IMAGE_DATA_TYPE.clone()))
-            .input(enum_input::<BlendMode>("mode", &BLENDMODE_DATATYPE))
-            .input(FuncInput::required("alpha", DataType::Float).default(1.0))
-            .output("image", IMAGE_DATA_TYPE.clone())
+            .input(
+                FuncInput::required("Source", IMAGE_DATA_TYPE.clone())
+                    .description("Top image (the blend source)."),
+            )
+            .input(
+                FuncInput::required("Destination", IMAGE_DATA_TYPE.clone())
+                    .description("Bottom image (the blend backdrop)."),
+            )
+            .input(enum_input::<BlendMode>("Mode", &BLENDMODE_DATATYPE).description("Blend mode."))
+            .input(
+                FuncInput::required("Alpha", DataType::Float)
+                    .description("Blend strength in [0, 1]. 1 is full source.")
+                    .default(1.0),
+            )
+            .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Blended image."))
             .lambda(FuncLambda::new(
                 move |ctx_manager, _, _, inputs, _, outputs| {
                     Box::pin(async move {
@@ -221,18 +251,43 @@ pub fn image_library() -> Library {
 
     // transform
     library.add(
-        Func::new("d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a", "transform")
-            .description("Applies scale, rotation, and translation to an image")
-            .category("image")
+        Func::new("d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a", "Transform")
+            .description("Applies scale, rotation, and translation to an image.")
+            .category("Image")
             .pure()
             .context(VISION_CTX_TYPE.clone())
-            .input(FuncInput::required("image", IMAGE_DATA_TYPE.clone()))
-            .input(FuncInput::required("scale_x", DataType::Float).default(1.0))
-            .input(FuncInput::required("scale_y", DataType::Float).default(1.0))
-            .input(FuncInput::required("rotation", DataType::Float).default(0.0))
-            .input(FuncInput::required("translate_x", DataType::Float).default(0.0))
-            .input(FuncInput::required("translate_y", DataType::Float).default(0.0))
-            .output("image", IMAGE_DATA_TYPE.clone())
+            .input(
+                FuncInput::required("Image", IMAGE_DATA_TYPE.clone())
+                    .description("Image to transform."),
+            )
+            .input(
+                FuncInput::required("Scale X", DataType::Float)
+                    .description("Horizontal scale factor. 1 leaves width unchanged.")
+                    .default(1.0),
+            )
+            .input(
+                FuncInput::required("Scale Y", DataType::Float)
+                    .description("Vertical scale factor. 1 leaves height unchanged.")
+                    .default(1.0),
+            )
+            .input(
+                FuncInput::required("Rotation", DataType::Float)
+                    .description("Rotation in radians, about the image center.")
+                    .default(0.0),
+            )
+            .input(
+                FuncInput::required("Translate X", DataType::Float)
+                    .description("Horizontal shift in pixels.")
+                    .default(0.0),
+            )
+            .input(
+                FuncInput::required("Translate Y", DataType::Float)
+                    .description("Vertical shift in pixels.")
+                    .default(0.0),
+            )
+            .output(
+                FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Transformed image."),
+            )
             .lambda(FuncLambda::new(
                 move |ctx_manager, _, _, inputs, _, outputs| {
                     Box::pin(async move {

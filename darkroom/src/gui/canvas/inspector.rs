@@ -210,6 +210,10 @@ impl Inspectors {
             .show(ui, |ui| {
                 line(ui, node.name.as_str("(unnamed)"), title_style(ui));
                 line(ui, node.kind_label.as_str(""), muted_style(ui));
+                let description = node.description.as_str("");
+                if !description.is_empty() {
+                    line(ui, description, muted_style(ui));
+                }
 
                 let inputs = scene.inputs(node.inputs);
                 if !inputs.is_empty() {

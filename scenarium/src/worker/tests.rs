@@ -47,7 +47,7 @@ impl FrameHarness {
         library.merge(worker_events_library());
 
         let graph = log_frame_no_graph(&library);
-        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+        let frame_event_node_id = graph.by_name("Frame Event").unwrap().id;
         let library = Arc::new(library);
 
         let (tx, compute_rx) = mpsc::channel(cap);
@@ -95,9 +95,9 @@ fn log_frame_no_graph(library: &Library) -> Graph {
     let float_to_string_node_id: NodeId = "eb6590aa-229d-4874-abba-37c56f5b97fa".into();
     let print_node_id: NodeId = "8be72298-dece-4a5f-8a1d-d2dee1e791d3".into();
 
-    let frame_event_func = library.by_name("frame event").unwrap();
-    let float_to_string_func = library.by_name("float to string").unwrap();
-    let print_func = library.by_name("print").unwrap();
+    let frame_event_func = library.by_name("Frame Event").unwrap();
+    let float_to_string_func = library.by_name("Float → String").unwrap();
+    let print_func = library.by_name("Print").unwrap();
 
     let mut frame_event_node: Node = frame_event_func.into();
     frame_event_node.id = frame_event_node_id;
@@ -431,7 +431,7 @@ async fn execute_terminals_triggers_terminal_nodes() {
 
     // Simple single-terminal graph — doesn't use FrameHarness' frame-event setup.
     let mut graph = Graph::default();
-    let print_func = library.by_name("print").unwrap();
+    let print_func = library.by_name("Print").unwrap();
 
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
@@ -475,7 +475,7 @@ async fn worker_streams_node_progress_before_finished() {
 
     let library = basic_library();
     let mut graph = Graph::default();
-    let print_func = library.by_name("print").unwrap();
+    let print_func = library.by_name("Print").unwrap();
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
     let print_node_id = print_node.id;
@@ -536,7 +536,7 @@ async fn stale_cancel_is_cleared_at_run_start() {
 
     let library = basic_library();
     let mut graph = Graph::default();
-    let print_func = library.by_name("print").unwrap();
+    let print_func = library.by_name("Print").unwrap();
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
     let print_node_id = print_node.id;
@@ -953,7 +953,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     let library = basic_library();
 
     let mut graph = Graph::default();
-    let print_func = library.by_name("print").unwrap();
+    let print_func = library.by_name("Print").unwrap();
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
     let print_node_id = print_node.id;
@@ -1013,7 +1013,7 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
 
     // Terminal-only graph — one execute produces one line of output.
     let mut graph = Graph::default();
-    let print_func = library.by_name("print").unwrap();
+    let print_func = library.by_name("Print").unwrap();
     let mut print_node: Node = print_func.into();
     print_node.id = NodeId::unique();
     let print_node_id = print_node.id;
@@ -1604,13 +1604,13 @@ async fn disk_cache_persists_node_across_worker_restart() {
     // get_a (pure source) → mult (pure, persist Disk) → print (terminal).
     let lib = make_lib();
     let mut graph = Graph::default();
-    for name in ["get_a", "mult", "print"] {
+    for name in ["get_a", "mult", "Print"] {
         let node: Node = lib.by_name(name).unwrap().into();
         graph.add(node);
     }
     let get_a_id = graph.by_name("get_a").unwrap().id;
     let mult_id = graph.by_name("mult").unwrap().id;
-    let print_id = graph.by_name("print").unwrap().id;
+    let print_id = graph.by_name("Print").unwrap().id;
     graph.by_id_mut(&mult_id).unwrap().persist = CachePersistence::Disk;
     graph.set_input_binding(InputPort::new(mult_id, 0), (get_a_id, 0).into());
     graph.set_input_binding(InputPort::new(mult_id, 1), (get_a_id, 0).into());

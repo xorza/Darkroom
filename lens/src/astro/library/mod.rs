@@ -18,12 +18,10 @@ use lumos::{
     MlError, NeutralizeBackground, OpError, Reference, StackConfig, TiledOnnxConfig,
     calibrate_align_stack, ml_denoise, remove_stars, stack_cfa_master,
 };
-use scenarium::data::{
-    DataType, DynamicValue, EnumVariants, FsPathConfig, FsPathMode, StaticValue,
-};
+use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::library::{Library, TypeEntry};
 use scenarium::node::func_lambda::{FuncLambda, InvokeError, InvokeResult};
-use scenarium::node::function::{Func, FuncInput, ValueVariant};
+use scenarium::node::function::{Func, FuncInput, FuncOutput, ValueVariant};
 
 use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,
@@ -113,15 +111,15 @@ pub fn astro_library() -> Library {
 
     // load_astro_image
     library.add(
-        Func::new("fbcc8899-efc3-40e0-a6fd-8743f86edbd3", "load_astro_image")
-            .description("Loads a FITS/RAW/standard astronomical image")
-            .category("astro")
+        Func::new("fbcc8899-efc3-40e0-a6fd-8743f86edbd3", "Load Astro Image")
+            .description("Loads a FITS/RAW/standard astronomical image.")
+            .category("Astro")
             .pure()
-            .input(FuncInput::required(
-                "path",
-                ASTRO_IMAGE_PATH_DATA_TYPE.clone(),
-            ))
-            .output("image", IMAGE_DATA_TYPE.clone())
+            .input(
+                FuncInput::required("Path", ASTRO_IMAGE_PATH_DATA_TYPE.clone())
+                    .description("FITS, camera-RAW, or standard image file to load."),
+            )
+            .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Decoded frame."))
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
                     assert_eq!(inputs.len(), 1);
@@ -146,13 +144,13 @@ pub fn astro_library() -> Library {
 
     // build_masters
     library.add(
-        Func::new("f2f6f1ff-5b10-409c-900f-d6b48750a529", "build_masters")
+        Func::new("f2f6f1ff-5b10-409c-900f-d6b48750a529", "Build Masters")
             .description(
                 "Stacks raw calibration frames (darks/flats/bias/flat-darks) into calibration \
                  masters. With `cache` on, each master is written next to its frames and reused \
                  next run instead of re-stacking.",
             )
-            .category("astro")
+            .category("Astro")
             // `Pure`: its digest is the structural fold of its inputs, so the directory-aware
             // `FsPath` resolver keys it on each calibration folder's *contents* (sorted entry
             // `(name, len, mtime)`). A stable folder caches; any add/remove/edit re-keys it and
@@ -160,17 +158,25 @@ pub fn astro_library() -> Library {
             // writes next to the frames, keeping the recompute cheap.)
             .pure()
             .inputs([
-                dir_input("darks"),
-                dir_input("flats"),
-                dir_input("bias"),
-                dir_input("flat_darks"),
+                dir_input("Darks", "dark frames"),
+                dir_input("Flats", "flat frames"),
+                dir_input("Bias", "bias frames"),
+                dir_input("Flat Darks", "flat-dark frames"),
             ])
             .input(
-                FuncInput::required("sigma", DataType::Float)
+                FuncInput::required("Sigma", DataType::Float)
+                    .description("Sigma-clipping rejection threshold when stacking.")
                     .default(DEFAULT_SIGMA_THRESHOLD as f64),
             )
-            .input(FuncInput::required("cache", DataType::Bool).default(true))
-            .output("masters", MASTERS_DATA_TYPE.clone())
+            .input(
+                FuncInput::required("Cache", DataType::Bool)
+                    .description("Write each master next to its frames and reuse it next run.")
+                    .default(true),
+            )
+            .output(
+                FuncOutput::new("Masters", MASTERS_DATA_TYPE.clone())
+                    .description("Calibration masters for the wired roles."),
+            )
             .lambda(FuncLambda::new(move |ctx, _, _, inputs, _, outputs| {
                 let cancel = ctx.cancel_flag();
                 Box::pin(async move {
@@ -206,35 +212,53 @@ pub fn astro_library() -> Library {
 
     // stack_lights
     library.add(
-        Func::new("b02f5c42-7bda-48f6-81dd-81338efbb126", "stack_lights")
-            .description("Calibrates, aligns and stacks a folder of light frames into one image")
-            .category("astro")
+        Func::new("b02f5c42-7bda-48f6-81dd-81338efbb126", "Stack Lights")
+            .description("Calibrates, aligns, and stacks a folder of light frames into one image.")
+            .category("Astro")
             // Pure: the digest folds the `lights` folder's contents (the
             // directory-aware `FsPath` resolver), so an unchanged folder caches
             // and any add/remove/edit re-keys it — no purity override needed.
             .pure()
-            .input(FuncInput::required("lights", ASTRO_DIR_DATA_TYPE.clone()))
-            .input(FuncInput::optional("masters", MASTERS_DATA_TYPE.clone()))
+            .input(
+                FuncInput::required("Lights", ASTRO_DIR_DATA_TYPE.clone())
+                    .description("Folder of light frames to stack."),
+            )
+            .input(
+                FuncInput::optional("Masters", MASTERS_DATA_TYPE.clone())
+                    .description("Optional calibration masters. Unwired means no calibration."),
+            )
             // Each stage is one input: a preset quick-pick (the `value_variants`
             // dropdown) that a build_*_config node can wire into to override.
             .input(preset_config_input::<DetectionConfigDef>(
-                "detection",
-                DetectionPreset::variant_names(),
+                "Detection",
+                DetectionPreset::picker_variants(),
             ))
             .input(preset_config_input::<RegistrationConfigDef>(
-                "registration",
-                RegistrationPreset::variant_names(),
+                "Registration",
+                RegistrationPreset::picker_variants(),
             ))
             .input(preset_config_input::<CombineConfigDef>(
-                "combine",
-                CombinePreset::variant_names(),
+                "Combine",
+                CombinePreset::picker_variants(),
             ))
             // reference: < 0 picks the frame with the most stars (auto); >= 0 is
             // a 0-based index into the (directory-sorted) light frames.
-            .input(FuncInput::required("reference", DataType::Int).default(-1_i64))
-            .output("image", IMAGE_DATA_TYPE.clone())
-            .output("coverage", IMAGE_DATA_TYPE.clone())
-            .output("weight", IMAGE_DATA_TYPE.clone())
+            .input(
+                FuncInput::required("Reference", DataType::Int)
+                    .description(
+                        "Alignment reference frame index; −1 auto-picks the richest frame.",
+                    )
+                    .default(-1_i64),
+            )
+            .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Stacked image."))
+            .output(
+                FuncOutput::new("Coverage", IMAGE_DATA_TYPE.clone())
+                    .description("Per-pixel frame-count map."),
+            )
+            .output(
+                FuncOutput::new("Weight", IMAGE_DATA_TYPE.clone())
+                    .description("Per-pixel accumulated weight map."),
+            )
             .lambda(FuncLambda::new(move |ctx, _, _, inputs, _, outputs| {
                 // Grab the run's cancel flag so the heavy lumos op can poll it.
                 let cancel = ctx.cancel_flag();
@@ -336,16 +360,19 @@ pub fn astro_library() -> Library {
 
     // auto_stretch
     library.add(
-        Func::new("c15248e0-006a-4a4a-9aae-b1fc7886dea1", "auto_stretch")
-            .description("Auto-stretches a linear frame to a viewable image (display tone curve)")
-            .category("astro")
+        Func::new("c15248e0-006a-4a4a-9aae-b1fc7886dea1", "Auto Stretch")
+            .description("Auto-stretches a linear frame to a viewable image (display tone curve).")
+            .category("Astro")
             .pure()
-            .input(frame_input("image"))
+            .input(frame_input("Image"))
             .input(preset_config_input::<StretchConfigDef>(
-                "method",
-                StretchPreset::variant_names(),
+                "Method",
+                StretchPreset::picker_variants(),
             ))
-            .output("image", IMAGE_DATA_TYPE.clone())
+            .output(
+                FuncOutput::new("Image", IMAGE_DATA_TYPE.clone())
+                    .description("Stretched, display-ready image."),
+            )
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
                     assert_eq!(inputs.len(), 2);
@@ -379,7 +406,7 @@ pub fn astro_library() -> Library {
     add_config_builder::<BackgroundConfigDef>(
         &mut library,
         "9cda0462-1b8e-4c50-83d6-4db470df22d9",
-        "build_background_config",
+        "Build Background Config",
         "Builds a detailed background-extraction config",
     );
 
@@ -389,19 +416,19 @@ pub fn astro_library() -> Library {
     add_config_builder::<DetectionConfigDef>(
         &mut library,
         "6c6f92e7-0f74-454c-acc4-68691cb8462f",
-        "build_detection_config",
+        "Build Detection Config",
         "Builds a detailed star-detection config",
     );
     add_config_builder::<RegistrationConfigDef>(
         &mut library,
         "adf216fe-baa9-4abd-8c4a-bfb98bb60fbc",
-        "build_registration_config",
+        "Build Registration Config",
         "Builds a detailed registration config",
     );
     add_config_builder::<CombineConfigDef>(
         &mut library,
         "05313ceb-a3b2-4488-92af-c9e228bb1789",
-        "build_combine_config",
+        "Build Combine Config",
         "Builds a detailed frame-combination config",
     );
 
@@ -410,19 +437,19 @@ pub fn astro_library() -> Library {
     add_config_builder::<DenoiseConfigDef>(
         &mut library,
         "77693298-3531-4858-89ce-03cb347dc3f2",
-        "build_denoise_config",
+        "Build Denoise Config",
         "Builds a detailed wavelet-denoise config",
     );
     add_config_builder::<HdrConfigDef>(
         &mut library,
         "dc82d7a9-b7a7-460b-a86d-5dc9055e0d18",
-        "build_hdr_config",
+        "Build HDR Config",
         "Builds a detailed HDR dynamic-range-compression config",
     );
     add_config_builder::<LocalContrastConfigDef>(
         &mut library,
         "f9ebdedf-38e3-4a74-8c74-eb207903d327",
-        "build_local_contrast_config",
+        "Build Local Contrast Config",
         "Builds a detailed local-contrast config",
     );
 
@@ -431,13 +458,13 @@ pub fn astro_library() -> Library {
     add_config_builder::<StretchConfigDef>(
         &mut library,
         "82f271d4-d047-459a-83aa-0bf8288787cf",
-        "build_stretch_config",
+        "Build Stretch Config",
         "Builds a detailed display-stretch config",
     );
     add_config_builder::<ScnrConfigDef>(
         &mut library,
         "d07742d1-4469-4739-b2ff-78b4dcf64132",
-        "build_scnr_config",
+        "Build SCNR Config",
         "Builds a detailed SCNR (green-removal) config",
     );
 
@@ -447,15 +474,15 @@ pub fn astro_library() -> Library {
     // build_background_config (which overrides the preset when present).
     library.add(processing_func(
         "e27c2a02-ec2a-4c6d-afea-60d1276ff8e1",
-        "background_extract",
-        "Fits and removes a smooth sky-background gradient",
+        "Extract Background",
+        "Fits and removes a smooth sky-background gradient.",
         vec![
-            frame_input("image"),
-            // One `config` input: pick a `mode` preset (value_variants dropdown)
+            frame_input("Image"),
+            // One `Config` input: pick a `mode` preset (value_variants dropdown)
             // or wire a build_background_config node to override it.
             preset_config_input::<BackgroundConfigDef>(
-                "config",
-                BackgroundModeKind::variant_names(),
+                "Config",
+                BackgroundModeKind::picker_variants(),
             ),
         ],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
@@ -485,11 +512,11 @@ pub fn astro_library() -> Library {
     // denoise
     library.add(processing_func(
         "61c17dfa-8369-446b-b6e7-d91d62d344ee",
-        "denoise",
-        "Wavelet denoise (starlet coefficient thresholding)",
+        "Denoise",
+        "Wavelet denoise (starlet coefficient thresholding).",
         vec![
-            frame_input("image"),
-            float_input("strength", 0.85),
+            frame_input("Image"),
+            float_input("Strength", 0.85, "Denoise strength in [0, 1]."),
             config_override_input::<DenoiseConfigDef>(),
         ],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
@@ -519,11 +546,11 @@ pub fn astro_library() -> Library {
     // scnr
     library.add(processing_func(
         "ef0c2661-8553-4302-9251-95b2d383af19",
-        "scnr",
-        "Removes the residual green cast (SCNR)",
+        "SCNR",
+        "Removes the residual green cast (SCNR).",
         vec![
-            frame_input("image"),
-            preset_config_input::<ScnrConfigDef>("method", ScnrKind::variant_names()),
+            frame_input("Image"),
+            preset_config_input::<ScnrConfigDef>("Method", ScnrKind::picker_variants()),
         ],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
@@ -550,9 +577,9 @@ pub fn astro_library() -> Library {
     // neutralize_background
     library.add(processing_func(
         "5a8c9043-61ca-4a5a-8e55-ce27c804e84b",
-        "neutralize_background",
-        "Shifts each channel so the background reads neutral gray",
-        vec![frame_input("image")],
+        "Neutralize Background",
+        "Shifts each channel so the background reads neutral gray.",
+        vec![frame_input("Image")],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
                 let value = inputs[0].value.clone();
@@ -565,11 +592,11 @@ pub fn astro_library() -> Library {
     // hdr_compress
     library.add(processing_func(
         "300a2ec5-0ccd-47ec-b282-030eea41441c",
-        "hdr_compress",
-        "Compresses large-scale dynamic range (multiscale HDR)",
+        "HDR Compress",
+        "Compresses large-scale dynamic range (multiscale HDR).",
         vec![
-            frame_input("image"),
-            float_input("amount", 0.5),
+            frame_input("Image"),
+            float_input("Amount", 0.5, "Compression amount in [0, 1]."),
             config_override_input::<HdrConfigDef>(),
         ],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
@@ -599,11 +626,11 @@ pub fn astro_library() -> Library {
     // local_contrast
     library.add(processing_func(
         "6a28b732-2704-454b-8afd-0a91d385458a",
-        "local_contrast",
-        "Local contrast enhancement (CLAHE)",
+        "Local Contrast",
+        "Local contrast enhancement (CLAHE).",
         vec![
-            frame_input("image"),
-            float_input("strength", 0.8),
+            frame_input("Image"),
+            float_input("Strength", 0.8, "Local-contrast strength in [0, 1]."),
             config_override_input::<LocalContrastConfigDef>(),
         ],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
@@ -633,9 +660,9 @@ pub fn astro_library() -> Library {
     // ml_denoise — caller-supplied ONNX denoiser (DeepSNR), display-domain.
     library.add(processing_func(
         "ace786f9-8a02-4ed1-93a0-ad67bf0680f8",
-        "ml_denoise",
-        "Denoise a stretched image with a caller-supplied ONNX model (DeepSNR)",
-        vec![frame_input("image")],
+        "ML Denoise",
+        "Denoise a stretched image with a caller-supplied ONNX model (DeepSNR).",
+        vec![frame_input("Image")],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
                 let model = ml_model_paths().denoise;
@@ -651,15 +678,21 @@ pub fn astro_library() -> Library {
 
     // remove_stars — caller-supplied StarNet ONNX model → starless + recovered stars layers.
     library.add(
-        Func::new("60c31a76-eed4-467c-9ba3-5c89d294a91b", "remove_stars")
+        Func::new("60c31a76-eed4-467c-9ba3-5c89d294a91b", "Remove Stars")
             .description(
-                "Remove stars with a caller-supplied StarNet ONNX model (starless + stars)",
+                "Removes stars with a caller-supplied StarNet ONNX model (starless + stars).",
             )
-            .category("astro")
+            .category("Astro")
             .pure()
-            .input(frame_input("image"))
-            .output("starless", IMAGE_DATA_TYPE.clone())
-            .output("stars", IMAGE_DATA_TYPE.clone())
+            .input(frame_input("Image"))
+            .output(
+                FuncOutput::new("Starless", IMAGE_DATA_TYPE.clone())
+                    .description("The image with stars removed."),
+            )
+            .output(
+                FuncOutput::new("Stars", IMAGE_DATA_TYPE.clone())
+                    .description("The recovered star layer."),
+            )
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
                     let model = ml_model_paths().star_removal;
@@ -678,19 +711,17 @@ pub fn astro_library() -> Library {
 }
 
 /// A single config input that's a config `T`'s wire (so a `build_*_config` node
-/// can drive it) *and* offers `presets` as a quick-pick dropdown via
-/// `value_variants` (seeded to the first). The node resolves a wired
-/// `ConfigValue<T>` if present, else the picked preset name.
-fn preset_config_input<T: NodeConfig>(name: &str, presets: Vec<String>) -> FuncInput {
-    let variants = presets
-        .iter()
-        .map(|preset| ValueVariant {
-            name: preset.clone(),
-            value: StaticValue::Enum(preset.clone()),
-        })
-        .collect();
-    let mut input = FuncInput::required(name, config_data_type::<T>()).variants(variants);
-    input.default_value = presets.first().map(|p| StaticValue::Enum(p.clone()));
+/// can drive it) *and* offers `variants` as a quick-pick dropdown (seeded to the
+/// first). The node resolves a wired `ConfigValue<T>` if present, else the picked
+/// preset name. Each variant stores the raw preset label but shows its friendly
+/// [`ValueVariant::display_name`], so a saved graph keeps working while the picker
+/// reads human-friendly (e.g. shows "Wide Field", stores `wide_field`).
+fn preset_config_input<T: NodeConfig>(name: &str, variants: Vec<ValueVariant>) -> FuncInput {
+    let default_value = variants.first().map(|v| v.value.clone());
+    let mut input = FuncInput::required(name, config_data_type::<T>())
+        .description("Preset quick-pick; wire a matching build config node to override it.")
+        .variants(variants);
+    input.default_value = default_value;
     input
 }
 
@@ -699,7 +730,8 @@ fn preset_config_input<T: NodeConfig>(name: &str, presets: Vec<String>) -> FuncI
 /// node uses its scalar param; wired from a `build_*_config` node → the full
 /// config overrides it.
 fn config_override_input<T: NodeConfig>() -> FuncInput {
-    FuncInput::optional("config", config_data_type::<T>())
+    FuncInput::optional("Config", config_data_type::<T>())
+        .description("Optional detailed config; overrides the inline knob when wired.")
 }
 
 /// Wrap a single-channel result plane (coverage / weight) as a grayscale
@@ -709,25 +741,28 @@ fn plane_to_frame(plane: Buffer2<f32>) -> AstroImage {
     AstroImage::from_planar_channels(dims, [Vec::from(plane)])
 }
 
-/// An optional calibration-frame folder input (`darks`/`flats`/…): an
+/// An optional calibration-frame folder input (`Darks`/`Flats`/…): an
 /// [`ASTRO_DIR_DATA_TYPE`] directory picker, not required (an unwired role
-/// simply yields no master for it).
-fn dir_input(name: &str) -> FuncInput {
-    FuncInput::optional(name, ASTRO_DIR_DATA_TYPE.clone())
+/// simply yields no master for it). `what` completes the tooltip
+/// ("Folder of {what}.").
+fn dir_input(name: &str, what: &str) -> FuncInput {
+    FuncInput::optional(name, ASTRO_DIR_DATA_TYPE.clone()).description(format!("Folder of {what}."))
 }
 
 /// A required `Image` input port (the astro nodes' image currency).
 fn frame_input(name: &str) -> FuncInput {
-    FuncInput::required(name, IMAGE_DATA_TYPE.clone())
+    FuncInput::required(name, IMAGE_DATA_TYPE.clone()).description("Image to process.")
 }
 
-/// A required float parameter input seeded with `default`.
-fn float_input(name: &str, default: f32) -> FuncInput {
-    FuncInput::required(name, DataType::Float).default(default as f64)
+/// A required float parameter input seeded with `default`, with a tooltip.
+fn float_input(name: &str, default: f32, description: &str) -> FuncInput {
+    FuncInput::required(name, DataType::Float)
+        .description(description)
+        .default(default as f64)
 }
 
 /// Assemble a `Func` for an `Image → Image` processing node:
-/// `Pure`, category `astro`, a single `image` output. The caller supplies
+/// `Pure`, category `Astro`, a single `Image` output. The caller supplies
 /// the inputs (the frame first) and the lambda.
 fn processing_func(
     id: &str,
@@ -737,11 +772,11 @@ fn processing_func(
     lambda: FuncLambda,
 ) -> Func {
     Func::new(id, name)
-        .category("astro")
+        .category("Astro")
         .description(description)
         .pure()
         .inputs(inputs)
-        .output("image", IMAGE_DATA_TYPE.clone())
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Processed image."))
         .lambda(lambda)
 }
 

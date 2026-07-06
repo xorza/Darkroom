@@ -122,12 +122,12 @@ mod cache_persistence {
         let mut mult = node(&lib, "mult", NodeId::unique());
         mult.persist = CachePersistence::Disk;
         graph.add(mult);
-        graph.add(node(&lib, "print", NodeId::unique()));
+        graph.add(node(&lib, "Print", NodeId::unique()));
         let get_a_id = graph.by_name("get_a").unwrap().id;
         let mult_id = graph.by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, (get_a_id, 0).into());
         bind(&mut graph, "mult", 1, (get_a_id, 0).into());
-        bind(&mut graph, "print", 0, (mult_id, 0).into());
+        bind(&mut graph, "Print", 0, (mult_id, 0).into());
 
         // First run: everything computes; `mult` is stored to disk.
         let mut engine = disk_engine(&dir);
@@ -206,9 +206,9 @@ mod cache_persistence {
         mult.persist = CachePersistence::Disk;
         graph.add(mult);
         let print_mult_id = NodeId::unique();
-        graph.add(node(&lib, "print", print_mult_id));
+        graph.add(node(&lib, "Print", print_mult_id));
         let print_direct_id = NodeId::unique();
-        graph.add(node(&lib, "print", print_direct_id));
+        graph.add(node(&lib, "Print", print_direct_id));
         let get_a_id = graph.by_name("get_a").unwrap().id;
         let mult_id = graph.by_name("mult").unwrap().id;
         graph.set_input_binding(InputPort::new(mult_id, 0), (get_a_id, 0).into());
@@ -274,7 +274,7 @@ mod cache_persistence {
         let mut mult = node(&lib, "mult", NodeId::unique());
         mult.persist = CachePersistence::Disk;
         graph.add(mult);
-        graph.add(node(&lib, "print", NodeId::unique()));
+        graph.add(node(&lib, "Print", NodeId::unique()));
         let get_a_id = graph.by_name("get_a").unwrap().id;
         let sum_id = graph.by_name("sum").unwrap().id;
         let mult_id = graph.by_name("mult").unwrap().id;
@@ -282,7 +282,7 @@ mod cache_persistence {
         bind(&mut graph, "sum", 1, (get_a_id, 0).into());
         bind(&mut graph, "mult", 0, (sum_id, 0).into());
         bind(&mut graph, "mult", 1, (get_a_id, 0).into());
-        bind(&mut graph, "print", 0, (mult_id, 0).into());
+        bind(&mut graph, "Print", 0, (mult_id, 0).into());
 
         // First run: everything computes; sum (14) and mult (98) stored to disk.
         let mut engine = disk_engine(&dir);
@@ -371,7 +371,7 @@ mod cache_persistence {
         let mut mult = node(&lib, "mult", NodeId::unique());
         mult.persist = CachePersistence::Disk;
         graph.add(mult);
-        graph.add(node(&lib, "print", NodeId::unique()));
+        graph.add(node(&lib, "Print", NodeId::unique()));
         let get_a_id = graph.by_name("get_a").unwrap().id;
         let sum_id = graph.by_name("sum").unwrap().id;
         let mult_id = graph.by_name("mult").unwrap().id;
@@ -379,7 +379,7 @@ mod cache_persistence {
         bind(&mut graph, "sum", 1, (get_a_id, 0).into());
         bind(&mut graph, "mult", 0, (sum_id, 0).into());
         bind(&mut graph, "mult", 1, (get_a_id, 0).into());
-        bind(&mut graph, "print", 0, (mult_id, 0).into());
+        bind(&mut graph, "Print", 0, (mult_id, 0).into());
 
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &lib).unwrap();
@@ -468,9 +468,9 @@ mod cache_persistence {
         let mut mult = node(&lib, "mult", NodeId::from_u128(1));
         mult.persist = CachePersistence::Disk;
         graph.add(mult);
-        graph.add(node(&lib, "print", NodeId::from_u128(2)));
+        graph.add(node(&lib, "Print", NodeId::from_u128(2)));
         let mult_id = graph.by_name("mult").unwrap().id;
-        bind(&mut graph, "print", 0, (mult_id, 0).into());
+        bind(&mut graph, "Print", 0, (mult_id, 0).into());
 
         let set = |graph: &mut Graph, a: i64, b: i64| {
             bind(graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
@@ -545,11 +545,11 @@ mod cache_persistence {
         let mut mult = node(&lib, "mult", NodeId::unique());
         mult.persist = CachePersistence::Disk;
         graph.add(mult);
-        graph.add(node(&lib, "print", NodeId::unique()));
+        graph.add(node(&lib, "Print", NodeId::unique()));
         let mult_id = graph.by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(2)));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
-        bind(&mut graph, "print", 0, (mult_id, 0).into());
+        bind(&mut graph, "Print", 0, (mult_id, 0).into());
 
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &lib).unwrap();
@@ -576,11 +576,11 @@ mod cache_persistence {
             let mut mult = node(&lib, "mult", NodeId::from_u128(1));
             mult.persist = persist;
             graph.add(mult);
-            graph.add(node(&lib, "print", NodeId::from_u128(2)));
+            graph.add(node(&lib, "Print", NodeId::from_u128(2)));
             let mult_id = graph.by_name("mult").unwrap().id;
             bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(2)));
             bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
-            bind(&mut graph, "print", 0, (mult_id, 0).into());
+            bind(&mut graph, "Print", 0, (mult_id, 0).into());
             graph
         };
 
@@ -621,11 +621,11 @@ mod cache_persistence {
             let mut mult = node(&lib, "mult", NodeId::from_u128(1));
             mult.persist = CachePersistence::Disk;
             graph.add(mult);
-            graph.add(node(&lib, "print", NodeId::from_u128(2)));
+            graph.add(node(&lib, "Print", NodeId::from_u128(2)));
             let mult_id = graph.by_name("mult").unwrap().id;
             bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
             bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(b)));
-            bind(&mut graph, "print", 0, (mult_id, 0).into());
+            bind(&mut graph, "Print", 0, (mult_id, 0).into());
             graph
         };
         let blob_count = |dir: &TempDir| std::fs::read_dir(&dir.0).unwrap().count();
@@ -677,12 +677,12 @@ mod cache_persistence {
         let mut mult = node(&lib, "mult", NodeId::from_u128(2));
         mult.persist = CachePersistence::Disk;
         graph.add(mult);
-        graph.add(node(&lib, "print", NodeId::from_u128(3)));
+        graph.add(node(&lib, "Print", NodeId::from_u128(3)));
         let get_a_id = graph.by_name("get_a").unwrap().id;
         let mult_id = graph.by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, (get_a_id, 0).into());
         bind(&mut graph, "mult", 1, (get_a_id, 0).into());
-        bind(&mut graph, "print", 0, (mult_id, 0).into());
+        bind(&mut graph, "Print", 0, (mult_id, 0).into());
 
         let mult_id = graph.by_name("mult").unwrap().id;
         let ran = |s: &ExecutionStats, id| s.executed_nodes.iter().any(|n| n.node_id == id);
@@ -767,12 +767,12 @@ mod cache_persistence {
         let mut sum = node(&lib, "sum", NodeId::unique());
         sum.persist = CachePersistence::Disk;
         graph.add(sum);
-        graph.add(node(&lib, "print", NodeId::unique()));
+        graph.add(node(&lib, "Print", NodeId::unique()));
         let get_a_id = graph.by_name("get_a").unwrap().id;
         let sum_id = graph.by_name("sum").unwrap().id;
         bind(&mut graph, "sum", 0, (get_a_id, 0).into());
         bind(&mut graph, "sum", 1, (get_a_id, 0).into());
-        bind(&mut graph, "print", 0, (sum_id, 0).into());
+        bind(&mut graph, "Print", 0, (sum_id, 0).into());
 
         // Run 1: writes sum's blob to disk.
         let mut engine = disk_engine(&dir);
@@ -814,7 +814,7 @@ mod cache_persistence {
         use crate::async_lambda;
         use crate::execution::output_cache::OutputCache;
         use crate::library::Library;
-        use crate::node::function::{Func, FuncInput};
+        use crate::node::function::{Func, FuncInput, FuncOutput};
 
         const PRODUCE: &str = "63b7a83c-d7fc-46f4-805a-4bf2695e3763";
         const CONSUME: &str = "39bbd6b3-b919-4095-b3d0-79a4515de75e";
@@ -833,14 +833,14 @@ mod cache_persistence {
                 let produce = Func::new(PRODUCE, "produce")
                     .category("Test")
                     .pure()
-                    .output(
+                    .output(FuncOutput::new(
                         "out",
                         if as_float {
                             DataType::Float
                         } else {
                             DataType::Int
                         },
-                    );
+                    ));
                 let runs = produce_runs.clone();
                 let produce = if as_float {
                     produce.lambda(
@@ -929,12 +929,12 @@ mod cache_persistence {
         let mut mult = node(&library, "mult", NodeId::unique());
         mult.persist = CachePersistence::Disk;
         graph.add(mult);
-        graph.add(node(&library, "print", NodeId::unique()));
+        graph.add(node(&library, "Print", NodeId::unique()));
         let get_b_id = graph.by_name("get_b").unwrap().id;
         let mult_id = graph.by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, (get_b_id, 0).into());
         bind(&mut graph, "mult", 1, (get_b_id, 0).into());
-        bind(&mut graph, "print", 0, (mult_id, 0).into());
+        bind(&mut graph, "Print", 0, (mult_id, 0).into());
 
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &library).unwrap();
@@ -965,12 +965,12 @@ mod cache_persistence {
         let mut graph = Graph::default();
         graph.add(node(&library, "get_a", NodeId::unique()));
         graph.add(node(&library, "mult", NodeId::unique()));
-        graph.add(node(&library, "print", NodeId::unique()));
+        graph.add(node(&library, "Print", NodeId::unique()));
         let get_a_id = graph.by_name("get_a").unwrap().id;
         let mult_id = graph.by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, (get_a_id, 0).into());
         bind(&mut graph, "mult", 1, (get_a_id, 0).into());
-        bind(&mut graph, "print", 0, (mult_id, 0).into());
+        bind(&mut graph, "Print", 0, (mult_id, 0).into());
 
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &library).unwrap();
@@ -1006,7 +1006,7 @@ mod cache_persistence {
         use crate::data::CustomValueCodec;
         use crate::data::{CustomValue, TypeId};
         use crate::library::{Library, TypeEntry};
-        use crate::node::function::Func;
+        use crate::node::function::{Func, FuncOutput};
         use crate::runtime::context::ContextManager;
 
         type CodecError = Box<dyn std::error::Error + Send + Sync>;
@@ -1065,7 +1065,7 @@ mod cache_persistence {
                     .category("Test")
                     .pure()
                     .terminal()
-                    .output("out", DataType::Custom(BLOB_TYPE.into()))
+                    .output(FuncOutput::new("out", DataType::Custom(BLOB_TYPE.into())))
                     .lambda(async_lambda!(
                         move |_, _, _, _, _, outputs| { counter = recompute.clone() } => {
                             counter.fetch_add(1, Ordering::SeqCst);
@@ -1199,10 +1199,10 @@ mod file_cache {
         let cache_node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough { bypass }));
         let cache_id = cache_node.id;
         graph.add(cache_node);
-        graph.add(node(&lib, "print", NodeId::unique()));
+        graph.add(node(&lib, "Print", NodeId::unique()));
 
         let get_a_id = graph.by_name("get_a").unwrap().id;
-        let print_id = graph.by_name("print").unwrap().id;
+        let print_id = graph.by_name("Print").unwrap().id;
         // cache.value = get_a.0; cache.path = const; print.value = cache.0
         graph.set_input_binding(InputPort::new(cache_id, 0), (get_a_id, 0).into());
         graph.set_input_binding(
@@ -1291,7 +1291,7 @@ mod graph_structure {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
-            ["sum", "mult", "print"]
+            ["sum", "mult", "Print"]
         );
 
         assert_eq!(execution_graph.program.e_nodes.len(), 5);
@@ -1313,7 +1313,7 @@ mod graph_structure {
         let get_b = execution_graph.by_name("get_b").unwrap();
         let sum = execution_graph.by_name("sum").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("print").unwrap();
+        let print = execution_graph.by_name("Print").unwrap();
 
         // usage_count: get_a→sum[0], get_b→sum[1]+mult[1], sum→mult[0], mult→print[0]
         assert_eq!(execution_graph.node_output_usage(get_a)[0], 1);
@@ -1346,7 +1346,7 @@ mod graph_structure {
         let get_a = execution_graph.by_name("get_a").unwrap();
         let get_b = execution_graph.by_name("get_b").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("print").unwrap();
+        let print = execution_graph.by_name("Print").unwrap();
 
         assert_eq!(execution_graph.node_output_usage(get_a).len(), 1);
         assert_eq!(execution_graph.node_output_usage(get_b).len(), 1);
@@ -1452,7 +1452,7 @@ mod missing_inputs {
         let get_b = execution_graph.by_name("get_b").unwrap();
         let sum = execution_graph.by_name("sum").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("print").unwrap();
+        let print = execution_graph.by_name("Print").unwrap();
 
         // get_b has no missing inputs (no inputs at all)
         assert!(
@@ -1494,7 +1494,7 @@ mod missing_inputs {
 
         let sum = execution_graph.by_name("sum").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("print").unwrap();
+        let print = execution_graph.by_name("Print").unwrap();
 
         // The missing flag flows through the optional bind to mult and on to print, so
         // the gated chain isn't runnable (its sources still are).
@@ -1527,7 +1527,7 @@ mod missing_inputs {
         execution_graph.prepare_execution(true, false, &[])?;
 
         let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("print").unwrap();
+        let print = execution_graph.by_name("Print").unwrap();
 
         assert!(!execution_graph.node_verdict(mult).missing_required_inputs());
         assert!(
@@ -1607,7 +1607,7 @@ mod disabled_nodes {
         // (transitive) producer and are flagged missing-required-input.
         let get_b = execution_graph.by_name("get_b").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("print").unwrap();
+        let print = execution_graph.by_name("Print").unwrap();
         assert!(
             !execution_graph
                 .node_verdict(get_b)
@@ -1643,7 +1643,7 @@ mod disabled_nodes {
         assert!(execution_graph.by_name("sum").is_none());
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
-            ["get_b", "mult", "print"]
+            ["get_b", "mult", "Print"]
         );
 
         Ok(())
@@ -1671,11 +1671,11 @@ mod const_bindings {
         // upstream, so get_a/get_b/sum are pruned.
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
-            ["mult", "print"]
+            ["mult", "Print"]
         );
 
         let mult_id = execution_graph.by_name("mult").unwrap().id;
-        let print_id = execution_graph.by_name("print").unwrap().id;
+        let print_id = execution_graph.by_name("Print").unwrap().id;
         let ran = |stats: &ExecutionStats, id| stats.executed_nodes.iter().any(|n| n.node_id == id);
 
         // Re-run with the same bindings: mult's digest is unchanged, so it's reused
@@ -1715,7 +1715,7 @@ mod const_bindings {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
-            ["mult", "print"]
+            ["mult", "Print"]
         );
 
         // Same const value: no re-execution of mult
@@ -1723,7 +1723,7 @@ mod const_bindings {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
-        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
+        assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
 
         // Different const value: mult re-executes
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
@@ -1732,14 +1732,14 @@ mod const_bindings {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
-            ["mult", "print"]
+            ["mult", "Print"]
         );
 
         // Stable again
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
-        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
+        assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
 
         Ok(())
     }
@@ -1759,7 +1759,7 @@ mod const_bindings {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
-            ["get_b", "sum", "mult", "print"]
+            ["get_b", "sum", "mult", "Print"]
         );
 
         // Also unbind sum[1] — now sum has all const/none inputs, no upstream needed
@@ -1770,7 +1770,7 @@ mod const_bindings {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
-            ["sum", "mult", "print"]
+            ["sum", "mult", "Print"]
         );
 
         Ok(())
@@ -1791,7 +1791,7 @@ mod const_bindings {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
-            ["get_b", "sum", "mult", "print"]
+            ["get_b", "sum", "mult", "Print"]
         );
 
         // Switch from const back to bind — sum must re-execute
@@ -1802,7 +1802,7 @@ mod const_bindings {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
-            ["sum", "mult", "print"]
+            ["sum", "mult", "Print"]
         );
 
         Ok(())
@@ -1827,14 +1827,14 @@ mod const_bindings {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
-            ["mult", "print"]
+            ["mult", "Print"]
         );
 
         // Stable on rerun
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
-        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
+        assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
 
         Ok(())
     }
@@ -1877,12 +1877,12 @@ mod behavior {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
-            ["sum", "mult", "print"]
+            ["sum", "mult", "Print"]
         );
 
         // Second run: only print (impure terminal) re-executes, others cached
         let exe_stats = execution_graph.execute_terminals().await?;
-        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
+        assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
         assert_eq!(exe_stats.cached_nodes.len(), 4);
 
         // Cached mult must still hold the correct product, not a stale value:
@@ -1928,7 +1928,7 @@ mod behavior {
         }
 
         let name_of: std::collections::HashMap<NodeId, String> =
-            ["get_a", "get_b", "sum", "mult", "print"]
+            ["get_a", "get_b", "sum", "mult", "Print"]
                 .iter()
                 .map(|n| (graph.by_name(n).unwrap().id, n.to_string()))
                 .collect();
@@ -2026,7 +2026,7 @@ mod behavior {
         use crate::execution::stats::NodeError;
         use crate::graph::{Graph, NodeId};
         use crate::library::Library;
-        use crate::node::function::Func;
+        use crate::node::function::{Func, FuncOutput};
 
         // Trips the cancel on its first invoke only, so the re-run completes.
         let cancel_first = Arc::new(AtomicBool::new(true));
@@ -2034,7 +2034,7 @@ mod behavior {
             .category("Debug")
             .pure()
             .terminal()
-            .output("out", DataType::Int)
+            .output(FuncOutput::new("out", DataType::Int))
             .lambda(async_lambda!(
                 move |ctx, _, _, _, _, outputs| { cancel_first = Arc::clone(&cancel_first) } => {
                     if cancel_first.swap(false, Ordering::Relaxed) {
@@ -2121,14 +2121,14 @@ mod behavior {
         use crate::graph::{Graph, NodeId};
         use crate::library::Library;
         use crate::node::func_lambda::InvokeError;
-        use crate::node::function::Func;
+        use crate::node::function::{Func, FuncOutput};
 
         let library: Library = [
             Func::new("8003e30b-0417-474d-a77f-1d3ea71ac6b3", "always_cancel")
                 .category("Debug")
                 .pure()
                 .terminal()
-                .output("out", DataType::Int)
+                .output(FuncOutput::new("out", DataType::Int))
                 .lambda(async_lambda!(move |_, _, _, _, _, _| {
                     Err(InvokeError::Cancelled)
                 })),
@@ -2188,7 +2188,7 @@ mod behavior {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
-            ["sum", "mult", "print"]
+            ["sum", "mult", "Print"]
         );
 
         Ok(())
@@ -2262,7 +2262,7 @@ mod composite_behavior {
         let mut graph = Graph::default();
         graph.subgraphs.add(def.clone());
         let inst = graph.add_subgraph_node(&def, SubgraphRef::Local(def_id));
-        let p = func_node(library, "print", "p");
+        let p = func_node(library, "Print", "p");
         let p_id = p.id;
         graph.add(p);
         graph.set_input_binding(InputPort::new(p_id, 0), (inst, 0).into());
@@ -2525,7 +2525,7 @@ mod execution {
         // First run executes everything; once the pure upstream is cached, runs 2
         // and 3 must schedule identically — guards the reused `Scratch` buffers
         // being reset cleanly each run (a missed reset would drift).
-        assert_eq!(run2, ["print"]);
+        assert_eq!(run2, ["Print"]);
         assert_eq!(run2, run3);
         assert_ne!(run1, run2);
 
@@ -2559,7 +2559,7 @@ mod execution {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
-            ["mult", "print"]
+            ["mult", "Print"]
         );
 
         // Switch back to bind from cached get_b — mult re-executes with cached upstream
@@ -2571,7 +2571,7 @@ mod execution {
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
-            ["mult", "print"]
+            ["mult", "Print"]
         );
 
         Ok(())
@@ -2591,7 +2591,7 @@ mod execution {
         use crate::async_lambda;
         use crate::graph::Graph;
         use crate::library::Library;
-        use crate::node::function::Func;
+        use crate::node::function::{Func, FuncOutput};
 
         let invocations = Arc::new(AtomicUsize::new(0));
         let library: Library = [Func::new(
@@ -2600,8 +2600,8 @@ mod execution {
         )
         .category("Debug")
         .terminal()
-        .output("a", DataType::Int)
-        .output("b", DataType::Int)
+        .output(FuncOutput::new("a", DataType::Int))
+        .output(FuncOutput::new("b", DataType::Int))
         .lambda(async_lambda!(
             move |_, _, _, _, _, outputs| { invocations = Arc::clone(&invocations) } => {
                 let run = invocations.fetch_add(1, Ordering::Relaxed);
@@ -2769,7 +2769,7 @@ mod argument_values {
         ));
 
         // print: input is mult(35), no outputs
-        let print_id = graph.by_name("print").unwrap().id;
+        let print_id = graph.by_name("Print").unwrap().id;
         let values = execution_graph.get_argument_values(&print_id).unwrap();
 
         assert_eq!(values.inputs.len(), 1);
@@ -2876,7 +2876,7 @@ mod error_propagation {
 
         // sum depends on get_a, mult on sum, print on mult — each inherits the
         // upstream error and drops its output.
-        for name in ["sum", "mult", "print"] {
+        for name in ["sum", "mult", "Print"] {
             assert!(
                 error_for(name)
                     .unwrap_or_else(|| panic!("{name} should carry an upstream error"))
@@ -2952,7 +2952,7 @@ mod stats {
 
         // Verify specific node IDs are present
         let sum_id = graph.by_name("sum").unwrap().id;
-        let print_id = graph.by_name("print").unwrap().id;
+        let print_id = graph.by_name("Print").unwrap().id;
         assert!(stats.executed_nodes.iter().any(|n| n.node_id == sum_id));
         assert!(stats.executed_nodes.iter().any(|n| n.node_id == print_id));
 
@@ -2971,7 +2971,7 @@ mod events {
     use crate::async_lambda;
     use crate::execution::event::EventRef;
     use crate::node::event_lambda::EventLambda;
-    use crate::node::function::{Func, FuncInput};
+    use crate::node::function::{Func, FuncInput, FuncOutput};
 
     const EMIT_FUNC: FuncId = FuncId::from_u128(0xE311);
     const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);
@@ -2997,7 +2997,7 @@ mod events {
         let mut library = Library::default();
         library.add(
             Func::new(EMIT_FUNC, "emit")
-                .output("out", DataType::Int)
+                .output(FuncOutput::new("out", DataType::Int))
                 .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
                 .lambda(async_lambda!(
                     move |_, _, _, _, _, outputs| { calls = emit_calls_l.clone() } => {
@@ -3143,7 +3143,7 @@ mod output_usage {
     use super::*;
     use crate::async_lambda;
     use crate::node::func_lambda::OutputUsage;
-    use crate::node::function::{Func, FuncInput};
+    use crate::node::function::{Func, FuncInput, FuncOutput};
 
     const SPLIT_FUNC: FuncId = FuncId::from_u128(0x5911);
     const SINK_FUNC: FuncId = FuncId::from_u128(0x5922);
@@ -3156,8 +3156,8 @@ mod output_usage {
         let mut library = Library::default();
         library.add(
             Func::new(SPLIT_FUNC, "split")
-                .output("a", DataType::Int)
-                .output("b", DataType::Int)
+                .output(FuncOutput::new("a", DataType::Int))
+                .output(FuncOutput::new("b", DataType::Int))
                 .lambda(async_lambda!(
                     move |_, _, _, _, usage, outputs| { seen = seen_usage_l.clone() } => {
                         seen.lock().await.extend_from_slice(usage);
@@ -3289,8 +3289,8 @@ mod topology {
         let mut graph = Graph::default();
         graph.add(node(&library, "get_a", get_a_id));
         graph.add(node(&library, "get_b", get_b_id));
-        graph.add(node(&library, "print", print1_id));
-        graph.add(node(&library, "print", print2_id));
+        graph.add(node(&library, "Print", print1_id));
+        graph.add(node(&library, "Print", print2_id));
         graph.set_input_binding(InputPort::new(print1_id, 0), (get_a_id, 0).into());
         graph.set_input_binding(InputPort::new(print2_id, 0), (get_b_id, 0).into());
         graph.validate();
@@ -3335,9 +3335,9 @@ mod topology {
 
         let mut graph = Graph::default();
         graph.add(node(&library, "get_b", get_b_id));
-        graph.add(node(&library, "print", print_b_id));
+        graph.add(node(&library, "Print", print_b_id));
         graph.add(node(&library, "get_a", get_a_id));
-        graph.add(node(&library, "print", print_a_id));
+        graph.add(node(&library, "Print", print_a_id));
         graph.set_input_binding(InputPort::new(print_b_id, 0), (get_b_id, 0).into());
         graph.set_input_binding(InputPort::new(print_a_id, 0), (get_a_id, 0).into());
         graph.validate();
@@ -3388,7 +3388,7 @@ mod topology {
         let print_a_id = NodeId::unique();
         let mut graph = Graph::default();
         graph.add(node(&library, "get_a", get_a_id));
-        graph.add(node(&library, "print", print_a_id));
+        graph.add(node(&library, "Print", print_a_id));
         graph.set_input_binding(InputPort::new(print_a_id, 0), (get_a_id, 0).into());
         graph.validate();
 
@@ -3401,7 +3401,7 @@ mod topology {
             let gb = NodeId::unique();
             let pb = NodeId::unique();
             graph.add(node(&library, "get_b", gb));
-            graph.add(node(&library, "print", pb));
+            graph.add(node(&library, "Print", pb));
             graph.set_input_binding(InputPort::new(pb, 0), (gb, 0).into());
             graph.validate();
             eg.update(&graph, &library).unwrap();
@@ -3537,7 +3537,7 @@ mod subgraph {
         let (a_id, b_id) = (get_a.id, get_b.id);
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let print = fnode(&library, "print");
+        let print = fnode(&library, "Print");
         let print_id = print.id;
 
         let mut graph = Graph::default();
@@ -3593,7 +3593,7 @@ mod subgraph {
         // parent: C, print <- C.out0 (out1 unused).
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let print = fnode(&library, "print");
+        let print = fnode(&library, "Print");
         let print_id = print.id;
 
         let mut graph = Graph::default();
@@ -3621,7 +3621,7 @@ mod subgraph {
         // so the cyclic node is reachable from a terminal.
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let print = fnode(&library, "print");
+        let print = fnode(&library, "Print");
         let print_id = print.id;
 
         let mut graph = Graph::default();
@@ -3661,7 +3661,7 @@ mod subgraph {
         let (a_id, b_id) = (get_a.id, get_b.id);
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let print = fnode(&library, "print");
+        let print = fnode(&library, "Print");
         let print_id = print.id;
 
         let mut graph = Graph::default();
@@ -3682,7 +3682,7 @@ mod subgraph {
         let sum = eg.by_name("sum").unwrap();
         assert_eq!(bind_target(&eg, sum, 0), a_id);
         assert_eq!(bind_target(&eg, sum, 1), b_id);
-        assert_eq!(bind_target(&eg, eg.by_name("print").unwrap(), 0), sum.id);
+        assert_eq!(bind_target(&eg, eg.by_name("Print").unwrap(), 0), sum.id);
     }
 
     /// A func-only graph builds with the node ids unchanged (caches survive).
@@ -3821,7 +3821,7 @@ mod subgraph {
         // parent: composite C, and `listener` subscribing to C's event 0.
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
-        let listener = fnode(&library, "print");
+        let listener = fnode(&library, "Print");
         let listener_id = listener.id;
 
         let mut graph = Graph::default();
@@ -3847,7 +3847,7 @@ mod subgraph {
         // def: SubgraphInput trigger → interior `print` subscribes to it.
         let si = Node::new(NodeKind::SubgraphInput);
         let si_id = si.id;
-        let reactor = fnode(&library, "print");
+        let reactor = fnode(&library, "Print");
         let reactor_id = reactor.id;
         let mut def_graph = Graph::default();
         def_graph.add(si);
@@ -3873,7 +3873,7 @@ mod subgraph {
         eg.update(&graph, &library).unwrap();
 
         // The interior `print` flat id is the one wired onto `ticker`'s event.
-        let reactor_flat = eg.by_name("print").unwrap().id;
+        let reactor_flat = eg.by_name("Print").unwrap().id;
         let ticker_node = eg.by_id(&emitter_id).unwrap();
         assert_eq!(subscriber_ids(&eg, ticker_node, 0), vec![reactor_flat]);
     }
@@ -3901,8 +3901,8 @@ mod subgraph {
         let c1 = Node::subgraph_instance(def_ref, SubgraphRef::Linked(def_id));
         let c2 = Node::subgraph_instance(def_ref, SubgraphRef::Linked(def_id));
         let (c1_id, c2_id) = (c1.id, c2.id);
-        let p1 = fnode(&library, "print");
-        let p2 = fnode(&library, "print");
+        let p1 = fnode(&library, "Print");
+        let p2 = fnode(&library, "Print");
         let (p1_id, p2_id) = (p1.id, p2.id);
 
         let mut graph = Graph::default();

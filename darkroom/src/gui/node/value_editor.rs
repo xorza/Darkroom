@@ -51,7 +51,10 @@ pub(crate) fn show(
     // chosen variant's value. Works regardless of `data_type` (a custom config
     // port still shows its presets).
     if !value_variants.is_empty() {
-        let names: Vec<&str> = value_variants.iter().map(|o| o.name.as_str()).collect();
+        let names: Vec<&str> = value_variants
+            .iter()
+            .map(|o| o.display_name.as_str())
+            .collect();
         let before = value_variants
             .iter()
             .position(|o| &o.value == value)

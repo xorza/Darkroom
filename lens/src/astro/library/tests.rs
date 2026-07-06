@@ -33,8 +33,8 @@ fn astro_dir_is_an_existing_directory_picker() {
 #[test]
 fn load_astro_image_node_is_registered() {
     let lib = astro_library();
-    let f = func(&lib, "load_astro_image");
-    assert_eq!(f.category, "astro");
+    let f = func(&lib, "Load Astro Image");
+    assert_eq!(f.category, "Astro");
     assert_eq!(f.inputs.len(), 1);
     assert_eq!(f.outputs.len(), 1);
     assert_eq!(f.inputs[0].data_type, *ASTRO_IMAGE_PATH_DATA_TYPE);
@@ -44,8 +44,8 @@ fn load_astro_image_node_is_registered() {
 #[test]
 fn build_masters_node_is_registered() {
     let lib = astro_library();
-    let f = func(&lib, "build_masters");
-    assert_eq!(f.category, "astro");
+    let f = func(&lib, "Build Masters");
+    assert_eq!(f.category, "Astro");
     // Pure: the digest folds each calibration folder's contents (directory-aware
     // FsPath resolver), so a changed folder re-keys — no purity override needed.
     assert_eq!(f.behavior, FuncBehavior::Pure);
@@ -55,19 +55,19 @@ fn build_masters_node_is_registered() {
     // Four optional calibration-frame folders, then sigma, then cache.
     assert_eq!(f.inputs.len(), 6);
     let dir_names: Vec<&str> = f.inputs[..4].iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(dir_names, ["darks", "flats", "bias", "flat_darks"]);
+    assert_eq!(dir_names, ["Darks", "Flats", "Bias", "Flat Darks"]);
     for input in &f.inputs[..4] {
         assert!(!input.required, "calibration folders are optional");
         assert_eq!(input.data_type, *ASTRO_DIR_DATA_TYPE);
     }
-    assert_eq!(f.inputs[4].name, "sigma");
+    assert_eq!(f.inputs[4].name, "Sigma");
     assert_eq!(f.inputs[4].data_type, DataType::Float);
     assert_eq!(
         f.inputs[4].default_value,
         Some(StaticValue::Float(DEFAULT_SIGMA_THRESHOLD as f64)),
     );
     // Cache toggle defaults on, so masters persist + reload by default.
-    assert_eq!(f.inputs[5].name, "cache");
+    assert_eq!(f.inputs[5].name, "Cache");
     assert_eq!(f.inputs[5].data_type, DataType::Bool);
     assert_eq!(f.inputs[5].default_value, Some(StaticValue::Bool(true)));
 }
@@ -75,8 +75,8 @@ fn build_masters_node_is_registered() {
 #[test]
 fn stack_lights_node_is_registered() {
     let lib = astro_library();
-    let f = func(&lib, "stack_lights");
-    assert_eq!(f.category, "astro");
+    let f = func(&lib, "Stack Lights");
+    assert_eq!(f.category, "Astro");
     // Pure: the digest folds the `lights` folder's contents (directory-aware
     // FsPath resolver), so any add/remove/edit re-keys it — no override needed.
     assert_eq!(f.behavior, FuncBehavior::Pure);
@@ -88,12 +88,12 @@ fn stack_lights_node_is_registered() {
     assert_eq!(
         names,
         [
-            "lights",
-            "masters",
-            "detection",
-            "registration",
-            "combine",
-            "reference"
+            "Lights",
+            "Masters",
+            "Detection",
+            "Registration",
+            "Combine",
+            "Reference"
         ]
     );
     assert_eq!(f.inputs[0].data_type, *ASTRO_DIR_DATA_TYPE);
@@ -123,6 +123,22 @@ fn stack_lights_node_is_registered() {
             "precise_ground"
         ]
     );
+    // The dropdown *displays* friendly labels while the stored value stays the
+    // raw preset name (so saved graphs keep resolving) — display is decoupled.
+    let detection_displays: Vec<&str> = f.inputs[2]
+        .value_variants
+        .iter()
+        .map(|o| o.display_name.as_str())
+        .collect();
+    assert_eq!(
+        detection_displays,
+        [
+            "Wide Field",
+            "High Resolution",
+            "Crowded Field",
+            "Precise Ground"
+        ]
+    );
     assert_eq!(
         f.inputs[2].default_value,
         Some(StaticValue::Enum("wide_field".to_string())),
@@ -135,11 +151,11 @@ fn stack_lights_node_is_registered() {
         f.inputs[4].data_type,
         config_data_type::<CombineConfigDef>()
     );
-    assert_eq!(f.inputs[5].name, "reference");
+    assert_eq!(f.inputs[5].name, "Reference");
     assert_eq!(f.inputs[5].default_value, Some(StaticValue::Int(-1)));
 
     let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
-    assert_eq!(out_names, ["image", "coverage", "weight"]);
+    assert_eq!(out_names, ["Image", "Coverage", "Weight"]);
     for out in &f.outputs {
         assert_eq!(out.ty.declared(), *IMAGE_DATA_TYPE);
     }
@@ -148,15 +164,15 @@ fn stack_lights_node_is_registered() {
 #[test]
 fn auto_stretch_node_is_registered() {
     let lib = astro_library();
-    let f = func(&lib, "auto_stretch");
-    assert_eq!(f.category, "astro");
+    let f = func(&lib, "Auto Stretch");
+    assert_eq!(f.category, "Astro");
     assert_eq!(f.inputs.len(), 2);
-    assert_eq!(f.inputs[0].name, "image");
+    assert_eq!(f.inputs[0].name, "Image");
     assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
     assert!(f.inputs[0].required);
     // `method` is a config-typed input with the presets as value_variants
     // (seeded to the first), overridable by build_stretch_config.
-    assert_eq!(f.inputs[1].name, "method");
+    assert_eq!(f.inputs[1].name, "Method");
     assert_eq!(
         f.inputs[1].data_type,
         config_data_type::<StretchConfigDef>()
@@ -180,16 +196,16 @@ fn processing_nodes_are_registered() {
     let lib = astro_library();
     // Each in-place op: a required `image` Image in, an Image out.
     for name in [
-        "background_extract",
-        "denoise",
-        "scnr",
-        "neutralize_background",
-        "hdr_compress",
-        "local_contrast",
+        "Extract Background",
+        "Denoise",
+        "SCNR",
+        "Neutralize Background",
+        "HDR Compress",
+        "Local Contrast",
     ] {
         let f = func(&lib, name);
-        assert_eq!(f.category, "astro", "{name} category");
-        assert_eq!(f.inputs[0].name, "image", "{name} first input");
+        assert_eq!(f.category, "Astro", "{name} category");
+        assert_eq!(f.inputs[0].name, "Image", "{name} first input");
         assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE, "{name} in type");
         assert!(f.inputs[0].required, "{name} image required");
         assert_eq!(f.outputs.len(), 1, "{name} one output");
@@ -208,31 +224,31 @@ fn scalar_per_frame_nodes_take_optional_config_overrides() {
     // gain an optional `config` override fed by the matching build node.
     let cases: [(&str, &str, DataType); 3] = [
         (
-            "denoise",
-            "build_denoise_config",
+            "Denoise",
+            "Build Denoise Config",
             config_data_type::<DenoiseConfigDef>(),
         ),
         (
-            "hdr_compress",
-            "build_hdr_config",
+            "HDR Compress",
+            "Build HDR Config",
             config_data_type::<HdrConfigDef>(),
         ),
         (
-            "local_contrast",
-            "build_local_contrast_config",
+            "Local Contrast",
+            "Build Local Contrast Config",
             config_data_type::<LocalContrastConfigDef>(),
         ),
     ];
     for (node, builder, ty) in cases {
         let f = func(&lib, node);
         let config = f.inputs.last().unwrap();
-        assert_eq!(config.name, "config", "{node} override input");
+        assert_eq!(config.name, "Config", "{node} override input");
         assert_eq!(config.data_type, ty, "{node} override type");
         assert!(!config.required, "{node} config is an optional override");
 
         // The builder node emits that same config type.
         let b = func(&lib, builder);
-        assert_eq!(b.category, "astro");
+        assert_eq!(b.category, "Astro");
         assert_eq!(b.outputs[0].ty.declared(), ty, "{builder} output type");
         assert!(
             b.inputs.iter().all(|i| i.required),
@@ -249,19 +265,19 @@ fn preset_nodes_use_value_variant_picks_with_build_overrides() {
     // (node, input name, input index, config type, build node, first preset)
     let cases: [(&str, &str, usize, DataType, &str, &str); 2] = [
         (
-            "auto_stretch",
-            "method",
+            "Auto Stretch",
+            "Method",
             1,
             config_data_type::<StretchConfigDef>(),
-            "build_stretch_config",
+            "Build Stretch Config",
             "auto_asinh",
         ),
         (
-            "scnr",
-            "method",
+            "SCNR",
+            "Method",
             1,
             config_data_type::<ScnrConfigDef>(),
-            "build_scnr_config",
+            "Build SCNR Config",
             "average_neutral",
         ),
     ];
@@ -294,8 +310,8 @@ fn build_background_config_reflects_fields_and_feeds_background_extract() {
     let lib = astro_library();
     // The builder exposes one labeled input per BackgroundConfig field, in
     // struct order; all required (none are `Option`s).
-    let builder = func(&lib, "build_background_config");
-    assert_eq!(builder.category, "astro");
+    let builder = func(&lib, "Build Background Config");
+    assert_eq!(builder.category, "Astro");
     let labels: Vec<&str> = builder.inputs.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(
         labels,
@@ -309,7 +325,7 @@ fn build_background_config_reflects_fields_and_feeds_background_extract() {
         ]
     );
     assert!(builder.inputs.iter().all(|i| i.required));
-    assert_eq!(builder.outputs[0].name, "config");
+    assert_eq!(builder.outputs[0].name, "Config");
     assert_eq!(
         builder.outputs[0].ty.declared(),
         config_data_type::<BackgroundConfigDef>()
@@ -317,9 +333,9 @@ fn build_background_config_reflects_fields_and_feeds_background_extract() {
 
     // background_extract is image + one `config` input of that type: a mode
     // preset quick-pick (value_variants) a builder can wire into to override.
-    let bg = func(&lib, "background_extract");
+    let bg = func(&lib, "Extract Background");
     let bg_names: Vec<&str> = bg.inputs.iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(bg_names, ["image", "config"]);
+    assert_eq!(bg_names, ["Image", "Config"]);
     assert!(bg.inputs[1].required, "config is required (preset-seeded)");
     assert_eq!(
         bg.inputs[1].data_type,
@@ -336,26 +352,26 @@ fn build_background_config_reflects_fields_and_feeds_background_extract() {
 #[test]
 fn ml_denoise_node_is_registered() {
     let lib = astro_library();
-    let f = func(&lib, "ml_denoise");
-    assert_eq!(f.category, "astro");
+    let f = func(&lib, "ML Denoise");
+    assert_eq!(f.category, "Astro");
     let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(names, ["image"]);
+    assert_eq!(names, ["Image"]);
     assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
     assert_eq!(f.outputs.len(), 1);
-    assert_eq!(f.outputs[0].name, "image");
+    assert_eq!(f.outputs[0].name, "Image");
     assert_eq!(f.outputs[0].ty.declared(), *IMAGE_DATA_TYPE);
 }
 
 #[test]
 fn remove_stars_node_has_starless_and_stars_outputs() {
     let lib = astro_library();
-    let f = func(&lib, "remove_stars");
-    assert_eq!(f.category, "astro");
+    let f = func(&lib, "Remove Stars");
+    assert_eq!(f.category, "Astro");
     let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(names, ["image"]);
+    assert_eq!(names, ["Image"]);
     assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
     let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
-    assert_eq!(out_names, ["starless", "stars"]);
+    assert_eq!(out_names, ["Starless", "Stars"]);
     for o in &f.outputs {
         assert_eq!(o.ty.declared(), *IMAGE_DATA_TYPE);
     }

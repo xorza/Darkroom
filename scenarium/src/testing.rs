@@ -10,7 +10,7 @@ use crate::async_lambda;
 use crate::data::DataType;
 use crate::graph::{Graph, InputPort, Node, NodeId};
 use crate::library::Library;
-use crate::node::function::{Func, FuncInput};
+use crate::node::function::{Func, FuncInput, FuncOutput};
 
 pub struct TestFuncHooks {
     pub get_a: Arc<dyn Fn() -> anyhow::Result<i64> + Send + Sync + 'static>,
@@ -42,7 +42,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
             .pure()
             .input(FuncInput::required("A", DataType::Int))
             .input(FuncInput::optional("B", DataType::Int))
-            .output("Prod", DataType::Int)
+            .output(FuncOutput::new("Prod", DataType::Int))
             .lambda(async_lambda!(move |_, state, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -58,7 +58,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
             .description("Returns the value from test hook A")
             .category("Debug")
             .pure()
-            .output("Int32 Value", DataType::Int)
+            .output(FuncOutput::new("Int32 Value", DataType::Int))
             .lambda(async_lambda!(
                 move |_, _, _, _, _, outputs| { get_a = Arc::clone(&get_a) } => {
                     assert_eq!(outputs.len(), 1);
@@ -70,7 +70,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
             .description("Returns the value from test hook B")
             .category("Debug")
             .pure()
-            .output("Int32 Value", DataType::Int)
+            .output(FuncOutput::new("Int32 Value", DataType::Int))
             .lambda(async_lambda!(
                 move |_, _, _, _, _, outputs| { get_b = Arc::clone(&get_b) } => {
                     assert_eq!(outputs.len(), 1);
@@ -84,7 +84,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
             .pure()
             .input(FuncInput::required("A", DataType::Int))
             .input(FuncInput::optional("B", DataType::Int))
-            .output("Sum", DataType::Int)
+            .output(FuncOutput::new("Sum", DataType::Int))
             .lambda(async_lambda!(move |_, state, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -94,7 +94,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
                 outputs[0] = (a + b).into();
                 Ok(())
             })),
-        Func::new("f22cd316-1cdf-4a80-b86c-1277acd1408a", "print")
+        Func::new("f22cd316-1cdf-4a80-b86c-1277acd1408a", "Print")
             .description("Outputs an integer value via the test print hook")
             .category("Debug")
             .terminal()
@@ -125,7 +125,7 @@ pub fn test_graph() -> Graph {
     let get_b_func = library.by_name("get_b").unwrap();
     let sum_func = library.by_name("sum").unwrap();
     let mult_func = library.by_name("mult").unwrap();
-    let print_func = library.by_name("print").unwrap();
+    let print_func = library.by_name("Print").unwrap();
 
     let mut get_a_node: Node = get_a_func.into();
     get_a_node.id = get_a_node_id;

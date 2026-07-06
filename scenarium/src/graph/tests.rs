@@ -4,7 +4,7 @@ use crate::graph::{
     Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort, Subscription,
     closes_data_cycle,
 };
-use crate::node::function::{Func, FuncId, FuncInput};
+use crate::node::function::{Func, FuncId, FuncInput, FuncOutput};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::SerdeFormat;
 
@@ -81,7 +81,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
         let port = if const_only { port.const_only() } else { port };
         let func = Func::new(FuncId::unique(), "f")
             .input(port)
-            .output("out", DataType::Int);
+            .output(FuncOutput::new("out", DataType::Int));
         let mut library = Library::default();
         library.funcs.add(func.clone());
 
@@ -111,13 +111,14 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
 
     // Int and String never coerce (numerics coerce among themselves, but a
     // string is a distinct kind), so this pair exercises a real rejection.
-    let int_src = Func::new(FuncId::unique(), "int_src").output("o", DataType::Int);
+    let int_src =
+        Func::new(FuncId::unique(), "int_src").output(FuncOutput::new("o", DataType::Int));
     let str_sink = Func::new(FuncId::unique(), "str_sink")
         .input(FuncInput::required("x", DataType::String))
-        .output("o", DataType::String);
+        .output(FuncOutput::new("o", DataType::String));
     let int_sink = Func::new(FuncId::unique(), "int_sink")
         .input(FuncInput::required("x", DataType::Int))
-        .output("o", DataType::Int);
+        .output(FuncOutput::new("o", DataType::Int));
     let mut library = Library::default();
     library.funcs.add(int_src.clone());
     library.funcs.add(str_sink.clone());
@@ -204,7 +205,7 @@ fn resolve_output_type_follows_passthrough_chain() {
 
     // Int-out producer → pass1 → pass2. Both passthroughs declare a `Null`
     // (wildcard) output, but the resolved type must be the producer's `Int`.
-    let producer = Func::new(FuncId::unique(), "src").output("out", DataType::Int);
+    let producer = Func::new(FuncId::unique(), "src").output(FuncOutput::new("out", DataType::Int));
     let mut library = Library::default();
     library.funcs.add(producer.clone());
 
@@ -326,11 +327,13 @@ fn edges_invalidated_by_follows_wildcard_chains() {
     use crate::library::Library;
     use crate::node::special::SpecialNode;
 
-    let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
-    let str_src = Func::new(FuncId::unique(), "ssrc").output("o", DataType::String);
+    let float_src =
+        Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float));
+    let str_src =
+        Func::new(FuncId::unique(), "ssrc").output(FuncOutput::new("o", DataType::String));
     let float_sink = Func::new(FuncId::unique(), "fsink")
         .input(FuncInput::required("x", DataType::Float))
-        .output("o", DataType::Float);
+        .output(FuncOutput::new("o", DataType::Float));
     let mut library = Library::default();
     library.funcs.add(float_src.clone());
     library.funcs.add(str_src.clone());
@@ -378,7 +381,7 @@ fn would_create_cycle_detects_direct_and_transitive_loops() {
     // consumer. Chain a → b → c via binds; d is an unconnected sink.
     let relay = Func::new(FuncId::unique(), "relay")
         .input(FuncInput::required("x", DataType::Int))
-        .output("o", DataType::Int);
+        .output(FuncOutput::new("o", DataType::Int));
     let mut g = Graph::default();
     let a = g.add_func_node(&relay);
     let b = g.add_func_node(&relay);
@@ -440,7 +443,7 @@ fn input_type_resolves_declared_types_and_skips_boundaries() {
 
     let consumer = Func::new(FuncId::unique(), "dst")
         .input(FuncInput::required("x", DataType::Float))
-        .output("out", DataType::Float);
+        .output(FuncOutput::new("out", DataType::Float));
     let mut library = Library::default();
     library.funcs.add(consumer.clone());
 
@@ -602,7 +605,7 @@ fn subscribers_ranges_one_emitter_event() {
     let emitter = graph.by_name("get_a").unwrap().id;
     let s1 = graph.by_name("sum").unwrap().id;
     let s2 = graph.by_name("mult").unwrap().id;
-    let other = graph.by_name("print").unwrap().id;
+    let other = graph.by_name("Print").unwrap().id;
 
     graph.subscribe(emitter, 0, s1);
     graph.subscribe(emitter, 0, s2);
@@ -806,7 +809,7 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
     library.add(
         Func::new(func_id, "op")
             .input(FuncInput::optional("in", DataType::Int))
-            .output("out", DataType::Int),
+            .output(FuncOutput::new("out", DataType::Int)),
     );
 
     let mut graph = Graph::default();

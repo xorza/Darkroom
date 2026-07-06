@@ -5,7 +5,7 @@ use crate::library::Library;
 use crate::node::event_lambda::EventLambda;
 use crate::node::func_lambda::FuncLambda;
 use crate::node::function::FuncId;
-use crate::node::function::{Func, FuncInput};
+use crate::node::function::{Func, FuncInput, FuncOutput};
 use common::FloatExt;
 use common::Slot;
 
@@ -23,13 +23,18 @@ pub fn worker_events_library() -> Library {
     let mut library = Library::default();
 
     library.add(
-        Func::new(FRAME_EVENT_FUNC_ID, "frame event")
+        Func::new(FRAME_EVENT_FUNC_ID, "Frame Event")
+            .description("Emits a recurring frame tick, carrying the elapsed time and frame count.")
             .category("Timers")
-            .input(FuncInput::required("frequency", DataType::Float).default(1.0))
-            .output("delta", DataType::Float)
-            .output("frame no", DataType::Int)
+            .input(
+                FuncInput::required("Frequency", DataType::Float)
+                    .description("Target ticks per second (Hz). 0 disables the FPS event.")
+                    .default(1.0),
+            )
+            .output(FuncOutput::new("Delta", DataType::Float).description("Seconds elapsed since the previous frame."))
+            .output(FuncOutput::new("Frame #", DataType::Int).description("Frame counter, incremented each tick."))
             .event(
-                "always",
+                "Always",
                 EventLambda::new(|_state| {
                     Box::pin(async move {
                         //
@@ -37,7 +42,7 @@ pub fn worker_events_library() -> Library {
                 }),
             )
             .event(
-                "fps",
+                "FPS",
                 EventLambda::new(|state| {
                     Box::pin(async move {
                         // Get current state from per-node event state

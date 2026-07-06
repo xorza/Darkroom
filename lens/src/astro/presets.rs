@@ -8,7 +8,8 @@
 use std::str::FromStr;
 
 use lumos::{BackgroundMode, RegistrationConfig, Scnr, StackConfig, StarDetectionConfig, Stretch};
-use scenarium::data::EnumVariants;
+use scenarium::data::{EnumVariants, StaticValue};
+use scenarium::node::function::ValueVariant;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -16,15 +17,15 @@ use strum_macros::EnumIter;
 const COMBINE_SIGMA: f32 = 3.0;
 
 /// Generate a preset enum + its `EnumVariants` (the `value_variants` list) /
-/// `FromStr` glue. Each variant carries a stable string `label` (the dropdown
-/// text + serialized value) and a `config` expression that builds the lumos
-/// stage config.
+/// `FromStr` glue. Each variant carries a stable string `label` (the serialized
+/// value), a human `display` label (the dropdown text), and a `config`
+/// expression that builds the lumos stage config.
 macro_rules! preset_enum {
     (
         $(#[$meta:meta])*
         $enum:ident => $config:ty,
         display: $display:literal,
-        variants: { $($variant:ident = $label:literal => $ctor:expr),+ $(,)? }
+        variants: { $($variant:ident = $label:literal @ $label_display:literal => $ctor:expr),+ $(,)? }
     ) => {
         $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
@@ -37,6 +38,24 @@ macro_rules! preset_enum {
                 match self {
                     $(Self::$variant => $label),+
                 }
+            }
+
+            /// Human dropdown label for this preset (display-only).
+            fn display_label(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $label_display),+
+                }
+            }
+
+            /// The picker variants: each stores the raw `label` as its bound
+            /// value but shows the friendly `display_label`.
+            pub fn picker_variants() -> Vec<ValueVariant> {
+                Self::iter()
+                    .map(|v| {
+                        ValueVariant::new(v.label(), StaticValue::Enum(v.label().to_string()))
+                            .display(v.display_label())
+                    })
+                    .collect()
             }
 
             /// Expand this preset to its lumos stage config.
@@ -70,10 +89,10 @@ preset_enum! {
     DetectionPreset => StarDetectionConfig,
     display: "DetectionPreset",
     variants: {
-        WideField = "wide_field" => StarDetectionConfig::wide_field(),
-        HighResolution = "high_resolution" => StarDetectionConfig::high_resolution(),
-        CrowdedField = "crowded_field" => StarDetectionConfig::crowded_field(),
-        PreciseGround = "precise_ground" => StarDetectionConfig::precise_ground(),
+        WideField = "wide_field" @ "Wide Field" => StarDetectionConfig::wide_field(),
+        HighResolution = "high_resolution" @ "High Resolution" => StarDetectionConfig::high_resolution(),
+        CrowdedField = "crowded_field" @ "Crowded Field" => StarDetectionConfig::crowded_field(),
+        PreciseGround = "precise_ground" @ "Precise Ground" => StarDetectionConfig::precise_ground(),
     }
 }
 
@@ -82,11 +101,11 @@ preset_enum! {
     RegistrationPreset => RegistrationConfig,
     display: "RegistrationPreset",
     variants: {
-        Default = "default" => RegistrationConfig::default(),
-        Fast = "fast" => RegistrationConfig::fast(),
-        Precise = "precise" => RegistrationConfig::precise(),
-        WideField = "wide_field" => RegistrationConfig::wide_field(),
-        Mosaic = "mosaic" => RegistrationConfig::mosaic(),
+        Default = "default" @ "Default" => RegistrationConfig::default(),
+        Fast = "fast" @ "Fast" => RegistrationConfig::fast(),
+        Precise = "precise" @ "Precise" => RegistrationConfig::precise(),
+        WideField = "wide_field" @ "Wide Field" => RegistrationConfig::wide_field(),
+        Mosaic = "mosaic" @ "Mosaic" => RegistrationConfig::mosaic(),
     }
 }
 
@@ -95,10 +114,10 @@ preset_enum! {
     CombinePreset => StackConfig,
     display: "CombinePreset",
     variants: {
-        SigmaClipped = "sigma_clipped" => StackConfig::sigma_clipped(COMBINE_SIGMA),
-        Winsorized = "winsorized" => StackConfig::winsorized(COMBINE_SIGMA),
-        Median = "median" => StackConfig::median(),
-        Mean = "mean" => StackConfig::mean(),
+        SigmaClipped = "sigma_clipped" @ "Sigma Clipped" => StackConfig::sigma_clipped(COMBINE_SIGMA),
+        Winsorized = "winsorized" @ "Winsorized" => StackConfig::winsorized(COMBINE_SIGMA),
+        Median = "median" @ "Median" => StackConfig::median(),
+        Mean = "mean" @ "Mean" => StackConfig::mean(),
     }
 }
 
@@ -107,8 +126,8 @@ preset_enum! {
     StretchPreset => Stretch,
     display: "StretchPreset",
     variants: {
-        AutoAsinh = "auto_asinh" => Stretch::auto_asinh(),
-        AutoStf = "auto_stf" => Stretch::auto_stf(),
+        AutoAsinh = "auto_asinh" @ "Auto Asinh" => Stretch::auto_asinh(),
+        AutoStf = "auto_stf" @ "Auto STF" => Stretch::auto_stf(),
     }
 }
 
@@ -117,8 +136,8 @@ preset_enum! {
     BackgroundModeKind => BackgroundMode,
     display: "BackgroundMode",
     variants: {
-        Subtract = "subtract" => BackgroundMode::Subtract,
-        Divide = "divide" => BackgroundMode::Divide,
+        Subtract = "subtract" @ "Subtract" => BackgroundMode::Subtract,
+        Divide = "divide" @ "Divide" => BackgroundMode::Divide,
     }
 }
 
@@ -130,8 +149,8 @@ preset_enum! {
     ScnrKind => Scnr,
     display: "Scnr",
     variants: {
-        AverageNeutral = "average_neutral" => Scnr::average_neutral(),
-        AdditiveMask = "additive_mask" => Scnr::additive_mask(SCNR_ADDITIVE_AMOUNT),
+        AverageNeutral = "average_neutral" @ "Average Neutral" => Scnr::average_neutral(),
+        AdditiveMask = "additive_mask" @ "Additive Mask" => Scnr::additive_mask(SCNR_ADDITIVE_AMOUNT),
     }
 }
 

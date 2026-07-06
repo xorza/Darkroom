@@ -12,7 +12,7 @@ use crate::library::Library;
 use crate::node::event_lambda::EventLambda;
 use crate::node::func_lambda::FuncLambda;
 use crate::node::function::FuncId;
-use crate::node::function::{Func, FuncInput};
+use crate::node::function::{Func, FuncInput, FuncOutput};
 
 pub(crate) const WATCH_DIRECTORY_FUNC_ID: FuncId =
     FuncId::from_u128(0x1318c24c2ac74a9aa454281bdbdc4ffc);
@@ -104,18 +104,38 @@ pub fn fs_watch_library() -> Library {
     let mut library = Library::default();
 
     library.add(
-        Func::new(WATCH_DIRECTORY_FUNC_ID, "watch directory")
+        Func::new(WATCH_DIRECTORY_FUNC_ID, "Watch Directory")
             .category("Filesystem")
             .description(
-                "Passes a directory through unchanged and fires `changed` when files are added, \
+                "Passes a directory through unchanged and fires `Changed` when files are added, \
                  removed, renamed, or written — ignoring access-time and other metadata-only events.",
             )
-            .input(FuncInput::required("directory", directory_type()).const_only())
-            .input(FuncInput::required("recursive", DataType::Bool).default(true).const_only())
-            .input(FuncInput::required("debounce ms", DataType::Int).default(1000i64).const_only())
-            .output("directory", directory_type())
+            .input(
+                FuncInput::required("Directory", directory_type())
+                    .description("Directory to watch and pass through.")
+                    .const_only(),
+            )
+            .input(
+                FuncInput::required("Recursive", DataType::Bool)
+                    .description("Watch subdirectories too, not just the top level.")
+                    .default(true)
+                    .const_only(),
+            )
+            .input(
+                FuncInput::required("Debounce (ms)", DataType::Int)
+                    .description(
+                        "Quiet window after a change before firing, collapsing a burst into one \
+                         event. 0 disables debouncing.",
+                    )
+                    .default(1000i64)
+                    .const_only(),
+            )
+            .output(
+                FuncOutput::new("Directory", directory_type())
+                    .description("The same directory, re-emitted on each change."),
+            )
             .event(
-                "changed",
+                "Changed",
                 EventLambda::new(|state| {
                     Box::pin(async move {
                         let watch = state
@@ -239,19 +259,19 @@ mod tests {
     #[test]
     fn registers_watch_directory_func() {
         let lib = fs_watch_library();
-        let func = lib.by_name("watch directory").expect("func registered");
+        let func = lib.by_name("Watch Directory").expect("func registered");
 
         assert_eq!(func.id, WATCH_DIRECTORY_FUNC_ID);
         assert_eq!(func.inputs.len(), 3);
-        assert_eq!(func.inputs[0].name, "directory");
-        assert_eq!(func.inputs[1].name, "recursive");
+        assert_eq!(func.inputs[0].name, "Directory");
+        assert_eq!(func.inputs[1].name, "Recursive");
         assert_eq!(func.inputs[1].default_value, Some(StaticValue::Bool(true)));
-        assert_eq!(func.inputs[2].name, "debounce ms");
+        assert_eq!(func.inputs[2].name, "Debounce (ms)");
         assert_eq!(func.inputs[2].default_value, Some(StaticValue::Int(1000)));
         assert_eq!(func.outputs.len(), 1);
-        assert_eq!(func.outputs[0].name, "directory");
+        assert_eq!(func.outputs[0].name, "Directory");
         assert_eq!(func.events.len(), 1);
-        assert_eq!(func.events[0].name, "changed");
+        assert_eq!(func.events[0].name, "Changed");
         // Impure so it re-executes (and re-emits the passthrough) on every fire.
         assert!(matches!(func.behavior, FuncBehavior::Impure));
     }
@@ -294,7 +314,7 @@ mod tests {
         let dir = unique_temp_dir();
         let dir_str = dir.to_str().unwrap();
         let lib = fs_watch_library();
-        let func = lib.by_name("watch directory").unwrap();
+        let func = lib.by_name("Watch Directory").unwrap();
 
         let mut ctx = ContextManager::default();
         let mut state = AnyState::default();
@@ -324,7 +344,7 @@ mod tests {
         let dir = unique_temp_dir();
         let dir_str = dir.to_str().unwrap();
         let lib = fs_watch_library();
-        let func = lib.by_name("watch directory").unwrap();
+        let func = lib.by_name("Watch Directory").unwrap();
 
         let mut ctx = ContextManager::default();
         let mut state = AnyState::default();
@@ -383,7 +403,7 @@ mod tests {
     #[tokio::test]
     async fn empty_path_skips_watcher_and_event_parks() {
         let lib = fs_watch_library();
-        let func = lib.by_name("watch directory").unwrap();
+        let func = lib.by_name("Watch Directory").unwrap();
 
         let mut ctx = ContextManager::default();
         let mut state = AnyState::default();
@@ -426,7 +446,7 @@ mod tests {
     async fn debounce_collapses_burst_into_one_fire() {
         let dir = unique_temp_dir();
         let lib = fs_watch_library();
-        let func = lib.by_name("watch directory").unwrap();
+        let func = lib.by_name("Watch Directory").unwrap();
 
         // Seed per-node state with a 200ms-debounce watcher, then drive the real
         // `changed` event lambda against a hand-pulsed signal (a "burst").

@@ -20,6 +20,30 @@ pub enum FuncBehavior {
 pub struct ValueVariant {
     pub name: String,
     pub value: StaticValue,
+    /// Human label shown in the editor's picker dropdown. Display-only — the
+    /// value bound on pick is [`ValueVariant::value`], never this. Defaults to
+    /// `name` via [`ValueVariant::new`]; override with [`ValueVariant::display`]
+    /// to show a friendlier label than a raw/serialized `name`.
+    #[serde(default)]
+    pub display_name: String,
+}
+
+impl ValueVariant {
+    /// A picker variant whose dropdown label is its `name`.
+    pub fn new(name: impl Into<String>, value: StaticValue) -> Self {
+        let name = name.into();
+        Self {
+            display_name: name.clone(),
+            name,
+            value,
+        }
+    }
+
+    /// Override the dropdown label (leaving `name`/`value` untouched).
+    pub fn display(mut self, display_name: impl Into<String>) -> Self {
+        self.display_name = display_name.into();
+        self
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -27,6 +51,10 @@ pub struct FuncInput {
     pub name: String,
     pub required: bool,
     pub data_type: DataType,
+    /// One-line human explanation shown as the port's hover tooltip in the
+    /// editor (units, range, meaning). Display-only — execution never reads it.
+    #[serde(default)]
+    pub description: Option<String>,
     /// When set, this input may only hold a `Const` literal — wiring an upstream
     /// output into it (a `Bind`) is rejected by graph validation and blocked in
     /// the editor. For inputs the engine reads as a constant (e.g. the file-cache
@@ -46,6 +74,7 @@ impl FuncInput {
             name: name.into(),
             required: true,
             data_type,
+            description: None,
             const_only: false,
             default_value: None,
             value_variants: Vec::new(),
@@ -59,6 +88,7 @@ impl FuncInput {
             name: name.into(),
             required: false,
             data_type,
+            description: None,
             const_only: false,
             default_value: None,
             value_variants: Vec::new(),
@@ -68,6 +98,12 @@ impl FuncInput {
     /// Seed this input's const default value.
     pub fn default(mut self, value: impl Into<StaticValue>) -> Self {
         self.default_value = Some(value.into());
+        self
+    }
+
+    /// Attach the port's hover-tooltip text. See [`FuncInput::description`].
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
         self
     }
 
@@ -115,6 +151,10 @@ impl OutputType {
 pub struct FuncOutput {
     pub name: String,
     pub ty: OutputType,
+    /// One-line human explanation shown as the port's hover tooltip in the
+    /// editor. Display-only — execution never reads it.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 impl FuncOutput {
@@ -122,7 +162,14 @@ impl FuncOutput {
         Self {
             name: name.into(),
             ty: OutputType::Fixed(data_type),
+            description: None,
         }
+    }
+
+    /// Attach the port's hover-tooltip text. See [`FuncOutput::description`].
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
     }
 }
 
@@ -238,8 +285,11 @@ impl Func {
         self
     }
 
-    pub fn output(mut self, name: impl Into<String>, data_type: DataType) -> Self {
-        self.outputs.push(FuncOutput::new(name, data_type));
+    /// Add an output port. Build it with [`FuncOutput::new`], optionally chaining
+    /// [`FuncOutput::description`] — mirrors the [`Func::input`] +
+    /// [`FuncInput`] builder pattern.
+    pub fn output(mut self, output: FuncOutput) -> Self {
+        self.outputs.push(output);
         self
     }
 
@@ -252,6 +302,7 @@ impl Func {
             ty: OutputType::Wildcard {
                 mirrors: mirrors_input,
             },
+            description: None,
         });
         self
     }

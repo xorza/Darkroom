@@ -6,7 +6,7 @@ use crate::async_lambda;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::library::Library;
 use crate::node::func_lambda::InvokeInput;
-use crate::node::function::{Func, FuncInput, ValueVariant};
+use crate::node::function::{Func, FuncInput, FuncOutput, ValueVariant};
 
 #[repr(u32)]
 #[derive(Debug, Display, EnumIter, Copy, Clone)]
@@ -23,10 +23,7 @@ enum Math2ArgOp {
 impl Math2ArgOp {
     fn list_variants() -> Vec<ValueVariant> {
         Math2ArgOp::iter()
-            .map(|op| ValueVariant {
-                name: op.to_string(),
-                value: StaticValue::Int(op as i64),
-            })
+            .map(|op| ValueVariant::new(op.to_string(), StaticValue::Int(op as i64)))
             .collect()
     }
     fn invoke(&self, inputs: &[InvokeInput]) -> anyhow::Result<DynamicValue> {
@@ -71,11 +68,14 @@ pub fn basic_library() -> Library {
     // print: log the input string to the node log (info level), read
     // back by the editor. Sugar over `ContextManager::log`.
     library.add(
-        Func::new("01896910-0790-AD1B-AA12-3F1437196789", "print")
-            .description("Logs a string value to the node log")
-            .category("math")
+        Func::new("01896910-0790-AD1B-AA12-3F1437196789", "Print")
+            .description("Logs a string value to the node log.")
+            .category("Math")
             .terminal()
-            .input(FuncInput::required("value", DataType::String))
+            .input(
+                FuncInput::required("Value", DataType::String)
+                    .description("Text to write to the node's log (info level)."),
+            )
             .lambda(async_lambda!(move |ctx, _, _, inputs, _, _| {
                 assert_eq!(inputs.len(), 1);
                 let value: &str = inputs[0].value.as_string().unwrap();
@@ -86,21 +86,24 @@ pub fn basic_library() -> Library {
 
     // math two argument operation
     library.add(
-        Func::new("01896910-4BC9-77AA-6973-64CC1C56B9CE", "2 arg math")
+        Func::new("01896910-4BC9-77AA-6973-64CC1C56B9CE", "2-Arg Math")
             .description(
                 "Performs a two-argument math operation (add, subtract, multiply, divide, modulo, \
-                 power, log)",
+                 power, log).",
             )
-            .category("math")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("a", DataType::Float))
-            .input(FuncInput::required("b", DataType::Float))
+            .input(FuncInput::required("A", DataType::Float).description("First operand."))
+            .input(FuncInput::required("B", DataType::Float).description("Second operand."))
             .input(
-                FuncInput::required("op", DataType::Int)
+                FuncInput::required("Operation", DataType::Int)
+                    .description("Operation to apply to A and B.")
                     .default(Math2ArgOp::Add)
                     .variants(Math2ArgOp::list_variants()),
             )
-            .output("result", DataType::Float)
+            .output(
+                FuncOutput::new("Result", DataType::Float).description("Result of the operation."),
+            )
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(outputs.len(), 1);
@@ -116,12 +119,15 @@ pub fn basic_library() -> Library {
 
     // to string
     library.add(
-        Func::new("01896a88-bf15-dead-4a15-5969da5a9e65", "float to string")
-            .description("Converts a float value to its string representation")
-            .category("math")
+        Func::new("01896a88-bf15-dead-4a15-5969da5a9e65", "Float → String")
+            .description("Converts a float value to its string representation.")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("value", DataType::Float))
-            .output("result", DataType::String)
+            .input(FuncInput::required("Value", DataType::Float).description("Number to convert."))
+            .output(
+                FuncOutput::new("Text", DataType::String)
+                    .description("The value's decimal string form."),
+            )
             .lambda(async_lambda!(|_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -136,12 +142,23 @@ pub fn basic_library() -> Library {
 
     // random
     library.add(
-        Func::new("01897928-66cd-52cb-abeb-a5bfd7f3763e", "random")
-            .description("Generates a random float between min and max values")
-            .category("math")
-            .input(FuncInput::required("min", DataType::Float).default(0.0))
-            .input(FuncInput::required("max", DataType::Float).default(1.0))
-            .output("result", DataType::Float)
+        Func::new("01897928-66cd-52cb-abeb-a5bfd7f3763e", "Random")
+            .description("Generates a random float between min and max values.")
+            .category("Math")
+            .input(
+                FuncInput::required("Min", DataType::Float)
+                    .description("Lower bound (inclusive).")
+                    .default(0.0),
+            )
+            .input(
+                FuncInput::required("Max", DataType::Float)
+                    .description("Upper bound (exclusive).")
+                    .default(1.0),
+            )
+            .output(
+                FuncOutput::new("Value", DataType::Float)
+                    .description("A random number in [Min, Max)."),
+            )
             .lambda(async_lambda!(move |_, cache, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -161,13 +178,21 @@ pub fn basic_library() -> Library {
 
     // add
     library.add(
-        Func::new("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee", "add")
-            .description("Adds two float values (a + b)")
-            .category("math")
+        Func::new("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee", "Add")
+            .description("Adds two float values (A + B).")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("a", DataType::Float).default(0.0))
-            .input(FuncInput::required("b", DataType::Float).default(1.0))
-            .output("result", DataType::Float)
+            .input(
+                FuncInput::required("A", DataType::Float)
+                    .description("First addend.")
+                    .default(0.0),
+            )
+            .input(
+                FuncInput::required("B", DataType::Float)
+                    .description("Second addend.")
+                    .default(1.0),
+            )
+            .output(FuncOutput::new("Sum", DataType::Float).description("A + B."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -183,13 +208,21 @@ pub fn basic_library() -> Library {
 
     // subtract
     library.add(
-        Func::new("01897c50-229e-f5e4-1c60-7f1e14531da2", "subtract")
-            .description("Subtracts the second value from the first (a - b)")
-            .category("math")
+        Func::new("01897c50-229e-f5e4-1c60-7f1e14531da2", "Subtract")
+            .description("Subtracts the second value from the first (A − B).")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("a", DataType::Float).default(0.0))
-            .input(FuncInput::required("b", DataType::Float).default(1.0))
-            .output("result", DataType::Float)
+            .input(
+                FuncInput::required("A", DataType::Float)
+                    .description("Minuend.")
+                    .default(0.0),
+            )
+            .input(
+                FuncInput::required("B", DataType::Float)
+                    .description("Subtrahend.")
+                    .default(1.0),
+            )
+            .output(FuncOutput::new("Difference", DataType::Float).description("A − B."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -205,13 +238,21 @@ pub fn basic_library() -> Library {
 
     // multiply
     library.add(
-        Func::new("01897c50-d510-55bf-8cb9-545a62cc76cc", "multiply")
-            .description("Multiplies two float values (a * b)")
-            .category("math")
+        Func::new("01897c50-d510-55bf-8cb9-545a62cc76cc", "Multiply")
+            .description("Multiplies two float values (A × B).")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("a", DataType::Float).default(0.0))
-            .input(FuncInput::required("b", DataType::Float).default(1.0))
-            .output("result", DataType::Float)
+            .input(
+                FuncInput::required("A", DataType::Float)
+                    .description("First factor.")
+                    .default(0.0),
+            )
+            .input(
+                FuncInput::required("B", DataType::Float)
+                    .description("Second factor.")
+                    .default(1.0),
+            )
+            .output(FuncOutput::new("Product", DataType::Float).description("A × B."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -227,14 +268,24 @@ pub fn basic_library() -> Library {
 
     // divide
     library.add(
-        Func::new("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b", "divide")
-            .description("Divides the first value by the second, outputs both quotient and modulo")
-            .category("math")
+        Func::new("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b", "Divide")
+            .description(
+                "Divides the first value by the second, outputs both quotient and remainder.",
+            )
+            .category("Math")
             .pure()
-            .input(FuncInput::required("a", DataType::Float).default(0.0))
-            .input(FuncInput::required("b", DataType::Float).default(1.0))
-            .output("divide", DataType::Float)
-            .output("modulo", DataType::Float)
+            .input(
+                FuncInput::required("A", DataType::Float)
+                    .description("Dividend.")
+                    .default(0.0),
+            )
+            .input(
+                FuncInput::required("B", DataType::Float)
+                    .description("Divisor.")
+                    .default(1.0),
+            )
+            .output(FuncOutput::new("Quotient", DataType::Float).description("A ÷ B."))
+            .output(FuncOutput::new("Remainder", DataType::Float).description("A mod B."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 2);
@@ -252,13 +303,23 @@ pub fn basic_library() -> Library {
 
     // power
     library.add(
-        Func::new("01897c52-ac50-733e-aeeb-7018fd84c264", "power")
-            .description("Raises the first value to the power of the second (a^b)")
-            .category("math")
+        Func::new("01897c52-ac50-733e-aeeb-7018fd84c264", "Power")
+            .description("Raises the first value to the power of the second (Base^Exponent).")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("a", DataType::Float).default(0.0))
-            .input(FuncInput::required("b", DataType::Float).default(1.0))
-            .output("power", DataType::Float)
+            .input(
+                FuncInput::required("Base", DataType::Float)
+                    .description("The base.")
+                    .default(0.0),
+            )
+            .input(
+                FuncInput::required("Exponent", DataType::Float)
+                    .description("The exponent.")
+                    .default(1.0),
+            )
+            .output(
+                FuncOutput::new("Result", DataType::Float).description("Base raised to Exponent."),
+            )
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -274,12 +335,16 @@ pub fn basic_library() -> Library {
 
     // sqrt
     library.add(
-        Func::new("01897c53-a3d7-e716-b80a-0ba98661413a", "sqrt")
-            .description("Calculates the square root of a value")
-            .category("math")
+        Func::new("01897c53-a3d7-e716-b80a-0ba98661413a", "Square Root")
+            .description("Calculates the square root of a value.")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("a", DataType::Float).default(0.0))
-            .output("sqrt", DataType::Float)
+            .input(
+                FuncInput::required("Value", DataType::Float)
+                    .description("Number to take the square root of.")
+                    .default(0.0),
+            )
+            .output(FuncOutput::new("Root", DataType::Float).description("√Value."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -294,12 +359,16 @@ pub fn basic_library() -> Library {
 
     // sin
     library.add(
-        Func::new("01897c54-8671-5d7c-db4c-aca72865a5a6", "sin")
-            .description("Calculates the sine of an angle in radians")
-            .category("math")
+        Func::new("01897c54-8671-5d7c-db4c-aca72865a5a6", "Sine")
+            .description("Calculates the sine of an angle in radians.")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("a", DataType::Float).default(0.0))
-            .output("sin", DataType::Float)
+            .input(
+                FuncInput::required("Angle", DataType::Float)
+                    .description("Angle in radians.")
+                    .default(0.0),
+            )
+            .output(FuncOutput::new("Sine", DataType::Float).description("sin(Angle)."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -314,12 +383,16 @@ pub fn basic_library() -> Library {
 
     // cos
     library.add(
-        Func::new("01897c54-ceb5-e603-ebde-c6904a8ef6e5", "cos")
-            .description("Calculates the cosine of an angle in radians")
-            .category("math")
+        Func::new("01897c54-ceb5-e603-ebde-c6904a8ef6e5", "Cosine")
+            .description("Calculates the cosine of an angle in radians.")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("a", DataType::Float).default(0.0))
-            .output("cos", DataType::Float)
+            .input(
+                FuncInput::required("Angle", DataType::Float)
+                    .description("Angle in radians.")
+                    .default(0.0),
+            )
+            .output(FuncOutput::new("Cosine", DataType::Float).description("cos(Angle)."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -334,12 +407,16 @@ pub fn basic_library() -> Library {
 
     // tan
     library.add(
-        Func::new("01897c55-1fda-2837-f4bd-75bea812a70e", "tan")
-            .description("Calculates the tangent of an angle in radians")
-            .category("math")
+        Func::new("01897c55-1fda-2837-f4bd-75bea812a70e", "Tangent")
+            .description("Calculates the tangent of an angle in radians.")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("a", DataType::Float).default(0.0))
-            .output("tan", DataType::Float)
+            .input(
+                FuncInput::required("Angle", DataType::Float)
+                    .description("Angle in radians.")
+                    .default(0.0),
+            )
+            .output(FuncOutput::new("Tangent", DataType::Float).description("tan(Angle)."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -354,12 +431,16 @@ pub fn basic_library() -> Library {
 
     // asin
     library.add(
-        Func::new("01897c55-6920-1641-593c-5a1d91c033cb", "asin")
-            .description("Calculates the arc sine (inverse sine), returns angle in radians")
-            .category("math")
+        Func::new("01897c55-6920-1641-593c-5a1d91c033cb", "Arcsine")
+            .description("Calculates the arc sine (inverse sine), returns angle in radians.")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("sin", DataType::Float).default(0.0))
-            .output("asin", DataType::Float)
+            .input(
+                FuncInput::required("Sine", DataType::Float)
+                    .description("Sine value in [−1, 1].")
+                    .default(0.0),
+            )
+            .output(FuncOutput::new("Angle", DataType::Float).description("Angle in radians."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -374,12 +455,16 @@ pub fn basic_library() -> Library {
 
     // acos
     library.add(
-        Func::new("01897c55-a3ef-681e-6fbb-5133c96f720c", "acos")
-            .description("Calculates the arc cosine (inverse cosine), returns angle in radians")
-            .category("math")
+        Func::new("01897c55-a3ef-681e-6fbb-5133c96f720c", "Arccosine")
+            .description("Calculates the arc cosine (inverse cosine), returns angle in radians.")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("cos", DataType::Float).default(1.0))
-            .output("acos", DataType::Float)
+            .input(
+                FuncInput::required("Cosine", DataType::Float)
+                    .description("Cosine value in [−1, 1].")
+                    .default(1.0),
+            )
+            .output(FuncOutput::new("Angle", DataType::Float).description("Angle in radians."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -394,12 +479,16 @@ pub fn basic_library() -> Library {
 
     // atan
     library.add(
-        Func::new("01897c55-e6f4-726c-5d4e-a2f90c4fc43b", "atan")
-            .description("Calculates the arc tangent (inverse tangent), returns angle in radians")
-            .category("math")
+        Func::new("01897c55-e6f4-726c-5d4e-a2f90c4fc43b", "Arctangent")
+            .description("Calculates the arc tangent (inverse tangent), returns angle in radians.")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("tan", DataType::Float).default(0.0))
-            .output("atan", DataType::Float)
+            .input(
+                FuncInput::required("Tangent", DataType::Float)
+                    .description("Tangent value.")
+                    .default(0.0),
+            )
+            .output(FuncOutput::new("Angle", DataType::Float).description("Angle in radians."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -414,13 +503,21 @@ pub fn basic_library() -> Library {
 
     // log
     library.add(
-        Func::new("01897c56-8dde-c5f3-a389-f326fdf81b3a", "log")
-            .description("Calculates the logarithm of a value with the given base")
-            .category("math")
+        Func::new("01897c56-8dde-c5f3-a389-f326fdf81b3a", "Logarithm")
+            .description("Calculates the logarithm of a value with the given base.")
+            .category("Math")
             .pure()
-            .input(FuncInput::required("value", DataType::Float).default(1.0))
-            .input(FuncInput::required("base", DataType::Float).default(10.0))
-            .output("log", DataType::Float)
+            .input(
+                FuncInput::required("Value", DataType::Float)
+                    .description("Number to take the logarithm of.")
+                    .default(1.0),
+            )
+            .input(
+                FuncInput::required("Base", DataType::Float)
+                    .description("Logarithm base.")
+                    .default(10.0),
+            )
+            .output(FuncOutput::new("Result", DataType::Float).description("log_Base(Value)."))
             .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);

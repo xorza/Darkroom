@@ -653,14 +653,16 @@ mod tests {
         use scenarium::data::DataType;
         use scenarium::graph::{Binding, Graph, InputPort, Node, NodeKind};
         use scenarium::library::Library;
-        use scenarium::node::function::{Func, FuncId, FuncInput};
+        use scenarium::node::function::{Func, FuncId, FuncInput, FuncOutput};
         use scenarium::node::special::SpecialNode;
 
-        let float_src = Func::new(FuncId::unique(), "fsrc").output("o", DataType::Float);
-        let string_src = Func::new(FuncId::unique(), "ssrc").output("o", DataType::String);
+        let float_src =
+            Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float));
+        let string_src =
+            Func::new(FuncId::unique(), "ssrc").output(FuncOutput::new("o", DataType::String));
         let float_sink = Func::new(FuncId::unique(), "fsink")
             .input(FuncInput::required("x", DataType::Float))
-            .output("o", DataType::Float);
+            .output(FuncOutput::new("o", DataType::Float));
         let library = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
 
         let mut graph = Graph::default();

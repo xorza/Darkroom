@@ -82,6 +82,9 @@ impl From<&Binding> for InputBindingView {
 #[derive(Debug)]
 pub struct SceneInput {
     pub name: InternedStr,
+    /// Port tooltip from the func's [`FuncInput::description`]; empty when the
+    /// port declares none.
+    pub description: InternedStr,
     pub ty: DataType,
     /// Per-frame snapshot of the input's [`Binding`].
     pub binding: InputBindingView,
@@ -108,6 +111,9 @@ pub struct SceneInput {
 #[derive(Debug)]
 pub struct SceneOutput {
     pub name: InternedStr,
+    /// Port tooltip from the func's [`FuncOutput::description`]; empty when the
+    /// port declares none.
+    pub description: InternedStr,
     pub ty: DataType,
 }
 
@@ -127,6 +133,9 @@ pub struct SceneNode {
     /// name, or the boundary role (`Input`/`Output`). Shown by the
     /// inspection panel.
     pub kind_label: InternedStr,
+    /// The func's [`Func::description`] (empty for subgraph/boundary nodes).
+    /// Shown by the inspection panel and the new-node palette tooltip.
+    pub description: InternedStr,
     /// Span into [`Scene::inputs`].
     pub inputs: Span,
     /// Span into [`Scene::outputs`].
@@ -224,6 +233,7 @@ impl Scene {
             let interface = match &node.kind {
                 NodeKind::Func(func_id) => library.by_id(func_id).map(|f| NodeInterface {
                     kind_label: f.name.clone().into(),
+                    description: f.description.clone().unwrap_or_default().into(),
                     inputs: Cow::Borrowed(&f.inputs),
                     outputs: Cow::Borrowed(&f.outputs),
                     events: f.events.iter().map(|e| e.name.clone().into()).collect(),
@@ -233,6 +243,7 @@ impl Scene {
                 }),
                 NodeKind::Subgraph(r) => graph.resolve_def(*r, library).map(|d| NodeInterface {
                     kind_label: d.name.clone().into(),
+                    description: "".into(),
                     inputs: Cow::Borrowed(&d.inputs),
                     outputs: Cow::Borrowed(&d.outputs),
                     events: d.events.iter().map(|e| e.name.clone().into()).collect(),
@@ -250,6 +261,7 @@ impl Scene {
                     let f = s.func();
                     Some(NodeInterface {
                         kind_label: f.name.clone().into(),
+                        description: f.description.clone().unwrap_or_default().into(),
                         inputs: Cow::Borrowed(&f.inputs),
                         outputs: Cow::Borrowed(&f.outputs),
                         events: f.events.iter().map(|e| e.name.clone().into()).collect(),
@@ -269,6 +281,7 @@ impl Scene {
                     outputs.push(placeholder_output());
                     NodeInterface {
                         kind_label: "Input".into(),
+                        description: "".into(),
                         inputs: Cow::Borrowed(&[]),
                         outputs: Cow::Owned(outputs),
                         events: Vec::new(),
@@ -286,6 +299,7 @@ impl Scene {
                     inputs.push(placeholder_input());
                     NodeInterface {
                         kind_label: "Output".into(),
+                        description: "".into(),
                         inputs: Cow::Owned(inputs),
                         outputs: Cow::Borrowed(&[]),
                         events: Vec::new(),
@@ -320,6 +334,7 @@ impl Scene {
                     };
                     NodeInterface {
                         kind_label: kind_label.into(),
+                        description: "".into(),
                         inputs: Cow::Borrowed(&[]),
                         outputs: Cow::Borrowed(&[]),
                         events: Vec::new(),
@@ -345,6 +360,7 @@ impl Scene {
                 );
                 self.inputs.push(SceneInput {
                     name: input.name.clone().into(),
+                    description: input.description.clone().unwrap_or_default().into(),
                     ty: input.data_type.clone(),
                     binding: InputBindingView::from(&binding),
                     default: default_static_value(library, input),
@@ -365,6 +381,7 @@ impl Scene {
                     .enumerate()
                     .map(|(i, o)| SceneOutput {
                         name: o.name.clone().into(),
+                        description: o.description.clone().unwrap_or_default().into(),
                         // A wildcard output (passthrough / reroute) reports the type
                         // resolved through the input it mirrors; a fixed output uses
                         // its declared type.
@@ -395,6 +412,7 @@ impl Scene {
                 pos: vn.pos,
                 name,
                 kind_label: interface.kind_label,
+                description: interface.description,
                 inputs,
                 outputs,
                 events,
@@ -457,6 +475,8 @@ fn slice_pool<T>(pool: &[T], span: Span) -> &[T] {
 /// `Cow`.
 struct NodeInterface<'a> {
     kind_label: InternedStr,
+    /// The func's description (empty for subgraphs/boundaries/missing stubs).
+    description: InternedStr,
     inputs: Cow<'a, [FuncInput]>,
     outputs: Cow<'a, [FuncOutput]>,
     /// Event (emitter) port names, in declaration order. `FuncEvent` and
@@ -660,7 +680,7 @@ mod tests {
         // def id the library no longer defines.
         let library = basic_library();
         let mut graph = Graph::default();
-        let known: Node = library.by_name("add").unwrap().into();
+        let known: Node = library.by_name("Add").unwrap().into();
         let known_id = known.id;
         let mut ghost_func = Node::new(NodeKind::Func(
             "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
@@ -717,8 +737,8 @@ mod tests {
             FRAME_EVENT_FUNC_ID, worker_events_library,
         };
 
-        // The `frame event` func declares two events ("always", "fps") and two
-        // data outputs ("delta", "frame no"); the projection must surface both
+        // The `frame event` func declares two events ("Always", "FPS") and two
+        // data outputs ("Delta", "Frame #"); the projection must surface both
         // independently — events in their own pool, outputs unchanged.
         let library = worker_events_library();
         let mut graph = Graph::default();
@@ -736,7 +756,7 @@ mod tests {
             .iter()
             .map(|e| e.name.as_str(""))
             .collect();
-        assert_eq!(event_names, ["always", "fps"], "events project in order");
+        assert_eq!(event_names, ["Always", "FPS"], "events project in order");
 
         let output_names: Vec<&str> = scene
             .outputs(n.outputs)
@@ -745,7 +765,7 @@ mod tests {
             .collect();
         assert_eq!(
             output_names,
-            ["delta", "frame no"],
+            ["Delta", "Frame #"],
             "data outputs are unaffected by events"
         );
     }
@@ -756,7 +776,7 @@ mod tests {
             FRAME_EVENT_FUNC_ID, worker_events_library,
         };
 
-        // Two frame-event nodes; subscribe the second to the first's "fps"
+        // Two frame-event nodes; subscribe the second to the first's "FPS"
         // event (event_idx 1). The projection must mirror that one edge.
         let library = worker_events_library();
         let mut graph = Graph::default();
@@ -788,10 +808,10 @@ mod tests {
         // (Memory), one Disk. The projection must mirror each.
         let library = basic_library();
         let mut graph = Graph::default();
-        let memory_node: Node = library.by_name("add").unwrap().into();
+        let memory_node: Node = library.by_name("Add").unwrap().into();
         let memory_id = memory_node.id;
         graph.add(memory_node);
-        let mut disk_node: Node = library.by_name("add").unwrap().into();
+        let mut disk_node: Node = library.by_name("Add").unwrap().into();
         disk_node.persist = CachePersistence::Disk;
         let disk_id = disk_node.id;
         graph.add(disk_node);

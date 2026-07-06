@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{Configure, MenuItem, Panel, PopupHandle, Sizing, Text, Ui};
+use palantir::{Configure, MenuItem, Panel, PopupHandle, Sizing, Text, Tooltip, Ui};
 use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
 use scenarium::graph::{Binding, InputPort, Node, NodeKind};
@@ -138,7 +138,12 @@ fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Optio
                                 for func in
                                     ctx.library.funcs.iter().filter(|f| f.category == category)
                                 {
-                                    if MenuItem::new(func.name.clone()).show(ui, popup).clicked() {
+                                    let resp = MenuItem::new(func.name.clone()).show(ui, popup);
+                                    let clicked = resp.clicked();
+                                    if let Some(desc) = &func.description {
+                                        Tooltip::for_(&resp.snapshot()).text(desc.clone()).show(ui);
+                                    }
+                                    if clicked {
                                         let node: Node = func.into();
                                         let bindings = default_bindings(node.id, &func.inputs);
                                         chosen = Some(ChosenNode {
@@ -212,7 +217,12 @@ fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
 /// seeded like a func node.
 fn special_entry(ui: &mut Ui, popup: &PopupHandle, special: SpecialNode) -> Option<ChosenNode> {
     let func = special.func();
-    if !MenuItem::new(func.name.clone()).show(ui, popup).clicked() {
+    let resp = MenuItem::new(func.name.clone()).show(ui, popup);
+    let clicked = resp.clicked();
+    if let Some(desc) = &func.description {
+        Tooltip::for_(&resp.snapshot()).text(desc.clone()).show(ui);
+    }
+    if !clicked {
         return None;
     }
     let mut node = Node::new(NodeKind::Special(special));
