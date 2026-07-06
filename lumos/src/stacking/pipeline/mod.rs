@@ -483,9 +483,17 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     // a larger reservation than the warp step (step 2) — size the two separately.
     let plane_bytes = sensor.x * sensor.y * std::mem::size_of::<f32>();
     let threads = rayon::current_num_threads();
-    let decode_concurrency =
-        compute_load_concurrency(PER_FRAME_DECODE_PLANES * plane_bytes, 0, available, threads);
+    // These stream to disk (nothing retained → 0 resident frames), so the working-set estimate is
+    // the per-decode transient the headroom is divided by.
+    let decode_concurrency = compute_load_concurrency(
+        plane_bytes,
+        PER_FRAME_DECODE_PLANES * plane_bytes,
+        0,
+        available,
+        threads,
+    );
     let warp_concurrency = compute_load_concurrency(
+        plane_bytes,
         PER_FRAME_WORKING_PLANES * plane_bytes,
         0,
         available,

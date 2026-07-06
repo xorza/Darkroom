@@ -144,9 +144,26 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
 }
 
 /// In-memory byte footprint of one frame's pixel data (planes are `f32`). Drives the tier decision
-/// and the decode-concurrency budget.
+/// and (as the resident-set term) the decode-concurrency budget.
 fn frame_bytes(dimensions: ImageDimensions) -> usize {
     dimensions.sample_count() * size_of::<f32>()
+}
+
+/// Peak transient heap one in-flight decode holds, relative to the decoded frame. This — not the
+/// resident [`frame_bytes`] — is what [`compute_load_concurrency`] must divide the memory headroom
+/// by; sizing against the smaller resident frame let peak load heap overshoot the budget ~2×.
+///
+/// The factor is 2× and format-independent, because the dominant term is shared: every loader hands
+/// its decoded f32 frame (1×) to [`compute_frame_stats`], which copies an equal-size median scratch
+/// (1×) before the frame is stored or spilled. Both concrete loaders peak at exactly that window —
+/// FITS reads the source bytes but drops them before stats; the libraw CFA path reads a borrowed
+/// `&[u16]` (no copy) and frees libraw's buffers before stats — so neither exceeds the 2× floor.
+/// (The RAW decode→demosaic step in `pipeline` holds a much larger arena and budgets its own
+/// transient separately; it does not go through this loader.)
+const DECODE_TRANSIENT_FACTOR: usize = 2;
+
+fn decode_transient_bytes(dimensions: ImageDimensions) -> usize {
+    DECODE_TRANSIENT_FACTOR * frame_bytes(dimensions)
 }
 
 /// Generate a cache filename from the hash of the source path.
@@ -428,9 +445,11 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     cancel: &CancelToken,
 ) -> Result<LoadedTier, Error> {
     // Decode is CPU-bound, so fan out to the worker count, bounded by RAM headroom — every frame
-    // stays resident in this tier, so only the budget left over feeds in-flight decode transients.
+    // stays resident in this tier, so only the budget left over feeds in-flight decode transients,
+    // each charged its true ~2× footprint (`decode_transient_bytes`) so the load doesn't overshoot.
     let concurrency = compute_load_concurrency(
         frame_bytes(dimensions),
+        decode_transient_bytes(dimensions),
         paths.len(),
         available_memory,
         rayon::current_num_threads(),
@@ -518,9 +537,11 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
 
     // Decode is CPU-bound, so fan out to the worker count, bounded by RAM. The disk tier streams
     // each decoded frame to its own file and drops it, so nothing stays resident (`0`) — only the
-    // in-flight decodes occupy memory. Each frame writes unique files, so there's no contention.
+    // in-flight decodes occupy memory, each its true ~2× transient. Each frame writes unique files,
+    // so there's no contention.
     let concurrency = compute_load_concurrency(
         frame_bytes(dimensions),
+        decode_transient_bytes(dimensions),
         0,
         available_memory,
         rayon::current_num_threads(),

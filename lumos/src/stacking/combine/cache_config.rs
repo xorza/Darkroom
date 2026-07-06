@@ -155,27 +155,28 @@ pub fn compute_optimal_chunk_rows_with_memory(
 /// Maximum frames to decode concurrently while loading a cache tier.
 ///
 /// Decoding is CPU-bound (libraw runs one thread per frame), so concurrency should reach the worker
-/// count — but each in-flight decode also needs a transient buffer about the size of one decoded
-/// frame, on top of whatever frames stay resident for the rest of the load. `resident_frames` is
-/// that retained count: every frame for the in-memory tier (they all live in RAM at once), or `0`
-/// for the disk tier, which streams each decoded frame to disk and drops it. The result keeps peak
-/// memory within the usable budget (`MEMORY_PERCENT`) and never exceeds `max_workers`.
+/// count — but each in-flight decode transiently holds `transient_bytes_per_decode`: the decoded
+/// frame *plus* its decode/stats scratch, ~2× the frame (see `decode_transient_bytes` in `cache`).
+/// That sits on top of the `resident_frames` that stay resident for the rest of the load at
+/// `resident_bytes_per_frame` each: every frame for the in-memory tier (they all live in RAM at
+/// once), or `0` for the disk tier, which streams each decoded frame to disk and drops it.
 ///
-/// This replaces a hardcoded cap of 3, which left most cores idle on a roomy box yet could still
-/// over-commit memory on a stack that barely fit. Always returns at least 1.
+/// Concurrency is the memory left after the resident set divided by the *transient* — not the
+/// smaller resident frame size, which is the bug this fixes: charging one resident frame per decode
+/// let peak load heap overshoot the budget ~2× (measured at 6000×6000). Result stays within the
+/// usable budget (`MEMORY_PERCENT`), never exceeds `max_workers`, and is always ≥ 1.
 pub fn compute_load_concurrency(
-    bytes_per_frame: usize,
+    resident_bytes_per_frame: usize,
+    transient_bytes_per_decode: usize,
     resident_frames: usize,
     available_memory: u64,
     max_workers: usize,
 ) -> usize {
     let usable = memory_budget(available_memory);
-    let bytes_per_frame = (bytes_per_frame as u64).max(1);
-    let resident = bytes_per_frame.saturating_mul(resident_frames as u64);
-    // Memory left for in-flight decode transients beyond the resident set. Charging a full frame
-    // per in-flight decode is deliberately conservative (libraw's real scratch is smaller).
+    let transient = (transient_bytes_per_decode as u64).max(1);
+    let resident = (resident_bytes_per_frame as u64).saturating_mul(resident_frames as u64);
     let headroom = usable.saturating_sub(resident);
-    let mem_limit = (headroom / bytes_per_frame).max(1) as usize;
+    let mem_limit = (headroom / transient).max(1) as usize;
     mem_limit.min(max_workers.max(1))
 }
 
@@ -199,8 +200,8 @@ mod tests {
     #[test]
     fn load_concurrency_is_worker_bound_when_memory_is_ample() {
         // 20 resident frames ≈ 1.9 GB against 27 GB → 20.25 GB usable, ~18 GB headroom ⇒ far more
-        // than 16 frames fit, so the worker count is the binding limit.
-        let c = compute_load_concurrency(FRAME_96MB, 20, 27 * GB, 16);
+        // than 16 decodes (at the 2× transient) fit, so the worker count is the binding limit.
+        let c = compute_load_concurrency(FRAME_96MB, 2 * FRAME_96MB, 20, 27 * GB, 16);
         assert_eq!(c, 16);
     }
 
@@ -208,7 +209,7 @@ mod tests {
     fn load_concurrency_is_memory_bound_when_tight() {
         // Big resident set that nearly fills the usable budget leaves no headroom → serialize.
         // usable = 0.75 × 25 GB = 18.75 GB; resident = 200 × 96 MB ≈ 18.75 GB ⇒ headroom ≈ 0.
-        let c = compute_load_concurrency(FRAME_96MB, 200, 25 * GB, 16);
+        let c = compute_load_concurrency(FRAME_96MB, 2 * FRAME_96MB, 200, 25 * GB, 16);
         assert_eq!(
             c, 1,
             "a stack that nearly fills the budget must decode one at a time"
@@ -216,25 +217,39 @@ mod tests {
     }
 
     #[test]
+    fn load_concurrency_charges_transient_not_resident() {
+        // The core fix: concurrency divides headroom by the per-decode *transient*, not the resident
+        // frame size. Disk tier (0 resident), usable = 3 GB, 1 GB frames. Charging one frame per
+        // decode would allow 3 in flight (3 GB); charging the true 2× transient allows only 1.
+        let one_frame = compute_load_concurrency(GB as usize, GB as usize, 0, 4 * GB, 64);
+        let two_x = compute_load_concurrency(GB as usize, 2 * GB as usize, 0, 4 * GB, 64);
+        assert_eq!((one_frame, two_x), (3, 1));
+        assert!(
+            two_x < one_frame,
+            "a larger per-decode transient must lower concurrency — the overshoot fix"
+        );
+    }
+
+    #[test]
     fn load_concurrency_disk_tier_keeps_nothing_resident() {
-        // resident_frames = 0 (disk tier): only the in-flight decodes count. usable = 3 GB,
-        // 3 GB / 96 MB = 32 in-flight fit, so the 8-worker cap binds.
-        let c = compute_load_concurrency(FRAME_96MB, 0, 4 * GB, 8);
+        // resident_frames = 0 (disk tier): only the in-flight decodes count. usable = 3 GB, at the
+        // 2× transient 3 GB / 192 MB = 16 in-flight fit, so the 8-worker cap binds.
+        let c = compute_load_concurrency(FRAME_96MB, 2 * FRAME_96MB, 0, 4 * GB, 8);
         assert_eq!(c, 8);
     }
 
     #[test]
     fn load_concurrency_large_frames_bind_below_workers() {
-        // 1 GB frames, disk tier, 4 GB RAM → usable 3 GB → only 3 in-flight fit, below 16 workers.
-        let c = compute_load_concurrency(GB as usize, 0, 4 * GB, 16);
+        // 1 GB transient per decode, disk tier, 4 GB RAM → usable 3 GB → only 3 in-flight, < 16.
+        let c = compute_load_concurrency(GB as usize, GB as usize, 0, 4 * GB, 16);
         assert_eq!(c, 3);
     }
 
     #[test]
     fn load_concurrency_more_memory_allows_more() {
         // Parameter actually drives behavior: more RAM → strictly more concurrency, up to workers.
-        let lo = compute_load_concurrency(GB as usize, 0, 2 * GB, 16); // usable 1.5 GB → 1
-        let hi = compute_load_concurrency(GB as usize, 0, 8 * GB, 16); // usable 6 GB → 6
+        let lo = compute_load_concurrency(GB as usize, GB as usize, 0, 2 * GB, 16); // usable 1.5 GB → 1
+        let hi = compute_load_concurrency(GB as usize, GB as usize, 0, 8 * GB, 16); // usable 6 GB → 6
         assert_eq!((lo, hi), (1, 6));
         assert!(hi > lo);
     }
@@ -243,17 +258,17 @@ mod tests {
     fn load_concurrency_floors_and_clamps() {
         // Degenerate inputs never panic and never drop below 1.
         assert_eq!(
-            compute_load_concurrency(0, 0, 0, 16),
+            compute_load_concurrency(0, 0, 0, 0, 16),
             1,
             "zero frame size → at least 1"
         );
         assert_eq!(
-            compute_load_concurrency(FRAME_96MB, 5, 0, 16),
+            compute_load_concurrency(FRAME_96MB, 2 * FRAME_96MB, 5, 0, 16),
             1,
             "no memory → at least 1"
         );
         assert_eq!(
-            compute_load_concurrency(FRAME_96MB, 5, 27 * GB, 0),
+            compute_load_concurrency(FRAME_96MB, 2 * FRAME_96MB, 5, 27 * GB, 0),
             1,
             "zero workers → at least 1"
         );
