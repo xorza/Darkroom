@@ -28,8 +28,10 @@ use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, Sce
 use crate::gui::theme::Theme;
 use crate::gui::{EventRef, PortKind, PortRef};
 
-/// Grid columns: inputs (hug), input values (hug — uniform width keeps the
-/// editors aligned), a fill spacer, then outputs (hug). The outputs sit in a
+/// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
+/// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
+/// editor caps itself so it doesn't grow this column), a fill spacer, then
+/// outputs (hug). The outputs sit in a
 /// *hug* column, not the fill, so the grid's content size includes them: a
 /// `fill` column contributes 0 to a hug-sized grid and would collapse,
 /// spilling the outputs out of the node (palantir

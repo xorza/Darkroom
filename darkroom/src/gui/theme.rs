@@ -1,6 +1,6 @@
 use palantir::{
-    Background, Brush, ButtonTheme, Color, Corners, Shadow, Spacing, Stroke, TextEditTheme,
-    WidgetLook,
+    Background, Brush, ButtonTheme, Color, Corners, DragValueTheme, Shadow, Spacing, Stroke,
+    TextEditTheme, WidgetLook,
 };
 
 // ── shared dimensions ────────────────────────────────────────────────
@@ -22,9 +22,9 @@ const PORT_COL_PAD_X: f32 = 8.0;
 const PORT_GAP: f32 = 6.0;
 const PORT_COLS_GAP: f32 = 12.0;
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
-/// Upper bound on the value column: editors fill the column up to here, then
-/// a long value (e.g. a long file path) ellipsizes instead of stretching the
-/// node out.
+/// Upper bound on the value column: editors fill the column up to here, then a
+/// long value (a wide enum/preset dropdown, a long path) ellipsizes instead of
+/// stretching the node out.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 const NEW_NODE_POPUP_MAX_HEIGHT: f32 = 400.0;
 // palantir sub-theme tweaks (see `palantir_theme_for`)
@@ -288,49 +288,63 @@ pub struct Theme {
 }
 
 /// Per-widget theme bundle for the inline static-value editor on a
-/// `Binding::Const` input port. Owns the look of the path-pick chip
-/// (transparent at rest, hover-only background, no border) and the
-/// fixed field width so a single struct covers every visual axis the
-/// editor needs.
+/// `Binding::Const` input port. Owns the `DragValue` look (scrub chip —
+/// transparent at rest, hover-only background, no border — plus the inline
+/// editor derived from it) which the numeric fields use directly and the
+/// `Button`/`ComboBox` siblings (path pick, enum, presets) borrow via
+/// `drag_value.chip`, and the fixed field width.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StaticValueEditorTheme {
-    pub button: ButtonTheme,
-    /// Minimum logical-px width of the embedded `TextEdit` / pick button /
-    /// dropdown — editors fill the value column down to at least this.
+    pub drag_value: DragValueTheme,
+    /// Minimum logical-px width of the value column — editors fill it down to
+    /// at least this.
     pub width: f32,
-    /// Maximum logical-px width of the value column, so a long value
-    /// ellipsizes rather than stretching the node.
+    /// Maximum logical-px width of the value column, so a wide editor (enum /
+    /// preset dropdown, long path) ellipsizes rather than stretching the node.
     pub max_width: f32,
 }
 
 impl StaticValueEditorTheme {
-    /// Path-pick chip in the dark theme — transparent at rest, dark
-    /// `elem_hover`/`elem_active` fills on hover and press.
+    /// Editor in the dark theme — transparent chip at rest, dark
+    /// `elem_hover`/`elem_active` fills on hover/press, palette caret+selection.
     fn dark() -> Self {
-        Self::with_button_fills(dark::PAL_ELEM_HOVER, dark::PAL_ELEM_ACTIVE)
+        Self::from_palette(
+            dark::PAL_ELEM_HOVER,
+            dark::PAL_ELEM_ACTIVE,
+            dark::PAL_TEXT,
+            dark::SELECTION_RECT,
+        )
     }
 
-    /// Path-pick chip in the light theme — same structure as `dark`,
-    /// with the light palette's `elem_hover`/`elem_active` fills.
+    /// Editor in the light theme — same structure as `dark`, light palette.
     fn light() -> Self {
-        Self::with_button_fills(light::PAL_ELEM_HOVER, light::PAL_ELEM_ACTIVE)
+        Self::from_palette(
+            light::PAL_ELEM_HOVER,
+            light::PAL_ELEM_ACTIVE,
+            light::PAL_TEXT,
+            light::SELECTION_RECT,
+        )
     }
 
-    /// Shared shape: palantir's `menu_button` preset (transparent at
-    /// rest + disabled, no border) with the two hover/press fills
-    /// substituted to match the live palette. `ButtonTheme` isn't
-    /// `const`-constructible, so this lives behind a `fn` instead of
-    /// `const DARK / LIGHT` peers next to the palette mods.
-    fn with_button_fills(hover: Color, pressed: Color) -> Self {
-        let mut button = ButtonTheme::menu_button();
-        if let Some(bg) = button.hovered.background.as_mut() {
+    /// Shared shape: palantir's `menu_button` preset (transparent at rest +
+    /// disabled, no border) recoloured for hover/press, with the inline editor
+    /// derived from that chip so both modes share one box, and caret/selection
+    /// taken from the palette so it matches the app's other text fields.
+    fn from_palette(hover: Color, pressed: Color, caret: Color, selection: Color) -> Self {
+        let mut chip = ButtonTheme::menu_button();
+        if let Some(bg) = chip.hovered.background.as_mut() {
             bg.fill = hover.into();
         }
-        if let Some(bg) = button.pressed.background.as_mut() {
+        if let Some(bg) = chip.pressed.background.as_mut() {
             bg.fill = pressed.into();
         }
+        let editor_colors = TextEditTheme {
+            caret,
+            selection,
+            ..TextEditTheme::default()
+        };
         Self {
-            button,
+            drag_value: DragValueTheme::from_chip(chip, &editor_colors),
             width: VALUE_EDITOR_WIDTH,
             max_width: VALUE_EDITOR_MAX_WIDTH,
         }

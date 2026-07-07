@@ -46,32 +46,58 @@ event_port_hover = "#ffffff"
 width = 100.0
 max_width = 240.0
 
-[static_value_editor.button]
+[static_value_editor.drag_value.chip]
 padding = [8.0, 4.0]
 margin = 0.0
 
-[static_value_editor.button.normal.background]
+[static_value_editor.drag_value.chip.normal.background]
 corners = 4.0
 
-[static_value_editor.button.normal.background.fill]
+[static_value_editor.drag_value.chip.normal.background.fill]
 Solid = "#00000000"
 
-[static_value_editor.button.hovered.background]
+[static_value_editor.drag_value.chip.hovered.background]
 corners = 4.0
 
-[static_value_editor.button.hovered.background.fill]
+[static_value_editor.drag_value.chip.hovered.background.fill]
 Solid = "#3e3e3e"
 
-[static_value_editor.button.pressed.background]
+[static_value_editor.drag_value.chip.pressed.background]
 corners = 4.0
 
-[static_value_editor.button.pressed.background.fill]
+[static_value_editor.drag_value.chip.pressed.background.fill]
 Solid = "#4b4b4b"
 
-[static_value_editor.button.disabled.background]
+[static_value_editor.drag_value.chip.disabled.background]
 corners = 4.0
 
-[static_value_editor.button.disabled.background.fill]
+[static_value_editor.drag_value.chip.disabled.background.fill]
+Solid = "#00000000"
+
+[static_value_editor.drag_value.editor]
+placeholder = "#aaaaa8"
+caret = "#e2dfd3"
+caret_width = 1.5
+selection = "#9adbfb"
+padding = [8.0, 4.0]
+margin = 0.0
+
+[static_value_editor.drag_value.editor.normal.background]
+corners = 4.0
+
+[static_value_editor.drag_value.editor.normal.background.fill]
+Solid = "#00000000"
+
+[static_value_editor.drag_value.editor.focused.background]
+corners = 4.0
+
+[static_value_editor.drag_value.editor.focused.background.fill]
+Solid = "#3e3e3e"
+
+[static_value_editor.drag_value.editor.disabled.background]
+corners = 4.0
+
+[static_value_editor.drag_value.editor.disabled.background.fill]
 Solid = "#00000000"
 
 [inline_rename.text_edit]
@@ -583,6 +609,116 @@ width = 1.5
 Solid = "#aaaaa82e"
 
 [palantir_theme.text_edit.disabled.text]
+font_size_px = 16.0
+color = "#878a8d"
+line_height_mult = 1.2
+family = "Sans"
+weight = "Regular"
+
+[palantir_theme.drag_value.chip]
+padding = [12.0, 6.0]
+margin = 0.0
+
+[palantir_theme.drag_value.chip.normal.background]
+corners = 4.0
+
+[palantir_theme.drag_value.chip.normal.background.fill]
+Solid = "#3e3e3e"
+
+[palantir_theme.drag_value.chip.normal.background.stroke]
+width = 1.0
+
+[palantir_theme.drag_value.chip.normal.background.stroke.brush]
+Solid = "#aaaaa82e"
+
+[palantir_theme.drag_value.chip.hovered.background]
+corners = 4.0
+
+[palantir_theme.drag_value.chip.hovered.background.fill]
+Solid = "#4b4b4b"
+
+[palantir_theme.drag_value.chip.hovered.background.stroke]
+width = 1.0
+
+[palantir_theme.drag_value.chip.hovered.background.stroke.brush]
+Solid = "#aaaaa82e"
+
+[palantir_theme.drag_value.chip.pressed.background]
+corners = 4.0
+
+[palantir_theme.drag_value.chip.pressed.background.fill]
+Solid = "#4b4b4b"
+
+[palantir_theme.drag_value.chip.pressed.background.stroke]
+width = 1.0
+
+[palantir_theme.drag_value.chip.pressed.background.stroke.brush]
+Solid = "#105577"
+
+[palantir_theme.drag_value.chip.disabled.background]
+corners = 4.0
+
+[palantir_theme.drag_value.chip.disabled.background.fill]
+Solid = "#343434"
+
+[palantir_theme.drag_value.chip.disabled.background.stroke]
+width = 1.0
+
+[palantir_theme.drag_value.chip.disabled.background.stroke.brush]
+Solid = "#aaaaa82e"
+
+[palantir_theme.drag_value.chip.disabled.text]
+font_size_px = 16.0
+color = "#878a8d"
+line_height_mult = 1.2
+family = "Sans"
+weight = "Regular"
+
+[palantir_theme.drag_value.editor]
+placeholder = "#aaaaa8"
+caret = "#ffffff"
+caret_width = 1.5
+selection = "#9adbfb40"
+padding = [12.0, 6.0]
+margin = 0.0
+
+[palantir_theme.drag_value.editor.normal.background]
+corners = 4.0
+
+[palantir_theme.drag_value.editor.normal.background.fill]
+Solid = "#3e3e3e"
+
+[palantir_theme.drag_value.editor.normal.background.stroke]
+width = 1.0
+
+[palantir_theme.drag_value.editor.normal.background.stroke.brush]
+Solid = "#aaaaa82e"
+
+[palantir_theme.drag_value.editor.focused.background]
+corners = 4.0
+
+[palantir_theme.drag_value.editor.focused.background.fill]
+Solid = "#4b4b4b"
+
+[palantir_theme.drag_value.editor.focused.background.stroke]
+width = 1.0
+
+[palantir_theme.drag_value.editor.focused.background.stroke.brush]
+Solid = "#aaaaa82e"
+
+[palantir_theme.drag_value.editor.disabled.background]
+corners = 4.0
+
+[palantir_theme.drag_value.editor.disabled.background.fill]
+Solid = "#343434"
+
+[palantir_theme.drag_value.editor.disabled.background.stroke]
+width = 1.0
+
+[palantir_theme.drag_value.editor.disabled.background.stroke.brush]
+Solid = "#aaaaa82e"
+
+[palantir_theme.drag_value.editor.disabled.text]
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2

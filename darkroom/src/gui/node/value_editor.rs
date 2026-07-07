@@ -12,6 +12,11 @@
 //! smart text field that infers the literal's kind from the text (see
 //! [`parse_any`]).
 //!
+//! Numeric fields (`Int`/`Float`) render as an editable `DragValue`
+//! ([`numeric_edit`]): drag horizontally to scrub, click to type an exact
+//! value. `Any` stays a plain smart text field — its editing reinterprets
+//! the literal's kind, which the numeric-only `DragValue` can't do.
+//!
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
 //! formatting would clobber partial input (typing "3." would reformat
 //! to "3" on the next frame). The buffer lives in palantir's StateMap
@@ -20,7 +25,8 @@
 //! parsed value differs from the canonical one.
 
 use palantir::{
-    Button, Checkbox, ComboBox, Configure, Sizing, Spacing, TextEdit, TextWrap, Ui, WidgetId,
+    Button, Checkbox, ComboBox, Configure, DragValue, Sizing, Spacing, TextEdit, TextWrap, Ui,
+    WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
 use scenarium::library::Library;
@@ -63,7 +69,7 @@ pub(crate) fn show(
         let mut idx = before;
         ComboBox::new(&mut idx, &names)
             .id(id)
-            .style(theme.button.clone())
+            .style(theme.drag_value.chip.clone())
             .size((Sizing::FILL, Sizing::Hug))
             .min_size((width, 0.0))
             .show(ui);
@@ -80,23 +86,7 @@ pub(crate) fn show(
         return any_smart_edit(ui, id, value, width);
     }
     match value {
-        StaticValue::Int(current) => {
-            let buf = buffered_text_edit(ui, id, current, i64::to_string, width);
-            buf.parse::<i64>()
-                .ok()
-                .filter(|v| v != current)
-                .map(StaticValue::Int)
-        }
-        StaticValue::Float(current) => {
-            let buf = buffered_text_edit(ui, id, current, format_float, width);
-            buf.parse::<f64>()
-                .ok()
-                // Bit-exact: matches StaticValue's PartialEq, so we
-                // don't emit a change for `1.0` → `1` (same value,
-                // different textual form).
-                .filter(|v| v.to_bits() != current.to_bits())
-                .map(StaticValue::Float)
-        }
+        StaticValue::Int(_) | StaticValue::Float(_) => numeric_edit(ui, theme, id, value, width),
         StaticValue::String(current) => {
             let buf = buffered_text_edit(ui, id, current, |s| s.clone(), width);
             (buf != *current).then_some(StaticValue::String(buf))
@@ -115,7 +105,7 @@ pub(crate) fn show(
             Button::new()
                 .id(id)
                 .label(path_preview(path))
-                .style(theme.button.clone())
+                .style(theme.drag_value.chip.clone())
                 .text_wrap(TextWrap::Ellipsis)
                 .size((Sizing::FILL, Sizing::Hug))
                 .min_size((width, 0.0))
@@ -143,7 +133,7 @@ pub(crate) fn show(
             let mut idx = before;
             ComboBox::new(&mut idx, &options)
                 .id(id)
-                .style(theme.button.clone())
+                .style(theme.drag_value.chip.clone())
                 .size((Sizing::FILL, Sizing::Hug))
                 .min_size((width, 0.0))
                 .show(ui);
@@ -272,6 +262,64 @@ fn format_float(v: &f64) -> String {
     format!("{v:?}")
 }
 
+/// Editor for a numeric const (`Int`/`Float`): an editable `DragValue` —
+/// drag horizontally to scrub, click to type an exact value. Both modes,
+/// the focus swap, and Enter/blur commit live inside the widget. Returns
+/// the new value only when it actually changed this frame. Non-numeric
+/// values return `None`.
+fn numeric_edit(
+    ui: &mut Ui,
+    theme: &StaticValueEditorTheme,
+    id: WidgetId,
+    value: &StaticValue,
+    width: f32,
+) -> Option<StaticValue> {
+    match value {
+        StaticValue::Int(current) => {
+            let mut draft = *current;
+            DragValue::new(&mut draft)
+                .editable(true)
+                .speed(int_speed(*current))
+                .style(theme.drag_value.clone())
+                .size((Sizing::FILL, Sizing::Hug))
+                .min_size((width, 0.0))
+                .id(id)
+                .show(ui);
+            (draft != *current).then_some(StaticValue::Int(draft))
+        }
+        StaticValue::Float(current) => {
+            let mut draft = *current;
+            DragValue::new(&mut draft)
+                .editable(true)
+                .speed(float_speed(*current))
+                .decimals(3)
+                .style(theme.drag_value.clone())
+                .size((Sizing::FILL, Sizing::Hug))
+                .min_size((width, 0.0))
+                .id(id)
+                .show(ui);
+            // Bit-exact: matches StaticValue's PartialEq, so `1.0` → `1`
+            // (same value, different textual form) doesn't emit a change.
+            (draft.to_bits() != current.to_bits()).then_some(StaticValue::Float(draft))
+        }
+        _ => None,
+    }
+}
+
+/// Drag speed for a float: ≈1% of the value's magnitude per logical pixel
+/// (floored at a unit's worth), so scrubbing feels consistent whether the
+/// value is `0.5` or `5000`. Sampled by `DragValue` at drag start, so it
+/// stays fixed for the duration of a drag.
+fn float_speed(v: f64) -> f64 {
+    v.abs().max(1.0) * 0.01
+}
+
+/// Drag speed for an integer: same magnitude-relative scaling, floored at
+/// `0.25`/px so small counts stay adjustable (~4 px per step near zero).
+fn int_speed(v: i64) -> f64 {
+    ((v.abs() as f64) * 0.01).max(0.25)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,5 +381,31 @@ mod tests {
             parse_any(&format_any(&StaticValue::String("42".into()))),
             StaticValue::Int(42)
         );
+    }
+
+    #[test]
+    fn float_speed_scales_with_magnitude() {
+        // Below a unit, speed floors at 0.01/px (max(|v|, 1) * 0.01).
+        assert_eq!(float_speed(0.0), 0.01);
+        assert_eq!(float_speed(0.5), 0.01);
+        assert_eq!(float_speed(-0.5), 0.01);
+        // Above a unit it scales proportionally: 50 → 0.5/px, 1000 → 10/px.
+        assert_eq!(float_speed(50.0), 0.5);
+        assert_eq!(float_speed(1000.0), 10.0);
+        // Uses the magnitude, so sign doesn't matter.
+        assert_eq!(float_speed(-1000.0), 10.0);
+        // A big value really does scrub faster than a small one per pixel.
+        assert!(float_speed(1000.0) > float_speed(1.0));
+    }
+
+    #[test]
+    fn int_speed_floors_then_scales() {
+        // Small counts floor at 0.25/px (~4 px per whole step).
+        assert_eq!(int_speed(0), 0.25);
+        assert_eq!(int_speed(5), 0.25);
+        assert_eq!(int_speed(-5), 0.25);
+        // Above the floor it scales: 200 → 2/px, 1000 → 10/px.
+        assert_eq!(int_speed(200), 2.0);
+        assert_eq!(int_speed(1000), 10.0);
     }
 }
