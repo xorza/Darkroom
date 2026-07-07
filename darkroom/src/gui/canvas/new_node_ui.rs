@@ -1,5 +1,8 @@
 use glam::Vec2;
-use palantir::{Configure, MenuItem, Panel, PopupHandle, Scroll, Sizing, Text, Tooltip, Ui};
+use palantir::{
+    Configure, MenuItem, Panel, PopupHandle, Scroll, Sizing, Spacing, Text, TextEdit, Tooltip, Ui,
+    WidgetId,
+};
 use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
 use scenarium::graph::{Binding, InputPort, Node, NodeKind};
@@ -43,6 +46,10 @@ pub(crate) struct NewNodeUi {
     /// wire resumes *floating* and the user clicks the exact port to land
     /// it. Taken by the canvas next frame.
     resume_floating: Option<PortRef>,
+    /// Live text of the palette's search field. Cleared on each open;
+    /// case-insensitively filters the listed entries by name (a matching
+    /// category name shows that whole column). Empty ⇒ everything shows.
+    query: String,
 }
 
 impl NewNodeUi {
@@ -59,29 +66,37 @@ impl NewNodeUi {
         // Open the palette either from a bare RMB / double-click (`NewNode`
         // gesture) or from a connection dropped on empty canvas
         // (`pending_source`). Placement is the same — under the pointer.
+        let mut just_opened = false;
         if (pending_source.is_some() || gesture == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
             self.world_pos = to_world(local, scene);
             self.source = pending_source;
             self.menu.open_at(rect.min + local);
+            // Fresh open: empty the filter and focus the search field this
+            // frame so the user can type straight away.
+            self.query.clear();
+            just_opened = true;
         }
 
         // Cap the palette height to the window so a short window scrolls
         // the overflow (via the inner vertical `Scroll`) instead of
-        // running off-screen. The popup's `max_size` height bounds that
-        // scroll's viewport; the `Hug` columns inside report their full
-        // height as the scrollable content.
+        // running off-screen. The popup's `max_size` height bounds the
+        // whole popup; the search row sits above a `Scroll` whose own cap
+        // (`max_height` minus the search row) keeps it from eating the
+        // header's space — a `Hug` scroll otherwise claims the full cap.
         let surface = ui.display().logical_rect();
         let max_height = ctx
             .theme
             .new_node_popup_max_height
             .min(surface.size.h - 16.0)
             .max(120.0);
+        let scroll_cap = (max_height - SEARCH_ROW_ALLOWANCE).max(80.0);
+        let query = &mut self.query;
         let chosen = self
             .menu
             .show(ui, "new_node_popup", Some(max_height), |ui, popup| {
-                palette_body(ui, popup, ctx)
+                palette_body(ui, popup, ctx, query, scroll_cap, just_opened)
             });
 
         if let Some(ChosenNode {
@@ -114,21 +129,53 @@ impl NewNodeUi {
     }
 }
 
-/// Record the palette's category columns and return the chosen entry, if
-/// any. One column per category (an `hstack`); within a column the funcs are
-/// a plain `vstack`. The whole row lives inside a vertical `Scroll` so a
-/// window too short for the palette pans the overflow instead of running
-/// off-screen: the popup's `max_size` height cap (set by the caller from the
-/// window height) bounds the scroll's viewport, and the `Hug` columns report
-/// their full height as the scrollable content. Everything hugs on the cross
-/// axis, so the popup is only as wide as its columns need. Funcs first, then
-/// this category's shared (`Linked`) subgraph defs. The pick is owned,
-/// holding no `library` borrow past the body.
-fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Option<ChosenNode> {
+/// Gap (px) below the search field, before the results scroll.
+const SEARCH_ROW_GAP: f32 = 8.0;
+
+/// Vertical space (px) the search row (field + its [`SEARCH_ROW_GAP`]) and
+/// popup padding claim above the scrolling results, subtracted from the
+/// popup's height cap to size the inner `Scroll`.
+const SEARCH_ROW_ALLOWANCE: f32 = 48.0;
+
+/// Record the palette: a search field pinned at the top, then the category
+/// columns (one `hstack` column per category) inside a vertical `Scroll`.
+/// Entries whose name (case-insensitively) contains `query` show; a category
+/// whose *own* name matches shows its whole column. Empty `query` ⇒ all show.
+///
+/// The `Scroll` pans the overflow when the window is too short. It carries an
+/// explicit `max_size` (`scroll_cap`) rather than leaning on the popup's cap:
+/// a `Hug` scroll in a capped popup otherwise claims the full cap and spills
+/// over the search row. `focus` grabs the field on the opening frame so the
+/// user types immediately. The pick is owned, holding no `library` borrow
+/// past the body.
+fn palette_body(
+    ui: &mut Ui,
+    popup: &PopupHandle,
+    ctx: &AppContext<'_>,
+    query: &mut String,
+    scroll_cap: f32,
+    focus: bool,
+) -> Option<ChosenNode> {
     let mut chosen: Option<ChosenNode> = None;
+
+    let search_id = WidgetId::from_hash("new_node_search");
+    TextEdit::new(query)
+        .id(search_id)
+        .placeholder("Search…")
+        .style(ctx.theme.inline_rename.text_edit.clone())
+        .size((Sizing::Fill(1.0), Sizing::Hug))
+        .min_size((200.0, 0.0))
+        .margin(Spacing::new(0.0, 0.0, 0.0, SEARCH_ROW_GAP))
+        .show(ui);
+    if focus {
+        ui.request_focus(Some(search_id));
+    }
+    let query_lc = query.to_lowercase();
+
     Scroll::vertical()
         .id_salt("new_node_scroll")
         .size((Sizing::Hug, Sizing::Hug))
+        .max_size((f32::INFINITY, scroll_cap))
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("new_node_columns")
@@ -136,6 +183,26 @@ fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Optio
                 .gap(12.0)
                 .show(ui, |ui| {
                     for category in sorted_categories(ctx) {
+                        // A matching category name reveals its whole column;
+                        // otherwise each entry is filtered by its own name.
+                        let cat_match = name_matches(category, &query_lc);
+                        let shows = |name: &str| cat_match || name_matches(name, &query_lc);
+                        let has_any = ctx
+                            .library
+                            .funcs
+                            .iter()
+                            .any(|f| f.category == category && shows(&f.name))
+                            || SPECIAL_NODES
+                                .iter()
+                                .any(|s| s.func().category == category && shows(&s.func().name))
+                            || ctx
+                                .library
+                                .subgraphs
+                                .iter()
+                                .any(|d| d.category == category && shows(&d.name));
+                        if !has_any {
+                            continue;
+                        }
                         Panel::vstack()
                             .id_salt(("new_node_col", category))
                             .size((Sizing::Hug, Sizing::Hug))
@@ -149,11 +216,10 @@ fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Optio
                                     .size((Sizing::Hug, Sizing::Hug))
                                     .gap(2.0)
                                     .show(ui, |ui| {
-                                        for func in ctx
-                                            .library
-                                            .funcs
-                                            .iter()
-                                            .filter(|f| f.category == category)
+                                        for func in
+                                            ctx.library.funcs.iter().filter(|f| {
+                                                f.category == category && shows(&f.name)
+                                            })
                                         {
                                             let resp =
                                                 MenuItem::new(func.name.clone()).show(ui, popup);
@@ -176,10 +242,9 @@ fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Optio
                                         }
                                         // Built-in special nodes of this category (their
                                         // interface is hardcoded, not library-registered).
-                                        for &special in SPECIAL_NODES
-                                            .iter()
-                                            .filter(|s| s.func().category == category)
-                                        {
+                                        for &special in SPECIAL_NODES.iter().filter(|s| {
+                                            s.func().category == category && shows(&s.func().name)
+                                        }) {
                                             if let Some(picked) = special_entry(ui, popup, special)
                                             {
                                                 chosen = Some(picked);
@@ -187,11 +252,10 @@ fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Optio
                                         }
                                         // Shared (`Linked`) subgraph defs of this
                                         // category, after the funcs.
-                                        for def in ctx
-                                            .library
-                                            .subgraphs
-                                            .iter()
-                                            .filter(|d| d.category == category)
+                                        for def in
+                                            ctx.library.subgraphs.iter().filter(|d| {
+                                                d.category == category && shows(&d.name)
+                                            })
                                         {
                                             if MenuItem::new(def.name.clone())
                                                 .show(ui, popup)
@@ -220,6 +284,12 @@ fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Optio
                 });
         });
     chosen
+}
+
+/// Case-insensitive substring match used by the palette search. An empty
+/// (already-lowercased) query matches everything.
+fn name_matches(name: &str, query_lc: &str) -> bool {
+    query_lc.is_empty() || name.to_lowercase().contains(query_lc)
 }
 
 /// Every category that has a func *or* a shared subgraph def, sorted +
@@ -314,5 +384,24 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn name_matches_is_case_insensitive_substring_with_empty_query_wildcard() {
+        // Empty query is the "show everything" wildcard.
+        assert!(name_matches("Gaussian Blur", ""));
+        assert!(name_matches("", ""));
+        // Case-insensitive substring anywhere in the name. Caller passes an
+        // already-lowercased query, so only the name is folded here.
+        assert!(name_matches("Gaussian Blur", "blur"));
+        assert!(name_matches("Gaussian Blur", "gauss"));
+        assert!(name_matches("Gaussian Blur", "an bl"));
+        // Non-substring and wrong-fragment queries reject.
+        assert!(!name_matches("Gaussian Blur", "sharpen"));
+        assert!(!name_matches("Blur", "blurry"));
+        // A non-lowercased query never matches a lowercased name — the
+        // contract is "query already lowercased", so this documents that a
+        // caller who forgets to fold gets no false positives.
+        assert!(!name_matches("blur", "BLUR"));
     }
 }
