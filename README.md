@@ -18,13 +18,16 @@ in-house immediate-mode GUI with a wgpu renderer — over a domain-agnostic grap
 engine. Its first workload is imaging: general image processing and an
 astronomical stacking pipeline.
 
+<p align="center">
+  <img src="docs/readme-screenshot.png" width="900"
+       alt="The Darkroom editor: a node-graph canvas wiring an astronomical image-stacking pipeline — build_masters, stack_lights, star removal, auto-stretch, and blend, with live per-node status badges" />
+</p>
+
 ## Run it
 
 ```sh
 cargo run                 # launches Darkroom (the default member)
 ```
-
-Already cloned flat? `git submodule update --init --recursive`.
 
 ## Features
 
