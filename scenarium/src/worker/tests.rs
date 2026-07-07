@@ -92,20 +92,20 @@ fn log_frame_no_graph(library: &Library) -> Graph {
     let mut graph = Graph::default();
 
     let frame_event_node_id: NodeId = "e69c3f32-ac66-4447-a3f6-9e8528c5d830".into();
-    let float_to_string_node_id: NodeId = "eb6590aa-229d-4874-abba-37c56f5b97fa".into();
+    let to_string_node_id: NodeId = "eb6590aa-229d-4874-abba-37c56f5b97fa".into();
     let print_node_id: NodeId = "8be72298-dece-4a5f-8a1d-d2dee1e791d3".into();
 
     let frame_event_func = library.by_name("Frame Event").unwrap();
-    let float_to_string_func = library.by_name("Float → String").unwrap();
+    let to_string_func = library.by_name("To String").unwrap();
     let print_func = library.by_name("Print").unwrap();
 
     let mut frame_event_node: Node = frame_event_func.into();
     frame_event_node.id = frame_event_node_id;
     graph.add(frame_event_node);
 
-    let mut float_to_string_node: Node = float_to_string_func.into();
-    float_to_string_node.id = float_to_string_node_id;
-    graph.add(float_to_string_node);
+    let mut to_string_node: Node = to_string_func.into();
+    to_string_node.id = to_string_node_id;
+    graph.add(to_string_node);
 
     let mut print_node: Node = print_func.into();
     print_node.id = print_node_id;
@@ -114,12 +114,12 @@ fn log_frame_no_graph(library: &Library) -> Graph {
     graph.set_input_binding(InputPort::new(frame_event_node_id, 0), 1.into());
     graph.subscribe(frame_event_node_id, 0, print_node_id);
     graph.set_input_binding(
-        InputPort::new(float_to_string_node_id, 0),
+        InputPort::new(to_string_node_id, 0),
         (frame_event_node_id, 1).into(),
     );
     graph.set_input_binding(
         InputPort::new(print_node_id, 0),
-        (float_to_string_node_id, 0).into(),
+        (to_string_node_id, 0).into(),
     );
 
     graph

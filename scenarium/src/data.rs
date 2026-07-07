@@ -228,6 +228,22 @@ impl StaticValue {
             _ => None,
         }
     }
+
+    /// The value's bare textual content — unquoted strings, full-precision
+    /// floats, `true`/`false` for bools — as produced by the `To String` node.
+    /// Distinct from [`Display`](StaticValue#impl-Display-for-StaticValue),
+    /// which quotes strings and rounds floats for compact editor labels.
+    pub fn to_value_string(&self) -> String {
+        match self {
+            StaticValue::Null => "null".to_string(),
+            StaticValue::Float(value) => value.to_string(),
+            StaticValue::Int(value) => value.to_string(),
+            StaticValue::Bool(value) => value.to_string(),
+            StaticValue::String(value) => value.clone(),
+            StaticValue::FsPath(path) => path.clone(),
+            StaticValue::Enum(variant) => variant.clone(),
+        }
+    }
 }
 
 impl Display for StaticValue {
@@ -312,6 +328,17 @@ impl DynamicValue {
         match self {
             DynamicValue::Custom(data) => data.as_any().downcast_ref::<T>(),
             _ => None,
+        }
+    }
+
+    /// This value as text for the `To String` node — the inner value's
+    /// [`StaticValue::to_value_string`], a custom value's `Display`, or the
+    /// empty string when unbound.
+    pub fn to_value_string(&self) -> String {
+        match self {
+            DynamicValue::Unbound => String::new(),
+            DynamicValue::Static(value) => value.to_value_string(),
+            DynamicValue::Custom(data) => data.to_string(),
         }
     }
 
@@ -637,6 +664,55 @@ mod tests {
         // the library's variant list, so the bare type yields `None` here too.
         assert_eq!(DataType::Custom(TypeId::from_u128(1)).default_value(), None);
         assert_eq!(DataType::Enum(TypeId::from_u128(2)).default_value(), None);
+    }
+
+    #[test]
+    fn to_value_string_is_bare_content_unlike_display() {
+        // Every static kind renders as its bare content: no quotes on strings,
+        // full-precision floats, canonical bool text.
+        assert_eq!(StaticValue::Null.to_value_string(), "null");
+        assert_eq!(StaticValue::Float(1.5).to_value_string(), "1.5");
+        assert_eq!(StaticValue::Int(-42).to_value_string(), "-42");
+        assert_eq!(StaticValue::Bool(true).to_value_string(), "true");
+        assert_eq!(StaticValue::String("hi".into()).to_value_string(), "hi");
+        assert_eq!(
+            StaticValue::FsPath("/tmp/x".into()).to_value_string(),
+            "/tmp/x"
+        );
+        assert_eq!(StaticValue::Enum("Add".into()).to_value_string(), "Add");
+
+        // It deliberately diverges from `Display`, which quotes strings and
+        // rounds floats to 4 places for compact editor labels.
+        assert_eq!(format!("{}", StaticValue::String("hi".into())), "\"hi\"");
+        assert_eq!(format!("{}", StaticValue::Float(1.5)), "1.5000");
+
+        // DynamicValue delegates to the inner static value; unbound is empty; a
+        // custom value renders through its `Display`.
+        assert_eq!(
+            DynamicValue::Static(StaticValue::Int(7)).to_value_string(),
+            "7"
+        );
+        assert_eq!(DynamicValue::Unbound.to_value_string(), "");
+
+        #[derive(Debug)]
+        struct Tag(&'static str);
+        impl Display for Tag {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "tag:{}", self.0)
+            }
+        }
+        impl CustomValue for Tag {
+            fn type_id(&self) -> TypeId {
+                TypeId::from_u128(0xaa)
+            }
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+        assert_eq!(
+            DynamicValue::from_custom(Tag("z")).to_value_string(),
+            "tag:z"
+        );
     }
 
     #[test]

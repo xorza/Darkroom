@@ -119,23 +119,22 @@ pub fn basic_library() -> Library {
 
     // to string
     library.add(
-        Func::new("01896a88-bf15-dead-4a15-5969da5a9e65", "Float → String")
-            .description("Converts a float value to its string representation.")
+        Func::new("01896a88-bf15-dead-4a15-5969da5a9e65", "To String")
+            .description("Converts any value to its string representation.")
             .category("Math")
             .pure()
-            .input(FuncInput::required("Value", DataType::Float).description("Number to convert."))
+            .input(
+                FuncInput::required("Value", DataType::Null)
+                    .description("Value of any type to convert to text."),
+            )
             .output(
-                FuncOutput::new("Text", DataType::String)
-                    .description("The value's decimal string form."),
+                FuncOutput::new("Text", DataType::String).description("The value's string form."),
             )
             .lambda(async_lambda!(|_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let value: f64 = inputs[0].value.as_f64().unwrap();
-                let result = value.to_string();
-
-                outputs[0] = result.into();
+                outputs[0] = inputs[0].value.to_value_string().into();
                 Ok(())
             })),
     );
