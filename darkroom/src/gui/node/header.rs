@@ -8,8 +8,8 @@
 
 use glam::Vec2;
 use palantir::{
-    Align, Background, Color, Configure, Corners, HAlign, Panel, Sense, Shape, Sizing, Spacing,
-    Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, Corners, FontWeight, HAlign, Panel, Sense, Shape, Sizing,
+    Spacing, Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 use scenarium::graph::{CachePersistence, NodeId};
 
@@ -321,6 +321,10 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
     let ev = InlineRename::new(id, node.name.clone())
         .theme(&rcx.theme.inline_rename)
         .max_chars(NODE_NAME_MAX_CHARS)
+        .style(TextStyle {
+            weight: FontWeight::Bold,
+            ..ui.theme.text
+        })
         .show(ui);
     if ev.clicked {
         out.push(select_intent(shift, rcx.scene, node.id));
@@ -466,6 +470,7 @@ impl Badge {
                 .style(TextStyle {
                     color: glyph_color,
                     font_size_px: BADGE_FONT,
+                    weight: FontWeight::Bold,
                     ..ui.theme.text
                 })
                 .show(ui);
