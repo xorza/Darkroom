@@ -26,8 +26,8 @@ use crate::gui::widgets::inline_rename::InlineRename;
 const NODE_NAME_MAX_CHARS: usize = 32;
 
 /// Side of a header indicator chip (px), and its glyph font size.
-const BADGE_SIZE: f32 = 15.0;
-const BADGE_FONT: f32 = 10.0;
+const BADGE_SIZE: f32 = 18.0;
+const BADGE_FONT: f32 = 12.0;
 
 /// Shared chip tint opacity: a marker's fill and a hollow control's hover-lift
 /// both paint their color at this alpha, so the two families feel like one system.
