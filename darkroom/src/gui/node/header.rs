@@ -1,7 +1,10 @@
-//! Node header bar: the title plus the right-aligned indicator chips
-//! (`S` subgraph-open, `T` terminal, `D` disable-toggle, `C` cache-toggle,
-//! and the `i` inspect chip). Drawn as the top child of each node body by
-//! [`crate::gui::node::NodeUI`].
+//! Node header bar: the title plus the node's indicator chips, split into two
+//! visual families so a toggle can't be mistaken for a fact. **Controls** are
+//! bordered, hover-lifting chips you act on — `S` subgraph-open, `D` disable,
+//! `C` cache, and the `i` inspect chip. **Markers** are flat tinted pills that
+//! only describe the node — `T` terminal and `~` impure. In [`status_row`] the
+//! markers sit left (by the run-time label), the controls right. Drawn as the
+//! top child of each node body by [`crate::gui::node::NodeUI`].
 
 use glam::Vec2;
 use palantir::{
@@ -166,23 +169,27 @@ fn header_bar(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<I
                     filled: mode == Some(InspectMode::Pinned),
                     wid: Some(inspect_badge_wid(node.id)),
                     tip: "Inspect — values, status, log",
+                    kind: BadgeKind::Control,
                 }
                 .show(ui, theme);
             }
         });
 }
 
-/// The status strip under the header: the last-run time label (left) and
-/// the indicator chips (`S` subgraph-open, `T` terminal, `D` disable, `C`
-/// cache), right-aligned. Its own row so the time appearing/disappearing
-/// doesn't resize the header; the disable chip always shows, so the row's
-/// height is reserved regardless.
+/// The status strip under the header: the last-run time label and the read-only
+/// markers (`T` terminal, `~` impure) on the left, then a `FILL` spacer, then
+/// the interactive controls (`S` subgraph-open, `D` disable, `C` cache) on the
+/// right. Its own row so the time appearing/disappearing doesn't resize the
+/// header; the disable chip always shows, so the row's height is reserved
+/// regardless.
 pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     Panel::hstack()
         .id_salt("status_row")
         .size((Sizing::FILL, Sizing::Hug))
-        .padding(Spacing::xy(8.0, 2.0))
+        // Extra top padding sets the markers/controls off from the header bar
+        // (the body vstack has no gap between rows). Order: left, top, right, bottom.
+        .padding(Spacing::new(8.0, 7.0, 8.0, 2.0))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
@@ -209,16 +216,46 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     })
                     .show(ui);
             }
-            // FILL spacer pushes the badge cluster to the right edge.
+            // Read-only markers (left cluster, beside the time label): what
+            // the node *is*. Flat tinted pills, not interactive — so they read
+            // as labels rather than the toggles on the right.
+            if node.terminal {
+                Badge {
+                    salt: "badge_t",
+                    glyph: "T",
+                    color: theme.colors.badge_terminal,
+                    filled: false,
+                    wid: None,
+                    tip: "Terminal — output sink",
+                    kind: BadgeKind::Marker,
+                }
+                .show(ui, theme);
+            }
+            if node.impure {
+                Badge {
+                    salt: "badge_impure",
+                    glyph: "~",
+                    color: theme.colors.badge_impure,
+                    filled: false,
+                    wid: None,
+                    tip: "Impure — recomputes every run, never cached",
+                    kind: BadgeKind::Marker,
+                }
+                .show(ui, theme);
+            }
+            // FILL spacer splits the markers (left) from the controls (right).
             Panel::hstack()
                 .id_salt("badge_spacer")
                 .size((Sizing::FILL, Sizing::Hug))
                 .show(ui, |_| {});
-            // Subgraph chip is the open-in-tab affordance. We only *draw*
-            // it here (with its stable id); the click is read next frame
-            // in `emit_subgraph_opens` (prepass) so the open applies
-            // before the record — letting the subgraph record a pass
-            // earlier and its connections draw with no first-frame gap.
+            // Interactive controls (right cluster): what you can *do* to the
+            // node. Bordered chips that lift on hover.
+            //
+            // Subgraph chip is the open-in-tab affordance. We only *draw* it
+            // here (with its stable id); the click is read next frame in
+            // `emit_subgraph_opens` (prepass) so the open applies before the
+            // record — letting the subgraph record a pass earlier and its
+            // connections draw with no first-frame gap.
             if node.subgraph.is_some() {
                 Badge {
                     salt: "badge_sg",
@@ -227,17 +264,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     filled: true,
                     wid: Some(subgraph_badge_wid(node.id)),
                     tip: "Open subgraph",
-                }
-                .show(ui, theme);
-            }
-            if node.terminal {
-                Badge {
-                    salt: "badge_t",
-                    glyph: "T",
-                    color: theme.colors.badge_terminal,
-                    filled: true,
-                    wid: None,
-                    tip: "Terminal — output sink",
+                    kind: BadgeKind::Control,
                 }
                 .show(ui, theme);
             }
@@ -250,6 +277,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 filled: node.disabled,
                 wid: Some(disable_badge_wid(node.id)),
                 tip: "Disable — exclude from the run",
+                kind: BadgeKind::Control,
             }
             .show(ui, theme);
             if disable_toggled {
@@ -259,13 +287,14 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 });
             }
             // Cache toggle: filled when the node's output persists to the
-            // on-disk store (`CachePersistence::Disk`), hollow for
-            // memory-only. Muted swatch, like the disable toggle — a config
-            // flip, not an alarm. Suppressed where the toggle doesn't apply:
-            // boundary nodes (pure routing), self-caching nodes like the
-            // file-cache passthrough (`uncacheable`), terminal sinks (no
-            // downstream consumer to serve a cached output to), and impure
-            // nodes (no content digest, so a `Disk` request is never honored).
+            // on-disk store (`CachePersistence::Disk`), hollow for memory-only.
+            // Muted swatch, like the disable toggle — a config flip, not an
+            // alarm. Suppressed where the toggle doesn't apply: boundary nodes
+            // (pure routing), self-caching nodes like the file-cache
+            // passthrough (`uncacheable`), terminal sinks (no downstream
+            // consumer to serve a cached output to), and impure nodes (no
+            // content digest, so a `Disk` request is never honored — the `~`
+            // marker shows why instead).
             if !node.uncacheable && !node.terminal && !node.impure {
                 let persist_toggled = Badge {
                     salt: "badge_c",
@@ -274,6 +303,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     filled: node.persist,
                     wid: Some(persist_badge_wid(node.id)),
                     tip: "Cache to disk — persist output across runs",
+                    kind: BadgeKind::Control,
                 }
                 .show(ui, theme);
                 if persist_toggled {
@@ -328,20 +358,37 @@ pub(crate) fn subgraph_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.subgraph_badge", node_id))
 }
 
-/// One header indicator chip: a small rounded square with a centered
-/// glyph. `filled` paints a solid swatch (active/descriptor); otherwise
-/// it's a hollow outline (inactive toggle). A `wid` makes it clickable and
-/// [`Badge::show`] returns whether it was clicked this frame; decorative
-/// chips set `wid: None` (relying on `salt` for a stable id) and ignore it.
+/// Which visual family a chip belongs to — the two read very differently so
+/// the user can tell a toggle from a fact at a glance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BadgeKind {
+    /// Interactive: a bordered square that lifts a faint fill on hover
+    /// (pressable). `filled` marks its "on" state. Toggles (`C`/`D`) and
+    /// actions (`S`/`i`).
+    Control,
+    /// Read-only descriptor: a borderless, tinted pill with its glyph inked in
+    /// the descriptor's own color. No hover, no click — clearly a label.
+    /// Markers (`T` terminal, `~` impure).
+    Marker,
+}
+
+/// One header indicator chip. A [`BadgeKind::Control`] renders as a bordered
+/// square (hollow, or a solid swatch when `filled`) with a hover-lift; a
+/// [`BadgeKind::Marker`] renders as a flat tinted pill (`filled` unused). A
+/// `wid` makes a control clickable and [`Badge::show`] returns whether it was
+/// clicked this frame; markers set `wid: None` (relying on `salt` for a stable
+/// id) and never report a click.
 #[derive(Debug)]
 struct Badge {
-    /// Stable id salt — used only for decorative (`wid: None`) chips.
+    /// Stable id salt — used only for `wid: None` chips (every marker).
     salt: &'static str,
     glyph: &'static str,
     color: Color,
+    /// Control "on" state (solid swatch). Ignored by markers.
     filled: bool,
     wid: Option<WidgetId>,
     tip: &'static str,
+    kind: BadgeKind,
 }
 
 impl Badge {
@@ -353,33 +400,58 @@ impl Badge {
             filled,
             wid,
             tip,
+            kind,
         } = self;
-        let background = if filled {
-            Background {
-                fill: color.into(),
-                corners: Corners::all(3.0),
-                ..Default::default()
-            }
-        } else {
-            Background {
-                stroke: Stroke::solid(color, 1.0),
-                corners: Corners::all(3.0),
-                ..Default::default()
+        // Background + glyph ink diverge by family: a marker is a flat tinted
+        // pill (glyph in its own color); a control is a bordered square whose
+        // hollow form lifts a faint fill of its color on hover, and whose
+        // filled form is a solid swatch with a dark (header-fill) glyph.
+        let (background, glyph_color) = match kind {
+            BadgeKind::Marker => (
+                Background {
+                    fill: color.with_alpha(0.20).into(),
+                    corners: Corners::all(BADGE_SIZE * 0.5),
+                    ..Default::default()
+                },
+                color,
+            ),
+            BadgeKind::Control if filled => (
+                Background {
+                    fill: color.into(),
+                    corners: Corners::all(3.0),
+                    ..Default::default()
+                },
+                theme.colors.header_fill,
+            ),
+            BadgeKind::Control => {
+                let mut bg = Background {
+                    stroke: Stroke::solid(color, 1.0),
+                    corners: Corners::all(3.0),
+                    ..Default::default()
+                };
+                // Last-frame hover (`response_for`) lifts a faint fill so the
+                // chip reads as pressable — the same trick the tab-strip chips use.
+                if wid.is_some_and(|w| ui.response_for(w).hovered) {
+                    bg.fill = color.with_alpha(0.20).into();
+                }
+                (bg, color)
             }
         };
-        // Solid chips carry dark glyphs (contrast against the swatch);
-        // hollow chips ink the glyph in the accent itself.
-        let glyph_color = if filled {
-            theme.colors.header_fill
-        } else {
-            color
+        // A marker hugs its glyph with horizontal padding into a pill; a control
+        // is a fixed square.
+        let width = match kind {
+            BadgeKind::Marker => Sizing::Hug,
+            BadgeKind::Control => Sizing::Fixed(BADGE_SIZE),
         };
         let mut panel = Panel::zstack()
-            .size((Sizing::Fixed(BADGE_SIZE), Sizing::Fixed(BADGE_SIZE)))
+            .size((width, Sizing::Fixed(BADGE_SIZE)))
             .child_align(Align::CENTER)
             .background(background);
-        // Clickable chips capture the press; decorative ones (`T`) still opt
-        // into `HOVER` so their tooltip fires without swallowing the click.
+        if matches!(kind, BadgeKind::Marker) {
+            panel = panel.padding(Spacing::xy(5.0, 0.0));
+        }
+        // Clickable controls capture the press; markers still opt into `HOVER`
+        // so their tooltip fires without swallowing a click on the node body.
         panel = match wid {
             Some(w) => panel.id(w).sense(Sense::CLICK),
             None => panel.id_salt(salt).sense(Sense::HOVER),

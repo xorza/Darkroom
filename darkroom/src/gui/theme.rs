@@ -73,6 +73,9 @@ pub(crate) mod dark {
     pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xff5e44);
     // cache (persist-to-disk) chip — palette `warning` yellow.
     pub(crate) const BADGE_CACHE: Color = Color::hex(0xffd44a);
+    // impure marker — palette `constant` purple (the "volatile / recomputes
+    // every run" hue, shared with the running-glow).
+    pub(crate) const BADGE_IMPURE: Color = Color::hex(0xd4bfff);
 
     // execution-status glow
     pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0xdaff58);
@@ -128,6 +131,8 @@ pub(crate) mod light {
     pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xef7271);
     // cache (persist-to-disk) chip — palette `warning` yellow.
     pub(crate) const BADGE_CACHE: Color = Color::hex(0xf1ad49);
+    // impure marker — palette `constant` purple (shared with the running-glow).
+    pub(crate) const BADGE_IMPURE: Color = Color::hex(0xa37acc);
 
     // execution-status glow — success / accent / syn_keyword / error.
     pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0x85b304);
@@ -654,6 +659,9 @@ palette_colors! {
     badge_terminal => BADGE_TERMINAL,
     /// Cache (persist-to-disk) chip — warning yellow.
     badge_cache => BADGE_CACHE,
+    /// Impure marker — `constant` purple. A read-only descriptor (the node
+    /// recomputes every run and is never cached), not an interactive toggle.
+    badge_impure => BADGE_IMPURE,
     /// Soft glow behind a node computed this run — palette `success` (green).
     exec_executed_glow => EXEC_EXECUTED_GLOW,
     /// Node reused its cached result — palette `accent` (cyan).
@@ -835,6 +843,8 @@ mod tests {
         assert_eq!(theme.colors.output_port, Color::hex(0xffa63d));
         // Cache (persist-to-disk) chip is the palette `warning` yellow.
         assert_eq!(theme.colors.badge_cache, Color::hex(0xffd44a));
+        // Impure marker is the palette `constant` purple.
+        assert_eq!(theme.colors.badge_impure, Color::hex(0xd4bfff));
         assert_eq!(theme.node_min_width, 160.0);
         assert!(theme.palantir_theme.tooltip.max_size.h.is_infinite());
         // The menu-bar font was shrunk from palantir's default to ours.
