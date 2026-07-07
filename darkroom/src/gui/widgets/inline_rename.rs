@@ -6,14 +6,14 @@
 //! [`RenameEvent`] onto its own intent. Mirrors the per-widget split of
 //! [`crate::gui::node::value_editor`].
 
-use palantir::{
+use aperture::{
     Align, Configure, HAlign, InternedStr, Justify, Key, Panel, Sense, Shortcut, Sizing, Spacing,
     Text, TextEdit, TextEditTheme, TextStyle, Ui, VAlign, WidgetId,
 };
 
 use crate::gui::theme::InlineRenameTheme;
 
-/// Cross-frame state for one inline-rename editor, held in palantir's
+/// Cross-frame state for one inline-rename editor, held in aperture's
 /// `StateMap` under the editor's `WidgetId`.
 #[derive(Default, Clone)]
 struct RenameState {
@@ -47,7 +47,7 @@ const DEFAULT_MAX_CHARS: usize = 64;
 /// double-click swaps in a `max_chars`-capped `TextEdit` that hugs its
 /// text width (grows as you type). Enter or blur commits, Esc cancels.
 /// The same `id` is recorded every frame across the label⇄editor swap so
-/// palantir keeps the state row alive — pick something stable per
+/// aperture keeps the state row alive — pick something stable per
 /// underlying domain item (node id, port id, subgraph id, …).
 ///
 pub(crate) struct InlineRename<'a> {
@@ -147,7 +147,7 @@ impl<'a> InlineRename<'a> {
         };
         let caret_room = theme_ref.text_edit.caret_width.max(0.0);
         // TextEdit's Hug single-line floor sets `min_size.w = text +
-        // padding_horiz + 2 * caret_room` (see palantir
+        // padding_horiz + 2 * caret_room` (see aperture
         // `text_edit/mod.rs::show`), reserving caret slack on *both*
         // sides so the end-of-line caret never clips on horizontal
         // scroll. We mirror the same total width on the idle Panel,

@@ -23,7 +23,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use palantir::Ui;
+use aperture::Ui;
 use scenarium::execution::stats::{ExecutionStats, LogEntry, RunPhase, RunProgress};
 use scenarium::execution::{ArgumentValues, RunError};
 use scenarium::graph::NodeId;

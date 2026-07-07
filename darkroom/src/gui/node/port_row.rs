@@ -6,11 +6,11 @@
 //! header by [`crate::gui::node::NodeUI`]; the boundary-port rename
 //! affordance lives in [`crate::gui::node::port_rename`].
 
-use glam::Vec2;
-use palantir::{
+use aperture::{
     Align, Color, Configure, ContextMenu, Corners, Grid, HAlign, MenuItem, Panel, Rect, Sense,
     Shape, Sizing, Spacing, Stroke, Text, Tooltip, Track, Ui, VAlign, WidgetId,
 };
+use glam::Vec2;
 use scenarium::data::{DataType, FsPathMode, StaticValue};
 use scenarium::graph::Binding;
 use scenarium::graph::NodeId;
@@ -34,7 +34,7 @@ use crate::gui::{EventRef, PortKind, PortRef};
 /// outputs (hug). The outputs sit in a
 /// *hug* column, not the fill, so the grid's content size includes them: a
 /// `fill` column contributes 0 to a hug-sized grid and would collapse,
-/// spilling the outputs out of the node (palantir
+/// spilling the outputs out of the node (aperture
 /// `grid_hug_grid_collapses_fill_tracks`). The fill spacer instead claims any
 /// width beyond the ports, pushing the outputs to the node's right edge.
 const COL_INPUT: u16 = 0;
@@ -58,7 +58,7 @@ pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
     }
     // Fixed-height rows (font-relative) so a node's ports stay uniform whether
     // or not an input carries an inline editor (hug makes editor rows taller).
-    let row_height = theme.palantir_theme.text.font_size_px * PORT_ROW_HEIGHT_EM;
+    let row_height = theme.aperture_theme.text.font_size_px * PORT_ROW_HEIGHT_EM;
     let rows: Vec<Track> = vec![Track::fixed(row_height); n_rows];
     Grid::new()
         .id_salt("ports")

@@ -2,10 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-`darkroom` is the node-graph editor, built on Palantir (the in-tree
-immediate-mode GUI lib at `../palantir`). Root `../CLAUDE.md` holds the
-workspace-wide rules (workflow, Rust style, tooling); Palantir's own
-widget/id conventions live in `../palantir/CLAUDE.md`. This file covers only
+`darkroom` is the node-graph editor, built on Aperture (the in-tree
+immediate-mode GUI lib at `../aperture`). Root `../CLAUDE.md` holds the
+workspace-wide rules (workflow, Rust style, tooling); Aperture's own
+widget/id conventions live in `../aperture/CLAUDE.md`. This file covers only
 what's specific to darkroom.
 
 ## Commands
@@ -15,7 +15,7 @@ cargo run -p darkroom                      # launch the editor (opens last doc)
 cargo test -p darkroom              # tests (mostly pure: zoom math, breaker geometry, serde round-trips)
 cargo test -p darkroom <substr>     # single test by name substring
 cargo clippy -p darkroom --all-targets -- -D warnings
-cargo run -p darkroom --features profile-with-tracy   # tracy zones across darkroom + palantir
+cargo run -p darkroom --features profile-with-tracy   # tracy zones across darkroom + aperture
 ```
 
 Run the ignored one-shot asset generator after changing the default look:
@@ -28,10 +28,10 @@ Run the ignored one-shot asset generator after changing the default look:
   `SubgraphDef`, `StaticValue`, the headless `Worker` evaluator, serde formats.
   darkroom never reimplements graph semantics; it edits a `scenarium::Graph`,
   resolves nodes against a `Library`, and runs the graph through `Worker`.
-- **`palantir`** — the GUI runtime. `App` implements `palantir::App::frame`;
+- **`aperture`** — the GUI runtime. `App` implements `aperture::App::frame`;
   `WinitHost` (in `main.rs`) drives it. All widgets, input, layout, theming,
   texture upload come from here. Pre-1.0, breaks freely — coordinate changes
-  with palantir.
+  with aperture.
 - **`common`** — `SerdeFormat`, `serialize`/`deserialize`, `KeyIndexVec`.
 - **`lens`** — `image_library()` / `astro_library()` (image + astro node libraries).
 - **`tokio`** — multi-thread runtime backing the execution worker (graph runs
@@ -48,7 +48,7 @@ everything else is grouped by responsibility:
 - **`run_state.rs`** — per-node execution status + logs + on-demand runtime
   values (`RunState`, `NodeRunState`, `ExecStatus`, `RunId`).
 - **`node_values.rs`** — render-side value views: formats worker-returned
-  values to text and uploads image previews as palantir textures
+  values to text and uploads image previews as aperture textures
   (`NodeValueView`, `PortValueView`).
 - **`app/`** — `mod.rs` (the `App`: runtime owner + per-frame entry +
   `AppContext`), `editor/` (the `Editor`: document + undo + scene + UI tree +
@@ -126,10 +126,10 @@ One frame:
 3. **sync_target** — if the active graph changed since last frame, drop
    transient gesture state and flag a relayout. Does not rebuild.
 4. **rebuild #1 (pre-prepass)** — `rebuild_scene(target)`, **unconditional**,
-   because `Scene` re-interns port names into palantir's per-frame text arena
+   because `Scene` re-interns port names into aperture's per-frame text arena
    (cleared each `Ui::frame`), so the projection must be regenerated every
    frame regardless. Clears `scene_dirty`.
-5. **edit prepass** — read palantir's *current* input state (drag deltas,
+5. **edit prepass** — read aperture's *current* input state (drag deltas,
    pan/zoom, connection release) and push `Intent`s. No drawing.
    Layout-changing edits (node drag, connection commit) are emitted here so
    they apply *before* the record.
@@ -212,7 +212,7 @@ Idempotent — a no-op on an already-canonical document.
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-frame snapshot rebuilt from the *active* graph+view every frame
 (`Scene::rebuild(graph, view, library, ctx_def, run_state)` — see
-`Editor::rebuild_scene`). Port names live in palantir's per-frame text arena,
+`Editor::rebuild_scene`). Port names live in aperture's per-frame text arena,
 so it *must* be rebuilt before any widget reads it. Port names, types, and
 input-binding snapshots are flattened into pooled `Vec`s sliced per node (zero
 per-node allocation in steady state). Each `SceneNode` carries its
@@ -239,7 +239,7 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 - On-thread, `App::frame` drains the channel (`worker.drain()`, non-blocking).
   `NodeProgress` → `RunState::apply_progress` marks the active node
   `ExecStatus::Running(Instant)` (purple glow) live — carrying the start instant
-  so the node header shows a `palantir::Spinner` + live elapsed-so-far
+  so the node header shows a `aperture::Spinner` + live elapsed-so-far
   (`App::frame` repaints ~20fps while `run_state.is_running()`);
   `ExecutionFinished` → `set_results`
   folds the final `ExecutionStats` (including nested-subgraph attribution) onto
@@ -259,7 +259,7 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   which sends a `ValueRequest { node_id, run_id }` (the `run_id` epoch drops
   stale replies). The worker spawns a forwarder task; its `ArgumentValues`
   reply (`inputs`/`outputs`) lands on a later frame, where
-  `node_values::build_view` formats text + uploads image previews as palantir
+  `node_values::build_view` formats text + uploads image previews as aperture
   textures into `RunState`.
 
 ### GUI tree (`src/gui/`)
@@ -333,8 +333,8 @@ The look is **code-defined**, not embedded TOML. Module consts hold every
 color (`CANVAS_BG`, `NODE_FILL`, `BADGE_SUBGRAPH`, `EXEC_EXECUTED_GLOW`,
 `INPUT_PORT`, …) and layout dimension (`NODE_MIN_WIDTH`, `PORT_SIZE`,
 `CANVAS_DOT_SPACING`, …). `Theme::default()` assembles them. `Theme` bundles
-darkroom's own fields *and* the nested `palantir::Theme` (scalar fields first,
-the palantir table last — a TOML serialization ordering requirement), so it's a
+darkroom's own fields *and* the nested `aperture::Theme` (scalar fields first,
+the aperture table last — a TOML serialization ordering requirement), so it's a
 complete bundle serialized as TOML. The checked-in `assets/ayu-graphite.toml`
 is a reference/round-trip fixture kept in sync by an ignored test, **not** a
 parallel source of truth.

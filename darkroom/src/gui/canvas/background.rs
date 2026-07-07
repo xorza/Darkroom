@@ -1,5 +1,5 @@
+use aperture::{Color, ColorU8, Image, ImageFit, ImageHandle, Shape, Ui};
 use glam::Vec2;
-use palantir::{Color, ColorU8, Image, ImageFit, ImageHandle, Shape, Ui};
 
 use crate::gui::app::AppContext;
 use crate::gui::canvas::outer_canvas_widget_id;
@@ -19,7 +19,7 @@ const MAX_WRAP: f32 = 2.0;
 const TILE_PX: u32 = 64;
 
 /// Dotted canvas backdrop, drawn as one tiled [`Shape::Image`]. A small
-/// dot tile is generated once, registered into palantir's image cache,
+/// dot tile is generated once, registered into aperture's image cache,
 /// and stamped across the whole canvas by a single tiled image whose UV
 /// transform carries the pan/zoom — so the grid pans and zooms for the
 /// cost of one draw call.

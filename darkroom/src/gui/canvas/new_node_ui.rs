@@ -1,8 +1,8 @@
-use glam::Vec2;
-use palantir::{
+use aperture::{
     Configure, MenuItem, Panel, PopupHandle, Scroll, Sizing, Spacing, Text, TextEdit, Tooltip, Ui,
     WidgetId,
 };
+use glam::Vec2;
 use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
 use scenarium::graph::{Binding, InputPort, Node, NodeKind};

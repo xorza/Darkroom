@@ -1,5 +1,5 @@
+use aperture::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Spacing, Ui};
 use glam::Vec2;
-use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Spacing, Ui};
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context
 /// popups (the node menu, subgraph-badge menu, and new-node palette). Owns

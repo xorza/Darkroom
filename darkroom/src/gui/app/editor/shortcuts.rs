@@ -1,12 +1,12 @@
 //! Keyboard input → intent/command mapping. A child module of `editor`:
-//! these read palantir's key state and translate chords into queued
+//! these read aperture's key state and translate chords into queued
 //! `Intent`s (canvas edits) or a `AppCommand` (file ops). Being a child
 //! lets them drive the pipeline through `Editor`'s private fields without
 //! widening visibility; they never touch the frame orchestration.
 
 use std::collections::BTreeSet;
 
-use palantir::{Key, Shortcut, Ui};
+use aperture::{Key, Shortcut, Ui};
 
 use crate::core::document::{GraphRef, Viewport};
 use crate::core::edit::intent::{self, Intent, build_duplicate_intent};
@@ -27,7 +27,7 @@ const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 const RUN_SHORTCUT: Shortcut = Shortcut::ctrl('R');
 /// ⌘Q on macOS, Ctrl+Q elsewhere. Routes through `AppCommand::Shell(ShellCommand::Quit)` →
 /// `App::request_quit`, so it prompts to save when the document is dirty
-/// — same path as File ▸ Quit. (palantir drops winit's default macOS menu
+/// — same path as File ▸ Quit. (aperture drops winit's default macOS menu
 /// so ⌘Q reaches us instead of hard-terminating.)
 const QUIT_SHORTCUT: Shortcut = Shortcut::ctrl('Q');
 
@@ -38,7 +38,7 @@ impl Editor {
     ///
     /// The chords are sampled via `key_pressed` *every frame,
     /// unconditionally* — that call both reads the press and keeps the
-    /// chord subscribed, and palantir's keyboard wake-gate only delivers
+    /// chord subscribed, and aperture's keyboard wake-gate only delivers
     /// an off-focus press when its chord was subscribed last frame
     /// (subscriptions clear each frame). Focus only gates the *action*:
     /// while a widget holds focus, Ctrl+Z must undo that widget's text,
@@ -82,7 +82,7 @@ impl Editor {
         let escape = ui.escape_pressed();
         let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
         // Sampled before the focus gate so the chords stay subscribed for
-        // palantir's wake-gate even on a focused frame.
+        // aperture's wake-gate even on a focused frame.
         let delete = ui.key_pressed(Shortcut::key(Key::Delete))
             || ui.key_pressed(Shortcut::key(Key::Backspace));
         if ui.focused_id().is_some() {
@@ -128,7 +128,7 @@ impl Editor {
     /// focus, so Ctrl+S still saves while a node's value editor is
     /// focused (TextEdit doesn't bind S/O/N, so nothing is stolen).
     /// Every chord is sampled with `key_pressed` each frame so all
-    /// stay subscribed for palantir's wake-gate (sampling them all up
+    /// stay subscribed for aperture's wake-gate (sampling them all up
     /// front, not short-circuited, so one chord firing doesn't drop
     /// the others' subscription that frame). Save-As (Ctrl+Shift+S) is
     /// checked before Save (Ctrl+S) so the shift variant wins its

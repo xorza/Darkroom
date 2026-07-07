@@ -49,18 +49,18 @@
     ],
   },
   {
-    "label": "run palantir showcase",
+    "label": "run aperture showcase",
     "command": "RUST_BACKTRACE=1 cargo",
-    "args": ["run", "--release", "--manifest-path", "palantir/Cargo.toml"],
+    "args": ["run", "--release", "--manifest-path", "aperture/Cargo.toml"],
   },
   {
-    "label": "run palantir showcase with tracy",
+    "label": "run aperture showcase with tracy",
     "command": "RUST_BACKTRACE=1 cargo",
     "args": [
       "run",
       "--release",
       "--manifest-path",
-      "palantir/Cargo.toml",
+      "aperture/Cargo.toml",
       "--features",
       "profile-with-tracy",
     ],

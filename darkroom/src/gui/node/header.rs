@@ -6,11 +6,11 @@
 //! markers sit left (by the run-time label), the controls right. Drawn as the
 //! top child of each node body by [`crate::gui::node::NodeUI`].
 
-use glam::Vec2;
-use palantir::{
+use aperture::{
     Align, Background, Color, Configure, Corners, FontWeight, HAlign, Panel, Sense, Shape, Sizing,
     Spacing, Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
+use glam::Vec2;
 use scenarium::graph::{CachePersistence, NodeId};
 
 use crate::core::edit::intent::Intent;

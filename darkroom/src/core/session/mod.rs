@@ -1,7 +1,7 @@
 //! Frontend-agnostic editing core for the non-GUI modes (`--tui`,
 //! `--headless`). Owns the document plus an [`Engine`] (func lib +
 //! evaluation worker + script host), and drains their inbound queues on
-//! each [`Session::tick`]. No Palantir, no undo stack, no inspector —
+//! each [`Session::tick`]. No Aperture, no undo stack, no inspector —
 //! scripts mutate the graph, trigger runs, and `print`/`shutdown`; the
 //! worker's results and script `print`s land on a small status log the
 //! driver can show.

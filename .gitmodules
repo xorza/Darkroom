@@ -4,9 +4,9 @@
 [submodule "imaginarium"]
 	path = imaginarium
 	url = git@github.com:xorza/Imaginarium.git
-[submodule "palantir"]
-	path = palantir
-	url = git@github.com:xorza/palantir.git
+[submodule "aperture"]
+	path = aperture
+	url = git@github.com:xorza/aperture.git
 [submodule "fits-well"]
 	path = fits-well
 	url = git@github.com:xorza/fits-well.git

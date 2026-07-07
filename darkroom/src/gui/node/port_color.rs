@@ -8,7 +8,7 @@
 //! default / untyped boundary placeholder) has no type identity, so it
 //! falls back to the positional input/output port colors from the theme.
 
-use palantir::Color;
+use aperture::Color;
 use scenarium::data::DataType;
 
 use crate::gui::PortKind;

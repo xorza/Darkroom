@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
+use aperture::InternedStr;
 use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
-use palantir::InternedStr;
 use scenarium::data::{DataType, StaticValue};
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
 use scenarium::graph::{
@@ -195,7 +195,7 @@ pub struct SceneConnection {
 }
 
 impl Scene {
-    /// Names live in palantir's per-frame text arena, which clears at
+    /// Names live in aperture's per-frame text arena, which clears at
     /// the next `Ui::frame` — so `Scene` must be rebuilt every frame
     /// before any widget consumes it. `App::frame` enforces this.
     ///

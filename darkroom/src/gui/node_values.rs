@@ -7,9 +7,9 @@
 //! cross into the editor. The owning per-node store + fetch coordination
 //! lives in [`crate::gui::run_state::RunState`].
 
+use aperture::{Image as PalImage, ImageHandle, Ui};
 use imaginarium::{ColorFormat, Image as RawImage};
 use lens::Image as LensImage;
-use palantir::{Image as PalImage, ImageHandle, Ui};
 use scenarium::data::DynamicValue;
 use scenarium::execution::ArgumentValues;
 
@@ -66,7 +66,7 @@ fn port_view(ui: &Ui, value: &DynamicValue) -> PortValueView {
     }
 }
 
-/// Upload an `RGBA_U8` preview as a palantir texture. Repacks rows only if
+/// Upload an `RGBA_U8` preview as an aperture texture. Repacks rows only if
 /// a padded stride ever shows up (the preview path produces a packed
 /// stride, so this is normally a straight move). `None` for an unexpected
 /// format or a degenerate buffer.

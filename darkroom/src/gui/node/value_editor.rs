@@ -19,12 +19,12 @@
 //!
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
 //! formatting would clobber partial input (typing "3." would reformat
-//! to "3" on the next frame). The buffer lives in palantir's StateMap
+//! to "3" on the next frame). The buffer lives in aperture's StateMap
 //! keyed by the editor id; we mirror canonical → buffer only while
 //! unfocused and parse on every frame, emitting a change only when the
 //! parsed value differs from the canonical one.
 
-use palantir::{
+use aperture::{
     Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextWrap, Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
@@ -225,7 +225,7 @@ fn path_preview(path: &str) -> String {
         .unwrap_or_else(|| path.to_owned())
 }
 
-/// Render a TextEdit whose buffer survives across frames via palantir's
+/// Render a TextEdit whose buffer survives across frames via aperture's
 /// StateMap. While the editor is unfocused, the buffer mirrors the
 /// canonical value (re-formatted via `fmt`); while focused, the user's
 /// in-progress text is left alone. Returns the current buffer for the

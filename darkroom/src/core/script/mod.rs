@@ -175,7 +175,7 @@ pub enum ScriptMessage {
     /// with no autorun toggle.
     RunOnce,
     /// `shutdown()` — ask the host to quit, via
-    /// [`palantir::HostHandle::quit`].
+    /// [`aperture::HostHandle::quit`].
     Shutdown,
 }
 
@@ -386,7 +386,7 @@ fn register_run(engine: &mut Engine, inbound: InboundSender) {
 
 /// `shutdown()` — ask the host to quit. Pushed through the inbound
 /// channel like every other side effect; `App` translates it into
-/// [`palantir::HostHandle::quit`].
+/// [`aperture::HostHandle::quit`].
 fn register_shutdown(engine: &mut Engine, inbound: InboundSender) {
     engine.register_fn("shutdown", move || {
         inbound.send(ScriptMessage::Shutdown);

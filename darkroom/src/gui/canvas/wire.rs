@@ -4,8 +4,8 @@
 //! draw the curve through the one primitive here, so the two stay visually
 //! identical apart from their brush.
 
+use aperture::{Brush, LineCap, Shape, Ui};
 use glam::Vec2;
-use palantir::{Brush, LineCap, Shape, Ui};
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
 /// link still bows out into a readable curve.

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use palantir::{MenuItem, Ui};
+use aperture::{MenuItem, Ui};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;

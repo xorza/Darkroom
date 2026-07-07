@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
+use aperture::{Corners, PointerButton, Rect, Shape, Stroke, Ui};
 use glam::Vec2;
-use palantir::{Corners, PointerButton, Rect, Shape, Stroke, Ui};
 use scenarium::graph::NodeId;
 
 use crate::core::edit::intent::Intent;

@@ -5,7 +5,7 @@
 //! (`SubgraphInput`/`SubgraphOutput`) port rows in
 //! [`crate::gui::node::port_row`]; ordinary node ports render plain text.
 
-use palantir::{Configure, HAlign, InternedStr, Sense, Text, Tooltip, Ui, WidgetId};
+use aperture::{Configure, HAlign, InternedStr, Sense, Text, Tooltip, Ui, WidgetId};
 
 use crate::core::document::BoundarySide;
 use crate::core::edit::intent::Intent;
@@ -18,7 +18,7 @@ const PORT_NAME_MAX_CHARS: usize = 24;
 
 /// Stable id for a port's rename editor — and for the sensing label
 /// panel shown when idle, so the same `WidgetId` is recorded every frame
-/// across the label⇄editor swap (palantir drops state rows for ids it
+/// across the label⇄editor swap (aperture drops state rows for ids it
 /// doesn't see).
 fn port_rename_wid(port: PortRef) -> WidgetId {
     WidgetId::from_hash((

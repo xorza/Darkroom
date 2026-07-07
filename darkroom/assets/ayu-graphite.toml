@@ -133,428 +133,428 @@ line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme]
+[aperture_theme]
 window_clear = "#1a1a1a"
 text_scale = 1.0
 
-[palantir_theme.button]
+[aperture_theme.button]
 padding = [12.0, 6.0]
 margin = 0.0
 
-[palantir_theme.button.normal.background]
+[aperture_theme.button.normal.background]
 corners = 4.0
 
-[palantir_theme.button.normal.background.fill]
+[aperture_theme.button.normal.background.fill]
 Solid = "#3e3e3e"
 
-[palantir_theme.button.normal.background.stroke]
+[aperture_theme.button.normal.background.stroke]
 width = 1.0
 
-[palantir_theme.button.normal.background.stroke.brush]
+[aperture_theme.button.normal.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.button.hovered.background]
+[aperture_theme.button.hovered.background]
 corners = 4.0
 
-[palantir_theme.button.hovered.background.fill]
+[aperture_theme.button.hovered.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.button.hovered.background.stroke]
+[aperture_theme.button.hovered.background.stroke]
 width = 1.0
 
-[palantir_theme.button.hovered.background.stroke.brush]
+[aperture_theme.button.hovered.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.button.pressed.background]
+[aperture_theme.button.pressed.background]
 corners = 4.0
 
-[palantir_theme.button.pressed.background.fill]
+[aperture_theme.button.pressed.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.button.pressed.background.stroke]
+[aperture_theme.button.pressed.background.stroke]
 width = 1.0
 
-[palantir_theme.button.pressed.background.stroke.brush]
+[aperture_theme.button.pressed.background.stroke.brush]
 Solid = "#105577"
 
-[palantir_theme.button.disabled.background]
+[aperture_theme.button.disabled.background]
 corners = 4.0
 
-[palantir_theme.button.disabled.background.fill]
+[aperture_theme.button.disabled.background.fill]
 Solid = "#343434"
 
-[palantir_theme.button.disabled.background.stroke]
+[aperture_theme.button.disabled.background.stroke]
 width = 1.0
 
-[palantir_theme.button.disabled.background.stroke.brush]
+[aperture_theme.button.disabled.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.button.disabled.text]
+[aperture_theme.button.disabled.text]
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.menu_button]
+[aperture_theme.menu_button]
 padding = [8.0, 4.0]
 margin = 0.0
 
-[palantir_theme.menu_button.normal.background]
+[aperture_theme.menu_button.normal.background]
 corners = 4.0
 
-[palantir_theme.menu_button.normal.background.fill]
+[aperture_theme.menu_button.normal.background.fill]
 Solid = "#343434d9"
 
-[palantir_theme.menu_button.normal.text]
+[aperture_theme.menu_button.normal.text]
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.menu_button.hovered.background]
+[aperture_theme.menu_button.hovered.background]
 corners = 4.0
 
-[palantir_theme.menu_button.hovered.background.fill]
+[aperture_theme.menu_button.hovered.background.fill]
 Solid = "#3e3e3e"
 
-[palantir_theme.menu_button.hovered.text]
+[aperture_theme.menu_button.hovered.text]
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.menu_button.pressed.background]
+[aperture_theme.menu_button.pressed.background]
 corners = 4.0
 
-[palantir_theme.menu_button.pressed.background.fill]
+[aperture_theme.menu_button.pressed.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.menu_button.pressed.text]
+[aperture_theme.menu_button.pressed.text]
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.menu_button.disabled.background]
+[aperture_theme.menu_button.disabled.background]
 corners = 4.0
 
-[palantir_theme.menu_button.disabled.background.fill]
+[aperture_theme.menu_button.disabled.background.fill]
 Solid = "#343434d9"
 
-[palantir_theme.menu_button.disabled.text]
+[aperture_theme.menu_button.disabled.text]
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.checkbox]
+[aperture_theme.checkbox]
 indicator = "#1a1a1a"
 box_size = 16.0
 indicator_stroke = 2.0
 indicator_inset = 4.0
 row_gap = 8.0
 
-[palantir_theme.checkbox.unchecked.normal.background]
+[aperture_theme.checkbox.unchecked.normal.background]
 corners = 3.0
 
-[palantir_theme.checkbox.unchecked.normal.background.fill]
+[aperture_theme.checkbox.unchecked.normal.background.fill]
 Solid = "#3e3e3e"
 
-[palantir_theme.checkbox.unchecked.normal.background.stroke]
+[aperture_theme.checkbox.unchecked.normal.background.stroke]
 width = 1.0
 
-[palantir_theme.checkbox.unchecked.normal.background.stroke.brush]
+[aperture_theme.checkbox.unchecked.normal.background.stroke.brush]
 Solid = "#aaaaa859"
 
-[palantir_theme.checkbox.unchecked.hovered.background]
+[aperture_theme.checkbox.unchecked.hovered.background]
 corners = 3.0
 
-[palantir_theme.checkbox.unchecked.hovered.background.fill]
+[aperture_theme.checkbox.unchecked.hovered.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.checkbox.unchecked.hovered.background.stroke]
+[aperture_theme.checkbox.unchecked.hovered.background.stroke]
 width = 1.0
 
-[palantir_theme.checkbox.unchecked.hovered.background.stroke.brush]
+[aperture_theme.checkbox.unchecked.hovered.background.stroke.brush]
 Solid = "#aaaaa859"
 
-[palantir_theme.checkbox.unchecked.pressed.background]
+[aperture_theme.checkbox.unchecked.pressed.background]
 corners = 3.0
 
-[palantir_theme.checkbox.unchecked.pressed.background.fill]
+[aperture_theme.checkbox.unchecked.pressed.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.checkbox.unchecked.pressed.background.stroke]
+[aperture_theme.checkbox.unchecked.pressed.background.stroke]
 width = 1.0
 
-[palantir_theme.checkbox.unchecked.pressed.background.stroke.brush]
+[aperture_theme.checkbox.unchecked.pressed.background.stroke.brush]
 Solid = "#105577"
 
-[palantir_theme.checkbox.unchecked.disabled.background]
+[aperture_theme.checkbox.unchecked.disabled.background]
 corners = 3.0
 
-[palantir_theme.checkbox.unchecked.disabled.background.fill]
+[aperture_theme.checkbox.unchecked.disabled.background.fill]
 Solid = "#343434"
 
-[palantir_theme.checkbox.unchecked.disabled.background.stroke]
+[aperture_theme.checkbox.unchecked.disabled.background.stroke]
 width = 1.0
 
-[palantir_theme.checkbox.unchecked.disabled.background.stroke.brush]
+[aperture_theme.checkbox.unchecked.disabled.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.checkbox.unchecked.disabled.text]
+[aperture_theme.checkbox.unchecked.disabled.text]
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.checkbox.checked.normal.background]
+[aperture_theme.checkbox.checked.normal.background]
 corners = 3.0
 
-[palantir_theme.checkbox.checked.normal.background.fill]
+[aperture_theme.checkbox.checked.normal.background.fill]
 Solid = "#9adbfb"
 
-[palantir_theme.checkbox.checked.hovered.background]
+[aperture_theme.checkbox.checked.hovered.background]
 corners = 3.0
 
-[palantir_theme.checkbox.checked.hovered.background.fill]
+[aperture_theme.checkbox.checked.hovered.background.fill]
 Solid = "#9adbfb"
 
-[palantir_theme.checkbox.checked.pressed.background]
+[aperture_theme.checkbox.checked.pressed.background]
 corners = 3.0
 
-[palantir_theme.checkbox.checked.pressed.background.fill]
+[aperture_theme.checkbox.checked.pressed.background.fill]
 Solid = "#9adbfb"
 
-[palantir_theme.checkbox.checked.pressed.background.stroke]
+[aperture_theme.checkbox.checked.pressed.background.stroke]
 width = 1.0
 
-[palantir_theme.checkbox.checked.pressed.background.stroke.brush]
+[aperture_theme.checkbox.checked.pressed.background.stroke.brush]
 Solid = "#105577"
 
-[palantir_theme.checkbox.checked.disabled.background]
+[aperture_theme.checkbox.checked.disabled.background]
 corners = 3.0
 
-[palantir_theme.checkbox.checked.disabled.background.fill]
+[aperture_theme.checkbox.checked.disabled.background.fill]
 Solid = "#9adbfb73"
 
-[palantir_theme.checkbox.checked.disabled.text]
+[aperture_theme.checkbox.checked.disabled.text]
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.radio]
+[aperture_theme.radio]
 indicator = "#1a1a1a"
 box_size = 16.0
 indicator_stroke = 2.0
 indicator_inset = 4.0
 row_gap = 8.0
 
-[palantir_theme.radio.unchecked.normal.background]
+[aperture_theme.radio.unchecked.normal.background]
 corners = 8.0
 
-[palantir_theme.radio.unchecked.normal.background.fill]
+[aperture_theme.radio.unchecked.normal.background.fill]
 Solid = "#3e3e3e"
 
-[palantir_theme.radio.unchecked.normal.background.stroke]
+[aperture_theme.radio.unchecked.normal.background.stroke]
 width = 1.0
 
-[palantir_theme.radio.unchecked.normal.background.stroke.brush]
+[aperture_theme.radio.unchecked.normal.background.stroke.brush]
 Solid = "#aaaaa859"
 
-[palantir_theme.radio.unchecked.hovered.background]
+[aperture_theme.radio.unchecked.hovered.background]
 corners = 8.0
 
-[palantir_theme.radio.unchecked.hovered.background.fill]
+[aperture_theme.radio.unchecked.hovered.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.radio.unchecked.hovered.background.stroke]
+[aperture_theme.radio.unchecked.hovered.background.stroke]
 width = 1.0
 
-[palantir_theme.radio.unchecked.hovered.background.stroke.brush]
+[aperture_theme.radio.unchecked.hovered.background.stroke.brush]
 Solid = "#aaaaa859"
 
-[palantir_theme.radio.unchecked.pressed.background]
+[aperture_theme.radio.unchecked.pressed.background]
 corners = 8.0
 
-[palantir_theme.radio.unchecked.pressed.background.fill]
+[aperture_theme.radio.unchecked.pressed.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.radio.unchecked.pressed.background.stroke]
+[aperture_theme.radio.unchecked.pressed.background.stroke]
 width = 1.0
 
-[palantir_theme.radio.unchecked.pressed.background.stroke.brush]
+[aperture_theme.radio.unchecked.pressed.background.stroke.brush]
 Solid = "#105577"
 
-[palantir_theme.radio.unchecked.disabled.background]
+[aperture_theme.radio.unchecked.disabled.background]
 corners = 8.0
 
-[palantir_theme.radio.unchecked.disabled.background.fill]
+[aperture_theme.radio.unchecked.disabled.background.fill]
 Solid = "#343434"
 
-[palantir_theme.radio.unchecked.disabled.background.stroke]
+[aperture_theme.radio.unchecked.disabled.background.stroke]
 width = 1.0
 
-[palantir_theme.radio.unchecked.disabled.background.stroke.brush]
+[aperture_theme.radio.unchecked.disabled.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.radio.unchecked.disabled.text]
+[aperture_theme.radio.unchecked.disabled.text]
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.radio.checked.normal.background]
+[aperture_theme.radio.checked.normal.background]
 corners = 8.0
 
-[palantir_theme.radio.checked.normal.background.fill]
+[aperture_theme.radio.checked.normal.background.fill]
 Solid = "#9adbfb"
 
-[palantir_theme.radio.checked.hovered.background]
+[aperture_theme.radio.checked.hovered.background]
 corners = 8.0
 
-[palantir_theme.radio.checked.hovered.background.fill]
+[aperture_theme.radio.checked.hovered.background.fill]
 Solid = "#9adbfb"
 
-[palantir_theme.radio.checked.pressed.background]
+[aperture_theme.radio.checked.pressed.background]
 corners = 8.0
 
-[palantir_theme.radio.checked.pressed.background.fill]
+[aperture_theme.radio.checked.pressed.background.fill]
 Solid = "#9adbfb"
 
-[palantir_theme.radio.checked.pressed.background.stroke]
+[aperture_theme.radio.checked.pressed.background.stroke]
 width = 1.0
 
-[palantir_theme.radio.checked.pressed.background.stroke.brush]
+[aperture_theme.radio.checked.pressed.background.stroke.brush]
 Solid = "#105577"
 
-[palantir_theme.radio.checked.disabled.background]
+[aperture_theme.radio.checked.disabled.background]
 corners = 8.0
 
-[palantir_theme.radio.checked.disabled.background.fill]
+[aperture_theme.radio.checked.disabled.background.fill]
 Solid = "#9adbfb73"
 
-[palantir_theme.radio.checked.disabled.text]
+[aperture_theme.radio.checked.disabled.text]
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.switch]
+[aperture_theme.switch]
 indicator = "#ffffff"
 box_size = 20.0
 indicator_stroke = 2.0
 indicator_inset = 3.0
 row_gap = 8.0
 
-[palantir_theme.switch.unchecked.normal.background]
+[aperture_theme.switch.unchecked.normal.background]
 corners = 10.0
 
-[palantir_theme.switch.unchecked.normal.background.fill]
+[aperture_theme.switch.unchecked.normal.background.fill]
 Solid = "#3e3e3e"
 
-[palantir_theme.switch.unchecked.normal.background.stroke]
+[aperture_theme.switch.unchecked.normal.background.stroke]
 width = 1.0
 
-[palantir_theme.switch.unchecked.normal.background.stroke.brush]
+[aperture_theme.switch.unchecked.normal.background.stroke.brush]
 Solid = "#aaaaa859"
 
-[palantir_theme.switch.unchecked.hovered.background]
+[aperture_theme.switch.unchecked.hovered.background]
 corners = 10.0
 
-[palantir_theme.switch.unchecked.hovered.background.fill]
+[aperture_theme.switch.unchecked.hovered.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.switch.unchecked.hovered.background.stroke]
+[aperture_theme.switch.unchecked.hovered.background.stroke]
 width = 1.0
 
-[palantir_theme.switch.unchecked.hovered.background.stroke.brush]
+[aperture_theme.switch.unchecked.hovered.background.stroke.brush]
 Solid = "#aaaaa859"
 
-[palantir_theme.switch.unchecked.pressed.background]
+[aperture_theme.switch.unchecked.pressed.background]
 corners = 10.0
 
-[palantir_theme.switch.unchecked.pressed.background.fill]
+[aperture_theme.switch.unchecked.pressed.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.switch.unchecked.pressed.background.stroke]
+[aperture_theme.switch.unchecked.pressed.background.stroke]
 width = 1.0
 
-[palantir_theme.switch.unchecked.pressed.background.stroke.brush]
+[aperture_theme.switch.unchecked.pressed.background.stroke.brush]
 Solid = "#105577"
 
-[palantir_theme.switch.unchecked.disabled.background]
+[aperture_theme.switch.unchecked.disabled.background]
 corners = 10.0
 
-[palantir_theme.switch.unchecked.disabled.background.fill]
+[aperture_theme.switch.unchecked.disabled.background.fill]
 Solid = "#343434"
 
-[palantir_theme.switch.unchecked.disabled.background.stroke]
+[aperture_theme.switch.unchecked.disabled.background.stroke]
 width = 1.0
 
-[palantir_theme.switch.unchecked.disabled.background.stroke.brush]
+[aperture_theme.switch.unchecked.disabled.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.switch.unchecked.disabled.text]
+[aperture_theme.switch.unchecked.disabled.text]
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.switch.checked.normal.background]
+[aperture_theme.switch.checked.normal.background]
 corners = 10.0
 
-[palantir_theme.switch.checked.normal.background.fill]
+[aperture_theme.switch.checked.normal.background.fill]
 Solid = "#9adbfb"
 
-[palantir_theme.switch.checked.hovered.background]
+[aperture_theme.switch.checked.hovered.background]
 corners = 10.0
 
-[palantir_theme.switch.checked.hovered.background.fill]
+[aperture_theme.switch.checked.hovered.background.fill]
 Solid = "#9adbfb"
 
-[palantir_theme.switch.checked.pressed.background]
+[aperture_theme.switch.checked.pressed.background]
 corners = 10.0
 
-[palantir_theme.switch.checked.pressed.background.fill]
+[aperture_theme.switch.checked.pressed.background.fill]
 Solid = "#9adbfb"
 
-[palantir_theme.switch.checked.pressed.background.stroke]
+[aperture_theme.switch.checked.pressed.background.stroke]
 width = 1.0
 
-[palantir_theme.switch.checked.pressed.background.stroke.brush]
+[aperture_theme.switch.checked.pressed.background.stroke.brush]
 Solid = "#105577"
 
-[palantir_theme.switch.checked.disabled.background]
+[aperture_theme.switch.checked.disabled.background]
 corners = 10.0
 
-[palantir_theme.switch.checked.disabled.background.fill]
+[aperture_theme.switch.checked.disabled.background.fill]
 Solid = "#9adbfb73"
 
-[palantir_theme.switch.checked.disabled.text]
+[aperture_theme.switch.checked.disabled.text]
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.switch.anim]
+[aperture_theme.switch.anim]
 kind = "spring"
 stiffness = 170.0
 damping = 26.0
 
-[palantir_theme.scrollbar]
+[aperture_theme.scrollbar]
 width = 8.0
 gap = 4.0
 min_thumb_px = 24.0
@@ -564,7 +564,7 @@ thumb_hover = "#aaaaa8a6"
 thumb_active = "#aaaaa8d9"
 radius = 4.0
 
-[palantir_theme.text_edit]
+[aperture_theme.text_edit]
 placeholder = "#aaaaa8"
 caret = "#e2dfd3"
 caret_width = 1.5
@@ -572,109 +572,109 @@ selection = "#9adbfb40"
 padding = [5.0, 3.0]
 margin = 0.0
 
-[palantir_theme.text_edit.normal.background]
+[aperture_theme.text_edit.normal.background]
 corners = 4.0
 
-[palantir_theme.text_edit.normal.background.fill]
+[aperture_theme.text_edit.normal.background.fill]
 Solid = "#3e3e3e"
 
-[palantir_theme.text_edit.normal.background.stroke]
+[aperture_theme.text_edit.normal.background.stroke]
 width = 1.5
 
-[palantir_theme.text_edit.normal.background.stroke.brush]
+[aperture_theme.text_edit.normal.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.text_edit.focused.background]
+[aperture_theme.text_edit.focused.background]
 corners = 4.0
 
-[palantir_theme.text_edit.focused.background.fill]
+[aperture_theme.text_edit.focused.background.fill]
 Solid = "#3e3e3e"
 
-[palantir_theme.text_edit.focused.background.stroke]
+[aperture_theme.text_edit.focused.background.stroke]
 width = 1.5
 
-[palantir_theme.text_edit.focused.background.stroke.brush]
+[aperture_theme.text_edit.focused.background.stroke.brush]
 Solid = "#105577"
 
-[palantir_theme.text_edit.disabled.background]
+[aperture_theme.text_edit.disabled.background]
 corners = 4.0
 
-[palantir_theme.text_edit.disabled.background.fill]
+[aperture_theme.text_edit.disabled.background.fill]
 Solid = "#343434"
 
-[palantir_theme.text_edit.disabled.background.stroke]
+[aperture_theme.text_edit.disabled.background.stroke]
 width = 1.5
 
-[palantir_theme.text_edit.disabled.background.stroke.brush]
+[aperture_theme.text_edit.disabled.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.text_edit.disabled.text]
+[aperture_theme.text_edit.disabled.text]
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.drag_value.chip]
+[aperture_theme.drag_value.chip]
 padding = [12.0, 6.0]
 margin = 0.0
 
-[palantir_theme.drag_value.chip.normal.background]
+[aperture_theme.drag_value.chip.normal.background]
 corners = 4.0
 
-[palantir_theme.drag_value.chip.normal.background.fill]
+[aperture_theme.drag_value.chip.normal.background.fill]
 Solid = "#3e3e3e"
 
-[palantir_theme.drag_value.chip.normal.background.stroke]
+[aperture_theme.drag_value.chip.normal.background.stroke]
 width = 1.0
 
-[palantir_theme.drag_value.chip.normal.background.stroke.brush]
+[aperture_theme.drag_value.chip.normal.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.drag_value.chip.hovered.background]
+[aperture_theme.drag_value.chip.hovered.background]
 corners = 4.0
 
-[palantir_theme.drag_value.chip.hovered.background.fill]
+[aperture_theme.drag_value.chip.hovered.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.drag_value.chip.hovered.background.stroke]
+[aperture_theme.drag_value.chip.hovered.background.stroke]
 width = 1.0
 
-[palantir_theme.drag_value.chip.hovered.background.stroke.brush]
+[aperture_theme.drag_value.chip.hovered.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.drag_value.chip.pressed.background]
+[aperture_theme.drag_value.chip.pressed.background]
 corners = 4.0
 
-[palantir_theme.drag_value.chip.pressed.background.fill]
+[aperture_theme.drag_value.chip.pressed.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.drag_value.chip.pressed.background.stroke]
+[aperture_theme.drag_value.chip.pressed.background.stroke]
 width = 1.0
 
-[palantir_theme.drag_value.chip.pressed.background.stroke.brush]
+[aperture_theme.drag_value.chip.pressed.background.stroke.brush]
 Solid = "#105577"
 
-[palantir_theme.drag_value.chip.disabled.background]
+[aperture_theme.drag_value.chip.disabled.background]
 corners = 4.0
 
-[palantir_theme.drag_value.chip.disabled.background.fill]
+[aperture_theme.drag_value.chip.disabled.background.fill]
 Solid = "#343434"
 
-[palantir_theme.drag_value.chip.disabled.background.stroke]
+[aperture_theme.drag_value.chip.disabled.background.stroke]
 width = 1.0
 
-[palantir_theme.drag_value.chip.disabled.background.stroke.brush]
+[aperture_theme.drag_value.chip.disabled.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.drag_value.chip.disabled.text]
+[aperture_theme.drag_value.chip.disabled.text]
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.drag_value.editor]
+[aperture_theme.drag_value.editor]
 placeholder = "#aaaaa8"
 caret = "#ffffff"
 caret_width = 1.5
@@ -682,162 +682,162 @@ selection = "#9adbfb40"
 padding = [12.0, 6.0]
 margin = 0.0
 
-[palantir_theme.drag_value.editor.normal.background]
+[aperture_theme.drag_value.editor.normal.background]
 corners = 4.0
 
-[palantir_theme.drag_value.editor.normal.background.fill]
+[aperture_theme.drag_value.editor.normal.background.fill]
 Solid = "#3e3e3e"
 
-[palantir_theme.drag_value.editor.normal.background.stroke]
+[aperture_theme.drag_value.editor.normal.background.stroke]
 width = 1.0
 
-[palantir_theme.drag_value.editor.normal.background.stroke.brush]
+[aperture_theme.drag_value.editor.normal.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.drag_value.editor.focused.background]
+[aperture_theme.drag_value.editor.focused.background]
 corners = 4.0
 
-[palantir_theme.drag_value.editor.focused.background.fill]
+[aperture_theme.drag_value.editor.focused.background.fill]
 Solid = "#4b4b4b"
 
-[palantir_theme.drag_value.editor.focused.background.stroke]
+[aperture_theme.drag_value.editor.focused.background.stroke]
 width = 1.0
 
-[palantir_theme.drag_value.editor.focused.background.stroke.brush]
+[aperture_theme.drag_value.editor.focused.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.drag_value.editor.disabled.background]
+[aperture_theme.drag_value.editor.disabled.background]
 corners = 4.0
 
-[palantir_theme.drag_value.editor.disabled.background.fill]
+[aperture_theme.drag_value.editor.disabled.background.fill]
 Solid = "#343434"
 
-[palantir_theme.drag_value.editor.disabled.background.stroke]
+[aperture_theme.drag_value.editor.disabled.background.stroke]
 width = 1.0
 
-[palantir_theme.drag_value.editor.disabled.background.stroke.brush]
+[aperture_theme.drag_value.editor.disabled.background.stroke.brush]
 Solid = "#aaaaa82e"
 
-[palantir_theme.drag_value.editor.disabled.text]
+[aperture_theme.drag_value.editor.disabled.text]
 font_size_px = 16.0
 color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.context_menu]
+[aperture_theme.context_menu]
 padding = 4.0
 min_width = 160.0
 separator = "#aaaaa82e"
 
-[palantir_theme.context_menu.panel]
+[aperture_theme.context_menu.panel]
 corners = 6.0
 
-[palantir_theme.context_menu.panel.fill]
+[aperture_theme.context_menu.panel.fill]
 Solid = "#343434"
 
-[palantir_theme.context_menu.panel.stroke]
+[aperture_theme.context_menu.panel.stroke]
 width = 1.0
 
-[palantir_theme.context_menu.panel.stroke.brush]
+[aperture_theme.context_menu.panel.stroke.brush]
 Solid = "#aaaaa838"
 
-[palantir_theme.context_menu.item]
+[aperture_theme.context_menu.item]
 shortcut = "#aaaaa8"
 padding = [10.0, 6.0]
 
-[palantir_theme.context_menu.item.normal.text]
+[aperture_theme.context_menu.item.normal.text]
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.context_menu.item.hovered.background]
+[aperture_theme.context_menu.item.hovered.background]
 corners = 4.0
 
-[palantir_theme.context_menu.item.hovered.background.fill]
+[aperture_theme.context_menu.item.hovered.background.fill]
 Solid = "#3e3e3e"
 
-[palantir_theme.context_menu.item.hovered.text]
+[aperture_theme.context_menu.item.hovered.text]
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.context_menu.item.disabled.text]
+[aperture_theme.context_menu.item.disabled.text]
 font_size_px = 13.0
 color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.modal]
+[aperture_theme.modal]
 backdrop = "#00000080"
 padding = 20.0
 min_width = 280.0
 
-[palantir_theme.modal.card]
+[aperture_theme.modal.card]
 corners = 12.0
 
-[palantir_theme.modal.card.fill]
+[aperture_theme.modal.card.fill]
 Solid = "#3e3e3e"
 
-[palantir_theme.modal.card.stroke]
+[aperture_theme.modal.card.stroke]
 width = 1.0
 
-[palantir_theme.modal.card.stroke.brush]
+[aperture_theme.modal.card.stroke.brush]
 Solid = "#aaaaa840"
 
-[palantir_theme.tooltip]
+[aperture_theme.tooltip]
 padding = [6.0, 4.0]
 delay = 0.5
 warmup = 1.0
 gap = 6.0
 
-[palantir_theme.tooltip.panel]
+[aperture_theme.tooltip.panel]
 corners = 4.0
 
-[palantir_theme.tooltip.panel.fill]
+[aperture_theme.tooltip.panel.fill]
 Solid = "#343434"
 
-[palantir_theme.tooltip.panel.stroke]
+[aperture_theme.tooltip.panel.stroke]
 width = 1.0
 
-[palantir_theme.tooltip.panel.stroke.brush]
+[aperture_theme.tooltip.panel.stroke.brush]
 Solid = "#aaaaa838"
 
-[palantir_theme.tooltip.panel.shadow]
+[aperture_theme.tooltip.panel.shadow]
 color = "#00000099"
 offset = [2.0, 2.0]
 blur = 5.0
 spread = 0.0
 inset = false
 
-[palantir_theme.tooltip.text]
+[aperture_theme.tooltip.text]
 font_size_px = 13.0
 color = "#e2dfd3"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
-[palantir_theme.tooltip.max_size]
+[aperture_theme.tooltip.max_size]
 w = 280.0
 
-[palantir_theme.progress_bar]
+[aperture_theme.progress_bar]
 track = "#3e3e3e"
 fill = "#9adbfb"
 height = 6.0
 
-[palantir_theme.slider]
+[aperture_theme.slider]
 rail = "#3e3e3e"
 fill = "#9adbfb"
 knob = "#ffffff"
 knob_size = 18.0
 rail_thickness = 4.0
 
-[palantir_theme.text]
+[aperture_theme.text]
 font_size_px = 16.0
 color = "#e2dfd3"
 line_height_mult = 1.2

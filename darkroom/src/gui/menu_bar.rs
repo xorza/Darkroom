@@ -1,5 +1,5 @@
+use aperture::{Button, Configure, ContextMenu, MenuItem, Panel, PopupHandle, Sizing, Spacing, Ui};
 use glam::Vec2;
-use palantir::{Button, Configure, ContextMenu, MenuItem, Panel, PopupHandle, Sizing, Spacing, Ui};
 
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;

@@ -7,7 +7,7 @@
 //! open panels), falling back to the static binding otherwise; image
 //! ports also render a preview thumbnail beneath their line.
 //!
-//! Panels are **not** palantir `Popup`s — those record into the
+//! Panels are **not** aperture `Popup`s — those record into the
 //! screen-space `Layer::Popup` and wouldn't track the canvas. Instead
 //! [`Inspectors::draw_panels`] records ordinary `Panel`s as direct
 //! children of the inner (transformed) canvas in
@@ -23,11 +23,11 @@
 
 use std::collections::HashMap;
 
-use glam::Vec2;
-use palantir::{
+use aperture::{
     Background, Color, Configure, Corners, ImageFit, Panel, Sense, Shadow, Shape, Sizing, Spacing,
     Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
 };
+use glam::Vec2;
 use scenarium::data::{DataType, StaticValue};
 use scenarium::execution::stats::LogLevel;
 use scenarium::graph::NodeId;

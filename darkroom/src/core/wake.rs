@@ -7,7 +7,7 @@ use tokio::sync::Notify;
 
 /// Opaque "wake the host loop" callback, fired from a background
 /// worker/script thread after it posts a result so the main loop
-/// re-drains. The GUI wires it to [`palantir::HostHandle::request_repaint`];
+/// re-drains. The GUI wires it to [`aperture::HostHandle::request_repaint`];
 /// the headless / TUI drivers wire it to a `tokio::sync::Notify` (see
 /// [`from_notify`]). Keeps the worker + script modules free of any
 /// specific frontend type.

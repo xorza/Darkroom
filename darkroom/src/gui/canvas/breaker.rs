@@ -1,5 +1,5 @@
+use aperture::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui};
 use glam::Vec2;
-use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui};
 use scenarium::graph::NodeId;
 use scenarium::graph::{Binding, InputPort, Subscription};
 

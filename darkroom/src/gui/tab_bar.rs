@@ -6,7 +6,7 @@
 //! connections draw with no first-frame gap. Pure view state; never
 //! touches the document.
 
-use palantir::{
+use aperture::{
     Align, Background, Configure, Corners, InternedStr, Panel, Sense, Sizing, Spacing, Text,
     TextStyle, Ui, VAlign, WidgetId,
 };

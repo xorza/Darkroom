@@ -186,6 +186,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
+name = "aperture"
+version = "0.3.0"
+dependencies = [
+ "aperture-anim-derive",
+ "arboard",
+ "backtrace",
+ "bitflags 2.13.0",
+ "bytemuck",
+ "cosmic-text",
+ "criterion",
+ "dhat",
+ "encase",
+ "etagere",
+ "fixedbitset",
+ "gethostname",
+ "glam 0.33.2",
+ "half",
+ "image",
+ "padding-struct",
+ "pollster",
+ "profiling",
+ "rayon",
+ "rustc-hash 2.1.3",
+ "serde",
+ "smol_str 0.3.6",
+ "soa-rs",
+ "strum",
+ "tinyvec",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "tracy-client",
+ "unicode-segmentation",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "aperture-anim-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1215,6 +1262,7 @@ name = "darkroom"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aperture",
  "arc-swap",
  "clap",
  "common",
@@ -1224,7 +1272,6 @@ dependencies = [
  "imaginarium",
  "lens",
  "lz4_flex",
- "palantir",
  "rfd",
  "rhai",
  "scenarium",
@@ -3407,53 +3454,6 @@ checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "palantir"
-version = "0.3.0"
-dependencies = [
- "arboard",
- "backtrace",
- "bitflags 2.13.0",
- "bytemuck",
- "cosmic-text",
- "criterion",
- "dhat",
- "encase",
- "etagere",
- "fixedbitset",
- "gethostname",
- "glam 0.33.2",
- "half",
- "image",
- "padding-struct",
- "palantir-anim-derive",
- "pollster",
- "profiling",
- "rayon",
- "rustc-hash 2.1.3",
- "serde",
- "smol_str 0.3.6",
- "soa-rs",
- "strum",
- "tinyvec",
- "toml",
- "tracing",
- "tracing-subscriber",
- "tracy-client",
- "unicode-segmentation",
- "wgpu",
- "winit",
-]
-
-[[package]]
-name = "palantir-anim-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

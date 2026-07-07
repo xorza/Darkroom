@@ -1,6 +1,6 @@
 use std::mem::take;
 
-use palantir::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
+use aperture::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
 
 use crate::core::document::{Document, GraphRef, TabRef};
 use crate::core::edit::intent::Intent;

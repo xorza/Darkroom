@@ -1,6 +1,6 @@
 //! The frontend-agnostic engine: the document model + edit pipeline, the
 //! evaluation worker, the scripting host, and the non-GUI `Session` the
-//! `tui`/`headless` frontends drive. No Palantir, no rendering — the GUI
+//! `tui`/`headless` frontends drive. No Aperture, no rendering — the GUI
 //! (`crate::gui`) is one consumer; `tui` / `headless` are the others. This
 //! layer never imports from `crate::gui`.
 

@@ -3,7 +3,7 @@
 //! changes; the returned [`ExitOutcome`] drives whether the app saves,
 //! discards, or stays — and whether to stop asking in future.
 
-use palantir::{Button, Checkbox, Configure, Modal, Panel, Text, Ui, WidgetId};
+use aperture::{Button, Checkbox, Configure, Modal, Panel, Text, Ui, WidgetId};
 
 /// The user's answer to the unsaved-changes prompt for one frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

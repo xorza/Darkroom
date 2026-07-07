@@ -7,11 +7,11 @@
 //! paint "toggled" while their action is in flight and map to an [`AppCommand`],
 //! while the framing buttons emit an `Intent::SetViewport` directly.
 
-use glam::Vec2;
-use palantir::{
+use aperture::{
     Align, Background, Color, Configure, Corners, HAlign, Panel, Rect, Sense, Shape, Sizing,
     Spacing, Stroke, Tooltip, Ui, VAlign, WidgetId,
 };
+use glam::Vec2;
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;

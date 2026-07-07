@@ -11,7 +11,7 @@
 //!
 //! [`App`]: crate::gui::app::App
 
-use palantir::Ui;
+use aperture::Ui;
 use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphDef;
 use scenarium::library::Library;
@@ -240,7 +240,7 @@ impl Editor {
             // Rebuild the projection for this frame, after the navigation
             // phase has fully settled the document — so prepass and
             // `PortFrame` never read a stale graph. Unconditional for a
-            // graph tab: `Scene` re-interns port names into palantir's
+            // graph tab: `Scene` re-interns port names into aperture's
             // per-frame text arena (cleared each `Ui::frame`).
             self.rebuild_scene(target, library);
             self.scene_dirty = false;

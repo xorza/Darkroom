@@ -12,7 +12,7 @@
 
 use std::path::PathBuf;
 
-use palantir::{
+use aperture::{
     Align, Background, Button, Checkbox, Color, Configure, Panel, RadioButton, Sense, Sizing,
     Spacing, Text, TextEdit, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };

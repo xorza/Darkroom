@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-palantir = { workspace = true }
+aperture = { workspace = true }
 scenarium = { workspace = true }
 common = { workspace = true }
 lens = { workspace = true }
@@ -36,11 +36,11 @@ tracing-subscriber = { workspace = true }
 common = { workspace = true, features = ["test-support"] }
 
 [features]
-# Forward palantir's tracy backend so `cargo run -p darkroom --features
+# Forward aperture's tracy backend so `cargo run -p darkroom --features
 # profile-with-tracy` lights up zones across both crates against a single
-# tracy-client connection (palantir centralises the `tracy-client` dep
+# tracy-client connection (aperture centralises the `tracy-client` dep
 # so the FFI singleton stays unique).
-profile-with-tracy = ["palantir/profile-with-tracy"]
+profile-with-tracy = ["aperture/profile-with-tracy"]
 
 # Embeds `assets/icons/darkroom.ico` into the .exe as a Win32 resource so
 # Explorer / taskbar show the app icon. No-op off Windows (see build.rs).

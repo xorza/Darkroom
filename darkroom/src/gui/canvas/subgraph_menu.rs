@@ -1,4 +1,4 @@
-use palantir::{MenuItem, Ui};
+use aperture::{MenuItem, Ui};
 use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphRef;
 

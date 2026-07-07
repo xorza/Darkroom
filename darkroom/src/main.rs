@@ -7,8 +7,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use aperture::{WindowIcon, WinitHost, WinitHostConfig};
 use clap::{Parser, Subcommand};
-use palantir::{WindowIcon, WinitHost, WinitHostConfig};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
@@ -36,7 +36,7 @@ struct Cli {
 /// Which frontend to run. `gui` is the default when no subcommand is given.
 #[derive(Subcommand, Debug)]
 enum Mode {
-    /// Run the Palantir desktop editor (default).
+    /// Run the Aperture desktop editor (default).
     Gui,
     /// Run the terminal command shell — a stdin REPL, no graph rendering.
     Tui,
@@ -131,7 +131,7 @@ fn main() {
     }
 }
 
-/// Launch the Palantir desktop editor. The winit event loop owns the main
+/// Launch the Aperture desktop editor. The winit event loop owns the main
 /// thread, so this doesn't return until the window closes.
 fn run_gui(script_cfg: ScriptConfig) {
     // Load preferences here, before the window exists, so a saved size /

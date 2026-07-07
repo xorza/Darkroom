@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
+use aperture::{Rect, ResponseState, Ui};
 use glam::Vec2;
-use palantir::{Rect, ResponseState, Ui};
 use scenarium::graph::NodeId;
 
 use crate::gui::canvas::node_ports;
@@ -106,7 +106,7 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
     }
 
     /// Force the hover flag on (idempotent) — the active drag's snap target,
-    /// which palantir's drag-capture suppression hides from `response.hovered`.
+    /// which aperture's drag-capture suppression hides from `response.hovered`.
     pub(crate) fn set_hovered(&mut self, key: K) {
         if let Some(info) = self.live.get_mut(&key) {
             info.hovered = true;
@@ -123,13 +123,13 @@ struct PortInfo {
     /// when either the port or its parent node hasn't measured yet.
     layout_center: Option<Vec2>,
     /// Post-transform/clip screen rect for pointer hit-test (snap).
-    /// Bypasses palantir's drag-capture hover suppression by reading
+    /// Bypasses aperture's drag-capture hover suppression by reading
     /// geometry directly.
     screen_rect: Option<Rect>,
     /// `true` when the port should paint with its hover color. Filled
     /// from `response.hovered` in `rebuild`; an active connection
     /// drag's snap target gets it forced on via `set_hovered` after
-    /// `ConnectionUI::apply` (palantir's drag-capture suppression
+    /// `ConnectionUI::apply` (aperture's drag-capture suppression
     /// otherwise hides the snap target from `response.hovered`).
     hovered: bool,
     /// One-frame edge: pointer-down → drag latched on this port this

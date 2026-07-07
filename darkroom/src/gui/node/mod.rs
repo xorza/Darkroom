@@ -16,10 +16,10 @@ use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
 use crate::gui::{PortKind, PortRef, UiAction};
-use glam::Vec2;
-use palantir::{
+use aperture::{
     Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };
+use glam::Vec2;
 use scenarium::data::{DataType, FsPathConfig, StaticValue};
 use scenarium::graph::Binding;
 use scenarium::graph::NodeId;
@@ -249,7 +249,7 @@ impl NodeUI {
         }
     }
 
-    /// Pre-record pass: peek palantir's input state for any widgets
+    /// Pre-record pass: peek aperture's input state for any widgets
     /// this `NodeUI` owns and push the corresponding `Intent`s into
     /// `out`. Runs before `Scene::rebuild` in `App::frame`, so any
     /// state mutation applied from these intents (notably drag-driven

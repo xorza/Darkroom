@@ -4,9 +4,9 @@
 //! viewport algebra. The gesture emits `Intent::SetViewport`, so pan/zoom
 //! rides the same undo path as every other edit.
 
+use aperture::{PointerButton, Rect, Size, Ui};
 use common::FloatExt;
 use glam::Vec2;
-use palantir::{PointerButton, Rect, Size, Ui};
 
 use crate::core::document::Viewport;
 use crate::core::edit::intent::Intent;
@@ -23,7 +23,7 @@ const MAX_ZOOM: f32 = 5.0;
 
 /// Per-pixel base for converting wheel / touchpad scroll into a
 /// multiplicative zoom factor. Tuned so a single classic wheel notch
-/// (~16-20 logical px after palantir's line→pixel conversion) yields
+/// (~16-20 logical px after aperture's line→pixel conversion) yields
 /// roughly a 4-5% zoom step, while a fast touchpad swipe (~50-100 px
 /// in one frame) stays a controlled ~13-22% step. Lower → slower
 /// zoom, higher → snappier but jumps badly on touchpad.
@@ -46,7 +46,7 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 /// - **Scroll** (`Sense::SCROLL`): mouse wheel / touchpad swipe →
 ///   zoom-about-cursor (graph-editor convention: Figma / Blender
 ///   node editor / ComfyUI). Vertical delta only; horizontal is
-///   ignored. Palantir ingests the scroll delta already-negated
+///   ignored. Aperture ingests the scroll delta already-negated
 ///   so `+y` means "scroll content down" → zoom out, `-y` (wheel
 ///   up) → zoom in.
 /// - **Pinch** (`Sense::PINCH`): zoom-about-cursor using the
@@ -122,7 +122,7 @@ fn zoom_about(pan: &mut Vec2, zoom: &mut f32, pivot_local: Vec2, factor: f32) {
     *zoom = new_zoom;
 }
 
-/// Map a one-frame vertical scroll delta (in logical px, palantir's
+/// Map a one-frame vertical scroll delta (in logical px, aperture's
 /// "advance offset forward" sign convention — `+y` = scroll content
 /// down) to a multiplicative zoom factor. Negative `delta_y` (wheel
 /// up) zooms in (`factor > 1`); positive (wheel down) zooms out
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn scroll_to_zoom_factor_wheel_up_zooms_in() {
-        // One classic wheel notch up after palantir line→pixel
+        // One classic wheel notch up after aperture line→pixel
         // conversion lands around `-line_px` (theme default ≈ 18 px,
         // sign-flipped at ingest). Round-trip check: a typical wheel
         // notch produces a > 1.0 factor; magnitude is the documented

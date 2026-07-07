@@ -9,7 +9,7 @@
 //! (they bridge `Document` / `Engine` / `Preferences` / dialogs), which is why
 //! they live on `App` rather than any one owner; the split is by concern.
 
-use palantir::Ui;
+use aperture::Ui;
 
 use crate::gui::app::App;
 

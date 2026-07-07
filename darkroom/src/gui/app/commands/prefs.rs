@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use palantir::Ui;
+use aperture::Ui;
 use scenarium::data::{FsPathConfig, FsPathMode};
 
 use crate::gui::app::App;
@@ -53,7 +53,7 @@ impl App {
     /// [`Preferences`]: crate::core::io::preferences::Preferences
     fn apply_preferences(&mut self, ui: &mut Ui) {
         self.theme = Theme::from_preset(self.preferences.theme.resolve());
-        ui.theme = self.theme.palantir_theme.clone();
+        ui.theme = self.theme.aperture_theme.clone();
         self.preferences.apply_ml_model_paths();
         self.preferences.save();
     }

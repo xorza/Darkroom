@@ -1,5 +1,5 @@
+use aperture::{Brush, Color, LinearGradient, PointerButton, PointerEvent, PointerSense, Stop, Ui};
 use glam::Vec2;
-use palantir::{Brush, Color, LinearGradient, PointerButton, PointerEvent, PointerSense, Stop, Ui};
 use scenarium::data::DataType;
 use scenarium::graph::{Binding, InputPort, closes_data_cycle};
 
@@ -273,7 +273,7 @@ impl ConnectionUI {
 
     /// Compatible-kind port currently snapped under the pointer
     /// during an active drag, or `None`. Read by `GraphUI` to force
-    /// the hover state in `PortFrame` (otherwise palantir's
+    /// the hover state in `PortFrame` (otherwise aperture's
     /// drag-capture suppression would hide it).
     pub(crate) fn snap_port(&self) -> Option<PortRef> {
         self.state.and_then(|s| s.snap_end)
@@ -433,7 +433,7 @@ fn input_const_only(scene: &Scene, port: PortRef) -> bool {
 /// Port currently under the pointer that is a compatible target for `start` —
 /// opposite kind, a different node, type-compatible, and not cycle-forming.
 /// Uses a geometry test against the cached port rect rather than
-/// `response.hovered`: palantir suppresses `hovered` on every widget except the
+/// `response.hovered`: aperture suppresses `hovered` on every widget except the
 /// LMB-capture owner during a drag, so while the start port owns the capture no
 /// other port can ever read `hovered = true`.
 fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -> Option<PortRef> {

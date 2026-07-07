@@ -7,7 +7,7 @@ members = [
     "lumos",
     "imaginarium",
     "quickbench",
-    "palantir",
+    "aperture",
     "fits-well"
 ]
 default-members = ["darkroom"]
@@ -28,7 +28,7 @@ darkroom = { path = "darkroom" }
 imaginarium = { path = "imaginarium", features = ["wgpu"] }
 lens = { path = "lens" }
 lumos = { path = "lumos" }
-palantir = { path = "palantir" }
+aperture = { path = "aperture" }
 fits-well = { path = "fits-well" }
 
 wgpu = { version = "30.0", features = ["metal", "vulkan", "dx12"] }

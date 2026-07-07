@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use palantir::Ui;
+use aperture::Ui;
 use scenarium::graph::Graph as CoreGraph;
 use scenarium::library::Library;
 
@@ -81,11 +81,11 @@ pub(crate) struct App {
 impl App {
     /// Build the app before the first frame: assemble the func lib +
     /// seed document, then restore persisted preferences (saved theme +
-    /// last document) and push the resolved palantir theme onto `Ui`.
+    /// last document) and push the resolved aperture theme onto `Ui`.
     /// Restore failures degrade silently to defaults — a missing or
     /// corrupt preferences, or a deleted document, must not block launch.
     ///
-    /// Handed to [`palantir::WinitHost::run`], which calls it once the
+    /// Handed to [`aperture::WinitHost::run`], which calls it once the
     /// `Ui` + [`HostHandle`] exist (before the first frame).
     pub(crate) fn new(
         ui: &mut Ui,
@@ -130,8 +130,8 @@ impl App {
             app.preferences.save();
         }
         // Resolved theme (default, or whatever the preferences restored)
-        // onto the Ui so palantir widgets paint correctly frame 1.
-        ui.theme = app.theme.palantir_theme.clone();
+        // onto the Ui so aperture widgets paint correctly frame 1.
+        ui.theme = app.theme.aperture_theme.clone();
         // ui.debug_overlay.damage_rect = true;
         app
     }
@@ -296,8 +296,8 @@ impl App {
     }
 }
 
-impl palantir::App for App {
-    fn frame(&mut self, _win: palantir::WindowToken, ui: &mut Ui) {
+impl aperture::App for App {
+    fn frame(&mut self, _win: aperture::WindowToken, ui: &mut Ui) {
         // Keep the persisted window geometry current so a save on quit
         // captures the latest size / position.
         self.track_window_state(ui);
