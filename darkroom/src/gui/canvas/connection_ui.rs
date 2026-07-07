@@ -14,16 +14,42 @@ use crate::gui::node::{node_widget_id, set_input};
 use crate::gui::scene::{InputBindingView, Scene};
 use crate::gui::{PortKind, PortRef};
 
+/// Upper bound on the *vertical-gap* term of the handle length, so a tall
+/// forward span bows into a gentle S rather than a huge loop.
+const MAX_HANDLE: f32 = 120.0;
+
+/// Gain on the *backward-reach* term: `reach = BACKREACH_GAIN * sqrt(distance)`.
+/// A square-root law (not linear, not a fixed cap) so the loop keeps growing as
+/// the input moves further left — a flat cap reads short across a big gap — yet
+/// grows ever more slowly, so it never sprawls out to the sides the way a
+/// linear reach does. Tuned so a node-width backlink (~180px) reaches ~135px.
+const BACKREACH_GAIN: f32 = 10.0;
+
 /// Control points for a left-to-right cubic between port centers `p0`
 /// (output side) and `p3` (input side): both handles run horizontally so the
 /// curve leaves the output rightward and arrives at the input leftward.
 /// Shared by the permanent and in-flight draws so the preview matches the
 /// committed curve exactly.
+///
+/// The handle length is the larger of two terms:
+/// - **Forward** — half the *vertical* gap (clamped to `[MIN_HANDLE,
+///   MAX_HANDLE]`): near-level ports stay taut, stacked ones bow into a gentle
+///   S without over-looping on a tall span.
+/// - **Backward** — when the input sits *left* of the output the wire must
+///   double back on itself. A short handle whips it straight across the node
+///   bodies (the "hidden under the node" look); reaching out by
+///   `BACKREACH_GAIN * sqrt(distance)` instead bows both ends into one wide,
+///   smooth loop that leaves the output rightward, arcs around, and re-enters
+///   the input leftward. The `sqrt` keeps the loop scaling with the backlink
+///   distance (so far-apart nodes still get a proper loop, not a stub) while
+///   growing slowly enough that it never sprawls out to the sides.
 fn cubic_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
-    let dx = ((p3.x - p0.x).abs() * 0.5).max(MIN_HANDLE);
+    let vertical = ((p3.y - p0.y).abs() * 0.5).clamp(MIN_HANDLE, MAX_HANDLE);
+    let backreach = BACKREACH_GAIN * (p0.x - p3.x).max(0.0).sqrt();
+    let len = vertical.max(backreach);
     CubicHandles {
-        p1: p0 + Vec2::new(dx, 0.0),
-        p2: p3 - Vec2::new(dx, 0.0),
+        p1: p0 + Vec2::new(len, 0.0),
+        p2: p3 - Vec2::new(len, 0.0),
     }
 }
 

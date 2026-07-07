@@ -9,7 +9,7 @@ use palantir::{Brush, LineCap, Shape, Ui};
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
 /// link still bows out into a readable curve.
-pub(crate) const MIN_HANDLE: f32 = 40.0;
+pub(crate) const MIN_HANDLE: f32 = 30.0;
 
 /// The two interior control points of a connection cubic — the named result
 /// of each renderer's handle-placement function.
