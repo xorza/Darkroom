@@ -1,65 +1,9 @@
 use rand::{RngExt, SeedableRng};
-use strum::IntoEnumIterator;
-use strum_macros::{Display, EnumIter};
 
 use crate::async_lambda;
-use crate::data::{DataType, DynamicValue, StaticValue};
+use crate::data::DataType;
 use crate::library::Library;
-use crate::node::func_lambda::InvokeInput;
-use crate::node::function::{Func, FuncInput, FuncOutput, ValueVariant};
-
-#[repr(u32)]
-#[derive(Debug, Display, EnumIter, Copy, Clone)]
-enum Math2ArgOp {
-    Add = 0,
-    Subtract = 1,
-    Multiply = 2,
-    Divide = 3,
-    Modulo = 4,
-    Power = 5,
-    Log = 6,
-}
-
-impl Math2ArgOp {
-    fn list_variants() -> Vec<ValueVariant> {
-        Math2ArgOp::iter()
-            .map(|op| ValueVariant::new(op.to_string(), StaticValue::Int(op as i64)))
-            .collect()
-    }
-    fn invoke(&self, inputs: &[InvokeInput]) -> anyhow::Result<DynamicValue> {
-        assert_eq!(inputs.len(), 2);
-
-        let a = inputs[0].value.as_f64().unwrap();
-        let b = inputs[1].value.as_f64().unwrap();
-
-        Ok(self.apply(a, b).into())
-    }
-    fn apply(&self, a: f64, b: f64) -> f64 {
-        match self {
-            Math2ArgOp::Add => a + b,
-            Math2ArgOp::Subtract => a - b,
-            Math2ArgOp::Multiply => a * b,
-            Math2ArgOp::Divide => a / b,
-            Math2ArgOp::Modulo => a % b,
-            Math2ArgOp::Power => a.powf(b),
-            Math2ArgOp::Log => a.log(b),
-        }
-    }
-}
-
-impl From<Math2ArgOp> for StaticValue {
-    fn from(op: Math2ArgOp) -> Self {
-        StaticValue::Int(op as i64)
-    }
-}
-
-impl From<i64> for Math2ArgOp {
-    fn from(op: i64) -> Self {
-        Math2ArgOp::iter()
-            .find(|op_| *op_ as i64 == op)
-            .expect("Unknown math op")
-    }
-}
+use crate::node::function::{Func, FuncInput, FuncOutput};
 
 /// The built-in math / string / print nodes.
 pub fn basic_library() -> Library {
@@ -80,39 +24,6 @@ pub fn basic_library() -> Library {
                 assert_eq!(inputs.len(), 1);
                 let value: &str = inputs[0].value.as_string().unwrap();
                 ctx.info(value);
-                Ok(())
-            })),
-    );
-
-    // math two argument operation
-    library.add(
-        Func::new("01896910-4BC9-77AA-6973-64CC1C56B9CE", "2-Arg Math")
-            .description(
-                "Performs a two-argument math operation (add, subtract, multiply, divide, modulo, \
-                 power, log).",
-            )
-            .category("Math")
-            .pure()
-            .input(FuncInput::required("A", DataType::Float).description("First operand."))
-            .input(FuncInput::required("B", DataType::Float).description("Second operand."))
-            .input(
-                FuncInput::required("Operation", DataType::Int)
-                    .description("Operation to apply to A and B.")
-                    .default(Math2ArgOp::Add)
-                    .variants(Math2ArgOp::list_variants()),
-            )
-            .output(
-                FuncOutput::new("Result", DataType::Float).description("Result of the operation."),
-            )
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 3);
-                assert_eq!(outputs.len(), 1);
-
-                let op: Math2ArgOp = inputs[2].value.as_i64().unwrap().into();
-
-                op.invoke(&inputs[0..2])
-                    .map(|result| outputs[0] = result)
-                    .expect("failed to invoke math two argument operation");
                 Ok(())
             })),
     );
