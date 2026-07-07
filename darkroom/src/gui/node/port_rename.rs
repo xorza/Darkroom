@@ -10,7 +10,7 @@ use palantir::{Configure, HAlign, InternedStr, Sense, Text, Tooltip, Ui, WidgetI
 use crate::core::document::BoundarySide;
 use crate::core::edit::intent::Intent;
 use crate::gui::PortRef;
-use crate::gui::node::{RecordCtx, select_intent};
+use crate::gui::node::{RecordCtx, click_intents};
 use crate::gui::widgets::inline_rename::InlineRename;
 
 /// Character cap for a boundary-port name in the inline rename editor.
@@ -70,7 +70,7 @@ pub(crate) fn port_label(
     // Single click selects the node (the label otherwise swallows the
     // click the body would have gotten); a committed value renames.
     if ev.clicked {
-        out.push(select_intent(shift, rcx.scene, port.node_id));
+        click_intents(shift, rcx.scene, port.node_id, out);
     }
     if let Some(to) = ev.committed {
         out.push(Intent::RenameBoundaryPort {

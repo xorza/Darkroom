@@ -16,7 +16,7 @@ use scenarium::graph::{CachePersistence, NodeId};
 use crate::core::edit::intent::Intent;
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::port_color::event_color;
-use crate::gui::node::{RecordCtx, exec_color, node_rename_wid, select_intent};
+use crate::gui::node::{RecordCtx, click_intents, exec_color, node_rename_wid};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::SceneNode;
 use crate::gui::theme::Theme;
@@ -327,7 +327,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
         })
         .show(ui);
     if ev.clicked {
-        out.push(select_intent(shift, rcx.scene, node.id));
+        click_intents(shift, rcx.scene, node.id, out);
     }
     if let Some(to) = ev.committed {
         out.push(Intent::RenameNode {

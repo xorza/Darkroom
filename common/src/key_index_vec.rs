@@ -97,6 +97,27 @@ where
         removed
     }
 
+    /// Move the item keyed by `key` to position `target_idx`, sliding the
+    /// items between its old and new slot over to close the gap. A stable
+    /// reorder — every other item keeps its relative order. `target_idx` is
+    /// clamped to the last valid index. Returns the item's previous index,
+    /// or `None` if `key` isn't present.
+    pub fn move_to_index(&mut self, key: &K, target_idx: usize) -> Option<usize> {
+        let from = self.index_of_key(key)?;
+        // `index_of_key` returned `Some`, so the vec is non-empty.
+        let to = target_idx.min(self.items.len() - 1);
+        if from != to {
+            let item = self.items.remove(from);
+            self.items.insert(to, item);
+            // Only the items in `[from, to]` shifted; reindex that span.
+            for idx in from.min(to)..=from.max(to) {
+                let k = *self.items[idx].key();
+                self.idx_by_key.insert(k, idx);
+            }
+        }
+        Some(from)
+    }
+
     /// After an `items.remove(removed_idx)`, decrement the stored index of every
     /// item that shifted left (those now at `removed_idx..`). The removed key's
     /// own entry must already be gone from `idx_by_key`.
@@ -623,6 +644,77 @@ mod tests {
         let mut vec = KeyIndexVec::<u32, TestItem>::default();
         vec.add(TestItem { id: 1, value: 10 });
         vec.remove_by_index(5);
+    }
+
+    // === move_to_index tests ===
+
+    /// Collect the current key order, and assert every stored index matches
+    /// its slot — the invariant `move_to_index` must preserve.
+    fn order_and_check(vec: &KeyIndexVec<u32, TestItem>) -> Vec<u32> {
+        for (idx, item) in vec.items.iter().enumerate() {
+            assert_eq!(vec.index_of_key(&item.id), Some(idx), "index map in sync");
+        }
+        vec.items.iter().map(|item| item.id).collect()
+    }
+
+    fn seeded() -> KeyIndexVec<u32, TestItem> {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        for id in [1, 2, 3, 4] {
+            vec.add(TestItem {
+                id,
+                value: id as i32 * 10,
+            });
+        }
+        vec
+    }
+
+    #[test]
+    fn move_to_index_forward_slides_between() {
+        let mut vec = seeded();
+        // Move id 2 (idx 1) to idx 3: 1,3,4 slide left, 2 lands last.
+        assert_eq!(vec.move_to_index(&2, 3), Some(1));
+        assert_eq!(order_and_check(&vec), vec![1, 3, 4, 2]);
+    }
+
+    #[test]
+    fn move_to_index_backward_slides_between() {
+        let mut vec = seeded();
+        // Move id 4 (idx 3) to idx 0: 1,2,3 slide right, 4 lands first.
+        assert_eq!(vec.move_to_index(&4, 0), Some(3));
+        assert_eq!(order_and_check(&vec), vec![4, 1, 2, 3]);
+    }
+
+    #[test]
+    fn move_to_index_same_slot_is_noop() {
+        let mut vec = seeded();
+        assert_eq!(vec.move_to_index(&3, 2), Some(2));
+        assert_eq!(order_and_check(&vec), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn move_to_index_clamps_past_end() {
+        let mut vec = seeded();
+        // Target past the end clamps to the last slot.
+        assert_eq!(vec.move_to_index(&1, 999), Some(0));
+        assert_eq!(order_and_check(&vec), vec![2, 3, 4, 1]);
+    }
+
+    #[test]
+    fn move_to_index_missing_key_returns_none() {
+        let mut vec = seeded();
+        assert_eq!(vec.move_to_index(&99, 0), None);
+        assert_eq!(order_and_check(&vec), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn move_to_index_roundtrips_via_prior_index() {
+        // Raising then restoring by the returned index is a full inverse —
+        // the property the RaiseNode undo step relies on.
+        let mut vec = seeded();
+        let from = vec.move_to_index(&2, vec.len() - 1).unwrap();
+        assert_eq!(order_and_check(&vec), vec![1, 3, 4, 2]);
+        vec.move_to_index(&2, from);
+        assert_eq!(order_and_check(&vec), vec![1, 2, 3, 4]);
     }
 
     // === clear tests ===

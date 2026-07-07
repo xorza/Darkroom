@@ -115,6 +115,15 @@ pub enum Intent {
     SetSelection {
         to: BTreeSet<NodeId>,
     },
+    /// Lift `node_id` to the top of its graph's paint stack — the end of
+    /// `view_nodes`, which is drawn last and so sits in front. Emitted
+    /// when a node is clicked or grabbed, so clicking a node brings it
+    /// forward. The stack order lives in `view_nodes`, so it persists
+    /// across save/load and tab switches and walks with undo/redo — unlike
+    /// the transient selection-recency stack it replaced.
+    RaiseNode {
+        node_id: NodeId,
+    },
     /// Enable/disable a node for execution (`Node::disabled`). The header
     /// badge toggles it; a disabled node is skipped at flatten time.
     SetDisabled {
@@ -264,6 +273,15 @@ pub enum GraphStep {
         from: BTreeSet<NodeId>,
         to: BTreeSet<NodeId>,
     },
+    /// Reorder within `view_nodes` to raise a node to the top of the paint
+    /// stack. `from_index`/`to_index` are its slot before/after the raise,
+    /// so apply slides it to `to_index` and revert slides it back — a
+    /// stable reorder that leaves every other node's relative order intact.
+    RaiseNode {
+        node_id: NodeId,
+        from_index: usize,
+        to_index: usize,
+    },
     SetDisabled {
         node_id: NodeId,
         from: bool,
@@ -379,6 +397,12 @@ impl GraphStep {
             GraphStep::RenameNode { from, to, .. } => from == to,
             GraphStep::SetInput { from, to, .. } => from == to,
             GraphStep::SetSelection { from, to } => from == to,
+            // Already on top (its slot is the last one) → nothing to raise.
+            GraphStep::RaiseNode {
+                from_index,
+                to_index,
+                ..
+            } => from_index == to_index,
             GraphStep::SetDisabled { from, to, .. } => from == to,
             GraphStep::SetPersist { from, to, .. } => from == to,
             GraphStep::SetViewport { from, to } => {
@@ -538,6 +562,16 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             from: view.selected_nodes.clone(),
             to,
         },
+        Intent::RaiseNode { node_id } => {
+            let from_index = view.view_nodes.index_of_key(&node_id)?;
+            // Top of the stack is the last slot — painted last, drawn in front.
+            let to_index = view.view_nodes.len() - 1;
+            GraphStep::RaiseNode {
+                node_id,
+                from_index,
+                to_index,
+            }
+        }
         Intent::SetDisabled { node_id, to } => GraphStep::SetDisabled {
             from: graph.by_id(&node_id)?.disabled,
             node_id,
@@ -913,6 +947,11 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetSelection { to, .. } => {
             scope.view.selected_nodes = to.clone();
         }
+        GraphStep::RaiseNode {
+            node_id, to_index, ..
+        } => {
+            scope.view.view_nodes.move_to_index(node_id, *to_index);
+        }
         GraphStep::SetDisabled { node_id, to, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().disabled = *to;
         }
@@ -1055,6 +1094,13 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetSelection { from, .. } => {
             scope.view.selected_nodes = from.clone();
         }
+        GraphStep::RaiseNode {
+            node_id,
+            from_index,
+            ..
+        } => {
+            scope.view.view_nodes.move_to_index(node_id, *from_index);
+        }
         GraphStep::SetDisabled { node_id, from, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().disabled = *from;
         }
@@ -1128,6 +1174,8 @@ impl UndoStep {
                 matches!(from, Binding::Const(_)) != matches!(to, Binding::Const(_))
             }
             GraphStep::SetSelection { .. }
+            // Raising only reorders the paint stack — no node remeasures.
+            | GraphStep::RaiseNode { .. }
             // Disabling only dims the body paint — same rect, no remeasure.
             | GraphStep::SetDisabled { .. }
             // The cache toggle flips a badge fill — same rect, no remeasure.
@@ -1161,6 +1209,7 @@ impl UndoStep {
                 GraphStep::MoveNodes { .. }
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetSelection { .. }
+                | GraphStep::RaiseNode { .. }
                 | GraphStep::SetDisabled { .. }
                 | GraphStep::SetPersist { .. }
                 | GraphStep::SetViewport { .. }
@@ -1179,9 +1228,15 @@ impl UndoStep {
     /// silently defaulting.
     pub fn dirties_document(&self) -> bool {
         match self {
-            // Navigation only — panning, zooming, selecting, switching or
-            // closing tabs is view state the user doesn't "save".
-            UndoStep::Graph(GraphStep::SetSelection { .. } | GraphStep::SetViewport { .. })
+            // Navigation only — panning, zooming, selecting, restacking, or
+            // switching/closing tabs is view state the user doesn't "save".
+            // Stacking order rides in `view_nodes` and still writes on any
+            // save (like selection), but a bare restack shouldn't nag on exit.
+            UndoStep::Graph(
+                GraphStep::SetSelection { .. }
+                | GraphStep::RaiseNode { .. }
+                | GraphStep::SetViewport { .. },
+            )
             | UndoStep::Doc(DocStep::SwitchTab { .. } | DocStep::CloseTab { .. }) => false,
             // Graph data + node layout — real edits worth persisting.
             UndoStep::Graph(
@@ -1225,6 +1280,7 @@ impl UndoStep {
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetSelection { .. }
+                | GraphStep::RaiseNode { .. }
                 | GraphStep::SetDisabled { .. }
                 | GraphStep::SetPersist { .. }
                 | GraphStep::DetachSubgraph { .. }
@@ -1618,6 +1674,65 @@ mod tests {
             )
             .is_none(),
             "Memory → Memory writes nothing"
+        );
+    }
+
+    #[test]
+    fn raise_node_reorders_persists_and_undoes() {
+        use common::SerdeFormat;
+
+        let mut doc = Document::default();
+        let a = add_node_at(&mut doc, Vec2::ZERO);
+        let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
+        let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
+
+        let order = |doc: &Document| -> Vec<NodeId> {
+            doc.main_view.view_nodes.iter().map(|vn| vn.id).collect()
+        };
+        assert_eq!(order(&doc), vec![a, b, c], "seed order is insertion order");
+
+        // Raise `a` (the back node) to the top — the end of `view_nodes`,
+        // painted last and so drawn in front.
+        let step = commit_intent(Intent::RaiseNode { node_id: a }, &mut doc, GraphRef::Main)
+            .expect("raising a back node is a real reorder");
+        assert_eq!(
+            order(&doc),
+            vec![b, c, a],
+            "a moved to the top of the stack"
+        );
+
+        // Stacking is view-state: undoable + persisted, but not dirty-worthy,
+        // and it neither remeasures nor reshapes a subgraph interface.
+        assert!(
+            !step.dirties_document(),
+            "a bare restack shouldn't nag on save"
+        );
+        assert!(!step.requires_relayout());
+        assert!(!step.requires_reconcile());
+        assert!(
+            step.gesture_key().is_none(),
+            "each raise is its own undo entry"
+        );
+
+        // Undo restores the prior order; redo re-raises.
+        revert_step(&step, &mut doc, GraphRef::Main);
+        assert_eq!(order(&doc), vec![a, b, c], "undo restores the prior order");
+        apply_step(&step, &mut doc, GraphRef::Main);
+        assert_eq!(order(&doc), vec![b, c, a], "redo re-raises a");
+
+        // Raising the node already on top writes nothing.
+        assert!(
+            commit_intent(Intent::RaiseNode { node_id: a }, &mut doc, GraphRef::Main).is_none(),
+            "raising the frontmost node is a no-op"
+        );
+
+        // The whole point: render order round-trips through save/load.
+        let bytes = doc.serialize(SerdeFormat::Rhai).unwrap();
+        let reloaded = Document::deserialize(SerdeFormat::Rhai, &bytes).unwrap();
+        assert_eq!(
+            order(&reloaded),
+            vec![b, c, a],
+            "render order survives save/load"
         );
     }
 

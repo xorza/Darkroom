@@ -65,10 +65,6 @@ pub(crate) struct RecordCtx<'a> {
 #[derive(Default, Debug)]
 pub(crate) struct NodeUI {
     drag_anchor: Option<DragAnchor>,
-    /// Back-to-front node paint order (most-recently-selected on top). Reset
-    /// on tab switch with the rest of the gesture state, so it only ever
-    /// holds the active graph's nodes.
-    z_order: ZOrder,
 }
 
 #[derive(Clone, Debug)]
@@ -105,10 +101,13 @@ impl NodeUI {
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken_nodes.clear();
         }
-        // Paint back-to-front in selection-recency order — later draws sit
-        // on top, so the most recently selected node is frontmost.
-        let order = self.paint_order(rcx.scene);
-        for n in order {
+        // Paint in `view_nodes` order (mirrored into `scene.nodes`) — later
+        // draws sit on top, so the last node in the list is frontmost. The
+        // order is persisted view state, so a raised node stays raised across
+        // save/load and tab switches; `Intent::RaiseNode` moves a clicked node
+        // to the end. `RecordCtx` is `Copy`, so the `&scene.nodes` borrow held
+        // by the loop coexists with copying `rcx` into `draw_one`.
+        for n in rcx.scene.nodes.iter() {
             self.draw_one(ui, rcx, n, probe, out);
         }
         // Drop the anchor if its target node vanished from the graph
@@ -119,21 +118,6 @@ impl NodeUI {
         {
             self.drag_anchor = None;
         }
-    }
-
-    /// The scene's nodes in back-to-front paint order. Folds this frame's
-    /// committed selection into the recency [`Self::z_order`] (newly-selected
-    /// nodes rise to the top) and resolves it to `&SceneNode`s. Uses
-    /// `scene.selected_nodes` (committed), not the rubber-band preview, so
-    /// recency updates only when a selection commits — not every frame of a
-    /// band drag.
-    fn paint_order<'a>(&mut self, scene: &'a Scene) -> Vec<&'a SceneNode> {
-        let current: Vec<NodeId> = scene.nodes.iter().map(|n| n.id).collect();
-        let order = self.z_order.reconcile(&current, &scene.selected_nodes);
-        order
-            .iter()
-            .filter_map(|id| scene.nodes.by_key(id))
-            .collect()
     }
 
     fn draw_one(
@@ -226,7 +210,7 @@ impl NodeUI {
         // selection. `UndoStep::is_noop` filters a click that doesn't
         // change the set (e.g. clicking the sole selected node).
         if body_clicked {
-            out.push(select_intent(shift_click, rcx.scene, node.id));
+            click_intents(shift_click, rcx.scene, node.id, out);
         }
 
         // The header title doubles as a drag handle: its idle label
@@ -254,7 +238,7 @@ impl NodeUI {
                     .map(|n| (n.id, n.pos))
                     .collect()
             } else {
-                out.push(select_intent(false, rcx.scene, node.id));
+                click_intents(false, rcx.scene, node.id, out);
                 vec![(node.id, node.pos)]
             };
             self.drag_anchor = Some(DragAnchor {
@@ -500,11 +484,24 @@ pub(crate) fn set_input(port: PortRef, to: Binding) -> Intent {
     }
 }
 
+/// The intents a click on `node_id` produces: the selection change plus a
+/// lift to the top of the paint stack, so clicking a node brings it to the
+/// front. The raise is skipped only when a Shift-click *removes* the node
+/// from the selection — a node you just deselected shouldn't jump forward.
+/// Shared by the node body, header title, and port labels so clicking any
+/// of them behaves like clicking the body.
+pub(crate) fn click_intents(shift: bool, scene: &Scene, node_id: NodeId, out: &mut Vec<Intent>) {
+    out.push(select_intent(shift, scene, node_id));
+    let deselecting = shift && scene.selected_nodes.contains(&node_id);
+    if !deselecting {
+        out.push(Intent::RaiseNode { node_id });
+    }
+}
+
 /// The `SetSelection` a click on `node_id` produces: plain click selects
-/// only it, Shift-click toggles its membership. Shared by the node body
-/// and the port labels so clicking a label selects the node like the
-/// body does. `UndoStep::is_noop` drops the entry when nothing changed.
-pub(crate) fn select_intent(shift: bool, scene: &Scene, node_id: NodeId) -> Intent {
+/// only it, Shift-click toggles its membership. `UndoStep::is_noop` drops
+/// the entry when nothing changed.
+fn select_intent(shift: bool, scene: &Scene, node_id: NodeId) -> Intent {
     let mut to = if shift {
         scene.selected_nodes.clone()
     } else {
@@ -518,119 +515,54 @@ pub(crate) fn select_intent(shift: bool, scene: &Scene, node_id: NodeId) -> Inte
     Intent::SetSelection { to }
 }
 
-/// Back-to-front node paint order: most-recently-(committed-)selected nodes
-/// last, so they paint on top and *stay* raised until another node is
-/// selected. Reconciled against the live node set + selection each frame.
-#[derive(Default, Debug)]
-struct ZOrder {
-    order: Vec<NodeId>,
-    /// Last reconcile's selection, to spot nodes newly added to it.
-    prev_selected: BTreeSet<NodeId>,
-}
-
-impl ZOrder {
-    /// Fold this frame's committed `selected` set in — every id newly added
-    /// since the last call moves to the back (top) — then reconcile with the
-    /// live `current` id set (scene order): drop departed ids, append any not
-    /// yet ordered (freshly added) on top. Returns the resulting order.
-    fn reconcile(&mut self, current: &[NodeId], selected: &BTreeSet<NodeId>) -> &[NodeId] {
-        // Raise nodes newly added to the selection; re-selecting one already
-        // on top leaves it there. Iteration is BTreeSet order, which only
-        // matters when several commit at once (a rubber band) — recency among
-        // simultaneously-selected nodes isn't otherwise defined.
-        for id in selected {
-            if !self.prev_selected.contains(id) {
-                self.order.retain(|z| z != id);
-                self.order.push(*id);
-            }
-        }
-        self.prev_selected.clone_from(selected);
-        // Reconcile membership: drop departed nodes, then append freshly-added
-        // ones on top in scene order. Linear `contains` is fine — a graph
-        // holds at most a few hundred nodes.
-        self.order.retain(|id| current.contains(id));
-        for id in current {
-            if !self.order.contains(id) {
-                self.order.push(*id);
-            }
-        }
-        &self.order
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn ids(n: usize) -> Vec<NodeId> {
-        (0..n).map(|_| NodeId::unique()).collect()
+    fn scene_with_selection(selected: impl IntoIterator<Item = NodeId>) -> Scene {
+        Scene {
+            selected_nodes: selected.into_iter().collect(),
+            ..Default::default()
+        }
+    }
+
+    fn click(shift: bool, scene: &Scene, id: NodeId) -> Vec<Intent> {
+        let mut out = Vec::new();
+        click_intents(shift, scene, id, &mut out);
+        out
     }
 
     #[test]
-    fn newly_selected_rises_to_top_and_stays_after_deselect() {
-        let n = ids(3);
-        let current = n.clone();
-        let mut z = ZOrder::default();
+    fn click_intents_raises_unless_shift_deselects() {
+        let a = NodeId::unique();
+        let b = NodeId::unique();
 
-        // First frame, nothing selected → order seeds in scene order.
-        z.reconcile(&current, &BTreeSet::new());
-        assert_eq!(z.order, vec![n[0], n[1], n[2]]);
+        // Plain click on an unselected node: select it, then raise it.
+        let out = click(false, &scene_with_selection([]), a);
+        assert_eq!(out.len(), 2);
+        assert!(matches!(out[0], Intent::SetSelection { .. }));
+        assert!(matches!(out[1], Intent::RaiseNode { node_id } if node_id == a));
 
-        // Select n[0] → it rises to the top (back of the list).
-        z.reconcile(&current, &BTreeSet::from([n[0]]));
-        assert_eq!(
-            z.order,
-            vec![n[1], n[2], n[0]],
-            "selected node moves to top"
+        // Plain click on an already-selected node still raises it.
+        let out = click(false, &scene_with_selection([a]), a);
+        assert!(
+            out.iter()
+                .any(|i| matches!(i, Intent::RaiseNode { node_id } if *node_id == a)),
+            "a plain click always lifts its node to the front"
         );
 
-        // Deselect → order unchanged: the raise *persists* (recency stack).
-        z.reconcile(&current, &BTreeSet::new());
-        assert_eq!(
-            z.order,
-            vec![n[1], n[2], n[0]],
-            "stays raised after deselect"
+        // Shift-click adding a fresh node to the selection raises it.
+        let out = click(true, &scene_with_selection([a]), b);
+        assert!(
+            out.iter()
+                .any(|i| matches!(i, Intent::RaiseNode { node_id } if *node_id == b)),
+            "shift-adding a node raises it"
         );
 
-        // Select n[1] → above the previously-raised n[0].
-        z.reconcile(&current, &BTreeSet::from([n[1]]));
-        assert_eq!(z.order, vec![n[2], n[0], n[1]]);
-    }
-
-    #[test]
-    fn departed_nodes_drop_and_new_nodes_append_on_top() {
-        let n = ids(3);
-        let mut z = ZOrder {
-            order: vec![n[0], n[1], n[2]],
-            prev_selected: BTreeSet::new(),
-        };
-
-        // n[1] removed from the graph; a brand-new node appears.
-        let fresh = NodeId::unique();
-        let current = vec![n[0], n[2], fresh];
-        z.reconcile(&current, &BTreeSet::new());
-        assert_eq!(
-            z.order,
-            vec![n[0], n[2], fresh],
-            "removed node dropped; new node appended on top",
-        );
-    }
-
-    #[test]
-    fn reselecting_the_top_node_is_idempotent() {
-        let n = ids(2);
-        let current = n.clone();
-        let mut z = ZOrder {
-            order: vec![n[0], n[1]],
-            // n[1] was already selected last frame.
-            prev_selected: BTreeSet::from([n[1]]),
-        };
-
-        z.reconcile(&current, &BTreeSet::from([n[1]]));
-        assert_eq!(
-            z.order,
-            vec![n[0], n[1]],
-            "no churn when selection is unchanged"
-        );
+        // Shift-click removing a node does NOT raise it — a node you just
+        // deselected shouldn't jump to the front.
+        let out = click(true, &scene_with_selection([a, b]), b);
+        assert_eq!(out.len(), 1, "shift-deselect suppresses the raise");
+        assert!(matches!(out[0], Intent::SetSelection { .. }));
     }
 }
