@@ -105,7 +105,7 @@ pub struct SceneInput {
 
 /// One output port in the per-frame projection. `ty` is the *resolved* type —
 /// for a wildcard output (passthrough / reroute) it's the type followed through
-/// the wire (`Null` until something is wired in); the wildcard relationship
+/// the wire (`Any` until something is wired in); the wildcard relationship
 /// itself lives on `FuncOutput`'s [`OutputType`], and re-validating downstream
 /// wires on an input change is handled at edit time, not from the projection.
 #[derive(Debug)]
@@ -606,7 +606,7 @@ mod tests {
         assert!(matches!(in_outs[0].ty, DataType::Int));
         assert!(matches!(in_outs[1].ty, DataType::Float));
         assert!(
-            matches!(in_outs[2].ty, DataType::Null),
+            matches!(in_outs[2].ty, DataType::Any),
             "placeholder untyped"
         );
 

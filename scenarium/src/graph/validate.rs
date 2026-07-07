@@ -150,12 +150,12 @@ impl Graph {
                     src.node_id,
                     src.port_idx
                 );
-                // Types on both ends must be compatible (`Null` is the wildcard —
+                // Types on both ends must be compatible (`Any` is the wildcard —
                 // a passthrough/reroute port). This is the engine-side boundary
                 // check: with it a wired binding can't deliver the wrong type to
                 // a node function, so lambdas may trust their input types. Edges
                 // touching a boundary node have no concrete port type here
-                // (`None`/`Null`), so they're skipped — the interface types them.
+                // (`None`/`Any`), so they're skipped — the interface types them.
                 if let Some(sink_ty) = self.input_type(library, *dst) {
                     let source_ty = self.resolve_output_type(library, *src);
                     ensure!(
@@ -267,7 +267,7 @@ fn const_satisfies(library: &Library, input: &FuncInput, value: &StaticValue) ->
         return input.value_variants.iter().any(|v| v.value == *value);
     }
     match &input.data_type {
-        DataType::Null => true,
+        DataType::Any => true,
         DataType::Float | DataType::Int | DataType::Bool => matches!(
             value,
             StaticValue::Float(_) | StaticValue::Int(_) | StaticValue::Bool(_)

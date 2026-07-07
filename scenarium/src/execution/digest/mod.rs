@@ -225,7 +225,7 @@ fn hash_fs_content(hasher: &mut DigestHasher, value: &StaticValue) {
 /// hashed.
 fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
     let tag: u8 = match ty {
-        DataType::Null => 0,
+        DataType::Any => 0,
         DataType::Float => 1,
         DataType::Int => 2,
         DataType::Bool => 3,

@@ -130,19 +130,19 @@ pub enum OutputType {
     Fixed(DataType),
     /// A polymorphic passthrough / reroute output whose type mirrors the
     /// resolved type of input `mirrors` (e.g. the file-cache node). It reads as
-    /// the wildcard `Null` until the editor resolves it by following the wire
+    /// the wildcard `Any` until the editor resolves it by following the wire
     /// (see [`Graph::resolve_output_type`](crate::graph::Graph::resolve_output_type));
     /// the engine never type-checks, so it ignores the distinction.
     Wildcard { mirrors: usize },
 }
 
 impl OutputType {
-    /// The fixed type, or `Null` for an (unresolved) wildcard — the declared
+    /// The fixed type, or `Any` for an (unresolved) wildcard — the declared
     /// fallback the editor shows before resolving the wire.
     pub fn declared(&self) -> DataType {
         match self {
             OutputType::Fixed(ty) => ty.clone(),
-            OutputType::Wildcard { .. } => DataType::Null,
+            OutputType::Wildcard { .. } => DataType::Any,
         }
     }
 }

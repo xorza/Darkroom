@@ -465,12 +465,11 @@ fn port_tip(description: &str, type_label: String) -> String {
 }
 
 /// Human-readable type for a port tooltip: scalar names, the picker mode for
-/// paths, `Null` (the untyped boundary placeholder) as "any", and a registered
+/// paths, `Any` (the untyped boundary placeholder) as "any", and a registered
 /// `Custom`/`Enum` type's display name (the raw id if it isn't registered).
 fn type_label(library: &Library, ty: &DataType) -> String {
     match ty {
-        // The untyped boundary placeholder reads as "any" here, not "null".
-        DataType::Null => "any".to_owned(),
+        DataType::Any => "any".to_owned(),
         DataType::FsPath(cfg) => {
             let mode = match cfg.mode {
                 FsPathMode::Directory => "directory",

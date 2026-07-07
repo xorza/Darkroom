@@ -121,14 +121,17 @@ impl FsPathConfig {
     }
 }
 
-/// A port's type. `Custom`/`Enum` reference a *registered* nominal type by
-/// [`TypeId`] — the metadata (display name, enum variants, disk codec) lives on
-/// the [`Library`](crate::library::Library) type table, not inline. `FsPath` is
+/// A port's type. `Any` is the wildcard — a polymorphic passthrough / reroute
+/// port that matches every type on either side (see [`Self::compatible_with`]);
+/// it's also the declared type of an unresolved wildcard output and the default.
+/// `Custom`/`Enum` reference a *registered* nominal type by [`TypeId`] — the
+/// metadata (display name, enum variants, disk codec) lives on the
+/// [`Library`](crate::library::Library) type table, not inline. `FsPath` is
 /// structural config (not a nominal type), so it stays inline.
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DataType {
     #[default]
-    Null,
+    Any,
     Float,
     Int,
     Bool,
@@ -459,7 +462,7 @@ impl DataType {
     /// variants seed the default themselves.
     pub fn default_value(&self) -> Option<StaticValue> {
         Some(match self {
-            DataType::Null => StaticValue::Null,
+            DataType::Any => StaticValue::Null,
             DataType::Float => StaticValue::Float(0.0),
             DataType::Int => StaticValue::Int(0),
             DataType::Bool => StaticValue::Bool(false),
@@ -486,7 +489,7 @@ impl DataType {
     /// [`Graph::check_with`](crate::graph::Graph::check_with) uses to validate
     /// wired bindings at the compile boundary, so it must permit exactly what
     /// the engine can execute:
-    /// - `Null` is the wildcard — a polymorphic passthrough / reroute port (see
+    /// - `Any` is the wildcard — a polymorphic passthrough / reroute port (see
     ///   [`OutputType::Wildcard`](crate::node::function::OutputType)) — and matches
     ///   anything on either side.
     /// - the scalar numerics (`Float`/`Int`/`Bool`) coerce among themselves at
@@ -495,7 +498,7 @@ impl DataType {
     /// - everything else must match exactly (derived `PartialEq`: `Custom`/`Enum`
     ///   by id, `FsPath` by config).
     pub fn compatible_with(&self, source: &DataType) -> bool {
-        if matches!(self, DataType::Null) || matches!(source, DataType::Null) {
+        if matches!(self, DataType::Any) || matches!(source, DataType::Any) {
             return true;
         }
         if self.is_numeric_scalar() && source.is_numeric_scalar() {
@@ -599,11 +602,11 @@ mod tests {
         assert!(!DataType::String.compatible_with(&DataType::Bool));
         assert!(!DataType::String.compatible_with(&DataType::Float));
 
-        // `Null` is the wildcard on either side (the polymorphic passthrough port
-        // and the default both read as `Null`).
-        assert!(DataType::Null.compatible_with(&DataType::Float));
-        assert!(DataType::Float.compatible_with(&DataType::Null));
-        assert!(DataType::Null.compatible_with(&DataType::Null));
+        // `Any` is the wildcard on either side (the polymorphic passthrough port
+        // and the default both read as `Any`).
+        assert!(DataType::Any.compatible_with(&DataType::Float));
+        assert!(DataType::Float.compatible_with(&DataType::Any));
+        assert!(DataType::Any.compatible_with(&DataType::Any));
 
         // Custom types match by id, not by being "custom"; never to a scalar.
         assert!(custom(1).compatible_with(&custom(1)));

@@ -203,7 +203,7 @@ fn resolve_output_type_follows_passthrough_chain() {
     use crate::library::Library;
     use crate::node::special::SpecialNode;
 
-    // Int-out producer → pass1 → pass2. Both passthroughs declare a `Null`
+    // Int-out producer → pass1 → pass2. Both passthroughs declare a `Any`
     // (wildcard) output, but the resolved type must be the producer's `Int`.
     let producer = Func::new(FuncId::unique(), "src").output(FuncOutput::new("out", DataType::Int));
     let mut library = Library::default();
@@ -238,17 +238,17 @@ fn resolve_output_type_follows_passthrough_chain() {
         DataType::Int
     );
 
-    // An unbound value input leaves the passthrough polymorphic (`Null`),
+    // An unbound value input leaves the passthrough polymorphic (`Any`),
     // so its output accepts any consumer again.
     graph.set_input_binding(InputPort::new(p1, 0), Binding::None);
     assert_eq!(
         graph.resolve_output_type(&library, OutputPort::new(p1, 0)),
-        DataType::Null
+        DataType::Any
     );
-    // The taint flows downstream: pass2 now reads pass1's `Null`.
+    // The taint flows downstream: pass2 now reads pass1's `Any`.
     assert_eq!(
         graph.resolve_output_type(&library, OutputPort::new(p2, 0)),
-        DataType::Null
+        DataType::Any
     );
 
     // A scalar const carries its type, so the output resolves to it (and
@@ -268,15 +268,15 @@ fn resolve_output_type_follows_passthrough_chain() {
     );
 
     // A const whose type can't be reconstructed from the value alone — an
-    // enum literal on a `Null` (wildcard) input — stays polymorphic rather
-    // than panicking. (The passthrough's value input is `Null`-declared.)
+    // enum literal on a `Any` (wildcard) input — stays polymorphic rather
+    // than panicking. (The passthrough's value input is `Any`-declared.)
     graph.set_input_binding(
         InputPort::new(p1, 0),
         Binding::Const(StaticValue::Enum("X".into())),
     );
     assert_eq!(
         graph.resolve_output_type(&library, OutputPort::new(p1, 0)),
-        DataType::Null
+        DataType::Any
     );
 }
 
@@ -420,7 +420,7 @@ fn resolve_output_type_breaks_a_binding_cycle() {
     use crate::node::special::SpecialNode;
 
     // A passthrough whose value input binds to its own output — a cycle the
-    // editor can momentarily hold. Resolution must terminate as `Null`.
+    // editor can momentarily hold. Resolution must terminate as `Any`.
     let library = Library::default();
     let mut graph = Graph::default();
     let pass = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
@@ -432,7 +432,7 @@ fn resolve_output_type_breaks_a_binding_cycle() {
 
     assert_eq!(
         graph.resolve_output_type(&library, OutputPort::new(id, 0)),
-        DataType::Null
+        DataType::Any
     );
 }
 

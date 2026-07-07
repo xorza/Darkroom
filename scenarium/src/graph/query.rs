@@ -13,7 +13,7 @@ impl Graph {
     /// The declared type of input `port`, or `None` when it can't be resolved —
     /// a boundary node (its arity mirrors the enclosing interface, with no
     /// per-port type here) or a missing func/def. The caller treats `None` as
-    /// the polymorphic `Null`. The engine never type-checks, so only the editor
+    /// the polymorphic `Any`. The engine never type-checks, so only the editor
     /// calls this.
     pub fn input_type(&self, library: &Library, port: InputPort) -> Option<DataType> {
         self.input_spec(library, port).map(|i| i.data_type.clone())
@@ -44,7 +44,7 @@ impl Graph {
     /// value's type survives the hop: a `Bind` follows the producer up, while a
     /// `Const` takes the mirrored input's declared type (which carries the full
     /// `FsPathConfig` / `Enum` id), or the const's own scalar type on a wildcard
-    /// (`Null`-declared) input. The walk dead-ends polymorphic (`Null`) when the
+    /// (`Any`-declared) input. The walk dead-ends polymorphic (`Any`) when the
     /// mirrored input is unbound, the producer is a boundary or missing, or a
     /// binding cycle is hit. Used by the editor for port-type display, connection
     /// compatibility, and subgraph-interface inference; the engine never
@@ -60,7 +60,7 @@ impl Graph {
         visiting: &mut HashSet<NodeId>,
     ) -> DataType {
         let Some(out) = self.output_spec(library, port) else {
-            return DataType::Null;
+            return DataType::Any;
         };
 
         // A fixed output is just its declared type; a wildcard reports the type
@@ -75,31 +75,31 @@ impl Graph {
         // the planner reject it later) — break it as polymorphic rather than
         // recurse forever.
         if !visiting.insert(port.node_id) {
-            return DataType::Null;
+            return DataType::Any;
         }
         let mirror = InputPort::new(port.node_id, mirrors);
         let resolved = match self.input_binding(mirror) {
             Binding::Bind(src) => self.resolve_output_type_inner(library, src, visiting),
             // The mirrored input's *declared* type already carries the full
             // `FsPathConfig` / `Enum` id (and a `Custom` id for a preset port), so
-            // a const of any kind resolves to it. A wildcard (`Null`-declared)
+            // a const of any kind resolves to it. A wildcard (`Any`-declared)
             // input instead takes the const's own, more specific scalar type; a
             // bare path/enum/null const there isn't reconstructable from the
-            // value alone, so it stays polymorphic (`Null`).
+            // value alone, so it stays polymorphic (`Any`).
             Binding::Const(v) => match self.input_type(library, mirror) {
-                Some(declared) if !matches!(declared, DataType::Null) => declared,
+                Some(declared) if !matches!(declared, DataType::Any) => declared,
                 _ => match v {
                     StaticValue::Float(_) => DataType::Float,
                     StaticValue::Int(_) => DataType::Int,
                     StaticValue::Bool(_) => DataType::Bool,
                     StaticValue::String(_) => DataType::String,
                     StaticValue::Null | StaticValue::FsPath(_) | StaticValue::Enum(_) => {
-                        DataType::Null
+                        DataType::Any
                     }
                 },
             },
             // Nothing wired in yet — polymorphic.
-            Binding::None => DataType::Null,
+            Binding::None => DataType::Any,
         };
         visiting.remove(&port.node_id);
         resolved

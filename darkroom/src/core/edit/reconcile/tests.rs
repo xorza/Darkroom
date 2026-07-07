@@ -246,7 +246,7 @@ fn existing_port_type_is_rederived_from_wiring() {
 fn passthrough_ports_are_null_typed() {
     // `SubgraphInput.out0` wired straight to `SubgraphOutput.in0` — no
     // real func between. Both boundary ports are polymorphic, so their
-    // derived type is `Null`.
+    // derived type is `Any`.
     let library = lib();
     let sgin = Node::new(NodeKind::SubgraphInput);
     let sgout = Node::new(NodeKind::SubgraphOutput);
@@ -271,10 +271,10 @@ fn passthrough_ports_are_null_typed() {
     assert_eq!(def.outputs.len(), 1);
     assert_eq!(
         def.inputs[0].data_type,
-        DataType::Null,
+        DataType::Any,
         "a passthrough subgraph input is polymorphic (Null)"
     );
-    assert_eq!(def.outputs[0].ty.declared(), DataType::Null);
+    assert_eq!(def.outputs[0].ty.declared(), DataType::Any);
 }
 
 #[test]
@@ -282,7 +282,7 @@ fn passthrough_in_subgraph_exposes_the_resolved_output_type() {
     use scenarium::node::special::SpecialNode;
 
     // Interior: SubgraphInput → sum → CachePassthrough → SubgraphOutput. The
-    // passthrough's output statically declares the wildcard `Null`, but the
+    // passthrough's output statically declares the wildcard `Any`, but the
     // exposed subgraph output must report `sum`'s real output type, resolved
     // through it — otherwise wrapping a value in a file-cache would erase its
     // type for the whole composite.
@@ -291,7 +291,7 @@ fn passthrough_in_subgraph_exposes_the_resolved_output_type() {
     let want_ty = library.by_name("sum").unwrap().outputs[0].ty.declared();
     assert_ne!(
         want_ty,
-        DataType::Null,
+        DataType::Any,
         "fixture sanity: sum has a concrete output type"
     );
 

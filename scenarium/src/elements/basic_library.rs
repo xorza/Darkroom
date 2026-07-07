@@ -17,7 +17,7 @@ pub fn basic_library() -> Library {
             .category("System")
             .terminal()
             .input(
-                FuncInput::required("Value", DataType::Null)
+                FuncInput::required("Value", DataType::Any)
                     .description("Value of any type to write to the node's log (info level)."),
             )
             .lambda(async_lambda!(move |ctx, _, _, inputs, _, _| {
@@ -34,7 +34,7 @@ pub fn basic_library() -> Library {
             .category("Math")
             .pure()
             .input(
-                FuncInput::required("Value", DataType::Null)
+                FuncInput::required("Value", DataType::Any)
                     .description("Value of any type to convert to text."),
             )
             .output(

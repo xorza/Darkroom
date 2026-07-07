@@ -28,7 +28,7 @@ impl Fix {
         }
         let idx = self.program.e_nodes.len();
         let outputs_start = self.program.output_types.len() as u32;
-        self.program.output_types.push(DataType::Null);
+        self.program.output_types.push(DataType::Any);
         self.program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),
             inited: true,

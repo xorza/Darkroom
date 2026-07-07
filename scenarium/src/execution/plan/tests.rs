@@ -29,7 +29,7 @@ impl Fix {
         let outputs_start = self.program.output_types.len() as u32;
         self.program
             .output_types
-            .resize(outputs_start as usize + outputs as usize, DataType::Null);
+            .resize(outputs_start as usize + outputs as usize, DataType::Any);
         let idx = self.program.e_nodes.len();
         self.program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),

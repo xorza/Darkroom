@@ -254,7 +254,7 @@ impl OutputCache {
     /// resolved output types off the program pool, so this predicts (without reading)
     /// whether `blob::read` would succeed — `mark_on_disk_if_present` never flags a node
     /// whose later on-demand load would fail and trip the executor's "value present"
-    /// invariant. An unresolved type (`Null`) imposes no constraint.
+    /// invariant. An unresolved type (`Any`) imposes no constraint.
     fn outputs_decodable(&self, types: &[DataType]) -> bool {
         types.iter().all(|ty| match ty {
             DataType::Custom(type_id) => self.library.codec(type_id).is_some(),

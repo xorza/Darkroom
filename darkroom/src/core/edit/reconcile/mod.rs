@@ -109,7 +109,7 @@ fn plan_inputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncInpu
         // Type is derived from the wired port every pass (so reconnecting
         // to a differently-typed node updates it); the name and any
         // authored fields are preserved. A passthrough / unwired-to-a-real
-        // port resolves to `Null` (polymorphic — see `infer_used_input_type`).
+        // port resolves to `Any` (polymorphic — see `infer_used_input_type`).
         let data_type = infer_used_input_type(interior, library, boundary, old);
         interface.push(match def.inputs.get(old) {
             Some(existing) => FuncInput {
@@ -147,7 +147,7 @@ fn plan_outputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncOut
     for (new_idx, &old) in used.iter().enumerate() {
         remap.insert(old, new_idx);
         // Re-derive the type from the wired producer each pass; preserve
-        // the name. Passthrough / unwired-to-a-real producer → `Null`.
+        // the name. Passthrough / unwired-to-a-real producer → `Any`.
         let data_type = infer_used_output_type(interior, library, boundary, old);
         let name = match def.outputs.get(old) {
             Some(existing) => existing.name.clone(),
@@ -241,7 +241,7 @@ fn synth_input(idx: usize, data_type: DataType) -> FuncInput {
 }
 
 /// Type of subgraph input `old`: the type the interior consumer it feeds
-/// expects. Falls back to `Null` when no consumer resolves (a placeholder
+/// expects. Falls back to `Any` when no consumer resolves (a placeholder
 /// with no destination shouldn't reach here, but stay total).
 fn infer_used_input_type(
     interior: &Graph,
@@ -259,7 +259,7 @@ fn infer_used_input_type(
 /// Type of subgraph output `old`: the type of the interior producer bound
 /// into `SubgraphOutput` input `old`. Resolved via
 /// [`Graph::resolve_output_type`], so a producing `CachePassthrough` reports
-/// the type wired through it rather than its wildcard `Null` — the composite's
+/// the type wired through it rather than its wildcard `Any` — the composite's
 /// exposed output keeps the value's real type.
 fn infer_used_output_type(
     interior: &Graph,

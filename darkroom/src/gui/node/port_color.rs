@@ -4,7 +4,7 @@
 //! Built-in scalar types get fixed hues per palette; `Custom` / `Enum`
 //! types are keyed by their `type_id` onto a small ramp, so distinct
 //! custom types (e.g. an image vs. a calibration-masters payload) land on
-//! stable, distinct colors without enumerating them here. `Null` (the
+//! stable, distinct colors without enumerating them here. `Any` (the
 //! default / untyped boundary placeholder) has no type identity, so it
 //! falls back to the positional input/output port colors from the theme.
 
@@ -16,10 +16,10 @@ use crate::gui::theme::{Theme, ThemePreset};
 
 /// Color for a port of type `ty` on the given side. `hovered` lightens
 /// (dark theme) or darkens (light theme) the typed hue for emphasis;
-/// untyped (`Null`) ports defer to the theme's positional port colors,
+/// untyped (`Any`) ports defer to the theme's positional port colors,
 /// which carry their own hover variants.
 pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: bool) -> Color {
-    if matches!(ty, DataType::Null) {
+    if matches!(ty, DataType::Any) {
         return fallback(theme, kind, hovered);
     }
     let base = type_hue(theme.preset, ty);
@@ -52,7 +52,7 @@ fn fallback(theme: &Theme, kind: PortKind, hovered: bool) -> Color {
     }
 }
 
-/// The base hue for a non-`Null` type under the given palette.
+/// The base hue for a non-`Any` type under the given palette.
 fn type_hue(preset: ThemePreset, ty: &DataType) -> Color {
     let p = match preset {
         ThemePreset::Dark => &DARK,
@@ -65,7 +65,7 @@ fn type_hue(preset: ThemePreset, ty: &DataType) -> Color {
         DataType::String => p.string,
         DataType::FsPath(_) => p.path,
         DataType::Custom(id) | DataType::Enum(id) => ramp_pick(p.ramp, id.as_u128()),
-        DataType::Null => unreachable!("Null handled by fallback in port_color"),
+        DataType::Any => unreachable!("Any handled by fallback in port_color"),
     };
     Color::hex(hex)
 }
@@ -165,19 +165,19 @@ mod tests {
     fn null_falls_back_to_positional_port_color() {
         let t = Theme::dark();
         assert_eq!(
-            port_color(&t, &DataType::Null, PortKind::Input, false),
+            port_color(&t, &DataType::Any, PortKind::Input, false),
             t.colors.input_port
         );
         assert_eq!(
-            port_color(&t, &DataType::Null, PortKind::Output, false),
+            port_color(&t, &DataType::Any, PortKind::Output, false),
             t.colors.output_port
         );
         assert_eq!(
-            port_color(&t, &DataType::Null, PortKind::Input, true),
+            port_color(&t, &DataType::Any, PortKind::Input, true),
             t.colors.input_port_hover
         );
         assert_eq!(
-            port_color(&t, &DataType::Null, PortKind::Output, true),
+            port_color(&t, &DataType::Any, PortKind::Output, true),
             t.colors.output_port_hover
         );
     }

@@ -865,7 +865,7 @@ mod cache_persistence {
                 Func::new(CONSUME, "consume")
                     .category("Test")
                     .terminal()
-                    .input(FuncInput::required("in", DataType::Null))
+                    .input(FuncInput::required("in", DataType::Any))
                     .lambda(async_lambda!(move |_, _, _, inputs, _, _| { recv = recv.clone() } => {
                         *recv.lock().unwrap() = inputs[0].value.as_f64().unwrap_or(f64::NAN);
                         Ok(())

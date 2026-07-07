@@ -8,7 +8,7 @@
 //! button showing the chosen file's name — the actual path change comes
 //! back deferred via the OS file dialog, opened by `App` outside the
 //! record and polled here by `emit_path_picks`). `Enum` renders as a
-//! dropdown over the port's declared variants. `Null` renders as a
+//! dropdown over the port's declared variants. `Any` renders as a
 //! read-only label.
 //!
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
@@ -148,7 +148,7 @@ pub(crate) fn show(
     }
 }
 
-/// Non-editable values (`Null`, or an `Enum` on a port that lost its
+/// Non-editable values (`Any`, or an `Enum` on a port that lost its
 /// type) show their textual form in a read-only field; clicks fall
 /// through to the surrounding row. Always returns `None`.
 fn read_only_label(

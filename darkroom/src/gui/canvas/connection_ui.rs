@@ -301,7 +301,7 @@ impl ConnectionUI {
             // end of a connection visually matches the port it touches —
             // and, with per-type port colors, the wire reads as its data
             // type (both ends share it unless one side is the untyped
-            // `Null` wildcard). `lower_cubic_bezier` samples `Brush::Linear`
+            // `Any` wildcard). `lower_cubic_bezier` samples `Brush::Linear`
             // along the curve parameter `t` and ignores `angle` — we pass
             // 0.0. Broken-state still wins as a flat color so the alarm
             // read doesn't get diluted by the gradient.

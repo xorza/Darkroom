@@ -181,7 +181,7 @@ impl Library {
     /// isn't registered in this process).
     pub fn type_name(&self, ty: &DataType) -> Cow<'_, str> {
         match ty {
-            DataType::Null => Cow::Borrowed("null"),
+            DataType::Any => Cow::Borrowed("any"),
             DataType::Float => Cow::Borrowed("float"),
             DataType::Int => Cow::Borrowed("int"),
             DataType::Bool => Cow::Borrowed("bool"),

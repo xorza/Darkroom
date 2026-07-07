@@ -166,7 +166,7 @@ pub(crate) struct ExecutionProgram {
     /// from the func library (which the program doesn't retain), so the compiled
     /// program is self-describing. Read by the digest (an output-signature change
     /// re-keys) and the disk cache's codec check. An unresolved wildcard port is
-    /// `DataType::Null`. Its `len()` is the program's total output count
+    /// `DataType::Any`. Its `len()` is the program's total output count
     /// ([`Self::n_outputs`]).
     #[serde(default)]
     pub(crate) output_types: Vec<DataType>,
@@ -206,7 +206,7 @@ impl ExecutionProgram {
     /// Fill the `output_types` pool by resolving each node's declared output types
     /// (wildcards followed through bindings) from the full `library` — done once at
     /// flatten, where every compiled node's func is guaranteed present (`check_with`
-    /// resolved them). An unresolved wildcard port stores `DataType::Null`. Builds
+    /// resolved them). An unresolved wildcard port stores `DataType::Any`. Builds
     /// into a fresh buffer first so the per-node reads don't alias the write-back.
     pub(crate) fn resolve_output_types(&mut self, library: &Library) {
         let capacity: usize = self.e_nodes.iter().map(|n| n.outputs.len as usize).sum();
@@ -215,7 +215,7 @@ impl ExecutionProgram {
             let port_count = self.e_nodes[idx].outputs.len as usize;
             for port in 0..port_count {
                 types.push(
-                    effective_output_type(self, library, idx, port, 0).unwrap_or(DataType::Null),
+                    effective_output_type(self, library, idx, port, 0).unwrap_or(DataType::Any),
                 );
             }
         }

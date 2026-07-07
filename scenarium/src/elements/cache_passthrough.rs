@@ -36,7 +36,7 @@ fn build_func() -> Func {
              upstream is not recomputed.",
         )
         .input(
-            FuncInput::required("Value", DataType::Null)
+            FuncInput::required("Value", DataType::Any)
                 .description("Value to cache and pass through."),
         )
         // The path input — its index is [`CACHE_PATH_INPUT`]. Const-only: the
