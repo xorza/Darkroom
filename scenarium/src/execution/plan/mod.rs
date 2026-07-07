@@ -1,14 +1,17 @@
 //! Scheduling: the per-run schedule ([`ExecutionPlan`]) and the [`Planner`] that builds
 //! it. The planner runs one backward post-order DFS from the run's roots (terminals,
-//! event subscribers, event-trigger owners), producing `process_order` (deps before
-//! consumers), per-output usage counts, and each node's [`NodeVerdict`] (runnable vs
-//! blocked on inputs) — purely structural, no cache/digest state. The
+//! event subscribers, event-trigger owners — plus every terminal when a fired event
+//! reaches a [`RunTerminals`](crate::node::special::SpecialNode::RunTerminals) sink),
+//! producing `process_order` (deps before consumers), per-output usage counts, and each
+//! node's [`NodeVerdict`] (runnable vs blocked on inputs) — purely structural, no
+//! cache/digest state. The
 //! [`Executor`](crate::execution::executor::Executor) consumes the plan; the plan is
 //! reused via a buffer on the engine and the `Planner` owns reusable DFS scratch, so a
 //! repeated plan on an unchanged graph allocates nothing.
 
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram, NodeIdx};
 use crate::execution::{Error, NodeColumn, Result, RunSeeds, validate};
+use crate::node::special::SpecialNode;
 
 /// The planner's structural verdict for one node this run, indexed by `e_node_idx`.
 /// The planner decides only *runnable vs blocked on inputs*; *cached vs recompute* is an
@@ -235,18 +238,31 @@ impl Planner {
 /// every node owning a subscribed event. Not deduped: a node seeding via several categories
 /// appears more than once, which is harmless — the walk's `Color` check skips a revisited root
 /// and the cut's `needed[root] = true` seeding is idempotent, so neither cares about repeats.
+///
+/// A [`RunTerminals`](SpecialNode::RunTerminals) node among a fired event's subscribers is not
+/// itself a root (it computes nothing); instead it promotes the run to include *every* terminal
+/// node — the "when this event fires, re-run the whole graph" trigger.
 fn collect_roots(program: &ExecutionProgram, seeds: &RunSeeds, plan: &mut ExecutionPlan) {
     // `plan.reset` already cleared `roots`; this only pushes into it.
 
-    // Event subscribers.
+    // Event subscribers. A `RunTerminals` sink among them fires no cone of its own — it
+    // promotes this run to run all terminals (below), so it's skipped as a root here.
+    let mut run_terminals = seeds.terminals;
     for event in &seeds.events {
         let e_node = program.e_nodes.by_key(&event.node_id).unwrap();
         let subs = &program.events[e_node.events.range()][event.event_idx].subscribers;
-        plan.roots.extend(subs.iter().copied());
+        for &sub in subs {
+            if program.e_nodes[sub].special == Some(SpecialNode::RunTerminals) {
+                run_terminals = true;
+            } else {
+                plan.roots.push(sub);
+            }
+        }
     }
 
-    // Terminal nodes.
-    if seeds.terminals {
+    // Terminal nodes — every one, whether requested directly (`seeds.terminals`) or promoted
+    // by a fired event reaching a `RunTerminals` sink.
+    if run_terminals {
         for (idx, e) in program.e_nodes.iter().enumerate() {
             if e.terminal {
                 plan.roots.push(idx.into());

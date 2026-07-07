@@ -12,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::elements::cache_passthrough::cache_passthrough_func;
+use crate::elements::run_terminals::run_terminals_func;
 use crate::node::function::Func;
 
 /// A built-in node identified by *kind*, not by a `FuncId`. Its ports + lambda
@@ -27,10 +28,20 @@ pub enum SpecialNode {
     /// run (the UI bypass toggle). Per-instance config, so it rides in the variant
     /// rather than as a field on every node.
     CachePassthrough { bypass: bool },
+
+    /// An event sink with no data ports. It computes nothing; when an event it
+    /// subscribes to fires, the engine seeds the run with *every* terminal node
+    /// (re-running the whole graph) instead of a data cone of its own — the
+    /// promotion lives in the planner's root collection. Interface in
+    /// [`run_terminals`](crate::elements::run_terminals).
+    RunTerminals,
 }
 
 /// Every special node (default config), for the editor's node-add menu.
-pub const ALL: &[SpecialNode] = &[SpecialNode::CachePassthrough { bypass: false }];
+pub const ALL: &[SpecialNode] = &[
+    SpecialNode::CachePassthrough { bypass: false },
+    SpecialNode::RunTerminals,
+];
 
 impl SpecialNode {
     /// This node's hardcoded interface + passthrough lambda. Used by flatten (ports,
@@ -39,6 +50,7 @@ impl SpecialNode {
     pub fn func(self) -> &'static Func {
         match self {
             SpecialNode::CachePassthrough { .. } => cache_passthrough_func(),
+            SpecialNode::RunTerminals => run_terminals_func(),
         }
     }
 }

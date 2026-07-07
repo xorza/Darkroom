@@ -419,7 +419,10 @@ impl<'a> Run<'a> {
             return;
         }
         match graph.by_id(&node_id).map(|n| &n.kind) {
-            Some(NodeKind::Func(_)) => {
+            // A special node subscribes like a func: it flattens to one leaf and
+            // becomes the flat subscriber. `RunTerminals` in particular relies on
+            // this edge so the planner sees it among a fired event's subscribers.
+            Some(NodeKind::Func(_) | NodeKind::Special(_)) => {
                 let flat = flatten_id(self.path.as_slice(), node_id);
                 self.push_edge(emitter, event_idx, flat);
             }

@@ -3135,6 +3135,168 @@ mod events {
 
         Ok(())
     }
+
+    const SOURCE_FUNC: FuncId = FuncId::from_u128(0xE401);
+    const SINK_FUNC: FuncId = FuncId::from_u128(0xE402);
+
+    /// A `RunTerminals` special node subscribed to an event fires no cone of its own
+    /// (it has no ports) — instead firing that event runs *every* terminal, exactly as
+    /// pressing "Run" would. Here `emit`'s tick reaches only the `RunTerminals` sink, yet
+    /// the independent `source → sink` terminal cone runs, while `emit` (not a terminal,
+    /// not in that cone) does not.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_terminals_sink_runs_all_terminals_on_event() -> anyhow::Result<()> {
+        use crate::graph::NodeKind;
+        use crate::node::special::SpecialNode;
+
+        let source_calls = Arc::new(Mutex::new(0i64));
+        let sink_values = Arc::new(Mutex::new(Vec::<i64>::new()));
+        let source_l = source_calls.clone();
+        let sink_l = sink_values.clone();
+
+        let mut library = Library::default();
+        // An impure emitter carrying a "tick" event but no data wiring of its own.
+        library.add(
+            Func::new(EMIT_FUNC, "emit")
+                .output(FuncOutput::new("out", DataType::Int))
+                .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
+                .lambda(async_lambda!(move |_, _, _, _, _, outputs| {
+                    outputs[0] = DynamicValue::Static(StaticValue::Int(0));
+                    Ok(())
+                })),
+        );
+        // An impure source feeding the terminal — proves the terminal's whole cone runs.
+        library.add(
+            Func::new(SOURCE_FUNC, "source")
+                .output(FuncOutput::new("out", DataType::Int))
+                .lambda(async_lambda!(
+                    move |_, _, _, _, _, outputs| { calls = source_l.clone() } => {
+                        let mut n = calls.lock().await;
+                        *n += 1;
+                        outputs[0] = DynamicValue::Static(StaticValue::Int(*n));
+                        Ok(())
+                    }
+                )),
+        );
+        // An impure terminal sink recording each value it receives.
+        library.add(
+            Func::new(SINK_FUNC, "sink")
+                .terminal()
+                .input(FuncInput::required("in", DataType::Int))
+                .lambda(async_lambda!(
+                    move |_, _, _, inputs, _, _| { values = sink_l.clone() } => {
+                        values.lock().await.push(inputs[0].value.as_i64().unwrap());
+                        Ok(())
+                    }
+                )),
+        );
+
+        let emit_id = NodeId::unique();
+        let source_id = NodeId::unique();
+        let sink_id = NodeId::unique();
+        let trigger_id = NodeId::unique();
+
+        let mut graph = Graph::default();
+        graph.add(node(&library, "emit", emit_id));
+        graph.add(node(&library, "source", source_id));
+        graph.add(node(&library, "sink", sink_id));
+        // The RunTerminals sink — no ports; subscribes to emit's tick.
+        let mut trigger = Node::new(NodeKind::Special(SpecialNode::RunTerminals));
+        trigger.id = trigger_id;
+        trigger.name = "trigger".to_string();
+        graph.add(trigger);
+
+        // The sink's cone (source → sink) is wholly independent of emit.
+        graph.set_input_binding(InputPort::new(sink_id, 0), (source_id, 0).into());
+        graph.subscribe(emit_id, 0, trigger_id);
+        graph.validate_with(&library);
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library)?;
+
+        let stats = eg
+            .execute_events([EventRef {
+                node_id: emit_id,
+                event_idx: 0,
+            }])
+            .await?;
+
+        // The terminal cone ran; emit (neither a terminal nor in that cone) did not.
+        let ran = execution_node_names_in_order(&eg);
+        assert!(ran.contains(&"source".to_string()), "ran = {ran:?}");
+        assert!(ran.contains(&"sink".to_string()), "ran = {ran:?}");
+        assert!(!ran.contains(&"emit".to_string()), "ran = {ran:?}");
+        assert_eq!(*source_calls.lock().await, 1);
+        assert_eq!(*sink_values.lock().await, vec![1]);
+        assert_eq!(stats.triggered_events.len(), 1);
+
+        // The RunTerminals sink is itself a terminal, so it runs (its no-op lambda)
+        // alongside the promoted terminals — never seeded as a plain subscriber cone.
+        assert!(ran.contains(&"trigger".to_string()), "ran = {ran:?}");
+        let trigger_idx = eg.program.e_nodes.index_of_key(&trigger_id).unwrap();
+        assert!(
+            eg.plan.process_order.iter().any(|i| i.idx() == trigger_idx),
+            "the RunTerminals sink runs as a terminal"
+        );
+
+        Ok(())
+    }
+
+    /// Without the `RunTerminals` sink, firing `emit`'s tick reaches no subscriber, so
+    /// the same terminal cone is left untouched — isolating the sink as the cause.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn event_without_run_terminals_sink_runs_nothing() -> anyhow::Result<()> {
+        let source_calls = Arc::new(Mutex::new(0i64));
+        let source_l = source_calls.clone();
+
+        let mut library = Library::default();
+        library.add(
+            Func::new(EMIT_FUNC, "emit")
+                .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
+                .lambda(async_lambda!(move |_, _, _, _, _, _| { Ok(()) })),
+        );
+        library.add(
+            Func::new(SOURCE_FUNC, "source")
+                .output(FuncOutput::new("out", DataType::Int))
+                .lambda(async_lambda!(
+                    move |_, _, _, _, _, outputs| { calls = source_l.clone() } => {
+                        *calls.lock().await += 1;
+                        outputs[0] = DynamicValue::Static(StaticValue::Int(1));
+                        Ok(())
+                    }
+                )),
+        );
+        library.add(
+            Func::new(SINK_FUNC, "sink")
+                .terminal()
+                .input(FuncInput::required("in", DataType::Int))
+                .lambda(async_lambda!(move |_, _, _, _, _, _| { Ok(()) })),
+        );
+
+        let emit_id = NodeId::unique();
+        let source_id = NodeId::unique();
+        let sink_id = NodeId::unique();
+
+        let mut graph = Graph::default();
+        graph.add(node(&library, "emit", emit_id));
+        graph.add(node(&library, "source", source_id));
+        graph.add(node(&library, "sink", sink_id));
+        graph.set_input_binding(InputPort::new(sink_id, 0), (source_id, 0).into());
+        graph.validate_with(&library);
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library)?;
+        eg.execute_events([EventRef {
+            node_id: emit_id,
+            event_idx: 0,
+        }])
+        .await?;
+
+        assert!(execution_node_names_in_order(&eg).is_empty());
+        assert_eq!(*source_calls.lock().await, 0);
+
+        Ok(())
+    }
 }
 
 // === Output Usage (Skip / Needed) ===
