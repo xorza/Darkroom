@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use palantir::{WinitHost, WinitHostConfig};
+use palantir::{WindowIcon, WinitHost, WinitHostConfig};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
@@ -140,6 +140,7 @@ fn run_gui(script_cfg: ScriptConfig) {
     // instance for the app so we don't read the file twice.
     let preferences = Preferences::load();
     let mut config = WinitHostConfig::new("darkroom");
+    config.window.icon = load_icon();
     if let Some(w) = &preferences.window {
         config.window.inner_size = Some(w.size);
         config.window.position = w.position;
@@ -151,6 +152,21 @@ fn run_gui(script_cfg: ScriptConfig) {
         App::new(ui, handle, script_cfg, preferences)
     })
     .run();
+}
+
+/// Decode the baked-in window icon (PNG → RGBA8) for the title bar /
+/// taskbar. Honored on Windows and Linux; macOS ignores per-window icons —
+/// its Dock icon comes from the `.app` bundle (`[package.metadata.bundle]`
+/// in `Cargo.toml`). Returns `None` if the embedded asset ever fails to
+/// decode, degrading to the platform default rather than blocking startup.
+fn load_icon() -> Option<WindowIcon> {
+    static ICON_PNG: &[u8] = include_bytes!("../assets/icons/darkroom-256.png");
+    let rgba = image::load_from_memory(ICON_PNG)
+        .inspect_err(|e| tracing::warn!("window icon decode failed: {e}"))
+        .ok()?
+        .to_rgba8();
+    let (w, h) = rgba.dimensions();
+    Some(WindowIcon::from_rgba(rgba.into_raw(), w, h))
 }
 
 /// The non-GUI frontends, dispatched by [`run_terminal`].
@@ -200,6 +216,16 @@ fn init_tracing() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn load_icon_decodes_embedded_png() {
+        // Guards the runtime window-icon path: the baked asset must decode
+        // to 256×256 RGBA8 so `WindowIcon::from_rgba`'s length invariant
+        // holds. Catches a swapped-in wrong-size or non-RGBA asset.
+        let icon = load_icon().expect("embedded window icon decodes");
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4, "RGBA8 buffer length");
+    }
 
     #[test]
     fn no_subcommand_defaults_to_gui() {

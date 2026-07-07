@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=darkroom
+GenericName=Node Graph Editor
+Comment=Node-graph image pipeline editor
+Exec=darkroom %F
+Icon=darkroom
+Terminal=false
+Categories=Graphics;Development;
+StartupWMClass=darkroom
