@@ -41,10 +41,11 @@ const COL_INPUT: u16 = 0;
 const COL_VALUE: u16 = 1;
 const COL_OUTPUT: u16 = 3;
 
-/// Port row height as a multiple of the body font size. Clears the tallest
-/// inline editor (a preset dropdown / pick chip ≈ 1.7em) so fixed rows stay
-/// uniform without clipping their editor.
-const PORT_ROW_HEIGHT_EM: f32 = 1.8;
+/// Port row height as a multiple of the body font size. The value editors
+/// fill this height (so a chip, dropdown, and text field are all the same
+/// size); it must clear the tallest editor's min-content — the inline text
+/// field, `line_height + padding + border ≈ 1.9em` — so nothing overflows.
+const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 
 pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
@@ -264,7 +265,7 @@ fn value_cell(
     let edited = Panel::hstack()
         .id_salt(("val", port.port_idx))
         .grid_cell((port.port_idx as u16, COL_VALUE))
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::FILL))
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             value_editor::show(

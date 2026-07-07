@@ -25,8 +25,7 @@
 //! parsed value differs from the canonical one.
 
 use palantir::{
-    Button, Checkbox, ComboBox, Configure, DragValue, Sizing, Spacing, TextEdit, TextWrap, Ui,
-    WidgetId,
+    Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextWrap, Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
 use scenarium::library::Library;
@@ -70,7 +69,7 @@ pub(crate) fn show(
         ComboBox::new(&mut idx, &names)
             .id(id)
             .style(theme.drag_value.chip.clone())
-            .size((Sizing::FILL, Sizing::Hug))
+            .size((Sizing::FILL, Sizing::FILL))
             .min_size((width, 0.0))
             .show(ui);
         return (idx != before)
@@ -107,11 +106,8 @@ pub(crate) fn show(
                 .label(path_preview(path))
                 .style(theme.drag_value.chip.clone())
                 .text_wrap(TextWrap::Ellipsis)
-                .size((Sizing::FILL, Sizing::Hug))
+                .size((Sizing::FILL, Sizing::FILL))
                 .min_size((width, 0.0))
-                // Override the theme's vertical padding so the chip sits
-                // flush on the port-row baseline.
-                .padding(Spacing::xy(6.0, 0.0))
                 .show(ui);
             None
         }
@@ -134,7 +130,7 @@ pub(crate) fn show(
             ComboBox::new(&mut idx, &options)
                 .id(id)
                 .style(theme.drag_value.chip.clone())
-                .size((Sizing::FILL, Sizing::Hug))
+                .size((Sizing::FILL, Sizing::FILL))
                 .min_size((width, 0.0))
                 .show(ui);
             if idx != before {
@@ -212,7 +208,7 @@ fn read_only_label(
     let mut buf = value.to_value_string();
     TextEdit::new(&mut buf)
         .id(id)
-        .size((Sizing::Fixed(width), Sizing::Hug))
+        .size((Sizing::Fixed(width), Sizing::FILL))
         .show(ui);
     None
 }
@@ -247,8 +243,7 @@ fn buffered_text_edit<T>(
     let mut text = std::mem::take(&mut ui.state_mut::<EditBuffer>(id).text);
     TextEdit::new(&mut text)
         .id(id)
-        .size((Sizing::FILL, Sizing::Hug))
-        .min_size((width, 0.0))
+        .size((Sizing::Fixed(width), Sizing::FILL))
         .show(ui);
     let snapshot = text.clone();
     ui.state_mut::<EditBuffer>(id).text = text;
@@ -281,8 +276,7 @@ fn numeric_edit(
                 .editable(true)
                 .speed(int_speed(*current))
                 .style(theme.drag_value.clone())
-                .size((Sizing::FILL, Sizing::Hug))
-                .min_size((width, 0.0))
+                .size((Sizing::Fixed(width), Sizing::FILL))
                 .id(id)
                 .show(ui);
             (draft != *current).then_some(StaticValue::Int(draft))
@@ -294,8 +288,7 @@ fn numeric_edit(
                 .speed(float_speed(*current))
                 .decimals(3)
                 .style(theme.drag_value.clone())
-                .size((Sizing::FILL, Sizing::Hug))
-                .min_size((width, 0.0))
+                .size((Sizing::Fixed(width), Sizing::FILL))
                 .id(id)
                 .show(ui);
             // Bit-exact: matches StaticValue's PartialEq, so `1.0` → `1`
