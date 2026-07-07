@@ -81,14 +81,14 @@ pub(crate) fn show(
     }
     match value {
         StaticValue::Int(current) => {
-            let buf = buffered_text_edit(ui, id, *current, i64::to_string, width);
+            let buf = buffered_text_edit(ui, id, current, i64::to_string, width);
             buf.parse::<i64>()
                 .ok()
                 .filter(|v| v != current)
                 .map(StaticValue::Int)
         }
         StaticValue::Float(current) => {
-            let buf = buffered_text_edit(ui, id, *current, format_float, width);
+            let buf = buffered_text_edit(ui, id, current, format_float, width);
             buf.parse::<f64>()
                 .ok()
                 // Bit-exact: matches StaticValue's PartialEq, so we
@@ -98,7 +98,7 @@ pub(crate) fn show(
                 .map(StaticValue::Float)
         }
         StaticValue::String(current) => {
-            let buf = buffered_text_edit(ui, id, current.clone(), |s| s.clone(), width);
+            let buf = buffered_text_edit(ui, id, current, |s| s.clone(), width);
             (buf != *current).then_some(StaticValue::String(buf))
         }
         StaticValue::Bool(current) => {
@@ -170,7 +170,7 @@ fn any_smart_edit(
     value: &StaticValue,
     width: f32,
 ) -> Option<StaticValue> {
-    let buf = buffered_text_edit(ui, id, value.clone(), format_any, width);
+    let buf = buffered_text_edit(ui, id, value, format_any, width);
     let parsed = parse_any(&buf);
     (parsed != *value).then_some(parsed)
 }
@@ -219,7 +219,7 @@ fn read_only_label(
     value: &StaticValue,
     width: f32,
 ) -> Option<StaticValue> {
-    let mut buf = placeholder(value);
+    let mut buf = value.to_value_string();
     TextEdit::new(&mut buf)
         .id(id)
         .size((Sizing::Fixed(width), Sizing::Hug))
@@ -247,12 +247,12 @@ fn path_preview(path: &str) -> String {
 fn buffered_text_edit<T>(
     ui: &mut Ui,
     id: WidgetId,
-    canonical: T,
+    canonical: &T,
     fmt: fn(&T) -> String,
     width: f32,
 ) -> String {
     if ui.focused_id() != Some(id) {
-        ui.state_mut::<EditBuffer>(id).text = fmt(&canonical);
+        ui.state_mut::<EditBuffer>(id).text = fmt(canonical);
     }
     let mut text = std::mem::take(&mut ui.state_mut::<EditBuffer>(id).text);
     TextEdit::new(&mut text)
@@ -270,14 +270,6 @@ fn buffered_text_edit<T>(
 /// trailing `.0` so the field looks like a float.
 fn format_float(v: &f64) -> String {
     format!("{v:?}")
-}
-
-fn placeholder(value: &StaticValue) -> String {
-    match value {
-        StaticValue::Null => "null".to_owned(),
-        StaticValue::Enum(variant) => variant.clone(),
-        _ => String::new(),
-    }
 }
 
 #[cfg(test)]
