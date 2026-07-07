@@ -6,7 +6,7 @@ use palantir::{
 use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
 use scenarium::graph::{Binding, InputPort, Node, NodeKind};
-use scenarium::node::function::FuncInput;
+use scenarium::node::function::{Func, FuncInput};
 use scenarium::node::special::{ALL as SPECIAL_NODES, SpecialNode};
 
 use crate::core::document::view_node::ViewNode;
@@ -24,6 +24,25 @@ struct ChosenNode {
     node: Node,
     def: Option<Box<SubgraphDef>>,
     bindings: Vec<(InputPort, Binding)>,
+}
+
+/// One row of a category's palette list: a library `Func`, a built-in special
+/// node, or a shared subgraph def. Collecting the three into one type lets a
+/// category's rows be sorted by name into a single alphabetical list.
+enum PaletteEntry<'a> {
+    Func(&'a Func),
+    Special(SpecialNode),
+    Subgraph(&'a SubgraphDef),
+}
+
+impl PaletteEntry<'_> {
+    fn name(&self) -> &str {
+        match self {
+            PaletteEntry::Func(f) => &f.name,
+            PaletteEntry::Special(s) => &s.func().name,
+            PaletteEntry::Subgraph(d) => &d.name,
+        }
+    }
 }
 
 /// Right-click or double-click on empty canvas → popup that lists every
@@ -216,66 +235,92 @@ fn palette_body(
                                     .size((Sizing::Hug, Sizing::Hug))
                                     .gap(2.0)
                                     .show(ui, |ui| {
-                                        for func in
-                                            ctx.library.funcs.iter().filter(|f| {
-                                                f.category == category && shows(&f.name)
-                                            })
-                                        {
-                                            let resp =
-                                                MenuItem::new(func.name.clone()).show(ui, popup);
-                                            let clicked = resp.clicked();
-                                            if let Some(desc) = &func.description {
-                                                Tooltip::for_(&resp.snapshot())
-                                                    .text(desc.clone())
-                                                    .show(ui);
-                                            }
-                                            if clicked {
-                                                let node: Node = func.into();
-                                                let bindings =
-                                                    default_bindings(node.id, &func.inputs);
-                                                chosen = Some(ChosenNode {
-                                                    node,
-                                                    def: None,
-                                                    bindings,
-                                                });
-                                            }
-                                        }
-                                        // Built-in special nodes of this category (their
-                                        // interface is hardcoded, not library-registered).
-                                        for &special in SPECIAL_NODES.iter().filter(|s| {
-                                            s.func().category == category && shows(&s.func().name)
-                                        }) {
-                                            if let Some(picked) = special_entry(ui, popup, special)
-                                            {
-                                                chosen = Some(picked);
-                                            }
-                                        }
-                                        // Shared (`Linked`) subgraph defs of this
-                                        // category, after the funcs.
-                                        for def in
-                                            ctx.library.subgraphs.iter().filter(|d| {
-                                                d.category == category && shows(&d.name)
-                                            })
-                                        {
-                                            if MenuItem::new(def.name.clone())
-                                                .show(ui, popup)
-                                                .clicked()
-                                            {
-                                                // Localize on instance: drop an editable
-                                                // `Local` copy that records its library `origin`.
-                                                let mut local = def.fresh_copy();
-                                                local.origin = Some(def.id);
-                                                let node = Node::subgraph_instance(
-                                                    &local,
-                                                    SubgraphRef::Local(local.id),
-                                                );
-                                                let bindings =
-                                                    default_bindings(node.id, &local.inputs);
-                                                chosen = Some(ChosenNode {
-                                                    node,
-                                                    def: Some(Box::new(local)),
-                                                    bindings,
-                                                });
+                                        // Funcs, built-in special nodes (interface hardcoded,
+                                        // not library-registered), and shared (`Linked`)
+                                        // subgraph defs of this category, merged and sorted by
+                                        // name so the list reads as one alphabetical run.
+                                        let mut entries: Vec<PaletteEntry> = ctx
+                                            .library
+                                            .funcs
+                                            .iter()
+                                            .filter(|f| f.category == category && shows(&f.name))
+                                            .map(PaletteEntry::Func)
+                                            .chain(
+                                                SPECIAL_NODES
+                                                    .iter()
+                                                    .copied()
+                                                    .filter(|s| {
+                                                        s.func().category == category
+                                                            && shows(&s.func().name)
+                                                    })
+                                                    .map(PaletteEntry::Special),
+                                            )
+                                            .chain(
+                                                ctx.library
+                                                    .subgraphs
+                                                    .iter()
+                                                    .filter(|d| {
+                                                        d.category == category && shows(&d.name)
+                                                    })
+                                                    .map(PaletteEntry::Subgraph),
+                                            )
+                                            .collect();
+                                        entries
+                                            .sort_by_cached_key(|e| e.name().to_ascii_lowercase());
+                                        for entry in entries {
+                                            match entry {
+                                                PaletteEntry::Func(func) => {
+                                                    let resp = MenuItem::new(func.name.clone())
+                                                        .show(ui, popup);
+                                                    let clicked = resp.clicked();
+                                                    if let Some(desc) = &func.description {
+                                                        Tooltip::for_(&resp.snapshot())
+                                                            .text(desc.clone())
+                                                            .show(ui);
+                                                    }
+                                                    if clicked {
+                                                        let node: Node = func.into();
+                                                        let bindings =
+                                                            default_bindings(node.id, &func.inputs);
+                                                        chosen = Some(ChosenNode {
+                                                            node,
+                                                            def: None,
+                                                            bindings,
+                                                        });
+                                                    }
+                                                }
+                                                PaletteEntry::Special(special) => {
+                                                    if let Some(picked) =
+                                                        special_entry(ui, popup, special)
+                                                    {
+                                                        chosen = Some(picked);
+                                                    }
+                                                }
+                                                PaletteEntry::Subgraph(def) => {
+                                                    if MenuItem::new(def.name.clone())
+                                                        .show(ui, popup)
+                                                        .clicked()
+                                                    {
+                                                        // Localize on instance: drop an editable
+                                                        // `Local` copy that records its library
+                                                        // `origin`.
+                                                        let mut local = def.fresh_copy();
+                                                        local.origin = Some(def.id);
+                                                        let node = Node::subgraph_instance(
+                                                            &local,
+                                                            SubgraphRef::Local(local.id),
+                                                        );
+                                                        let bindings = default_bindings(
+                                                            node.id,
+                                                            &local.inputs,
+                                                        );
+                                                        chosen = Some(ChosenNode {
+                                                            node,
+                                                            def: Some(Box::new(local)),
+                                                            bindings,
+                                                        });
+                                                    }
+                                                }
                                             }
                                         }
                                     });
