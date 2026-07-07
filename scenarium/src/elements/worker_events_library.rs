@@ -25,7 +25,7 @@ pub fn worker_events_library() -> Library {
     library.add(
         Func::new(FRAME_EVENT_FUNC_ID, "Frame Event")
             .description("Emits a recurring frame tick, carrying the elapsed time and frame count.")
-            .category("Timers")
+            .category("System")
             .input(
                 FuncInput::required("Frequency", DataType::Float)
                     .description("Target ticks per second (Hz). 0 disables the FPS event.")

@@ -105,7 +105,7 @@ pub fn fs_watch_library() -> Library {
 
     library.add(
         Func::new(WATCH_DIRECTORY_FUNC_ID, "Watch Directory")
-            .category("Filesystem")
+            .category("System")
             .description(
                 "Passes a directory through unchanged and fires `Changed` when files are added, \
                  removed, renamed, or written — ignoring access-time and other metadata-only events.",

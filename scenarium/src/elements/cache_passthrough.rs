@@ -26,7 +26,7 @@ pub(crate) fn cache_passthrough_func() -> &'static Func {
 
 fn build_func() -> Func {
     Func::new(CACHE_PASSTHROUGH_FUNC_ID, "File Cache")
-        .category("Cache")
+        .category("System")
         // It owns its caching (explicit-path store), so the editor's generic
         // disk-cache toggle doesn't apply.
         .uncacheable()
