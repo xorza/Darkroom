@@ -13,17 +13,16 @@ pub fn basic_library() -> Library {
     // back by the editor. Sugar over `ContextManager::log`.
     library.add(
         Func::new("01896910-0790-AD1B-AA12-3F1437196789", "Print")
-            .description("Logs a string value to the node log.")
+            .description("Logs any value to the node log.")
             .category("System")
             .terminal()
             .input(
-                FuncInput::required("Value", DataType::String)
-                    .description("Text to write to the node's log (info level)."),
+                FuncInput::required("Value", DataType::Null)
+                    .description("Value of any type to write to the node's log (info level)."),
             )
             .lambda(async_lambda!(move |ctx, _, _, inputs, _, _| {
                 assert_eq!(inputs.len(), 1);
-                let value: &str = inputs[0].value.as_string().unwrap();
-                ctx.info(value);
+                ctx.info(inputs[0].value.to_value_string());
                 Ok(())
             })),
     );
