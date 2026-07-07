@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{Configure, MenuItem, Panel, PopupHandle, Sizing, Text, Tooltip, Ui};
+use palantir::{Configure, MenuItem, Panel, PopupHandle, Scroll, Sizing, Text, Tooltip, Ui};
 use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
 use scenarium::graph::{Binding, InputPort, Node, NodeKind};
@@ -67,12 +67,22 @@ impl NewNodeUi {
             self.menu.open_at(rect.min + local);
         }
 
-        let chosen = self.menu.show(
-            ui,
-            "new_node_popup",
-            Some(ctx.theme.new_node_popup_max_height),
-            |ui, popup| palette_body(ui, popup, ctx),
-        );
+        // Cap the palette height to the window so a short window scrolls
+        // the overflow (via the inner vertical `Scroll`) instead of
+        // running off-screen. The popup's `max_size` height bounds that
+        // scroll's viewport; the `Hug` columns inside report their full
+        // height as the scrollable content.
+        let surface = ui.display().logical_rect();
+        let max_height = ctx
+            .theme
+            .new_node_popup_max_height
+            .min(surface.size.h - 16.0)
+            .max(120.0);
+        let chosen = self
+            .menu
+            .show(ui, "new_node_popup", Some(max_height), |ui, popup| {
+                palette_body(ui, popup, ctx)
+            });
 
         if let Some(ChosenNode {
             node,
@@ -106,91 +116,108 @@ impl NewNodeUi {
 
 /// Record the palette's category columns and return the chosen entry, if
 /// any. One column per category (an `hstack`); within a column the funcs are
-/// a `wrap_vstack`, so a category with many funcs wraps into sub-columns once
-/// it would exceed the popup's height cap (set by the caller): a bounded
-/// stack constrains its children's main axis, so the cap flows down through
-/// the column stacks into each func wrap. Everything hugs, so the popup is
-/// only as wide/tall as its columns need. Funcs first, then this category's
-/// shared (`Linked`) subgraph defs. The pick is owned, holding no `library`
-/// borrow past the body.
+/// a plain `vstack`. The whole row lives inside a vertical `Scroll` so a
+/// window too short for the palette pans the overflow instead of running
+/// off-screen: the popup's `max_size` height cap (set by the caller from the
+/// window height) bounds the scroll's viewport, and the `Hug` columns report
+/// their full height as the scrollable content. Everything hugs on the cross
+/// axis, so the popup is only as wide as its columns need. Funcs first, then
+/// this category's shared (`Linked`) subgraph defs. The pick is owned,
+/// holding no `library` borrow past the body.
 fn palette_body(ui: &mut Ui, popup: &PopupHandle, ctx: &AppContext<'_>) -> Option<ChosenNode> {
     let mut chosen: Option<ChosenNode> = None;
-    Panel::hstack()
-        .id_salt("new_node_columns")
+    Scroll::vertical()
+        .id_salt("new_node_scroll")
         .size((Sizing::Hug, Sizing::Hug))
-        .gap(12.0)
         .show(ui, |ui| {
-            for category in sorted_categories(ctx) {
-                Panel::vstack()
-                    .id_salt(("new_node_col", category))
-                    .size((Sizing::Hug, Sizing::Hug))
-                    .gap(4.0)
-                    .show(ui, |ui| {
-                        Text::new(category.to_owned())
-                            .id_salt(("new_node_cat", category))
-                            .show(ui);
-                        Panel::wrap_vstack()
-                            .id_salt(("new_node_funcs", category))
+            Panel::hstack()
+                .id_salt("new_node_columns")
+                .size((Sizing::Hug, Sizing::Hug))
+                .gap(12.0)
+                .show(ui, |ui| {
+                    for category in sorted_categories(ctx) {
+                        Panel::vstack()
+                            .id_salt(("new_node_col", category))
                             .size((Sizing::Hug, Sizing::Hug))
-                            .gap(2.0)
-                            .line_gap(12.0)
+                            .gap(4.0)
                             .show(ui, |ui| {
-                                for func in
-                                    ctx.library.funcs.iter().filter(|f| f.category == category)
-                                {
-                                    let resp = MenuItem::new(func.name.clone()).show(ui, popup);
-                                    let clicked = resp.clicked();
-                                    if let Some(desc) = &func.description {
-                                        Tooltip::for_(&resp.snapshot()).text(desc.clone()).show(ui);
-                                    }
-                                    if clicked {
-                                        let node: Node = func.into();
-                                        let bindings = default_bindings(node.id, &func.inputs);
-                                        chosen = Some(ChosenNode {
-                                            node,
-                                            def: None,
-                                            bindings,
-                                        });
-                                    }
-                                }
-                                // Built-in special nodes of this category (their
-                                // interface is hardcoded, not library-registered).
-                                for &special in SPECIAL_NODES
-                                    .iter()
-                                    .filter(|s| s.func().category == category)
-                                {
-                                    if let Some(picked) = special_entry(ui, popup, special) {
-                                        chosen = Some(picked);
-                                    }
-                                }
-                                // Shared (`Linked`) subgraph defs of this
-                                // category, after the funcs.
-                                for def in ctx
-                                    .library
-                                    .subgraphs
-                                    .iter()
-                                    .filter(|d| d.category == category)
-                                {
-                                    if MenuItem::new(def.name.clone()).show(ui, popup).clicked() {
-                                        // Localize on instance: drop an editable
-                                        // `Local` copy that records its library `origin`.
-                                        let mut local = def.fresh_copy();
-                                        local.origin = Some(def.id);
-                                        let node = Node::subgraph_instance(
-                                            &local,
-                                            SubgraphRef::Local(local.id),
-                                        );
-                                        let bindings = default_bindings(node.id, &local.inputs);
-                                        chosen = Some(ChosenNode {
-                                            node,
-                                            def: Some(Box::new(local)),
-                                            bindings,
-                                        });
-                                    }
-                                }
+                                Text::new(category.to_owned())
+                                    .id_salt(("new_node_cat", category))
+                                    .show(ui);
+                                Panel::vstack()
+                                    .id_salt(("new_node_funcs", category))
+                                    .size((Sizing::Hug, Sizing::Hug))
+                                    .gap(2.0)
+                                    .show(ui, |ui| {
+                                        for func in ctx
+                                            .library
+                                            .funcs
+                                            .iter()
+                                            .filter(|f| f.category == category)
+                                        {
+                                            let resp =
+                                                MenuItem::new(func.name.clone()).show(ui, popup);
+                                            let clicked = resp.clicked();
+                                            if let Some(desc) = &func.description {
+                                                Tooltip::for_(&resp.snapshot())
+                                                    .text(desc.clone())
+                                                    .show(ui);
+                                            }
+                                            if clicked {
+                                                let node: Node = func.into();
+                                                let bindings =
+                                                    default_bindings(node.id, &func.inputs);
+                                                chosen = Some(ChosenNode {
+                                                    node,
+                                                    def: None,
+                                                    bindings,
+                                                });
+                                            }
+                                        }
+                                        // Built-in special nodes of this category (their
+                                        // interface is hardcoded, not library-registered).
+                                        for &special in SPECIAL_NODES
+                                            .iter()
+                                            .filter(|s| s.func().category == category)
+                                        {
+                                            if let Some(picked) = special_entry(ui, popup, special)
+                                            {
+                                                chosen = Some(picked);
+                                            }
+                                        }
+                                        // Shared (`Linked`) subgraph defs of this
+                                        // category, after the funcs.
+                                        for def in ctx
+                                            .library
+                                            .subgraphs
+                                            .iter()
+                                            .filter(|d| d.category == category)
+                                        {
+                                            if MenuItem::new(def.name.clone())
+                                                .show(ui, popup)
+                                                .clicked()
+                                            {
+                                                // Localize on instance: drop an editable
+                                                // `Local` copy that records its library `origin`.
+                                                let mut local = def.fresh_copy();
+                                                local.origin = Some(def.id);
+                                                let node = Node::subgraph_instance(
+                                                    &local,
+                                                    SubgraphRef::Local(local.id),
+                                                );
+                                                let bindings =
+                                                    default_bindings(node.id, &local.inputs);
+                                                chosen = Some(ChosenNode {
+                                                    node,
+                                                    def: Some(Box::new(local)),
+                                                    bindings,
+                                                });
+                                            }
+                                        }
+                                    });
                             });
-                    });
-            }
+                    }
+                });
         });
     chosen
 }
