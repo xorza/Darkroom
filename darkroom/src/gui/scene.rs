@@ -10,7 +10,7 @@ use scenarium::graph::{
     Binding, CachePersistence, Graph, NodeId, NodeKind, OutputPort, Subscription,
 };
 use scenarium::library::Library;
-use scenarium::node::function::{FuncInput, FuncOutput, OutputType, ValueVariant};
+use scenarium::node::function::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 
 use crate::core::document::{GraphView, Viewport};
 use crate::gui::run_state::{ExecStatus, RunState};
@@ -159,6 +159,10 @@ pub struct SceneNode {
     /// self-caching nodes (the file-cache passthrough) and boundary/stub nodes
     /// that have no output to persist.
     pub uncacheable: bool,
+    /// The node's func is `Impure`. An impure node has no content digest, so a
+    /// `Disk` persist request is silently never honored — the header hides its
+    /// `C` badge, like `uncacheable`. `false` for composites and boundary nodes.
+    pub impure: bool,
     /// A `SubgraphInput`/`SubgraphOutput` interface boundary node. Its
     /// ports route the subgraph interface rather than carry literal
     /// values, so the const-value affordances (inline editor, "Set
@@ -240,6 +244,7 @@ impl Scene {
                     subgraph: None,
                     terminal: f.terminal,
                     uncacheable: f.uncacheable,
+                    impure: f.behavior == FuncBehavior::Impure,
                 }),
                 NodeKind::Subgraph(r) => graph.resolve_def(*r, library).map(|d| NodeInterface {
                     kind_label: d.name.clone().into(),
@@ -253,6 +258,9 @@ impl Scene {
                     // outputs" as the visible sink signal.
                     terminal: d.outputs.is_empty(),
                     uncacheable: false,
+                    // Aggregate purity of a composite isn't known here, so the
+                    // persist toggle stays available for it (unlike a func).
+                    impure: false,
                 }),
                 // A built-in special node: its interface is the hardcoded spec.
                 // Any wildcard output it declares is resolved below, with every
@@ -268,6 +276,7 @@ impl Scene {
                         subgraph: None,
                         terminal: f.terminal,
                         uncacheable: f.uncacheable,
+                        impure: f.behavior == FuncBehavior::Impure,
                     })
                 }
                 // Inbound boundary: no inputs; one output per def input,
@@ -288,6 +297,7 @@ impl Scene {
                         subgraph: None,
                         terminal: false,
                         uncacheable: true,
+                        impure: false,
                     }
                 }),
                 // Outbound boundary: one input per def output (synthesized
@@ -306,6 +316,7 @@ impl Scene {
                         subgraph: None,
                         terminal: false,
                         uncacheable: true,
+                        impure: false,
                     }
                 }),
             };
@@ -341,6 +352,7 @@ impl Scene {
                         subgraph: None,
                         terminal: false,
                         uncacheable: true,
+                        impure: false,
                     }
                 }
             };
@@ -421,6 +433,7 @@ impl Scene {
                 disabled: node.disabled,
                 persist: node.persist == CachePersistence::Disk,
                 uncacheable: interface.uncacheable,
+                impure: interface.impure,
                 boundary: matches!(
                     node.kind,
                     NodeKind::SubgraphInput | NodeKind::SubgraphOutput
@@ -489,6 +502,11 @@ struct NodeInterface<'a> {
     /// Node manages its own caching (or has no output to cache), so the editor's
     /// disk-cache (persist) toggle is hidden — see [`SceneNode::uncacheable`].
     uncacheable: bool,
+    /// The func is `Impure`, so it has no content digest and a `Disk` request is
+    /// silently never honored — the editor hides its persist toggle (see
+    /// [`SceneNode::impure`]). Only set from a func spec; `false` for composites
+    /// (aggregate purity isn't known here) and boundary/stub nodes.
+    impure: bool,
 }
 
 /// The literal a port falls back to when given a const binding: its declared
@@ -828,5 +846,42 @@ mod tests {
         let disk = scene.nodes.iter().find(|n| n.id == disk_id).unwrap();
         assert!(!memory.persist, "default node projects memory-only");
         assert!(disk.persist, "Disk-marked node projects persist=true");
+    }
+
+    #[test]
+    fn impure_flag_projects_from_func_behavior() {
+        use scenarium::node::function::Func;
+
+        // Two funcs identical but for behavior: a `Pure` one (offers the disk-cache
+        // toggle) and an `Impure` one (has no content digest, so the toggle is hidden).
+        // Both have an output and are non-terminal/cacheable, so `impure` is the sole
+        // differentiator the header gate reads.
+        let mut library = Library::default();
+        library.add(
+            Func::new("bbebd119-82d8-45cc-a710-cdaa45426521", "pure_src")
+                .pure()
+                .output(FuncOutput::new("out", DataType::Int)),
+        );
+        library.add(
+            Func::new("9a97bb06-2c2e-443a-a836-6a11e29cbea7", "impure_src")
+                .output(FuncOutput::new("out", DataType::Int)),
+        );
+
+        let mut graph = Graph::default();
+        let pure_id = graph.add_func_node(library.by_name("pure_src").unwrap());
+        let impure_id = graph.add_func_node(library.by_name("impure_src").unwrap());
+
+        let view = GraphView::for_graph(&graph);
+        let mut scene = Scene::default();
+        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+
+        let pure = scene.nodes.iter().find(|n| n.id == pure_id).unwrap();
+        let impure = scene.nodes.iter().find(|n| n.id == impure_id).unwrap();
+
+        assert!(!pure.impure, "a Pure func keeps its persist toggle");
+        assert!(impure.impure, "an Impure func hides its persist toggle");
+        // Isolate `impure` as the cause: neither is self-caching or a terminal sink.
+        assert!(!pure.uncacheable && !pure.terminal);
+        assert!(!impure.uncacheable && !impure.terminal);
     }
 }
