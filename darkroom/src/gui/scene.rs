@@ -504,6 +504,10 @@ fn default_static_value(library: &Library, input: &FuncInput) -> Option<StaticVa
                 .enum_variants(id)
                 .and_then(|variants| variants.first())
                 .map(|first| StaticValue::Enum(first.clone())),
+            // An untyped (`Any`) port has no concrete kind to seed; start it as
+            // an empty string so the smart editor opens blank and infers the
+            // kind from whatever the user types (see `value_editor::parse_any`).
+            DataType::Any => Some(StaticValue::String(String::new())),
             ty => ty.default_value(),
         }
     })
