@@ -14,7 +14,7 @@ pub fn basic_library() -> Library {
     library.add(
         Func::new("01896910-0790-AD1B-AA12-3F1437196789", "Print")
             .description("Logs a string value to the node log.")
-            .category("Math")
+            .category("System")
             .terminal()
             .input(
                 FuncInput::required("Value", DataType::String)
