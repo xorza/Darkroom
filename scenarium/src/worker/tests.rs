@@ -4,7 +4,7 @@ use common::PauseGate;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
-use crate::elements::basic_library::basic_library;
+use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::stats::{ExecutionStats, RunPhase};
 use crate::execution::{Error, Result as ExecResult};
@@ -43,7 +43,7 @@ impl FrameHarness {
     }
 
     async fn with_callback_capacity(cap: usize) -> Self {
-        let mut library = basic_library();
+        let mut library = system_library();
         library.merge(worker_events_library());
 
         let graph = log_frame_no_graph(&library);
@@ -427,7 +427,7 @@ async fn events_are_deduplicated() {
 async fn execute_terminals_triggers_terminal_nodes() {
     use crate::data::StaticValue;
 
-    let library = basic_library();
+    let library = system_library();
 
     // Simple single-terminal graph — doesn't use FrameHarness' frame-event setup.
     let mut graph = Graph::default();
@@ -473,7 +473,7 @@ async fn execute_terminals_triggers_terminal_nodes() {
 async fn worker_streams_node_progress_before_finished() {
     use crate::data::StaticValue;
 
-    let library = basic_library();
+    let library = system_library();
     let mut graph = Graph::default();
     let print_func = library.by_name("Print").unwrap();
     let mut print_node: Node = print_func.into();
@@ -534,7 +534,7 @@ async fn worker_streams_node_progress_before_finished() {
 async fn stale_cancel_is_cleared_at_run_start() {
     use crate::data::StaticValue;
 
-    let library = basic_library();
+    let library = system_library();
     let mut graph = Graph::default();
     let print_func = library.by_name("Print").unwrap();
     let mut print_node: Node = print_func.into();
@@ -950,7 +950,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     // the loop never actually spawns. This removes lambda-driven
     // callbacks as a confounding factor while still exercising the
     // should_start_event_loop branch.
-    let library = basic_library();
+    let library = system_library();
 
     let mut graph = Graph::default();
     let print_func = library.by_name("Print").unwrap();
@@ -1009,7 +1009,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
 async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     use crate::data::StaticValue;
 
-    let library = basic_library();
+    let library = system_library();
 
     // Terminal-only graph — one execute produces one line of output.
     let mut graph = Graph::default();

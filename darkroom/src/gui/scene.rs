@@ -672,13 +672,13 @@ mod tests {
 
     #[test]
     fn missing_func_and_subgraph_render_as_deletable_stubs() {
-        use scenarium::elements::basic_library::basic_library;
+        use scenarium::elements::math_library::math_library;
         use scenarium::graph::subgraph::SubgraphRef;
 
         // A resolvable func, plus two unresolvable nodes (e.g. a document
         // saved against an older library): a func id and a linked subgraph
         // def id the library no longer defines.
-        let library = basic_library();
+        let library = math_library();
         let mut graph = Graph::default();
         let known: Node = library.by_name("Add").unwrap().into();
         let known_id = known.id;
@@ -801,12 +801,12 @@ mod tests {
 
     #[test]
     fn persist_flag_projects_disk_as_true_memory_as_false() {
-        use scenarium::elements::basic_library::basic_library;
+        use scenarium::elements::math_library::math_library;
         use scenarium::graph::CachePersistence;
 
         // Two identical funcs differing only in cache policy: one default
         // (Memory), one Disk. The projection must mirror each.
-        let library = basic_library();
+        let library = math_library();
         let mut graph = Graph::default();
         let memory_node: Node = library.by_name("Add").unwrap().into();
         let memory_id = memory_node.id;

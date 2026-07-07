@@ -30,7 +30,7 @@ to the other:
 | `func_lambda.rs` | `FuncLambda`: the async node-function signature + `InvokeInput`/`InvokeResult`/`InvokeError`. |
 | `event_lambda.rs` | `EventLambda`: async event-handler signature. |
 | `macros.rs` | `async_lambda!` — ergonomic `FuncLambda` construction. |
-| `elements/` | Built-in node libraries: `basic_library.rs` (math/string/print), `worker_events_library.rs` (frame/fps events). |
+| `elements/` | Built-in node libraries: `math_library.rs` (Math), `system_library.rs` (System: print / to-string / concat), `worker_events_library.rs` (System: frame/fps events), `fs_watch_library.rs` (System: dir watch), `cache_passthrough.rs` (System: file cache). |
 | `execution/` | The compile→plan→execute pipeline (see below). |
 | `execution_stats.rs` | `ExecutionStats` per-run summary + `FlattenMap` (flat id → authoring attribution), `LogEntry`. |
 | `common/` | `AnyState` (per-node mutable state), `SharedAnyState` (concurrent event state). |
