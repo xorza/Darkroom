@@ -1,5 +1,6 @@
 //! Testing utilities for lumos.
 
+pub mod mem_probe;
 pub mod real_data;
 pub mod synthetic;
 

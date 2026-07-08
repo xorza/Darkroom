@@ -38,45 +38,19 @@
 //! unavailable and the assertion is skipped.
 
 use std::io::{self, Write};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::io::astro_image::AstroImage;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
+use crate::testing::mem_probe::{MB, RssSampler, env_parse};
 use crate::testing::synthetic::fixtures::star_field;
-
-const MB: u64 = 1024 * 1024;
 
 /// Generous upper bound on the detector's per-detection working set, in image-sized f32 planes:
 /// the pooled f32 scratch, plus the bitmasks and label map counted as their f32-equivalent, plus
 /// slack for transient (non-pooled) allocations. Used only to size the peak-heap ceiling; the exact
 /// pool footprint is pinned in `mem_budget_tests`.
 const WORKING_SET_PLANES: u64 = 12;
-
-/// Read a `/proc/self/status` field (`RssAnon`, `VmRSS`) in KiB. Linux-only; returns 0 elsewhere.
-fn status_kb(field: &str) -> u64 {
-    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
-    for line in status.lines() {
-        if let Some(rest) = line.strip_prefix(field).and_then(|r| r.strip_prefix(':')) {
-            return rest
-                .trim()
-                .trim_end_matches("kB")
-                .trim()
-                .parse()
-                .unwrap_or(0);
-        }
-    }
-    0
-}
-
-fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
 
 fn preset_config() -> Config {
     match std::env::var("LUMOS_SD_PRESET").ok().as_deref() {
@@ -141,33 +115,12 @@ fn detect_memory_probe() {
     );
     println!();
 
-    // Sample peak heap (RssAnon — the OOM-relevant, non-reclaimable figure) and total resident
-    // (VmRSS) for the detection loop only. `steady` flips true after the first detection, which is
-    // the one that allocates the pool; peak thereafter must not climb — that's the flat-in-n proof.
-    let stop = Arc::new(AtomicBool::new(false));
-    let steady = Arc::new(AtomicBool::new(false));
-    let peak_anon = Arc::new(AtomicU64::new(0));
-    let peak_total = Arc::new(AtomicU64::new(0));
-    let peak_steady_anon = Arc::new(AtomicU64::new(0));
-    let sampler = {
-        let (stop, steady) = (stop.clone(), steady.clone());
-        let (peak_anon, peak_total, peak_steady_anon) = (
-            peak_anon.clone(),
-            peak_total.clone(),
-            peak_steady_anon.clone(),
-        );
-        std::thread::spawn(move || {
-            while !stop.load(Ordering::Relaxed) {
-                let anon = status_kb("RssAnon");
-                peak_anon.fetch_max(anon, Ordering::Relaxed);
-                peak_total.fetch_max(status_kb("VmRSS"), Ordering::Relaxed);
-                if steady.load(Ordering::Relaxed) {
-                    peak_steady_anon.fetch_max(anon, Ordering::Relaxed);
-                }
-                std::thread::sleep(std::time::Duration::from_millis(2));
-            }
-        })
-    };
+    // Sample peak heap (RssAnon — the OOM-relevant figure) and total resident (VmRSS) for the
+    // detection loop. The gate opens after the first detection — the one that allocates the pool —
+    // so the gated peak is the steady state; it must not climb with the frame count (the flat-in-n
+    // proof).
+    let sampler = RssSampler::start();
+    let steady_gate = sampler.gate();
 
     let start = Instant::now();
     let mut reused = StarDetector::from_config(config.clone());
@@ -181,7 +134,7 @@ fn detect_memory_probe() {
         };
         total_stars += result.stars.len();
         if i == 0 {
-            steady.store(true, Ordering::Relaxed);
+            steady_gate.open();
         }
         let secs = start.elapsed().as_secs_f64();
         print!(
@@ -193,12 +146,10 @@ fn detect_memory_probe() {
     }
     let total_secs = start.elapsed().as_secs_f64();
 
-    stop.store(true, Ordering::Relaxed);
-    sampler.join().ok();
-
-    let anon_mb = peak_anon.load(Ordering::Relaxed) / 1024;
-    let steady_mb = peak_steady_anon.load(Ordering::Relaxed) / 1024;
-    let total_mb = peak_total.load(Ordering::Relaxed) / 1024;
+    let peak = sampler.finish();
+    let anon_mb = peak.anon_mb;
+    let steady_mb = peak.gated_anon_mb;
+    let total_mb = peak.total_mb;
     let mpix = (width * height * n) as f64 / 1e6;
 
     println!("\n");

@@ -1,1 +1,4 @@
 scrolview on newnode popup
+
+dont cache flag on nodes
+enable disable ram cache

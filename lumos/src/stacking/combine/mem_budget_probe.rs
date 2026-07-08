@@ -43,7 +43,7 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use common::CancelToken;
@@ -56,31 +56,7 @@ use crate::stacking::combine::config::{CombineMethod, StackConfig};
 use crate::stacking::combine::progress::{ProgressCallback, StackingProgress, StackingStage};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::stack::stack;
-
-const MB: u64 = 1024 * 1024;
-
-/// Read a `/proc/self/status` field (`RssAnon`, `VmRSS`) in KiB. Linux-only; returns 0 elsewhere.
-fn status_kb(field: &str) -> u64 {
-    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
-    for line in status.lines() {
-        if let Some(rest) = line.strip_prefix(field).and_then(|r| r.strip_prefix(':')) {
-            return rest
-                .trim()
-                .trim_end_matches("kB")
-                .trim()
-                .parse()
-                .unwrap_or(0);
-        }
-    }
-    0
-}
-
-fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
+use crate::testing::mem_probe::{MB, RssSampler, env_parse};
 
 /// Resolved `available_memory` budget plus a human label for the report.
 #[derive(Debug)]
@@ -327,33 +303,10 @@ fn master_stack_memory_probe() -> io::Result<()> {
     // Sample peak heap (RssAnon — the OOM-relevant, non-reclaimable metric) and total resident
     // (VmRSS, which includes reclaimable mmap'd spill pages) for the duration of the stack only.
     // Peak heap is split by phase: the *load* burst (concurrent decode transients — what the budget
-    // must bound) vs the *combine* steady state (resident frames + chunk buffers). `combining` flips
-    // when the first Processing progress arrives, so each sample lands in the right bucket.
-    let stop = Arc::new(AtomicBool::new(false));
-    let combining = Arc::new(AtomicBool::new(false));
-    let peak_anon = Arc::new(AtomicU64::new(0));
-    let peak_total = Arc::new(AtomicU64::new(0));
-    let peak_load_anon = Arc::new(AtomicU64::new(0));
-    let peak_combine_anon = Arc::new(AtomicU64::new(0));
-    let sampler = {
-        let (stop, combining) = (stop.clone(), combining.clone());
-        let (peak_anon, peak_total) = (peak_anon.clone(), peak_total.clone());
-        let (peak_load_anon, peak_combine_anon) =
-            (peak_load_anon.clone(), peak_combine_anon.clone());
-        std::thread::spawn(move || {
-            while !stop.load(Ordering::Relaxed) {
-                let anon = status_kb("RssAnon");
-                peak_anon.fetch_max(anon, Ordering::Relaxed);
-                peak_total.fetch_max(status_kb("VmRSS"), Ordering::Relaxed);
-                if combining.load(Ordering::Relaxed) {
-                    peak_combine_anon.fetch_max(anon, Ordering::Relaxed);
-                } else {
-                    peak_load_anon.fetch_max(anon, Ordering::Relaxed);
-                }
-                std::thread::sleep(std::time::Duration::from_millis(2));
-            }
-        })
-    };
+    // must bound, the gate-closed / ungated peak) vs the *combine* steady state (resident frames +
+    // chunk buffers, the gate-open peak). The gate opens when the first Processing progress arrives.
+    let sampler = RssSampler::start();
+    let combining = sampler.gate();
 
     // Split load vs combine wall-clock via the progress stages, and print a live line.
     let start = Instant::now();
@@ -374,7 +327,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
                 io::stdout().flush().ok();
             }
             StackingStage::Processing => {
-                combining.store(true, Ordering::Relaxed);
+                combining.open();
                 combine_start_us
                     .compare_exchange(
                         0,
@@ -391,17 +344,15 @@ fn master_stack_memory_probe() -> io::Result<()> {
         stack(&frames.paths, config, progress, CancelToken::never()).expect("stack failed");
     let total_secs = start.elapsed().as_secs_f64();
 
-    stop.store(true, Ordering::Relaxed);
-    sampler.join().ok();
-
+    let peak = sampler.finish();
     let combine_secs = total_secs - combine_start_us.load(Ordering::Relaxed) as f64 / 1e6;
     let load_secs = total_secs - combine_secs;
     let dims = result.image.dimensions();
     let mpix = (width * height * n) as f64 / 1e6;
-    let anon_mb = peak_anon.load(Ordering::Relaxed) / 1024;
-    let total_mb = peak_total.load(Ordering::Relaxed) / 1024;
-    let load_anon_mb = peak_load_anon.load(Ordering::Relaxed) / 1024;
-    let combine_anon_mb = peak_combine_anon.load(Ordering::Relaxed) / 1024;
+    let anon_mb = peak.anon_mb;
+    let total_mb = peak.total_mb;
+    let load_anon_mb = peak.ungated_anon_mb;
+    let combine_anon_mb = peak.gated_anon_mb;
 
     println!("\n");
     println!("=== result ===");
