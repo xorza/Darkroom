@@ -113,11 +113,29 @@ impl BufferPool {
     }
 }
 
-/// Dimension check used only by tests to assert pool sizing/reuse.
+/// Snapshot of how many buffers the pool currently holds, per kind. Memory tests read it to assert
+/// the detection working set stays flat across detections (no per-frame buffer leak).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PoolCounts {
+    pub floats: usize,
+    pub bitmasks: usize,
+    pub labels: usize,
+}
+
+/// Dimension check and pool-size introspection used only by tests to assert pool sizing/reuse.
 #[cfg(test)]
 impl BufferPool {
     pub fn matches_dimensions(&self, width: usize, height: usize) -> bool {
         self.dimensions.x == width && self.dimensions.y == height
+    }
+
+    pub(crate) fn counts(&self) -> PoolCounts {
+        PoolCounts {
+            floats: self.f32_buffers.len(),
+            bitmasks: self.bit_buffers.len(),
+            labels: self.u32_buffer.is_some() as usize,
+        }
     }
 }
 

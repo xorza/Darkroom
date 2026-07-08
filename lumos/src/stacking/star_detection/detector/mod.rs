@@ -15,6 +15,8 @@ use crate::io::astro_image::AstroImage;
 use crate::math::statistics::median_f32_mut;
 use crate::stacking::star_detection::background::{estimate_background, refine_background};
 use crate::stacking::star_detection::buffer_pool::BufferPool;
+#[cfg(test)]
+use crate::stacking::star_detection::buffer_pool::PoolCounts;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::star::Star;
 
@@ -188,5 +190,14 @@ impl StarDetector {
         }
 
         DetectionResult { stars, diagnostics }
+    }
+}
+
+#[cfg(test)]
+impl StarDetector {
+    /// Current buffer-pool working-set counts, or `None` before the first `detect`. For the memory
+    /// tests that assert the pool stays flat in the frame count across repeated detections.
+    pub(crate) fn pool_counts(&self) -> Option<PoolCounts> {
+        self.buffer_pool.as_ref().map(|pool| pool.counts())
     }
 }
