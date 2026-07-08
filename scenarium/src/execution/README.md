@@ -5,7 +5,7 @@ design home that the module's `//!` docs point at. Three parts:
 
 - **A. Subgraphs** — how composite nodes are authored and flattened away
   (`flatten.rs`; authoring types in `subgraph.rs`/`graph.rs`).
-- **B. Disk cache** — the content-addressed output cache for `persist = Disk` nodes
+- **B. Disk cache** — the content-addressed output cache for disk-backed (`Disk`/`Both`) nodes
   (`digest.rs`, `cache.rs`, `output_cache.rs`, `blob.rs`, `codec.rs`).
 - **C. File cache** — the explicit-path `file cache` passthrough node
   (`elements/cache_passthrough.rs`, `special.rs`).
@@ -232,20 +232,42 @@ Disk and RAM caching then work across composite boundaries with no special handl
 
 # Part B — Disk (content-addressed output) cache
 
-How a `persist = Disk` node's outputs survive a reload — staying correct (never serve
+How a disk-backed node's outputs survive a reload — staying correct (never serve
 a stale value) and lean (never hold bytes a run won't use). The **explicit-path**
 cache (Part C) shares the same storage primitive but keys on a path.
 
-## B.1 What opts in
+## B.0 The cache mode is two storage bits
 
-A node opts in with `CachePersistence::Disk` (`graph.rs`), surfaced on the flat node
-as `ExecutionNode.persist`. `Disk` is a **request**, honored only when:
+A node's `CacheMode` (`graph.rs`) is one four-state enum over two orthogonal bits — *keep
+in RAM* (`caches_in_ram`, the RAM tier §B.5) and *persist to disk* (`persists_to_disk`,
+this Part) — copied onto the flat node as `ExecutionNode.cache`:
+
+| Mode | RAM | Disk | After a run |
+|------|:-:|:-:|---|
+| `None` | ✗ | ✗ | value **dropped** — recomputes whenever next needed |
+| `Ram`  | ✓ | ✗ | value **kept resident**, reused across runs; lost on reopen |
+| `Disk` | ✗ | ✓ | RAM copy **demoted to disk-only** (`OnDisk`); reloads lazily |
+| `Both` | ✓ | ✓ | value **kept resident** *and* on disk — hot reuse + survives reopen |
+
+This is **storage only** — the mode never feeds the content digest (§B.2). Purity alone
+decides reproducibility; the mode decides where a reproducible value is stored. So a `None`
+node still has a digest: a downstream `Disk`/`Both` consumer caches normally and, when that
+consumer is a hit, the `None` node's cone is simply cut (§B.6) — never recomputed to feed a
+value nothing reads. The two reuse paths gate independently: RAM reuse
+(`Cache::is_resident_hit`) needs `caches_in_ram`; disk reuse (`mark_on_disk_if_present`)
+needs `persists_to_disk`. `evict_unused` then reclaims RAM the mode doesn't call to hold —
+demoting to a disk blob when one exists (lossless), else dropping only a non-RAM mode's value.
+
+## B.1 What opts into disk
+
+The disk store serves a node whose mode is `persists_to_disk` (`Disk`/`Both`, `graph.rs`),
+surfaced on the flat node as `ExecutionNode.cache`. Disk is a **request**, honored only when:
 
 1. The node has a **content digest** — its whole upstream cone is reproducible (§B.2).
    An impure node, or anything downstream of one, has no digest and is silently kept
    memory-only — it can never risk serving a stale value.
 2. A **disk root** is configured (`ExecutionEngine::set_output_cache` with a
-   `disk_root`). Until then every node is memory-only.
+   `disk_root`). Until then `Disk`/`Both` degrade to memory-only.
 
 ## B.2 The content digest is the cache key (`digest.rs`)
 
@@ -343,10 +365,13 @@ there are no deferred nodes. Then, per surviving node, once its digest is comput
    blob can't be the wrong type (the signature is in the digest, §B.2), but if it fails
    to *load* (corrupt/deleted) the bad file is deleted and the demanding consumer is
    dropped for this run; the next reopen recomputes it.
-5. **after the run → `evict_unused`.** Demote resident values the run's *executed* nodes
-   didn't produce or read — prior-run leftovers — back to `OnDisk`, **iff** a blob can
-   serve them again. Lossless (a later run or inspection reloads); a value with no blob
-   (Memory-only, impure) is kept, so eviction never forces a recompute.
+5. **after the run → `evict_unused`.** Reclaim RAM the run's cache modes don't call to
+   hold. A `caches_in_ram` node (`Ram`/`Both`) the run executed or read stays resident;
+   any other resident value is demoted to `OnDisk` **iff** a blob can serve it again
+   (lossless — a later run or inspection reloads), and only a **non-RAM** mode's value
+   (`None`, or a `Disk` value whose blob is missing) is dropped outright, recomputing when
+   next needed. A `Ram`/`Both` leftover with no blob is kept, so eviction never forces a
+   recompute of a value a mode promised to retain.
 
 **Off-run path — inspection.** `get_argument_values_with_previews` loads on demand via
 `hydrate_for_inspection`, so a disk-cached node no run touched still shows its value when
@@ -354,11 +379,11 @@ the editor selects it.
 
 ### Worked example
 
-`A → B → terminal`, `A` and `B` both `persist = Disk`, after a cold run that stored both.
-On reopen the pre-run cut resolves `A` and `B` as disk hits; the terminal runs and reads
-`B`, so `B` is kept and `hydrate_slot` pulls **only** `B` into RAM, while `A` — read only by
+`A → B → terminal`, `A` and `B` both disk-backed (`Disk`/`Both`), after a cold run that
+stored both. On reopen the pre-run cut resolves `A` and `B` as disk hits; the terminal runs
+and reads `B`, so `B`'s blob is pulled into RAM by `hydrate_slot` while `A` — read only by
 the reused `B` — is pruned (flagged `OnDisk`, still reported cached, its bytes never enter
-RAM). A `Memory` (non-persist) node feeding *only* `A` is cut too: it has no cross-session
+RAM). A `Ram` (memory-only) node feeding *only* `A` is cut too: it has no cross-session
 cache and the reused `A` ignores it, so it is **not** recomputed on reopen (the win the
 removed plan-time pass used to give). If a later edit invalidates `B`, `B` misses and
 recomputes, reading `A` from disk (`A` becomes the frontier) and re-needing that memory-only
@@ -401,7 +426,7 @@ not a registered `FuncId`. Its hardcoded interface + lambda come from
 - The lambda is a plain passthrough: `output[0] = input[0]`. The **engine** does the
   path-keyed file I/O around it.
 - The func is `uncacheable()` — it owns its caching, so the editor's generic
-  `persist = Disk` toggle doesn't apply.
+  `CacheMode` toggles don't apply.
 
 ## C.2 The path is the key (`file_cache_digest`)
 

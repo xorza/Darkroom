@@ -347,11 +347,11 @@ impl ExecutionEngine {
         Ok(stats)
     }
 
-    /// Persist to disk any **content-addressed** (`persist`) node that holds a resident
-    /// value but isn't on disk yet — e.g. a node just toggled to
-    /// `CachePersistence::Disk` whose value is still in RAM from a prior run. The worker
-    /// calls this on `SaveCaches`, since such a node is a cache hit and so never
-    /// re-executes to store itself.
+    /// Persist to disk any **content-addressed** (`persists_to_disk`, i.e. `Disk`/`Both`)
+    /// node that holds a resident value but isn't on disk yet — e.g. a node just toggled to
+    /// a disk-backed [`CacheMode`](crate::graph::CacheMode) whose value is still in RAM from
+    /// a prior run. The worker calls this on `SaveCaches`, since such a node is a cache hit
+    /// and so never re-executes to store itself.
     ///
     /// Never overwrites identical content: a content-addressed blob's path *is* its
     /// content hash, so [`OutputCache::store_node`] skips it when it already exists.
@@ -360,7 +360,7 @@ impl ExecutionEngine {
     /// identical file. Also a no-op for a node with no resident value.
     pub(crate) async fn store_resident_caches(&mut self) {
         for idx in self.program.node_indices() {
-            if !self.program.e_nodes[idx].persist {
+            if !self.program.e_nodes[idx].cache.persists_to_disk() {
                 continue;
             }
             self.output_cache

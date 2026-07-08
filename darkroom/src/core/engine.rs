@@ -48,8 +48,8 @@ impl Engine {
     }
 
     /// Point the content-addressed cache at `doc_path`'s project-local store
-    /// (`<stem>.darkroom-cache/` beside the file), so `persist` nodes reload across
-    /// sessions. `None` (an unsaved document) is memory-only. Explicit-path cache
+    /// (`<stem>.darkroom-cache/` beside the file), so disk-backed (`Disk`/`Both`)
+    /// nodes reload across sessions. `None` (an unsaved document) is memory-only. Explicit-path cache
     /// nodes are unaffected — they always use their own path.
     pub(crate) fn set_document_cache(&self, doc_path: Option<&Path>) {
         let root = doc_path.map(prepare_document_cache_root);

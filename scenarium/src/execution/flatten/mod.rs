@@ -24,7 +24,7 @@ use crate::execution::program::{
 };
 use crate::execution::stats::FlattenMap;
 use crate::graph::subgraph::SubgraphId;
-use crate::graph::{Binding, CachePersistence, Graph, InputPort, NodeId, NodeKind, Subscription};
+use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, Subscription};
 use crate::library::Library;
 use crate::node::function::Func;
 use crate::node::special::SpecialNode;
@@ -322,10 +322,10 @@ impl<'a> Run<'a> {
             e_node.events = Span::new(events_start, func.events.len() as u32);
             e_node.terminal = func.terminal;
             e_node.behavior = func.behavior;
-            // Record the `Disk` request; whether it's actually honored is decided
+            // Copy the cache mode; whether its disk bit is actually honored is decided
             // by the content digest (a node with an impure cone has no digest and
             // so can't be disk-cached) — see `digest.rs`.
-            e_node.persist = node.persist == CachePersistence::Disk;
+            e_node.cache = node.cache;
             // Special-node identity + its per-instance config (e.g. cache bypass),
             // recognized by the engine.
             e_node.special = special;

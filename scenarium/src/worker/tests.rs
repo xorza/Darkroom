@@ -1566,7 +1566,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     use crate::execution::output_cache::OutputCache;
-    use crate::graph::CachePersistence;
+    use crate::graph::CacheMode;
     use crate::testing::{TestFuncHooks, test_func_lib};
 
     /// A unique temp dir removed on drop, so the test doesn't collide or leak.
@@ -1611,7 +1611,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     let get_a_id = graph.by_name("get_a").unwrap().id;
     let mult_id = graph.by_name("mult").unwrap().id;
     let print_id = graph.by_name("Print").unwrap().id;
-    graph.by_id_mut(&mult_id).unwrap().persist = CachePersistence::Disk;
+    graph.by_id_mut(&mult_id).unwrap().cache = CacheMode::Disk;
     graph.set_input_binding(InputPort::new(mult_id, 0), (get_a_id, 0).into());
     graph.set_input_binding(InputPort::new(mult_id, 1), (get_a_id, 0).into());
     graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());

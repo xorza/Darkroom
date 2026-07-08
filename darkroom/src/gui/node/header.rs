@@ -11,7 +11,7 @@ use aperture::{
     Spacing, Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 use glam::Vec2;
-use scenarium::graph::{CachePersistence, NodeId};
+use scenarium::graph::{CacheMode, NodeId};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
@@ -278,32 +278,45 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     to: !node.disabled,
                 });
             }
-            // Cache toggle: filled when the node's output persists to the
-            // on-disk store (`CachePersistence::Disk`), hollow for memory-only.
-            // Muted swatch, like the disable toggle — a config flip, not an
-            // alarm. Suppressed where the toggle doesn't apply: boundary nodes
-            // (pure routing), self-caching nodes like the file-cache
-            // passthrough (`uncacheable`), terminal sinks (no downstream
-            // consumer to serve a cached output to), and impure nodes (no
-            // content digest, so a `Disk` request is never honored — the `~`
-            // marker shows why instead).
+            // Cache toggles: the two independent bits of the node's `CacheMode` —
+            // an `R` chip (keep the output resident in RAM, reused across runs) and
+            // a `↓` chip (persist it to the on-disk store, surviving a reopen). Each
+            // chip is filled when its bit is set; clicking flips just that bit.
+            // Muted swatch, like the disable toggle — a config flip, not an alarm.
+            // Both suppressed where caching can't apply: boundary nodes (pure
+            // routing), self-caching nodes like the file-cache passthrough
+            // (`uncacheable`), terminal sinks (no downstream consumer to serve a
+            // cached output to), and impure nodes (no content digest, so no mode is
+            // honored — the `~` marker shows why instead).
             if !node.uncacheable && !node.terminal && !node.impure {
-                let persist_toggled = Badge::control(
-                    "C",
+                let ram = node.cache.caches_in_ram();
+                let disk = node.cache.persists_to_disk();
+                if Badge::control(
+                    "R",
                     theme.colors.badge_cache,
-                    node.persist,
-                    persist_badge_wid(node.id),
-                    "Cache to disk — persist output across runs",
+                    ram,
+                    ram_badge_wid(node.id),
+                    "Cache in RAM — keep the output resident, reused across runs this session",
                 )
-                .show(ui, theme);
-                if persist_toggled {
-                    out.push(Intent::SetPersist {
+                .show(ui, theme)
+                {
+                    out.push(Intent::SetCacheMode {
                         node_id: node.id,
-                        to: if node.persist {
-                            CachePersistence::Memory
-                        } else {
-                            CachePersistence::Disk
-                        },
+                        to: CacheMode::from_bits(!ram, disk),
+                    });
+                }
+                if Badge::control(
+                    "↓",
+                    theme.colors.badge_cache,
+                    disk,
+                    disk_badge_wid(node.id),
+                    "Cache to disk — persist the output across runs and reopens",
+                )
+                .show(ui, theme)
+                {
+                    out.push(Intent::SetCacheMode {
+                        node_id: node.id,
+                        to: CacheMode::from_bits(ram, !disk),
                     });
                 }
             }
@@ -342,9 +355,14 @@ fn disable_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.disable_badge", node_id))
 }
 
-/// Stable id for a node's clickable memory/disk cache chip.
-fn persist_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.persist_badge", node_id))
+/// Stable id for a node's clickable RAM-cache chip.
+fn ram_badge_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.ram_badge", node_id))
+}
+
+/// Stable id for a node's clickable disk-cache chip.
+fn disk_badge_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.disk_badge", node_id))
 }
 
 /// Stable id for a subgraph node's clickable open-in-tab chip.

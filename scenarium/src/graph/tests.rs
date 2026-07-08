@@ -1,7 +1,7 @@
 use crate::data::DataType;
 use crate::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use crate::graph::{
-    Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, OutputPort, Subscription,
+    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, OutputPort, Subscription,
     closes_data_cycle,
 };
 use crate::node::function::{Func, FuncId, FuncInput, FuncOutput};
@@ -32,30 +32,62 @@ fn check_passes_for_valid_graph() {
 }
 
 #[test]
-fn persist_round_trips_and_defaults_to_memory() {
-    use common::deserialize;
-    assert_eq!(CachePersistence::default(), CachePersistence::Memory);
-
-    let library = test_func_lib(TestFuncHooks::default());
-    let mut graph = Graph::default();
-    let mut node: Node = library.by_name("get_a").unwrap().into();
-    node.persist = CachePersistence::Disk;
-    graph.add(node);
-
-    for format in [SerdeFormat::Json, SerdeFormat::Bitcode] {
-        let bytes = graph.serialize(format).unwrap();
-        let back = Graph::deserialize(&bytes, format).unwrap();
+fn cache_mode_bits_and_from_bits_round_trip() {
+    // The two storage bits, hand-tabulated per mode, plus `from_bits` as their inverse.
+    let table = [
+        (CacheMode::None, false, false),
+        (CacheMode::Ram, true, false),
+        (CacheMode::Disk, false, true),
+        (CacheMode::Both, true, true),
+    ];
+    for (mode, ram, disk) in table {
+        assert_eq!(mode.caches_in_ram(), ram, "{mode:?} RAM bit");
+        assert_eq!(mode.persists_to_disk(), disk, "{mode:?} disk bit");
         assert_eq!(
-            back.by_name("get_a").unwrap().persist,
-            CachePersistence::Disk
+            CacheMode::from_bits(ram, disk),
+            mode,
+            "from_bits({ram},{disk})"
         );
     }
+    // Distinct modes must not share a bit pattern (guards a botched refactor).
+    assert_ne!(CacheMode::Ram, CacheMode::Disk);
+    assert_ne!(CacheMode::None, CacheMode::Both);
+}
 
-    // A node authored before `persist` existed deserializes as `Memory`.
+#[test]
+fn cache_mode_round_trips_and_defaults_to_ram() {
+    use common::deserialize;
+    assert_eq!(CacheMode::default(), CacheMode::Ram);
+
+    let library = test_func_lib(TestFuncHooks::default());
+    for mode in [
+        CacheMode::None,
+        CacheMode::Ram,
+        CacheMode::Disk,
+        CacheMode::Both,
+    ] {
+        let mut graph = Graph::default();
+        let mut node: Node = library.by_name("get_a").unwrap().into();
+        node.cache = mode;
+        graph.add(node);
+
+        for format in [SerdeFormat::Json, SerdeFormat::Bitcode] {
+            let bytes = graph.serialize(format).unwrap();
+            let back = Graph::deserialize(&bytes, format).unwrap();
+            assert_eq!(
+                back.by_name("get_a").unwrap().cache,
+                mode,
+                "{mode:?} via {format:?}"
+            );
+        }
+    }
+
+    // A node authored before the `cache` field existed (or under the old `persist`
+    // name) has no `cache` key, so `#[serde(default)]` fills `Ram`.
     let legacy = r#"{ "id": "00000000-0000-0000-0000-000000000001",
             "kind": { "Func": "00000000-0000-0000-0000-000000000002" }, "name": "n" }"#;
     let node: Node = deserialize(legacy.as_bytes(), SerdeFormat::Json).unwrap();
-    assert_eq!(node.persist, CachePersistence::Memory);
+    assert_eq!(node.cache, CacheMode::Ram);
 }
 
 #[test]

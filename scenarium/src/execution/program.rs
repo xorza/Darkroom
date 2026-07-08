@@ -10,7 +10,7 @@ use common::{KeyIndexKey, KeyIndexVec, Span};
 use serde::{Deserialize, Serialize};
 
 use crate::data::{DataType, StaticValue};
-use crate::graph::NodeId;
+use crate::graph::{CacheMode, NodeId};
 use crate::library::Library;
 use crate::node::event_lambda::EventLambda;
 use crate::node::func_lambda::FuncLambda;
@@ -113,12 +113,15 @@ pub(crate) struct ExecutionNode {
     /// the digest of an `Impure` node (or any node downstream of one) is `None`.
     pub behavior: FuncBehavior,
 
-    /// The authoring node's `Disk` cache request, flattened from
-    /// [`CachePersistence`](crate::graph::CachePersistence). Read by the engine's
-    /// disk-cache load/store when one is configured; honored only when the node has
-    /// a content digest (a reproducible cone) — see `digest.rs`.
+    /// The authoring node's cache mode, copied from
+    /// [`CacheMode`](crate::graph::CacheMode) at flatten. Its two bits
+    /// ([`caches_in_ram`](crate::graph::CacheMode::caches_in_ram) /
+    /// [`persists_to_disk`](crate::graph::CacheMode::persists_to_disk)) gate RAM reuse and
+    /// the content-addressed disk load/store; disk is honored only when the node has a
+    /// content digest (a reproducible cone) and a disk root is configured — see `digest.rs`
+    /// and `output_cache.rs`.
     #[serde(default)]
-    pub persist: bool,
+    pub cache: CacheMode,
 
     /// `Some` for a built-in [`SpecialNode`] (flattened from
     /// [`NodeKind::Special`](crate::graph::NodeKind::Special)); the engine

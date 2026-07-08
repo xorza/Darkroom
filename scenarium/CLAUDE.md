@@ -21,7 +21,7 @@ to the other:
 
 | Path | Role |
 |------|------|
-| `graph.rs` | `Graph`, `Node`, `Binding`, `Subscription`, ports, `NodeKind`, `CachePersistence`. Authoring model + validation. |
+| `graph.rs` | `Graph`, `Node`, `Binding`, `Subscription`, ports, `NodeKind`, `CacheMode`. Authoring model + validation. |
 | `subgraph.rs` | `SubgraphDef`, `SubgraphRef` (Linked/Local), `SubgraphEvent`. Composite definitions and their exposed interface. |
 | `function.rs` | `Func` (definition), `FuncInput`/`FuncOutput`, `FuncBehavior`. |
 | `library.rs` | `Library` (the registry: funcs + shared subgraphs + nominal types), `TypeDecl`/`TypeEntry` (type metadata + optional disk codec). |
@@ -48,7 +48,7 @@ port Vecs; wiring lives flat at graph level:
 
 `Node` (`graph.rs:126`) is pure identity: `id`, `kind: NodeKind`
 (Func / Subgraph / SubgraphInput / SubgraphOutput), `name`,
-`persist: CachePersistence` (`Memory | Disk`), `disabled: bool`. Port arity
+`cache: CacheMode` (`None | Ram | Disk | Both`), `disabled: bool`. Port arity
 derives from `kind`. `Binding` (`graph.rs:48`) is `None` (unbound) /
 `Const(StaticValue)` / `Bind(OutputPort)`. `validate_with(library)` recurses per
 composite level with recursion guards.

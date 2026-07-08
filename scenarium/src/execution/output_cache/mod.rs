@@ -4,9 +4,10 @@
 //! the one storage primitive ([`blob`]), differing only in [`OutputCache::target`] (how
 //! a node maps to a file) and whether a present blob is rewritten:
 //!
-//! - **content-addressed** — a `persist` node's outputs at `<disk_root>/<hex(digest)>`,
-//!   keyed by its content digest. Reproducible: any upstream change re-keys it (so
-//!   it's auto-invalidated), and identical computations dedup across nodes/machines.
+//! - **content-addressed** — a disk-backed (`Disk`/`Both`) node's outputs at
+//!   `<disk_root>/<hex(digest)>`, keyed by its content digest. Reproducible: any upstream
+//!   change re-keys it (so it's auto-invalidated), and identical computations dedup across
+//!   nodes/machines.
 //! - **explicit-path** — a [`CachePassthrough`](crate::node::special::SpecialNode) node's
 //!   outputs at the `Const` `FsPath` in `input[1]`. The path *is* the key; the user
 //!   manages invalidation (delete the file, or the `bypass` toggle). See
@@ -68,7 +69,7 @@ impl Target {
 /// Persists node outputs to files and hydrates them back. Holds a snapshot of the
 /// [`Library`] (its type table is the source of custom-value codecs, used by both
 /// policies) and the optional content-addressed store root. Default is an empty
-/// library ⇒ no codecs, `persist` nodes memory-only; `CachePassthrough` nodes
+/// library ⇒ no codecs, disk-backed nodes memory-only; `CachePassthrough` nodes
 /// always use their explicit path.
 ///
 /// The snapshot is fine to hold across library swaps: codecs are registered once
@@ -77,7 +78,7 @@ impl Target {
 #[derive(Debug, Default)]
 pub struct OutputCache {
     library: Arc<Library>,
-    /// Root of the content-addressed store; `None` ⇒ `persist` nodes memory-only.
+    /// Root of the content-addressed store; `None` ⇒ disk-backed nodes memory-only.
     disk_root: Option<PathBuf>,
 }
 
@@ -91,15 +92,16 @@ impl OutputCache {
     }
 
     /// The file node `idx` caches to, or `None` when it doesn't: a
-    /// `CachePassthrough` with a `Const` path → explicit; a `persist` node with a
-    /// disk root and a content digest → content-addressed; anything else → none.
+    /// `CachePassthrough` with a `Const` path → explicit; a disk-backed
+    /// (`persists_to_disk`) node with a disk root and a content digest →
+    /// content-addressed; anything else → none.
     fn target(&self, program: &ExecutionProgram, idx: NodeIdx, cache: &Cache) -> Option<Target> {
         let e_node = &program.e_nodes[idx];
         if matches!(e_node.special, Some(SpecialNode::CachePassthrough { .. })) {
             return cache_node_path(program.node_inputs(e_node))
                 .map(|p| Target::Explicit(PathBuf::from(p)));
         }
-        if e_node.persist {
+        if e_node.cache.persists_to_disk() {
             let digest = cache.slots[idx].current_digest?;
             let mut buf = [0u8; 64];
             return Some(Target::Addressed(
@@ -116,6 +118,14 @@ impl OutputCache {
     /// ([`Resolver`](crate::execution::resolve::Resolver)) and the run loop (`prepare_node`)
     /// so the two decisions can't drift. A `None` digest (an impure cone) never reuses.
     /// Mutates the cache: stamps `current_digest`, and may flag a slot `OnDisk`.
+    ///
+    /// The two reuse paths are gated on the node's [`CacheMode`](crate::graph::CacheMode)
+    /// bits: RAM reuse (`is_resident_hit`) only for a `caches_in_ram` mode (`Ram`/`Both`),
+    /// disk reuse only for a `persists_to_disk` mode (`Disk`/`Both`, enforced inside
+    /// [`target`](Self::target) via `mark_on_disk_if_present`). So a `None` node reuses
+    /// neither and always recomputes; a `Disk` node reuses only from disk (its RAM copy is
+    /// demoted after each run). A `CachePassthrough` (file-cache) node bypasses these
+    /// gates — its explicit path is checked directly in `target`.
     pub(crate) fn stamp_and_check_reuse(
         &self,
         program: &ExecutionProgram,
@@ -124,8 +134,8 @@ impl OutputCache {
     ) -> bool {
         let digest = node_digest(program, idx, cache);
         cache.slots[idx].current_digest = digest;
-        digest.is_some()
-            && (cache.is_resident_hit(idx) || self.mark_on_disk_if_present(program, idx, cache))
+        let ram_hit = program.e_nodes[idx].cache.caches_in_ram() && cache.is_resident_hit(idx);
+        digest.is_some() && (ram_hit || self.mark_on_disk_if_present(program, idx, cache))
     }
 
     /// The executor's per-node "reuse from disk?" check, run once a node's digest is
@@ -219,15 +229,21 @@ impl OutputCache {
         false
     }
 
-    /// After a run, demote resident values the run neither executed nor read as a
-    /// frontier input back to disk-only — reclaiming RAM that merely duplicates a
-    /// disk blob. `keep[idx]` marks the nodes to retain — the run's executed nodes plus
-    /// the producers they read (see [`Executor::protected_after_run`](crate::execution::executor::Executor::protected_after_run));
-    /// any other resident value is a prior run's leftover, pruned behind a cache this
-    /// run, so nothing read it. If its blob is still on disk it's dropped from RAM and
-    /// re-marked [`ValueCache::OnDisk`], so a later run or an inspection reloads it.
-    /// Lossless: a value with no blob (Memory-only, impure) is kept, so eviction never
-    /// forces a recompute.
+    /// After a run, reclaim RAM the run's cache modes don't call for holding. Per resident
+    /// value (in program order):
+    ///
+    /// - A **RAM-retaining** node (`Ram`/`Both`, [`caches_in_ram`](crate::graph::CacheMode::caches_in_ram))
+    ///   that the run executed or read (`keep[idx]` — see
+    ///   [`Executor::protected_after_run`](crate::execution::executor::Executor::protected_after_run))
+    ///   stays resident, so next run's reuse is a RAM hit. Any *other* resident value is
+    ///   released:
+    /// - **Demote to disk** if a blob for the current digest is present
+    ///   ([`ValueCache::OnDisk`]) — lossless, a later run or inspection reloads it. This
+    ///   covers a `Disk`/`Both` value (used this run or a leftover) and reclaims its RAM.
+    /// - **Drop** (`clear_output`) only a **non-RAM** mode (`None`, or a `Disk` value whose
+    ///   blob is absent) — it will recompute when next needed, which is that mode's contract.
+    /// - Otherwise **keep**: a RAM-retaining leftover with no blob is held, so eviction
+    ///   never forces a recompute of a value a mode promised to retain.
     pub(crate) fn evict_unused(
         &self,
         program: &ExecutionProgram,
@@ -235,7 +251,12 @@ impl OutputCache {
         keep: &[bool],
     ) {
         for idx in program.node_indices() {
-            if keep[idx.idx()] || cache.slots[idx].output_values().is_none() {
+            if cache.slots[idx].output_values().is_none() {
+                continue;
+            }
+            let caches_in_ram = program.e_nodes[idx].cache.caches_in_ram();
+            // A RAM-retaining node touched this run stays hot for the next run's RAM hit.
+            if caches_in_ram && keep[idx.idx()] {
                 continue;
             }
             // Reloadable iff a blob for the current digest is on disk — only then is
@@ -245,6 +266,8 @@ impl OutputCache {
                 .is_some_and(|target| target.path().exists());
             if reloadable {
                 cache.slots[idx].value = ValueCache::OnDisk;
+            } else if !caches_in_ram {
+                cache.slots[idx].clear_output();
             }
         }
     }

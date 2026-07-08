@@ -83,7 +83,7 @@ pub(crate) struct Editor {
     /// side-effect field like `scene_dirty` / `needs_reconcile`, rather
     /// than a `bool` threaded back through every helper's return.
     needs_relayout: bool,
-    /// Set when a disk-cache toggle (`Intent::SetPersist`) is applied this frame.
+    /// Set when a disk-cache toggle (`Intent::SetCacheMode`) is applied this frame.
     /// `App` consumes it via [`Self::take_caches_dirty`] to flush the node's resident
     /// value to disk (a `SaveCaches` to the worker) without a re-run.
     caches_dirty: bool,
@@ -433,7 +433,7 @@ impl Editor {
         // flag it for `App` to send a `SaveCaches` after the frame.
         if scratch
             .iter()
-            .any(|i| matches!(i, Intent::SetPersist { .. }))
+            .any(|i| matches!(i, Intent::SetCacheMode { .. }))
         {
             self.caches_dirty = true;
         }

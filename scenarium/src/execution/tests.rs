@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::*;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::graph::{Binding, CachePersistence, InputPort, Node};
+use crate::graph::{Binding, CacheMode, InputPort, Node};
 use crate::node::function::FuncBehavior;
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::{FloatExt, SerdeFormat};
@@ -120,7 +120,7 @@ mod cache_persistence {
         let mut graph = Graph::default();
         graph.add(node(&lib, "get_a", NodeId::unique()));
         let mut mult = node(&lib, "mult", NodeId::unique());
-        mult.persist = CachePersistence::Disk;
+        mult.cache = CacheMode::Disk;
         graph.add(mult);
         graph.add(node(&lib, "Print", NodeId::unique()));
         let get_a_id = graph.by_name("get_a").unwrap().id;
@@ -203,7 +203,7 @@ mod cache_persistence {
         let mut graph = Graph::default();
         graph.add(node(&lib, "get_a", NodeId::unique()));
         let mut mult = node(&lib, "mult", NodeId::unique());
-        mult.persist = CachePersistence::Disk;
+        mult.cache = CacheMode::Disk;
         graph.add(mult);
         let print_mult_id = NodeId::unique();
         graph.add(node(&lib, "Print", print_mult_id));
@@ -264,15 +264,17 @@ mod cache_persistence {
             })
         };
 
-        // get_a(7) → sum(persist) = 7+7 = 14 → mult(persist) = 14*7 = 98 → print.
+        // get_a(7) → sum(Both) = 7+7 = 14 → mult(Both) = 14*7 = 98 → print. `Both`
+        // (RAM + disk) so the frontier the run reads is kept resident, not demoted —
+        // that retention is what this test asserts (pure `Disk` would demote it).
         let lib = make_lib();
         let mut graph = Graph::default();
         graph.add(node(&lib, "get_a", NodeId::unique()));
         let mut sum = node(&lib, "sum", NodeId::unique());
-        sum.persist = CachePersistence::Disk;
+        sum.cache = CacheMode::Both;
         graph.add(sum);
         let mut mult = node(&lib, "mult", NodeId::unique());
-        mult.persist = CachePersistence::Disk;
+        mult.cache = CacheMode::Both;
         graph.add(mult);
         graph.add(node(&lib, "Print", NodeId::unique()));
         let get_a_id = graph.by_name("get_a").unwrap().id;
@@ -362,14 +364,16 @@ mod cache_persistence {
         let dir = TempDir::new("evict");
         let lib = test_func_lib(default_hooks());
 
-        // get_a(1) → sum(persist) = 2 → mult(persist) = 2 → print, one engine.
+        // get_a(1) → sum(Both) = 2 → mult(Both) = 2 → print, one engine. `Both`
+        // (RAM + disk) keeps a used value resident and demotes an unused leftover —
+        // the retain-vs-evict split this test asserts (pure `Disk` would demote both).
         let mut graph = Graph::default();
         graph.add(node(&lib, "get_a", NodeId::unique()));
         let mut sum = node(&lib, "sum", NodeId::unique());
-        sum.persist = CachePersistence::Disk;
+        sum.cache = CacheMode::Both;
         graph.add(sum);
         let mut mult = node(&lib, "mult", NodeId::unique());
-        mult.persist = CachePersistence::Disk;
+        mult.cache = CacheMode::Both;
         graph.add(mult);
         graph.add(node(&lib, "Print", NodeId::unique()));
         let get_a_id = graph.by_name("get_a").unwrap().id;
@@ -449,6 +453,192 @@ mod cache_persistence {
         );
     }
 
+    /// A top-level node recomputed (rather than reused) in the last run.
+    fn ran(stats: &ExecutionStats, id: NodeId) -> bool {
+        stats.executed_nodes.iter().any(|e| e.node_id == id)
+    }
+    /// A top-level node reused a cache (RAM hit, disk hit, or a still-available cut) last run.
+    fn cached(stats: &ExecutionStats, id: NodeId) -> bool {
+        stats.cached_nodes.contains(&id)
+    }
+    /// Count of content-addressed blobs in the store — one per persisted node.
+    fn blob_count(dir: &TempDir) -> usize {
+        std::fs::read_dir(&dir.0).unwrap().flatten().count()
+    }
+
+    /// One row of the cache-mode matrix. Over a fresh store, build `get_a → mult(mode) →
+    /// print` (an impure terminal, so `mult` is needed every run), run twice on one engine,
+    /// then reopen with empty RAM. Asserts the four modes' *distinct* outcomes on the axes
+    /// they differ on: cross-run reuse, RAM retention after the run, and disk persistence.
+    async fn assert_mode_behavior(mode: CacheMode) {
+        let dir = TempDir::new(&format!("mode-{mode:?}"));
+        let lib = test_func_lib(default_hooks());
+
+        // get_a(1) → mult(mode) = 1*1 = 1 → print.
+        let mut graph = Graph::default();
+        graph.add(node(&lib, "get_a", NodeId::unique()));
+        let mut mult = node(&lib, "mult", NodeId::unique());
+        mult.cache = mode;
+        graph.add(mult);
+        graph.add(node(&lib, "Print", NodeId::unique()));
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let mult_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "mult", 0, (get_a_id, 0).into());
+        bind(&mut graph, "mult", 1, (get_a_id, 0).into());
+        bind(&mut graph, "Print", 0, (mult_id, 0).into());
+
+        // Two runs on one engine: run 1 is cold; run 2 reveals cross-run reuse.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &lib).unwrap();
+        let run1 = engine.execute_terminals().await.unwrap();
+        assert!(
+            ran(&run1, mult_id),
+            "{mode:?}: mult computes on the cold run"
+        );
+
+        let run2 = engine.execute_terminals().await.unwrap();
+        if mode == CacheMode::None {
+            assert!(
+                ran(&run2, mult_id),
+                "None recomputes every run its value is needed"
+            );
+            assert!(!cached(&run2, mult_id), "None is never reported cached");
+        } else {
+            assert!(
+                cached(&run2, mult_id),
+                "{mode:?} reuses its cached output on run 2"
+            );
+            assert!(!ran(&run2, mult_id), "{mode:?} does not recompute on run 2");
+        }
+
+        // Slot retention after run 2: RAM-resident iff the mode keeps RAM.
+        let slot = engine.runtime_slot(engine.by_name("mult").unwrap());
+        assert_eq!(
+            slot.output_values().is_some(),
+            mode.caches_in_ram(),
+            "{mode:?}: RAM retention must equal caches_in_ram()"
+        );
+        match mode {
+            CacheMode::None => assert!(
+                matches!(slot.value, ValueCache::Empty),
+                "None drops its value after the run: {:?}",
+                slot.value
+            ),
+            CacheMode::Disk => assert!(
+                matches!(slot.value, ValueCache::OnDisk),
+                "Disk demotes its RAM copy to disk-only after the run: {:?}",
+                slot.value
+            ),
+            CacheMode::Ram | CacheMode::Both => assert!(
+                matches!(
+                    slot.output_values().map(|v| &v[0]),
+                    Some(DynamicValue::Static(StaticValue::Int(1)))
+                ),
+                "Ram/Both keep the resident value (1*1=1): {:?}",
+                slot.value
+            ),
+        }
+
+        // A content-addressed blob exists iff the mode persists to disk.
+        assert_eq!(
+            blob_count(&dir) > 0,
+            mode.persists_to_disk(),
+            "{mode:?}: a blob exists iff persists_to_disk()"
+        );
+
+        // Reopen with empty RAM over the same store: only a disk-backed mode survives.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &lib).unwrap();
+        let reopen = engine.execute_terminals().await.unwrap();
+        if mode.persists_to_disk() {
+            assert!(
+                cached(&reopen, mult_id),
+                "{mode:?} reloads mult from disk on reopen"
+            );
+            assert!(
+                !ran(&reopen, get_a_id),
+                "{mode:?}: the cut prunes get_a behind the disk hit"
+            );
+        } else {
+            assert!(
+                ran(&reopen, mult_id),
+                "{mode:?} has no disk blob, so mult recomputes on reopen"
+            );
+            assert!(
+                ran(&reopen, get_a_id),
+                "{mode:?}: get_a recomputes to feed mult"
+            );
+        }
+    }
+
+    /// The four cache modes produce four distinct reuse / retention / persistence
+    /// behaviors — the parameterized proof that the mode actually drives the engine.
+    #[tokio::test]
+    async fn cache_mode_matrix() {
+        for mode in [
+            CacheMode::None,
+            CacheMode::Ram,
+            CacheMode::Disk,
+            CacheMode::Both,
+        ] {
+            assert_mode_behavior(mode).await;
+        }
+    }
+
+    /// `None` is storage-only: it never taints downstream reproducibility. `A(None) →
+    /// B(Disk)` — B still has a content digest, so it persists and, on reopen, is served
+    /// from disk with A cut (not recomputed), exactly as if A were an ordinary cached node.
+    /// Contrast an `Impure` A, which *would* strip B of its digest and force both to rerun.
+    #[tokio::test]
+    async fn none_upstream_does_not_disable_downstream_disk_cache() {
+        let dir = TempDir::new("none-orthogonal");
+        let lib = test_func_lib(default_hooks());
+
+        // get_a(1) → A = sum(None) = 1+1 = 2 → B = mult(Disk) = 2*2 = 4 → print.
+        let mut graph = Graph::default();
+        graph.add(node(&lib, "get_a", NodeId::unique()));
+        let mut a = node(&lib, "sum", NodeId::unique());
+        a.cache = CacheMode::None;
+        graph.add(a);
+        let mut b = node(&lib, "mult", NodeId::unique());
+        b.cache = CacheMode::Disk;
+        graph.add(b);
+        graph.add(node(&lib, "Print", NodeId::unique()));
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let a_id = graph.by_name("sum").unwrap().id;
+        let b_id = graph.by_name("mult").unwrap().id;
+        bind(&mut graph, "sum", 0, (get_a_id, 0).into());
+        bind(&mut graph, "sum", 1, (get_a_id, 0).into());
+        bind(&mut graph, "mult", 0, (a_id, 0).into());
+        bind(&mut graph, "mult", 1, (a_id, 0).into());
+        bind(&mut graph, "Print", 0, (b_id, 0).into());
+
+        // Cold run computes A and B; B(Disk) persists — proving A(None) left B a digest.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &lib).unwrap();
+        let cold = engine.execute_terminals().await.unwrap();
+        assert!(
+            ran(&cold, a_id) && ran(&cold, b_id),
+            "cold run computes A and B"
+        );
+        assert!(
+            blob_count(&dir) > 0,
+            "B(Disk) persists despite its None upstream"
+        );
+
+        // Reopen: B is a disk hit, so A(None) — read only by the reused B — is cut, not
+        // recomputed. Setting A to None disabled neither B's cache nor A's own reuse-cut.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &lib).unwrap();
+        let reopen = engine.execute_terminals().await.unwrap();
+        assert!(cached(&reopen, b_id), "B reloads from disk on reopen");
+        assert!(
+            !ran(&reopen, a_id),
+            "A(None) is cut behind the disk hit, not recomputed"
+        );
+        assert!(!ran(&reopen, get_a_id), "get_a is cut behind A too");
+    }
+
     /// Flipping a `persist` node's inputs *back* to a previously-stored configuration
     /// must serve that config's value from its disk blob — not the stale RAM value the
     /// intervening run left resident under a now-superseded digest. The old
@@ -466,7 +656,7 @@ mod cache_persistence {
         // slot (and its resident value) survives each `update`.
         let mut graph = Graph::default();
         let mut mult = node(&lib, "mult", NodeId::from_u128(1));
-        mult.persist = CachePersistence::Disk;
+        mult.cache = CacheMode::Disk;
         graph.add(mult);
         graph.add(node(&lib, "Print", NodeId::from_u128(2)));
         let mult_id = graph.by_name("mult").unwrap().id;
@@ -543,7 +733,7 @@ mod cache_persistence {
         // from any upstream, so only mult + print run.
         let mut graph = Graph::default();
         let mut mult = node(&lib, "mult", NodeId::unique());
-        mult.persist = CachePersistence::Disk;
+        mult.cache = CacheMode::Disk;
         graph.add(mult);
         graph.add(node(&lib, "Print", NodeId::unique()));
         let mult_id = graph.by_name("mult").unwrap().id;
@@ -571,10 +761,10 @@ mod cache_persistence {
 
         // mult(const 2, const 3) = 6 → print, with mult's persistence configurable.
         // Fixed node ids so the slot (and its resident value) survives each update.
-        let build = |persist: CachePersistence| {
+        let build = |persist: CacheMode| {
             let mut graph = Graph::default();
             let mut mult = node(&lib, "mult", NodeId::from_u128(1));
-            mult.persist = persist;
+            mult.cache = persist;
             graph.add(mult);
             graph.add(node(&lib, "Print", NodeId::from_u128(2)));
             let mult_id = graph.by_name("mult").unwrap().id;
@@ -587,9 +777,7 @@ mod cache_persistence {
         let mut engine = disk_engine(&dir);
 
         // Run with Memory caching: mult computes (6) and stays resident, nothing on disk.
-        engine
-            .update(&build(CachePersistence::Memory), &lib)
-            .unwrap();
+        engine.update(&build(CacheMode::Ram), &lib).unwrap();
         engine.execute_terminals().await.unwrap();
         assert!(
             std::fs::read_dir(&dir.0).unwrap().next().is_none(),
@@ -598,7 +786,7 @@ mod cache_persistence {
 
         // Toggle the node to Disk (a graph edit → update), but do NOT re-run. The
         // resident value must reach disk now, not on some later execution.
-        engine.update(&build(CachePersistence::Disk), &lib).unwrap();
+        engine.update(&build(CacheMode::Disk), &lib).unwrap();
         engine.store_resident_caches().await;
         assert!(
             std::fs::read_dir(&dir.0).unwrap().next().is_some(),
@@ -619,7 +807,7 @@ mod cache_persistence {
         let build = |a: i64, b: i64| {
             let mut graph = Graph::default();
             let mut mult = node(&lib, "mult", NodeId::from_u128(1));
-            mult.persist = CachePersistence::Disk;
+            mult.cache = CacheMode::Disk;
             graph.add(mult);
             graph.add(node(&lib, "Print", NodeId::from_u128(2)));
             let mult_id = graph.by_name("mult").unwrap().id;
@@ -675,7 +863,7 @@ mod cache_persistence {
         let mut graph = Graph::default();
         graph.add(node(&lib, "get_a", NodeId::from_u128(1)));
         let mut mult = node(&lib, "mult", NodeId::from_u128(2));
-        mult.persist = CachePersistence::Disk;
+        mult.cache = CacheMode::Disk;
         graph.add(mult);
         graph.add(node(&lib, "Print", NodeId::from_u128(3)));
         let get_a_id = graph.by_name("get_a").unwrap().id;
@@ -765,7 +953,7 @@ mod cache_persistence {
         let mut graph = Graph::default();
         graph.add(node(&lib, "get_a", NodeId::unique()));
         let mut sum = node(&lib, "sum", NodeId::unique());
-        sum.persist = CachePersistence::Disk;
+        sum.cache = CacheMode::Disk;
         graph.add(sum);
         graph.add(node(&lib, "Print", NodeId::unique()));
         let get_a_id = graph.by_name("get_a").unwrap().id;
@@ -884,7 +1072,7 @@ mod cache_persistence {
         let int_lib = build_lib(false);
         let mut graph = Graph::default();
         let mut produce_node = node(&int_lib, "produce", NodeId::unique());
-        produce_node.persist = CachePersistence::Disk;
+        produce_node.cache = CacheMode::Disk;
         let produce_id = produce_node.id;
         graph.add(produce_node);
         graph.add(node(&int_lib, "consume", NodeId::unique()));
@@ -927,7 +1115,7 @@ mod cache_persistence {
         let mut graph = Graph::default();
         graph.add(node(&library, "get_b", NodeId::unique()));
         let mut mult = node(&library, "mult", NodeId::unique());
-        mult.persist = CachePersistence::Disk;
+        mult.cache = CacheMode::Disk;
         graph.add(mult);
         graph.add(node(&library, "Print", NodeId::unique()));
         let get_b_id = graph.by_name("get_b").unwrap().id;
@@ -1093,7 +1281,7 @@ mod cache_persistence {
             "make_blob",
             NodeId::unique(),
         );
-        blob_node.persist = CachePersistence::Disk;
+        blob_node.cache = CacheMode::Disk;
         let blob_id = blob_node.id;
         graph.add(blob_node);
 

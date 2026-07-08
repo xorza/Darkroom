@@ -1,5 +1,5 @@
-//! Per-document on-disk cache location. A node marked `CachePersistence::Disk`
-//! persists its output to a content-addressed store; darkroom roots that store
+//! Per-document on-disk cache location. A node with a disk-backed `CacheMode`
+//! (`Disk`/`Both`) persists its output to a content-addressed store; darkroom roots that store
 //! beside the document file so the cache travels with the project rather than
 //! polluting a machine-global directory. An unsaved document has no path, so it
 //! stays memory-only until first save.

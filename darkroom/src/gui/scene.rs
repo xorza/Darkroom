@@ -6,9 +6,7 @@ use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
 use scenarium::data::{DataType, StaticValue};
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
-use scenarium::graph::{
-    Binding, CachePersistence, Graph, NodeId, NodeKind, OutputPort, Subscription,
-};
+use scenarium::graph::{Binding, CacheMode, Graph, NodeId, NodeKind, OutputPort, Subscription};
 use scenarium::library::Library;
 use scenarium::node::function::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 
@@ -151,17 +149,15 @@ pub struct SceneNode {
     /// Excluded from execution (`Node::disabled`). The header badge
     /// toggles this via `Intent::SetDisabled`; the body paints dimmed.
     pub disabled: bool,
-    /// `true` when this node's output is cached to disk
-    /// (`CachePersistence::Disk`), `false` for memory-only. The header `C`
-    /// badge toggles it via `Intent::SetPersist`.
-    pub persist: bool,
-    /// Suppresses the header's `C` (disk-cache/persist) badge. `true` for
-    /// self-caching nodes (the file-cache passthrough) and boundary/stub nodes
-    /// that have no output to persist.
+    /// Where this node's output is cached ([`CacheMode`]). The header's two cache
+    /// chips (RAM + disk) toggle its bits via `Intent::SetCacheMode`.
+    pub cache: CacheMode,
+    /// Suppresses the header's cache chips. `true` for self-caching nodes (the
+    /// file-cache passthrough) and boundary/stub nodes that have no output to cache.
     pub uncacheable: bool,
-    /// The node's func is `Impure`. An impure node has no content digest, so a
-    /// `Disk` persist request is silently never honored — the header hides its
-    /// `C` badge, like `uncacheable`. `false` for composites and boundary nodes.
+    /// The node's func is `Impure`. An impure node has no content digest, so no
+    /// cache mode is ever honored — the header hides both cache chips, like
+    /// `uncacheable`. `false` for composites and boundary nodes.
     pub impure: bool,
     /// A `SubgraphInput`/`SubgraphOutput` interface boundary node. Its
     /// ports route the subgraph interface rather than carry literal
@@ -259,7 +255,7 @@ impl Scene {
                     terminal: d.outputs.is_empty(),
                     uncacheable: false,
                     // Aggregate purity of a composite isn't known here, so the
-                    // persist toggle stays available for it (unlike a func).
+                    // cache chips stay available for it (unlike a func).
                     impure: false,
                 }),
                 // A built-in special node: its interface is the hardcoded spec.
@@ -431,7 +427,7 @@ impl Scene {
                 subgraph: interface.subgraph,
                 terminal: interface.terminal,
                 disabled: node.disabled,
-                persist: node.persist == CachePersistence::Disk,
+                cache: node.cache,
                 uncacheable: interface.uncacheable,
                 impure: interface.impure,
                 boundary: matches!(
@@ -500,10 +496,10 @@ struct NodeInterface<'a> {
     subgraph: Option<SubgraphRef>,
     terminal: bool,
     /// Node manages its own caching (or has no output to cache), so the editor's
-    /// disk-cache (persist) toggle is hidden — see [`SceneNode::uncacheable`].
+    /// cache chips are hidden — see [`SceneNode::uncacheable`].
     uncacheable: bool,
-    /// The func is `Impure`, so it has no content digest and a `Disk` request is
-    /// silently never honored — the editor hides its persist toggle (see
+    /// The func is `Impure`, so it has no content digest and no cache mode is
+    /// honored — the editor hides its cache chips (see
     /// [`SceneNode::impure`]). Only set from a func spec; `false` for composites
     /// (aggregate purity isn't known here) and boundary/stub nodes.
     impure: bool,
@@ -822,30 +818,34 @@ mod tests {
     }
 
     #[test]
-    fn persist_flag_projects_disk_as_true_memory_as_false() {
+    fn cache_mode_projects_verbatim_per_node() {
         use scenarium::elements::math_library::math_library;
-        use scenarium::graph::CachePersistence;
 
-        // Two identical funcs differing only in cache policy: one default
-        // (Memory), one Disk. The projection must mirror each.
+        // One `Add` node per cache mode; each `SceneNode.cache` must mirror its source
+        // node's mode exactly (the header reads the two bits off it).
         let library = math_library();
         let mut graph = Graph::default();
-        let memory_node: Node = library.by_name("Add").unwrap().into();
-        let memory_id = memory_node.id;
-        graph.add(memory_node);
-        let mut disk_node: Node = library.by_name("Add").unwrap().into();
-        disk_node.persist = CachePersistence::Disk;
-        let disk_id = disk_node.id;
-        graph.add(disk_node);
+        let mut ids = Vec::new();
+        for mode in [
+            CacheMode::None,
+            CacheMode::Ram,
+            CacheMode::Disk,
+            CacheMode::Both,
+        ] {
+            let mut node: Node = library.by_name("Add").unwrap().into();
+            node.cache = mode;
+            ids.push((node.id, mode));
+            graph.add(node);
+        }
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         scene.rebuild(&graph, &view, &library, None, &RunState::default());
 
-        let memory = scene.nodes.iter().find(|n| n.id == memory_id).unwrap();
-        let disk = scene.nodes.iter().find(|n| n.id == disk_id).unwrap();
-        assert!(!memory.persist, "default node projects memory-only");
-        assert!(disk.persist, "Disk-marked node projects persist=true");
+        for (id, mode) in ids {
+            let projected = scene.nodes.iter().find(|n| n.id == id).unwrap();
+            assert_eq!(projected.cache, mode, "{mode:?} projects verbatim");
+        }
     }
 
     #[test]
@@ -878,8 +878,8 @@ mod tests {
         let pure = scene.nodes.iter().find(|n| n.id == pure_id).unwrap();
         let impure = scene.nodes.iter().find(|n| n.id == impure_id).unwrap();
 
-        assert!(!pure.impure, "a Pure func keeps its persist toggle");
-        assert!(impure.impure, "an Impure func hides its persist toggle");
+        assert!(!pure.impure, "a Pure func keeps its cache chips");
+        assert!(impure.impure, "an Impure func hides its cache chips");
         // Isolate `impure` as the cause: neither is self-caching or a terminal sink.
         assert!(!pure.uncacheable && !pure.terminal);
         assert!(!impure.uncacheable && !impure.terminal);

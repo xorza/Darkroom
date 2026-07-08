@@ -151,20 +151,57 @@ mod binding_map_serde {
     }
 }
 
-/// Where a node's computed output is cached. `Memory` keeps it only in the live
-/// engine (dropped on reload); `Disk` also persists it to the content-addressed
-/// store, so an unchanged graph reloads the result instead of recomputing. `Disk`
-/// is a *request* honored only for reproducible nodes — a node with an impure node
-/// anywhere in its upstream cone has no content digest, so it's silently kept
-/// memory-only and never risks serving a stale value. The on-disk backend is wired
-/// only once a caller enables it (`ExecutionEngine::set_output_cache` with a disk
-/// root); until then every node is memory-only regardless. See
-/// `execution/README.md` Part B.
+/// Where a node's computed output is cached — the two orthogonal storage bits
+/// *keep in RAM* ([`caches_in_ram`](Self::caches_in_ram)) and *persist to disk*
+/// ([`persists_to_disk`](Self::persists_to_disk)) as one four-state enum:
+///
+/// - `None` — cache nowhere: never reused across runs, recomputed whenever its value
+///   is needed, and dropped after the run to free RAM.
+/// - `Ram` — resident in the live engine and reused across runs, but lost on reload.
+/// - `Disk` — persisted to the content-addressed store (survives reload); its RAM copy
+///   is demoted to disk-only after the run and reloaded lazily.
+/// - `Both` — resident in RAM *and* on disk: hot reuse this session plus survival across
+///   reloads.
+///
+/// This is a *storage* choice only — it never affects reproducibility. Disk/RAM reuse is
+/// honored only for a node with a content digest (a reproducible cone); a node with an
+/// impure node anywhere upstream has no digest, so it's silently kept memory-only and
+/// never risks serving a stale value, whatever its mode. The on-disk backend is wired only
+/// once a caller enables it (`ExecutionEngine::set_output_cache` with a disk root); until
+/// then `Disk`/`Both` degrade to memory-only. See `execution/README.md` Part B.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
-pub enum CachePersistence {
+pub enum CacheMode {
+    None,
     #[default]
-    Memory,
+    Ram,
     Disk,
+    Both,
+}
+
+impl CacheMode {
+    /// Whether the node's value is retained in RAM and reused across runs (`Ram`/`Both`).
+    /// The other modes drop or demote the RAM copy after each run.
+    pub fn caches_in_ram(self) -> bool {
+        matches!(self, CacheMode::Ram | CacheMode::Both)
+    }
+
+    /// Whether the node's value is persisted to the content-addressed disk store
+    /// (`Disk`/`Both`), so it survives a reload.
+    pub fn persists_to_disk(self) -> bool {
+        matches!(self, CacheMode::Disk | CacheMode::Both)
+    }
+
+    /// Compose a mode from the two storage bits — the inverse of
+    /// [`caches_in_ram`](Self::caches_in_ram)/[`persists_to_disk`](Self::persists_to_disk),
+    /// used by the editor's two independent cache toggles.
+    pub fn from_bits(ram: bool, disk: bool) -> Self {
+        match (ram, disk) {
+            (false, false) => CacheMode::None,
+            (true, false) => CacheMode::Ram,
+            (false, true) => CacheMode::Disk,
+            (true, true) => CacheMode::Both,
+        }
+    }
 }
 
 /// What a node *is*. A plain `Func` instance, a composite `Subgraph`
@@ -194,10 +231,11 @@ pub struct Node {
     pub kind: NodeKind,
     pub name: String,
 
-    /// Where this node's output is cached. See [`CachePersistence`].
-    /// `#[serde(default)]` → `Memory` keeps pre-field documents memory-only.
+    /// Where this node's output is cached. See [`CacheMode`].
+    /// `#[serde(default)]` → `Ram` keeps pre-field (and pre-rename) documents
+    /// memory-only.
     #[serde(default)]
-    pub persist: CachePersistence,
+    pub cache: CacheMode,
 
     /// Disabled nodes are skipped at flatten time: they emit no execution
     /// node, and any binding resolving to one yields no producer, so a
@@ -730,7 +768,7 @@ impl Node {
             id: NodeId::unique(),
             kind,
             name: String::new(),
-            persist: CachePersistence::Memory,
+            cache: CacheMode::Ram,
             disabled: false,
         }
     }
@@ -745,7 +783,7 @@ impl Node {
             id: NodeId::unique(),
             kind: NodeKind::Subgraph(r),
             name: def.name.clone(),
-            persist: CachePersistence::Memory,
+            cache: CacheMode::Ram,
             disabled: false,
         }
     }
@@ -759,7 +797,7 @@ impl From<&Func> for Node {
             id: NodeId::unique(),
             kind: NodeKind::Func(func.id),
             name: func.name.clone(),
-            persist: CachePersistence::Memory,
+            cache: CacheMode::Ram,
             disabled: false,
         }
     }

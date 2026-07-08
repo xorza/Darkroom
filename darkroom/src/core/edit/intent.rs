@@ -33,7 +33,7 @@ use glam::Vec2;
 use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
 use scenarium::graph::{
-    Binding, CachePersistence, Graph, InputPort, Node, NodeId, NodeKind, Subscription,
+    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, Subscription,
 };
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
@@ -130,13 +130,13 @@ pub enum Intent {
         node_id: NodeId,
         to: bool,
     },
-    /// Set where a node's output is cached (`Node::persist` —
-    /// `Memory`/`Disk`). The header `C` badge toggles it; `Disk` persists the
-    /// output to the content-addressed store so a reproducible node reloads
-    /// instead of recomputing.
-    SetPersist {
+    /// Set where a node's output is cached (`Node::cache` — `None`/`Ram`/`Disk`/
+    /// `Both`). The header's two cache chips (RAM + disk) each flip one bit; the
+    /// disk bit persists the output to the content-addressed store so a
+    /// reproducible node reloads instead of recomputing.
+    SetCacheMode {
         node_id: NodeId,
-        to: CachePersistence,
+        to: CacheMode,
     },
     /// Fork a private standalone copy of a `Subgraph(Local(_))` node's
     /// def and re-point the node at it (the S-badge "Detach" action).
@@ -287,10 +287,10 @@ pub enum GraphStep {
         from: bool,
         to: bool,
     },
-    SetPersist {
+    SetCacheMode {
         node_id: NodeId,
-        from: CachePersistence,
-        to: CachePersistence,
+        from: CacheMode,
+        to: CacheMode,
     },
     /// Fork + re-point: `def` (a fresh standalone copy) joins the
     /// graph's local defs and the node swaps from `from_id` to `def.id`.
@@ -404,7 +404,7 @@ impl GraphStep {
                 ..
             } => from_index == to_index,
             GraphStep::SetDisabled { from, to, .. } => from == to,
-            GraphStep::SetPersist { from, to, .. } => from == to,
+            GraphStep::SetCacheMode { from, to, .. } => from == to,
             GraphStep::SetViewport { from, to } => {
                 (from.pan - to.pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
                     && (from.zoom - to.zoom).abs() < VIEWPORT_EPS
@@ -577,8 +577,8 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             node_id,
             to,
         },
-        Intent::SetPersist { node_id, to } => GraphStep::SetPersist {
-            from: graph.by_id(&node_id)?.persist,
+        Intent::SetCacheMode { node_id, to } => GraphStep::SetCacheMode {
+            from: graph.by_id(&node_id)?.cache,
             node_id,
             to,
         },
@@ -955,8 +955,8 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetDisabled { node_id, to, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().disabled = *to;
         }
-        GraphStep::SetPersist { node_id, to, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().persist = *to;
+        GraphStep::SetCacheMode { node_id, to, .. } => {
+            scope.graph.by_id_mut(node_id).unwrap().cache = *to;
         }
         GraphStep::DetachSubgraph { node_id, def, .. } => {
             scope.graph.subgraphs.add((**def).clone());
@@ -1104,8 +1104,8 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetDisabled { node_id, from, .. } => {
             scope.graph.by_id_mut(node_id).unwrap().disabled = *from;
         }
-        GraphStep::SetPersist { node_id, from, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().persist = *from;
+        GraphStep::SetCacheMode { node_id, from, .. } => {
+            scope.graph.by_id_mut(node_id).unwrap().cache = *from;
         }
         GraphStep::DetachSubgraph {
             node_id,
@@ -1179,7 +1179,7 @@ impl UndoStep {
             // Disabling only dims the body paint — same rect, no remeasure.
             | GraphStep::SetDisabled { .. }
             // The cache toggle flips a badge fill — same rect, no remeasure.
-            | GraphStep::SetPersist { .. }
+            | GraphStep::SetCacheMode { .. }
             // Event wiring paints a wire between existing glyphs — no
             // node remeasure.
             | GraphStep::SetSubscription { .. } => false,
@@ -1211,7 +1211,7 @@ impl UndoStep {
                 | GraphStep::SetSelection { .. }
                 | GraphStep::RaiseNode { .. }
                 | GraphStep::SetDisabled { .. }
-                | GraphStep::SetPersist { .. }
+                | GraphStep::SetCacheMode { .. }
                 | GraphStep::SetViewport { .. }
                 // Subscriptions don't feed a subgraph's derived interface.
                 | GraphStep::SetSubscription { .. },
@@ -1247,7 +1247,7 @@ impl UndoStep {
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetDisabled { .. }
-                | GraphStep::SetPersist { .. }
+                | GraphStep::SetCacheMode { .. }
                 | GraphStep::DetachSubgraph { .. }
                 | GraphStep::SetSubscription { .. },
             )
@@ -1282,7 +1282,7 @@ impl UndoStep {
                 | GraphStep::SetSelection { .. }
                 | GraphStep::RaiseNode { .. }
                 | GraphStep::SetDisabled { .. }
-                | GraphStep::SetPersist { .. }
+                | GraphStep::SetCacheMode { .. }
                 | GraphStep::DetachSubgraph { .. }
                 | GraphStep::SetSubscription { .. },
             )
@@ -1623,57 +1623,50 @@ mod tests {
     }
 
     #[test]
-    fn set_persist_commits_and_reverts() {
+    fn set_cache_mode_commits_and_reverts() {
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
-        // Fresh nodes default to memory-only.
-        assert_eq!(
-            doc.graph.by_id(&id).unwrap().persist,
-            CachePersistence::Memory
-        );
+        // Fresh nodes default to RAM-only.
+        assert_eq!(doc.graph.by_id(&id).unwrap().cache, CacheMode::Ram);
 
-        // Flip to Disk: the step applies and carries the prior value for revert.
-        let step = commit_intent(
-            Intent::SetPersist {
-                node_id: id,
-                to: CachePersistence::Disk,
-            },
-            &mut doc,
-            GraphRef::Main,
-        )
-        .expect("Memory → Disk is a real change, not a no-op");
-        assert_eq!(
-            doc.graph.by_id(&id).unwrap().persist,
-            CachePersistence::Disk
-        );
-        assert!(
-            !step.requires_relayout() && !step.requires_reconcile(),
-            "a cache toggle neither remeasures nor reshapes the interface"
-        );
-        assert!(
-            step.gesture_key().is_none(),
-            "each cache toggle is its own undo entry"
-        );
-
-        // Undo restores memory-only.
-        revert_step(&step, &mut doc, GraphRef::Main);
-        assert_eq!(
-            doc.graph.by_id(&id).unwrap().persist,
-            CachePersistence::Memory
-        );
+        // A representative bit-flip per header chip, each committing then reverting to
+        // the prior value the step captured: Ram→Both (disk chip on), Ram→None (RAM chip off).
+        for (to, from) in [
+            (CacheMode::Both, CacheMode::Ram),
+            (CacheMode::None, CacheMode::Ram),
+            (CacheMode::Disk, CacheMode::Ram),
+        ] {
+            let step = commit_intent(
+                Intent::SetCacheMode { node_id: id, to },
+                &mut doc,
+                GraphRef::Main,
+            )
+            .unwrap_or_else(|| panic!("{from:?} → {to:?} is a real change, not a no-op"));
+            assert_eq!(doc.graph.by_id(&id).unwrap().cache, to);
+            assert!(
+                !step.requires_relayout() && !step.requires_reconcile(),
+                "a cache toggle neither remeasures nor reshapes the interface"
+            );
+            assert!(
+                step.gesture_key().is_none(),
+                "each cache toggle is its own undo entry"
+            );
+            revert_step(&step, &mut doc, GraphRef::Main);
+            assert_eq!(doc.graph.by_id(&id).unwrap().cache, from);
+        }
 
         // Setting it to the value it already holds is a no-op (no undo entry).
         assert!(
             commit_intent(
-                Intent::SetPersist {
+                Intent::SetCacheMode {
                     node_id: id,
-                    to: CachePersistence::Memory,
+                    to: CacheMode::Ram,
                 },
                 &mut doc,
                 GraphRef::Main,
             )
             .is_none(),
-            "Memory → Memory writes nothing"
+            "Ram → Ram writes nothing"
         );
     }
 
