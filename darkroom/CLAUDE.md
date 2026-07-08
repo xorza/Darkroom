@@ -175,7 +175,9 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   `SwitchTab`/`CloseTab` are graph-agnostic and special-cased ahead of the
   scope lookup. Adding a variant touches ~6 spots — the doc comment lists them.
 - Variants: `AddNode`, `DuplicateNodes`, `RemoveNode`, `MoveNodes`,
-  `RenameNode`, `SetInput`, `SetSelection`, `SetDisabled`, `SetCacheMode`,
+  `RenameNode`, `SetInput`, `SetSelection`, `RaiseNode`, `SetNodeProperty`
+  (a `NodeProperty::Disabled`/`Cache` — one intent backs both scalar toggles),
+  `SetSubscription` (`subscribe: bool` — one intent backs subscribe + unsubscribe),
   `DetachSubgraph`, `SetViewport`, `RenameBoundaryPort`, `RenameSubgraph`,
   plus document-global `SwitchTab` / `CloseTab`.
 - `DuplicateNodes` is assembled from the current selection by

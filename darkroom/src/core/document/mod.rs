@@ -875,16 +875,18 @@ mod tests {
 
     #[test]
     fn set_disabled_round_trips_through_undo() {
-        use crate::core::edit::intent::{Intent, apply_step, build_step, revert_step};
+        use crate::core::edit::intent::{
+            Intent, NodeProperty, apply_step, build_step, revert_step,
+        };
 
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
         assert!(!doc.graph.by_id(&id).unwrap().disabled, "starts enabled");
 
         let step = build_step(
-            Intent::SetDisabled {
+            Intent::SetNodeProperty {
                 node_id: id,
-                to: true,
+                to: NodeProperty::Disabled(true),
             },
             &doc,
             GraphRef::Main,

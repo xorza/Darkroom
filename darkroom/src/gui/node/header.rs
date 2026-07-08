@@ -13,7 +13,7 @@ use aperture::{
 use glam::Vec2;
 use scenarium::graph::{CacheMode, NodeId};
 
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::{Intent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::port_color::event_color;
 use crate::gui::node::{RecordCtx, click_intents, exec_color, node_rename_wid};
@@ -273,9 +273,9 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             )
             .show(ui, theme);
             if disable_toggled {
-                out.push(Intent::SetDisabled {
+                out.push(Intent::SetNodeProperty {
                     node_id: node.id,
-                    to: !node.disabled,
+                    to: NodeProperty::Disabled(!node.disabled),
                 });
             }
             // Cache toggles: the two independent bits of the node's `CacheMode` —
@@ -300,9 +300,9 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 )
                 .show(ui, theme)
                 {
-                    out.push(Intent::SetCacheMode {
+                    out.push(Intent::SetNodeProperty {
                         node_id: node.id,
-                        to: CacheMode::from_bits(!ram, disk),
+                        to: NodeProperty::Cache(CacheMode::from_bits(!ram, disk)),
                     });
                 }
                 if Badge::control(
@@ -314,9 +314,9 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 )
                 .show(ui, theme)
                 {
-                    out.push(Intent::SetCacheMode {
+                    out.push(Intent::SetNodeProperty {
                         node_id: node.id,
-                        to: CacheMode::from_bits(ram, !disk),
+                        to: NodeProperty::Cache(CacheMode::from_bits(ram, !disk)),
                     });
                 }
             }

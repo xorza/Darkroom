@@ -46,9 +46,9 @@ pub(crate) struct SubscriptionUI {
 }
 
 /// The in-flight event wire, discriminated by which end it started from. Both
-/// directions commit the same [`Intent::Subscribe`]; only the fixed end and
-/// the snap target differ. Identity-only — endpoints resolve every frame from
-/// `PortFrame`, so the wire survives layout changes and node moves.
+/// directions commit the same `SetSubscription { subscribe: true }`; only the
+/// fixed end and the snap target differ. Identity-only — endpoints resolve every
+/// frame from `PortFrame`, so the wire survives layout changes and node moves.
 #[derive(Clone, Copy, Debug)]
 enum InFlight {
     /// Started on an emitter event glyph; snapping to a subscription pin.
@@ -68,8 +68,8 @@ enum InFlight {
 impl SubscriptionUI {
     /// Drive the in-flight subscription wire: latch a fresh drag from either
     /// an emitter glyph or a subscription pin, track the snapped opposite
-    /// end, and commit an [`Intent::Subscribe`] on release over a valid
-    /// target. Esc cancels.
+    /// end, and commit a `SetSubscription { subscribe: true }` on release over
+    /// a valid target. Esc cancels.
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
@@ -130,10 +130,11 @@ impl SubscriptionUI {
             | InFlight::FromSubscriber {
                 subscriber,
                 snap_emitter: Some(emitter),
-            } => out.push(Intent::Subscribe {
+            } => out.push(Intent::SetSubscription {
                 emitter: emitter.node_id,
                 event_idx: emitter.event_idx,
                 subscriber,
+                subscribe: true,
             }),
             _ => {}
         }

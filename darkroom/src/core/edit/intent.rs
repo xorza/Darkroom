@@ -43,6 +43,18 @@ use crate::core::document::{
     BoundarySide, Document, EditScope, EditScopeRef, GraphRef, TabRef, Viewport,
 };
 
+/// One scalar node property an editor can toggle — the payload of
+/// [`Intent::SetNodeProperty`]. Both variants are geometry-neutral (changing
+/// one never remeasures the node or reshapes a subgraph interface) and dirty
+/// the document, so they share one intent / step rather than a variant each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NodeProperty {
+    /// `Node::disabled` — excluded from execution, skipped at flatten time.
+    Disabled(bool),
+    /// `Node::cache` — where the node's output is cached (see [`CacheMode`]).
+    Cache(CacheMode),
+}
+
 /// What the caller wants to change. Forward-only — no `from` fields.
 /// Each variant says "set X to Y"; the consumer captures the previous
 /// Y at commit time via [`build_step`].
@@ -124,19 +136,14 @@ pub enum Intent {
     RaiseNode {
         node_id: NodeId,
     },
-    /// Enable/disable a node for execution (`Node::disabled`). The header
-    /// badge toggles it; a disabled node is skipped at flatten time.
-    SetDisabled {
+    /// Set one scalar property of a node — its `disabled` flag or its cache
+    /// [`CacheMode`] (see [`NodeProperty`]). Emitted by the header badges: `D`
+    /// flips `Disabled` (skips the node at flatten time); the `R`/`↓` chips each
+    /// flip one bit of `Cache` (the disk bit persists the output so a
+    /// reproducible node reloads instead of recomputing).
+    SetNodeProperty {
         node_id: NodeId,
-        to: bool,
-    },
-    /// Set where a node's output is cached (`Node::cache` — `None`/`Ram`/`Disk`/
-    /// `Both`). The header's two cache chips (RAM + disk) each flip one bit; the
-    /// disk bit persists the output to the content-addressed store so a
-    /// reproducible node reloads instead of recomputing.
-    SetCacheMode {
-        node_id: NodeId,
-        to: CacheMode,
+        to: NodeProperty,
     },
     /// Fork a private standalone copy of a `Subgraph(Local(_))` node's
     /// def and re-point the node at it (the S-badge "Detach" action).
@@ -181,19 +188,17 @@ pub enum Intent {
         id: SubgraphId,
         to: String,
     },
-    /// Subscribe `subscriber` to `emitter`'s event `event_idx` — an event
-    /// wire dropped on a subscription pin. Idempotent (a no-op when the
-    /// subscription already exists).
-    Subscribe {
+    /// Add (`subscribe = true`) or remove (`false`) an event subscription:
+    /// `subscriber` ← `emitter`'s event `event_idx`. An event wire dropped on,
+    /// or severed from, a subscription pin. Idempotent — a no-op when the
+    /// subscription already matches. Lowers to the single reversible
+    /// [`GraphStep::SetSubscription`], subscribe and unsubscribe being exact
+    /// inverses.
+    SetSubscription {
         emitter: NodeId,
         event_idx: usize,
         subscriber: NodeId,
-    },
-    /// Remove an event subscription.
-    Unsubscribe {
-        emitter: NodeId,
-        event_idx: usize,
-        subscriber: NodeId,
+        subscribe: bool,
     },
 }
 
@@ -282,15 +287,13 @@ pub enum GraphStep {
         from_index: usize,
         to_index: usize,
     },
-    SetDisabled {
+    /// Set a scalar node property (disable flag or cache mode). One step backs
+    /// both, since they're geometry-neutral and apply/revert identically —
+    /// write the [`NodeProperty`] into its field. See [`Intent::SetNodeProperty`].
+    SetNodeProperty {
         node_id: NodeId,
-        from: bool,
-        to: bool,
-    },
-    SetCacheMode {
-        node_id: NodeId,
-        from: CacheMode,
-        to: CacheMode,
+        from: NodeProperty,
+        to: NodeProperty,
     },
     /// Fork + re-point: `def` (a fresh standalone copy) joins the
     /// graph's local defs and the node swaps from `from_id` to `def.id`.
@@ -403,8 +406,7 @@ impl GraphStep {
                 to_index,
                 ..
             } => from_index == to_index,
-            GraphStep::SetDisabled { from, to, .. } => from == to,
-            GraphStep::SetCacheMode { from, to, .. } => from == to,
+            GraphStep::SetNodeProperty { from, to, .. } => from == to,
             GraphStep::SetViewport { from, to } => {
                 (from.pan - to.pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
                     && (from.zoom - to.zoom).abs() < VIEWPORT_EPS
@@ -572,16 +574,15 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
                 to_index,
             }
         }
-        Intent::SetDisabled { node_id, to } => GraphStep::SetDisabled {
-            from: graph.by_id(&node_id)?.disabled,
-            node_id,
-            to,
-        },
-        Intent::SetCacheMode { node_id, to } => GraphStep::SetCacheMode {
-            from: graph.by_id(&node_id)?.cache,
-            node_id,
-            to,
-        },
+        Intent::SetNodeProperty { node_id, to } => {
+            let node = graph.by_id(&node_id)?;
+            // Capture the *same* property's current value as `from` for revert.
+            let from = match to {
+                NodeProperty::Disabled(_) => NodeProperty::Disabled(node.disabled),
+                NodeProperty::Cache(_) => NodeProperty::Cache(node.cache),
+            };
+            GraphStep::SetNodeProperty { node_id, from, to }
+        }
         Intent::DetachSubgraph { node_id } => {
             let NodeKind::Subgraph(SubgraphRef::Local(from_id)) = graph.by_id(&node_id)?.kind
             else {
@@ -599,34 +600,28 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             from: view.viewport,
             to,
         },
-        Intent::Subscribe {
+        Intent::SetSubscription {
             emitter,
             event_idx,
             subscriber,
+            subscribe,
         } => {
-            // Both endpoints must exist; a stale drag onto a vanished node
-            // drops rather than recording a dangling subscription.
-            graph.by_id(&emitter)?;
-            graph.by_id(&subscriber)?;
+            // A subscribe needs both endpoints present; a stale drag onto a
+            // vanished node drops rather than recording a dangling subscription.
+            // An unsubscribe of a vanished node no-ops naturally (nothing is
+            // subscribed → from == to == false), so it needs no existence check.
+            if subscribe {
+                graph.by_id(&emitter)?;
+                graph.by_id(&subscriber)?;
+            }
             GraphStep::SetSubscription {
                 from: graph.is_subscribed(emitter, event_idx, subscriber),
-                to: true,
+                to: subscribe,
                 emitter,
                 event_idx,
                 subscriber,
             }
         }
-        Intent::Unsubscribe {
-            emitter,
-            event_idx,
-            subscriber,
-        } => GraphStep::SetSubscription {
-            from: graph.is_subscribed(emitter, event_idx, subscriber),
-            to: false,
-            emitter,
-            event_idx,
-            subscriber,
-        },
     };
     Some(UndoStep::Graph(step))
 }
@@ -952,11 +947,8 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         } => {
             scope.view.view_nodes.move_to_index(node_id, *to_index);
         }
-        GraphStep::SetDisabled { node_id, to, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().disabled = *to;
-        }
-        GraphStep::SetCacheMode { node_id, to, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().cache = *to;
+        GraphStep::SetNodeProperty { node_id, to, .. } => {
+            set_node_property(scope, node_id, *to);
         }
         GraphStep::DetachSubgraph { node_id, def, .. } => {
             scope.graph.subgraphs.add((**def).clone());
@@ -989,6 +981,16 @@ fn set_subscription(
         scope.graph.subscribe(emitter, event_idx, subscriber);
     } else {
         scope.graph.unsubscribe(emitter, event_idx, subscriber);
+    }
+}
+
+/// Write one [`NodeProperty`] into its node field. Shared by `apply_graph`
+/// (writes `to`) and `revert_graph` (writes `from`).
+fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProperty) {
+    let node = scope.graph.by_id_mut(node_id).unwrap();
+    match prop {
+        NodeProperty::Disabled(v) => node.disabled = v,
+        NodeProperty::Cache(v) => node.cache = v,
     }
 }
 
@@ -1101,11 +1103,8 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         } => {
             scope.view.view_nodes.move_to_index(node_id, *from_index);
         }
-        GraphStep::SetDisabled { node_id, from, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().disabled = *from;
-        }
-        GraphStep::SetCacheMode { node_id, from, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().cache = *from;
+        GraphStep::SetNodeProperty { node_id, from, .. } => {
+            set_node_property(scope, node_id, *from);
         }
         GraphStep::DetachSubgraph {
             node_id,
@@ -1176,10 +1175,9 @@ impl UndoStep {
             GraphStep::SetSelection { .. }
             // Raising only reorders the paint stack — no node remeasures.
             | GraphStep::RaiseNode { .. }
-            // Disabling only dims the body paint — same rect, no remeasure.
-            | GraphStep::SetDisabled { .. }
-            // The cache toggle flips a badge fill — same rect, no remeasure.
-            | GraphStep::SetCacheMode { .. }
+            // A node property (disable dims the body, a cache toggle flips a
+            // badge fill) keeps the same rect — no remeasure.
+            | GraphStep::SetNodeProperty { .. }
             // Event wiring paints a wire between existing glyphs — no
             // node remeasure.
             | GraphStep::SetSubscription { .. } => false,
@@ -1210,8 +1208,7 @@ impl UndoStep {
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetSelection { .. }
                 | GraphStep::RaiseNode { .. }
-                | GraphStep::SetDisabled { .. }
-                | GraphStep::SetCacheMode { .. }
+                | GraphStep::SetNodeProperty { .. }
                 | GraphStep::SetViewport { .. }
                 // Subscriptions don't feed a subgraph's derived interface.
                 | GraphStep::SetSubscription { .. },
@@ -1246,8 +1243,7 @@ impl UndoStep {
                 | GraphStep::MoveNodes { .. }
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetInput { .. }
-                | GraphStep::SetDisabled { .. }
-                | GraphStep::SetCacheMode { .. }
+                | GraphStep::SetNodeProperty { .. }
                 | GraphStep::DetachSubgraph { .. }
                 | GraphStep::SetSubscription { .. },
             )
@@ -1281,8 +1277,7 @@ impl UndoStep {
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetSelection { .. }
                 | GraphStep::RaiseNode { .. }
-                | GraphStep::SetDisabled { .. }
-                | GraphStep::SetCacheMode { .. }
+                | GraphStep::SetNodeProperty { .. }
                 | GraphStep::DetachSubgraph { .. }
                 | GraphStep::SetSubscription { .. },
             )
@@ -1434,20 +1429,30 @@ mod tests {
         let mut doc = Document::default();
         let emitter = add_node_at(&mut doc, Vec2::ZERO);
         let subscriber = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
-        let sub = |e, i, s| Intent::Subscribe {
+        let set_sub = |e, i, s, subscribe| Intent::SetSubscription {
             emitter: e,
             event_idx: i,
             subscriber: s,
+            subscribe,
         };
 
         // Subscribe commits and writes the edge.
-        let step = commit_intent(sub(emitter, 0, subscriber), &mut doc, GraphRef::Main)
-            .expect("subscribe commits");
+        let step = commit_intent(
+            set_sub(emitter, 0, subscriber, true),
+            &mut doc,
+            GraphRef::Main,
+        )
+        .expect("subscribe commits");
         assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
 
         // A second identical subscribe is a no-op (from == to == true).
         assert!(
-            commit_intent(sub(emitter, 0, subscriber), &mut doc, GraphRef::Main).is_none(),
+            commit_intent(
+                set_sub(emitter, 0, subscriber, true),
+                &mut doc,
+                GraphRef::Main
+            )
+            .is_none(),
             "re-subscribing the same edge is a no-op"
         );
 
@@ -1459,11 +1464,7 @@ mod tests {
 
         // Unsubscribe commits, removes the edge, and undo brings it back.
         let step = commit_intent(
-            Intent::Unsubscribe {
-                emitter,
-                event_idx: 0,
-                subscriber,
-            },
+            set_sub(emitter, 0, subscriber, false),
             &mut doc,
             GraphRef::Main,
         )
@@ -1478,13 +1479,9 @@ mod tests {
         assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
         assert!(
             commit_intent(
-                Intent::Unsubscribe {
-                    emitter,
-                    event_idx: 0,
-                    subscriber,
-                },
+                set_sub(emitter, 0, subscriber, false),
                 &mut doc,
-                GraphRef::Main,
+                GraphRef::Main
             )
             .is_none(),
             "unsubscribing a missing edge is a no-op"
@@ -1498,10 +1495,11 @@ mod tests {
         let ghost = NodeId::unique();
         assert!(
             commit_intent(
-                Intent::Subscribe {
+                Intent::SetSubscription {
                     emitter,
                     event_idx: 0,
                     subscriber: ghost,
+                    subscribe: true,
                 },
                 &mut doc,
                 GraphRef::Main,
@@ -1623,51 +1621,64 @@ mod tests {
     }
 
     #[test]
-    fn set_cache_mode_commits_and_reverts() {
+    fn set_node_property_commits_and_reverts() {
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
-        // Fresh nodes default to RAM-only.
+        // Fresh nodes default to RAM-only and enabled.
         assert_eq!(doc.graph.by_id(&id).unwrap().cache, CacheMode::Ram);
+        assert!(!doc.graph.by_id(&id).unwrap().disabled);
 
-        // A representative bit-flip per header chip, each committing then reverting to
-        // the prior value the step captured: Ram→Both (disk chip on), Ram→None (RAM chip off).
-        for (to, from) in [
-            (CacheMode::Both, CacheMode::Ram),
-            (CacheMode::None, CacheMode::Ram),
-            (CacheMode::Disk, CacheMode::Ram),
-        ] {
+        // Both properties ride the one `SetNodeProperty` path. A representative flip
+        // each (the cache header chips: Ram→Both/None/Disk; the disable chip: →on),
+        // committing then reverting — each iteration returns the node to its defaults,
+        // so the step's captured `from` is always Ram / enabled.
+        let cases = [
+            NodeProperty::Cache(CacheMode::Both),
+            NodeProperty::Cache(CacheMode::None),
+            NodeProperty::Cache(CacheMode::Disk),
+            NodeProperty::Disabled(true),
+        ];
+        for to in cases {
             let step = commit_intent(
-                Intent::SetCacheMode { node_id: id, to },
+                Intent::SetNodeProperty { node_id: id, to },
                 &mut doc,
                 GraphRef::Main,
             )
-            .unwrap_or_else(|| panic!("{from:?} → {to:?} is a real change, not a no-op"));
-            assert_eq!(doc.graph.by_id(&id).unwrap().cache, to);
+            .unwrap_or_else(|| panic!("{to:?} is a real change, not a no-op"));
+            let node = doc.graph.by_id(&id).unwrap();
+            match to {
+                NodeProperty::Cache(m) => assert_eq!(node.cache, m),
+                NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
+            }
             assert!(
                 !step.requires_relayout() && !step.requires_reconcile(),
-                "a cache toggle neither remeasures nor reshapes the interface"
+                "a node-property toggle neither remeasures nor reshapes the interface"
             );
             assert!(
                 step.gesture_key().is_none(),
-                "each cache toggle is its own undo entry"
+                "each toggle is its own undo entry"
             );
             revert_step(&step, &mut doc, GraphRef::Main);
-            assert_eq!(doc.graph.by_id(&id).unwrap().cache, from);
+            let node = doc.graph.by_id(&id).unwrap();
+            assert_eq!(node.cache, CacheMode::Ram, "revert restores the cache");
+            assert!(!node.disabled, "revert restores the disable flag");
         }
 
-        // Setting it to the value it already holds is a no-op (no undo entry).
-        assert!(
-            commit_intent(
-                Intent::SetCacheMode {
-                    node_id: id,
-                    to: CacheMode::Ram,
-                },
-                &mut doc,
-                GraphRef::Main,
-            )
-            .is_none(),
-            "Ram → Ram writes nothing"
-        );
+        // Setting a property to the value it already holds is a no-op (no undo entry).
+        for to in [
+            NodeProperty::Cache(CacheMode::Ram),
+            NodeProperty::Disabled(false),
+        ] {
+            assert!(
+                commit_intent(
+                    Intent::SetNodeProperty { node_id: id, to },
+                    &mut doc,
+                    GraphRef::Main,
+                )
+                .is_none(),
+                "{to:?} equals the current value → writes nothing"
+            );
+        }
     }
 
     #[test]
