@@ -35,10 +35,10 @@ pub(crate) mod cache;
 pub(crate) mod cache_node;
 pub(crate) mod codec;
 pub(crate) mod digest;
+pub mod disk_store;
 pub mod event;
 pub(crate) mod executor;
 mod flatten;
-pub mod disk_store;
 pub(crate) mod plan;
 pub(crate) mod program;
 mod query;
@@ -49,9 +49,9 @@ mod tests;
 pub(crate) mod validate;
 
 use cache::RuntimeCache;
+use disk_store::DiskStore;
 use event::EventRef;
 use executor::Executor;
-use disk_store::DiskStore;
 use plan::{ExecutionPlan, Planner};
 #[cfg(test)]
 use program::ExecutionNode;
@@ -176,10 +176,10 @@ pub(crate) struct RunSeeds {
 
 /// The three-phase pipeline container. Owns the compiled `program`, the
 /// `flattener` (compile scratch) and its `flatten` map (flat↔authoring ids), the
-/// reusable `plan` buffer, the `planner` (scheduling scratch), the cross-run
-/// `cache` (per-node outputs + state), the `executor` (run loop + context), and
-/// the `disk_store` (file persistence). Not serializable — the persistent form
-/// is the [`ExecutionProgram`] alone.
+/// reusable `plan` buffer, the `planner` (scheduling scratch), the cross-run `cache`
+/// (per-node outputs + state, plus its owned `DiskStore` file persistence and the
+/// caching policy), and the `executor` (run loop + context). Not serializable — the
+/// persistent form is the [`ExecutionProgram`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
     pub(crate) program: ExecutionProgram,
@@ -190,22 +190,18 @@ pub(crate) struct ExecutionEngine {
     /// still hold it), and handed to each run's `ExecutionStats` by refcount bump.
     /// Compile scratch, not part of the serialized program.
     flatten_map: Arc<FlattenMap>,
-    /// Per-node cross-run cache (output values, digests, node state), reconciled
-    /// to the node set at each `update`.
+    /// Per-node cross-run cache (output values, digests, node state) plus the [`DiskStore`]
+    /// backing it and the caching policy over both — reuse, hydration, persistence, eviction.
+    /// The RAM slots are reconciled to the node set at each `update`; the disk store is set via
+    /// [`Self::set_disk_store`] and kept across updates.
     cache: RuntimeCache,
     executor: Executor,
     planner: Planner,
-    /// RuntimeCache-aware refinement of the plan: resolves reuse + cuts cones feeding only cache
+    /// Cache-aware refinement of the plan: resolves reuse + cuts cones feeding only cache
     /// hits, between plan and execute. Owns reusable per-run scratch (see `resolve.rs`).
     resolver: Resolver,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
-    /// Output cache: at execution time serves `persist` (content-addressed) and
-    /// `CachePassthrough` (explicit-path) nodes from disk when a blob for their digest
-    /// exists, reads only the ones a run consumes into RAM, and persists fresh ones after
-    /// a run. Holds the one codec registry and the optional disk root; empty default is
-    /// memory-only. Set via [`Self::set_disk_store`].
-    disk_store: DiskStore,
 }
 
 impl ExecutionEngine {
@@ -231,8 +227,8 @@ impl ExecutionEngine {
     /// files on a hit (skipping recompute), and freshly-computed ones are stored
     /// after a run. The RAM cache is keyed by node id + digest, independent of the
     /// root, so swapping keeps any warm in-memory outputs.
-    pub(crate) fn set_disk_store(&mut self, cache: DiskStore) {
-        self.disk_store = cache;
+    pub(crate) fn set_disk_store(&mut self, disk_store: DiskStore) {
+        self.cache.disk_store = disk_store;
     }
 
     // === Phase 1: compile ===
@@ -306,12 +302,9 @@ impl ExecutionEngine {
         // disk-cached node's stale upstream isn't recomputed on reopen. Mutates the cache
         // (stamps digests, flags disk hits); the run loop re-derives each surviving node's
         // digest as it reaches it (producers first) and materializes the disk frontier lazily.
-        let needed = self.resolver.resolve(
-            &self.program,
-            &self.plan,
-            &mut self.cache,
-            &self.disk_store,
-        );
+        let needed = self
+            .resolver
+            .resolve(&self.program, &self.plan, &mut self.cache);
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), not batched here — so a long run's earlier
@@ -323,7 +316,6 @@ impl ExecutionEngine {
                 &self.plan,
                 needed,
                 &mut self.cache,
-                &self.disk_store,
                 &self.flatten_map,
                 progress,
                 cancel,
@@ -332,11 +324,9 @@ impl ExecutionEngine {
 
         // Phase 3b: reclaim RAM from prior-run values this run left untouched and
         // that the disk store (written per-node above) can serve again on demand. The
-        // executor owns which nodes ran, so it computes the keep-set; the output cache
-        // just demotes the rest.
+        // executor owns which nodes ran, so it computes the keep-set; the cache demotes the rest.
         let keep = self.executor.protected_after_run(&self.program, &self.plan);
-        self.disk_store
-            .evict_unused(&self.program, &mut self.cache, &keep);
+        self.cache.evict_unused(&self.program, &keep);
 
         stats.triggered_events = seeds.events;
         // Annotate with how the graph was flattened so the stats' flat ids
@@ -354,7 +344,7 @@ impl ExecutionEngine {
     /// and so never re-executes to store itself.
     ///
     /// Never overwrites identical content: a content-addressed blob's path *is* its
-    /// content hash, so [`DiskStore::store_node`] skips it when it already exists.
+    /// content hash, so [`DiskStore::store`] skips it when it already exists.
     /// Explicit-path (`CachePassthrough`) nodes are deliberately excluded here — their
     /// file is (re)written by their own execution, so flushing them would overwrite an
     /// identical file. Also a no-op for a node with no resident value.
@@ -363,13 +353,8 @@ impl ExecutionEngine {
             if !self.program.e_nodes[idx].cache.persists_to_disk() {
                 continue;
             }
-            self.disk_store
-                .store_node(
-                    &self.program,
-                    idx,
-                    &self.cache,
-                    &mut self.executor.ctx_manager,
-                )
+            self.cache
+                .store_node(&self.program, idx, &mut self.executor.ctx_manager)
                 .await;
         }
     }

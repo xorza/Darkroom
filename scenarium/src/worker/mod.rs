@@ -10,8 +10,8 @@ use common::CancelToken;
 use common::PauseGate;
 use common::ReadyState;
 
-use crate::execution::event::{EventRef, EventTrigger};
 use crate::execution::disk_store::DiskStore;
+use crate::execution::event::{EventRef, EventTrigger};
 use crate::execution::stats::{ExecutionStats, RunProgress};
 use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result, RunSeeds};
 use crate::graph::{Graph, NodeId};

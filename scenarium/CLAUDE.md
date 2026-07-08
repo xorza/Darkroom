@@ -98,7 +98,7 @@ the executor's pre-run cut).
 **3. Execute — `Executor::run(program, plan)`** (`executor.rs`).
 `Executor` owns the `ctx_manager` + per-run scratch (invoke buffers + one `outcomes`
 column of [`NodeOutcome`], each `Pending`/`Reused`/`Cut`/`Ran`/`Failed`/`Skipped` carrying
-its own elapsed/error); the cross-run `slots` live on the `Cache`. `RuntimeSlot` (`cache.rs`)
+its own elapsed/error); the cross-run `slots` live on the `RuntimeCache`. `RuntimeSlot` (`cache.rs`)
 caches `output_values` + the `produced_under` digest, per-node `AnyState`/`SharedAnyState`.
 
 **One output digest.** The whole cache keys off a single `RuntimeSlot::current_digest`
@@ -108,7 +108,7 @@ value + `FsPath` directory content, or a `Bind` producer's already-stamped `curr
 The one special case: a `CachePassthrough` (file-cache) node is keyed on its `Const` path
 *alone* (`file_cache_digest`), excluding its `input[0]` cone. Reuse is uniform: a resident
 value whose `produced_under == current_digest` (`is_resident_hit`) is served from RAM; else
-`OutputCache::mark_on_disk_if_present` stats a blob for that digest and reuses it (loaded
+`RuntimeCache::mark_on_disk_if_present` stats a blob for that digest and reuses it (loaded
 lazily by `hydrate_slot` only when a running consumer reads it, so a disk-cached value behind
 another never enters RAM — this is what survives a reopen); else the node runs and
 `store_node` writes the blob. Downstream skip is just digest folding: a producer whose

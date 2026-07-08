@@ -1,4 +1,4 @@
-//! RuntimeCache-aware refinement of the structural schedule — the "up-to-date check" between
+//! Cache-aware refinement of the structural schedule — the "up-to-date check" between
 //! [`plan`](crate::execution::plan) and [`execute`](crate::execution::executor). The plan is
 //! the static dependency DAG (*what could run*); the [`Resolver`] folds in the current cache
 //! state to decide *what still needs to*: which pure-structural nodes reuse a cached output,
@@ -18,7 +18,6 @@
 
 use crate::execution::NodeColumn;
 use crate::execution::cache::RuntimeCache;
-use crate::execution::disk_store::DiskStore;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 
@@ -64,9 +63,8 @@ impl Resolver {
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
         cache: &mut RuntimeCache,
-        disk_store: &DiskStore,
     ) -> &NodeColumn<bool> {
-        resolve_structural(program, disk_store, cache, plan, &mut self.resolved);
+        resolve_structural(program, cache, plan, &mut self.resolved);
         compute_needed(program, plan, &self.resolved, &mut self.needed);
         &self.needed
     }
@@ -78,7 +76,6 @@ impl Resolver {
 /// structural fold (or the file-cache node's path key), so the whole graph resolves here.
 fn resolve_structural(
     program: &ExecutionProgram,
-    disk_store: &DiskStore,
     cache: &mut RuntimeCache,
     plan: &ExecutionPlan,
     resolved: &mut NodeColumn<Resolved>,
@@ -93,7 +90,7 @@ fn resolve_structural(
         // Fold the digest (reading producers' just-stamped digests) and decide reuse through
         // the one shared helper — the run loop's `prepare_node` makes the identical call, so
         // the two verdicts can't drift.
-        resolved[idx] = if disk_store.stamp_and_check_reuse(program, idx, cache) {
+        resolved[idx] = if cache.stamp_and_check_reuse(program, idx) {
             Resolved::Reuse
         } else {
             Resolved::Run

@@ -6,7 +6,9 @@ design home that the module's `//!` docs point at. Three parts:
 - **A. Subgraphs** — how composite nodes are authored and flattened away
   (`flatten.rs`; authoring types in `subgraph.rs`/`graph.rs`).
 - **B. Disk cache** — the content-addressed output cache for disk-backed (`Disk`/`Both`) nodes
-  (`digest.rs`, `cache.rs`, `output_cache.rs`, `blob.rs`, `codec.rs`).
+  (`digest.rs`, `cache.rs`, `disk_store.rs`, `blob.rs`, `codec.rs`). The `RuntimeCache`
+  (`cache.rs`) owns the RAM slots *and* the `DiskStore` (`disk_store.rs`, pure blob I/O) and runs
+  the caching policy — reuse, hydration, persistence, eviction — over both.
 - **C. File cache** — the explicit-path `file cache` passthrough node
   (`elements/cache_passthrough.rs`, `special.rs`).
 
@@ -254,7 +256,7 @@ decides reproducibility; the mode decides where a reproducible value is stored. 
 node still has a digest: a downstream `Disk`/`Both` consumer caches normally and, when that
 consumer is a hit, the `None` node's cone is simply cut (§B.6) — never recomputed to feed a
 value nothing reads. The two reuse paths gate independently: RAM reuse
-(`Cache::is_resident_hit`) needs `caches_in_ram`; disk reuse (`mark_on_disk_if_present`)
+(`RuntimeCache::is_resident_hit`) needs `caches_in_ram`; disk reuse (`mark_on_disk_if_present`)
 needs `persists_to_disk`. `evict_unused` then reclaims RAM the mode doesn't call to hold —
 demoting to a disk blob when one exists (lossless), else dropping only a non-RAM mode's value.
 
@@ -266,7 +268,7 @@ surfaced on the flat node as `ExecutionNode.cache`. Disk is a **request**, honor
 1. The node has a **content digest** — its whole upstream cone is reproducible (§B.2).
    An impure node, or anything downstream of one, has no digest and is silently kept
    memory-only — it can never risk serving a stale value.
-2. A **disk root** is configured (`ExecutionEngine::set_output_cache` with a
+2. A **disk root** is configured (`ExecutionEngine::set_disk_store` with a
    `disk_root`). Until then `Disk`/`Both` degrade to memory-only.
 
 ## B.2 The content digest is the cache key (`digest.rs`)
@@ -330,10 +332,10 @@ Each node has a `RuntimeSlot` (index-aligned to `e_nodes`):
 
 ```
 current_digest: Option<Digest>   // this run's content digest, stamped by the executor
-value:          ValueCache        // Empty | Resident { values, produced_under } | OnDisk
+value:          ValueState        // Empty | Resident { values, produced_under } | OnDisk
 ```
 
-`ValueCache` is one enum, not the old three loosely-coupled fields — so the previously
+`ValueState` is one enum, not the old three loosely-coupled fields — so the previously
 representable bad combos ("resident *and* flagged on disk", a stale RAM value masking a
 fresh blob) can't be built. The reuse test is **`is_resident_hit`** — the slot is
 `Resident` *and* its `produced_under` equals the current digest — the true "bytes are
@@ -342,7 +344,7 @@ here for this key" predicate the executor's input read and disk store rely on. A
 this digest, not yet loaded": a cheap `stat` result, so a disk-cached value behind
 another reused node is served without entering RAM (B.6).
 
-## B.6 Execution-time lifecycle (`output_cache.rs`)
+## B.6 Execution-time lifecycle (`cache.rs` policy over `disk_store.rs` I/O)
 
 All of it happens *during the run*, not at plan time — the planner is structural and does no
 cache work. The executor first does a **pre-run cut** (`resolve.rs`): fold every node's digest
@@ -457,10 +459,10 @@ cone. So:
 
 ## C.3 Load / store and `bypass`
 
-Load/store go through the same `OutputCache` as Part B, via `Target::Explicit(path)`
+Load/store go through the same `DiskStore` as Part B, via `Target::Explicit(path)`
 (vs. `Target::Addressed(<root>/<hex(digest)>)`). The two policies differ only in:
 
-- **how a node maps to a file** — `OutputCache::target`: explicit `FsPath` vs.
+- **how a node maps to a file** — `DiskStore::blob_path`: explicit `FsPath` vs.
   content-addressed digest path;
 - **whether a present blob is rewritten** — explicit path is always (over)written;
   a content-addressed blob already on disk is skipped (same digest ⇒ same bytes).
