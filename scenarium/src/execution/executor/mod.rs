@@ -1,8 +1,8 @@
 //! The run loop and its transient state. The `Executor` owns the shared
 //! `ctx_manager` and the invoke scratch; the per-node cross-run cache lives in
-//! the [`Cache`](crate::execution::cache::Cache). Given an immutable
+//! the [`RuntimeCache`](crate::execution::cache::RuntimeCache). Given an immutable
 //! [`ExecutionProgram`](crate::execution::program::ExecutionProgram), a prepared
-//! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), and that `Cache`,
+//! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), and that `RuntimeCache`,
 //! [`Executor::run`] invokes each scheduled node's lambda and gathers stats.
 //! Each node's per-run result is one [`NodeOutcome`] in a column local to the run.
 //!
@@ -29,8 +29,7 @@ use crate::node::func_lambda::{InvokeError, InvokeInput, OutputUsage};
 use crate::node::function::FuncId;
 use crate::runtime::context::ContextManager;
 
-use crate::execution::cache::Cache;
-use crate::execution::output_cache::OutputCache;
+use crate::execution::cache::RuntimeCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::execution::{NodeColumn, RunError};
@@ -83,11 +82,18 @@ impl NodeOutcome {
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
     pub(crate) ctx_manager: ContextManager,
-    /// Per-*invoke* scratch, refilled for each node that runs: its resolved inputs and
-    /// its ports' [`OutputUsage`] flags (sliced from the plan's `output_usage` counts —
-    /// a different, per-output-pool thing, hence the `_scratch` suffix here).
+    /// Per-*invoke* scratch: the node's resolved inputs, refilled for each node that runs.
     inputs: Vec<InvokeInput>,
-    output_usage_scratch: Vec<OutputUsage>,
+    /// The run's live per-output consumer count, indexed by output-pool index and seeded
+    /// each run from the plan's `output_usage`. It serves two roles at once: sliced per node
+    /// it's the [`OutputUsage`] a lambda reads to skip unwanted outputs (still at its initial
+    /// value when the node runs, since producers run before their consumers), and it counts
+    /// *down* as each running consumer reads a bound producer — an output reaching `Skip`
+    /// (zero left) is spent, so its value is cleared one output at a time and, once every
+    /// output of the node is spent, the whole slot is reclaimed
+    /// ([`RuntimeCache::reclaim_slot`]) to trim peak RAM instead of holding it to end-of-run
+    /// eviction. Reused across runs, reset each run.
+    output_usage: Vec<OutputUsage>,
     /// Per-run outcome per node (see [`NodeOutcome`]), indexed by `e_node_idx`. Reused
     /// across runs, reset to node count each run. The one per-node result column.
     outcomes: NodeColumn<NodeOutcome>,
@@ -96,44 +102,17 @@ pub(crate) struct Executor {
 impl Executor {
     /// Whether node `idx` actually recomputed its lambda in the last run — i.e. wasn't
     /// reused from RAM/disk. Before any run (empty column) every node reads as "ran", so
-    /// plan-only introspection still sees the full schedule. Test/stats introspection.
+    /// plan-only introspection still sees the full schedule. Test introspection only.
+    #[cfg(test)]
     pub(crate) fn ran(&self, idx: NodeIdx) -> bool {
         idx.idx() >= self.outcomes.len() || self.outcomes[idx].ran()
     }
 
-    /// The nodes whose resident value the last run must keep, as a per-node mask:
-    /// everything the run recomputed, plus the producers those nodes read as frontier
-    /// inputs. A *reused* node (served from cache, its lambda skipped) isn't kept on its
-    /// own account — only if a node that ran read its value — so a disk-cached value
-    /// behind another reused node is reclaimed. Everything else resident is an untouched
-    /// prior-run leftover that [`OutputCache::evict_unused`] may demote to disk. Reads the
-    /// run's `outcomes`, so it's the executor's to compute, not the cache's.
-    pub(crate) fn protected_after_run(
-        &self,
-        program: &ExecutionProgram,
-        plan: &ExecutionPlan,
-    ) -> Vec<bool> {
-        let mut protected = vec![false; program.e_nodes.len()];
-        for &e_idx in &plan.process_order {
-            if !self.ran(e_idx) {
-                continue;
-            }
-            protected[e_idx.idx()] = true;
-            let span = program.e_nodes[e_idx].inputs;
-            for input in &program.inputs[span.range()] {
-                if let ExecutionBinding::Bind(addr) = &input.binding {
-                    protected[addr.target_idx.idx()] = true;
-                }
-            }
-        }
-        protected
-    }
-
     /// Walk `plan.process_order` (producer-first). For each node: skip it as
     /// [`NodeOutcome::Cut`] if it's outside the `needed` mask (the resolver pruned its cone),
-    /// else stamp its output digest and decide reuse ([`OutputCache::stamp_and_check_reuse`]),
+    /// else stamp its output digest and decide reuse ([`RuntimeCache::stamp_and_check_reuse`]),
     /// reuse from RAM/disk if unchanged, else invoke its lambda and persist
-    /// the result to `output_cache` right away (so a long run's earlier caches survive a later
+    /// the result to disk right away (so a long run's earlier caches survive a later
     /// failure or cancel). The `program`, `plan`, and `needed` mask are read-only. Returns
     /// per-run stats.
     #[allow(clippy::too_many_arguments)] // an orchestration entry point; each arg is a distinct collaborator
@@ -142,8 +121,7 @@ impl Executor {
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
         needed: &NodeColumn<bool>,
-        cache: &mut Cache,
-        output_cache: &OutputCache,
+        cache: &mut RuntimeCache,
         flatten: &FlattenMap,
         progress: Option<&UnboundedSender<RunProgress>>,
         cancel: CancelToken,
@@ -160,9 +138,23 @@ impl Executor {
         // context and these columns without aliasing `self`. The per-run result
         // columns start fresh at the current node count.
         let mut inputs = std::mem::take(&mut self.inputs);
-        let mut output_usage_scratch = std::mem::take(&mut self.output_usage_scratch);
         let mut outcomes = std::mem::take(&mut self.outcomes);
         outcomes.reset(n_nodes, NodeOutcome::Pending);
+
+        // Seed the run's live per-output consumer counts from the plan (`0` ⇒ `Skip`, the
+        // lambda-facing "nobody reads this output"; `> 0` ⇒ `Needed`). This same column is
+        // counted down as consumers read, freeing each spent output (see `collect_inputs` and
+        // the post-invoke release below). Borrowed in place (a distinct field from the
+        // `ctx_manager` the loop also mutates), reusing its allocation across runs.
+        let output_usage = &mut self.output_usage;
+        output_usage.clear();
+        output_usage.extend(plan.output_usage.iter().map(|&c| {
+            if c == 0 {
+                OutputUsage::Skip
+            } else {
+                OutputUsage::Needed(c)
+            }
+        }));
 
         // How far down `process_order` the run got. Stays the full length on a
         // normal run; on cancel it's the count reached before bailing, so the
@@ -211,7 +203,7 @@ impl Executor {
             // Resolve the node's digest and cache state — the one and only digest
             // computation (see [`prepare_node`]) — then act on the verdict. On `Run`,
             // `inputs` has been populated with the node's resolved arguments.
-            match prepare_node(program, output_cache, cache, e_node_idx, &mut inputs) {
+            match prepare_node(program, cache, output_usage, e_node_idx, &mut inputs) {
                 Readiness::Reuse => {
                     outcomes[e_node_idx] = NodeOutcome::Reused;
                     continue;
@@ -222,8 +214,6 @@ impl Executor {
                 }
                 Readiness::Run => {}
             }
-
-            collect_output_usage(program, plan, e_node_idx, &mut output_usage_scratch);
 
             let output_count = program.e_nodes[e_node_idx].outputs.len as usize;
             let event_state = cache.slots[e_node_idx].event_state.clone();
@@ -240,6 +230,10 @@ impl Executor {
                     phase: RunPhase::Started { at: invoke_start },
                 });
             }
+            // The node's own outputs are still at their seeded counts (producers run before
+            // consumers), so this slice is the `OutputUsage` the lambda reads to skip
+            // unwanted outputs.
+            let usage = &output_usage[program.e_nodes[e_node_idx].outputs.range()];
             let result = {
                 let lambda = &program.e_nodes[e_node_idx].lambda;
                 let slot = cache.slots[e_node_idx].invoke_slot(output_count);
@@ -249,7 +243,7 @@ impl Executor {
                         slot.state,
                         &event_state,
                         &inputs,
-                        &output_usage_scratch,
+                        usage,
                         slot.outputs,
                     )
                     .await
@@ -314,9 +308,18 @@ impl Executor {
             // synchronously inside `store_node`; only the write awaits, so the cache
             // borrow doesn't cross it.
             if succeeded {
-                output_cache
-                    .store_node(program, e_node_idx, cache, &mut self.ctx_manager)
+                cache
+                    .store_node(program, e_node_idx, &mut self.ctx_manager)
                     .await;
+                // A node no consumer reads (a terminal sink, or every output already `Skip`) is
+                // spent the instant it's stored — reclaim its non-RAM slot now rather than
+                // holding it to end-of-run eviction. A node that still owes reads is reclaimed
+                // later, in `collect_inputs`, when its last consumer lands.
+                if !program.e_nodes[e_node_idx].cache.caches_in_ram()
+                    && node_drained(program, output_usage, e_node_idx)
+                {
+                    cache.reclaim_slot(program, e_node_idx);
+                }
             }
         }
 
@@ -332,7 +335,6 @@ impl Executor {
         stats.logs = std::mem::take(&mut self.ctx_manager.logs);
         stats.cancelled = self.ctx_manager.cancel.is_cancelled();
         self.inputs = inputs;
-        self.output_usage_scratch = output_usage_scratch;
         self.outcomes = outcomes;
         stats
     }
@@ -351,7 +353,7 @@ enum Readiness {
 }
 
 /// Stamp node `idx`'s content digest and decide whether it reuses a cached output or must
-/// run, via [`OutputCache::stamp_and_check_reuse`] — the same call the pre-run
+/// run, via [`RuntimeCache::stamp_and_check_reuse`] — the same call the pre-run
 /// [`resolve`](crate::execution::resolve) sweep makes, so the two can't diverge. Producer-first
 /// order means every `Bind` producer's digest is already stamped when this runs; the sweep
 /// already stamped the same digest, and this re-derives it idempotently (a cheap fold), so the
@@ -363,8 +365,8 @@ enum Readiness {
 /// `inputs` holds the resolved arguments.
 fn prepare_node(
     program: &ExecutionProgram,
-    output_cache: &OutputCache,
-    cache: &mut Cache,
+    cache: &mut RuntimeCache,
+    output_usage: &mut [OutputUsage],
     idx: NodeIdx,
     inputs: &mut Vec<InvokeInput>,
 ) -> Readiness {
@@ -372,13 +374,13 @@ fn prepare_node(
     // `resolve_structural` makes the identical call, so the two verdicts can't drift. A disk
     // hit is flagged but its bytes load lazily only when a running consumer reads them (so a
     // disk-cached value behind another never enters RAM); a `None` digest (impure) never reuses.
-    if output_cache.stamp_and_check_reuse(program, idx, cache) {
+    if cache.stamp_and_check_reuse(program, idx) {
         return Readiness::Reuse;
     }
 
     // Not reusing: load the node's inputs, pulling any disk-cached producer in on demand (the
-    // lazy frontier read).
-    if !collect_inputs(program, output_cache, cache, idx, inputs) {
+    // lazy frontier read) and releasing each producer whose last read this satisfies.
+    if !collect_inputs(program, cache, output_usage, idx, inputs) {
         return Readiness::InputsUnavailable;
     }
     Readiness::Run
@@ -388,7 +390,7 @@ fn prepare_node(
 /// it isn't served as this run's result, and record the outcome. Shared by the
 /// errored-dependency and failed-input-load paths, which are indistinguishable downstream.
 fn mark_skipped(
-    cache: &mut Cache,
+    cache: &mut RuntimeCache,
     outcomes: &mut NodeColumn<NodeOutcome>,
     idx: NodeIdx,
     func_id: FuncId,
@@ -412,13 +414,13 @@ fn has_errored_dependency(
 
 /// Resolve `e_node_idx`'s inputs into `inputs`. Returns `false` if a bound producer's
 /// value can't be materialized — its disk blob was reused-from-disk but failed to load
-/// (corrupt/deleted): [`hydrate_slot`](OutputCache::hydrate_slot) then removes the bad
+/// (corrupt/deleted): [`hydrate_slot`](RuntimeCache::hydrate_slot) then removes the bad
 /// blob, so this run drops the consumer (like an errored dependency) and the next reopen
 /// recomputes the producer fresh. Any other missing value is a planner bug.
 fn collect_inputs(
     program: &ExecutionProgram,
-    output_cache: &OutputCache,
-    cache: &mut Cache,
+    cache: &mut RuntimeCache,
+    output_usage: &mut [OutputUsage],
     e_node_idx: NodeIdx,
     inputs: &mut Vec<InvokeInput>,
 ) -> bool {
@@ -434,12 +436,29 @@ fn collect_inputs(
                 // reused-from-disk (marked `OnDisk`, not yet loaded) — hydrate the latter
                 // now, the lazy frontier read. A resident value is a no-op load; a failed
                 // one leaves the slot empty and drops this consumer for the run.
-                output_cache.hydrate_slot(program, cache, target);
-                let Some(outputs) = cache.slots[target].output_values() else {
-                    return false;
+                cache.hydrate_slot(program, target);
+                let value = {
+                    let Some(outputs) = cache.slots[target].output_values() else {
+                        return false;
+                    };
+                    assert_eq!(outputs.len(), program.e_nodes[target].outputs.len as usize);
+                    outputs[port].clone()
                 };
-                assert_eq!(outputs.len(), program.e_nodes[target].outputs.len as usize);
-                outputs[port].clone()
+                // Count this read against the producer's output. Each `Bind` edge was counted
+                // once in the plan's usage, so when this output's count reaches `Skip` every
+                // in-run consumer has read it and it's spent — freed one output at a time here.
+                let out_idx = program.e_nodes[target].outputs.start as usize + port;
+                match output_usage[out_idx] {
+                    OutputUsage::Needed(1) => {
+                        output_usage[out_idx] = OutputUsage::Skip;
+                        release_spent_output(program, cache, output_usage, target, port);
+                    }
+                    OutputUsage::Needed(n) => output_usage[out_idx] = OutputUsage::Needed(n - 1),
+                    OutputUsage::Skip => {
+                        panic!("consumer read output {out_idx} the plan marked as unused (Skip)")
+                    }
+                }
+                value
             }
         };
         inputs.push(InvokeInput { value });
@@ -447,21 +466,35 @@ fn collect_inputs(
     true
 }
 
-fn collect_output_usage(
+/// The last consumer of `target`'s output `port` just took its copy. A `Ram`/`Both` node
+/// stays hot for the next run; for a non-RAM one, that spent output is freed now rather than
+/// at end-of-run eviction — the whole slot reclaimed
+/// ([`RuntimeCache::reclaim_slot`], demoted to disk or dropped) once *every* output is spent,
+/// else just this one value cleared while sibling outputs are still owed to other consumers.
+fn release_spent_output(
     program: &ExecutionProgram,
-    plan: &ExecutionPlan,
-    e_node_idx: NodeIdx,
-    usage: &mut Vec<OutputUsage>,
+    cache: &mut RuntimeCache,
+    output_usage: &[OutputUsage],
+    target: NodeIdx,
+    port: usize,
 ) {
-    usage.clear();
-    let span = program.e_nodes[e_node_idx].outputs;
-    usage.extend(plan.output_usage[span.range()].iter().map(|&c| {
-        if c == 0 {
-            OutputUsage::Skip
-        } else {
-            OutputUsage::Needed(c)
-        }
-    }));
+    if program.e_nodes[target].cache.caches_in_ram() {
+        return;
+    }
+    if node_drained(program, output_usage, target) {
+        cache.reclaim_slot(program, target);
+    } else {
+        cache.clear_output_port(target, port);
+    }
+}
+
+/// Whether every output of node `idx` is spent — no consumer this run still owes a read
+/// (each output is `Skip`, either seeded that way with zero consumers or counted down to it).
+fn node_drained(program: &ExecutionProgram, output_usage: &[OutputUsage], idx: NodeIdx) -> bool {
+    let outputs = program.e_nodes[idx].outputs;
+    output_usage[outputs.range()]
+        .iter()
+        .all(|u| matches!(u, OutputUsage::Skip))
 }
 
 fn collect_execution_stats(

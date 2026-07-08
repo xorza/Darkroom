@@ -1,18 +1,26 @@
-//! The per-node cross-run runtime cache: output values + content digests + node
-//! state, keyed by `NodeId` and index-aligned to the program's `e_nodes`. Owned
-//! by the [`ExecutionEngine`](crate::execution::ExecutionEngine); the executor's run
-//! loop computes each node's digest, writes its outputs, and reads its reuse state
-//! ([`RuntimeCache::is_resident_hit`]). Reconciled against the node set at each `update`.
-//! Per-run results (errors, timings) are *not* here — they belong to a single run
-//! and live on the run, not the cache.
+//! The cross-run runtime cache: the per-node RAM slots (output values + content digests +
+//! node state, keyed by `NodeId` and index-aligned to the program's `e_nodes`) **plus** the
+//! [`DiskStore`] backing them, and the caching policy over the two — reuse detection, on-demand
+//! hydration, persistence, and RAM eviction. Owned by the
+//! [`ExecutionEngine`](crate::execution::ExecutionEngine); the executor's run loop drives it a
+//! node at a time. The [`DiskStore`] is pure blob I/O and knows nothing of the cache; this type
+//! reads a node's digest/value-state off its slot and the blob off disk, and pushes the result
+//! back — so RAM eviction (demote-or-drop) lives here, on the cache that owns both stores.
+//! Per-run results (errors, timings) are *not* here — they belong to a single run, not the cache.
+
+use std::future::Future;
 
 use common::{KeyIndexKey, KeyIndexVec};
 
 use crate::data::DynamicValue;
-use crate::execution::digest::Digest;
-use crate::execution::program::{ExecutionNode, NodeIdx};
+use crate::execution::NodeColumn;
+use crate::execution::digest::{Digest, node_digest};
+use crate::execution::disk_store::DiskStore;
+use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram, NodeIdx};
 use crate::graph::NodeId;
+use crate::node::special::SpecialNode;
 use crate::runtime::any_state::AnyState;
+use crate::runtime::context::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 /// One node's cached output as an explicit three-state machine. The states are mutually
@@ -32,7 +40,7 @@ pub(crate) enum ValueState {
         produced_under: Option<Digest>,
     },
     /// Not in RAM, but a decodable blob exists on disk for the slot's *current* digest —
-    /// flagged during the run by [`DiskStore::mark_on_disk_if_present`](crate::execution::disk_store::DiskStore::mark_on_disk_if_present)
+    /// flagged during the run by [`mark_on_disk_if_present`](RuntimeCache::mark_on_disk_if_present)
     /// (or demoted here from a resident value by `evict_unused`) without loading,
     /// deserialized on demand (a running consumer's `collect_inputs`, or an inspection).
     /// Lets a disk-cached value behind another disk-cached value never enter RAM.
@@ -128,12 +136,16 @@ impl RuntimeSlot {
     }
 }
 
-/// The per-node cross-run cache. `slots` is index-aligned to `program.e_nodes`
-/// via [`Self::reconcile`]; the executor computes each node's digest, mutates its
-/// outputs/state, and reads reuse state ([`Self::is_resident_hit`]) in its run loop.
+/// The per-node cross-run cache plus its disk backing. `slots` is index-aligned to
+/// `program.e_nodes` via [`Self::reconcile`]; the executor computes each node's digest,
+/// mutates its outputs/state, and reads reuse state ([`Self::is_resident_hit`]) in its run
+/// loop. `disk_store` persists outputs and serves them back — set via
+/// [`ExecutionEngine::set_disk_store`](crate::execution::ExecutionEngine::set_disk_store) and
+/// kept across graph updates (only `slots` is reconciled/cleared).
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeCache {
     pub(crate) slots: KeyIndexVec<NodeId, RuntimeSlot>,
+    pub(crate) disk_store: DiskStore,
 }
 
 impl RuntimeCache {
@@ -173,7 +185,13 @@ impl RuntimeCache {
     /// reused, so it never ran) is still reported as *cached* when its value can be served —
     /// while a pruned memory-only node with no value reports `false`.
     pub(crate) fn has_available_value(&self, idx: NodeIdx) -> bool {
-        self.is_resident_hit(idx) || matches!(self.slots[idx].value, ValueState::OnDisk)
+        self.is_resident_hit(idx) || self.is_on_disk(idx)
+    }
+
+    /// Whether slot `idx` is flagged [`ValueState::OnDisk`] — a blob stat'd this run but not yet
+    /// loaded into RAM.
+    pub(crate) fn is_on_disk(&self, idx: NodeIdx) -> bool {
+        matches!(self.slots[idx].value, ValueState::OnDisk)
     }
 
     /// Install a disk-loaded output into a slot under `digest` (the node's current
@@ -184,6 +202,216 @@ impl RuntimeCache {
             produced_under: Some(digest),
         };
     }
+
+    /// Flag slot `idx` as `OnDisk` — its value lives only in a blob now. Used by the reuse
+    /// check when a blob is found and by [`reclaim_slot`](Self::reclaim_slot)'s demote path.
+    pub(crate) fn flag_on_disk(&mut self, idx: NodeIdx) {
+        self.slots[idx].value = ValueState::OnDisk;
+    }
+
+    /// Clear a single output value of a resident slot (to `Unbound`), keeping its siblings — the
+    /// mid-run per-output release for a non-RAM producer whose one output just went spent while
+    /// others are still owed to other consumers. No-op if the slot isn't resident or `port` is
+    /// out of range.
+    pub(crate) fn clear_output_port(&mut self, idx: NodeIdx, port: usize) {
+        if let ValueState::Resident { values, .. } = &mut self.slots[idx].value
+            && let Some(slot) = values.get_mut(port)
+        {
+            *slot = DynamicValue::Unbound;
+        }
+    }
+
+    // === Caching policy (over the RAM slots + the owned `disk_store`) ===
+
+    /// Stamp node `idx`'s content digest into its slot and return whether an unchanged output
+    /// can be reused this run — resident in RAM ([`is_resident_hit`](Self::is_resident_hit)) or
+    /// a blob on disk flagged now ([`mark_on_disk_if_present`](Self::mark_on_disk_if_present)).
+    /// The single place the digest is folded and the reuse verdict formed, shared by the pre-run
+    /// cut ([`Resolver`](crate::execution::resolve::Resolver)) and the run loop (`prepare_node`)
+    /// so the two can't drift. A `None` digest (an impure cone) never reuses.
+    ///
+    /// The two reuse paths are gated on the node's [`CacheMode`](crate::graph::CacheMode) bits:
+    /// RAM reuse only for a `caches_in_ram` mode (`Ram`/`Both`), disk reuse only for a
+    /// `persists_to_disk` mode (`Disk`/`Both`, enforced in [`DiskStore::blob_path`]). So a `None`
+    /// node reuses neither and always recomputes; a `Disk` node reuses only from disk (its RAM
+    /// copy is demoted after each run). A `CachePassthrough` (file-cache) node bypasses these
+    /// gates — its explicit path is checked directly in `blob_path`.
+    pub(crate) fn stamp_and_check_reuse(
+        &mut self,
+        program: &ExecutionProgram,
+        idx: NodeIdx,
+    ) -> bool {
+        let digest = node_digest(program, idx, self);
+        self.slots[idx].current_digest = digest;
+        let ram_hit = program.e_nodes[idx].cache.caches_in_ram() && self.is_resident_hit(idx);
+        digest.is_some() && (ram_hit || self.mark_on_disk_if_present(program, idx))
+    }
+
+    /// The per-node "reuse from disk?" check, run once a node's digest is computed: if a
+    /// decodable blob exists on disk for that digest, flag the slot `OnDisk` (dropping any stale
+    /// resident value produced under a superseded digest) and return `true` — the node is served
+    /// without running. The bytes stay on disk; they load lazily only when a running consumer
+    /// reads the value ([`hydrate_slot`](Self::hydrate_slot)), so a disk-cached value behind
+    /// another never enters RAM. A bypassed cache-passthrough always recomputes.
+    pub(crate) fn mark_on_disk_if_present(
+        &mut self,
+        program: &ExecutionProgram,
+        idx: NodeIdx,
+    ) -> bool {
+        if is_bypassed(program, idx) {
+            return false;
+        }
+        let Some(target) = self
+            .disk_store
+            .blob_path(program, idx, self.slots[idx].current_digest)
+        else {
+            return false;
+        };
+        if self
+            .disk_store
+            .outputs_decodable(program.node_output_types(&program.e_nodes[idx]))
+            && target.path().exists()
+        {
+            self.flag_on_disk(idx);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Deserialize node `idx`'s disk blob into its slot. Returns whether the slot is resident
+    /// afterward: `true` if already resident or the read succeeded. On a read failure (codec
+    /// gone, corrupt, an incompatible format, or deleted) the file is **deleted** and the slot
+    /// cleared, so the demanding consumer is dropped this run and the *next* reopen recomputes
+    /// the node + rewrites a fresh blob — without the delete, [`DiskStore::store`]'s
+    /// skip-if-exists would keep the broken file forever. A blob can't be of the *wrong type*
+    /// for a matching digest: the output signature is folded into the digest, so a redefined
+    /// output re-keys rather than colliding.
+    pub(crate) fn hydrate_slot(&mut self, program: &ExecutionProgram, idx: NodeIdx) -> bool {
+        // A fresh value already in RAM needs no load. A *stale* resident value can't reach here:
+        // `mark_on_disk_if_present` demotes "stale + blob on disk" to `OnDisk` (dropping the
+        // stale value) before a consumer would read it.
+        if self.is_resident_hit(idx) {
+            return true;
+        }
+        if !self.is_on_disk(idx) {
+            return false;
+        }
+        // The slot claimed an on-disk blob. Load it; on success it's resident.
+        if let Some(digest) = self.slots[idx].current_digest
+            && let Some(target) = self.disk_store.blob_path(program, idx, Some(digest))
+        {
+            if let Some(values) = self.disk_store.read(target.path()) {
+                self.hydrate(idx, values, digest);
+                return true;
+            }
+            // The blob didn't load — corrupt, an incompatible format, or vanished. Delete it so
+            // the recompute that follows writes a fresh one (otherwise the broken file lingers
+            // and `store` skips it as "already on disk", forever).
+            self.disk_store.delete(target.path());
+        }
+        self.slots[idx].clear_output();
+        false
+    }
+
+    /// Materialize node `idx` plus the producers feeding its inputs — the values an inspection
+    /// of `idx` reads (its own outputs and its inputs' resolved values). Lets a disk-cached node
+    /// no run touched still show its value when the editor selects it, without the run having
+    /// eagerly loaded every blob.
+    pub(crate) fn hydrate_for_inspection(&mut self, program: &ExecutionProgram, idx: NodeIdx) {
+        self.hydrate_slot(program, idx);
+        let span = program.e_nodes[idx].inputs;
+        for input in &program.inputs[span.range()] {
+            if let ExecutionBinding::Bind(addr) = &input.binding {
+                self.hydrate_slot(program, addr.target_idx);
+            }
+        }
+    }
+
+    /// Write node `idx`'s freshly-computed outputs to disk the moment it finishes (the executor
+    /// calls this right after a successful invoke), so a long run's earlier caches are durable
+    /// even if a later node errors or the run is cancelled. The target and output slice are
+    /// snapshotted **synchronously**; only [`DiskStore::store`]'s write awaits, so the borrow
+    /// across the await is just the value slice (`Sync`), never the whole cache.
+    ///
+    /// Only writes a value that matches the node's *current* digest
+    /// ([`is_resident_hit`](Self::is_resident_hit)): a resident value produced under a superseded
+    /// digest must not be written to the new digest's content-addressed path. In the run loop the
+    /// just-stamped value is always a current hit; this guards the deferred
+    /// [`store_resident_caches`](crate::execution::ExecutionEngine::store_resident_caches) flush.
+    pub(crate) fn store_node<'a>(
+        &'a self,
+        program: &ExecutionProgram,
+        idx: NodeIdx,
+        ctx: &'a mut ContextManager,
+    ) -> impl Future<Output = ()> + 'a {
+        let target = self
+            .disk_store
+            .blob_path(program, idx, self.slots[idx].current_digest);
+        let outputs = self
+            .is_resident_hit(idx)
+            .then(|| self.slots[idx].output_values())
+            .flatten();
+        let disk = &self.disk_store;
+        async move {
+            let (Some(target), Some(outputs)) = (target, outputs) else {
+                return;
+            };
+            disk.store(&target, outputs, ctx).await;
+        }
+    }
+
+    /// Reclaim node `idx`'s spent RAM value: demote to `OnDisk` if a blob for its current digest
+    /// can serve it again (lossless, reloads on demand), else drop a **non-RAM** value with no
+    /// such blob (`None`, or a `Disk` value whose blob is missing) so it recomputes when next
+    /// needed; a `Ram`/`Both` value with no blob is left resident — its mode promised to hold it.
+    /// The single place the demote-or-drop decision lives, shared by the mid-run release (the
+    /// executor, once a non-RAM node's every output is read) and the end-of-run
+    /// [`evict_unused`](Self::evict_unused) sweep. The *caller* decides eligibility.
+    pub(crate) fn reclaim_slot(&mut self, program: &ExecutionProgram, idx: NodeIdx) {
+        let reloadable = self
+            .disk_store
+            .blob_path(program, idx, self.slots[idx].current_digest)
+            .is_some_and(|target| target.path().exists());
+        if reloadable {
+            self.flag_on_disk(idx);
+        } else if !program.e_nodes[idx].cache.caches_in_ram() {
+            self.slots[idx].clear_output();
+        }
+    }
+
+    /// After a run, reclaim RAM the run's cache modes don't call for holding. A non-RAM value
+    /// whose consumers all ran was already released mid-run the moment its last consumer read it
+    /// (the executor's [`reclaim_slot`](Self::reclaim_slot) call); this end-of-run sweep covers
+    /// the rest — prior-run leftovers this run never touched (e.g. a cached value that fell
+    /// *behind* the frontier when a downstream node became a disk hit), and a non-RAM value some
+    /// consumer didn't reach (so its outputs never all went spent).
+    ///
+    /// `needed` is the resolver's cut mask (reused here, not recomputed): `true` for a node some
+    /// running node will read — the active frontier. A **RAM-retaining** node (`Ram`/`Both`) on
+    /// that frontier stays resident for next run's RAM hit; every other resident value goes
+    /// through [`reclaim_slot`](Self::reclaim_slot), which demotes a reloadable one to disk and
+    /// drops a non-RAM one (a non-reloadable `Ram`/`Both` leftover is kept, its mode's promise).
+    pub(crate) fn evict_unused(&mut self, program: &ExecutionProgram, needed: &NodeColumn<bool>) {
+        for idx in program.node_indices() {
+            if self.slots[idx].output_values().is_none() {
+                continue;
+            }
+            // A RAM-retaining node on the active frontier stays hot for the next run's RAM hit.
+            if program.e_nodes[idx].cache.caches_in_ram() && needed[idx] {
+                continue;
+            }
+            self.reclaim_slot(program, idx);
+        }
+    }
+}
+
+/// True for a bypassed cache-passthrough node — recompute + overwrite, so never hydrate it.
+fn is_bypassed(program: &ExecutionProgram, idx: NodeIdx) -> bool {
+    matches!(
+        program.e_nodes[idx].special,
+        Some(SpecialNode::CachePassthrough { bypass: true })
+    )
 }
 
 #[cfg(test)]
