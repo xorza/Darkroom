@@ -2,6 +2,6 @@ scrolview on newnode popup
 
 draw only nodes in view
 
-mldenoise doesnt cache
+total used ram for node
 
 node title disapppears sometimes
