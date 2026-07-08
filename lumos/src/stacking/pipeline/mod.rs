@@ -311,6 +311,71 @@ const PER_FRAME_WORKING_PLANES: usize = 8;
 /// scratch. Larger than [`PER_FRAME_WORKING_PLANES`], so step 1 fans out less and doesn't overshoot.
 const PER_FRAME_DECODE_PLANES: usize = 14;
 
+/// The raw-light stack's memory-tier decision, as pure arithmetic over the sensor size, frame count,
+/// worker count, and RAM budget — extracted from [`calibrate_align_stack`] so the budget logic is
+/// testable without decoding a single frame. `fits_in_ram` picks the tier; the two concurrencies
+/// bound the streaming path's fan-out when it doesn't.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MemoryPlan {
+    /// All warped frames plus the RAM path's per-frame scratch fit the usable budget → take the
+    /// all-in-memory path. Otherwise stream through the disk cache (memory-bounded, flat in N).
+    fits_in_ram: bool,
+    /// Streaming step 1 (decode → demosaic → detect) max in-flight frames: each holds the transient
+    /// ~[`PER_FRAME_DECODE_PLANES`]-plane demosaic arena, so this fans out less than the warp step.
+    decode_concurrency: usize,
+    /// Streaming step 2 (register → warp) max in-flight frames: each holds
+    /// ~[`PER_FRAME_WORKING_PLANES`] planes (input + output + scratch).
+    warp_concurrency: usize,
+}
+
+/// Decide the memory tier for `frame_count` raw lights whose single-channel f32 plane is
+/// `plane_bytes`, against a `threads`-wide pool and an `available`-byte RAM budget. Pure — no I/O, no
+/// globals — so the budget invariants are unit-testable ([`mem_budget_tests`]).
+fn plan_memory(
+    plane_bytes: usize,
+    frame_count: usize,
+    threads: usize,
+    available: u64,
+) -> MemoryPlan {
+    // Resident warped frame: 3 channels + coverage (conservative for a mono sensor).
+    let warped_bytes = 4 * plane_bytes;
+    // The RAM path runs detection/warp at full core count, each concurrent frame holding the
+    // per-frame working set of scratch. Reserve that worst case so the RAM path is only taken when
+    // the *frames and the scratch* fit — otherwise stream, which is memory-bounded (validated
+    // flat-in-N). This keeps a scratch overshoot from OOMing a stack whose frames alone would fit,
+    // on a high-core machine.
+    let concurrent = frame_count.min(threads);
+    let scratch_reserve = (PER_FRAME_WORKING_PLANES as u64)
+        .saturating_mul(plane_bytes as u64)
+        .saturating_mul(concurrent as u64);
+    let frame_budget = available.saturating_sub(scratch_reserve);
+    let fits_in_ram = fits_in_memory(warped_bytes, frame_count, frame_budget);
+
+    // Streaming fan-out: both steps spill to disk (0 resident frames), so headroom is divided by the
+    // per-decode transient. Decode holds the demosaic arena on top of the warp working set, so it
+    // fans out less and can't overshoot.
+    let decode_concurrency = compute_load_concurrency(
+        plane_bytes,
+        PER_FRAME_DECODE_PLANES * plane_bytes,
+        0,
+        available,
+        threads,
+    );
+    let warp_concurrency = compute_load_concurrency(
+        plane_bytes,
+        PER_FRAME_WORKING_PLANES * plane_bytes,
+        0,
+        available,
+        threads,
+    );
+
+    MemoryPlan {
+        fits_in_ram,
+        decode_concurrency,
+        warp_concurrency,
+    }
+}
+
 /// Calibrate, align, and stack raw light frames end to end — the full pipeline in one call.
 ///
 /// For each raw light (in parallel): load it as a `CfaImage`, apply `masters`
@@ -331,31 +396,23 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     }
     let total = light_paths.len();
 
-    // Tier decision: peek the sensor dimensions (no decode) and estimate the warped-frame footprint
-    // (RGB + coverage = 4 planes — conservative for mono). If the set won't fit ~75% RAM, stream it
-    // through a disk cache so peak RAM stays flat in the frame count.
+    // Tier decision: peek the sensor dimensions (no decode) and plan the memory tier. If the warped
+    // frames plus the RAM path's per-frame scratch won't fit ~75% RAM, stream through a disk cache so
+    // peak RAM stays flat in the frame count.
     let sensor = raw_dimensions(light_paths[0].as_ref()).map_err(|source| Error::Load {
         path: light_paths[0].as_ref().to_path_buf(),
         source,
     })?;
     let plane_bytes = sensor.x * sensor.y * std::mem::size_of::<f32>();
-    let warped_bytes = 4 * plane_bytes; // resident warped frame: 3 channels + coverage
-    // The RAM path runs detection/warp at full core count, each concurrent frame holding the
-    // per-frame working set of scratch. Reserve that worst case so the RAM path is only taken when
-    // the *frames and the scratch* fit — otherwise stream, which is memory-bounded (validated
-    // flat-in-N). This prevents a scratch overshoot from OOMing a stack whose frames alone would fit,
-    // on a high-core machine.
-    let concurrent = total.min(rayon::current_num_threads());
-    let scratch_reserve = (PER_FRAME_WORKING_PLANES * plane_bytes * concurrent) as u64;
     let available = config.stack.cache.get_available_memory();
-    let frame_budget = available.saturating_sub(scratch_reserve);
-    if !fits_in_memory(warped_bytes, total, frame_budget) {
+    let plan = plan_memory(plane_bytes, total, rayon::current_num_threads(), available);
+    if !plan.fits_in_ram {
         tracing::info!(
             frames = total,
             available_mb = available / (1024 * 1024),
             "Frame set + scratch exceeds the RAM budget — streaming via the disk cache (memory-bounded)"
         );
-        return calibrate_align_stack_streaming(light_paths, masters, config, cancel);
+        return calibrate_align_stack_streaming(light_paths, masters, config, cancel, plan);
     }
 
     tracing::info!(
@@ -464,6 +521,7 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     masters: &CalibrationMasters,
     config: &AlignStackConfig,
     cancel: CancelToken,
+    plan: MemoryPlan,
 ) -> Result<AlignStackResult, Error> {
     let total = light_paths.len();
     let cache_dir = config.stack.cache.cache_dir.clone();
@@ -473,32 +531,14 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
             source,
         })
     })?;
-    let available = config.stack.cache.get_available_memory();
-    let sensor = raw_dimensions(light_paths[0].as_ref()).map_err(|source| Error::Load {
-        path: light_paths[0].as_ref().to_path_buf(),
-        source,
-    })?;
-    // Cap fan-out to the per-frame working set so a low-RAM machine serialises rather than OOMs.
-    // The decode+detect step (step 1) also holds the transient ~10-plane demosaic arena, so it needs
-    // a larger reservation than the warp step (step 2) — size the two separately.
-    let plane_bytes = sensor.x * sensor.y * std::mem::size_of::<f32>();
-    let threads = rayon::current_num_threads();
-    // These stream to disk (nothing retained → 0 resident frames), so the working-set estimate is
-    // the per-decode transient the headroom is divided by.
-    let decode_concurrency = compute_load_concurrency(
-        plane_bytes,
-        PER_FRAME_DECODE_PLANES * plane_bytes,
-        0,
-        available,
-        threads,
-    );
-    let warp_concurrency = compute_load_concurrency(
-        plane_bytes,
-        PER_FRAME_WORKING_PLANES * plane_bytes,
-        0,
-        available,
-        threads,
-    );
+    // Fan-out for the two streaming steps was sized in `plan_memory` (decode holds the extra
+    // demosaic arena, so it fans out less than the warp step). Both stream to disk, so peak RAM is
+    // `concurrency × one-frame-working-set` plus the combine's chunk window — flat in the frame count.
+    let MemoryPlan {
+        decode_concurrency,
+        warp_concurrency,
+        ..
+    } = plan;
 
     // --- Step 1: decode → calibrate → demosaic → detect → spill calibrated. ---
     tracing::info!(
@@ -654,6 +694,9 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
         stacked, reference, registered, dropped,
     ))
 }
+
+#[cfg(test)]
+mod mem_budget_tests;
 
 #[cfg(test)]
 mod tests {

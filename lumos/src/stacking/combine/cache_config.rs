@@ -38,7 +38,9 @@ const MEMORY_PERCENT: u64 = 75;
 /// budget-respecting invariant test (`mem_budget_tests`) asserts against the real usable budget
 /// rather than re-deriving the 75%.
 pub(crate) fn memory_budget(available_memory: u64) -> u64 {
-    available_memory * MEMORY_PERCENT / 100
+    // u128 intermediate: the `u64::MAX` "everything fits" sentinel (forced-RAM tier) would overflow a
+    // u64 multiply, and dev builds have overflow-checks on. Exact for every real budget.
+    (available_memory as u128 * MEMORY_PERCENT as u128 / 100) as u64
 }
 
 /// Common configuration for cache-based stacking methods (median, sigma-clipped).
