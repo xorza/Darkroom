@@ -43,7 +43,7 @@ use std::time::Instant;
 use crate::io::astro_image::AstroImage;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
-use crate::testing::mem_probe::{MB, RssSampler, env_parse};
+use crate::testing::mem_probe::{MB, RssSampler, env_parse, measured, two_x_ceiling_mb};
 use crate::testing::synthetic::fixtures::star_field;
 
 /// Generous upper bound on the detector's per-detection working set, in image-sized f32 planes:
@@ -175,11 +175,9 @@ fn detect_memory_probe() {
     // detection leaked a buffer per frame, peak heap would scale with `n` and overrun this. A
     // generous 2× headroom absorbs allocator fragmentation and the sampler's coarse 2 ms cadence.
     let working_set_bytes = WORKING_SET_PLANES * plane_bytes;
-    let ceiling_mb = 2 * (resident_bytes + working_set_bytes) / MB;
+    let ceiling_mb = two_x_ceiling_mb(resident_bytes, working_set_bytes);
 
-    if anon_mb == 0 {
-        println!("ceiling check SKIPPED: no /proc/self/status (RssAnon unavailable off Linux)");
-    } else {
+    if measured(anon_mb, "ceiling check") {
         assert!(
             anon_mb <= ceiling_mb,
             "peak heap {anon_mb} MB exceeded the {ceiling_mb} MB ceiling (ring {ring} frames \

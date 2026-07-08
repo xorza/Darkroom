@@ -52,41 +52,9 @@ use crate::stacking::combine::config::{CombineMethod, StackConfig};
 use crate::stacking::combine::progress::{ProgressCallback, StackingProgress, StackingStage};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::stack::stack;
-use crate::testing::mem_probe::{MB, RssSampler, ensure_frames, env_parse};
-
-/// Resolved `available_memory` budget plus a human label for the report.
-#[derive(Debug)]
-struct BudgetChoice {
-    available_memory: Option<u64>,
-    label: String,
-}
-
-fn parse_budget() -> BudgetChoice {
-    match std::env::var("LUMOS_BUDGET").ok().as_deref() {
-        None | Some("") | Some("auto") => BudgetChoice {
-            available_memory: None,
-            label: "auto (system available)".into(),
-        },
-        // u64::MAX ⇒ everything fits ⇒ in-memory tier. 1 byte ⇒ nothing fits ⇒ spill tier.
-        Some("ram") => BudgetChoice {
-            available_memory: Some(u64::MAX),
-            label: "ram (force resident)".into(),
-        },
-        Some("disk") => BudgetChoice {
-            available_memory: Some(1),
-            label: "disk (force spill)".into(),
-        },
-        Some(n) => {
-            let mb: u64 = n
-                .parse()
-                .unwrap_or_else(|_| panic!("LUMOS_BUDGET: expected ram|disk|auto|<MB>, got {n:?}"));
-            BudgetChoice {
-                available_memory: Some(mb * MB),
-                label: format!("{mb} MB"),
-            }
-        }
-    }
-}
+use crate::testing::mem_probe::{
+    BudgetChoice, MB, RssSampler, budget_ceiling_mb, ensure_frames, env_parse, parse_budget,
+};
 
 fn build_config(
     method: &str,
@@ -118,7 +86,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
     let seed: u64 = env_parse("LUMOS_SEED", 1);
     let method = std::env::var("LUMOS_METHOD").unwrap_or_else(|_| "sigma".into());
     let keep = env_parse("LUMOS_KEEP", 0) != 0;
-    let budget = parse_budget();
+    let budget = parse_budget("LUMOS_BUDGET", BudgetChoice::auto());
 
     let base = std::env::var("LUMOS_DIR")
         .map(PathBuf::from)
@@ -264,21 +232,16 @@ fn master_stack_memory_probe() -> io::Result<()> {
     );
 
     // The budget is a hard heap ceiling: with the decode-transient accounting fixed, peak heap must
-    // stay within it. Skip the checks that can't hold: the `disk`/`ram` sentinels aren't real
-    // budgets, and below one decode's transient (~2× a frame) the engine can't honor any budget —
-    // it must hold at least one in-flight decode plus the output frame.
-    if let Some(budget_bytes) = budget.available_memory {
-        let floor = 3 * bytes_per_frame; // one in-flight decode (~2× frame) + the output frame
-        if budget_bytes != u64::MAX && budget_bytes >= floor {
-            let budget_mb = budget_bytes / MB;
-            assert!(
-                anon_mb <= budget_mb,
-                "peak heap {anon_mb} MB exceeded the {budget_mb} MB budget \
-                 (load burst {load_anon_mb} MB, combine {combine_anon_mb} MB) — \
-                 memory-tier accounting regressed"
-            );
-            println!("budget check  OK: peak heap {anon_mb} MB ≤ {budget_mb} MB budget");
-        }
+    // stay within it. `budget_ceiling_mb` skips the cases no budget can hold (the `disk`/`ram`
+    // sentinels, a sub-floor budget) and the off-Linux no-measurement case.
+    if let Some(budget_mb) = budget_ceiling_mb(anon_mb, &budget, bytes_per_frame) {
+        assert!(
+            anon_mb <= budget_mb,
+            "peak heap {anon_mb} MB exceeded the {budget_mb} MB budget \
+             (load burst {load_anon_mb} MB, combine {combine_anon_mb} MB) — \
+             memory-tier accounting regressed"
+        );
+        println!("budget check  OK: peak heap {anon_mb} MB ≤ {budget_mb} MB budget");
     }
 
     std::hint::black_box(&result);

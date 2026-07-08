@@ -47,47 +47,11 @@ use crate::stacking::combine::stack::stack;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::registration::warp;
-use crate::testing::mem_probe::{MB, RssSampler, ensure_frames, env_parse};
+use crate::testing::mem_probe::{
+    BudgetChoice, MB, RssSampler, budget_ceiling_mb, ensure_frames, env_parse, measured,
+    parse_budget, two_x_ceiling_mb,
+};
 use crate::testing::synthetic::fixtures::star_field;
-
-/// Resolved `available_memory` budget plus a human label for the report.
-#[derive(Debug)]
-struct BudgetChoice {
-    available_memory: Option<u64>,
-    label: String,
-}
-
-/// Parse `LUMOS_PIPE_BUDGET`: a number in MB, or `ram`/`disk`/`auto`. Default `2048` (MB) so the
-/// default 6000×6000 × 24 set (3.3 GB resident) overflows it and takes the disk tier.
-fn parse_budget() -> BudgetChoice {
-    match std::env::var("LUMOS_PIPE_BUDGET").ok().as_deref() {
-        Some("auto") => BudgetChoice {
-            available_memory: None,
-            label: "auto (system available)".into(),
-        },
-        Some("ram") => BudgetChoice {
-            available_memory: Some(u64::MAX),
-            label: "ram (force resident)".into(),
-        },
-        Some("disk") => BudgetChoice {
-            available_memory: Some(1),
-            label: "disk (force spill)".into(),
-        },
-        Some("") | None => BudgetChoice {
-            available_memory: Some(2048 * MB),
-            label: "2048 MB".into(),
-        },
-        Some(n) => {
-            let mb: u64 = n.parse().unwrap_or_else(|_| {
-                panic!("LUMOS_PIPE_BUDGET: expected ram|disk|auto|<MB>, got {n:?}")
-            });
-            BudgetChoice {
-                available_memory: Some(mb * MB),
-                label: format!("{mb} MB"),
-            }
-        }
-    }
-}
 
 #[test]
 #[ignore = "manual live peak-RSS probe; run explicitly with a filter, one config per process"]
@@ -96,7 +60,8 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
     let width: usize = env_parse("LUMOS_PIPE_W", 6000);
     let height: usize = env_parse("LUMOS_PIPE_H", 6000);
     let seed: u64 = env_parse("LUMOS_PIPE_SEED", 1);
-    let budget = parse_budget();
+    // Default 2048 MB so the default 6000×6000 × 24 set (3.3 GB resident) overflows it → disk tier.
+    let budget = parse_budget("LUMOS_PIPE_BUDGET", BudgetChoice::mb(2048));
 
     let base = std::env::var("LUMOS_PIPE_DIR")
         .map(PathBuf::from)
@@ -199,31 +164,19 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
         peak.total_mb
     );
 
-    // The budget is a hard heap ceiling for the whole sequence. Skip the `disk`/`ram` sentinels (not
-    // real budgets) and budgets below one in-flight decode's floor (~2× a frame + the output frame),
-    // where the engine can't honor any budget.
-    if let Some(budget_bytes) = budget.available_memory {
-        let floor = 3 * frame_bytes;
-        if budget_bytes != u64::MAX && budget_bytes >= floor {
-            let budget_mb = budget_bytes / MB;
-            if anon_mb == 0 {
-                println!(
-                    "budget check  SKIPPED: no /proc/self/status (RssAnon unavailable off Linux)"
-                );
-            } else {
-                assert!(
-                    anon_mb <= budget_mb,
-                    "peak heap {anon_mb} MB exceeded the {budget_mb} MB budget across \
-                     {total_stacks} stages — a stage's memory didn't free before the next, so the \
-                     pipeline's total footprint scales with the stage count instead of respecting one \
-                     budget"
-                );
-                println!(
-                    "budget check  OK: peak heap {anon_mb} MB ≤ {budget_mb} MB across all \
-                     {total_stacks} stages (memory freed between stages)"
-                );
-            }
-        }
+    // The budget is a hard heap ceiling for the whole sequence. `budget_ceiling_mb` skips what no
+    // budget can hold (the `disk`/`ram` sentinels, a sub-floor budget) and the off-Linux case.
+    if let Some(budget_mb) = budget_ceiling_mb(anon_mb, &budget, frame_bytes) {
+        assert!(
+            anon_mb <= budget_mb,
+            "peak heap {anon_mb} MB exceeded the {budget_mb} MB budget across {total_stacks} \
+             stages — a stage's memory didn't free before the next, so the pipeline's total \
+             footprint scales with the stage count instead of respecting one budget"
+        );
+        println!(
+            "budget check  OK: peak heap {anon_mb} MB ≤ {budget_mb} MB across all {total_stacks} \
+             stages (memory freed between stages)"
+        );
     }
 
     Ok(())
@@ -317,16 +270,14 @@ fn align_stack_memory_probe() {
     let threads = rayon::current_num_threads();
     let resident_planes = (n * (channels + 1)) as u64;
     let working_planes = (DETECT_WORKING_PLANES * threads) as u64;
-    let ceiling_mb = 2 * (resident_planes + working_planes) * frame_bytes / MB;
+    let ceiling_mb = two_x_ceiling_mb(resident_planes * frame_bytes, working_planes * frame_bytes);
 
     assert!(
         result.registered >= 2,
         "expected the dithered frames to register; only {} stacked (probe misconfigured?)",
         result.registered
     );
-    if anon_mb == 0 {
-        println!("ceiling check SKIPPED: no /proc/self/status (RssAnon unavailable off Linux)");
-    } else {
+    if measured(anon_mb, "ceiling check") {
         assert!(
             anon_mb <= ceiling_mb,
             "peak heap {anon_mb} MB exceeded the {ceiling_mb} MB ceiling (resident warped set + \
