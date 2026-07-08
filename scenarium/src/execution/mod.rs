@@ -146,9 +146,12 @@ pub enum Error {
 pub enum RunError {
     #[error("{message}")]
     Invoke { func_id: FuncId, message: String },
-    #[error("node {func_id:?} skipped: an upstream dependency errored")]
+    // The messages omit `func_id` (kept as machine-readable data): a `RunError`
+    // is already paired with its `NodeId` in `node_errors`, so these surface to
+    // the editor attributed to the node — a raw id in the text would be noise.
+    #[error("skipped: an upstream dependency errored")]
     SkippedUpstream { func_id: FuncId },
-    #[error("node {func_id:?} was cancelled before completing")]
+    #[error("cancelled before completing")]
     Cancelled { func_id: FuncId },
 }
 

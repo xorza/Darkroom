@@ -4,7 +4,7 @@
 //! nodes like `auto_stretch`. Heavy work runs off the worker via
 //! `spawn_blocking`; preset dropdowns live in [`crate::astro::presets`].
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock, RwLock};
 
@@ -266,11 +266,29 @@ pub fn astro_library() -> Library {
                     assert_eq!(inputs.len(), 6);
                     assert_eq!(outputs.len(), 3);
 
-                    let lights = inputs[0]
-                        .value
-                        .as_fs_path()
-                        .map(|dir| astro_image_files(Path::new(dir)))
+                    let lights_dir = inputs[0].value.as_fs_path().map(PathBuf::from);
+                    let lights = lights_dir
+                        .as_deref()
+                        .map(astro_image_files)
                         .unwrap_or_default();
+                    // Fail with a message that names the offending folder rather than
+                    // lumos's generic `NoFrames` ("no light frames provided"): the usual
+                    // cause is a stale/moved path, and knowing which folder is empty (and
+                    // whether it even exists) is what makes the error actionable.
+                    if lights.is_empty() {
+                        let msg = match &lights_dir {
+                            Some(dir) if !dir.exists() => {
+                                format!("light-frame folder does not exist: '{}'", dir.display())
+                            }
+                            Some(dir) => format!(
+                                "no astro-image frames (FITS/RAW/standard) found in \
+                                 light-frame folder '{}'",
+                                dir.display()
+                            ),
+                            None => "no light-frame folder is set".to_owned(),
+                        };
+                        return Err(InvokeError::External(anyhow::anyhow!(msg)));
+                    }
                     // Arc-clone the masters value so it can move into the
                     // blocking task; `Unbound` means "no calibration".
                     let masters_val = inputs[1].value.clone();

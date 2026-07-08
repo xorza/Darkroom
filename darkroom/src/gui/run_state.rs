@@ -83,6 +83,11 @@ impl ExecStatus {
 pub(crate) struct NodeRunState {
     pub(crate) status: ExecStatus,
     pub(crate) logs: Vec<LogEntry>,
+    /// Human-readable messages for this run's failures, folded on the same
+    /// attribution as `status` (a subgraph instance collects its subtree's).
+    /// Empty unless the node errored; drives the inspector's error detail so
+    /// a failed node reads e.g. "no light frames provided", not just "errored".
+    pub(crate) errors: Vec<String>,
     pub(crate) values: Option<NodeValueView>,
 }
 
@@ -123,6 +128,15 @@ impl RunState {
             .unwrap_or(&[])
     }
 
+    /// This run's failure messages for a node (the errored node itself, or a
+    /// composite instance aggregating its subtree). Empty unless it errored.
+    pub(crate) fn errors(&self, id: NodeId) -> &[String] {
+        self.nodes
+            .get(&id)
+            .map(|n| n.errors.as_slice())
+            .unwrap_or(&[])
+    }
+
     pub(crate) fn values(&self, id: NodeId) -> Option<&NodeValueView> {
         self.nodes.get(&id).and_then(|n| n.values.as_ref())
     }
@@ -136,6 +150,7 @@ impl RunState {
         for node in self.nodes.values_mut() {
             node.status = ExecStatus::None;
             node.logs.clear();
+            node.errors.clear();
         }
         for e in &stats.executed_nodes {
             self.record_status(stats, e.node_id, ExecStatus::Executed(e.elapsed_secs));
@@ -154,6 +169,7 @@ impl RunState {
                 continue;
             }
             self.record_status(stats, e.node_id, ExecStatus::Errored);
+            self.record_error(stats, e.node_id, &e.error);
         }
         for entry in &stats.logs {
             for node_id in stats.flatten.attribution(entry.node_id) {
@@ -175,6 +191,21 @@ impl RunState {
         for node_id in stats.flatten.attribution(flat_id) {
             let slot = self.nodes.entry(node_id).or_default();
             slot.status = slot.status.merged(status);
+        }
+    }
+
+    /// Fold one run error's message onto the errored node and every enclosing
+    /// composite instance (same attribution as `record_status`), so the
+    /// inspector can show the actual failure cause instead of a bare "errored".
+    /// A subgraph instance accumulates its whole subtree's failures.
+    fn record_error(&mut self, stats: &ExecutionStats, flat_id: NodeId, error: &RunError) {
+        let message = error.to_string();
+        for node_id in stats.flatten.attribution(flat_id) {
+            self.nodes
+                .entry(node_id)
+                .or_default()
+                .errors
+                .push(message.clone());
         }
     }
 
@@ -385,6 +416,55 @@ mod tests {
         let mut rs = RunState::default();
         rs.set_results(&stats(map, &[(interior, 1.0)], &[interior]));
         assert_eq!(rs.status(interior), ExecStatus::Errored);
+        // The failure message rides along with the status — the inspector
+        // shows it instead of a bare "errored".
+        assert_eq!(rs.errors(interior), ["test error"]);
+    }
+
+    /// A failure's message folds onto the errored interior node *and* its
+    /// enclosing subgraph instance (same attribution as the status), while a
+    /// `Cancelled` "error" records neither status nor message (a cancel is not
+    /// a failure).
+    #[test]
+    fn error_messages_attribute_to_instance_and_skip_cancelled() {
+        let interior = nid(1);
+        let inst = nid(10);
+        let (fail_flat, cancel_flat) = (nid(100), nid(101));
+        let mut map = FlattenMap::default();
+        map.reset();
+        let scope = map.push_scope(inst, 0);
+        map.set_leaf(fail_flat, scope, interior);
+        map.set_leaf(cancel_flat, scope, interior);
+
+        let node_err = |node_id, error| NodeError { node_id, error };
+        let mut s = stats(map, &[], &[]);
+        s.node_errors = vec![
+            node_err(
+                fail_flat,
+                RunError::Invoke {
+                    func_id: FuncId::from_u128(0),
+                    message: "no light frames provided".into(),
+                },
+            ),
+            node_err(
+                cancel_flat,
+                RunError::Cancelled {
+                    func_id: FuncId::from_u128(0),
+                },
+            ),
+        ];
+
+        let mut rs = RunState::default();
+        rs.set_results(&s);
+
+        // The real failure paints both the interior and the enclosing instance.
+        assert_eq!(rs.status(interior), ExecStatus::Errored);
+        assert_eq!(rs.errors(interior), ["no light frames provided"]);
+        assert_eq!(rs.status(inst), ExecStatus::Errored);
+        assert_eq!(rs.errors(inst), ["no light frames provided"]);
+        // The cancelled node contributes no extra status/message (only the one
+        // real failure's message is present, not a second entry for the cancel).
+        assert_eq!(rs.errors(interior).len(), 1, "cancel adds no message");
     }
 
     /// A log line emitted inside a subgraph instance attributes to both

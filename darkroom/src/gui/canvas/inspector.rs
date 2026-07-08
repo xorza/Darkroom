@@ -182,6 +182,7 @@ impl Inspectors {
         let theme = ctx.theme;
         let scene = ctx.scene;
         let logs = ctx.run_state.logs(node.id);
+        let errors = ctx.run_state.errors(node.id);
         let values = ctx.run_state.values(node.id);
         let border = match mode {
             InspectMode::Pinned => theme.colors.text_muted,
@@ -282,6 +283,19 @@ impl Inspectors {
                         ..body_style(ui)
                     },
                 );
+                // The actual failure cause(s) beneath the bare "errored" line,
+                // in the error color — this is what turns a generic status into
+                // an actionable message (e.g. "no light frames provided").
+                for message in errors {
+                    line(
+                        ui,
+                        message,
+                        TextStyle {
+                            color: theme.colors.exec_errored_glow,
+                            ..body_style(ui)
+                        },
+                    );
+                }
                 if let Some(flags) = flag_text(node) {
                     line(ui, &flags, muted_style(ui));
                 }
