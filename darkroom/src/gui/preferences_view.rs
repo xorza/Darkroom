@@ -144,6 +144,17 @@ const ML_LABEL_WIDTH: f32 = 150.0;
 /// Gap between the label column and the path field.
 const ML_ROW_GAP: f32 = 8.0;
 
+/// Cross-frame state for a [`model_row`] path field: the editor's live `text`
+/// plus `seen`, the external path value last mirrored into it. The buffer is
+/// refreshed from the path only when `seen` diverges from it (an external
+/// change — load or Browse), so an in-progress edit is never overwritten,
+/// including on the blur frame where the commit fires.
+#[derive(Default, Debug)]
+struct PathField {
+    text: String,
+    seen: String,
+}
+
 /// One model-path row: a fixed-width label, an **editable** path field (type
 /// or paste a path; Enter or click-away commits into `path`), a "Browse…"
 /// button, and — beneath, indented under the field — a download hint (a
@@ -185,27 +196,31 @@ fn model_row(
                         });
 
                     // Editable path field. The draft lives across frames in the
-                    // state map, mirroring the current path while unfocused (so a
-                    // Browse pick shows up); `TextEdit`'s own submit/blur signals
-                    // drive the commit — no focus or key polling.
+                    // state map and is refreshed from `path` only when `path`
+                    // changes *externally* (initial load, a Browse pick) — never
+                    // on "unfocused". Focus is resolved before the record pass, so
+                    // on the blur frame `focused_id()` already reads unfocused;
+                    // mirroring there would stomp the just-typed text before
+                    // `TextEdit`'s submit/blur commit could read it (the field
+                    // would snap back and nothing would save). Keying the refresh
+                    // on the external value sidesteps that race entirely.
                     let canonical = path.display().to_string();
-                    if ui.focused_id() != Some(id) {
-                        let buf = ui.state_mut::<String>(id);
-                        if *buf != canonical {
-                            buf.replace_range(.., &canonical);
-                        }
+                    let field = ui.state_mut::<PathField>(id);
+                    if field.seen != canonical {
+                        field.text.replace_range(.., &canonical);
+                        field.seen.replace_range(.., &canonical);
                     }
-                    let mut draft = std::mem::take(ui.state_mut::<String>(id));
+                    let mut draft = std::mem::take(&mut field.text);
                     let resp = TextEdit::new(&mut draft)
                         .id(id)
                         .size((Sizing::Fixed(ML_PATH_FIELD_WIDTH), Sizing::Hug))
                         .show(ui);
                     let commit = resp.submitted || resp.lost_focus;
-                    ui.state_mut::<String>(id).replace_range(.., &draft);
                     if commit && draft != canonical {
-                        *path = PathBuf::from(draft);
+                        *path = PathBuf::from(draft.clone());
                         command = Some(AppCommand::Prefs(PrefsCommand::Changed));
                     }
+                    ui.state_mut::<PathField>(id).text = draft;
 
                     if Button::new()
                         .id_salt("browse")
