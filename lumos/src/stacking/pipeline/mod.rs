@@ -696,6 +696,8 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
 }
 
 #[cfg(test)]
+mod mem_budget_probe;
+#[cfg(test)]
 mod mem_budget_tests;
 
 #[cfg(test)]

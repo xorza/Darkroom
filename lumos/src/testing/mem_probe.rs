@@ -9,10 +9,17 @@
 //! Heap is read from `/proc/self/status`, so measurement is Linux-only; elsewhere every peak reads
 //! 0 and probes skip their numeric assertion (the pipeline still runs).
 
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use fits_well::{FitsWriter, Image};
+use rand::{RngExt, SeedableRng};
+use rand_chacha::ChaCha8Rng;
+use rayon::prelude::*;
 
 /// Bytes per MiB — probes report and budget in MiB.
 pub(crate) const MB: u64 = 1024 * 1024;
@@ -146,4 +153,128 @@ impl RssSampler {
             ungated_anon_mb: self.peak_ungated.load(Ordering::Relaxed) / 1024,
         }
     }
+}
+
+/// One synthetic 16-bit mono frame: a vignetted background pedestal + Gaussian read noise, plus a
+/// handful of bright per-frame outliers (cosmic-ray stand-ins). The outliers differ every frame, so
+/// sigma-clipping and median combine actually have something to reject — a mean combine would keep
+/// them. Deterministic in `(seed, frame_idx)`; rows are generated in parallel with per-row RNGs.
+pub(crate) fn synth_frame_u16(
+    width: usize,
+    height: usize,
+    frame_idx: usize,
+    seed: u64,
+) -> Vec<u16> {
+    const PEDESTAL: f32 = 0.08;
+    const READ_NOISE: f32 = 0.012;
+
+    let cx = width as f32 / 2.0;
+    let cy = height as f32 / 2.0;
+    let max_r2 = cx * cx + cy * cy;
+
+    let mut data = vec![0u16; width * height];
+    let frame_mix = seed ^ (frame_idx as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+
+    data.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
+        let mut rng =
+            ChaCha8Rng::seed_from_u64(frame_mix ^ (y as u64).wrapping_mul(0x0000_0100_0000_0001));
+        let dy = y as f32 - cy;
+        for (x, px) in row.iter_mut().enumerate() {
+            let dx = x as f32 - cx;
+            // Radial vignette in ~[0.75, 1.0] and a mild diagonal gradient give the field structure.
+            let vignette = 1.0 - 0.25 * (dx * dx + dy * dy) / max_r2;
+            let gradient = 0.03 * (x as f32 / width as f32 + y as f32 / height as f32);
+            // Irwin–Hall (four uniforms) ≈ zero-mean Gaussian read noise.
+            let g: f32 = rng.random::<f32>()
+                + rng.random::<f32>()
+                + rng.random::<f32>()
+                + rng.random::<f32>()
+                - 2.0;
+            let v = PEDESTAL * vignette + gradient + READ_NOISE * g;
+            *px = (v.clamp(0.0, 1.0) * 65535.0) as u16;
+        }
+    });
+
+    let n_outliers = (width * height / 50_000).max(4);
+    let mut rng = ChaCha8Rng::seed_from_u64(frame_mix.rotate_left(17));
+    for _ in 0..n_outliers {
+        let x = rng.random_range(0..width);
+        let y = rng.random_range(0..height);
+        let level = rng.random_range(0.85f32..1.0);
+        data[y * width + x] = (level * 65535.0) as u16;
+    }
+    data
+}
+
+/// Write `data` as a 16-bit (BITPIX=16, BZERO=32768) FITS image, reusing `buf` as the encode scratch
+/// so a whole stack allocates it once. `std::fs::write` flushes reliably (unlike a `BufWriter`
+/// dropped inside the FITS writer).
+pub(crate) fn write_fits_u16(
+    path: &Path,
+    width: usize,
+    height: usize,
+    data: &[u16],
+    buf: &mut Vec<u8>,
+) -> io::Result<()> {
+    let image = Image::from_u16(vec![width, height], data);
+    buf.clear();
+    FitsWriter::new(&mut *buf)
+        .write_image(&image)
+        .map_err(io::Error::other)?;
+    std::fs::write(path, &buf)
+}
+
+/// A generated synthetic frame set: paths plus what it cost to materialize the missing ones.
+#[derive(Debug)]
+pub(crate) struct FrameSet {
+    pub(crate) paths: Vec<PathBuf>,
+    pub(crate) generated: usize,
+    pub(crate) gen_secs: f64,
+    pub(crate) bytes_on_disk: u64,
+}
+
+/// Generate `n` synthetic 16-bit FITS frames named `<prefix>_NNNN.fits` into `dir`, skipping any
+/// already present (so a probe re-run reuses the cached set). Shared by the combine and pipeline
+/// memory probes.
+pub(crate) fn ensure_frames(
+    dir: &Path,
+    prefix: &str,
+    n: usize,
+    width: usize,
+    height: usize,
+    seed: u64,
+) -> io::Result<FrameSet> {
+    std::fs::create_dir_all(dir)?;
+    let paths: Vec<PathBuf> = (0..n)
+        .map(|i| dir.join(format!("{prefix}_{i:04}.fits")))
+        .collect();
+
+    let start = Instant::now();
+    let mut buf = Vec::new();
+    let mut generated = 0;
+    for (i, path) in paths.iter().enumerate() {
+        if path.exists() {
+            continue;
+        }
+        let data = synth_frame_u16(width, height, i, seed);
+        write_fits_u16(path, width, height, &data, &mut buf)?;
+        generated += 1;
+        print!("\r  generating {prefix} frames… {}/{}", i + 1, n);
+        io::stdout().flush().ok();
+    }
+    if generated > 0 {
+        println!();
+    }
+    let bytes_on_disk = paths
+        .iter()
+        .filter_map(|p| p.metadata().ok())
+        .map(|m| m.len())
+        .sum();
+
+    Ok(FrameSet {
+        paths,
+        generated,
+        gen_secs: start.elapsed().as_secs_f64(),
+        bytes_on_disk,
+    })
 }

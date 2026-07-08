@@ -41,22 +41,18 @@
 //! default (`<repo>/.tmp`) is disk-backed.
 
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use common::CancelToken;
-use fits_well::{FitsWriter, Image};
-use rand::{RngExt, SeedableRng};
-use rand_chacha::ChaCha8Rng;
-use rayon::prelude::*;
 
 use crate::stacking::combine::config::{CombineMethod, StackConfig};
 use crate::stacking::combine::progress::{ProgressCallback, StackingProgress, StackingStage};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::stack::stack;
-use crate::testing::mem_probe::{MB, RssSampler, env_parse};
+use crate::testing::mem_probe::{MB, RssSampler, ensure_frames, env_parse};
 
 /// Resolved `available_memory` budget plus a human label for the report.
 #[derive(Debug)]
@@ -90,122 +86,6 @@ fn parse_budget() -> BudgetChoice {
             }
         }
     }
-}
-
-/// One synthetic 16-bit mono frame: a vignetted background pedestal + Gaussian read noise, plus a
-/// handful of bright per-frame outliers (cosmic-ray stand-ins). The outliers differ every frame, so
-/// sigma-clipping and median combine actually have something to reject — a mean combine would keep
-/// them. Deterministic in `(seed, frame_idx)`; rows are generated in parallel with per-row RNGs.
-fn synth_frame_u16(width: usize, height: usize, frame_idx: usize, seed: u64) -> Vec<u16> {
-    const PEDESTAL: f32 = 0.08;
-    const READ_NOISE: f32 = 0.012;
-
-    let cx = width as f32 / 2.0;
-    let cy = height as f32 / 2.0;
-    let max_r2 = cx * cx + cy * cy;
-
-    let mut data = vec![0u16; width * height];
-    let frame_mix = seed ^ (frame_idx as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-
-    data.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
-        let mut rng =
-            ChaCha8Rng::seed_from_u64(frame_mix ^ (y as u64).wrapping_mul(0x0000_0100_0000_0001));
-        let dy = y as f32 - cy;
-        for (x, px) in row.iter_mut().enumerate() {
-            let dx = x as f32 - cx;
-            // Radial vignette in ~[0.75, 1.0] and a mild diagonal gradient give the field structure.
-            let vignette = 1.0 - 0.25 * (dx * dx + dy * dy) / max_r2;
-            let gradient = 0.03 * (x as f32 / width as f32 + y as f32 / height as f32);
-            // Irwin–Hall (four uniforms) ≈ zero-mean Gaussian read noise.
-            let g: f32 = rng.random::<f32>()
-                + rng.random::<f32>()
-                + rng.random::<f32>()
-                + rng.random::<f32>()
-                - 2.0;
-            let v = PEDESTAL * vignette + gradient + READ_NOISE * g;
-            *px = (v.clamp(0.0, 1.0) * 65535.0) as u16;
-        }
-    });
-
-    let n_outliers = (width * height / 50_000).max(4);
-    let mut rng = ChaCha8Rng::seed_from_u64(frame_mix.rotate_left(17));
-    for _ in 0..n_outliers {
-        let x = rng.random_range(0..width);
-        let y = rng.random_range(0..height);
-        let level = rng.random_range(0.85f32..1.0);
-        data[y * width + x] = (level * 65535.0) as u16;
-    }
-    data
-}
-
-/// Write `data` as a 16-bit (BITPIX=16, BZERO=32768) FITS image, reusing `buf` as the encode
-/// scratch so a whole stack allocates it once. `std::fs::write` flushes reliably (unlike a
-/// `BufWriter` dropped inside the FITS writer).
-fn write_fits_u16(
-    path: &Path,
-    width: usize,
-    height: usize,
-    data: &[u16],
-    buf: &mut Vec<u8>,
-) -> io::Result<()> {
-    let image = Image::from_u16(vec![width, height], data);
-    buf.clear();
-    FitsWriter::new(&mut *buf)
-        .write_image(&image)
-        .map_err(io::Error::other)?;
-    std::fs::write(path, &buf)
-}
-
-/// The generated frame set: paths plus what it cost to materialize the missing ones.
-#[derive(Debug)]
-struct FrameSet {
-    paths: Vec<PathBuf>,
-    generated: usize,
-    gen_secs: f64,
-    bytes_on_disk: u64,
-}
-
-/// Generate the frame set into `dir`, skipping frames already present.
-fn ensure_frames(
-    dir: &Path,
-    n: usize,
-    width: usize,
-    height: usize,
-    seed: u64,
-) -> io::Result<FrameSet> {
-    std::fs::create_dir_all(dir)?;
-    let paths: Vec<PathBuf> = (0..n)
-        .map(|i| dir.join(format!("frame_{i:04}.fits")))
-        .collect();
-
-    let start = Instant::now();
-    let mut buf = Vec::new();
-    let mut generated = 0;
-    for (i, path) in paths.iter().enumerate() {
-        if path.exists() {
-            continue;
-        }
-        let data = synth_frame_u16(width, height, i, seed);
-        write_fits_u16(path, width, height, &data, &mut buf)?;
-        generated += 1;
-        print!("\r  generating frames… {}/{}", i + 1, n);
-        io::stdout().flush().ok();
-    }
-    if generated > 0 {
-        println!();
-    }
-    let bytes_on_disk = paths
-        .iter()
-        .filter_map(|p| p.metadata().ok())
-        .map(|m| m.len())
-        .sum();
-
-    Ok(FrameSet {
-        paths,
-        generated,
-        gen_secs: start.elapsed().as_secs_f64(),
-        bytes_on_disk,
-    })
 }
 
 fn build_config(
@@ -283,7 +163,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
     println!("frames dir    {}", frames_dir.display());
     println!();
 
-    let frames = ensure_frames(&frames_dir, n, width, height, seed)?;
+    let frames = ensure_frames(&frames_dir, "frame", n, width, height, seed)?;
     println!(
         "frames ready  {} on disk ({:.2} GB){}",
         n,
