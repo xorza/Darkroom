@@ -28,7 +28,7 @@
 use blake3::Hasher;
 
 use crate::data::{DataType, StaticValue};
-use crate::execution::cache::Cache;
+use crate::execution::cache::RuntimeCache;
 use crate::execution::cache_node::file_cache_digest;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
 use crate::node::function::FuncBehavior;
@@ -242,7 +242,7 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
 
 /// A node's **content digest** — the one content key it's cached under, folding its identity
 /// (func id/version + output types) plus its structural inputs. The single digest the whole
-/// cache keys on: RAM reuse ([`Cache::is_resident_hit`]), disk load/store, and downstream
+/// cache keys on: RAM reuse ([`RuntimeCache::is_resident_hit`]), disk load/store, and downstream
 /// folding all read the node's stamped `current_digest`. Computed producer-first
 /// (topological), so a `Bind` producer's `current_digest` is already stamped when read.
 ///
@@ -256,7 +256,7 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
 pub(crate) fn node_digest(
     program: &ExecutionProgram,
     idx: NodeIdx,
-    cache: &Cache,
+    cache: &RuntimeCache,
 ) -> Option<Digest> {
     let e_node = &program.e_nodes[idx];
 

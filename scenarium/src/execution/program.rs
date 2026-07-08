@@ -119,7 +119,7 @@ pub(crate) struct ExecutionNode {
     /// [`persists_to_disk`](crate::graph::CacheMode::persists_to_disk)) gate RAM reuse and
     /// the content-addressed disk load/store; disk is honored only when the node has a
     /// content digest (a reproducible cone) and a disk root is configured — see `digest.rs`
-    /// and `output_cache.rs`.
+    /// and `disk_store.rs`.
     #[serde(default)]
     pub cache: CacheMode,
 

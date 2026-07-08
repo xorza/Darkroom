@@ -671,7 +671,7 @@ palette_colors! {
     badge_subgraph => BADGE_SUBGRAPH,
     /// Terminal (sink) chip — error red.
     badge_terminal => BADGE_TERMINAL,
-    /// Cache (persist-to-disk) chip — warning yellow.
+    /// RuntimeCache (persist-to-disk) chip — warning yellow.
     badge_cache => BADGE_CACHE,
     /// Impure marker — `constant` purple. A read-only descriptor (the node
     /// recomputes every run and is never cached), not an interactive toggle.
@@ -855,7 +855,7 @@ mod tests {
         assert_eq!(theme.colors.canvas_bg, Color::hex(0x1a1a1a));
         assert_eq!(theme.colors.input_port, Color::hex(0xdaff58));
         assert_eq!(theme.colors.output_port, Color::hex(0xffa63d));
-        // Cache (persist-to-disk) chip is the palette `warning` yellow.
+        // RuntimeCache (persist-to-disk) chip is the palette `warning` yellow.
         assert_eq!(theme.colors.badge_cache, Color::hex(0xffd44a));
         // Impure marker is the palette `constant` purple.
         assert_eq!(theme.colors.badge_impure, Color::hex(0xd4bfff));

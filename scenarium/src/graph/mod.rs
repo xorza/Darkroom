@@ -167,7 +167,7 @@ mod binding_map_serde {
 /// honored only for a node with a content digest (a reproducible cone); a node with an
 /// impure node anywhere upstream has no digest, so it's silently kept memory-only and
 /// never risks serving a stale value, whatever its mode. The on-disk backend is wired only
-/// once a caller enables it (`ExecutionEngine::set_output_cache` with a disk root); until
+/// once a caller enables it (`ExecutionEngine::set_disk_store` with a disk root); until
 /// then `Disk`/`Both` degrade to memory-only. See `execution/README.md` Part B.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum CacheMode {

@@ -42,14 +42,14 @@ impl ExecutionEngine {
 
     /// `get_argument_values` plus awaited preview resolution. Reads any disk-cached
     /// value this node shows (its own outputs and its inputs' producers) into RAM first
-    /// via [`hydrate_for_inspection`](crate::execution::output_cache::OutputCache::hydrate_for_inspection),
+    /// via [`hydrate_for_inspection`](crate::execution::disk_store::DiskStore::hydrate_for_inspection),
     /// so an inspected node the run reused-from-disk (or never touched) still resolves.
     pub(crate) async fn get_argument_values_with_previews(
         &mut self,
         node_id: &NodeId,
     ) -> Option<ArgumentValues> {
         if let Some(idx) = self.program.e_nodes.index_of_key(node_id) {
-            self.output_cache
+            self.disk_store
                 .hydrate_for_inspection(&self.program, &mut self.cache, idx.into());
         }
         let mut values = self.get_argument_values(node_id)?;

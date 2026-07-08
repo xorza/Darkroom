@@ -12,12 +12,12 @@ fn out() -> Vec<DynamicValue> {
 fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     let d = Digest([7u8; 32]);
     let other = Digest([8u8; 32]);
-    let mut cache = Cache::default();
+    let mut cache = RuntimeCache::default();
 
     // 0: impure cone (no current digest) — never hits, even holding values.
     cache.slots.add(RuntimeSlot {
         id: NodeId::from_u128(1),
-        value: ValueCache::Resident {
+        value: ValueState::Resident {
             values: out(),
             produced_under: Some(d),
         },
@@ -34,7 +34,7 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     cache.slots.add(RuntimeSlot {
         id: NodeId::from_u128(3),
         current_digest: Some(d),
-        value: ValueCache::Resident {
+        value: ValueState::Resident {
             values: out(),
             produced_under: Some(other),
         },
@@ -44,7 +44,7 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     cache.slots.add(RuntimeSlot {
         id: NodeId::from_u128(4),
         current_digest: Some(d),
-        value: ValueCache::Resident {
+        value: ValueState::Resident {
             values: out(),
             produced_under: Some(d),
         },
@@ -69,7 +69,7 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
 #[test]
 fn hydrate_turns_a_miss_into_a_hit() {
     let d = Digest([3u8; 32]);
-    let mut cache = Cache::default();
+    let mut cache = RuntimeCache::default();
     cache.slots.add(RuntimeSlot {
         id: NodeId::from_u128(1),
         current_digest: Some(d),

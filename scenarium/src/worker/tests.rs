@@ -1557,7 +1557,7 @@ async fn drop_without_exit_shuts_down_cleanly() {
 /// The disk cache wires through both entry points and persists across worker
 /// restarts: a `persist` (Disk-marked) reproducible node's output, stored on a
 /// cold run, reloads on a fresh worker over the same store so its upstream never
-/// recomputes. The cache is set at runtime via a `SetOutputCache` message in the
+/// recomputes. The cache is set at runtime via a `SetDiskStore` message in the
 /// same batch as `Update` — exercising that it's applied before the compile
 /// hydrates.
 #[tokio::test]
@@ -1565,7 +1565,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-    use crate::execution::output_cache::OutputCache;
+    use crate::execution::disk_store::DiskStore;
     use crate::graph::CacheMode;
     use crate::testing::{TestFuncHooks, test_func_lib};
 
@@ -1623,12 +1623,12 @@ async fn disk_cache_persists_node_across_worker_restart() {
                 tx.try_send(result).ok();
             }
         });
-        // SetOutputCache shares the batch with Update, proving it's applied before
+        // SetDiskStore shares the batch with Update, proving it's applied before
         // the compile hydrates.
-        let cache = OutputCache::new(Arc::new(Library::default()), Some(root.to_path_buf()));
+        let cache = DiskStore::new(Arc::new(Library::default()), Some(root.to_path_buf()));
         worker
             .send_many([
-                WorkerMessage::SetOutputCache(cache),
+                WorkerMessage::SetDiskStore(cache),
                 WorkerMessage::Update { graph, library },
                 WorkerMessage::ExecuteTerminals,
             ])

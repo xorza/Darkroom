@@ -11,7 +11,7 @@ use common::PauseGate;
 use common::ReadyState;
 
 use crate::execution::event::{EventRef, EventTrigger};
-use crate::execution::output_cache::OutputCache;
+use crate::execution::disk_store::DiskStore;
 use crate::execution::stats::{ExecutionStats, RunProgress};
 use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result, RunSeeds};
 use crate::graph::{Graph, NodeId};
@@ -65,7 +65,7 @@ pub enum WorkerMessage {
     /// Swap the engine's output cache (codec registry + content-addressed store
     /// root). Applied before any graph op in the same batch, so the next `Update`
     /// hydrates from the new config — e.g. repointing at a per-document store dir.
-    SetOutputCache(OutputCache),
+    SetDiskStore(DiskStore),
     ExecuteTerminals,
     StartEventLoop,
     StopEventLoop,
@@ -271,7 +271,7 @@ enum LoopCommand {
 /// | Slot                  | Variants that write it      | Rule          |
 /// | --------------------- | --------------------------- | ------------- |
 /// | `graph_state`         | Update, Clear, SaveCaches   | last-write-wins |
-/// | `output_cache`        | SetOutputCache              | last-write-wins, applied pre-graph-op |
+/// | `disk_store`        | SetDiskStore              | last-write-wins, applied pre-graph-op |
 /// | `save_caches`         | SaveCaches                  | idempotent flag (persist, no run) |
 /// | `loop_request`        | StartEventLoop, StopEventLoop | last-write-wins |
 /// | `execute_terminals`   | ExecuteTerminals            | idempotent flag |
@@ -282,9 +282,9 @@ enum LoopCommand {
 #[derive(Debug, Default)]
 struct BatchIntent {
     graph_state: Option<GraphOp>,
-    /// `Some` = a `SetOutputCache` was in this batch (the new cache). Applied
+    /// `Some` = a `SetDiskStore` was in this batch (the new cache). Applied
     /// before `graph_state`, so a same-batch `Update` hydrates from it.
-    output_cache: Option<OutputCache>,
+    disk_store: Option<DiskStore>,
     /// A `SaveCaches` was in this batch: after the graph update, flush resident cache
     /// values to disk without running the graph.
     save_caches: bool,
@@ -321,7 +321,7 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
                 intent.save_caches = true;
             }
             WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
-            WorkerMessage::SetOutputCache(cache) => intent.output_cache = Some(cache),
+            WorkerMessage::SetDiskStore(cache) => intent.disk_store = Some(cache),
             WorkerMessage::ExecuteTerminals => intent.execute_terminals = true,
             WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
             WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
@@ -412,8 +412,8 @@ async fn worker_loop<ExecutionCallback>(
 
         // Swap the output cache before any graph op, so a same-batch `Update`
         // hydrates from the new config rather than the old.
-        if let Some(cache) = intent.output_cache.take() {
-            execution_engine.set_output_cache(cache);
+        if let Some(cache) = intent.disk_store.take() {
+            execution_engine.set_disk_store(cache);
         }
 
         let update_ok = match intent.graph_state.take() {

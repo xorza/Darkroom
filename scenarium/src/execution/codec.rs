@@ -1,6 +1,6 @@
 //! Codec layer for a node's output values (`Vec<DynamicValue>`) — turns them
 //! to/from bytes for the cache. The bytes are stored by
-//! [`OutputCache`](crate::execution::output_cache::OutputCache); this module is the
+//! [`DiskStore`](crate::execution::disk_store::DiskStore); this module is the
 //! value↔bytes half, not the storage.
 //!
 //! [`DynamicValue`] is deliberately not `Serialize`: `Unbound`/`Static` are
@@ -13,7 +13,7 @@
 //! value yet — which is exactly why the registry must exist). A type with no
 //! registered codec is left out of the cache, and
 //! caching is all-or-nothing per node so a reload never yields a half-real output
-//! set. The [`OutputCache`](crate::execution::output_cache::OutputCache) is the one
+//! set. The [`DiskStore`](crate::execution::disk_store::DiskStore) is the one
 //! consumer. See `execution/README.md` Part B.
 
 use common::{SerdeFormat, deserialize, serialize};

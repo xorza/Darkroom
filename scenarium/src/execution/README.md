@@ -365,13 +365,23 @@ there are no deferred nodes. Then, per surviving node, once its digest is comput
    blob can't be the wrong type (the signature is in the digest, §B.2), but if it fails
    to *load* (corrupt/deleted) the bad file is deleted and the demanding consumer is
    dropped for this run; the next reopen recomputes it.
-5. **after the run → `evict_unused`.** Reclaim RAM the run's cache modes don't call to
-   hold. A `caches_in_ram` node (`Ram`/`Both`) the run executed or read stays resident;
-   any other resident value is demoted to `OnDisk` **iff** a blob can serve it again
-   (lossless — a later run or inspection reloads), and only a **non-RAM** mode's value
-   (`None`, or a `Disk` value whose blob is missing) is dropped outright, recomputing when
-   next needed. A `Ram`/`Both` leftover with no blob is kept, so eviction never forces a
-   recompute of a value a mode promised to retain.
+5. **mid-run release — `reclaim_slot`.** The executor keeps the plan's per-output consumer
+   counts live and counts them *down* as each running consumer reads a bound producer
+   (`collect_inputs`). When an output reaches `Skip` (zero left) its value is cleared one output
+   at a time, and once *every* output of a **non-RAM** node is spent its whole slot is reclaimed
+   the instant its last consumer reads it — `reclaim_slot` demotes it to `OnDisk` if a blob
+   serves it (a `Disk` value), else drops it (`None`). A `Ram`/`Both` node is left resident
+   (kept hot for reuse). This bounds a chain's peak RAM to its active frontier instead of every
+   intermediate at once. A node no consumer reads (a terminal sink, or all its consumers cut) is
+   reclaimed the moment it finishes.
+6. **after the run → `evict_unused`.** The same `reclaim_slot` decision, swept over the
+   leftovers step 5 didn't reach — a prior run's untouched value, or a non-RAM value a consumer
+   never read (so its outputs never all went spent). A `caches_in_ram` node (`Ram`/`Both`) the
+   run executed or read stays resident; every other resident value goes through `reclaim_slot`:
+   demoted to `OnDisk` **iff** a blob can serve it again (lossless — a later run or inspection
+   reloads), else a **non-RAM** value (`None`, or a `Disk` value whose blob is missing) is
+   dropped outright and a `Ram`/`Both` leftover with no blob is kept — so eviction never forces
+   a recompute of a value a mode promised to retain.
 
 **Off-run path — inspection.** `get_argument_values_with_previews` loads on demand via
 `hydrate_for_inspection`, so a disk-cached node no run touched still shows its value when

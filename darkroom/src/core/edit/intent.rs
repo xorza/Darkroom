@@ -52,7 +52,7 @@ pub enum NodeProperty {
     /// `Node::disabled` — excluded from execution, skipped at flatten time.
     Disabled(bool),
     /// `Node::cache` — where the node's output is cached (see [`CacheMode`]).
-    Cache(CacheMode),
+    RuntimeCache(CacheMode),
 }
 
 /// What the caller wants to change. Forward-only — no `from` fields.
@@ -139,7 +139,7 @@ pub enum Intent {
     /// Set one scalar property of a node — its `disabled` flag or its cache
     /// [`CacheMode`] (see [`NodeProperty`]). Emitted by the header badges: `D`
     /// flips `Disabled` (skips the node at flatten time); the `R`/`↓` chips each
-    /// flip one bit of `Cache` (the disk bit persists the output so a
+    /// flip one bit of `RuntimeCache` (the disk bit persists the output so a
     /// reproducible node reloads instead of recomputing).
     SetNodeProperty {
         node_id: NodeId,
@@ -579,7 +579,7 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             // Capture the *same* property's current value as `from` for revert.
             let from = match to {
                 NodeProperty::Disabled(_) => NodeProperty::Disabled(node.disabled),
-                NodeProperty::Cache(_) => NodeProperty::Cache(node.cache),
+                NodeProperty::RuntimeCache(_) => NodeProperty::RuntimeCache(node.cache),
             };
             GraphStep::SetNodeProperty { node_id, from, to }
         }
@@ -990,7 +990,7 @@ fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProp
     let node = scope.graph.by_id_mut(node_id).unwrap();
     match prop {
         NodeProperty::Disabled(v) => node.disabled = v,
-        NodeProperty::Cache(v) => node.cache = v,
+        NodeProperty::RuntimeCache(v) => node.cache = v,
     }
 }
 
@@ -1633,9 +1633,9 @@ mod tests {
         // committing then reverting — each iteration returns the node to its defaults,
         // so the step's captured `from` is always Ram / enabled.
         let cases = [
-            NodeProperty::Cache(CacheMode::Both),
-            NodeProperty::Cache(CacheMode::None),
-            NodeProperty::Cache(CacheMode::Disk),
+            NodeProperty::RuntimeCache(CacheMode::Both),
+            NodeProperty::RuntimeCache(CacheMode::None),
+            NodeProperty::RuntimeCache(CacheMode::Disk),
             NodeProperty::Disabled(true),
         ];
         for to in cases {
@@ -1647,7 +1647,7 @@ mod tests {
             .unwrap_or_else(|| panic!("{to:?} is a real change, not a no-op"));
             let node = doc.graph.by_id(&id).unwrap();
             match to {
-                NodeProperty::Cache(m) => assert_eq!(node.cache, m),
+                NodeProperty::RuntimeCache(m) => assert_eq!(node.cache, m),
                 NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
             }
             assert!(
@@ -1666,7 +1666,7 @@ mod tests {
 
         // Setting a property to the value it already holds is a no-op (no undo entry).
         for to in [
-            NodeProperty::Cache(CacheMode::Ram),
+            NodeProperty::RuntimeCache(CacheMode::Ram),
             NodeProperty::Disabled(false),
         ] {
             assert!(

@@ -49,11 +49,11 @@ fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: Binding) {
     graph.set_input_binding(InputPort::new(id, idx), binding);
 }
 
-// === Disk Cache (engine integration) ===
+// === Disk RuntimeCache (engine integration) ===
 
 mod cache_persistence {
     use super::*;
-    use crate::execution::cache::ValueCache;
+    use crate::execution::cache::ValueState;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -84,11 +84,11 @@ mod cache_persistence {
     /// (simulating a reopen when called twice against the same dir). The default
     /// empty library is fine — these tests cache plain values.
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
-        use crate::execution::output_cache::OutputCache;
+        use crate::execution::disk_store::DiskStore;
         use crate::library::Library;
         use std::sync::Arc;
         let mut engine = ExecutionEngine::default();
-        engine.set_output_cache(OutputCache::new(
+        engine.set_disk_store(DiskStore::new(
             Arc::new(Library::default()),
             Some(dir.0.clone()),
         ));
@@ -246,7 +246,7 @@ mod cache_persistence {
     /// (`print`). On reopen only the frontier `mult` — the cached value `print`
     /// actually reads — is deserialized into RAM; the deeper `sum`, whose sole
     /// consumer `mult` is itself reused-from-disk (so never reads it), stays
-    /// `ValueCache::OnDisk` with no resident bytes. That is the RAM win. Inspecting
+    /// `ValueState::OnDisk` with no resident bytes. That is the RAM win. Inspecting
     /// `sum` then pulls it in on demand.
     #[tokio::test]
     async fn chained_disk_cache_loads_only_the_frontier() {
@@ -323,7 +323,7 @@ mod cache_persistence {
             .is_some();
         let sum_on_disk = matches!(
             engine.runtime_slot(engine.by_name("sum").unwrap()).value,
-            ValueCache::OnDisk
+            ValueState::OnDisk
         );
         assert!(
             !sum_resident,
@@ -414,7 +414,7 @@ mod cache_persistence {
             .is_some();
         let sum_disk = matches!(
             engine.runtime_slot(engine.by_name("sum").unwrap()).value,
-            ValueCache::OnDisk
+            ValueState::OnDisk
         );
         let mult_resident = engine
             .runtime_slot(engine.by_name("mult").unwrap())
@@ -520,12 +520,12 @@ mod cache_persistence {
         );
         match mode {
             CacheMode::None => assert!(
-                matches!(slot.value, ValueCache::Empty),
+                matches!(slot.value, ValueState::Empty),
                 "None drops its value after the run: {:?}",
                 slot.value
             ),
             CacheMode::Disk => assert!(
-                matches!(slot.value, ValueCache::OnDisk),
+                matches!(slot.value, ValueState::OnDisk),
                 "Disk demotes its RAM copy to disk-only after the run: {:?}",
                 slot.value
             ),
@@ -643,7 +643,7 @@ mod cache_persistence {
     /// must serve that config's value from its disk blob — not the stale RAM value the
     /// intervening run left resident under a now-superseded digest. The old
     /// three-field slot let that stale RAM value mask the fresh blob at hydrate
-    /// (`hydrate_slot` short-circuited on "values present"); the `ValueCache` enum drops
+    /// (`hydrate_slot` short-circuited on "values present"); the `ValueState` enum drops
     /// it when `mark_on_disk_if_present` flags the blob, so the reuse loads the correct
     /// bytes.
     #[tokio::test(flavor = "multi_thread")]
@@ -1000,7 +1000,7 @@ mod cache_persistence {
         use std::sync::Mutex;
 
         use crate::async_lambda;
-        use crate::execution::output_cache::OutputCache;
+        use crate::execution::disk_store::DiskStore;
         use crate::library::Library;
         use crate::node::function::{Func, FuncInput, FuncOutput};
 
@@ -1064,7 +1064,7 @@ mod cache_persistence {
 
         let engine_with = |lib: Library| {
             let mut eg = ExecutionEngine::default();
-            eg.set_output_cache(OutputCache::new(Arc::new(lib), Some(dir.0.clone())));
+            eg.set_disk_store(DiskStore::new(Arc::new(lib), Some(dir.0.clone())));
             eg
         };
 
@@ -1266,9 +1266,9 @@ mod cache_persistence {
         };
 
         let disk_engine_with_lib = |dir: &TempDir, library: Library| {
-            use crate::execution::output_cache::OutputCache;
+            use crate::execution::disk_store::DiskStore;
             let mut engine = ExecutionEngine::default();
-            engine.set_output_cache(OutputCache::new(Arc::new(library), Some(dir.0.clone())));
+            engine.set_disk_store(DiskStore::new(Arc::new(library), Some(dir.0.clone())));
             engine
         };
 
@@ -1341,7 +1341,7 @@ mod cache_persistence {
     }
 }
 
-// === File Cache (explicit-path passthrough node) ===
+// === File RuntimeCache (explicit-path passthrough node) ===
 
 mod file_cache {
     use super::*;
@@ -4380,5 +4380,156 @@ mod subgraph {
 
         assert_eq!(*ran.lock().unwrap(), 1);
         Ok(())
+    }
+}
+
+/// End-to-end proof that a non-RAM cache mode bounds a run's peak memory: each stage's
+/// output is released the instant the next stage consumes it, so only the active frontier is
+/// resident at once — the point of the mid-run release.
+mod mid_run_release {
+    use std::any::Any;
+    use std::sync::Arc;
+    use std::sync::Mutex as StdMutex;
+
+    use super::*;
+    use crate::async_lambda;
+    use crate::data::{CustomValue, TypeId};
+    use crate::library::{Library, TypeEntry};
+    use crate::node::function::{Func, FuncInput, FuncOutput};
+
+    const TRACKED_TYPE: &str = "7266406a-8083-4e46-b661-de4308bcec96";
+    const RELAY_FUNC: &str = "2b16e013-11fb-49cf-89b1-a9cb54c06be3";
+    const SINK_FUNC: &str = "ec454492-e235-4b49-b3ef-ae0b2b85bf5f";
+
+    /// Live/peak count of [`Tracked`] values resident at once during a run.
+    #[derive(Debug, Default)]
+    struct LiveTracker {
+        current: usize,
+        peak: usize,
+    }
+
+    /// A custom value that registers as live on creation and deregisters on `Drop`, so the
+    /// shared [`LiveTracker`] captures the peak number resident simultaneously. Cloning a
+    /// `DynamicValue::Custom` clones the `Arc`, not the `Tracked`, so a value stays live until
+    /// its last reference (cache slot or invoke buffer) drops — exactly what peak RAM tracks.
+    #[derive(Debug)]
+    struct Tracked {
+        tracker: Arc<StdMutex<LiveTracker>>,
+    }
+
+    impl Tracked {
+        fn new(tracker: Arc<StdMutex<LiveTracker>>) -> Self {
+            {
+                let mut t = tracker.lock().unwrap();
+                t.current += 1;
+                t.peak = t.peak.max(t.current);
+            }
+            Tracked { tracker }
+        }
+    }
+
+    impl Drop for Tracked {
+        fn drop(&mut self) {
+            self.tracker.lock().unwrap().current -= 1;
+        }
+    }
+
+    impl std::fmt::Display for Tracked {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Tracked")
+        }
+    }
+
+    impl CustomValue for Tracked {
+        fn type_id(&self) -> TypeId {
+            TRACKED_TYPE.into()
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    /// A `relay` (pure, custom→custom, emits a fresh `Tracked`) + a terminal `sink` that
+    /// consumes one, over the shared `tracker`.
+    fn relay_library(tracker: Arc<StdMutex<LiveTracker>>) -> Library {
+        let mut library = Library::default();
+        library.register_type(TRACKED_TYPE, TypeEntry::custom("Tracked"));
+        let tracker_l = tracker.clone();
+        library.add(
+            Func::new(RELAY_FUNC, "relay")
+                .category("Test")
+                .pure()
+                .input(FuncInput::optional(
+                    "in",
+                    DataType::Custom(TRACKED_TYPE.into()),
+                ))
+                .output(FuncOutput::new(
+                    "out",
+                    DataType::Custom(TRACKED_TYPE.into()),
+                ))
+                .lambda(async_lambda!(
+                    move |_, _, _, _, _, outputs| { tracker = tracker_l.clone() } => {
+                        outputs[0] = DynamicValue::Custom(Arc::new(Tracked::new(tracker.clone())));
+                        Ok(())
+                    }
+                )),
+        );
+        library.add(
+            Func::new(SINK_FUNC, "sink")
+                .category("Test")
+                .terminal()
+                .input(FuncInput::required(
+                    "in",
+                    DataType::Custom(TRACKED_TYPE.into()),
+                ))
+                .lambda(async_lambda!(|_, _, _, _, _, _| { Ok(()) })),
+        );
+        library
+    }
+
+    /// Run a 4-stage relay chain into a sink with every relay set to `relay_mode`, and return
+    /// the peak number of tracked outputs resident at once.
+    async fn chain_peak(relay_mode: CacheMode) -> usize {
+        let tracker = Arc::new(StdMutex::new(LiveTracker::default()));
+        let library = relay_library(tracker.clone());
+
+        let relays: Vec<NodeId> = (0..4).map(|_| NodeId::unique()).collect();
+        let sink_id = NodeId::unique();
+        let mut graph = Graph::default();
+        for &id in &relays {
+            let mut n = node(&library, "relay", id);
+            n.cache = relay_mode;
+            graph.add(n);
+        }
+        graph.add(node(&library, "sink", sink_id));
+        for pair in relays.windows(2) {
+            graph.set_input_binding(InputPort::new(pair[1], 0), (pair[0], 0).into());
+        }
+        graph.set_input_binding(InputPort::new(sink_id, 0), (relays[3], 0).into());
+        graph.validate();
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &library).unwrap();
+        engine.execute_terminals().await.unwrap();
+
+        tracker.lock().unwrap().peak
+    }
+
+    /// The cache mode drives peak residency. With `None`, each stage's output is freed the
+    /// moment the next stage reads it, so only a producer/consumer pair is ever resident →
+    /// peak 2, whatever the chain length. With `Ram`, every stage is retained for cross-run
+    /// reuse, so all four accumulate → peak 4. That the two differ is the whole feature.
+    #[tokio::test]
+    async fn none_cache_bounds_peak_residency_but_ram_accumulates() {
+        assert_eq!(
+            chain_peak(CacheMode::None).await,
+            2,
+            "None frees each stage the instant it is drained"
+        );
+        assert_eq!(
+            chain_peak(CacheMode::Ram).await,
+            4,
+            "Ram retains every stage for the whole run"
+        );
     }
 }

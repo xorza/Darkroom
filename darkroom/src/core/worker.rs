@@ -12,7 +12,7 @@
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use scenarium::execution::output_cache::OutputCache;
+use scenarium::execution::disk_store::DiskStore;
 use scenarium::execution::stats::{ExecutionStats, RunProgress};
 use scenarium::execution::{ArgumentValues, Error as ExecError};
 use scenarium::graph::{Graph, NodeId};
@@ -79,7 +79,7 @@ impl std::fmt::Debug for WorkerBridge {
 impl WorkerBridge {
     /// Spin up the worker on a fresh multi-thread runtime. Starts memory-only; the
     /// host installs the content-addressed output cache (codec registry + store
-    /// root) via [`Self::set_output_cache`]. The callback runs on a worker thread:
+    /// root) via [`Self::set_disk_store`]. The callback runs on a worker thread:
     /// it forwards the result over `tx` and asks the host to paint, so the next
     /// frame drains it.
     pub(crate) fn new(wake: Wake) -> Self {
@@ -136,8 +136,8 @@ impl WorkerBridge {
     /// Swap the engine's output cache (codec registry + content-addressed store
     /// root) — e.g. to repoint at the active document's store. Takes effect before
     /// the next run's compile. A dropped send (worker exited) is a harmless no-op.
-    pub(crate) fn set_output_cache(&self, cache: OutputCache) {
-        let _ = self.worker.send(WorkerMessage::SetOutputCache(cache));
+    pub(crate) fn set_disk_store(&self, cache: DiskStore) {
+        let _ = self.worker.send(WorkerMessage::SetDiskStore(cache));
     }
 
     /// Request cancellation of the in-flight run. Coarse: the running node

@@ -278,7 +278,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     to: NodeProperty::Disabled(!node.disabled),
                 });
             }
-            // Cache toggles: the two independent bits of the node's `CacheMode` —
+            // RuntimeCache toggles: the two independent bits of the node's `CacheMode` —
             // an `R` chip (keep the output resident in RAM, reused across runs) and
             // a `↓` chip (persist it to the on-disk store, surviving a reopen). Each
             // chip is filled when its bit is set; clicking flips just that bit.
@@ -296,13 +296,13 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     theme.colors.badge_cache,
                     ram,
                     ram_badge_wid(node.id),
-                    "Cache in RAM — keep the output resident, reused across runs this session",
+                    "RuntimeCache in RAM — keep the output resident, reused across runs this session",
                 )
                 .show(ui, theme)
                 {
                     out.push(Intent::SetNodeProperty {
                         node_id: node.id,
-                        to: NodeProperty::Cache(CacheMode::from_bits(!ram, disk)),
+                        to: NodeProperty::RuntimeCache(CacheMode::from_bits(!ram, disk)),
                     });
                 }
                 if Badge::control(
@@ -310,13 +310,13 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     theme.colors.badge_cache,
                     disk,
                     disk_badge_wid(node.id),
-                    "Cache to disk — persist the output across runs and reopens",
+                    "RuntimeCache to disk — persist the output across runs and reopens",
                 )
                 .show(ui, theme)
                 {
                     out.push(Intent::SetNodeProperty {
                         node_id: node.id,
-                        to: NodeProperty::Cache(CacheMode::from_bits(ram, !disk)),
+                        to: NodeProperty::RuntimeCache(CacheMode::from_bits(ram, !disk)),
                     });
                 }
             }

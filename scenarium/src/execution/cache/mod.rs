@@ -2,7 +2,7 @@
 //! state, keyed by `NodeId` and index-aligned to the program's `e_nodes`. Owned
 //! by the [`ExecutionEngine`](crate::execution::ExecutionEngine); the executor's run
 //! loop computes each node's digest, writes its outputs, and reads its reuse state
-//! ([`Cache::is_resident_hit`]). Reconciled against the node set at each `update`.
+//! ([`RuntimeCache::is_resident_hit`]). Reconciled against the node set at each `update`.
 //! Per-run results (errors, timings) are *not* here — they belong to a single run
 //! and live on the run, not the cache.
 
@@ -21,7 +21,7 @@ use crate::runtime::shared_any_state::SharedAnyState;
 /// built. The node's *identity* digest is a separate axis
 /// ([`RuntimeSlot::current_digest`]); this models only the value.
 #[derive(Default, Debug)]
-pub(crate) enum ValueCache {
+pub(crate) enum ValueState {
     /// No cached output — never produced, evicted, or cleared for re-execution.
     #[default]
     Empty,
@@ -32,7 +32,7 @@ pub(crate) enum ValueCache {
         produced_under: Option<Digest>,
     },
     /// Not in RAM, but a decodable blob exists on disk for the slot's *current* digest —
-    /// flagged during the run by [`OutputCache::mark_on_disk_if_present`](crate::execution::output_cache::OutputCache::mark_on_disk_if_present)
+    /// flagged during the run by [`DiskStore::mark_on_disk_if_present`](crate::execution::disk_store::DiskStore::mark_on_disk_if_present)
     /// (or demoted here from a resident value by `evict_unused`) without loading,
     /// deserialized on demand (a running consumer's `collect_inputs`, or an inspection).
     /// Lets a disk-cached value behind another disk-cached value never enter RAM.
@@ -53,7 +53,7 @@ pub(crate) struct RuntimeSlot {
     /// the run ([`digest::node_digest`]). A resident value hits iff its
     /// `produced_under` equals this — so a flipped-back input can't serve a stale value.
     pub(crate) current_digest: Option<Digest>,
-    pub(crate) value: ValueCache,
+    pub(crate) value: ValueState,
 }
 
 /// The two slot fields the run loop hands a lambda — its persistent `state` and the
@@ -77,13 +77,13 @@ impl RuntimeSlot {
     /// as if it were this run's result. (Successful runs reuse the buffer in place;
     /// see [`invoke_slot`](Self::invoke_slot).)
     pub(crate) fn clear_output(&mut self) {
-        self.value = ValueCache::Empty;
+        self.value = ValueState::Empty;
     }
 
     /// The resident output values, or `None` when the slot isn't `Resident`.
     pub(crate) fn output_values(&self) -> Option<&Vec<DynamicValue>> {
         match &self.value {
-            ValueCache::Resident { values, .. } => Some(values),
+            ValueState::Resident { values, .. } => Some(values),
             _ => None,
         }
     }
@@ -98,17 +98,17 @@ impl RuntimeSlot {
     /// updates it on success.
     pub(crate) fn invoke_slot(&mut self, output_count: usize) -> InvokeSlot<'_> {
         match &mut self.value {
-            ValueCache::Resident { values, .. } => {
+            ValueState::Resident { values, .. } => {
                 values.resize(output_count, DynamicValue::Unbound);
             }
             _ => {
-                self.value = ValueCache::Resident {
+                self.value = ValueState::Resident {
                     values: vec![DynamicValue::Unbound; output_count],
                     produced_under: None,
                 };
             }
         }
-        let ValueCache::Resident { values, .. } = &mut self.value else {
+        let ValueState::Resident { values, .. } = &mut self.value else {
             unreachable!("set to Resident just above");
         };
         InvokeSlot {
@@ -122,7 +122,7 @@ impl RuntimeSlot {
     /// key its disk blob is stored under. No-op if not `Resident`.
     pub(crate) fn stamp_produced(&mut self) {
         let digest = self.current_digest;
-        if let ValueCache::Resident { produced_under, .. } = &mut self.value {
+        if let ValueState::Resident { produced_under, .. } = &mut self.value {
             *produced_under = digest;
         }
     }
@@ -132,11 +132,11 @@ impl RuntimeSlot {
 /// via [`Self::reconcile`]; the executor computes each node's digest, mutates its
 /// outputs/state, and reads reuse state ([`Self::is_resident_hit`]) in its run loop.
 #[derive(Default, Debug)]
-pub(crate) struct Cache {
+pub(crate) struct RuntimeCache {
     pub(crate) slots: KeyIndexVec<NodeId, RuntimeSlot>,
 }
 
-impl Cache {
+impl RuntimeCache {
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
     }
@@ -161,25 +161,25 @@ impl Cache {
     /// disk-store rely on this being the true "bytes are here" predicate.
     pub(crate) fn is_resident_hit(&self, idx: NodeIdx) -> bool {
         match (&self.slots[idx].value, self.slots[idx].current_digest) {
-            (ValueCache::Resident { produced_under, .. }, Some(d)) => *produced_under == Some(d),
+            (ValueState::Resident { produced_under, .. }, Some(d)) => *produced_under == Some(d),
             _ => false,
         }
     }
 
     /// Whether the slot currently holds a *usable* cached value for its digest — resident
-    /// under the current digest, or a disk blob already flagged [`ValueCache::OnDisk`] this
+    /// under the current digest, or a disk blob already flagged [`ValueState::OnDisk`] this
     /// run. Unlike [`is_resident_hit`](Self::is_resident_hit) (RAM only), this also counts a
     /// stat'd-but-unloaded disk blob, so a node the executor's cut pruned (its consumers all
     /// reused, so it never ran) is still reported as *cached* when its value can be served —
     /// while a pruned memory-only node with no value reports `false`.
     pub(crate) fn has_available_value(&self, idx: NodeIdx) -> bool {
-        self.is_resident_hit(idx) || matches!(self.slots[idx].value, ValueCache::OnDisk)
+        self.is_resident_hit(idx) || matches!(self.slots[idx].value, ValueState::OnDisk)
     }
 
     /// Install a disk-loaded output into a slot under `digest` (the node's current
     /// digest), turning a later reuse check into a plain RAM hit.
     pub(crate) fn hydrate(&mut self, idx: NodeIdx, values: Vec<DynamicValue>, digest: Digest) {
-        self.slots[idx].value = ValueCache::Resident {
+        self.slots[idx].value = ValueState::Resident {
             values,
             produced_under: Some(digest),
         };

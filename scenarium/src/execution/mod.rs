@@ -38,7 +38,7 @@ pub(crate) mod digest;
 pub mod event;
 pub(crate) mod executor;
 mod flatten;
-pub mod output_cache;
+pub mod disk_store;
 pub(crate) mod plan;
 pub(crate) mod program;
 mod query;
@@ -48,10 +48,10 @@ pub mod stats;
 mod tests;
 pub(crate) mod validate;
 
-use cache::Cache;
+use cache::RuntimeCache;
 use event::EventRef;
 use executor::Executor;
-use output_cache::OutputCache;
+use disk_store::DiskStore;
 use plan::{ExecutionPlan, Planner};
 #[cfg(test)]
 use program::ExecutionNode;
@@ -178,7 +178,7 @@ pub(crate) struct RunSeeds {
 /// `flattener` (compile scratch) and its `flatten` map (flat↔authoring ids), the
 /// reusable `plan` buffer, the `planner` (scheduling scratch), the cross-run
 /// `cache` (per-node outputs + state), the `executor` (run loop + context), and
-/// the `output_cache` (file persistence). Not serializable — the persistent form
+/// the `disk_store` (file persistence). Not serializable — the persistent form
 /// is the [`ExecutionProgram`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
@@ -192,10 +192,10 @@ pub(crate) struct ExecutionEngine {
     flatten_map: Arc<FlattenMap>,
     /// Per-node cross-run cache (output values, digests, node state), reconciled
     /// to the node set at each `update`.
-    cache: Cache,
+    cache: RuntimeCache,
     executor: Executor,
     planner: Planner,
-    /// Cache-aware refinement of the plan: resolves reuse + cuts cones feeding only cache
+    /// RuntimeCache-aware refinement of the plan: resolves reuse + cuts cones feeding only cache
     /// hits, between plan and execute. Owns reusable per-run scratch (see `resolve.rs`).
     resolver: Resolver,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
@@ -204,8 +204,8 @@ pub(crate) struct ExecutionEngine {
     /// `CachePassthrough` (explicit-path) nodes from disk when a blob for their digest
     /// exists, reads only the ones a run consumes into RAM, and persists fresh ones after
     /// a run. Holds the one codec registry and the optional disk root; empty default is
-    /// memory-only. Set via [`Self::set_output_cache`].
-    output_cache: OutputCache,
+    /// memory-only. Set via [`Self::set_disk_store`].
+    disk_store: DiskStore,
 }
 
 impl ExecutionEngine {
@@ -224,15 +224,15 @@ impl ExecutionEngine {
         Arc::make_mut(&mut self.flatten_map).reset();
     }
 
-    /// Swap the [`OutputCache`] — the library snapshot (its type table supplies
+    /// Swap the [`DiskStore`] — the library snapshot (its type table supplies
     /// the custom-value codecs) plus the optional
     /// content-addressed store root. At the next `update`, `persist` (content-
     /// addressed) and `CachePassthrough` (explicit-path) outputs hydrate from their
     /// files on a hit (skipping recompute), and freshly-computed ones are stored
     /// after a run. The RAM cache is keyed by node id + digest, independent of the
     /// root, so swapping keeps any warm in-memory outputs.
-    pub(crate) fn set_output_cache(&mut self, cache: OutputCache) {
-        self.output_cache = cache;
+    pub(crate) fn set_disk_store(&mut self, cache: DiskStore) {
+        self.disk_store = cache;
     }
 
     // === Phase 1: compile ===
@@ -310,7 +310,7 @@ impl ExecutionEngine {
             &self.program,
             &self.plan,
             &mut self.cache,
-            &self.output_cache,
+            &self.disk_store,
         );
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
@@ -323,7 +323,7 @@ impl ExecutionEngine {
                 &self.plan,
                 needed,
                 &mut self.cache,
-                &self.output_cache,
+                &self.disk_store,
                 &self.flatten_map,
                 progress,
                 cancel,
@@ -335,7 +335,7 @@ impl ExecutionEngine {
         // executor owns which nodes ran, so it computes the keep-set; the output cache
         // just demotes the rest.
         let keep = self.executor.protected_after_run(&self.program, &self.plan);
-        self.output_cache
+        self.disk_store
             .evict_unused(&self.program, &mut self.cache, &keep);
 
         stats.triggered_events = seeds.events;
@@ -354,7 +354,7 @@ impl ExecutionEngine {
     /// and so never re-executes to store itself.
     ///
     /// Never overwrites identical content: a content-addressed blob's path *is* its
-    /// content hash, so [`OutputCache::store_node`] skips it when it already exists.
+    /// content hash, so [`DiskStore::store_node`] skips it when it already exists.
     /// Explicit-path (`CachePassthrough`) nodes are deliberately excluded here — their
     /// file is (re)written by their own execution, so flushing them would overwrite an
     /// identical file. Also a no-op for a node with no resident value.
@@ -363,7 +363,7 @@ impl ExecutionEngine {
             if !self.program.e_nodes[idx].cache.persists_to_disk() {
                 continue;
             }
-            self.output_cache
+            self.disk_store
                 .store_node(
                     &self.program,
                     idx,
@@ -469,7 +469,7 @@ impl ExecutionEngine {
             .index_of_key(&self.by_name(node_name).unwrap().id);
         let idx = idx.unwrap();
         let slot = &mut self.cache.slots[idx];
-        slot.value = cache::ValueCache::Resident {
+        slot.value = cache::ValueState::Resident {
             values,
             produced_under: slot.current_digest,
         };

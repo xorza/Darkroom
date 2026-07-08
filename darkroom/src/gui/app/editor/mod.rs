@@ -86,7 +86,7 @@ pub(crate) struct Editor {
     /// than a `bool` threaded back through every helper's return.
     needs_relayout: bool,
     /// Set when a cache-mode toggle (`Intent::SetNodeProperty` with a
-    /// `NodeProperty::Cache`) is applied this frame. `App` consumes it via
+    /// `NodeProperty::RuntimeCache`) is applied this frame. `App` consumes it via
     /// [`Self::take_caches_dirty`] to flush the node's resident value to disk (a
     /// `SaveCaches` to the worker) without a re-run.
     caches_dirty: bool,
@@ -439,7 +439,7 @@ impl Editor {
             matches!(
                 i,
                 Intent::SetNodeProperty {
-                    to: NodeProperty::Cache(_),
+                    to: NodeProperty::RuntimeCache(_),
                     ..
                 }
             )

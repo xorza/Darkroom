@@ -7,7 +7,7 @@
 use common::is_debug;
 use hashbrown::HashSet;
 
-use crate::execution::cache::Cache;
+use crate::execution::cache::RuntimeCache;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::graph::NodeId;
@@ -17,7 +17,7 @@ use crate::library::Library;
 /// runtime cache stayed index-aligned to the nodes after `reconcile`. The source
 /// graph is gone after flattening, so this validates each `e_node` against its
 /// func and checks binding integrity.
-pub(crate) fn compiled(program: &ExecutionProgram, cache: &Cache, library: &Library) {
+pub(crate) fn compiled(program: &ExecutionProgram, cache: &RuntimeCache, library: &Library) {
     if !is_debug() {
         return;
     }

@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use scenarium::execution::output_cache::OutputCache;
+use scenarium::execution::disk_store::DiskStore;
 use scenarium::graph::Graph;
 
 use crate::core::io::cache::prepare_document_cache_root;
@@ -38,7 +38,7 @@ impl Engine {
         // Install the cache up front (memory-only until a document has a path);
         // its codecs come from the library snapshot, and `set_document_cache`
         // repoints the store root as documents open.
-        worker.set_output_cache(OutputCache::new(library.load_full(), None));
+        worker.set_disk_store(DiskStore::new(library.load_full(), None));
         let script = ScriptHost::start(script_cfg, library.clone(), wake);
         Self {
             library,
@@ -54,7 +54,7 @@ impl Engine {
     pub(crate) fn set_document_cache(&self, doc_path: Option<&Path>) {
         let root = doc_path.map(prepare_document_cache_root);
         self.worker
-            .set_output_cache(OutputCache::new(self.library.load_full(), root));
+            .set_disk_store(DiskStore::new(self.library.load_full(), root));
     }
 
     /// Send `graph` to the worker for one evaluation (paired with the

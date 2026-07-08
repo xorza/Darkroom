@@ -148,8 +148,8 @@ fn konst(value: StaticValue) -> ExecutionBinding {
 /// in `e_node` order (the test `Prog`s are built that way), each node reading its
 /// producers' just-stamped `current_digest` — stopping after `through`. Re-stats any
 /// `FsPath` const each call. Returns the cache, holding every computed digest.
-fn digested_cache(program: &ExecutionProgram, through: NodeIdx) -> Cache {
-    let mut cache = Cache::default();
+fn digested_cache(program: &ExecutionProgram, through: NodeIdx) -> RuntimeCache {
+    let mut cache = RuntimeCache::default();
     cache.reconcile(&program.e_nodes);
     for idx in program.node_indices().take(through.idx() + 1) {
         let d = node_digest(program, idx, &cache);
