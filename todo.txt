@@ -5,3 +5,5 @@ draw only nodes in view
 total used ram for node
 
 node title disapppears sometimes
+
+let mut child_rank: u32 = 0;
