@@ -139,7 +139,7 @@ fn run_gui(script_cfg: ScriptConfig) {
     // first window is already up, too late to size it). Reuse the same
     // instance for the app so we don't read the file twice.
     let preferences = Preferences::load();
-    let mut config = WinitHostConfig::new("darkroom");
+    let mut config = WinitHostConfig::new("Darkroom");
     config.window.icon = load_icon();
     if let Some(w) = &preferences.window {
         config.window.inner_size = Some(w.size);
