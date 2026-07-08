@@ -5,7 +5,7 @@
 //! (`SubgraphInput`/`SubgraphOutput`) port rows in
 //! [`crate::gui::node::port_row`]; ordinary node ports render plain text.
 
-use aperture::{Configure, HAlign, InternedStr, Sense, Text, Tooltip, Ui, WidgetId};
+use aperture::{Configure, HAlign, Sense, SmolStr, Text, Tooltip, Ui, WidgetId};
 
 use crate::core::document::BoundarySide;
 use crate::core::edit::intent::Intent;
@@ -38,7 +38,7 @@ pub(crate) fn port_label(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     port: PortRef,
-    name: InternedStr,
+    name: SmolStr,
     tip: &str,
     rename: Option<BoundarySide>,
     out: &mut Vec<Intent>,

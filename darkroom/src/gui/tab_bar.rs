@@ -7,8 +7,8 @@
 //! touches the document.
 
 use aperture::{
-    Align, Background, Configure, Corners, InternedStr, Panel, Sense, Sizing, Spacing, Text,
-    TextStyle, Ui, VAlign, WidgetId,
+    Align, Background, Configure, Corners, Panel, Sense, Sizing, SmolStr, Spacing, Text, TextStyle,
+    Ui, VAlign, WidgetId,
 };
 use scenarium::graph::subgraph::SubgraphId;
 
@@ -26,7 +26,7 @@ const SUBGRAPH_NAME_MAX_CHARS: usize = 32;
 /// `closable` marks a tab that carries a close button (every tab except
 /// the `Main` graph — subgraph *and* non-graph views like Preferences).
 pub(crate) struct TabLabel {
-    pub(crate) text: InternedStr,
+    pub(crate) text: SmolStr,
     pub(crate) subgraph_id: Option<SubgraphId>,
     pub(crate) closable: bool,
 }

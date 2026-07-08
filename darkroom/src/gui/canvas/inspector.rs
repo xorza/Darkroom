@@ -208,9 +208,14 @@ impl Inspectors {
             .gap(3.0)
             .background(chrome)
             .show(ui, |ui| {
-                line(ui, node.name.as_str("(unnamed)"), title_style(ui));
-                line(ui, node.kind_label.as_str(""), muted_style(ui));
-                let description = node.description.as_str("");
+                let title = if node.name.is_empty() {
+                    "(unnamed)"
+                } else {
+                    node.name.as_str()
+                };
+                line(ui, title, title_style(ui));
+                line(ui, node.kind_label.as_str(), muted_style(ui));
+                let description = node.description.as_str();
                 if !description.is_empty() {
                     line(ui, description, muted_style(ui));
                 }
@@ -219,7 +224,7 @@ impl Inspectors {
                 if !inputs.is_empty() {
                     line(ui, "Inputs", section_style(ui));
                     for (i, input) in inputs.iter().enumerate() {
-                        let name = input.name.as_str("");
+                        let name = input.name.as_str();
                         let ty = Some(&input.ty);
                         // Runtime value when this run computed one; else
                         // fall back to the static binding.
@@ -248,7 +253,7 @@ impl Inspectors {
                 if !outputs.is_empty() {
                     line(ui, "Outputs", section_style(ui));
                     for (i, output) in outputs.iter().enumerate() {
-                        let name = output.name.as_str("");
+                        let name = output.name.as_str();
                         let ty = Some(&output.ty);
                         match values.and_then(|v| v.outputs.get(i)) {
                             Some(pv) => {

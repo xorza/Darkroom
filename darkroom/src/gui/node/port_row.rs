@@ -168,7 +168,7 @@ fn input_label_cell(
     let theme = rcx.theme;
     let allow_const = !node.boundary;
     let tip = port_tip(
-        input.description.as_str(""),
+        input.description.as_str(),
         type_label(rcx.library, &input.ty),
     );
     // Flag a required input's port only once a run actually failed on it (the
@@ -301,7 +301,7 @@ fn output_cell(
         rcx.port_frame.ports.is_hovered(port),
     );
     let tip = port_tip(
-        output.description.as_str(""),
+        output.description.as_str(),
         type_label(rcx.library, &output.ty),
     );
     let wid = port_circle_wid(port);
@@ -345,7 +345,7 @@ fn event_cell(
     let wid = event_glyph_wid(node_id, event_idx);
     let ev = EventRef { node_id, event_idx };
     let fill = event_color(theme, rcx.port_frame.events.is_hovered(ev));
-    let tip = format!("event: {}", event.name.as_str(""));
+    let tip = format!("event: {}", event.name);
     Panel::hstack()
         .id_salt(("event", event_idx))
         .grid_cell((row as u16, COL_OUTPUT))

@@ -7,8 +7,8 @@
 //! [`crate::gui::node::value_editor`].
 
 use aperture::{
-    Align, Configure, HAlign, InternedStr, Justify, Key, Panel, Sense, Shortcut, Sizing, Spacing,
-    Text, TextEdit, TextEditTheme, TextStyle, Ui, VAlign, WidgetId,
+    Align, Configure, HAlign, Justify, Key, Panel, Sense, Shortcut, Sizing, SmolStr, Spacing, Text,
+    TextEdit, TextEditTheme, TextStyle, Ui, VAlign, WidgetId,
 };
 
 use crate::gui::theme::InlineRenameTheme;
@@ -52,7 +52,7 @@ const DEFAULT_MAX_CHARS: usize = 64;
 ///
 pub(crate) struct InlineRename<'a> {
     id: WidgetId,
-    name: InternedStr,
+    name: SmolStr,
     /// Borrowed when the caller supplied one via [`Self::theme`];
     /// otherwise `show()` falls back to `InlineRenameTheme::default()`
     /// (the built-in flat editor).
@@ -63,7 +63,7 @@ pub(crate) struct InlineRename<'a> {
 }
 
 impl<'a> InlineRename<'a> {
-    pub(crate) fn new(id: WidgetId, name: impl Into<InternedStr>) -> Self {
+    pub(crate) fn new(id: WidgetId, name: impl Into<SmolStr>) -> Self {
         Self {
             id,
             name: name.into(),
@@ -184,9 +184,9 @@ impl<'a> InlineRename<'a> {
                 .child_align(Align::v(VAlign::Center))
                 .sense(Sense::CLICK | Sense::DRAG)
                 .show(ui, |ui| {
-                    // `InternedStr::clone` is allocation-free for the
-                    // `Owned` names darkroom builds, so this is cheap
-                    // per frame.
+                    // `SmolStr::clone` is allocation-free (inline or
+                    // `Arc` bump) and `Into<InternedStr>` wraps it as
+                    // `Owned` without copying, so this is cheap per frame.
                     let mut t = Text::new(name.clone());
                     if let Some(s) = style {
                         t = t.style(s);
@@ -200,7 +200,7 @@ impl<'a> InlineRename<'a> {
                 let st = ui.state_mut::<RenameState>(id);
                 st.active = true;
                 st.focused_once = false;
-                st.draft = name.as_str("").to_owned();
+                st.draft = name.as_str().to_owned();
                 ui.request_focus(Some(id));
             }
             return RenameEvent {
@@ -241,7 +241,7 @@ impl<'a> InlineRename<'a> {
         ui.request_focus(None);
         RenameEvent {
             clicked: false,
-            committed: (commit && draft != name.as_str("")).then_some(draft),
+            committed: (commit && draft != name.as_str()).then_some(draft),
         }
     }
 }

@@ -1,5 +1,1 @@
-interned_string.as_str(""
-
-Tooltip::for_(&resp.snapshot()).text(desc.clone()).show(ui);  - String instead of internedstring
-
 scrolview on newnode popup

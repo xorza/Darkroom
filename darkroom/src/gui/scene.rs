@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
-use aperture::InternedStr;
+use aperture::SmolStr;
 use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
 use scenarium::data::{DataType, StaticValue};
@@ -81,10 +81,10 @@ impl From<&Binding> for InputBindingView {
 /// per port (so an AoS pool beats parallel columns here).
 #[derive(Debug)]
 pub struct SceneInput {
-    pub name: InternedStr,
+    pub name: SmolStr,
     /// Port tooltip from the func's [`FuncInput::description`]; empty when the
     /// port declares none.
-    pub description: InternedStr,
+    pub description: SmolStr,
     pub ty: DataType,
     /// Per-frame snapshot of the input's [`Binding`].
     pub binding: InputBindingView,
@@ -110,10 +110,10 @@ pub struct SceneInput {
 /// wires on an input change is handled at edit time, not from the projection.
 #[derive(Debug)]
 pub struct SceneOutput {
-    pub name: InternedStr,
+    pub name: SmolStr,
     /// Port tooltip from the func's [`FuncOutput::description`]; empty when the
     /// port declares none.
-    pub description: InternedStr,
+    pub description: SmolStr,
     pub ty: DataType,
 }
 
@@ -121,21 +121,21 @@ pub struct SceneOutput {
 /// type — they are pure triggers — so a name is all the UI needs to list them.
 #[derive(Debug)]
 pub struct SceneEvent {
-    pub name: InternedStr,
+    pub name: SmolStr,
 }
 
 #[derive(Debug)]
 pub struct SceneNode {
     pub id: NodeId,
     pub pos: Vec2,
-    pub name: InternedStr,
+    pub name: SmolStr,
     /// Human-readable type identity: the func name, the subgraph def
     /// name, or the boundary role (`Input`/`Output`). Shown by the
     /// inspection panel.
-    pub kind_label: InternedStr,
+    pub kind_label: SmolStr,
     /// The func's [`Func::description`] (empty for subgraph/boundary nodes).
     /// Shown by the inspection panel and the new-node palette tooltip.
-    pub description: InternedStr,
+    pub description: SmolStr,
     /// Span into [`Scene::inputs`].
     pub inputs: Span,
     /// Span into [`Scene::outputs`].
@@ -414,7 +414,7 @@ impl Scene {
             );
             // Boundary nodes carry no name in the model; label them by
             // role so the interior header isn't a blank bar.
-            let name: InternedStr = match (&node.kind, node.name.is_empty()) {
+            let name: SmolStr = match (&node.kind, node.name.is_empty()) {
                 (NodeKind::SubgraphInput, true) => "Inputs".into(),
                 (NodeKind::SubgraphOutput, true) => "Outputs".into(),
                 _ => node.name.clone().into(),
@@ -487,16 +487,16 @@ fn slice_pool<T>(pool: &[T], span: Span) -> &[T] {
 /// boundary node synthesizes them from the def's `FuncOutput`s, hence
 /// `Cow`.
 struct NodeInterface<'a> {
-    kind_label: InternedStr,
+    kind_label: SmolStr,
     /// The func's description (empty for subgraphs/boundaries/missing stubs).
-    description: InternedStr,
+    description: SmolStr,
     inputs: Cow<'a, [FuncInput]>,
     outputs: Cow<'a, [FuncOutput]>,
     /// Event (emitter) port names, in declaration order. `FuncEvent` and
     /// `SubgraphEvent` differ in type but both expose a `name`, and the UI
-    /// only lists the name — so the interface flattens them to interned
+    /// only lists the name — so the interface flattens them to owned
     /// names rather than threading a third `Cow<[_]>` of incompatible types.
-    events: Vec<InternedStr>,
+    events: Vec<SmolStr>,
     subgraph: Option<SubgraphRef>,
     terminal: bool,
     /// Node manages its own caching (or has no output to cache), so the editor's
@@ -618,8 +618,8 @@ mod tests {
         let output_node = scene.nodes.iter().find(|n| n.id == out_id).unwrap();
 
         // Boundary nodes are labeled by role.
-        assert_eq!(input_node.kind_label.as_str(""), "Input");
-        assert_eq!(output_node.kind_label.as_str(""), "Output");
+        assert_eq!(input_node.kind_label.as_str(), "Input");
+        assert_eq!(output_node.kind_label.as_str(), "Output");
 
         // SubgraphInput's outputs mirror the def inputs (A:Int, B:Float)
         // plus the untyped "+" placeholder — types align with names.
@@ -644,7 +644,7 @@ mod tests {
         let in_out_names: Vec<&str> = scene
             .outputs(input_node.outputs)
             .iter()
-            .map(|o| o.name.as_str(""))
+            .map(|o| o.name.as_str())
             .collect();
         assert_eq!(in_out_names, ["A", "B", "+"]);
         assert!(input_node.subgraph.is_none() && !input_node.terminal);
@@ -659,7 +659,7 @@ mod tests {
         let out_in_names: Vec<&str> = scene
             .inputs(output_node.inputs)
             .iter()
-            .map(|i| i.name.as_str(""))
+            .map(|i| i.name.as_str())
             .collect();
         assert_eq!(out_in_names, ["Sum", "+"]);
 
@@ -732,14 +732,14 @@ mod tests {
         // The flag tracks resolution; the label names what's missing.
         assert!(!known_node.missing, "a resolved func is not a stub");
         assert!(ghost_func_node.missing && ghost_sub_node.missing);
-        assert_eq!(ghost_func_node.kind_label.as_str(""), "missing func");
-        assert_eq!(ghost_sub_node.kind_label.as_str(""), "missing subgraph");
+        assert_eq!(ghost_func_node.kind_label.as_str(), "missing func");
+        assert_eq!(ghost_sub_node.kind_label.as_str(), "missing subgraph");
 
         // Both stubs keep their saved name and carry no ports — and the
         // subgraph stub drops its `subgraph` ref so the "open in tab" action
         // isn't offered for a def that isn't there.
-        assert_eq!(ghost_func_node.name.as_str(""), "astro_to_image");
-        assert_eq!(ghost_sub_node.name.as_str(""), "removed_subgraph");
+        assert_eq!(ghost_func_node.name.as_str(), "astro_to_image");
+        assert_eq!(ghost_sub_node.name.as_str(), "removed_subgraph");
         assert!(ghost_sub_node.subgraph.is_none());
         for stub in [ghost_func_node, ghost_sub_node] {
             assert_eq!(scene.inputs(stub.inputs).len(), 0, "stub has no inputs");
@@ -776,14 +776,14 @@ mod tests {
         let event_names: Vec<&str> = scene
             .events(n.events)
             .iter()
-            .map(|e| e.name.as_str(""))
+            .map(|e| e.name.as_str())
             .collect();
         assert_eq!(event_names, ["Always", "FPS"], "events project in order");
 
         let output_names: Vec<&str> = scene
             .outputs(n.outputs)
             .iter()
-            .map(|o| o.name.as_str(""))
+            .map(|o| o.name.as_str())
             .collect();
         assert_eq!(
             output_names,
