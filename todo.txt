@@ -1,1 +1,7 @@
 scrolview on newnode popup
+
+draw only nodes in view
+
+mldenoise doesnt cache
+
+node title disapppears sometimes
