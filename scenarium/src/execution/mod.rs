@@ -81,6 +81,9 @@ impl<T> NodeColumn<T> {
         self.values.clear();
     }
 
+    /// Node count. Only the test-only `Executor::ran` reads it (to treat a pre-run empty
+    /// column as "all ran"); production indexes columns by a valid `NodeIdx`.
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.values.len()
     }
@@ -322,11 +325,10 @@ impl ExecutionEngine {
             )
             .await;
 
-        // Phase 3b: reclaim RAM from prior-run values this run left untouched and
-        // that the disk store (written per-node above) can serve again on demand. The
-        // executor owns which nodes ran, so it computes the keep-set; the cache demotes the rest.
-        let keep = self.executor.protected_after_run(&self.program, &self.plan);
-        self.cache.evict_unused(&self.program, &keep);
+        // Phase 3b: reclaim RAM from values this run left off the active frontier and that the
+        // disk store (written per-node above) can serve again on demand. Reuses the resolver's
+        // `needed` cut mask — the same active-frontier set — rather than recomputing a keep-set.
+        self.cache.evict_unused(&self.program, needed);
 
         stats.triggered_events = seeds.events;
         // Annotate with how the graph was flattened so the stats' flat ids
