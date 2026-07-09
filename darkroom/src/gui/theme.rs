@@ -63,9 +63,16 @@ pub(crate) mod dark {
 
     // node chrome
     pub(crate) const NODE_FILL: Color = Color::hex(0x343434);
-    pub(crate) const NODE_BORDER: Color = Color::hex(0x363636);
-    pub(crate) const HEADER_FILL: Color = Color::hex(0x414141);
+    // Transparent at rest: the ambient node shadow carries the edge, and the
+    // stroke slot is reserved for the selection / breaker / missing colors
+    // (its width still folds into layout, so selecting never resizes).
+    pub(crate) const NODE_BORDER: Color = Color::TRANSPARENT;
+    // Palette `elem_active` — a step brighter than the old `title_bar`
+    // swatch so the header band actually reads against the body fill.
+    pub(crate) const HEADER_FILL: Color = Color::hex(0x4b4b4b);
     pub(crate) const TEXT_MUTED: Color = Color::hex(0xaaaaa8);
+    // Port/event labels: de-emphasized so the value column carries each row.
+    pub(crate) const PORT_LABEL: Color = Color::hex(0xaaaaa8);
     pub(crate) const CHROME_FILL: Color = Color::hex(0x252525);
 
     // header badges
@@ -118,11 +125,15 @@ pub(crate) mod light {
     pub(crate) const CONNECTION_BROKEN: Color = Color::hex(0xef7271);
     pub(crate) const BREAKER_STROKE: Color = Color::hex(0xef7271);
 
-    // node chrome
+    // node chrome — light surfaces keep the hairline border even with the
+    // ambient shadow; a shadow alone reads mushy on near-white.
     pub(crate) const NODE_FILL: Color = Color::hex(0xececed);
     pub(crate) const NODE_BORDER: Color = Color::hex(0xcfd1d2);
     pub(crate) const HEADER_FILL: Color = Color::hex(0xdcddde);
     pub(crate) const TEXT_MUTED: Color = Color::hex(0x8b8e92);
+    // Darker than `text_muted`: labels are primary content and Ayu Light's
+    // muted gray drops under 3:1 on the node fill.
+    pub(crate) const PORT_LABEL: Color = Color::hex(0x6e7378);
     pub(crate) const CHROME_FILL: Color = Color::hex(0xdcddde);
 
     // header badges — accent / error / a deeper amber than the palette's
@@ -662,6 +673,11 @@ palette_colors! {
     /// active-tab text — visible without competing with the bright accent
     /// (`badge_subgraph`) or full-strength text.
     text_muted => TEXT_MUTED,
+    /// Port + event label ink — de-emphasized against the full-strength
+    /// value/editor text so each port row has one strong element. Its own
+    /// slot (not `text_muted`) because the light palette needs a darker
+    /// value for legibility on the node fill.
+    port_label => PORT_LABEL,
     /// Top-chrome fill behind the menu bar + tab strip. A notch darker
     /// than the node surface, sitting between the graph (`canvas_bg`)
     /// and the nodes, so the chrome recedes and the active tab (which

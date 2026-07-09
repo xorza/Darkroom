@@ -8,7 +8,7 @@
 
 use aperture::{
     Align, Color, Configure, ContextMenu, Corners, Grid, HAlign, MenuItem, Panel, Rect, Sense,
-    Shape, Sizing, Spacing, Stroke, Text, Tooltip, Track, Ui, VAlign, WidgetId,
+    Shape, Sizing, Spacing, Stroke, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use glam::Vec2;
 use scenarium::data::{DataType, FsPathMode, StaticValue};
@@ -354,7 +354,13 @@ fn event_cell(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            Text::new(event.name.clone()).show(ui);
+            // Muted like the data-port labels (see `port_label`).
+            Text::new(event.name.clone())
+                .style(TextStyle {
+                    color: theme.colors.port_label,
+                    ..ui.theme.text
+                })
+                .show(ui);
             event_glyph(
                 ui,
                 theme,

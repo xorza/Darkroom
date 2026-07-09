@@ -1,9 +1,10 @@
 //! Maps a port's [`DataType`] to the color its circle (and the wires
 //! touching it) paint with, so a graph reads by type at a glance.
 //!
-//! Built-in scalar types get fixed hues per palette; `Custom` / `Enum`
-//! types are keyed by their `type_id` onto a small ramp, so distinct
-//! custom types (e.g. an image vs. a calibration-masters payload) land on
+//! Built-in scalar types get fixed hues per palette, and so does the lens
+//! image type — the dominant payload on a darkroom canvas earns a deliberate
+//! color, not a hash pick. Remaining `Custom` / `Enum` types are keyed by
+//! their `type_id` onto a small ramp, so distinct custom types land on
 //! stable, distinct colors without enumerating them here. `Any` (the
 //! default / untyped boundary placeholder) has no type identity, so it
 //! falls back to the positional input/output port colors from the theme.
@@ -64,6 +65,10 @@ fn type_hue(preset: ThemePreset, ty: &DataType) -> Color {
         DataType::Float => p.float,
         DataType::String => p.string,
         DataType::FsPath(_) => p.path,
+        // Image is the dominant type on a darkroom canvas — it owns a fixed
+        // hue instead of a hash pick, so its wires read as one deliberate
+        // color (and can't land next to Float or the status purples).
+        DataType::Custom(id) if *id == *lens::IMAGE_TYPE_ID => p.image,
         DataType::Custom(id) | DataType::Enum(id) => ramp_pick(p.ramp, id.as_u128()),
         DataType::Any => unreachable!("Any handled by fallback in port_color"),
     };
@@ -100,7 +105,10 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
 
 /// A per-palette data-type color set. Hand-tuned to harmonize with the
 /// Ayu palettes; centralized here so retuning is a one-line edit. `ramp`
-/// backs the open-ended `Custom`/`Enum` families.
+/// backs the open-ended `Custom`/`Enum` families; `image` is the fixed
+/// hue the lens image type owns (see `type_hue`). The ramp deliberately
+/// carries no rose (Image owns it) and no purple (the running/impure
+/// status family), so a hash pick can't impersonate either.
 #[derive(Debug)]
 struct TypePalette {
     boolean: u32,
@@ -108,6 +116,7 @@ struct TypePalette {
     float: u32,
     string: u32,
     path: u32,
+    image: u32,
     ramp: &'static [u32],
 }
 
@@ -117,7 +126,9 @@ const DARK: TypePalette = TypePalette {
     float: 0x73d0ff,
     string: 0xffd173,
     path: 0xd4bfff,
-    ramp: &[0xffa759, 0x7bd88f, 0xff9eb5, 0x5ccfe6, 0xcaa9fa, 0xe6cd8a],
+    // Safelight rose — the photographic-darkroom hue for the image payload.
+    image: 0xff9eb5,
+    ramp: &[0xffa759, 0x7bd88f, 0x5ccfe6, 0xe6cd8a],
 };
 
 const LIGHT: TypePalette = TypePalette {
@@ -126,7 +137,8 @@ const LIGHT: TypePalette = TypePalette {
     float: 0x2b8fd6,
     string: 0xb8860b,
     path: 0x7a4fd0,
-    ramp: &[0xd9722a, 0x1f8fb3, 0xc23b73, 0x2f9e6a, 0x8b5cf0, 0xa67c1a],
+    image: 0xc23b73,
+    ramp: &[0xd9722a, 0x1f8fb3, 0x2f9e6a, 0xa67c1a],
 };
 
 #[cfg(test)]
@@ -204,6 +216,21 @@ mod tests {
             port_color(&t, &custom(0), PortKind::Input, false),
             port_color(&t, &custom(1), PortKind::Input, false),
         );
+        // The lens image type bypasses the ramp for its owned hue, which no
+        // ramp entry (in either palette) may duplicate — a hash pick must
+        // never impersonate the image color.
+        let image_ty = DataType::Custom(*lens::IMAGE_TYPE_ID);
+        assert_eq!(
+            port_color(&t, &image_ty, PortKind::Input, false),
+            Color::hex(DARK.image)
+        );
+        assert_eq!(
+            port_color(&Theme::light(), &image_ty, PortKind::Input, false),
+            Color::hex(LIGHT.image)
+        );
+        for p in [&DARK, &LIGHT] {
+            assert!(!p.ramp.contains(&p.image));
+        }
     }
 
     #[test]

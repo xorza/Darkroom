@@ -33,6 +33,12 @@ const BADGE_FONT: f32 = 12.0;
 /// both paint their color at this alpha, so the two families feel like one system.
 const CHIP_TINT_ALPHA: f32 = 0.20;
 
+/// Fill alpha of a toggled-on control chip (hover lifts it). Deliberately a
+/// tint, not a solid swatch: cache/disable state is passive configuration, and
+/// solid saturated fills are reserved for live status (the exec glows).
+const CHIP_ON_ALPHA: f32 = 0.35;
+const CHIP_ON_HOVER_ALPHA: f32 = 0.50;
+
 /// Compact run-time label: seconds → `s` / `ms` / `µs` at the scale
 /// that keeps 2–3 significant digits.
 pub(crate) fn fmt_elapsed(secs: f64) -> String {
@@ -173,7 +179,7 @@ fn header_bar(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<I
                     inspect_badge_wid(node.id),
                     "Inspect — values, status, log",
                 )
-                .show(ui, theme);
+                .show(ui);
             }
         });
 }
@@ -228,7 +234,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     theme.colors.badge_terminal,
                     "Terminal — output sink",
                 )
-                .show(ui, theme);
+                .show(ui);
             }
             if node.impure {
                 Badge::marker(
@@ -237,7 +243,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     theme.colors.badge_impure,
                     "Impure — recomputes every run, never cached",
                 )
-                .show(ui, theme);
+                .show(ui);
             }
             // FILL spacer splits the markers (left) from the controls (right).
             Panel::hstack()
@@ -260,7 +266,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     subgraph_badge_wid(node.id),
                     "Open subgraph",
                 )
-                .show(ui, theme);
+                .show(ui);
             }
             // Disable toggle: filled when the node is excluded from
             // execution. Muted swatch (it's "off", not an alarm).
@@ -271,7 +277,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                 disable_badge_wid(node.id),
                 "Disable — exclude from the run",
             )
-            .show(ui, theme);
+            .show(ui);
             if disable_toggled {
                 out.push(Intent::SetNodeProperty {
                     node_id: node.id,
@@ -298,7 +304,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     ram_badge_wid(node.id),
                     "RuntimeCache in RAM — keep the output resident, reused across runs this session",
                 )
-                .show(ui, theme)
+                .show(ui)
                 {
                     out.push(Intent::SetNodeProperty {
                         node_id: node.id,
@@ -312,7 +318,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     disk_badge_wid(node.id),
                     "RuntimeCache to disk — persist the output across runs and reopens",
                 )
-                .show(ui, theme)
+                .show(ui)
                 {
                     out.push(Intent::SetNodeProperty {
                         node_id: node.id,
@@ -377,8 +383,8 @@ pub(crate) fn subgraph_badge_wid(node_id: NodeId) -> WidgetId {
 #[derive(Debug, Clone, Copy)]
 enum BadgeKind {
     /// Interactive: a bordered square that lifts a faint fill on hover
-    /// (pressable). `wid` makes it clickable; `filled` is its solid "on" swatch.
-    /// Toggles (`C`/`D`) and actions (`S`/`i`).
+    /// (pressable). `wid` makes it clickable; `filled` deepens the tint for
+    /// the "on" state. Toggles (`C`/`D`) and actions (`S`/`i`).
     Control { wid: WidgetId, filled: bool },
     /// Read-only descriptor: a borderless, tinted pill with its glyph inked in
     /// its own color. Never clickable — `salt` just gives it a stable id for the
@@ -425,48 +431,45 @@ impl Badge {
         }
     }
 
-    fn show(self, ui: &mut Ui, theme: &Theme) -> bool {
+    fn show(self, ui: &mut Ui) -> bool {
         let Badge {
             glyph,
             color,
             tip,
             kind,
         } = self;
-        // Background + glyph ink + width diverge by family: a marker is a flat
-        // tinted pill (glyph in its own color, hugging its glyph); a control is a
-        // fixed square whose hollow form lifts a faint fill of its color on hover,
-        // and whose filled form is a solid swatch with a dark (header-fill) glyph.
-        let (background, glyph_color, width) = match kind {
+        // Background + width diverge by family — the glyph always inks in the
+        // chip's own color. A marker is a flat tinted pill hugging its glyph; a
+        // control is a bordered square whose "on" state deepens the tint (never
+        // a solid swatch — that weight belongs to live status, not config).
+        let (background, width) = match kind {
             BadgeKind::Marker { .. } => (
                 Background {
                     fill: color.with_alpha(CHIP_TINT_ALPHA).into(),
                     corners: Corners::all(BADGE_SIZE * 0.5),
                     ..Default::default()
                 },
-                color,
                 Sizing::Hug,
             ),
-            BadgeKind::Control { filled: true, .. } => (
-                Background {
-                    fill: color.into(),
-                    corners: Corners::all(3.0),
-                    ..Default::default()
-                },
-                theme.colors.header_fill,
-                Sizing::Fixed(BADGE_SIZE),
-            ),
-            BadgeKind::Control { wid, filled: false } => {
+            BadgeKind::Control { wid, filled } => {
                 let mut bg = Background {
                     stroke: Stroke::solid(color, 1.0),
                     corners: Corners::all(3.0),
                     ..Default::default()
                 };
-                // Last-frame hover (`response_for`) lifts a faint fill so the
-                // chip reads as pressable — the same trick the tab-strip chips use.
-                if ui.response_for(wid).hovered {
-                    bg.fill = color.with_alpha(CHIP_TINT_ALPHA).into();
+                // Last-frame hover (`response_for`) lifts the fill so the chip
+                // reads as pressable — the same trick the tab-strip chips use.
+                let hovered = ui.response_for(wid).hovered;
+                let alpha = match (filled, hovered) {
+                    (true, true) => CHIP_ON_HOVER_ALPHA,
+                    (true, false) => CHIP_ON_ALPHA,
+                    (false, true) => CHIP_TINT_ALPHA,
+                    (false, false) => 0.0,
+                };
+                if alpha > 0.0 {
+                    bg.fill = color.with_alpha(alpha).into();
                 }
-                (bg, color, Sizing::Fixed(BADGE_SIZE))
+                (bg, Sizing::Fixed(BADGE_SIZE))
             }
         };
         let mut panel = Panel::zstack()
@@ -486,7 +489,7 @@ impl Badge {
         let chip = panel.show(ui, |ui| {
             Text::new(glyph)
                 .style(TextStyle {
-                    color: glyph_color,
+                    color,
                     font_size_px: BADGE_FONT,
                     weight: FontWeight::Bold,
                     ..ui.theme.text

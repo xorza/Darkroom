@@ -15,7 +15,7 @@ use crate::gui::node::header::{header, status_row, subgraph_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid, ports_row};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
-use crate::gui::theme::Theme;
+use crate::gui::theme::{Theme, ThemePreset};
 use crate::gui::{PortKind, PortRef, UiAction};
 use aperture::{
     Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
@@ -176,10 +176,10 @@ impl NodeUI {
         }
         let selected = rcx.selected.contains(&node.id);
         // The border width is *always* the selection width so selecting a
-        // node never resizes it (stroke folds into padding). Only the
-        // color changes: the breaker alarm wins, then the bright selection
-        // halo, else the resting `node_border` (a faint outline just above
-        // the fill).
+        // node never resizes it (stroke folds into padding — width-gated,
+        // not color-gated). Only the color changes: the breaker alarm wins,
+        // then the bright selection halo, else the resting `node_border`
+        // (transparent in the dark theme, a hairline in the light one).
         let border_width = theme.node_border_width * 2.0;
         let border = if broken {
             theme.colors.connection_broken
@@ -195,9 +195,9 @@ impl NodeUI {
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).
         let shift_click = ui.modifiers().shift;
-        // Soft glow behind the node colored by its last run outcome
-        // (zero-offset so it wraps evenly). `None` paints nothing.
-        let shadow = exec_shadow(theme, node.exec_status);
+        // Status glow when the node ran, else the ambient elevation shadow —
+        // one slot, and live status outranks depth.
+        let shadow = node_shadow(theme, node.exec_status);
 
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
@@ -462,10 +462,12 @@ pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
     }
 }
 
-/// The status glow for a node's last-run outcome, or `Shadow::NONE`
-/// when it didn't run. Zero offset so the halo wraps evenly; a small
-/// spread pushes it past the border so it reads at any zoom.
-fn exec_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
+/// The node body's one shadow: the status glow for its last-run outcome
+/// (zero offset so the halo wraps evenly), or — when it didn't run — a soft
+/// ambient drop shadow that lifts the body off the canvas and the wires
+/// crossing beneath it. The ambient alpha is per-preset: near-black canvases
+/// need a much heavier black to register than near-white ones.
+fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
     match exec_color(theme, status) {
         Some(color) => Shadow {
             color,
@@ -474,7 +476,19 @@ fn exec_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
             spread: 0.0,
             inset: false,
         },
-        None => Shadow::NONE,
+        None => {
+            let alpha = match theme.preset {
+                ThemePreset::Dark => 0.5,
+                ThemePreset::Light => 0.2,
+            };
+            Shadow {
+                color: Color::linear_rgba(0.0, 0.0, 0.0, alpha),
+                offset: Vec2::new(0.0, 3.0),
+                blur: 10.0,
+                spread: 0.0,
+                inset: false,
+            }
+        }
     }
 }
 

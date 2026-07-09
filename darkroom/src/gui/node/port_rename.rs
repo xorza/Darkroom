@@ -5,7 +5,7 @@
 //! (`SubgraphInput`/`SubgraphOutput`) port rows in
 //! [`crate::gui::node::port_row`]; ordinary node ports render plain text.
 
-use aperture::{Configure, HAlign, Sense, SmolStr, Text, Tooltip, Ui, WidgetId};
+use aperture::{Configure, HAlign, Sense, SmolStr, Text, TextStyle, Tooltip, Ui, WidgetId};
 
 use crate::core::document::BoundarySide;
 use crate::core::edit::intent::Intent;
@@ -46,8 +46,16 @@ pub(crate) fn port_label(
     let Some(side) = rename else {
         // Regular node port: a plain label that opts into `Sense::HOVER`
         // (it captures no clicks, so node selection/drag still fall
-        // through) so the type tooltip has a trigger anchor.
-        let snapshot = Text::new(name).sense(Sense::HOVER).show(ui).snapshot();
+        // through) so the type tooltip has a trigger anchor. Muted ink —
+        // the value column is each row's strong element, not the label.
+        let snapshot = Text::new(name)
+            .style(TextStyle {
+                color: rcx.theme.colors.port_label,
+                ..ui.theme.text
+            })
+            .sense(Sense::HOVER)
+            .show(ui)
+            .snapshot();
         if !tip.is_empty() {
             Tooltip::for_(&snapshot).text(tip.to_owned()).show(ui);
         }

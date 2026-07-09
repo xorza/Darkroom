@@ -10,5 +10,5 @@ mod image;
 // Published surface — only what darkroom consumes. Everything else (config
 // mirrors, presets, datatypes, the config bridge) stays crate-internal.
 pub use astro::library::{MlModelPaths, astro_library, ml_model_paths, set_ml_model_paths};
-pub use image::Image;
 pub use image::library::image_library;
+pub use image::{IMAGE_TYPE_ID, Image};

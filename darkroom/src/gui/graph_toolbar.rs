@@ -92,7 +92,18 @@ pub(crate) fn show(
                     // Run / cancel: toggled while a one-shot run is in flight.
                     let running = ctx.run_state.is_running();
                     let run_tip = if running { "Cancel run" } else { "Run" };
-                    if toggle_button(ui, ctx.theme, run_button_wid(), running, run_tip, draw_play) {
+                    // Run is the one primary action in the cluster — it alone
+                    // idles with the accent glyph; the event-loop toggle sits
+                    // muted beside it like the framing buttons below.
+                    if toggle_button(
+                        ui,
+                        ctx.theme,
+                        run_button_wid(),
+                        running,
+                        ctx.theme.colors.exec_executed_glow,
+                        run_tip,
+                        draw_play,
+                    ) {
                         command = Some(if running {
                             AppCommand::Run(RunCommand::Cancel)
                         } else {
@@ -110,6 +121,7 @@ pub(crate) fn show(
                         ctx.theme,
                         events_button_wid(),
                         ctx.events_running,
+                        ctx.theme.colors.text_muted,
                         events_tip,
                         draw_play_bar,
                     ) {
@@ -158,12 +170,14 @@ pub(crate) fn show(
 
 /// One square glyph toggle, an opaque chip raised off the group pill. `toggled`
 /// inverts it (the running-glow fill with a dark glyph); idle is a neutral fill
-/// (lighter on hover) with the green "go" glyph. Returns whether it was clicked.
+/// (lighter on hover) with the caller's `idle_glyph` ink. Returns whether it
+/// was clicked.
 fn toggle_button(
     ui: &mut Ui,
     theme: &Theme,
     wid: WidgetId,
     toggled: bool,
+    idle_glyph: Color,
     tip: &'static str,
     draw_glyph: impl FnOnce(&mut Ui, f32, Color),
 ) -> bool {
@@ -171,9 +185,9 @@ fn toggle_button(
     let (fill, glyph) = if toggled {
         (theme.colors.exec_running_glow, theme.colors.chrome_fill)
     } else if hovered {
-        (theme.colors.header_fill, theme.colors.exec_executed_glow)
+        (theme.colors.header_fill, idle_glyph)
     } else {
-        (theme.colors.node_fill, theme.colors.exec_executed_glow)
+        (theme.colors.node_fill, idle_glyph)
     };
     glyph_button(ui, wid, fill, glyph, tip, draw_glyph)
 }
