@@ -6,6 +6,6 @@ node title disapppears sometimes
 
 clean unsued output immediately after exec
 
-image convert on save
-
 imaginarium failing tests
+
+avoid inputs values clone
