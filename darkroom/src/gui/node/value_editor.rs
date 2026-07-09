@@ -25,7 +25,8 @@
 //! parsed value differs from the canonical one.
 
 use aperture::{
-    Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextWrap, Ui, WidgetId,
+    Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextEditTheme, TextWrap,
+    Ui, WidgetId,
 };
 use scenarium::data::{DataType, StaticValue};
 use scenarium::library::Library;
@@ -81,13 +82,14 @@ pub(crate) fn show(
     // the stored value, so the field keeps reinterpreting across kinds — typing
     // "42" then "hello" flips `Int` → `String` — instead of locking to the kind
     // first entered.
+    let editor = &theme.drag_value.editor;
     if matches!(data_type, DataType::Any) {
-        return any_smart_edit(ui, id, value, width);
+        return any_smart_edit(ui, editor, id, value, width);
     }
     match value {
         StaticValue::Int(_) | StaticValue::Float(_) => numeric_edit(ui, theme, id, value, width),
         StaticValue::String(current) => {
-            let buf = buffered_text_edit(ui, id, current, |s| s.clone(), width);
+            let buf = buffered_text_edit(ui, editor, id, current, |s| s.clone(), width);
             (buf != *current).then_some(StaticValue::String(buf))
         }
         StaticValue::Bool(current) => {
@@ -119,10 +121,10 @@ pub(crate) fn show(
             // read-only label (shouldn't happen: an `Enum` value always rides a
             // registered `Enum`-typed port).
             let DataType::Enum(type_id) = data_type else {
-                return read_only_label(ui, id, value, width);
+                return read_only_label(ui, editor, id, value, width);
             };
             let Some(variants) = library.enum_variants(type_id) else {
-                return read_only_label(ui, id, value, width);
+                return read_only_label(ui, editor, id, value, width);
             };
             let options: Vec<&str> = variants.iter().map(String::as_str).collect();
             let before = options.iter().position(|v| *v == current).unwrap_or(0);
@@ -139,7 +141,7 @@ pub(crate) fn show(
                 None
             }
         }
-        StaticValue::Null => read_only_label(ui, id, value, width),
+        StaticValue::Null => read_only_label(ui, editor, id, value, width),
     }
 }
 
@@ -152,11 +154,12 @@ pub(crate) fn show(
 /// current one.
 fn any_smart_edit(
     ui: &mut Ui,
+    editor: &TextEditTheme,
     id: WidgetId,
     value: &StaticValue,
     width: f32,
 ) -> Option<StaticValue> {
-    let buf = buffered_text_edit(ui, id, value, format_any, width);
+    let buf = buffered_text_edit(ui, editor, id, value, format_any, width);
     let parsed = parse_any(&buf);
     (parsed != *value).then_some(parsed)
 }
@@ -201,6 +204,7 @@ fn parse_any(text: &str) -> StaticValue {
 /// through to the surrounding row. Always returns `None`.
 fn read_only_label(
     ui: &mut Ui,
+    editor: &TextEditTheme,
     id: WidgetId,
     value: &StaticValue,
     width: f32,
@@ -208,6 +212,7 @@ fn read_only_label(
     let mut buf = value.to_value_string();
     TextEdit::new(&mut buf)
         .id(id)
+        .style(editor.clone())
         .size((Sizing::Fixed(width), Sizing::FILL))
         .show(ui);
     None
@@ -232,6 +237,7 @@ fn path_preview(path: &str) -> String {
 /// caller to parse.
 fn buffered_text_edit<T>(
     ui: &mut Ui,
+    editor: &TextEditTheme,
     id: WidgetId,
     canonical: &T,
     fmt: fn(&T) -> String,
@@ -243,6 +249,7 @@ fn buffered_text_edit<T>(
     let mut text = std::mem::take(&mut ui.state_mut::<EditBuffer>(id).text);
     TextEdit::new(&mut text)
         .id(id)
+        .style(editor.clone())
         .size((Sizing::Fixed(width), Sizing::FILL))
         .show(ui);
     let snapshot = text.clone();

@@ -146,7 +146,7 @@ margin = 0.0
 corners = 4.0
 
 [static_value_editor_revealed.drag_value.editor.normal.background.fill]
-Solid = "#00000000"
+Solid = "#3e3e3e80"
 
 [static_value_editor_revealed.drag_value.editor.focused.background]
 corners = 4.0

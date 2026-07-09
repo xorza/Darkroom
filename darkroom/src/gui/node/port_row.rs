@@ -43,7 +43,7 @@ const COL_OUTPUT: u16 = 3;
 /// Port row height as a multiple of the body font size. The value editors
 /// fill this height (so a chip, dropdown, and text field are all the same
 /// size); it must clear the tallest editor's min-content — the inline text
-/// field, `line_height + padding + border ≈ 1.9em` — so nothing overflows.
+/// field, `line_height + chip padding ≈ 1.9em` — so nothing overflows.
 const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 
 pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {

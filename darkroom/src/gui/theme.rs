@@ -358,20 +358,33 @@ impl StaticValueEditorTheme {
     /// look. Called once per built theme (see `Theme::build`), never per
     /// frame. Silently a no-op if the chip's hover fill ever stops being a
     /// solid brush — revisit the patch then.
+    ///
+    /// Both the resting `chip` (numeric editors, which show it at rest) and
+    /// the inline `editor`'s normal state (string/`Any` editors, which are
+    /// always a `TextEdit` and so show `editor.normal` at rest) get the same
+    /// fill, so every field's edit affordance surfaces together.
     fn revealed(&self) -> Self {
         const REVEAL_ALPHA: f32 = 0.5;
         let mut out = self.clone();
-        let hover_fill = self
+        let Some(Brush::Solid(c)) = self
             .drag_value
             .chip
             .hovered
             .background
             .as_ref()
-            .map(|bg| bg.fill.clone());
-        if let (Some(Brush::Solid(c)), Some(bg)) =
-            (hover_fill, out.drag_value.chip.normal.background.as_mut())
+            .map(|bg| bg.fill.clone())
+        else {
+            return out;
+        };
+        let reveal = Brush::Solid(c.with_alpha(REVEAL_ALPHA));
+        for look in [
+            out.drag_value.chip.normal.background.as_mut(),
+            out.drag_value.editor.normal.background.as_mut(),
+        ]
+        .into_iter()
+        .flatten()
         {
-            bg.fill = Brush::Solid(c.with_alpha(REVEAL_ALPHA));
+            look.fill = reveal.clone();
         }
         out
     }
