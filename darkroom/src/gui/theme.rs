@@ -27,9 +27,8 @@ const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// stretching the node out.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 const NEW_NODE_POPUP_MAX_HEIGHT: f32 = 400.0;
-// aperture sub-theme tweaks (see `aperture_theme_for`)
+// aperture sub-theme tweak (see `aperture_theme_for`)
 const MENU_FONT_SIZE: f32 = 13.0;
-const MENU_CHIP_ALPHA: f32 = 0.85;
 
 // ── colour palettes ──────────────────────────────────────────────────
 // One named-const mod per built-in preset, so any builder (`Theme::dark`,
@@ -77,6 +76,10 @@ pub(crate) mod dark {
     // a near-black canvas needs a lot of alpha before a shadow registers.
     pub(crate) const NODE_AMBIENT_SHADOW: Color = Color::linear_rgba(0.0, 0.0, 0.0, 0.5);
     pub(crate) const CHROME_FILL: Color = Color::hex(0x252525);
+    // Inactive tab chip — a notch above `CHROME_FILL` toward the node
+    // surface, so an unselected tab reads as a resting chip, not a bare
+    // label on the band.
+    pub(crate) const TAB_INACTIVE: Color = Color::hex(0x2e2e2e);
 
     // header badges
     pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x9adbfb);
@@ -144,6 +147,9 @@ pub(crate) mod light {
     // Light surfaces need far less shadow than the dark canvas.
     pub(crate) const NODE_AMBIENT_SHADOW: Color = Color::linear_rgba(0.0, 0.0, 0.0, 0.2);
     pub(crate) const CHROME_FILL: Color = Color::hex(0xdcddde);
+    // Inactive tab chip — a notch above `CHROME_FILL` toward the node
+    // surface, so an unselected tab reads as a chip on the light band.
+    pub(crate) const TAB_INACTIVE: Color = Color::hex(0xe6e7e8);
 
     // header badges — accent / error / a deeper amber than the palette's
     // warning yellow (#f1ad49 was barely visible on a light surface).
@@ -515,28 +521,37 @@ impl AperturePalette {
 
 /// Aperture sub-theme for darkroom: start from aperture's defaults,
 /// recolour every widget using `p`, then apply darkroom-only tweaks
-/// (smaller menu/context-menu font, semi-transparent node-surface chip
-/// on the floating menu-bar triggers).
+/// (smaller menu/context-menu font; menu-bar triggers muted + transparent
+/// at rest so they read as menus, not buttons).
 fn aperture_theme_for(p: &AperturePalette) -> aperture::Theme {
     let mut theme = aperture::Theme::default();
     recolour_aperture(&mut theme, p);
 
+    // Menu-bar triggers read as menus, not buttons: transparent at rest
+    // (the `menu_button` preset already is — no chip overlay), the label
+    // muted until hovered, and the whole thing at the smaller menu scale.
+    // hover/pressed keep the `elem_hover`/`elem_active` fills that
+    // `recolour_aperture` set.
     let base = theme.text;
+    // Font-only shrink (keeps each look's own colour) for the context-menu
+    // rows; menu-bar triggers also recolour per state, so they use `restyle`.
     let shrink = |look: &mut WidgetLook| {
         look.text = Some(look.text.unwrap_or(base).with_font_size(MENU_FONT_SIZE));
     };
-    let chip = Brush::Solid(p.elem.with_alpha(MENU_CHIP_ALPHA));
+    let restyle = |look: &mut WidgetLook, color: Color| {
+        look.text = Some(
+            look.text
+                .unwrap_or(base)
+                .with_color(color)
+                .with_font_size(MENU_FONT_SIZE),
+        );
+    };
     let mb = &mut theme.menu_button;
-    shrink(&mut mb.normal);
-    shrink(&mut mb.hovered);
-    shrink(&mut mb.pressed);
-    shrink(&mut mb.disabled);
-    if let Some(bg) = mb.normal.background.as_mut() {
-        bg.fill = chip.clone();
-    }
-    if let Some(bg) = mb.disabled.background.as_mut() {
-        bg.fill = chip;
-    }
+    restyle(&mut mb.normal, p.text_muted);
+    restyle(&mut mb.hovered, p.text);
+    restyle(&mut mb.pressed, p.text);
+    restyle(&mut mb.disabled, p.text_disabled);
+
     let item = &mut theme.context_menu.item;
     shrink(&mut item.normal);
     shrink(&mut item.hovered);
@@ -693,7 +708,7 @@ macro_rules! palette_colors {
     ($($(#[$meta:meta])* $field:ident => $konst:ident),+ $(,)?) => {
         /// Every darkroom chrome colour — the palette half of a [`Theme`]
         /// (the other half is layout dimensions). Serialized as the theme's
-        /// `[colors]` table. Deliberately not `Copy` (24 colours): moved,
+        /// `[colors]` table. Deliberately not `Copy` (25 colours): moved,
         /// not silently bit-copied.
         #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
         pub struct PaletteColors {
@@ -742,6 +757,11 @@ palette_colors! {
     /// and the nodes, so the chrome recedes and the active tab (which
     /// uses `canvas_bg`) reads as continuous with the graph below it.
     chrome_fill => CHROME_FILL,
+    /// Inactive tab-strip chip. A notch above `chrome_fill` toward the node
+    /// surface, so an unselected tab reads as a resting chip rather than a
+    /// bare label; the active tab uses `canvas_bg` + a `selection_rect`
+    /// accent top-line instead.
+    tab_inactive => TAB_INACTIVE,
     /// Subgraph (composite instance) chip — accent cyan.
     badge_subgraph => BADGE_SUBGRAPH,
     /// Terminal (sink) chip — error red.

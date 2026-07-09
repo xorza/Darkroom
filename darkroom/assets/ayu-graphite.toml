@@ -28,6 +28,7 @@ text_muted = "#aaaaa8"
 port_label = "#aaaaa8"
 node_ambient_shadow = "#00000080"
 chrome_fill = "#252525"
+tab_inactive = "#2e2e2e"
 badge_subgraph = "#9adbfb"
 badge_terminal = "#ff5e44"
 badge_cache = "#ffd44a"
@@ -264,11 +265,11 @@ margin = 0.0
 corners = 4.0
 
 [aperture_theme.menu_button.normal.background.fill]
-Solid = "#343434d9"
+Solid = "#00000000"
 
 [aperture_theme.menu_button.normal.text]
 font_size_px = 13.0
-color = "#e2dfd3"
+color = "#aaaaa8"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
@@ -303,11 +304,11 @@ weight = "Regular"
 corners = 4.0
 
 [aperture_theme.menu_button.disabled.background.fill]
-Solid = "#343434d9"
+Solid = "#00000000"
 
 [aperture_theme.menu_button.disabled.text]
 font_size_px = 13.0
-color = "#e2dfd3"
+color = "#878a8d"
 line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
