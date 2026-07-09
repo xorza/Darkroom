@@ -5,3 +5,5 @@ update ram usage on graph changes
 node title disapppears sometimes
 
 clean unsued output immediately after exec
+
+image convert on save
