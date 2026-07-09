@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use aperture::{WindowIcon, WinitHost, WinitHostConfig};
 use clap::{Parser, Subcommand};
+use common::is_debug;
 use tokio::sync::Notify;
 use uuid::Uuid;
 
@@ -147,7 +148,7 @@ fn run_gui(script_cfg: ScriptConfig) {
         config.window.maximized = w.maximized;
     }
     WinitHost::new(MAIN_WINDOW, config, move |ui, handle| {
-        // ui.debug_overlay_mut().damage_rect = true;
+        ui.debug_overlay_mut().damage_rect = is_debug();
 
         App::new(ui, handle, script_cfg, preferences)
     })
