@@ -83,9 +83,10 @@ pub(crate) mod dark {
     pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xff5e44);
     // cache (persist-to-disk) chip — palette `warning` yellow.
     pub(crate) const BADGE_CACHE: Color = Color::hex(0xffd44a);
-    // impure marker — palette `constant` purple (the "volatile / recomputes
-    // every run" hue, shared with the running-glow).
-    pub(crate) const BADGE_IMPURE: Color = Color::hex(0xd4bfff);
+    // impure marker — a saturated violet (the "volatile / recomputes every run"
+    // hue). Deliberately punchier than the pale running-glow purple so the `~`
+    // marker reads at a glance.
+    pub(crate) const BADGE_IMPURE: Color = Color::hex(0xc56cff);
 
     // execution-status glow
     pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0xdaff58);
@@ -150,8 +151,9 @@ pub(crate) mod light {
     pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xef7271);
     // cache (persist-to-disk) chip — palette `warning` yellow.
     pub(crate) const BADGE_CACHE: Color = Color::hex(0xf1ad49);
-    // impure marker — palette `constant` purple (shared with the running-glow).
-    pub(crate) const BADGE_IMPURE: Color = Color::hex(0xa37acc);
+    // impure marker — a saturated violet, punchier than the running-glow purple
+    // so the `~` marker reads at a glance on the light ground.
+    pub(crate) const BADGE_IMPURE: Color = Color::hex(0x9333d6);
 
     // execution-status glow — success / accent / syn_keyword / error.
     pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0x85b304);
@@ -933,7 +935,7 @@ mod tests {
         // RuntimeCache (persist-to-disk) chip is the palette `warning` yellow.
         assert_eq!(theme.colors.badge_cache, Color::hex(0xffd44a));
         // Impure marker is the palette `constant` purple.
-        assert_eq!(theme.colors.badge_impure, Color::hex(0xd4bfff));
+        assert_eq!(theme.colors.badge_impure, Color::hex(0xc56cff));
         assert_eq!(theme.node_min_width, 160.0);
         assert!(theme.aperture_theme.tooltip.max_size.h.is_infinite());
         // The menu-bar font was shrunk from aperture's default to ours.

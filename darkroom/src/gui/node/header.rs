@@ -126,7 +126,7 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
     Panel::hstack()
         .id_salt("header")
         .size((Sizing::FILL, Sizing::Hug))
-        .padding(Spacing::xy(8.0, 4.0))
+        .padding(Spacing::xy(8.0, 7.0))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .background(Background {

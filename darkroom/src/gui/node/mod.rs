@@ -502,12 +502,13 @@ fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
     match exec_color(theme, status) {
         // Blur/spread sized so the glow carries elevation too — it replaces
         // the ambient shadow, and a tighter halo would leave a just-run node
-        // sitting flatter than its idle neighbors.
+        // sitting flatter than its idle neighbors. Kept a touch tighter than
+        // the ambient shadow so the status reads as a crisp halo, not a bloom.
         Some(color) => Shadow {
             color,
             offset: Vec2::ZERO,
-            blur: 8.0,
-            spread: 1.0,
+            blur: 3.0,
+            spread: 0.5,
             inset: false,
         },
         None => Shadow {
