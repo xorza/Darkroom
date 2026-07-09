@@ -24,8 +24,8 @@
 use std::collections::HashMap;
 
 use aperture::{
-    Background, Color, Configure, Corners, ImageFit, Panel, Sense, Shadow, Shape, Sizing, Spacing,
-    Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
+    Background, Color, Configure, Corners, FontWeight, ImageFit, Panel, Sense, Shadow, Shape,
+    Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
 };
 use glam::Vec2;
 use scenarium::data::{DataType, StaticValue};
@@ -70,7 +70,7 @@ struct PanelDraw<'a> {
 }
 
 /// Fixed panel width in canvas (pre-transform) units.
-const PANEL_WIDTH: f32 = 210.0;
+const PANEL_WIDTH: f32 = 280.0;
 /// Max width of an inline preview thumbnail (panel width minus the
 /// panel's 8 px padding on each side).
 const PREVIEW_MAX_WIDTH: f32 = PANEL_WIDTH - 16.0;
@@ -188,9 +188,11 @@ impl Inspectors {
         let logs = ctx.run_state.logs(node.id);
         let errors = ctx.run_state.errors(node.id);
         let values = ctx.run_state.values(node.id);
+        // The outline is the *pinned* signal; a transient panel rides on its
+        // shadow alone. Width stays constant so pin-cycling never reflows.
         let border = match mode {
             InspectMode::Pinned => theme.colors.text_muted,
-            InspectMode::Open => theme.colors.node_border,
+            InspectMode::Open => Color::TRANSPARENT,
         };
         let chrome = Background {
             fill: theme.colors.node_fill.into(),
@@ -219,64 +221,15 @@ impl Inspectors {
                     node.name.as_str()
                 };
                 line(ui, title, title_style(ui));
-                line(ui, node.kind_label.as_str(), muted_style(ui));
-                let description = node.description.as_str();
-                if !description.is_empty() {
-                    line(ui, description, muted_style(ui));
+                // The kind line earns its row only when it says something the
+                // title doesn't — an unrenamed node repeats its func name.
+                if !node.kind_label.eq_ignore_ascii_case(title) {
+                    line(ui, node.kind_label.as_str(), muted_style(theme, ui));
                 }
 
-                let inputs = scene.inputs(node.inputs);
-                if !inputs.is_empty() {
-                    line(ui, "Inputs", section_style(ui));
-                    for (i, input) in inputs.iter().enumerate() {
-                        let name = input.name.as_str();
-                        let ty = Some(&input.ty);
-                        // Runtime value when this run computed one; else
-                        // fall back to the static binding.
-                        match values.and_then(|v| v.inputs.get(i)) {
-                            Some(pv) => {
-                                line(
-                                    ui,
-                                    &port_line(ctx.library, name, ty, Some(&pv.text)),
-                                    body_style(ui),
-                                );
-                                draw_preview(ui, node.id, "in", i, pv);
-                            }
-                            None => {
-                                let val = value_str(&input.binding);
-                                line(
-                                    ui,
-                                    &port_line(ctx.library, name, ty, Some(val.as_str())),
-                                    body_style(ui),
-                                );
-                            }
-                        }
-                    }
-                }
-
-                let outputs = scene.outputs(node.outputs);
-                if !outputs.is_empty() {
-                    line(ui, "Outputs", section_style(ui));
-                    for (i, output) in outputs.iter().enumerate() {
-                        let name = output.name.as_str();
-                        let ty = Some(&output.ty);
-                        match values.and_then(|v| v.outputs.get(i)) {
-                            Some(pv) => {
-                                line(
-                                    ui,
-                                    &port_line(ctx.library, name, ty, Some(&pv.text)),
-                                    body_style(ui),
-                                );
-                                draw_preview(ui, node.id, "out", i, pv);
-                            }
-                            None => {
-                                line(ui, &port_line(ctx.library, name, ty, None), body_style(ui))
-                            }
-                        }
-                    }
-                }
-
-                line(ui, "Status", section_style(ui));
+                // Status right under the title — the most-glanceable fact
+                // shouldn't sit below two full-width previews. The colored
+                // line is self-labeling; no section header.
                 let status_color =
                     exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
                 line(
@@ -301,14 +254,60 @@ impl Inspectors {
                     );
                 }
                 if let Some(flags) = flag_text(node) {
-                    line(ui, &flags, muted_style(ui));
+                    line(ui, &flags, muted_style(theme, ui));
+                }
+                let description = node.description.as_str();
+                if !description.is_empty() {
+                    line(ui, description, muted_style(theme, ui));
+                }
+
+                let inputs = scene.inputs(node.inputs);
+                if !inputs.is_empty() {
+                    section(ui, theme, "Inputs");
+                    for (i, input) in inputs.iter().enumerate() {
+                        let name = input.name.as_str();
+                        // Runtime value when this run computed one; else
+                        // fall back to the static binding.
+                        match values.and_then(|v| v.inputs.get(i)) {
+                            Some(pv) => {
+                                port_row(ui, theme, ctx.library, name, &input.ty, Some(&pv.text));
+                                draw_preview(ui, theme, node.id, "in", i, pv);
+                            }
+                            None => {
+                                let val = value_str(&input.binding);
+                                port_row(
+                                    ui,
+                                    theme,
+                                    ctx.library,
+                                    name,
+                                    &input.ty,
+                                    Some(val.as_str()),
+                                );
+                            }
+                        }
+                    }
+                }
+
+                let outputs = scene.outputs(node.outputs);
+                if !outputs.is_empty() {
+                    section(ui, theme, "Outputs");
+                    for (i, output) in outputs.iter().enumerate() {
+                        let name = output.name.as_str();
+                        match values.and_then(|v| v.outputs.get(i)) {
+                            Some(pv) => {
+                                port_row(ui, theme, ctx.library, name, &output.ty, Some(&pv.text));
+                                draw_preview(ui, theme, node.id, "out", i, pv);
+                            }
+                            None => port_row(ui, theme, ctx.library, name, &output.ty, None),
+                        }
+                    }
                 }
 
                 // Log: this node's lines from the last run, level-colored.
                 // Capped to the most recent few so the panel can't grow
                 // unbounded.
                 if !logs.is_empty() {
-                    line(ui, "Log", section_style(ui));
+                    section(ui, theme, "Log");
                     let start = logs.len().saturating_sub(LOG_LINE_CAP);
                     for entry in &logs[start..] {
                         line(
@@ -360,10 +359,71 @@ fn line(ui: &mut Ui, text: &str, style: TextStyle) {
         .show(ui);
 }
 
+/// A bold section label with breathing room above it, so the groups read
+/// by proximity inside the panel's tight line rhythm.
+fn section(ui: &mut Ui, theme: &Theme, text: &'static str) {
+    Text::new(text)
+        .style(TextStyle {
+            color: theme.colors.text_muted,
+            font_size_px: 11.0,
+            weight: FontWeight::Bold,
+            ..ui.theme.text
+        })
+        .margin(Spacing::new(0.0, 8.0, 0.0, 0.0))
+        .show(ui);
+}
+
+/// One port row, two tiers: a muted label line (the port name, plus its
+/// type when the two differ), then the value on its own full-strength
+/// line — so a long value wraps cleanly instead of orphaning its tail
+/// tokens mid-`name: type = value` string. `None` value renders the label
+/// alone (an output that hasn't run).
+fn port_row(
+    ui: &mut Ui,
+    theme: &Theme,
+    library: &Library,
+    name: &str,
+    ty: &DataType,
+    val: Option<&str>,
+) {
+    line(
+        ui,
+        &port_label_text(library, name, ty),
+        muted_style(theme, ui),
+    );
+    if let Some(v) = val {
+        line(ui, v, body_style(ui));
+    }
+}
+
+/// The label tier of a port row. Skips the type when it repeats the port
+/// name (`Image: Image`, the dominant case) and for paths (the value
+/// already reads as one).
+fn port_label_text(library: &Library, name: &str, ty: &DataType) -> String {
+    if matches!(ty, DataType::FsPath(_)) {
+        return name.to_owned();
+    }
+    let ty_name = library.type_name(ty);
+    if ty_name.eq_ignore_ascii_case(name) {
+        name.to_owned()
+    } else {
+        format!("{name} \u{b7} {ty_name}")
+    }
+}
+
 /// Draw a port's preview thumbnail beneath its value line: a fixed-size
 /// panel (aspect-preserving, capped at [`PREVIEW_MAX_WIDTH`]) painting the
-/// registered texture. No-op when the port has no preview.
-fn draw_preview(ui: &mut Ui, node_id: NodeId, side: &str, idx: usize, pv: &PortValueView) {
+/// registered texture inside a hairline rounded frame — a dark image on
+/// the dark panel needs an edge to read as a framed object. No-op when
+/// the port has no preview.
+fn draw_preview(
+    ui: &mut Ui,
+    theme: &Theme,
+    node_id: NodeId,
+    side: &str,
+    idx: usize,
+    pv: &PortValueView,
+) {
     let Some(handle) = &pv.preview else {
         return;
     };
@@ -382,6 +442,13 @@ fn draw_preview(ui: &mut Ui, node_id: NodeId, side: &str, idx: usize, pv: &PortV
             idx,
         )))
         .size((Sizing::Fixed(w), Sizing::Fixed(h)))
+        .background(Background {
+            fill: Color::TRANSPARENT.into(),
+            stroke: Stroke::solid(theme.colors.text_muted.with_alpha(0.18), 1.0),
+            corners: Corners::all(4.0),
+            ..Default::default()
+        })
+        .clip_rounded()
         .show(ui, |ui| {
             ui.add_shape(Shape::Image {
                 handle: handle.clone(),
@@ -399,17 +466,9 @@ fn title_style(ui: &Ui) -> TextStyle {
     }
 }
 
-fn section_style(ui: &Ui) -> TextStyle {
+fn muted_style(theme: &Theme, ui: &Ui) -> TextStyle {
     TextStyle {
-        color: ui.theme.text.color.with_alpha(0.7),
-        font_size_px: 11.0,
-        ..ui.theme.text
-    }
-}
-
-fn muted_style(ui: &Ui) -> TextStyle {
-    TextStyle {
-        color: ui.theme.text.color.with_alpha(0.6),
+        color: theme.colors.text_muted,
         font_size_px: 11.0,
         ..ui.theme.text
     }
@@ -419,26 +478,6 @@ fn body_style(ui: &Ui) -> TextStyle {
     TextStyle {
         font_size_px: 12.0,
         ..ui.theme.text
-    }
-}
-
-/// Format one port row. Path-typed ports show `name: value` (the value
-/// already conveys "path"); other ports show `name: type = value`, or
-/// `name: type` when no value is available.
-fn port_line(library: &Library, name: &str, ty: Option<&DataType>, val: Option<&str>) -> String {
-    if matches!(ty, Some(DataType::FsPath(_))) {
-        match val {
-            Some(v) => format!("{name}: {v}"),
-            None => format!("{name}: path"),
-        }
-    } else {
-        let ty = ty
-            .map(|t| library.type_name(t).into_owned())
-            .unwrap_or_default();
-        match val {
-            Some(v) => format!("{name}: {ty} = {v}"),
-            None => format!("{name}: {ty}"),
-        }
     }
 }
 
