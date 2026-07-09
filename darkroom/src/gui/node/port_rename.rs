@@ -19,8 +19,8 @@ const PORT_NAME_MAX_CHARS: usize = 24;
 /// Stable id for a port's rename editor — and for the sensing label
 /// panel shown when idle, so the same `WidgetId` is recorded every frame
 /// across the label⇄editor swap (aperture drops state rows for ids it
-/// doesn't see). Also the cull pass's focus probe (`owns_focus`).
-pub(crate) fn port_rename_wid(port: PortRef) -> WidgetId {
+/// doesn't see).
+fn port_rename_wid(port: PortRef) -> WidgetId {
     WidgetId::from_hash((
         "graph.node.port_rename",
         port.node_id,

@@ -280,8 +280,9 @@ the open-tab strip + "+" new-subgraph chip, emits `UiAction`s). The rest:
   (unit-tested). `cull.rs` is record-time viewport culling (unit-tested): only
   nodes and wires intersecting the visible world rect are recorded (off-screen
   ones cost no measure/paint). Safe because every node-subtree widget id
-  derives from the `NodeId`; a node whose text editor holds focus is exempt so
-  aperture's state sweep can't drop a mid-edit draft. Culled nodes keep their
+  derives from the `NodeId`; a node whose subtree holds keyboard focus
+  (aperture's `Ui::focus_within`) is exempt so aperture's state sweep can't
+  drop a mid-edit draft. Culled nodes keep their
   world extents via `CanvasGeometry::node_world_rect` (current position + a
   cross-frame size cache beside the port-offset cache), which also feeds the
   rubber-band hit test and inspector-panel anchoring.

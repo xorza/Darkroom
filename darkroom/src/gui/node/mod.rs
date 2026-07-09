@@ -12,7 +12,6 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::node_ports;
 use crate::gui::node::header::{header, status_row, subgraph_badge_wid};
-use crate::gui::node::port_rename::port_rename_wid;
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid, ports_row};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
@@ -105,7 +104,6 @@ impl NodeUI {
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken_nodes.clear();
         }
-        let focused = ui.focused_id();
         // Paint in `view_nodes` order (mirrored into `scene.nodes`) — later
         // draws sit on top, so the last node in the list is frontmost. The
         // order is persisted view state, so a raised node stays raised across
@@ -118,11 +116,14 @@ impl NodeUI {
         // `NodeId` (explicit `from_hash` ids, and aperture resolves auto ids
         // parent-scoped under them), so culling a sibling can't re-key
         // anything that stays on screen. Aperture *does* drop widget state
-        // for ids not recorded this frame, so a node whose text editor holds
-        // focus stays recorded even off-screen — otherwise panning away
+        // for ids not recorded this frame, so a node whose subtree holds the
+        // keyboard focus (`focus_within` — an in-progress title/const/port
+        // edit) stays recorded even off-screen; otherwise panning away
         // mid-edit would discard the draft.
         for n in rcx.scene.nodes.iter() {
-            if !node_visible(visible, rcx.geometry.node_world_rect(n)) && !owns_focus(n, focused) {
+            if !node_visible(visible, rcx.geometry.node_world_rect(n))
+                && !ui.focus_within(node_widget_id(n.id))
+            {
                 continue;
             }
             self.draw_one(ui, rcx, n, probe, out);
@@ -445,28 +446,6 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>)
             }
         }
     }
-}
-
-/// Whether the focused widget is one of `node`'s text editors — the title
-/// rename, an input's const editor, or a boundary port rename (each editor
-/// carries exactly the id these helpers derive, so equality is the
-/// ownership test). Keeps the cull pass from unrecording a mid-edit node:
-/// aperture drops state rows for ids it doesn't see, which would discard
-/// the in-progress draft.
-fn owns_focus(node: &SceneNode, focused: Option<WidgetId>) -> bool {
-    let Some(f) = focused else {
-        return false;
-    };
-    if node_rename_wid(node.id) == f {
-        return true;
-    }
-    if (0..node.inputs.len as usize).any(|i| const_editor_wid(node.id, i) == f) {
-        return true;
-    }
-    node.boundary
-        && [PortKind::Input, PortKind::Output]
-            .into_iter()
-            .any(|kind| node_ports(node, kind).any(|p| port_rename_wid(p) == f))
 }
 
 /// The accent color for a node's last-run status, or `None` when it
