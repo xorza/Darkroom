@@ -42,7 +42,7 @@ pub use crate::image::image_data::deinterleaved::DeinterleavedImageData;
 pub use crate::image::{Image, ImageDesc, SUPPORTED_EXTENSIONS};
 
 pub use crate::processing_context::ProcessingContext;
-pub use crate::processing_context::image_buffer::ImageBuffer;
+pub use crate::processing_context::image_buffer::{ImageBuffer, ImageMemory};
 
 pub use crate::ops::blend::{Blend, BlendMode};
 pub use crate::ops::contrast_brightness::ContrastBrightness;

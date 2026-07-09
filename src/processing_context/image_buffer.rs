@@ -8,6 +8,15 @@ use crate::common::error::Result;
 use crate::gpu::gpu_image::GpuImage;
 use crate::image::{Image, ImageDesc};
 
+/// Bytes an [`ImageBuffer`] currently holds, split by where they live: `cpu`
+/// system RAM (a resident `Image`) vs `gpu` VRAM (a resident `GpuImage`). An
+/// empty buffer (descriptor only) is zero on both — it holds no pixels yet.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ImageMemory {
+    pub cpu: usize,
+    pub gpu: usize,
+}
+
 /// Storage location for image data.
 #[derive(Debug)]
 pub(crate) enum Storage {
@@ -76,6 +85,26 @@ impl ImageBuffer {
     /// Returns true if the buffer has no storage allocated.
     pub fn is_empty(&self) -> bool {
         self.storage.borrow().is_none()
+    }
+
+    /// The bytes this buffer currently holds, split into CPU RAM vs GPU VRAM by
+    /// its residency. Reflects *actual* allocation: an empty buffer is zero, a
+    /// CPU-resident one counts its packed pixel bytes, a GPU-resident one its
+    /// (round-to-4) buffer bytes. A buffer counts on one side only — the two are
+    /// never resident at once.
+    pub fn memory_usage(&self) -> ImageMemory {
+        match &*self.storage.borrow() {
+            None => ImageMemory::default(),
+            Some(Storage::Cpu(img)) => ImageMemory {
+                cpu: img.bytes().len(),
+                gpu: 0,
+            },
+            #[cfg(feature = "wgpu")]
+            Some(Storage::Gpu(img)) => ImageMemory {
+                cpu: 0,
+                gpu: img.buffer_size() as usize,
+            },
+        }
     }
 
     /// Converts to GPU storage in place, uploading from CPU if needed.
@@ -228,5 +257,26 @@ impl From<Image> for ImageBuffer {
 impl From<GpuImage> for ImageBuffer {
     fn from(image: GpuImage) -> Self {
         Self::from_gpu(image)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::color_format::ColorFormat;
+
+    #[test]
+    fn memory_usage_reflects_residency() {
+        // A 4×3 RGBA_U8 image is tightly packed: 4 * 3 * 4 = 48 bytes.
+        let desc = ImageDesc::new(4, 3, ColorFormat::RGBA_U8);
+        assert_eq!(desc.size_in_bytes(), 48);
+
+        // An empty buffer holds no pixels — zero on both sides.
+        let empty = ImageBuffer::new_empty(desc);
+        assert_eq!(empty.memory_usage(), ImageMemory::default());
+
+        // CPU-resident: every byte is system RAM, none on the GPU.
+        let cpu = ImageBuffer::from_cpu(Image::new_black(desc).unwrap());
+        assert_eq!(cpu.memory_usage(), ImageMemory { cpu: 48, gpu: 0 });
     }
 }

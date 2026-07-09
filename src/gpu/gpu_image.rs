@@ -100,7 +100,7 @@ impl GpuImage {
     }
 
     /// Bytes occupied by the GPU buffer (packed size rounded up to a multiple of 4).
-    fn buffer_size(&self) -> u64 {
+    pub(crate) fn buffer_size(&self) -> u64 {
         align_to_u32(self.desc.size_in_bytes()) as u64
     }
 
