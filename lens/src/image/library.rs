@@ -10,7 +10,7 @@ use crate::image::conversion_format::{
 use crate::image::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 use crate::image::{IMAGE_DATA_TYPE, IMAGE_TYPE_ID, Image};
 use imaginarium::{Blend, BlendMode, ContrastBrightness, SUPPORTED_EXTENSIONS, Transform, Vec2};
-use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
+use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode, StaticValue};
 use scenarium::library::{Library, TypeEntry};
 use scenarium::node::func_lambda::FuncLambda;
 use scenarium::node::function::{Func, FuncInput, FuncOutput};
@@ -157,6 +157,9 @@ pub fn image_library() -> Library {
             )
             .input(
                 enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
+                    .default(StaticValue::Enum(
+                        ConversionFormat::RgbU8.to_color_format().to_string(),
+                    ))
                     .description("Target color format."),
             )
             .output(
