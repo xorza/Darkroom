@@ -337,6 +337,28 @@ impl StaticValueEditorTheme {
         )
     }
 
+    /// The pointer-over-node variant: the chip's hover fill, at reduced
+    /// alpha, becomes the *resting* background — const editors surface as
+    /// soon as the pointer is anywhere over the node, without waiting for a
+    /// direct hover. Fill only, so geometry is identical to the resting look.
+    pub(crate) fn revealed(&self) -> Self {
+        const REVEAL_ALPHA: f32 = 0.5;
+        let mut out = self.clone();
+        let hover_fill = self
+            .drag_value
+            .chip
+            .hovered
+            .background
+            .as_ref()
+            .map(|bg| bg.fill.clone());
+        if let (Some(Brush::Solid(c)), Some(bg)) =
+            (hover_fill, out.drag_value.chip.normal.background.as_mut())
+        {
+            bg.fill = Brush::Solid(c.with_alpha(REVEAL_ALPHA));
+        }
+        out
+    }
+
     /// Shared shape: aperture's `menu_button` preset (transparent at rest +
     /// disabled, no border) recoloured for hover/press, with the inline editor
     /// derived from that chip so both modes share one box, and caret/selection
@@ -655,9 +677,10 @@ macro_rules! palette_colors {
 
 palette_colors! {
     canvas_bg => CANVAS_BG,
-    /// Tint of the rubber-band multi-selection rectangle. Drawn as a
-    /// translucent fill plus a near-opaque 1px border, both derived
-    /// from this single color (palette accent).
+    /// The selection accent: the rubber-band rectangle (translucent fill +
+    /// near-opaque 1px border, both derived from this) *and* the selected-
+    /// node border, so "in the selection" reads as one color from sweep to
+    /// committed halo (palette accent).
     selection_rect => SELECTION_RECT,
     /// Dotted backdrop grid dot color. Spacing + radius are layout
     /// dimensions on `Theme` (`canvas_dot_spacing` / `canvas_dot_radius`).
@@ -668,10 +691,10 @@ palette_colors! {
     node_border => NODE_BORDER,
     header_fill => HEADER_FILL,
     /// Muted secondary foreground (palette `text_muted`, `#aaaaa8`). The
-    /// de-emphasized accent shared across chrome: the selected-node halo,
-    /// inactive/disabled header chips, the pinned-inspector outline, and
-    /// active-tab text — visible without competing with the bright accent
-    /// (`badge_subgraph`) or full-strength text.
+    /// de-emphasized accent shared across chrome: inactive/disabled header
+    /// chips, the pinned-inspector outline, and active-tab text — visible
+    /// without competing with the bright accent (`badge_subgraph`) or
+    /// full-strength text.
     text_muted => TEXT_MUTED,
     /// Port + event label ink — de-emphasized against the full-strength
     /// value/editor text so each port row has one strong element. Its own

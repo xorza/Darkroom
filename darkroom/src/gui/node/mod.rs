@@ -188,7 +188,9 @@ impl NodeUI {
             // in the error color so it reads as broken-but-deletable.
             theme.colors.exec_errored_glow
         } else if selected {
-            theme.colors.text_muted
+            // The rubber-band's accent, so "in the selection" reads as one
+            // color from sweep to committed halo.
+            theme.colors.selection_rect
         } else {
             theme.colors.node_border
         };
@@ -469,11 +471,14 @@ pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
 /// need a much heavier black to register than near-white ones.
 fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
     match exec_color(theme, status) {
+        // Blur/spread sized so the glow carries elevation too — it replaces
+        // the ambient shadow, and a tighter halo would leave a just-run node
+        // sitting flatter than its idle neighbors.
         Some(color) => Shadow {
             color,
             offset: Vec2::ZERO,
-            blur: 3.0,
-            spread: 0.0,
+            blur: 8.0,
+            spread: 1.0,
             inset: false,
         },
         None => {
@@ -498,6 +503,20 @@ fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
 /// without needing the panel's response to round-trip first.
 pub(crate) fn node_widget_id(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.body", node_id))
+}
+
+/// Pointer-over-node, from last frame's arranged body rect. The body
+/// response's own `hovered` flag misses most of the node's area — ports,
+/// chips, and editors capture the hit — so hover-reveal affordances (chip
+/// ink, value-editor chips) test the rect directly.
+pub(crate) fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
+    match (
+        ui.response_for(node_widget_id(node_id)).layout_rect,
+        ui.pointer_pos(),
+    ) {
+        (Some(rect), Some(p)) => rect.contains(p),
+        _ => false,
+    }
 }
 
 /// Stable id for a node's inline title-rename editor (and its idle

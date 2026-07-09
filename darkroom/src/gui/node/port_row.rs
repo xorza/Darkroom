@@ -11,21 +11,20 @@ use aperture::{
     Shape, Sizing, Spacing, Stroke, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use glam::Vec2;
-use scenarium::data::{DataType, FsPathMode, StaticValue};
+use scenarium::data::{DataType, FsPathMode};
 use scenarium::graph::Binding;
 use scenarium::graph::NodeId;
 use scenarium::library::Library;
-use scenarium::node::function::ValueVariant;
 
 use crate::core::document::BoundarySide;
 use crate::core::edit::intent::Intent;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
-use crate::gui::node::{RecordCtx, set_input};
+use crate::gui::node::{RecordCtx, node_hovered, set_input};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
-use crate::gui::theme::Theme;
+use crate::gui::theme::{StaticValueEditorTheme, Theme};
 use crate::gui::{EventRef, PortKind, PortRef};
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
@@ -56,6 +55,11 @@ pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
     if n_rows == 0 {
         return;
     }
+    // Pointer-over-node surfaces the (otherwise invisible) const-editor
+    // chips at half strength — the edit affordance appears exactly when the
+    // pointer is in the neighborhood, and geometry never changes.
+    let revealed = node_hovered(ui, node.id).then(|| theme.static_value_editor.revealed());
+    let sve = revealed.as_ref().unwrap_or(&theme.static_value_editor);
     // Fixed-height rows (font-relative) so a node's ports stay uniform whether
     // or not an input carries an inline editor (hug makes editor rows taller).
     let row_height = theme.aperture_theme.text.font_size_px * PORT_ROW_HEIGHT_EM;
@@ -78,12 +82,18 @@ pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
             theme.port_col_pad_top,
         ))
         .show(ui, |ui| {
-            input_cells(ui, rcx, node, out);
+            input_cells(ui, rcx, node, sve, out);
             output_cells(ui, rcx, node, out);
         });
 }
 
-fn input_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+fn input_cells(
+    ui: &mut Ui,
+    rcx: RecordCtx<'_>,
+    node: &SceneNode,
+    sve: &StaticValueEditorTheme,
+    out: &mut Vec<Intent>,
+) {
     let inputs = rcx.scene.inputs(node.inputs);
     // Boundary (`SubgraphInput`/`SubgraphOutput`) ports route the
     // interface, not literal values — no const affordance.
@@ -98,9 +108,8 @@ fn input_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<
         // *outputs* — renameable, except the trailing "+" placeholder.
         let rename = (node.boundary && i + 1 < inputs.len()).then_some(BoundarySide::Output);
         input_label_cell(ui, rcx, port, node, input, rename, out);
-        if allow_const && let InputBindingView::Const(value) = &input.binding {
-            let variants = rcx.scene.value_variants(input.value_variants);
-            value_cell(ui, rcx, port, value, &input.ty, variants, out);
+        if allow_const && matches!(input.binding, InputBindingView::Const(_)) {
+            value_cell(ui, rcx, sve, port, input, out);
         }
     }
 }
@@ -252,12 +261,16 @@ fn input_label_cell(
 fn value_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
+    sve: &StaticValueEditorTheme,
     port: PortRef,
-    value: &StaticValue,
-    data_type: &DataType,
-    value_variants: &[ValueVariant],
+    input: &SceneInput,
     out: &mut Vec<Intent>,
 ) {
+    let InputBindingView::Const(value) = &input.binding else {
+        return;
+    };
+    let data_type = &input.ty;
+    let value_variants = rcx.scene.value_variants(input.value_variants);
     let editor_id = const_editor_wid(port.node_id, port.port_idx);
     // Fill the value column so every editor is the same width (the column
     // hugs to the widest editor's content). `min_size` on the editors keeps
@@ -270,7 +283,7 @@ fn value_cell(
         .show(ui, |ui| {
             value_editor::show(
                 ui,
-                &rcx.theme.static_value_editor,
+                sve,
                 rcx.library,
                 editor_id,
                 value,

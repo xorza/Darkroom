@@ -161,7 +161,7 @@ impl BreakerState {
     }
 }
 
-fn cubic_point(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: f32) -> Vec2 {
+pub(crate) fn cubic_point(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: f32) -> Vec2 {
     let u = 1.0 - t;
     let uu = u * u;
     let tt = t * t;

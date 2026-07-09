@@ -7,7 +7,7 @@ use scenarium::graph::{Binding, InputPort, closes_data_cycle};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
-use crate::gui::canvas::breaker::BreakerProbe;
+use crate::gui::canvas::breaker::{BreakerProbe, cubic_point};
 use crate::gui::canvas::cull::wire_visible;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, add_cubic_wire};
@@ -20,6 +20,24 @@ use crate::gui::{PortKind, PortRef};
 /// Upper bound on the *vertical-gap* term of the handle length, so a tall
 /// forward span bows into a gentle S rather than a huge loop.
 const MAX_HANDLE: f32 = 120.0;
+
+/// How far rest-state wire endpoint colors pull toward the canvas, so the
+/// port dots (identity) stay the brightest points on the data path and long
+/// wires don't outshine them.
+const WIRE_REST_DIM: f32 = 0.15;
+
+/// Alpha of the permanent wires while a new connection is being dragged —
+/// dimming the standing plumbing so the type-tinted preview and the
+/// candidate ports pop.
+const WIRE_DRAG_FADE: f32 = 0.35;
+
+/// Screen-px radius around the pointer that counts as "on the wire" for the
+/// hover highlight (divided by zoom into world units).
+const WIRE_HOVER_RADIUS: f32 = 6.0;
+
+/// Width multiplier for a hovered wire, so one connection stays traceable
+/// through a crossing.
+const WIRE_HOVER_WIDTH: f32 = 1.25;
 
 /// Gain on the *backward-reach* term: `reach = BACKREACH_GAIN * sqrt(distance)`.
 /// A square-root law (not linear, not a fixed cap) so the loop keeps growing as
@@ -54,6 +72,29 @@ fn cubic_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
         p1: p0 + Vec2::new(len, 0.0),
         p2: p3 - Vec2::new(len, 0.0),
     }
+}
+
+/// Linear-space pull of `c` toward `to` by `t`, alpha untouched. Storage
+/// colors are already linear, so a straight component lerp is correct.
+fn toward(c: Color, to: Color, t: f32) -> Color {
+    Color::linear_rgba(
+        c.r + (to.r - c.r) * t,
+        c.g + (to.g - c.g) * t,
+        c.b + (to.b - c.b) * t,
+        c.a,
+    )
+}
+
+/// Whether `point` lies within `radius` of the cubic — sampled, like the
+/// breaker's crossing test, which is plenty for a hover threshold a few
+/// pixels wide.
+fn near_cubic(p0: Vec2, handles: &CubicHandles, p3: Vec2, point: Vec2, radius: f32) -> bool {
+    const SAMPLES: u32 = 16;
+    let r2 = radius * radius;
+    (0..=SAMPLES).any(|i| {
+        let t = i as f32 / SAMPLES as f32;
+        cubic_point(p0, handles.p1, handles.p2, p3, t).distance_squared(point) <= r2
+    })
 }
 
 /// Owns the in-flight new-connection wire (a held drag or a free-floating
@@ -288,6 +329,7 @@ impl ConnectionUI {
     /// `probe.state.broken` for the breaker's release-frame drain. A
     /// culled wire skips the breaker probe too — the scribble is always
     /// on-screen, so it can't cross an off-screen curve.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &self,
         ui: &mut Ui,
@@ -296,11 +338,21 @@ impl ConnectionUI {
         geometry: &CanvasGeometry,
         visible: Option<Rect>,
         probe: &mut BreakerProbe<'_>,
+        canvas_origin: Vec2,
     ) {
         let width = ctx.theme.connection_width;
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken.clear();
         }
+        // Hover proximity runs in world units; the threshold is a screen
+        // radius, so divide by zoom. No hover highlight while a new wire is
+        // being dragged — the whole standing set fades instead.
+        let dragging = self.state.is_some();
+        let pointer = (!dragging)
+            .then(|| pointer_world(ui, scene, canvas_origin))
+            .flatten();
+        let zoom = scene.viewport.zoom.max(f32::EPSILON);
+        let hover_radius = WIRE_HOVER_RADIUS / zoom;
         for c in &scene.connections {
             let src_port = PortRef {
                 node_id: c.src_node,
@@ -340,17 +392,37 @@ impl ConnectionUI {
             // along the curve parameter `t` and ignores `angle` — we pass
             // 0.0. Broken-state still wins as a flat color so the alarm
             // read doesn't get diluted by the gradient.
+            //
+            // Emphasis tiers: at rest the endpoint colors pull toward the
+            // canvas (dots outrank paths); hovering the curve or either
+            // endpoint restores full strength and widens the stroke; while
+            // a new connection is dragged the whole standing set fades.
+            let hovered = !broken
+                && (geometry.ports.is_hovered(src_port)
+                    || geometry.ports.is_hovered(tgt_port)
+                    || pointer.is_some_and(|p| near_cubic(p0, &handles, p3, p, hover_radius)));
             let brush = if broken {
                 Brush::Solid(ctx.theme.colors.connection_broken)
             } else {
                 let src_ty = port_data_type(scene, src_port).unwrap_or_default();
                 let tgt_ty = port_data_type(scene, tgt_port).unwrap_or_default();
-                port_gradient(
-                    port_color(ctx.theme, &src_ty, PortKind::Output, false),
-                    port_color(ctx.theme, &tgt_ty, PortKind::Input, false),
-                )
+                let mut a = port_color(ctx.theme, &src_ty, PortKind::Output, false);
+                let mut b = port_color(ctx.theme, &tgt_ty, PortKind::Input, false);
+                if dragging {
+                    a = a.with_alpha(WIRE_DRAG_FADE);
+                    b = b.with_alpha(WIRE_DRAG_FADE);
+                } else if !hovered {
+                    a = toward(a, ctx.theme.colors.canvas_bg, WIRE_REST_DIM);
+                    b = toward(b, ctx.theme.colors.canvas_bg, WIRE_REST_DIM);
+                }
+                port_gradient(a, b)
             };
-            add_cubic_wire(ui, p0, p3, handles, width, brush);
+            let w = if hovered {
+                width * WIRE_HOVER_WIDTH
+            } else {
+                width
+            };
+            add_cubic_wire(ui, p0, p3, handles, w, brush);
         }
     }
 
