@@ -5,5 +5,3 @@ total used ram for node
 node title disapppears sometimes
 
 textedit        .size((Sizing::FILL, Sizing::Hug))  - min size text
-
-undo for dragvalue staticvalue edit
