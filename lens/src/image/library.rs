@@ -127,6 +127,7 @@ pub fn image_library() -> Library {
             )
             .input(
                 enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
+                    .default(StaticValue::Enum(ConversionFormat::AsIs.label()))
                     .description(
                         "Convert to this color format before saving; \"As Is\" keeps the source format.",
                     ),
@@ -423,11 +424,15 @@ mod tests {
         assert_eq!(f.inputs[2].data_type, *CONVERSION_FORMAT_DATATYPE);
         assert!(f.inputs[2].required);
 
-        // Unlike Convert, Save Image keeps `enum_input`'s first-variant seed, so a
-        // fresh node saves the source format untouched.
+        // Save Image explicitly defaults to "As Is", so a fresh node saves the
+        // source format untouched.
         assert_eq!(
             f.inputs[2].default_value,
             Some(StaticValue::Enum("As Is".to_string())),
+        );
+        assert_eq!(
+            f.inputs[2].default_value,
+            Some(StaticValue::Enum(ConversionFormat::AsIs.label())),
         );
         assert_eq!(
             ConversionFormat::from_str("As Is")
