@@ -9,7 +9,7 @@ use std::any::Any;
 use std::sync::LazyLock;
 
 use lumos::CalibrationMasters;
-use scenarium::data::{CustomValue, DataType, TypeId};
+use scenarium::data::{CustomValue, DataType, RamUsage, TypeId};
 
 pub static MASTERS_TYPE_ID: LazyLock<TypeId> =
     LazyLock::new(|| "db1bc978-1d0b-4ffc-9a74-6220eff8908e".into());
@@ -36,6 +36,14 @@ impl CustomValue for Masters {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn ram_bytes(&self) -> RamUsage {
+        // Calibration frames are CPU-only (lumos has no GPU backend).
+        RamUsage {
+            cpu: self.masters.ram_bytes(),
+            gpu: 0,
+        }
     }
 }
 

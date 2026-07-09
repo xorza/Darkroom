@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 
 use common::Slot;
 use imaginarium::Preview;
-use scenarium::data::{CustomValue, DataType, PendingPreview, TypeId};
+use scenarium::data::{CustomValue, DataType, PendingPreview, RamUsage, TypeId};
 use scenarium::runtime::context::ContextManager;
 
 use crate::image::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
@@ -60,6 +60,16 @@ impl CustomValue for Image {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn ram_bytes(&self) -> RamUsage {
+        // The buffer reports where its pixels currently live (CPU vs GPU); the
+        // small thumbnail preview is transient and not counted.
+        let mem = self.buffer.memory_usage();
+        RamUsage {
+            cpu: mem.cpu,
+            gpu: mem.gpu,
+        }
     }
 
     fn gen_preview(&self, ctx_manager: &mut ContextManager) -> Option<Box<dyn PendingPreview>> {

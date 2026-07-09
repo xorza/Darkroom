@@ -12,6 +12,7 @@ pub(crate) mod app;
 pub(crate) mod node_values;
 pub(crate) mod run_state;
 pub(crate) mod scene;
+pub(crate) mod status_bar;
 pub(crate) mod theme;
 
 use crate::core::document::GraphRef;

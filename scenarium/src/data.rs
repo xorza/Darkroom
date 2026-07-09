@@ -43,6 +43,41 @@ pub trait PendingPreview: Send {
     async fn wait(self: Box<Self>, ctx_manager: &mut ContextManager);
 }
 
+/// A resident memory footprint split by where the bytes live: `cpu` system RAM
+/// vs `gpu` VRAM. Per-value footprints ([`CustomValue::ram_bytes`]) fold into a
+/// cache-wide total ([`RuntimeCache::resident_ram_usage`](crate::execution::cache::RuntimeCache::resident_ram_usage))
+/// via [`Add`](std::ops::Add), which the editor surfaces as a RAM readout.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RamUsage {
+    pub cpu: usize,
+    pub gpu: usize,
+}
+
+impl RamUsage {
+    /// Total bytes across both pools.
+    pub fn total(&self) -> usize {
+        self.cpu + self.gpu
+    }
+}
+
+impl std::ops::Add for RamUsage {
+    type Output = RamUsage;
+
+    fn add(self, rhs: RamUsage) -> RamUsage {
+        RamUsage {
+            cpu: self.cpu + rhs.cpu,
+            gpu: self.gpu + rhs.gpu,
+        }
+    }
+}
+
+impl std::ops::AddAssign for RamUsage {
+    fn add_assign(&mut self, rhs: RamUsage) {
+        self.cpu += rhs.cpu;
+        self.gpu += rhs.gpu;
+    }
+}
+
 /// Trait for custom types that can be stored in `DynamicValue::Custom`.
 /// Implementors report their registered [`TypeId`] so the library can resolve
 /// the type's metadata and disk codec.
@@ -56,6 +91,14 @@ pub trait CustomValue: Send + Sync + Display + 'static {
         None
     }
     fn as_any(&self) -> &dyn Any;
+
+    /// This value's resident RAM footprint, split into system RAM vs GPU VRAM.
+    /// Defaults to zero; heavy payloads (image buffers, stacked frames) override
+    /// it so the runtime cache can report how much memory its resident values
+    /// hold.
+    fn ram_bytes(&self) -> RamUsage {
+        RamUsage::default()
+    }
 }
 
 /// Error a codec hands back to the framework. The codec lives in a downstream
@@ -352,6 +395,16 @@ impl DynamicValue {
         match self {
             DynamicValue::Custom(data) => data.gen_preview(ctx_manager),
             _ => None,
+        }
+    }
+
+    /// This value's resident RAM footprint: a [`Custom`](DynamicValue::Custom)
+    /// payload's [`ram_bytes`](CustomValue::ram_bytes), else zero (inline scalars
+    /// are negligible).
+    pub fn ram_usage(&self) -> RamUsage {
+        match self {
+            DynamicValue::Custom(data) => data.ram_bytes(),
+            _ => RamUsage::default(),
         }
     }
 }

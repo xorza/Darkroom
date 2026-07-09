@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use hashbrown::HashMap;
 
+use crate::data::RamUsage;
 use crate::execution::RunError;
 use crate::execution::event::EventRef;
 use crate::graph::{InputPort, NodeId};
@@ -187,4 +188,9 @@ pub struct ExecutionStats {
     /// node ran (the already-running node still completed). The stat lists
     /// reflect only what actually ran.
     pub cancelled: bool,
+    /// RAM held by the runtime cache's resident values after this run's
+    /// end-of-run eviction — system RAM vs GPU VRAM. Stamped by
+    /// [`ExecutionEngine::execute`](crate::execution::ExecutionEngine) once the
+    /// cache's resident set is final; the editor surfaces it as a memory readout.
+    pub cache_ram: RamUsage,
 }

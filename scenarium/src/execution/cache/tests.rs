@@ -90,3 +90,78 @@ fn hydrate_turns_a_miss_into_a_hit() {
         "current digest moved on ⇒ miss"
     );
 }
+
+#[test]
+fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
+    use std::any::Any;
+    use std::fmt;
+
+    use crate::data::{CustomValue, TypeId};
+
+    #[derive(Debug)]
+    struct Payload {
+        cpu: usize,
+        gpu: usize,
+    }
+    impl fmt::Display for Payload {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "payload")
+        }
+    }
+    impl CustomValue for Payload {
+        fn type_id(&self) -> TypeId {
+            TypeId::from_u128(0x5123)
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn ram_bytes(&self) -> RamUsage {
+            RamUsage {
+                cpu: self.cpu,
+                gpu: self.gpu,
+            }
+        }
+    }
+
+    let d = Digest([1u8; 32]);
+    // One Arc held by two different slots — its bytes exist once.
+    let shared: Arc<dyn CustomValue> = Arc::new(Payload { cpu: 100, gpu: 10 });
+
+    let mut cache = RuntimeCache::default();
+    // Slot A: the shared value + a distinct 5/0 value + a scalar (weightless).
+    cache.slots.add(RuntimeSlot {
+        id: NodeId::from_u128(1),
+        current_digest: Some(d),
+        value: ValueState::Resident {
+            values: vec![
+                DynamicValue::Custom(shared.clone()),
+                DynamicValue::Custom(Arc::new(Payload { cpu: 5, gpu: 0 })),
+                DynamicValue::Static(StaticValue::Int(9)),
+            ],
+            produced_under: Some(d),
+        },
+        ..Default::default()
+    });
+    // Slot B: the *same* shared Arc again — must not be counted twice.
+    cache.slots.add(RuntimeSlot {
+        id: NodeId::from_u128(2),
+        current_digest: Some(d),
+        value: ValueState::Resident {
+            values: vec![DynamicValue::Custom(shared.clone())],
+            produced_under: Some(d),
+        },
+        ..Default::default()
+    });
+    // Slot C: OnDisk — resident nowhere, contributes zero.
+    cache.slots.add(RuntimeSlot {
+        id: NodeId::from_u128(3),
+        current_digest: Some(d),
+        value: ValueState::OnDisk,
+        ..Default::default()
+    });
+
+    // shared (100/10) counted once + the 5/0 value; scalar and OnDisk add nothing.
+    let usage = cache.resident_ram_usage();
+    assert_eq!(usage, RamUsage { cpu: 105, gpu: 10 });
+    assert_eq!(usage.total(), 115);
+}

@@ -1,5 +1,5 @@
 scrolview on newnode popup
 
-total used ram for node
+update ram usage on graph changes
 
 node title disapppears sometimes

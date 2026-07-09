@@ -104,6 +104,12 @@ impl StackableImage for CfaImage {
 }
 
 impl CfaImage {
+    /// Resident RAM held by this frame: its single f32 CFA plane's pixel bytes.
+    /// Metadata is negligible against a full-sensor plane.
+    pub fn ram_bytes(&self) -> usize {
+        self.data.width() * self.data.height() * std::mem::size_of::<f32>()
+    }
+
     /// Serialize this CFA image to `path` (bitcode: the CFA plane + metadata).
     /// Pairs with [`Self::load`] for a calibration-master cache.
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {

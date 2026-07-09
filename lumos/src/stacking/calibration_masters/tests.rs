@@ -555,3 +555,32 @@ fn test_flat_dark_takes_priority_over_bias() {
         light.data[1]
     );
 }
+
+#[test]
+fn ram_bytes_sums_present_frames_and_defects() {
+    // A 10×8 mono CFA frame holds 80 f32 pixels = 320 bytes.
+    let dark = constant_cfa(10, 8, 0.1, CfaType::Mono);
+    assert_eq!(dark.ram_bytes(), 10 * 8 * 4);
+
+    // A defect map counts only its hot + cold index lists (3 usize = 24 bytes on
+    // a 64-bit target); an empty/default map is zero.
+    let mut defects = DefectMap::default();
+    assert_eq!(defects.ram_bytes(), 0);
+    defects.hot_indices = vec![1, 2];
+    defects.cold_indices = vec![7];
+    assert_eq!(defects.ram_bytes(), 3 * std::mem::size_of::<usize>());
+
+    // The bundle sums present roles + the defect map; absent roles add nothing.
+    let masters = CalibrationMasters {
+        master_dark: Some(dark),
+        master_flat: Some(constant_cfa(4, 4, 1.0, CfaType::Mono)),
+        master_bias: None,
+        master_flat_dark: None,
+        defect_map: Some(defects),
+    };
+    // 320 (dark: 80·4) + 64 (flat: 16·4) + 24 (defects: 3·8) = 408 bytes.
+    assert_eq!(
+        masters.ram_bytes(),
+        10 * 8 * 4 + 4 * 4 * 4 + 3 * std::mem::size_of::<usize>()
+    );
+}

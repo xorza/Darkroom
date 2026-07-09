@@ -66,6 +66,11 @@ pub struct DefectMap {
 }
 
 impl DefectMap {
+    /// Resident RAM held by the map: its hot + cold flat-index lists.
+    pub fn ram_bytes(&self) -> usize {
+        (self.hot_indices.len() + self.cold_indices.len()) * std::mem::size_of::<usize>()
+    }
+
     /// Detect **hot** pixels from a master dark — those above `median + sigma_threshold·σ` for
     /// their CFA color — and store them. Chainable, in any order:
     /// `DefectMap::default().detect_hot(&dark, 5.0, &CancelToken::never()).detect_cold(&flat, &CancelToken::never())`.

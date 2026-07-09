@@ -8,11 +8,13 @@
 //! back — so RAM eviction (demote-or-drop) lives here, on the cache that owns both stores.
 //! Per-run results (errors, timings) are *not* here — they belong to a single run, not the cache.
 
+use std::collections::HashSet;
 use std::future::Future;
+use std::sync::Arc;
 
 use common::{KeyIndexKey, KeyIndexVec};
 
-use crate::data::DynamicValue;
+use crate::data::{DynamicValue, RamUsage};
 use crate::execution::NodeColumn;
 use crate::execution::digest::{Digest, node_digest};
 use crate::execution::disk_store::DiskStore;
@@ -151,6 +153,30 @@ pub(crate) struct RuntimeCache {
 impl RuntimeCache {
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
+    }
+
+    /// The RAM held by every *resident* value across all slots, split into system
+    /// RAM vs GPU VRAM. `OnDisk`/`Empty` slots hold nothing and count zero. A
+    /// `Custom` value shared (`Arc`) by more than one slot is counted once — its
+    /// bytes exist once — deduped by pointer identity.
+    pub(crate) fn resident_ram_usage(&self) -> RamUsage {
+        let mut seen: HashSet<*const ()> = HashSet::new();
+        let mut total = RamUsage::default();
+        for slot in self.slots.iter() {
+            let ValueState::Resident { values, .. } = &slot.value else {
+                continue;
+            };
+            for value in values {
+                if let DynamicValue::Custom(arc) = value
+                    && !seen.insert(Arc::as_ptr(arc) as *const ())
+                {
+                    // A second slot holds the same Arc — its bytes are already counted.
+                    continue;
+                }
+                total += value.ram_usage();
+            }
+        }
+        total
     }
 
     /// Rebuild `slots` in `e_nodes` order: preserve each surviving node's cache by

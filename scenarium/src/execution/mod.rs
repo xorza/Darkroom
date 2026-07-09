@@ -333,6 +333,10 @@ impl ExecutionEngine {
         // `needed` cut mask — the same active-frontier set — rather than recomputing a keep-set.
         self.cache.evict_unused(&self.program, needed);
 
+        // The resident set is now final (post-eviction), so this is the true
+        // cache footprint the run leaves behind.
+        stats.cache_ram = self.cache.resident_ram_usage();
+
         stats.triggered_events = seeds.events;
         // Annotate with how the graph was flattened so the stats' flat ids
         // can be projected back onto authoring nodes (the executor itself

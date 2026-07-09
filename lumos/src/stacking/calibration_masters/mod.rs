@@ -156,6 +156,23 @@ pub fn stack_cfa_master(
 }
 
 impl CalibrationMasters {
+    /// Resident RAM held by this bundle: the present master frames' pixel bytes
+    /// plus the defect map's index lists.
+    pub fn ram_bytes(&self) -> usize {
+        let frames = [
+            &self.master_dark,
+            &self.master_flat,
+            &self.master_bias,
+            &self.master_flat_dark,
+        ];
+        let frame_bytes: usize = frames
+            .iter()
+            .filter_map(|m| m.as_ref())
+            .map(CfaImage::ram_bytes)
+            .sum();
+        frame_bytes + self.defect_map.as_ref().map_or(0, DefectMap::ram_bytes)
+    }
+
     /// Create CalibrationMasters from pre-built CFA images.
     ///
     /// Generates defect map from the CFA dark if provided.

@@ -20,7 +20,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use common::CancelToken;
 
-use crate::data::DynamicValue;
+use crate::data::{DynamicValue, RamUsage};
 use crate::execution::stats::{
     ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
 };
@@ -564,6 +564,9 @@ fn collect_execution_stats(
         flatten: Arc::default(),
         // Set by `run` from the cancel flag after the loop.
         cancelled: false,
+        // Stamped by `ExecutionEngine::execute` after end-of-run eviction, when
+        // the cache's resident set is final.
+        cache_ram: RamUsage::default(),
     }
 }
 

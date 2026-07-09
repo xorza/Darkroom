@@ -14,6 +14,7 @@ use crate::gui::menu_bar;
 use crate::gui::node::emit_subgraph_opens;
 use crate::gui::preferences_view;
 use crate::gui::scene::Scene;
+use crate::gui::status_bar;
 use crate::gui::tab_bar::{self, TabLabel};
 
 /// Top of darkroom's UI tree. Owns every persistent UI scope (right
@@ -107,6 +108,8 @@ impl MainWindow {
                         }
                     }
                 }
+                // Bottom chrome: the cache-memory readout, below the content pane.
+                status_bar::show(ui, ctx);
             });
 
         if take(&mut self.first_frame) {

@@ -24,6 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use aperture::Ui;
+use scenarium::data::RamUsage;
 use scenarium::execution::stats::{ExecutionStats, LogEntry, RunPhase, RunProgress};
 use scenarium::execution::{ArgumentValues, RunError};
 use scenarium::graph::NodeId;
@@ -106,6 +107,10 @@ pub(crate) struct RunState {
     /// per node per run — a reply, including a `None` one, doesn't reopen
     /// the node for re-request.
     requested: HashSet<NodeId>,
+    /// RAM held by the worker's runtime cache after the last finished run
+    /// (system RAM vs GPU VRAM), mirrored from its `ExecutionStats`. Drives the
+    /// status bar's memory readout.
+    pub(crate) cache_ram: RamUsage,
 }
 
 impl RunState {
@@ -147,6 +152,7 @@ impl RunState {
     /// stats). Entries left carrying nothing are dropped.
     pub(crate) fn set_results(&mut self, stats: &ExecutionStats) {
         self.running = false;
+        self.cache_ram = stats.cache_ram;
         for node in self.nodes.values_mut() {
             node.status = ExecStatus::None;
             node.logs.clear();
@@ -325,6 +331,7 @@ mod tests {
             logs: vec![],
             flatten: Arc::new(flatten),
             cancelled: false,
+            cache_ram: RamUsage::default(),
         }
     }
 
