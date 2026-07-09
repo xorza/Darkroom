@@ -96,10 +96,13 @@ pub(crate) mod dark {
     pub(crate) const OUTPUT_PORT: Color = Color::hex(0xffa63d);
     pub(crate) const INPUT_PORT_HOVER: Color = Color::hex(0xe9ff8e);
     pub(crate) const OUTPUT_PORT_HOVER: Color = Color::hex(0xffc878);
-    // Events read as neutral white to set them apart from the type-colored
-    // data ports; near-white at rest so hover can lift to pure white.
-    pub(crate) const EVENT_PORT: Color = Color::hex(0xe6e6e6);
-    pub(crate) const EVENT_PORT_HOVER: Color = Color::hex(0xffffff);
+    // Events wear the palette's `error` red — the same swatch as the
+    // terminal `T` badge the subscription pin sits beside, so the trigger
+    // machinery reads as one family. Shape (triangle vs. circle) keeps
+    // events apart from data ports; hover lifts toward white like the
+    // typed port hovers.
+    pub(crate) const EVENT_PORT: Color = Color::hex(0xff5e44);
+    pub(crate) const EVENT_PORT_HOVER: Color = Color::hex(0xff8b78);
 
     // aperture sub-theme palette — values aperture's widgets normally
     // read from its own `palette::*` consts. Pushed through
@@ -158,10 +161,10 @@ pub(crate) mod light {
     pub(crate) const OUTPUT_PORT: Color = Color::hex(0xfa8d3e);
     pub(crate) const INPUT_PORT_HOVER: Color = Color::hex(0x6f9603);
     pub(crate) const OUTPUT_PORT_HOVER: Color = Color::hex(0xd97527);
-    // White is invisible on the light canvas, so events use a mid-gray at
-    // rest and darken on hover (matching the light-theme port emphasis).
-    pub(crate) const EVENT_PORT: Color = Color::hex(0x5b5b5b);
-    pub(crate) const EVENT_PORT_HOVER: Color = Color::hex(0x2e2e2e);
+    // Events wear the light palette's `error` red (see the dark peer's
+    // rationale); hover darkens for emphasis like the light port hovers.
+    pub(crate) const EVENT_PORT: Color = Color::hex(0xef7271);
+    pub(crate) const EVENT_PORT_HOVER: Color = Color::hex(0xb35555);
 
     // aperture sub-theme palette — see `dark::PAL_*` for the contract.
     pub(crate) const PAL_TEXT: Color = Color::hex(0x5c6166);

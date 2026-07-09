@@ -9,7 +9,10 @@ use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::wire_visible;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pointer_world;
-use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, add_cubic_wire};
+use crate::gui::canvas::wire::{
+    CubicHandles, MIN_HANDLE, WIRE_DRAG_FADE, WIRE_HOVER_RADIUS, WIRE_HOVER_WIDTH, WIRE_REST_DIM,
+    add_cubic_wire, near_cubic, toward,
+};
 use crate::gui::node::port_color::event_color;
 use crate::gui::scene::Scene;
 
@@ -168,6 +171,7 @@ impl SubscriptionUI {
     /// `probe.state.broken_subscriptions` for the release-frame drain. A
     /// culled wire skips the breaker probe too — the scribble is always
     /// on-screen, so it can't cross an off-screen curve.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &self,
         ui: &mut Ui,
@@ -176,8 +180,18 @@ impl SubscriptionUI {
         geometry: &CanvasGeometry,
         visible: Option<Rect>,
         probe: &mut BreakerProbe<'_>,
+        canvas_origin: Vec2,
     ) {
         let width = ctx.theme.connection_width;
+        // Same emphasis tiers as the data wires (see `connection_ui`): rest
+        // dims toward the canvas, hover restores full strength, an in-flight
+        // subscription drag fades the standing set.
+        let dragging = self.state.is_some();
+        let pointer = (!dragging)
+            .then(|| pointer_world(ui, scene, canvas_origin))
+            .flatten();
+        let zoom = scene.viewport.zoom.max(f32::EPSILON);
+        let hover_radius = WIRE_HOVER_RADIUS / zoom;
         for s in &scene.subscriptions {
             let emitter = EventRef {
                 node_id: s.emitter,
@@ -205,12 +219,27 @@ impl SubscriptionUI {
             }
             // The neutral event color matches the emitter/subscriber glyphs;
             // the broken alarm color wins while the breaker crosses it.
+            let hovered = !broken
+                && (geometry.events.is_hovered(emitter)
+                    || geometry.subs.is_hovered(s.subscriber)
+                    || pointer.is_some_and(|p| near_cubic(p0, &handles, p3, p, hover_radius)));
             let brush = if broken {
                 Brush::Solid(ctx.theme.colors.connection_broken)
             } else {
-                Brush::Solid(event_color(ctx.theme, false))
+                let mut c = event_color(ctx.theme, false);
+                if dragging {
+                    c = c.with_alpha(WIRE_DRAG_FADE);
+                } else if !hovered {
+                    c = toward(c, ctx.theme.colors.canvas_bg, WIRE_REST_DIM);
+                }
+                Brush::Solid(c)
             };
-            add_cubic_wire(ui, p0, p3, handles, width, brush);
+            let w = if hovered {
+                width * WIRE_HOVER_WIDTH
+            } else {
+                width
+            };
+            add_cubic_wire(ui, p0, p3, handles, w, brush);
         }
     }
 

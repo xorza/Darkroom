@@ -341,8 +341,8 @@ fn output_cell(
     // `emit_port_dblclicks` (prepass) alongside the input-side gesture.
 }
 
-/// One event (emitter) port row: the event name plus a white triangle glyph,
-/// right-aligned and overhanging the node edge like a data output. Sits in
+/// One event (emitter) port row: the event name plus an event-colored triangle
+/// glyph, right-aligned and overhanging the node edge like a data output. Sits in
 /// `COL_OUTPUT` at `row` (below the data outputs). The glyph senses drags so a
 /// wire can be pulled from it to a subscriber pin (see `SubscriptionUI`).
 fn event_cell(
@@ -413,7 +413,7 @@ fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: S
                 a: Vec2::new(0.0, 0.0),
                 b: Vec2::new(0.0, port),
                 c: Vec2::new(port, port * 0.5),
-                radius: 0.0,
+                radius: EVENT_TRIANGLE_RADIUS,
                 fill: fill.into(),
                 stroke: Stroke::ZERO,
             });
@@ -428,6 +428,10 @@ fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: S
 /// Hover / grab box scaled past the painted dot so ports are easier to
 /// hit and snap to, while the visible circle stays `port_size`.
 const PORT_HIT_SCALE: f32 = 1.8;
+
+/// Corner rounding of the event triangles (emitter glyph + subscription
+/// pin), matching the soft corners of the rest of the chrome.
+pub(crate) const EVENT_TRIANGLE_RADIUS: f32 = 2.0;
 
 fn circle_frame(
     ui: &mut Ui,

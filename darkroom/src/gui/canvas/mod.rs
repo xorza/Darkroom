@@ -343,7 +343,15 @@ impl GraphUI {
                             // Subscription wires sit under the node bodies
                             // like data wires (drawn before `draw_all`), and
                             // share the breaker probe so they're cuttable too.
-                            subscription_ui.draw(ui, ctx, scene, geometry, visible, &mut probe);
+                            subscription_ui.draw(
+                                ui,
+                                ctx,
+                                scene,
+                                geometry,
+                                visible,
+                                &mut probe,
+                                canvas_origin,
+                            );
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,

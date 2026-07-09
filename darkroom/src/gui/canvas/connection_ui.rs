@@ -7,10 +7,13 @@ use scenarium::graph::{Binding, InputPort, closes_data_cycle};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
-use crate::gui::canvas::breaker::{BreakerProbe, cubic_point};
+use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::wire_visible;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, add_cubic_wire};
+use crate::gui::canvas::wire::{
+    CubicHandles, MIN_HANDLE, WIRE_DRAG_FADE, WIRE_HOVER_RADIUS, WIRE_HOVER_WIDTH, WIRE_REST_DIM,
+    add_cubic_wire, near_cubic, toward,
+};
 use crate::gui::canvas::{node_ports, outer_canvas_widget_id, pointer_world};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
@@ -20,24 +23,6 @@ use crate::gui::{PortKind, PortRef};
 /// Upper bound on the *vertical-gap* term of the handle length, so a tall
 /// forward span bows into a gentle S rather than a huge loop.
 const MAX_HANDLE: f32 = 120.0;
-
-/// How far rest-state wire endpoint colors pull toward the canvas, so the
-/// port dots (identity) stay the brightest points on the data path and long
-/// wires don't outshine them.
-const WIRE_REST_DIM: f32 = 0.15;
-
-/// Alpha of the permanent wires while a new connection is being dragged —
-/// dimming the standing plumbing so the type-tinted preview and the
-/// candidate ports pop.
-const WIRE_DRAG_FADE: f32 = 0.35;
-
-/// Screen-px radius around the pointer that counts as "on the wire" for the
-/// hover highlight (divided by zoom into world units).
-const WIRE_HOVER_RADIUS: f32 = 6.0;
-
-/// Width multiplier for a hovered wire, so one connection stays traceable
-/// through a crossing.
-const WIRE_HOVER_WIDTH: f32 = 1.25;
 
 /// Gain on the *backward-reach* term: `reach = BACKREACH_GAIN * sqrt(distance)`.
 /// A square-root law (not linear, not a fixed cap) so the loop keeps growing as
@@ -74,28 +59,6 @@ fn cubic_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
     }
 }
 
-/// Linear-space pull of `c` toward `to` by `t`, alpha untouched. Storage
-/// colors are already linear, so a straight component lerp is correct.
-fn toward(c: Color, to: Color, t: f32) -> Color {
-    Color::linear_rgba(
-        c.r + (to.r - c.r) * t,
-        c.g + (to.g - c.g) * t,
-        c.b + (to.b - c.b) * t,
-        c.a,
-    )
-}
-
-/// Whether `point` lies within `radius` of the cubic — sampled, like the
-/// breaker's crossing test, which is plenty for a hover threshold a few
-/// pixels wide.
-fn near_cubic(p0: Vec2, handles: &CubicHandles, p3: Vec2, point: Vec2, radius: f32) -> bool {
-    const SAMPLES: u32 = 16;
-    let r2 = radius * radius;
-    (0..=SAMPLES).any(|i| {
-        let t = i as f32 / SAMPLES as f32;
-        cubic_point(p0, handles.p1, handles.p2, p3, t).distance_squared(point) <= r2
-    })
-}
 
 /// Owns the in-flight new-connection wire (a held drag or a free-floating
 /// wire — see [`InFlight`]) plus the existing-connection renderer.

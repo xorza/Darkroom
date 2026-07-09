@@ -16,6 +16,7 @@ use scenarium::graph::{CacheMode, NodeId};
 use crate::core::edit::intent::{Intent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::port_color::event_color;
+use crate::gui::node::port_row::EVENT_TRIANGLE_RADIUS;
 use crate::gui::node::{RecordCtx, click_intents, exec_color, node_rename_wid};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::SceneNode;
@@ -52,8 +53,8 @@ pub(crate) fn fmt_elapsed(secs: f64) -> String {
 }
 
 /// The header bar (title + inspect chip). A terminal node also carries a
-/// whole-node event-subscription pin — a white triangle overhanging the
-/// top-left edge — so the header is overlaid in a zstack: the pin floats
+/// whole-node event-subscription pin — an event-colored triangle overhanging
+/// the top-left edge — so the header is overlaid in a zstack: the pin floats
 /// over the bar's left edge without reflowing the title (zstack children
 /// don't push each other). Non-terminal nodes draw the bar directly.
 pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
@@ -73,13 +74,15 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
         });
 }
 
-/// One whole-node event-subscription pin: a white triangle overhanging the
-/// node's top-left corner, its apex pointing up-left toward the incoming
-/// wire. Negative top *and* left margins pull it out past both edges, like a
-/// port circle overhangs its edge. It's both a drop target for an emitter's
-/// event wire *and* a drag source — pulling from it starts a subscription
-/// wire aimed at an emitter (see `SubscriptionUI`). `hovered` (set while a
-/// drag snaps to it) tints the triangle as drop feedback.
+/// One whole-node event-subscription pin: an event-colored triangle
+/// overhanging the node's top-left corner, its apex pointing up-left toward
+/// the incoming wire. (The hue, not white, is what keeps it from reading as
+/// a stray macOS pointer.) Negative top *and* left margins pull it out past
+/// both edges, like a port circle overhangs its edge. It's both a drop
+/// target for an emitter's event wire *and* a drag source — pulling from it
+/// starts a subscription wire aimed at an emitter (see `SubscriptionUI`).
+/// `hovered` (set while a drag snaps to it) tints the triangle as drop
+/// feedback.
 fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool) {
     let port = theme.port_size;
     // Overhang past the body's inner edge (the border-folded padding) by the
@@ -109,7 +112,7 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool
                 a: tf(Vec2::new(port, 0.0)),
                 b: tf(Vec2::new(port, port)),
                 c: tf(Vec2::new(0.0, port * 0.5)),
-                radius: 0.0,
+                radius: EVENT_TRIANGLE_RADIUS,
                 fill: event_color(theme, hovered).into(),
                 stroke: Stroke::ZERO,
             });
