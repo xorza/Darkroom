@@ -59,7 +59,6 @@ fn cubic_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
     }
 }
 
-
 /// Owns the in-flight new-connection wire (a held drag or a free-floating
 /// wire — see [`InFlight`]) plus the existing-connection renderer.
 /// Single-wire-at-a-time means one `Option` is enough; the permanent

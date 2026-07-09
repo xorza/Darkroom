@@ -35,6 +35,7 @@ use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
+use crate::gui::node::header::draw_subscription_pins;
 use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_port_dblclicks};
 use crate::gui::scene::{Scene, SceneNode};
 use crate::gui::{PortKind, PortRef};
@@ -360,6 +361,10 @@ impl GraphUI {
                                 geometry,
                                 inspectors,
                             };
+                            // Subscription pins record before the bodies so
+                            // each triangle peeks out from *behind* its
+                            // node's corner (and above the wires).
+                            draw_subscription_pins(ui, rcx);
                             node_ui.draw_all(ui, rcx, visible, &mut probe, out);
                         }
                         // Inspection panels paint after the node bodies so

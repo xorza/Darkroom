@@ -40,8 +40,8 @@ input_port = "#daff58"
 output_port = "#ffa63d"
 input_port_hover = "#e9ff8e"
 output_port_hover = "#ffc878"
-event_port = "#e6e6e6"
-event_port_hover = "#ffffff"
+event_port = "#ff5e44"
+event_port_hover = "#ff8b78"
 
 [static_value_editor]
 width = 100.0

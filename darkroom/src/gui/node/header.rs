@@ -7,8 +7,8 @@
 //! top child of each node body by [`crate::gui::node::NodeUI`].
 
 use aperture::{
-    Align, Background, Color, Configure, Corners, FontWeight, HAlign, Panel, Sense, Shape, Sizing,
-    Spacing, Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, Corners, FontWeight, Panel, Sense, Shape, Sizing, Spacing,
+    Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 use glam::Vec2;
 use scenarium::graph::{CacheMode, NodeId};
@@ -52,43 +52,34 @@ pub(crate) fn fmt_elapsed(secs: f64) -> String {
     }
 }
 
-/// The header bar (title + inspect chip). A terminal node also carries a
-/// whole-node event-subscription pin — an event-colored triangle overhanging
-/// the top-left edge — so the header is overlaid in a zstack: the pin floats
-/// over the bar's left edge without reflowing the title (zstack children
-/// don't push each other). Non-terminal nodes draw the bar directly.
-pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
-    if !node.terminal {
-        header_bar(ui, rcx, node, out);
-        return;
+/// Record every terminal node's event-subscription pin as a canvas-level
+/// widget. Called *before* the node bodies so each triangle paints under
+/// its node — peeking out from behind the top-left corner — while sitting
+/// above the wires. Uses the same widget id as ever, so `CanvasGeometry`
+/// polling and the `SubscriptionUI` drag logic are unchanged; the body
+/// covers (and wins hits over) the inner half, leaving the protruding part
+/// hoverable and draggable.
+pub(crate) fn draw_subscription_pins(ui: &mut Ui, rcx: RecordCtx<'_>) {
+    for node in rcx.scene.nodes.iter() {
+        if !node.terminal {
+            continue;
+        }
+        // Highlighted while an event drag is snapped to this pin.
+        let snapped = rcx.geometry.subs.is_hovered(node.id);
+        subscription_pin(ui, rcx.theme, node, snapped);
     }
-    let theme = rcx.theme;
-    Panel::zstack()
-        .id_salt("header_overlay")
-        .size((Sizing::FILL, Sizing::Hug))
-        .show(ui, |ui| {
-            header_bar(ui, rcx, node, out);
-            // Highlighted while an event drag is snapped to this pin.
-            let snapped = rcx.geometry.subs.is_hovered(node.id);
-            subscription_glyph(ui, theme, node.id, snapped);
-        });
 }
 
-/// One whole-node event-subscription pin: an event-colored triangle
-/// overhanging the node's top-left corner, its apex pointing up-left toward
-/// the incoming wire. (The hue, not white, is what keeps it from reading as
-/// a stray macOS pointer.) Negative top *and* left margins pull it out past
-/// both edges, like a port circle overhangs its edge. It's both a drop
-/// target for an emitter's event wire *and* a drag source — pulling from it
-/// starts a subscription wire aimed at an emitter (see `SubscriptionUI`).
-/// `hovered` (set while a drag snaps to it) tints the triangle as drop
-/// feedback.
-fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool) {
+/// One whole-node event-subscription pin: an event-colored triangle behind
+/// the node's top-left corner, its apex pointing up-left toward the
+/// incoming wire. The port-sized box is centered on the corner (world
+/// coords), the same half-on-the-edge geometry the port circles use. It's
+/// both a drop target for an emitter's event wire *and* a drag source —
+/// pulling from it starts a subscription wire aimed at an emitter (see
+/// `SubscriptionUI`). `hovered` (set while a drag snaps to it) tints the
+/// triangle as drop feedback.
+fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hovered: bool) {
     let port = theme.port_size;
-    // Overhang past the body's inner edge (the border-folded padding) by the
-    // dot's radius on each axis, centering the glyph box on the body corner —
-    // the same half-on-the-edge overhang the port circles use.
-    let overhang = theme.port_radius() + theme.node_border_width * 2.0;
     // Rotate the base (left-pointing) triangle +45° about its center so the
     // apex points up-left, aligned with the wire arriving from there. The
     // rotated points are passed straight to the SDF triangle primitive; the
@@ -102,10 +93,9 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool
     // fall through to the node body's own drag. A plain click on the pin no
     // longer selects the node — the same tradeoff those glyphs already make.
     let pin = Panel::zstack()
-        .id(subscription_glyph_wid(node_id))
+        .id(subscription_glyph_wid(node.id))
+        .position(node.pos - Vec2::splat(theme.port_radius()))
         .size((Sizing::Fixed(port), Sizing::Fixed(port)))
-        .align(Align::new(HAlign::Left, VAlign::Top))
-        .margin(Spacing::new(-overhang, -overhang, 0.0, 0.0))
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
             ui.add_shape(Shape::Triangle {
@@ -130,10 +120,13 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.subscription_glyph", node_id))
 }
 
-/// The header bar proper: the node title plus the right-aligned inspect
-/// chip. Indicator chips + the run-time label live in [`status_row`] below
-/// it so adding/removing the time label never reflows the title.
-fn header_bar(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+/// The header bar: the node title plus the right-aligned inspect chip.
+/// Indicator chips + the run-time label live in [`status_row`] below it so
+/// adding/removing the time label never reflows the title. The terminal
+/// nodes' event-subscription pin is *not* drawn here — it records at canvas
+/// level, before the node bodies, so it peeks out from behind the node's
+/// corner (see [`draw_subscription_pins`]).
+pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding). Its top corners must
