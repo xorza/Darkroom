@@ -17,12 +17,18 @@
 //! value. `Any` stays a plain smart text field — its editing reinterprets
 //! the literal's kind, which the numeric-only `DragValue` can't do.
 //!
+//! Every editor emits **once per committed gesture**, not per frame: the
+//! `DragValue` reports its commit (drag release / Enter / blur), the text
+//! editors commit on Enter or focus loss. Mid-gesture the document keeps
+//! its old value — the widgets display their in-progress state themselves —
+//! so one scrub or one typed entry lands as one `SetInput` undo step.
+//!
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
 //! formatting would clobber partial input (typing "3." would reformat
 //! to "3" on the next frame). The buffer lives in aperture's StateMap
 //! keyed by the editor id; we mirror canonical → buffer only while
-//! unfocused and parse on every frame, emitting a change only when the
-//! parsed value differs from the canonical one.
+//! unfocused — skipping the blur frame, whose buffer still holds the
+//! user's text to commit — and parse only when the edit commits.
 
 use aperture::{
     Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextEditTheme, TextWrap,
@@ -37,12 +43,16 @@ use crate::gui::theme::StaticValueEditorTheme;
 #[derive(Default, Clone, Debug)]
 struct EditBuffer {
     text: String,
+    /// Focus state last frame; a true→false edge marks the blur-commit
+    /// frame, where the buffer must survive the canonical mirror.
+    was_focused: bool,
 }
 
 /// Render the editor for `value`. Returns the new value when the user
-/// edited it this frame, otherwise `None`. `id` must be stable across
-/// frames so the TextEdit / buffer state survives. Every visual axis
-/// (button look, field width) comes off `theme`.
+/// committed an edit this frame (scrub released, Enter, blur, or a
+/// discrete pick), otherwise `None`. `id` must be stable across frames
+/// so the TextEdit / buffer state survives. Every visual axis (button
+/// look, field width) comes off `theme`.
 pub(crate) fn show(
     ui: &mut Ui,
     theme: &StaticValueEditorTheme,
@@ -89,8 +99,8 @@ pub(crate) fn show(
     match value {
         StaticValue::Int(_) | StaticValue::Float(_) => numeric_edit(ui, theme, id, value, width),
         StaticValue::String(current) => {
-            let buf = buffered_text_edit(ui, editor, id, current, |s| s.clone(), width);
-            (buf != *current).then_some(StaticValue::String(buf))
+            let edit = buffered_text_edit(ui, editor, id, current, |s| s.clone(), width);
+            (edit.committed && edit.text != *current).then_some(StaticValue::String(edit.text))
         }
         StaticValue::Bool(current) => {
             let mut draft = *current;
@@ -150,8 +160,8 @@ pub(crate) fn show(
 /// an integer → `Int`, a finite decimal → `Float`, anything else → `String`.
 /// The port declares no kind, so the kind rides on the value itself; the
 /// ambiguity is inherent — `"42"` always reads back as `Int`, never the string
-/// `"42"`. Returns the reinterpreted value only when it differs from the
-/// current one.
+/// `"42"`. Returns the reinterpreted value only when the edit committed and
+/// it differs from the current one.
 fn any_smart_edit(
     ui: &mut Ui,
     editor: &TextEditTheme,
@@ -159,8 +169,11 @@ fn any_smart_edit(
     value: &StaticValue,
     width: f32,
 ) -> Option<StaticValue> {
-    let buf = buffered_text_edit(ui, editor, id, value, format_any, width);
-    let parsed = parse_any(&buf);
+    let edit = buffered_text_edit(ui, editor, id, value, format_any, width);
+    if !edit.committed {
+        return None;
+    }
+    let parsed = parse_any(&edit.text);
     (parsed != *value).then_some(parsed)
 }
 
@@ -230,11 +243,20 @@ fn path_preview(path: &str) -> String {
         .unwrap_or_else(|| path.to_owned())
 }
 
+/// What [`buffered_text_edit`] hands back: the buffer's current text and
+/// whether this frame committed the edit (Enter, or focus left the field).
+#[derive(Debug)]
+struct BufferedEdit {
+    text: String,
+    committed: bool,
+}
+
 /// Render a TextEdit whose buffer survives across frames via aperture's
 /// StateMap. While the editor is unfocused, the buffer mirrors the
 /// canonical value (re-formatted via `fmt`); while focused, the user's
-/// in-progress text is left alone. Returns the current buffer for the
-/// caller to parse.
+/// in-progress text is left alone. The blur frame is detected *before*
+/// the mirror (via `was_focused`) so the user's text survives to be
+/// committed rather than being clobbered back to canonical.
 fn buffered_text_edit<T>(
     ui: &mut Ui,
     editor: &TextEditTheme,
@@ -242,19 +264,27 @@ fn buffered_text_edit<T>(
     canonical: &T,
     fmt: fn(&T) -> String,
     width: f32,
-) -> String {
-    if ui.focused_id() != Some(id) {
-        ui.state_mut::<EditBuffer>(id).text = fmt(canonical);
+) -> BufferedEdit {
+    let focused = ui.focused_id() == Some(id);
+    let state = ui.state_mut::<EditBuffer>(id);
+    let blurred = state.was_focused && !focused;
+    state.was_focused = focused;
+    if !focused && !blurred {
+        state.text = fmt(canonical);
     }
     let mut text = std::mem::take(&mut ui.state_mut::<EditBuffer>(id).text);
-    TextEdit::new(&mut text)
+    let submitted = TextEdit::new(&mut text)
         .id(id)
         .style(editor.clone())
         .size((Sizing::Fixed(width), Sizing::FILL))
-        .show(ui);
+        .show(ui)
+        .submitted;
     let snapshot = text.clone();
     ui.state_mut::<EditBuffer>(id).text = text;
-    snapshot
+    BufferedEdit {
+        text: snapshot,
+        committed: submitted || blurred,
+    }
 }
 
 /// `{}` on f64 prints `1` for whole numbers, which round-trips through
@@ -266,9 +296,11 @@ fn format_float(v: &f64) -> String {
 
 /// Editor for a numeric const (`Int`/`Float`): an editable `DragValue` —
 /// drag horizontally to scrub, click to type an exact value. Both modes,
-/// the focus swap, and Enter/blur commit live inside the widget. Returns
-/// the new value only when it actually changed this frame. Non-numeric
-/// values return `None`.
+/// the focus swap, and Enter/blur commit live inside the widget. The draft
+/// re-seeds from the document value every frame and is emitted only on the
+/// widget's `committed` frame, which carries the gesture's final value —
+/// one scrub or typed entry lands as one change. Non-numeric values return
+/// `None`.
 fn numeric_edit(
     ui: &mut Ui,
     theme: &StaticValueEditorTheme,
@@ -279,28 +311,30 @@ fn numeric_edit(
     match value {
         StaticValue::Int(current) => {
             let mut draft = *current;
-            DragValue::new(&mut draft)
+            let committed = DragValue::new(&mut draft)
                 .editable(true)
                 .speed(int_speed(*current))
                 .style(theme.drag_value.clone())
                 .size((Sizing::Fixed(width), Sizing::FILL))
                 .id(id)
-                .show(ui);
-            (draft != *current).then_some(StaticValue::Int(draft))
+                .show(ui)
+                .committed;
+            (committed && draft != *current).then_some(StaticValue::Int(draft))
         }
         StaticValue::Float(current) => {
             let mut draft = *current;
-            DragValue::new(&mut draft)
+            let committed = DragValue::new(&mut draft)
                 .editable(true)
                 .speed(float_speed(*current))
                 .decimals(3)
                 .style(theme.drag_value.clone())
                 .size((Sizing::Fixed(width), Sizing::FILL))
                 .id(id)
-                .show(ui);
+                .show(ui)
+                .committed;
             // Bit-exact: matches StaticValue's PartialEq, so `1.0` → `1`
             // (same value, different textual form) doesn't emit a change.
-            (draft.to_bits() != current.to_bits()).then_some(StaticValue::Float(draft))
+            (committed && draft.to_bits() != current.to_bits()).then_some(StaticValue::Float(draft))
         }
         _ => None,
     }

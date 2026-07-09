@@ -819,13 +819,11 @@ fn test_sigma_clipped_stats_kappa_affects_rejection() {
 
     let ClippedStats {
         median: median_strict,
-        sigma: _,
         ..
     } = sigma_clipped_median_mad(&mut values_strict, &mut deviations, 1.5, 3);
     deviations.clear();
     let ClippedStats {
         median: median_loose,
-        sigma: _,
         ..
     } = sigma_clipped_median_mad(&mut values_loose, &mut deviations, 5.0, 3);
 
@@ -874,13 +872,11 @@ fn test_sigma_clipped_stats_iterations_improve_result() {
 
     let ClippedStats {
         median: median_0iter,
-        sigma: _,
         ..
     } = sigma_clipped_median_mad(&mut values_0iter, &mut deviations, 2.5, 0);
     deviations.clear();
     let ClippedStats {
         median: median_3iter,
-        sigma: _,
         ..
     } = sigma_clipped_median_mad(&mut values_3iter, &mut deviations, 2.5, 3);
 

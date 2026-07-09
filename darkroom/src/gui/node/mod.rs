@@ -66,6 +66,14 @@ pub(crate) struct RecordCtx<'a> {
 #[derive(Default, Debug)]
 pub(crate) struct NodeUI {
     drag_anchor: Option<DragAnchor>,
+    /// The node kept recorded by the focus cull-exemption last frame.
+    /// Focus clears during input, *before* the record, so on the blur
+    /// frame `focus_within` is already false — but that frame is exactly
+    /// when an in-progress const edit commits (the editor's pending draft
+    /// resolves on its first post-blur record). One frame of hysteresis
+    /// keeps the node recorded through it; otherwise the cull would let
+    /// aperture sweep the draft unseen.
+    focus_kept_last: Option<NodeId>,
 }
 
 #[derive(Clone, Debug)]
@@ -119,15 +127,25 @@ impl NodeUI {
         // for ids not recorded this frame, so a node whose subtree holds the
         // keyboard focus (`focus_within` — an in-progress title/const/port
         // edit) stays recorded even off-screen; otherwise panning away
-        // mid-edit would discard the draft.
+        // mid-edit would discard the draft. The exemption carries one frame
+        // past the blur (`focus_kept_last`): focus clears before the record,
+        // and that first post-blur record is where the edit's pending draft
+        // commits.
+        let mut focus_kept = None;
         for n in rcx.scene.nodes.iter() {
+            let keeps_focus = ui.focus_within(node_widget_id(n.id));
+            if keeps_focus {
+                focus_kept = Some(n.id);
+            }
             if !node_visible(visible, rcx.geometry.node_world_rect(n))
-                && !ui.focus_within(node_widget_id(n.id))
+                && !keeps_focus
+                && self.focus_kept_last != Some(n.id)
             {
                 continue;
             }
             self.draw_one(ui, rcx, n, probe, out);
         }
+        self.focus_kept_last = focus_kept;
         // Drop the anchor if its target node vanished from the graph
         // (mid-drag delete). Without this, the slot would linger and
         // could fire when a fresh node reused the id.
