@@ -188,10 +188,12 @@ impl Inspectors {
         let logs = ctx.run_state.logs(node.id);
         let errors = ctx.run_state.errors(node.id);
         let values = ctx.run_state.values(node.id);
-        // The outline is the *pinned* signal; a transient panel rides on its
+        // The outline is the *pinned* signal, in the same accent the header's
+        // `i` chip uses for its open/pinned states — one color means
+        // "inspector held open" on both ends. A transient panel rides on its
         // shadow alone. Width stays constant so pin-cycling never reflows.
         let border = match mode {
-            InspectMode::Pinned => theme.colors.text_muted,
+            InspectMode::Pinned => theme.colors.badge_subgraph,
             InspectMode::Open => Color::TRANSPARENT,
         };
         let chrome = Background {
