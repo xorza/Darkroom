@@ -4,8 +4,6 @@ update ram usage on graph changes
 
 node title disapppears sometimes
 
-clean unsued output immediately after exec
-
 imaginarium failing tests
 
 avoid inputs values clone
