@@ -3,5 +3,3 @@ scrolview on newnode popup
 total used ram for node
 
 node title disapppears sometimes
-
-textedit        .size((Sizing::FILL, Sizing::Hug))  - min size text
