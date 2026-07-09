@@ -4,8 +4,8 @@
 //! shows no strip at all, matching the window status bar.
 
 use aperture::{
-    Align, Background, Color, Configure, Corners, Panel, Sizing, Spacing, Text, TextStyle, Ui,
-    VAlign,
+    Align, Background, Color, Configure, Corners, FontFamily, Panel, Sizing, Spacing, Text,
+    TextStyle, Ui, VAlign,
 };
 use scenarium::data::RamUsage;
 
@@ -81,6 +81,7 @@ fn meter(ui: &mut Ui, theme: &Theme, hue: Color, label: &'static str, bytes: usi
             Text::new(fmt_bytes(bytes))
                 .style(TextStyle {
                     font_size_px: VALUE_FONT,
+                    family: FontFamily::Mono,
                     ..ui.theme.text
                 })
                 .show(ui);

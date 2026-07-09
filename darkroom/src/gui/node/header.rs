@@ -1,14 +1,15 @@
 //! Node header bar: the title plus the node's indicator chips, split into two
 //! visual families so a toggle can't be mistaken for a fact. **Controls** are
 //! bordered, hover-lifting chips you act on — `S` subgraph-open, `D` disable,
-//! `C` cache, and the `i` inspect chip. **Markers** are flat tinted pills that
-//! only describe the node — `T` terminal and `~` impure. In [`status_row`] the
-//! markers sit left (by the run-time label), the controls right. Drawn as the
-//! top child of each node body by [`crate::gui::node::NodeUI`].
+//! `R`/`↓` cache, and the `i` inspect chip. **Markers** are flat tinted pills
+//! that only describe the node — `T` terminal and `~` impure. The descriptive
+//! side (run-time label + markers) rides in the [`header`] band beside the
+//! title; the interactive controls sit in the [`status_row`] below it. Drawn as
+//! the top children of each node body by [`crate::gui::node::NodeUI`].
 
 use aperture::{
-    Align, Background, Color, Configure, Corners, FontWeight, Panel, Sense, Shape, Sizing, Spacing,
-    Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, Corners, FontFamily, FontWeight, Panel, Sense, Shape,
+    Sizing, Spacing, Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 use glam::Vec2;
 use scenarium::graph::{CacheMode, NodeId};
@@ -106,12 +107,13 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.subscription_glyph", node_id))
 }
 
-/// The header bar: the node title plus the right-aligned inspect chip.
-/// Indicator chips + the run-time label live in [`status_row`] below it so
-/// adding/removing the time label never reflows the title. The terminal
-/// nodes' event-subscription pin is *not* drawn here — it records at canvas
-/// level, before the node bodies, so it peeks out from behind the node's
-/// corner (see [`draw_subscription_pins`]).
+/// The header bar: the node title (left) and the run-state cluster (right) —
+/// the last-run time, the descriptive markers (`T`/`~`), then the inspect chip.
+/// A `FILL` spacer between them keeps the title from reflowing as the time
+/// appears and disappears, so these can share one band with it (the interactive
+/// controls stay in [`status_row`] below). The terminal nodes' event-
+/// subscription pin is *not* drawn here — it records at canvas level, before the
+/// node bodies, so it peeks out from behind the node's corner.
 pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     // The header sits inside the body's border stroke (the layout folds
@@ -134,19 +136,64 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
         })
         .show(ui, |ui| {
             title(ui, rcx, node, out);
-            // FILL spacer pushes the inspect chip to the header's right
-            // edge, opposite the title.
+            // FILL spacer splits the title (left) from the run-state cluster
+            // (right): the last-run time, the descriptive markers, then inspect.
             Panel::hstack()
                 .id_salt("header_spacer")
                 .size((Sizing::FILL, Sizing::Hug))
                 .show(ui, |_| {});
+            // Last-run time, tied to the node's status color — the final time
+            // once executed, or live elapsed-so-far while running (`App::frame`
+            // repaints so it ticks). Mono/tabular so it holds a column across a
+            // stack of nodes. Lives in the header rather than a second row, so
+            // the node is one band shorter.
+            let elapsed = match node.exec_status {
+                ExecStatus::Executed(secs) => Some(secs),
+                ExecStatus::Running(at) => Some(at.elapsed().as_secs_f64()),
+                _ => None,
+            };
+            if let Some(secs) = elapsed {
+                let color = exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
+                // A comet spinner while computing, just left of the live time,
+                // so glow + spin + ticking time read as one "running" cue.
+                if matches!(node.exec_status, ExecStatus::Running(_)) {
+                    Spinner::new().size(BADGE_FONT).color(color).show(ui);
+                }
+                Text::new(fmt_elapsed(secs))
+                    .style(TextStyle {
+                        color,
+                        font_size_px: BADGE_FONT,
+                        family: FontFamily::Mono,
+                        ..ui.theme.text
+                    })
+                    .show(ui);
+            }
+            // Read-only markers — what the node *is* (flat tinted pills, not
+            // interactive, so they read as labels). They ride here beside the
+            // title; the interactive controls stay in `status_row` below.
+            if node.terminal {
+                Badge::marker(
+                    "badge_t",
+                    "T",
+                    theme.colors.badge_terminal,
+                    "Terminal — output sink",
+                )
+                .show(ui);
+            }
+            if node.impure {
+                Badge::marker(
+                    "badge_impure",
+                    "~",
+                    theme.colors.badge_impure,
+                    "Impure — recomputes every run, never cached",
+                )
+                .show(ui);
+            }
             // Inspect toggle: filled (checked) when pinned, accent outline
-            // when open, muted-grey outline (`text_muted`) when closed —
-            // visible on the header without competing with the accent
-            // S/T/C badges. The click is consumed in `Inspectors::apply`
-            // via this chip's deterministic id, so the returned flag is
-            // ignored here. Hidden on boundary nodes — they're pure
-            // routing, no runtime values / status worth inspecting.
+            // when open, muted-grey outline (`text_muted`) when closed. The
+            // click is consumed in `Inspectors::apply` via this chip's
+            // deterministic id, so the returned flag is ignored here. Hidden on
+            // boundary nodes — pure routing, no runtime values worth inspecting.
             if !node.boundary {
                 let mode = rcx.inspectors.mode(node.id);
                 let color = if mode.is_some() {
@@ -166,74 +213,32 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
         });
 }
 
-/// The status strip under the header: the last-run time label and the read-only
-/// markers (`T` terminal, `~` impure) on the left, then a `FILL` spacer, then
-/// the interactive controls (`S` subgraph-open, `D` disable, `C` cache) on the
-/// right. Its own row so the time appearing/disappearing doesn't resize the
-/// header; the disable chip always shows, so the row's height is reserved
-/// regardless.
+/// The controls strip under the header: a `FILL` spacer, then the interactive
+/// chips right-aligned — `S` subgraph-open, `D` disable, `R`/`↓` cache. What you
+/// can *do* to the node, kept in its own row so the actions group apart from the
+/// title's identity + state. The descriptive markers and run-time moved up into
+/// the [`header`]. The disable chip always shows, so the row's height is
+/// reserved regardless.
 pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     Panel::hstack()
         .id_salt("status_row")
         .size((Sizing::FILL, Sizing::Hug))
-        // Extra top padding sets the markers/controls off from the header bar
-        // (the body vstack has no gap between rows). Order: left, top, right, bottom.
+        // Extra top padding sets the controls off from the header bar (the body
+        // vstack has no gap between rows). Order: left, top, right, bottom.
         .padding(Spacing::new(8.0, 7.0, 8.0, 2.0))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            // Run time in the node's status color so it ties to the glow:
-            // the final time once executed, or live elapsed-so-far while
-            // running (`App::frame` repaints so it ticks).
-            let elapsed = match node.exec_status {
-                ExecStatus::Executed(secs) => Some(secs),
-                ExecStatus::Running(at) => Some(at.elapsed().as_secs_f64()),
-                _ => None,
-            };
-            if let Some(secs) = elapsed {
-                let color = exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
-                // A comet spinner while computing, just left of the live time,
-                // so glow + spin + ticking time read as one "running" cue.
-                if matches!(node.exec_status, ExecStatus::Running(_)) {
-                    Spinner::new().size(BADGE_FONT).color(color).show(ui);
-                }
-                Text::new(fmt_elapsed(secs))
-                    .style(TextStyle {
-                        color,
-                        font_size_px: BADGE_FONT,
-                        ..ui.theme.text
-                    })
-                    .show(ui);
-            }
-            // Read-only markers (left cluster, beside the time label): what
-            // the node *is*. Flat tinted pills, not interactive — so they read
-            // as labels rather than the toggles on the right.
-            if node.terminal {
-                Badge::marker(
-                    "badge_t",
-                    "T",
-                    theme.colors.badge_terminal,
-                    "Terminal — output sink",
-                )
-                .show(ui);
-            }
-            if node.impure {
-                Badge::marker(
-                    "badge_impure",
-                    "~",
-                    theme.colors.badge_impure,
-                    "Impure — recomputes every run, never cached",
-                )
-                .show(ui);
-            }
-            // FILL spacer splits the markers (left) from the controls (right).
+            // Leading FILL spacer pushes the controls to the right edge; the
+            // markers + run-time that used to share this row now ride in the
+            // header above.
             Panel::hstack()
-                .id_salt("badge_spacer")
+                .id_salt("ctrl_spacer")
                 .size((Sizing::FILL, Sizing::Hug))
                 .show(ui, |_| {});
-            // Interactive controls (right cluster): what you can *do* to the
-            // node. Bordered chips that lift on hover.
+            // Interactive controls: what you can *do* to the node. Bordered
+            // chips that lift on hover.
             //
             // Subgraph chip is the open-in-tab affordance. We only *draw* it
             // here (with its stable id); the click is read next frame in
@@ -270,7 +275,12 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // an `R` chip (keep the output resident in RAM, reused across runs) and
             // a `↓` chip (persist it to the on-disk store, surviving a reopen). Each
             // chip is filled when its bit is set; clicking flips just that bit.
-            // Muted swatch, like the disable toggle — a config flip, not an alarm.
+            //
+            // Quiet at rest: a chip inks muted grey until its bit is *on*, when it
+            // takes the cache accent (amber). So an idle node's controls stay
+            // monochrome and only an active cache carries color — the type-colored
+            // ports and the status glow keep the stage.
+            //
             // Both suppressed where caching can't apply: boundary nodes (pure
             // routing), self-caching nodes like the file-cache passthrough
             // (`uncacheable`), terminal sinks (no downstream consumer to serve a
@@ -279,9 +289,14 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             if !node.uncacheable && !node.terminal && !node.impure {
                 let ram = node.cache.caches_in_ram();
                 let disk = node.cache.persists_to_disk();
+                let ram_color = if ram {
+                    theme.colors.badge_cache
+                } else {
+                    theme.colors.text_muted
+                };
                 if Badge::control(
                     "R",
-                    theme.colors.badge_cache,
+                    ram_color,
                     ram,
                     ram_badge_wid(node.id),
                     "RuntimeCache in RAM — keep the output resident, reused across runs this session",
@@ -293,9 +308,14 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                         to: NodeProperty::RuntimeCache(CacheMode::from_bits(!ram, disk)),
                     });
                 }
+                let disk_color = if disk {
+                    theme.colors.badge_cache
+                } else {
+                    theme.colors.text_muted
+                };
                 if Badge::control(
                     "↓",
-                    theme.colors.badge_cache,
+                    disk_color,
                     disk,
                     disk_badge_wid(node.id),
                     "RuntimeCache to disk — persist the output across runs and reopens",
