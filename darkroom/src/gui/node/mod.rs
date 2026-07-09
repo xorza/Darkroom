@@ -11,11 +11,11 @@ use crate::gui::canvas::cull::node_visible;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::node_ports;
-use crate::gui::node::header::{header, status_row, subgraph_badge_wid};
+use crate::gui::node::header::{header, status_row, subgraph_badge_wid, subscription_pin};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid, ports_row};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
-use crate::gui::theme::{Theme, ThemePreset};
+use crate::gui::theme::Theme;
 use crate::gui::{PortKind, PortRef, UiAction};
 use aperture::{
     Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
@@ -200,6 +200,13 @@ impl NodeUI {
         // Status glow when the node ran, else the ambient elevation shadow —
         // one slot, and live status outranks depth.
         let shadow = node_shadow(theme, node.exec_status);
+
+        // The subscription pin records just before the body so it peeks out
+        // from behind this node's corner while riding the same cull decision
+        // and stack position as the node itself.
+        if node.terminal {
+            subscription_pin(ui, theme, node, rcx.geometry.subs.is_hovered(node.id));
+        }
 
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
@@ -467,8 +474,9 @@ pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
 /// The node body's one shadow: the status glow for its last-run outcome
 /// (zero offset so the halo wraps evenly), or — when it didn't run — a soft
 /// ambient drop shadow that lifts the body off the canvas and the wires
-/// crossing beneath it. The ambient alpha is per-preset: near-black canvases
-/// need a much heavier black to register than near-white ones.
+/// crossing beneath it. The ambient color is the theme's elevation swatch
+/// (`node_ambient_shadow`), shared with the inspector panels so all
+/// elevated surfaces cast one kind of shadow.
 fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
     match exec_color(theme, status) {
         // Blur/spread sized so the glow carries elevation too — it replaces
@@ -481,19 +489,13 @@ fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
             spread: 1.0,
             inset: false,
         },
-        None => {
-            let alpha = match theme.preset {
-                ThemePreset::Dark => 0.5,
-                ThemePreset::Light => 0.2,
-            };
-            Shadow {
-                color: Color::linear_rgba(0.0, 0.0, 0.0, alpha),
-                offset: Vec2::new(0.0, 3.0),
-                blur: 10.0,
-                spread: 0.0,
-                inset: false,
-            }
-        }
+        None => Shadow {
+            color: theme.colors.node_ambient_shadow,
+            offset: Vec2::new(0.0, 3.0),
+            blur: 10.0,
+            spread: 0.0,
+            inset: false,
+        },
     }
 }
 
@@ -507,11 +509,15 @@ pub(crate) fn node_widget_id(node_id: NodeId) -> WidgetId {
 
 /// Pointer-over-node, from last frame's arranged body rect. The body
 /// response's own `hovered` flag misses most of the node's area — ports,
-/// chips, and editors capture the hit — so hover-reveal affordances (chip
-/// ink, value-editor chips) test the rect directly.
+/// chips, and editors capture the hit — so hover-reveal affordances (the
+/// value-editor chips) test the rect directly. Uses the *screen-space*
+/// `rect` (`transform.apply_rect(layout_rect)`) to match `pointer_pos`'s
+/// surface space at any pan/zoom. Occlusion-blind: a panel or chrome
+/// stacked over the node still counts as hovering it (an aperture
+/// `hover_within` would fix that properly).
 pub(crate) fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
     match (
-        ui.response_for(node_widget_id(node_id)).layout_rect,
+        ui.response_for(node_widget_id(node_id)).rect,
         ui.pointer_pos(),
     ) {
         (Some(rect), Some(p)) => rect.contains(p),

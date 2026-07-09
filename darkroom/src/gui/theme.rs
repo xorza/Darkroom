@@ -73,6 +73,9 @@ pub(crate) mod dark {
     pub(crate) const TEXT_MUTED: Color = Color::hex(0xaaaaa8);
     // Port/event labels: de-emphasized so the value column carries each row.
     pub(crate) const PORT_LABEL: Color = Color::hex(0xaaaaa8);
+    // Ambient elevation shadow under nodes and floating panels. Heavy black:
+    // a near-black canvas needs a lot of alpha before a shadow registers.
+    pub(crate) const NODE_AMBIENT_SHADOW: Color = Color::linear_rgba(0.0, 0.0, 0.0, 0.5);
     pub(crate) const CHROME_FILL: Color = Color::hex(0x252525);
 
     // header badges
@@ -137,6 +140,8 @@ pub(crate) mod light {
     // Darker than `text_muted`: labels are primary content and Ayu Light's
     // muted gray drops under 3:1 on the node fill.
     pub(crate) const PORT_LABEL: Color = Color::hex(0x6e7378);
+    // Light surfaces need far less shadow than the dark canvas.
+    pub(crate) const NODE_AMBIENT_SHADOW: Color = Color::linear_rgba(0.0, 0.0, 0.0, 0.2);
     pub(crate) const CHROME_FILL: Color = Color::hex(0xdcddde);
 
     // header badges — accent / error / a deeper amber than the palette's
@@ -289,6 +294,12 @@ pub struct Theme {
     /// `Binding::Const` input port (number/string field, file-pick chip).
     pub static_value_editor: StaticValueEditorTheme,
 
+    /// The pointer-over-node variant of `static_value_editor` (chip fill
+    /// pre-lit at half the hover strength). Precomputed at construction —
+    /// deriving it per frame would clone the whole nested theme in the
+    /// record path — and kept next to its base so the pair can't drift.
+    pub static_value_editor_revealed: StaticValueEditorTheme,
+
     /// Look for the inline-rename widget (node title, boundary port,
     /// subgraph tab).
     pub inline_rename: InlineRenameTheme,
@@ -343,8 +354,11 @@ impl StaticValueEditorTheme {
     /// The pointer-over-node variant: the chip's hover fill, at reduced
     /// alpha, becomes the *resting* background — const editors surface as
     /// soon as the pointer is anywhere over the node, without waiting for a
-    /// direct hover. Fill only, so geometry is identical to the resting look.
-    pub(crate) fn revealed(&self) -> Self {
+    /// direct hover. Fill only, so geometry is identical to the resting
+    /// look. Called once per built theme (see `Theme::build`), never per
+    /// frame. Silently a no-op if the chip's hover fill ever stops being a
+    /// solid brush — revisit the patch then.
+    fn revealed(&self) -> Self {
         const REVEAL_ALPHA: f32 = 0.5;
         let mut out = self.clone();
         let hover_fill = self
@@ -704,6 +718,10 @@ palette_colors! {
     /// slot (not `text_muted`) because the light palette needs a darker
     /// value for legibility on the node fill.
     port_label => PORT_LABEL,
+    /// Ambient elevation shadow cast by nodes and floating panels (the
+    /// inspector) when no status glow claims the slot — one swatch so
+    /// every elevated surface casts the same kind of shadow.
+    node_ambient_shadow => NODE_AMBIENT_SHADOW,
     /// Top-chrome fill behind the menu bar + tab strip. A notch darker
     /// than the node surface, sitting between the graph (`canvas_bg`)
     /// and the nodes, so the chrome recedes and the active tab (which
@@ -805,6 +823,7 @@ impl Theme {
         sve: StaticValueEditorTheme,
         inline_rename: InlineRenameTheme,
     ) -> Self {
+        let static_value_editor_revealed = sve.revealed();
         Self {
             preset,
             canvas_dot_spacing: CANVAS_DOT_SPACING,
@@ -824,6 +843,7 @@ impl Theme {
             new_node_popup_max_height: NEW_NODE_POPUP_MAX_HEIGHT,
             colors,
             static_value_editor: sve,
+            static_value_editor_revealed,
             inline_rename,
             aperture_theme: aperture_theme_for(p),
         }

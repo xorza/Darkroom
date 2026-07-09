@@ -13,6 +13,7 @@ use aperture::Color;
 use scenarium::data::DataType;
 
 use crate::gui::PortKind;
+use crate::gui::canvas::wire::toward;
 use crate::gui::theme::{Theme, ThemePreset};
 
 /// Color for a port of type `ty` on the given side. `hovered` lightens
@@ -86,21 +87,9 @@ fn ramp_pick(ramp: &[u32], key: u128) -> u32 {
 fn emphasize(c: Color, preset: ThemePreset) -> Color {
     const T: f32 = 0.28;
     match preset {
-        ThemePreset::Dark => mix(c, Color::WHITE, T),
-        ThemePreset::Light => mix(c, Color::BLACK, T),
+        ThemePreset::Dark => toward(c, Color::WHITE, T),
+        ThemePreset::Light => toward(c, Color::BLACK, T),
     }
-}
-
-/// Linear-space lerp between two colors, preserving `a`'s alpha. Both
-/// inputs are already linear (storage form), so a straight component lerp
-/// is the correct blend.
-fn mix(a: Color, b: Color, t: f32) -> Color {
-    Color::linear_rgba(
-        a.r + (b.r - a.r) * t,
-        a.g + (b.g - a.g) * t,
-        a.b + (b.b - a.b) * t,
-        a.a,
-    )
 }
 
 /// A per-palette data-type color set. Hand-tuned to harmonize with the

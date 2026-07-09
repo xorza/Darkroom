@@ -35,7 +35,7 @@ use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
-use crate::gui::node::header::draw_subscription_pins;
+use crate::gui::canvas::wire::WireEmphasis;
 use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_port_dblclicks};
 use crate::gui::scene::{Scene, SceneNode};
 use crate::gui::{PortKind, PortRef};
@@ -332,27 +332,26 @@ impl GraphUI {
                         selection_ui.draw(ui, ctx);
                         {
                             let mut probe = breaker_ui.probe(canvas_origin);
-                            connection_ui.draw(
+                            // One emphasis resolution for both wire families:
+                            // any wire gesture — either drag controller or an
+                            // active breaker scribble — fades the standing set.
+                            let fading = connection_ui.dragging()
+                                || subscription_ui.dragging()
+                                || probe.state.is_some();
+                            let emphasis = WireEmphasis::resolve(
                                 ui,
-                                ctx,
                                 scene,
-                                geometry,
-                                visible,
-                                &mut probe,
                                 canvas_origin,
+                                ctx.theme.colors.canvas_bg,
+                                fading,
                             );
+                            connection_ui
+                                .draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
                             // Subscription wires sit under the node bodies
                             // like data wires (drawn before `draw_all`), and
                             // share the breaker probe so they're cuttable too.
-                            subscription_ui.draw(
-                                ui,
-                                ctx,
-                                scene,
-                                geometry,
-                                visible,
-                                &mut probe,
-                                canvas_origin,
-                            );
+                            subscription_ui
+                                .draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,
@@ -361,10 +360,6 @@ impl GraphUI {
                                 geometry,
                                 inspectors,
                             };
-                            // Subscription pins record before the bodies so
-                            // each triangle peeks out from *behind* its
-                            // node's corner (and above the wires).
-                            draw_subscription_pins(ui, rcx);
                             node_ui.draw_all(ui, rcx, visible, &mut probe, out);
                         }
                         // Inspection panels paint after the node bodies so

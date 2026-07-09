@@ -200,8 +200,11 @@ impl Inspectors {
             fill: theme.colors.node_fill.into(),
             stroke: Stroke::solid(border, 1.0),
             corners: Corners::all(theme.node_corner_radius),
+            // Same elevation swatch as the node bodies, so every floating
+            // surface casts one kind of shadow (bigger blur — the panel
+            // sits higher).
             shadow: Shadow {
-                color: Color::linear_rgb(0.0, 0.0, 0.0).with_alpha(0.45),
+                color: theme.colors.node_ambient_shadow,
                 offset: Vec2::new(0.0, 3.0),
                 blur: 12.0,
                 spread: 0.0,
@@ -255,8 +258,8 @@ impl Inspectors {
                         },
                     );
                 }
-                if let Some(flags) = flag_text(node) {
-                    line(ui, &flags, muted_style(theme, ui));
+                if node.terminal {
+                    line(ui, "terminal", muted_style(theme, ui));
                 }
                 let description = node.description.as_str();
                 if !description.is_empty() {
@@ -366,10 +369,8 @@ fn line(ui: &mut Ui, text: &str, style: TextStyle) {
 fn section(ui: &mut Ui, theme: &Theme, text: &'static str) {
     Text::new(text)
         .style(TextStyle {
-            color: theme.colors.text_muted,
-            font_size_px: 11.0,
             weight: FontWeight::Bold,
-            ..ui.theme.text
+            ..muted_style(theme, ui)
         })
         .margin(Spacing::new(0.0, 8.0, 0.0, 0.0))
         .show(ui);
@@ -399,12 +400,9 @@ fn port_row(
 }
 
 /// The label tier of a port row. Skips the type when it repeats the port
-/// name (`Image: Image`, the dominant case) and for paths (the value
-/// already reads as one).
+/// name (`Image · Image`, the dominant case; `Path · path` likewise) —
+/// otherwise `name · type`, so even a valueless port announces its type.
 fn port_label_text(library: &Library, name: &str, ty: &DataType) -> String {
-    if matches!(ty, DataType::FsPath(_)) {
-        return name.to_owned();
-    }
     let ty_name = library.type_name(ty);
     if ty_name.eq_ignore_ascii_case(name) {
         name.to_owned()
@@ -468,9 +466,12 @@ fn title_style(ui: &Ui) -> TextStyle {
     }
 }
 
+/// The panel's de-emphasized ink. `port_label`, not `text_muted`: the panel
+/// surface is the node fill, exactly the combination the light palette's
+/// `text_muted` is too faint for (see the `port_label` slot).
 fn muted_style(theme: &Theme, ui: &Ui) -> TextStyle {
     TextStyle {
-        color: theme.colors.text_muted,
+        color: theme.colors.port_label,
         font_size_px: 11.0,
         ..ui.theme.text
     }
@@ -514,11 +515,6 @@ fn status_text(status: ExecStatus) -> String {
     }
 }
 
-/// `terminal` flag for the footer, or `None` when the node isn't a terminal.
-fn flag_text(node: &SceneNode) -> Option<String> {
-    node.terminal.then(|| "terminal".to_owned())
-}
-
 /// Stable id for a node's inspector toggle chip in the header.
 pub(crate) fn inspect_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.inspect_badge", node_id))
@@ -532,6 +528,28 @@ fn inspect_panel_wid(node_id: NodeId) -> WidgetId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn port_label_text_dedups_type_repeating_the_name() {
+        use scenarium::data::FsPathConfig;
+        use std::sync::Arc;
+        let lib = Library::default();
+        // Type repeats the name (case-insensitive) → the name alone, no
+        // "Image · Image" stutter; distinct type → "name · type".
+        assert_eq!(port_label_text(&lib, "Float", &DataType::Float), "Float");
+        assert_eq!(
+            port_label_text(&lib, "Brightness", &DataType::Float),
+            "Brightness \u{b7} float"
+        );
+        // A path port still announces its type when the name differs —
+        // the old formatter dropped it entirely for valueless path ports.
+        let path_ty = DataType::FsPath(Arc::new(FsPathConfig::default()));
+        assert_eq!(port_label_text(&lib, "Path", &path_ty), "Path");
+        assert_eq!(
+            port_label_text(&lib, "Output", &path_ty),
+            "Output \u{b7} path"
+        );
+    }
 
     #[test]
     fn cycle_walks_closed_open_pinned_closed() {

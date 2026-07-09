@@ -10,10 +10,7 @@ use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::wire_visible;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::wire::{
-    CubicHandles, MIN_HANDLE, WIRE_DRAG_FADE, WIRE_HOVER_RADIUS, WIRE_HOVER_WIDTH, WIRE_REST_DIM,
-    add_cubic_wire, near_cubic, toward,
-};
+use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, WireEmphasis, add_cubic_wire};
 use crate::gui::canvas::{node_ports, outer_canvas_widget_id, pointer_world};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
@@ -172,6 +169,13 @@ impl ConnectionUI {
         self.pending_open.take()
     }
 
+    /// Whether a new-connection gesture is in flight — feeds the shared
+    /// wire-fade tier. (A method, not a `pub(crate)` field: `InFlight` is
+    /// module-private.)
+    pub(crate) fn dragging(&self) -> bool {
+        self.state.is_some()
+    }
+
     /// Whether a floating wire ended on a right-click this frame — the
     /// canvas suppresses the palette that same right-click would open.
     pub(crate) fn ended_on_secondary(&self) -> bool {
@@ -300,21 +304,12 @@ impl ConnectionUI {
         geometry: &CanvasGeometry,
         visible: Option<Rect>,
         probe: &mut BreakerProbe<'_>,
-        canvas_origin: Vec2,
+        emphasis: &WireEmphasis,
     ) {
         let width = ctx.theme.connection_width;
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken.clear();
         }
-        // Hover proximity runs in world units; the threshold is a screen
-        // radius, so divide by zoom. No hover highlight while a new wire is
-        // being dragged — the whole standing set fades instead.
-        let dragging = self.state.is_some();
-        let pointer = (!dragging)
-            .then(|| pointer_world(ui, scene, canvas_origin))
-            .flatten();
-        let zoom = scene.viewport.zoom.max(f32::EPSILON);
-        let hover_radius = WIRE_HOVER_RADIUS / zoom;
         for c in &scene.connections {
             let src_port = PortRef {
                 node_id: c.src_node,
@@ -355,35 +350,28 @@ impl ConnectionUI {
             // 0.0. Broken-state still wins as a flat color so the alarm
             // read doesn't get diluted by the gradient.
             //
-            // Emphasis tiers: at rest the endpoint colors pull toward the
-            // canvas (dots outrank paths); hovering the curve or either
-            // endpoint restores full strength and widens the stroke; while
-            // a new connection is dragged the whole standing set fades.
-            let hovered = !broken
-                && (geometry.ports.is_hovered(src_port)
-                    || geometry.ports.is_hovered(tgt_port)
-                    || pointer.is_some_and(|p| near_cubic(p0, &handles, p3, p, hover_radius)));
+            // Emphasis tiers resolve through the shared `WireEmphasis` (see
+            // wire.rs). A broken wire is the alarm: full color and full
+            // width against the (breaker-faded) rest of the set.
+            let endpoint_hover =
+                geometry.ports.is_hovered(src_port) || geometry.ports.is_hovered(tgt_port);
+            let hovered = !broken && emphasis.hovered(endpoint_hover, p0, &handles, p3);
             let brush = if broken {
                 Brush::Solid(ctx.theme.colors.connection_broken)
             } else {
                 let src_ty = port_data_type(scene, src_port).unwrap_or_default();
                 let tgt_ty = port_data_type(scene, tgt_port).unwrap_or_default();
-                let mut a = port_color(ctx.theme, &src_ty, PortKind::Output, false);
-                let mut b = port_color(ctx.theme, &tgt_ty, PortKind::Input, false);
-                if dragging {
-                    a = a.with_alpha(WIRE_DRAG_FADE);
-                    b = b.with_alpha(WIRE_DRAG_FADE);
-                } else if !hovered {
-                    a = toward(a, ctx.theme.colors.canvas_bg, WIRE_REST_DIM);
-                    b = toward(b, ctx.theme.colors.canvas_bg, WIRE_REST_DIM);
-                }
+                let a = emphasis.tint(
+                    port_color(ctx.theme, &src_ty, PortKind::Output, false),
+                    hovered,
+                );
+                let b = emphasis.tint(
+                    port_color(ctx.theme, &tgt_ty, PortKind::Input, false),
+                    hovered,
+                );
                 port_gradient(a, b)
             };
-            let w = if hovered {
-                width * WIRE_HOVER_WIDTH
-            } else {
-                width
-            };
+            let w = emphasis.width(width, hovered || broken);
             add_cubic_wire(ui, p0, p3, handles, w, brush);
         }
     }

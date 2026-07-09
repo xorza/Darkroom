@@ -9,10 +9,7 @@ use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::wire_visible;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pointer_world;
-use crate::gui::canvas::wire::{
-    CubicHandles, MIN_HANDLE, WIRE_DRAG_FADE, WIRE_HOVER_RADIUS, WIRE_HOVER_WIDTH, WIRE_REST_DIM,
-    add_cubic_wire, near_cubic, toward,
-};
+use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, WireEmphasis, add_cubic_wire};
 use crate::gui::node::port_color::event_color;
 use crate::gui::scene::Scene;
 
@@ -70,6 +67,13 @@ enum InFlight {
 }
 
 impl SubscriptionUI {
+    /// Whether a subscription-wire gesture is in flight — feeds the shared
+    /// wire-fade tier. (A method, not a `pub(crate)` field: `InFlight` is
+    /// module-private.)
+    pub(crate) fn dragging(&self) -> bool {
+        self.state.is_some()
+    }
+
     /// Drive the in-flight subscription wire: latch a fresh drag from either
     /// an emitter glyph or a subscription pin, track the snapped opposite
     /// end, and commit a `SetSubscription { subscribe: true }` on release over
@@ -180,18 +184,9 @@ impl SubscriptionUI {
         geometry: &CanvasGeometry,
         visible: Option<Rect>,
         probe: &mut BreakerProbe<'_>,
-        canvas_origin: Vec2,
+        emphasis: &WireEmphasis,
     ) {
         let width = ctx.theme.connection_width;
-        // Same emphasis tiers as the data wires (see `connection_ui`): rest
-        // dims toward the canvas, hover restores full strength, an in-flight
-        // subscription drag fades the standing set.
-        let dragging = self.state.is_some();
-        let pointer = (!dragging)
-            .then(|| pointer_world(ui, scene, canvas_origin))
-            .flatten();
-        let zoom = scene.viewport.zoom.max(f32::EPSILON);
-        let hover_radius = WIRE_HOVER_RADIUS / zoom;
         for s in &scene.subscriptions {
             let emitter = EventRef {
                 node_id: s.emitter,
@@ -217,28 +212,19 @@ impl SubscriptionUI {
                     .broken_subscriptions
                     .push(*s);
             }
-            // The neutral event color matches the emitter/subscriber glyphs;
-            // the broken alarm color wins while the breaker crosses it.
-            let hovered = !broken
-                && (geometry.events.is_hovered(emitter)
-                    || geometry.subs.is_hovered(s.subscriber)
-                    || pointer.is_some_and(|p| near_cubic(p0, &handles, p3, p, hover_radius)));
+            // Emphasis tiers resolve through the shared `WireEmphasis` (see
+            // wire.rs). Event wires share the breaker-alarm hue, so the
+            // alarm read on a broken wire is full strength + full width
+            // against the breaker-faded rest of the set.
+            let endpoint_hover =
+                geometry.events.is_hovered(emitter) || geometry.subs.is_hovered(s.subscriber);
+            let hovered = !broken && emphasis.hovered(endpoint_hover, p0, &handles, p3);
             let brush = if broken {
                 Brush::Solid(ctx.theme.colors.connection_broken)
             } else {
-                let mut c = event_color(ctx.theme, false);
-                if dragging {
-                    c = c.with_alpha(WIRE_DRAG_FADE);
-                } else if !hovered {
-                    c = toward(c, ctx.theme.colors.canvas_bg, WIRE_REST_DIM);
-                }
-                Brush::Solid(c)
+                Brush::Solid(emphasis.tint(event_color(ctx.theme, false), hovered))
             };
-            let w = if hovered {
-                width * WIRE_HOVER_WIDTH
-            } else {
-                width
-            };
+            let w = emphasis.width(width, hovered || broken);
             add_cubic_wire(ui, p0, p3, handles, w, brush);
         }
     }

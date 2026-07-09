@@ -161,43 +161,25 @@ const ML_LABEL_WIDTH: f32 = 150.0;
 /// Gap between the label column and the path field.
 const ML_ROW_GAP: f32 = 8.0;
 
-/// Health of a committed model path. Refreshed only when the external value
-/// changes (initial load, Browse, a commit landing in `path`) — never per
-/// frame, since each check stats the filesystem.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum PathStatus {
-    /// No path set — a valid resting state (the ML nodes are optional).
-    #[default]
-    Empty,
-    Ok,
-    Missing,
-    NotOnnx,
-}
-
-impl PathStatus {
-    fn of(path: &str) -> Self {
-        if path.is_empty() {
-            return Self::Empty;
-        }
-        let p = Path::new(path);
-        if !p.is_file() {
-            return Self::Missing;
-        }
-        let onnx = p
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("onnx"));
-        if onnx { Self::Ok } else { Self::NotOnnx }
+/// What's wrong with a committed model path, or `None` when it's empty (a
+/// valid resting state — the ML nodes are optional) or healthy. Stats the
+/// filesystem, so callers refresh it only on value changes and commits —
+/// never per frame.
+fn path_problem(path: &str) -> Option<&'static str> {
+    if path.is_empty() {
+        return None;
     }
-
-    /// The error line shown under the row, `None` when there is nothing
-    /// wrong worth flagging.
-    fn problem(self) -> Option<&'static str> {
-        match self {
-            Self::Empty | Self::Ok => None,
-            Self::Missing => Some("File not found"),
-            Self::NotOnnx => Some("Not an .onnx file"),
-        }
+    let p = Path::new(path);
+    if p.is_dir() {
+        return Some("Points at a folder \u{2014} pick the .onnx file inside");
     }
+    if !p.is_file() {
+        return Some("File not found");
+    }
+    let onnx = p
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("onnx"));
+    (!onnx).then_some("Not an .onnx file")
 }
 
 /// Cross-frame state for a [`model_row`] path field: the editor's live `text`
@@ -205,13 +187,14 @@ impl PathStatus {
 /// refreshed from the path only when `seen` diverges from it (an external
 /// change — load, Browse, or our own commit landing), so an in-progress edit
 /// is never overwritten, including on the blur frame where the commit fires.
-/// `status` (the path health) rides the same refresh, so the filesystem is
-/// only consulted when the committed value moves.
+/// `problem` (the path health) refreshes on the same mirror *and* on every
+/// commit — the latter so re-committing an unchanged path re-stats it (the
+/// file may have appeared since) — never per frame.
 #[derive(Default, Debug)]
 struct PathField {
     text: String,
     seen: String,
-    status: PathStatus,
+    problem: Option<&'static str>,
 }
 
 /// One model-path row: a fixed-width label, an **editable** path field (type
@@ -245,9 +228,9 @@ fn model_row(
     if field.seen != canonical {
         field.text.replace_range(.., &canonical);
         field.seen.replace_range(.., &canonical);
-        field.status = PathStatus::of(&canonical);
+        field.problem = path_problem(&canonical);
     }
-    let status = field.status;
+    let problem = field.problem;
     let mut draft = std::mem::take(&mut field.text);
     Panel::vstack()
         .id_salt(label)
@@ -279,7 +262,7 @@ fn model_row(
                         .placeholder("/path/to/model.onnx");
                     // A broken committed path recolors the field's chrome to
                     // the error tint (message under the row says what's wrong).
-                    if status.problem().is_some() {
+                    if problem.is_some() {
                         let mut style = ui.theme.text_edit.clone();
                         for look in [&mut style.normal, &mut style.focused] {
                             if let Some(bg) = look.background.as_mut() {
@@ -292,12 +275,19 @@ fn model_row(
                     let resp = edit.show(ui);
                     let commit = resp.submitted || resp.lost_focus;
                     if commit && draft != canonical {
-                        // `status` revalidates next frame via the `seen`
-                        // mirror once this lands back in `canonical`.
                         *path = PathBuf::from(draft.clone());
                         command = Some(AppCommand::Prefs(PrefsCommand::Changed));
                     }
-                    ui.state_mut::<PathField>(id).text = draft;
+                    let field = ui.state_mut::<PathField>(id);
+                    field.text = draft;
+                    if commit {
+                        // Re-stat on every commit — even an unchanged path:
+                        // the file may have appeared (or vanished) since the
+                        // last check, and Enter is the natural retry. A
+                        // *changed* commit re-checks again next frame via
+                        // the `seen` mirror once it lands in `canonical`.
+                        field.problem = path_problem(&field.text);
+                    }
 
                     if Button::new()
                         .id_salt("browse")
@@ -309,8 +299,8 @@ fn model_row(
                     }
                 });
 
-            if let Some(problem) = status.problem() {
-                indented_line(ui, |ui| {
+            if let Some(problem) = problem {
+                indented_line(ui, "problem", |ui| {
                     Text::new(problem)
                         .style(TextStyle {
                             color: theme.colors.exec_errored_glow,
@@ -331,10 +321,12 @@ fn model_row(
 const DOWNLOAD_HINT: &str = " \u{2014} unzip and point the field above at the .onnx file inside";
 
 /// A line under a model row, indented past the label column so it sits
-/// under the path field.
-fn indented_line(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
+/// under the path field. `salt` keys the panel explicitly: the error line
+/// is conditional, and an auto id would re-key the hint line each time it
+/// appears (occurrence-counter shift).
+fn indented_line(ui: &mut Ui, salt: &'static str, body: impl FnOnce(&mut Ui)) {
     Panel::hstack()
-        .auto_id()
+        .id_salt(salt)
         .size((Sizing::FILL, Sizing::Hug))
         .padding(Spacing::new(ML_LABEL_WIDTH + ML_ROW_GAP, 0.0, 0.0, 0.0))
         .gap(0.0)
@@ -355,7 +347,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
     } else {
         theme.colors.badge_subgraph
     };
-    indented_line(ui, |ui| {
+    indented_line(ui, "hint", |ui| {
         let link = Panel::hstack()
             .id(id)
             .size((Sizing::Hug, Sizing::Hug))
@@ -384,4 +376,39 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
             })
             .show(ui);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_problem_classifies_empty_missing_dir_and_extension() {
+        // Empty is the valid resting state (the ML nodes are optional).
+        assert_eq!(path_problem(""), None);
+        // A directory is distinguished from a truly absent path — pointing
+        // at the unzipped folder is the mistake the download hint warns of.
+        let dir = std::env::temp_dir();
+        assert_eq!(
+            path_problem(dir.to_str().unwrap()),
+            Some("Points at a folder \u{2014} pick the .onnx file inside")
+        );
+        let missing = dir.join("darkroom-test-definitely-missing.onnx");
+        assert_eq!(
+            path_problem(missing.to_str().unwrap()),
+            Some("File not found")
+        );
+        // Real files: a wrong extension flags; `.onnx` passes in any case.
+        let wrong = dir.join(format!("darkroom-path-test-{}.txt", std::process::id()));
+        std::fs::write(&wrong, b"x").unwrap();
+        assert_eq!(
+            path_problem(wrong.to_str().unwrap()),
+            Some("Not an .onnx file")
+        );
+        let onnx = dir.join(format!("darkroom-path-test-{}.ONNX", std::process::id()));
+        std::fs::write(&onnx, b"x").unwrap();
+        assert_eq!(path_problem(onnx.to_str().unwrap()), None);
+        std::fs::remove_file(wrong).unwrap();
+        std::fs::remove_file(onnx).unwrap();
+    }
 }

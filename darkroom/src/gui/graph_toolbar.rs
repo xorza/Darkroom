@@ -182,12 +182,19 @@ fn toggle_button(
     draw_glyph: impl FnOnce(&mut Ui, f32, Color),
 ) -> bool {
     let hovered = ui.response_for(wid).hovered;
-    let (fill, glyph) = if toggled {
-        (theme.colors.exec_running_glow, theme.colors.chrome_fill)
-    } else if hovered {
-        (theme.colors.header_fill, idle_glyph)
+    // Glyph and fill vary on different axes: the glyph only inverts for
+    // the toggled state, the fill also lifts on hover.
+    let glyph = if toggled {
+        theme.colors.chrome_fill
     } else {
-        (theme.colors.node_fill, idle_glyph)
+        idle_glyph
+    };
+    let fill = if toggled {
+        theme.colors.exec_running_glow
+    } else if hovered {
+        theme.colors.header_fill
+    } else {
+        theme.colors.node_fill
     };
     glyph_button(ui, wid, fill, glyph, tip, draw_glyph)
 }

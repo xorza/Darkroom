@@ -58,8 +58,11 @@ pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
     // Pointer-over-node surfaces the (otherwise invisible) const-editor
     // chips at half strength — the edit affordance appears exactly when the
     // pointer is in the neighborhood, and geometry never changes.
-    let revealed = node_hovered(ui, node.id).then(|| theme.static_value_editor.revealed());
-    let sve = revealed.as_ref().unwrap_or(&theme.static_value_editor);
+    let sve = if node_hovered(ui, node.id) {
+        &theme.static_value_editor_revealed
+    } else {
+        &theme.static_value_editor
+    };
     // Fixed-height rows (font-relative) so a node's ports stay uniform whether
     // or not an input carries an inline editor (hug makes editor rows taller).
     let row_height = theme.aperture_theme.text.font_size_px * PORT_ROW_HEIGHT_EM;
@@ -108,7 +111,7 @@ fn input_cells(
         // *outputs* — renameable, except the trailing "+" placeholder.
         let rename = (node.boundary && i + 1 < inputs.len()).then_some(BoundarySide::Output);
         input_label_cell(ui, rcx, port, node, input, rename, out);
-        if allow_const && matches!(input.binding, InputBindingView::Const(_)) {
+        if allow_const {
             value_cell(ui, rcx, sve, port, input, out);
         }
     }
@@ -266,6 +269,8 @@ fn value_cell(
     input: &SceneInput,
     out: &mut Vec<Intent>,
 ) {
+    // The one owner of the "only Const bindings get an inline editor"
+    // filter — wired and unbound inputs render no value cell.
     let InputBindingView::Const(value) = &input.binding else {
         return;
     };
@@ -408,12 +413,16 @@ fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: S
         .show(ui, |ui| {
             // Right-pointing isosceles triangle filling the port box: the apex
             // points outward (away from the node body), matching the emit
-            // direction. SDF-antialiased via the triangle primitive.
+            // direction. SDF-antialiased via the triangle primitive. Vertices
+            // are inset by the corner radius: the SDF rounds by *dilating*
+            // (`sdf - radius`), so the rounded result grows back out to the
+            // port box instead of past it.
+            let r = EVENT_TRIANGLE_RADIUS;
             ui.add_shape(Shape::Triangle {
-                a: Vec2::new(0.0, 0.0),
-                b: Vec2::new(0.0, port),
-                c: Vec2::new(port, port * 0.5),
-                radius: EVENT_TRIANGLE_RADIUS,
+                a: Vec2::new(r, r),
+                b: Vec2::new(r, port - r),
+                c: Vec2::new(port - r, port * 0.5),
+                radius: r,
                 fill: fill.into(),
                 stroke: Stroke::ZERO,
             });

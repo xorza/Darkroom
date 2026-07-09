@@ -52,46 +52,32 @@ pub(crate) fn fmt_elapsed(secs: f64) -> String {
     }
 }
 
-/// Record every terminal node's event-subscription pin as a canvas-level
-/// widget. Called *before* the node bodies so each triangle paints under
-/// its node — peeking out from behind the top-left corner — while sitting
-/// above the wires. Uses the same widget id as ever, so `CanvasGeometry`
-/// polling and the `SubscriptionUI` drag logic are unchanged; the body
-/// covers (and wins hits over) the inner half, leaving the protruding part
-/// hoverable and draggable.
-pub(crate) fn draw_subscription_pins(ui: &mut Ui, rcx: RecordCtx<'_>) {
-    for node in rcx.scene.nodes.iter() {
-        if !node.terminal {
-            continue;
-        }
-        // Highlighted while an event drag is snapped to this pin.
-        let snapped = rcx.geometry.subs.is_hovered(node.id);
-        subscription_pin(ui, rcx.theme, node, snapped);
-    }
-}
-
 /// One whole-node event-subscription pin: an event-colored triangle behind
 /// the node's top-left corner, its apex pointing up-left toward the
-/// incoming wire. The port-sized box is centered on the corner (world
+/// incoming wire. Recorded by `NodeUI::draw_one` immediately *before* its
+/// node's body, so it peeks out from behind the corner while keeping the
+/// node stack's paint order (above lower nodes, below raised ones) and the
+/// cull decision. The port-sized box is centered on the corner (world
 /// coords), the same half-on-the-edge geometry the port circles use. It's
 /// both a drop target for an emitter's event wire *and* a drag source —
-/// pulling from it starts a subscription wire aimed at an emitter (see
-/// `SubscriptionUI`). `hovered` (set while a drag snaps to it) tints the
-/// triangle as drop feedback.
-fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hovered: bool) {
+/// pulling from the *protruding* half starts a subscription wire aimed at
+/// an emitter (see `SubscriptionUI`); the body-covered half yields presses
+/// to the node, while drop-snapping (rect-based) still accepts the whole
+/// box. `hovered` (set while a drag snaps to it) tints the triangle as
+/// drop feedback.
+pub(crate) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hovered: bool) {
     let port = theme.port_size;
     // Rotate the base (left-pointing) triangle +45° about its center so the
     // apex points up-left, aligned with the wire arriving from there. The
     // rotated points are passed straight to the SDF triangle primitive; the
     // layout box is unchanged (the glyph isn't clipped to the owner rect, so
-    // the rotated apex may exceed it).
+    // the rotated apex may exceed it). The base triangle is inset by the
+    // corner radius: the SDF rounds by *dilating* (`sdf - radius`), so the
+    // rounded result grows back to the port box instead of past it.
+    let r = EVENT_TRIANGLE_RADIUS;
     let c = Vec2::splat(port * 0.5);
     let rot = Vec2::from_angle(std::f32::consts::FRAC_PI_4);
     let tf = |v: Vec2| c + rot.rotate(v - c);
-    // `CLICK | DRAG`, like the emitter glyph / port circles: `DRAG` pulls a
-    // subscription wire out of the pin and captures the press so it doesn't
-    // fall through to the node body's own drag. A plain click on the pin no
-    // longer selects the node — the same tradeoff those glyphs already make.
     let pin = Panel::zstack()
         .id(subscription_glyph_wid(node.id))
         .position(node.pos - Vec2::splat(theme.port_radius()))
@@ -99,10 +85,10 @@ fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hovered: bool)
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
             ui.add_shape(Shape::Triangle {
-                a: tf(Vec2::new(port, 0.0)),
-                b: tf(Vec2::new(port, port)),
-                c: tf(Vec2::new(0.0, port * 0.5)),
-                radius: EVENT_TRIANGLE_RADIUS,
+                a: tf(Vec2::new(port - r, r)),
+                b: tf(Vec2::new(port - r, port - r)),
+                c: tf(Vec2::new(r, port * 0.5)),
+                radius: r,
                 fill: event_color(theme, hovered).into(),
                 stroke: Stroke::ZERO,
             });
