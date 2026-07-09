@@ -90,6 +90,11 @@ pub(crate) struct NodeRunState {
     /// a failed node reads e.g. "no light frames provided", not just "errored".
     pub(crate) errors: Vec<String>,
     pub(crate) values: Option<NodeValueView>,
+    /// RAM this node's cached output holds after the last run (system vs GPU),
+    /// summed across its flattened contributors — a subgraph instance aggregates
+    /// its interior. Zero unless the node retains a value; drives the node body's
+    /// memory readout.
+    pub(crate) ram: RamUsage,
 }
 
 /// The last run's per-node state plus value-fetch coordination. Off the
@@ -146,6 +151,13 @@ impl RunState {
         self.nodes.get(&id).and_then(|n| n.values.as_ref())
     }
 
+    /// RAM this node's cached output holds after the last run (zero if it holds
+    /// nothing). Read into the scene each rebuild to drive the node body's
+    /// memory readout.
+    pub(crate) fn ram(&self, id: NodeId) -> RamUsage {
+        self.nodes.get(&id).map(|n| n.ram).unwrap_or_default()
+    }
+
     /// Reproject a finished run's status + logs onto the per-node map.
     /// Status/logs are reset and rebuilt; already-fetched values are kept
     /// (they belong to this epoch — a value reply can land before its
@@ -157,6 +169,7 @@ impl RunState {
             node.status = ExecStatus::None;
             node.logs.clear();
             node.errors.clear();
+            node.ram = RamUsage::default();
         }
         for e in &stats.executed_nodes {
             self.record_status(stats, e.node_id, ExecStatus::Executed(e.elapsed_secs));
@@ -186,8 +199,19 @@ impl RunState {
                 });
             }
         }
+        // Per-node RAM folds like elapsed time: a flattened node's footprint adds
+        // onto its authoring node and every enclosing composite instance, so an
+        // instance aggregates its interior's memory.
+        for (flat_id, usage) in &stats.node_ram {
+            for node_id in stats.flatten.attribution(*flat_id) {
+                self.nodes.entry(node_id).or_default().ram += *usage;
+            }
+        }
         self.nodes.retain(|_, n| {
-            n.status != ExecStatus::None || !n.logs.is_empty() || n.values.is_some()
+            n.status != ExecStatus::None
+                || !n.logs.is_empty()
+                || n.values.is_some()
+                || n.ram.total() > 0
         });
     }
 
@@ -332,6 +356,7 @@ mod tests {
             flatten: Arc::new(flatten),
             cancelled: false,
             cache_ram: RamUsage::default(),
+            node_ram: vec![],
         }
     }
 

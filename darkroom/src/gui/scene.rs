@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use aperture::SmolStr;
 use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
-use scenarium::data::{DataType, StaticValue};
+use scenarium::data::{DataType, RamUsage, StaticValue};
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
 use scenarium::graph::{Binding, CacheMode, Graph, NodeId, NodeKind, OutputPort, Subscription};
 use scenarium::library::Library;
@@ -169,6 +169,10 @@ pub struct SceneNode {
     /// `Executed`) the header time label; `None` (the default) paints
     /// no glow.
     pub exec_status: ExecStatus,
+    /// RAM this node's cached output holds after the last run (system vs GPU),
+    /// mirrored from `run_state`. Non-zero only for nodes that retain a value;
+    /// drives the node body's memory readout, hidden when zero.
+    pub ram: RamUsage,
     /// The node's func/subgraph def is absent from the library (e.g. a
     /// document saved against an older library), so its interface can't be
     /// resolved. Rendered as a portless error stub the user can still
@@ -435,6 +439,7 @@ impl Scene {
                     NodeKind::SubgraphInput | NodeKind::SubgraphOutput
                 ),
                 exec_status: run_state.status(vn.id),
+                ram: run_state.ram(vn.id),
                 missing,
             });
         }

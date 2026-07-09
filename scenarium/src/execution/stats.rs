@@ -193,4 +193,10 @@ pub struct ExecutionStats {
     /// [`ExecutionEngine::execute`](crate::execution::ExecutionEngine) once the
     /// cache's resident set is final; the editor surfaces it as a memory readout.
     pub cache_ram: RamUsage,
+    /// Per-node resident RAM for nodes holding a cached value after eviction,
+    /// keyed by *flattened* execution id — project onto authoring nodes via
+    /// [`FlattenMap::attribution`] like the other stat lists. Only non-zero nodes
+    /// appear. Drives each node body's memory readout. Stamped alongside
+    /// [`cache_ram`](Self::cache_ram).
+    pub node_ram: Vec<(NodeId, RamUsage)>,
 }

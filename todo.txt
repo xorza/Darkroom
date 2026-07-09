@@ -3,3 +3,6 @@ scrolview on newnode popup
 update ram usage on graph changes
 
 node title disapppears sometimes
+
+
+clean unsued output immediately after exec

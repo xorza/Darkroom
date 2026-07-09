@@ -334,8 +334,9 @@ impl ExecutionEngine {
         self.cache.evict_unused(&self.program, needed);
 
         // The resident set is now final (post-eviction), so this is the true
-        // cache footprint the run leaves behind.
+        // cache footprint the run leaves behind — total and per-node.
         stats.cache_ram = self.cache.resident_ram_usage();
+        stats.node_ram = self.cache.resident_ram_by_node();
 
         stats.triggered_events = seeds.events;
         // Annotate with how the graph was flattened so the stats' flat ids

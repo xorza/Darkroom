@@ -164,4 +164,16 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
     let usage = cache.resident_ram_usage();
     assert_eq!(usage, RamUsage { cpu: 105, gpu: 10 });
     assert_eq!(usage.total(), 115);
+
+    // Per-node: no cross-slot dedup — each node reports what it holds. Slot A holds
+    // shared (100/10) + the 5/0 value = 105/10; slot B holds shared again = 100/10;
+    // the OnDisk slot C is omitted.
+    let by_node = cache.resident_ram_by_node();
+    assert_eq!(
+        by_node,
+        vec![
+            (NodeId::from_u128(1), RamUsage { cpu: 105, gpu: 10 }),
+            (NodeId::from_u128(2), RamUsage { cpu: 100, gpu: 10 }),
+        ]
+    );
 }

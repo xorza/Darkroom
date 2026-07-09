@@ -9,6 +9,7 @@ pub(crate) mod tab_bar;
 pub(crate) mod widgets;
 
 pub(crate) mod app;
+pub(crate) mod format;
 pub(crate) mod node_values;
 pub(crate) mod run_state;
 pub(crate) mod scene;

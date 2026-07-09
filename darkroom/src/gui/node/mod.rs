@@ -1,4 +1,5 @@
 pub(crate) mod header;
+pub(crate) mod memory_row;
 pub(crate) mod port_color;
 pub(crate) mod port_rename;
 pub(crate) mod port_row;
@@ -12,6 +13,7 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::node_ports;
 use crate::gui::node::header::{header, status_row, subgraph_badge_wid, subscription_pin};
+use crate::gui::node::memory_row::memory_row;
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid, ports_row};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
@@ -242,6 +244,7 @@ impl NodeUI {
                 header(ui, rcx, node, out);
                 status_row(ui, rcx, node, out);
                 ports_row(ui, rcx, node, out);
+                memory_row(ui, rcx, node);
             });
         // Pull the body response's flags into locals so its `&mut ui`
         // borrow ends before the `response_for(title)` peek below.

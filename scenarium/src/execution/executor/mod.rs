@@ -567,6 +567,7 @@ fn collect_execution_stats(
         // Stamped by `ExecutionEngine::execute` after end-of-run eviction, when
         // the cache's resident set is final.
         cache_ram: RamUsage::default(),
+        node_ram: Vec::new(),
     }
 }
 

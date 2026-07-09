@@ -179,6 +179,29 @@ impl RuntimeCache {
         total
     }
 
+    /// Per-node resident RAM: each slot holding a non-zero resident value paired with
+    /// its footprint (system RAM vs GPU VRAM), keyed by the slot's `NodeId`. Unlike
+    /// [`resident_ram_usage`](Self::resident_ram_usage) this does **not** dedup shared
+    /// `Arc`s — each node reports the size of the value it holds, even when another
+    /// node references the same `Arc`. `OnDisk`/`Empty` slots and zero-byte values are
+    /// omitted, so only nodes actually holding memory appear.
+    pub(crate) fn resident_ram_by_node(&self) -> Vec<(NodeId, RamUsage)> {
+        let mut out = Vec::new();
+        for slot in self.slots.iter() {
+            let ValueState::Resident { values, .. } = &slot.value else {
+                continue;
+            };
+            let mut usage = RamUsage::default();
+            for value in values {
+                usage += value.ram_usage();
+            }
+            if usage.total() > 0 {
+                out.push((slot.id, usage));
+            }
+        }
+        out
+    }
+
     /// Rebuild `slots` in `e_nodes` order: preserve each surviving node's cache by
     /// id, default new nodes, trim removed ones. Mirrors the `CompactInsert` the
     /// flattener runs over `e_nodes`, keeping `slots[i]` aligned to `e_nodes[i]`.
