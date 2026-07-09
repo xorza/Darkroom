@@ -345,3 +345,51 @@ pub fn image_library() -> Library {
 
     library
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn func<'a>(lib: &'a Library, name: &str) -> &'a Func {
+        lib.funcs
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap_or_else(|| panic!("{name} registered"))
+    }
+
+    #[test]
+    fn convert_node_defaults_to_rgb_u8() {
+        let lib = image_library();
+        let f = func(&lib, "Convert");
+        assert_eq!(f.category, "Image");
+
+        // Image in (required), Format enum (required, seeded), Image out.
+        let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["Image", "Format"]);
+        assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
+        assert!(f.inputs[0].required);
+        assert_eq!(f.inputs[1].data_type, *CONVERSION_FORMAT_DATATYPE);
+        assert!(f.inputs[1].required);
+
+        // The Format input is seeded to RGB_U8 — `ColorFormat`'s Display is
+        // "{count} {type}{size}", so RGB_U8 → "RGB u8".
+        assert_eq!(
+            f.inputs[1].default_value,
+            Some(StaticValue::Enum("RGB u8".to_string())),
+        );
+        // Cross-check the literal against the enum's own formatting so a Display
+        // change can't let the two silently drift.
+        assert_eq!(
+            f.inputs[1].default_value,
+            Some(StaticValue::Enum(
+                ConversionFormat::RgbU8.to_color_format().to_string()
+            )),
+        );
+        // It's a genuine override: `enum_input` would otherwise seed the first
+        // variant (L_U8 → "L u8"), so a fresh node emits 8-bit RGB, not grayscale.
+        assert_ne!(
+            f.inputs[1].default_value,
+            Some(StaticValue::Enum("L u8".to_string())),
+        );
+    }
+}
