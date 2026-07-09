@@ -123,21 +123,41 @@ pub fn image_library() -> Library {
                         SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
                     ))),
                 )
-                .description("Destination file; the extension picks the format."),
+                .description("Destination file; the extension picks the container."),
+            )
+            .input(
+                enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
+                    .description(
+                        "Convert to this color format before saving; \"As Is\" keeps the source format.",
+                    ),
             )
             .context(VISION_CTX_TYPE.clone())
             .lambda(FuncLambda::new(move |ctx_manager, _, _, inputs, _, _| {
                 Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
+                    assert_eq!(inputs.len(), 3);
 
                     let input_image = inputs[0].value.as_custom::<Image>().unwrap();
                     let path = inputs[1].value.as_fs_path().unwrap();
+                    let format_str = inputs[2].value.as_enum().unwrap();
 
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
                     let cpu_image = input_image
                         .make_cpu(&vision_ctx.processing_ctx)
                         .map_err(anyhow::Error::from)?;
-                    cpu_image.save_file(path).map_err(anyhow::Error::from)?;
+
+                    let target_format = ConversionFormat::from_str(format_str)
+                        .expect("Invalid conversion format")
+                        .to_color_format();
+
+                    match target_format {
+                        Some(fmt) => cpu_image
+                            .clone()
+                            .convert(fmt)
+                            .map_err(anyhow::Error::from)?
+                            .save_file(path)
+                            .map_err(anyhow::Error::from)?,
+                        None => cpu_image.save_file(path).map_err(anyhow::Error::from)?,
+                    }
 
                     Ok(())
                 })
@@ -157,9 +177,7 @@ pub fn image_library() -> Library {
             )
             .input(
                 enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
-                    .default(StaticValue::Enum(
-                        ConversionFormat::RgbU8.to_color_format().to_string(),
-                    ))
+                    .default(StaticValue::Enum(ConversionFormat::RgbU8.label()))
                     .description("Target color format."),
             )
             .output(
@@ -183,10 +201,13 @@ pub fn image_library() -> Library {
                             .expect("Invalid conversion format")
                             .to_color_format();
 
-                        let converted = cpu_image
-                            .clone()
-                            .convert(target_format)
-                            .map_err(anyhow::Error::from)?;
+                        let converted = match target_format {
+                            Some(fmt) => cpu_image
+                                .clone()
+                                .convert(fmt)
+                                .map_err(anyhow::Error::from)?,
+                            None => cpu_image.clone(),
+                        };
 
                         outputs[0] = DynamicValue::from_custom(Image::from(converted));
 
@@ -381,15 +402,38 @@ mod tests {
         // change can't let the two silently drift.
         assert_eq!(
             f.inputs[1].default_value,
-            Some(StaticValue::Enum(
-                ConversionFormat::RgbU8.to_color_format().to_string()
-            )),
+            Some(StaticValue::Enum(ConversionFormat::RgbU8.label())),
         );
         // It's a genuine override: `enum_input` would otherwise seed the first
-        // variant (L_U8 → "L u8"), so a fresh node emits 8-bit RGB, not grayscale.
+        // variant (now "As Is"), so a fresh node emits 8-bit RGB, not a pass-through.
         assert_ne!(
             f.inputs[1].default_value,
-            Some(StaticValue::Enum("L u8".to_string())),
+            Some(StaticValue::Enum("As Is".to_string())),
+        );
+    }
+
+    #[test]
+    fn save_image_format_defaults_to_as_is() {
+        let lib = image_library();
+        let f = func(&lib, "Save Image");
+
+        // Image in, Path in, and the new Format enum — all required.
+        let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["Image", "Path", "Format"]);
+        assert_eq!(f.inputs[2].data_type, *CONVERSION_FORMAT_DATATYPE);
+        assert!(f.inputs[2].required);
+
+        // Unlike Convert, Save Image keeps `enum_input`'s first-variant seed, so a
+        // fresh node saves the source format untouched.
+        assert_eq!(
+            f.inputs[2].default_value,
+            Some(StaticValue::Enum("As Is".to_string())),
+        );
+        assert_eq!(
+            ConversionFormat::from_str("As Is")
+                .unwrap()
+                .to_color_format(),
+            None,
         );
     }
 }
