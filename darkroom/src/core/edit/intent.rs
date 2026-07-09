@@ -1624,17 +1624,17 @@ mod tests {
     fn set_node_property_commits_and_reverts() {
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
-        // Fresh nodes default to RAM-only and enabled.
-        assert_eq!(doc.graph.by_id(&id).unwrap().cache, CacheMode::Ram);
+        // Fresh nodes default to no caching (None) and enabled.
+        assert_eq!(doc.graph.by_id(&id).unwrap().cache, CacheMode::None);
         assert!(!doc.graph.by_id(&id).unwrap().disabled);
 
         // Both properties ride the one `SetNodeProperty` path. A representative flip
-        // each (the cache header chips: Ram→Both/None/Disk; the disable chip: →on),
+        // each (the cache header chips: None→Both/Ram/Disk; the disable chip: →on),
         // committing then reverting — each iteration returns the node to its defaults,
-        // so the step's captured `from` is always Ram / enabled.
+        // so the step's captured `from` is always None / enabled.
         let cases = [
             NodeProperty::RuntimeCache(CacheMode::Both),
-            NodeProperty::RuntimeCache(CacheMode::None),
+            NodeProperty::RuntimeCache(CacheMode::Ram),
             NodeProperty::RuntimeCache(CacheMode::Disk),
             NodeProperty::Disabled(true),
         ];
@@ -1660,13 +1660,13 @@ mod tests {
             );
             revert_step(&step, &mut doc, GraphRef::Main);
             let node = doc.graph.by_id(&id).unwrap();
-            assert_eq!(node.cache, CacheMode::Ram, "revert restores the cache");
+            assert_eq!(node.cache, CacheMode::None, "revert restores the cache");
             assert!(!node.disabled, "revert restores the disable flag");
         }
 
         // Setting a property to the value it already holds is a no-op (no undo entry).
         for to in [
-            NodeProperty::RuntimeCache(CacheMode::Ram),
+            NodeProperty::RuntimeCache(CacheMode::None),
             NodeProperty::Disabled(false),
         ] {
             assert!(

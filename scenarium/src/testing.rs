@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::async_lambda;
 use crate::data::DataType;
-use crate::graph::{Graph, InputPort, Node, NodeId};
+use crate::graph::{CacheMode, Graph, InputPort, Node, NodeId};
 use crate::library::Library;
 use crate::node::function::{Func, FuncInput, FuncOutput};
 
@@ -35,10 +35,14 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
         print,
     } = hooks;
 
+    // Every fixture func opts into `Ram` caching (the pre-`None`-default behavior)
+    // so the execution tests built on this library exercise cross-run cache reuse;
+    // a plain `Func` now defaults to `CacheMode::None`.
     [
         Func::new("432b9bf1-f478-476c-a9c9-9a6e190124fc", "mult")
             .description("Multiplies two integer values (A * B)")
             .category("Debug")
+            .default_cache_mode(CacheMode::Ram)
             .pure()
             .input(FuncInput::required("A", DataType::Int))
             .input(FuncInput::optional("B", DataType::Int))
@@ -57,6 +61,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
         Func::new("d4d27137-5a14-437a-8bb5-b2f7be0941a2", "get_a")
             .description("Returns the value from test hook A")
             .category("Debug")
+            .default_cache_mode(CacheMode::Ram)
             .pure()
             .output(FuncOutput::new("Int32 Value", DataType::Int))
             .lambda(async_lambda!(
@@ -69,6 +74,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
         Func::new("a937baff-822d-48fd-9154-58751539b59b", "get_b")
             .description("Returns the value from test hook B")
             .category("Debug")
+            .default_cache_mode(CacheMode::Ram)
             .pure()
             .output(FuncOutput::new("Int32 Value", DataType::Int))
             .lambda(async_lambda!(
@@ -81,6 +87,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
         Func::new("2d3b389d-7b58-44d9-b3d1-a595765b21a5", "sum")
             .description("Adds two integer values (A + B)")
             .category("Debug")
+            .default_cache_mode(CacheMode::Ram)
             .pure()
             .input(FuncInput::required("A", DataType::Int))
             .input(FuncInput::optional("B", DataType::Int))
@@ -97,6 +104,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
         Func::new("f22cd316-1cdf-4a80-b86c-1277acd1408a", "Print")
             .description("Outputs an integer value via the test print hook")
             .category("Debug")
+            .default_cache_mode(CacheMode::Ram)
             .terminal()
             .input(FuncInput::required("message", DataType::Int))
             .lambda(async_lambda!(

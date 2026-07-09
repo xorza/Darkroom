@@ -1,6 +1,7 @@
 use crate::runtime::context::ContextType;
 
 use crate::data::*;
+use crate::graph::CacheMode;
 use crate::node::event_lambda::EventLambda;
 use crate::node::func_lambda::FuncLambda;
 use common::KeyIndexKey;
@@ -197,6 +198,14 @@ pub struct Func {
     #[serde(default)]
     pub uncacheable: bool,
 
+    /// The [`CacheMode`] a freshly created node of this func copies into its
+    /// `cache`. Defaults to [`CacheMode::None`] (no caching); raise it with the
+    /// [`default_cache_mode`](Func::default_cache_mode) builder for funcs worth
+    /// caching out of the box. Only a policy for *new* nodes — existing nodes
+    /// keep whatever mode they were authored/saved with.
+    #[serde(default)]
+    pub default_cache_mode: CacheMode,
+
     pub behavior: FuncBehavior,
 
     /// Algorithm version, folded into the disk-cache content digest so a changed
@@ -275,6 +284,14 @@ impl Func {
         self
     }
 
+    /// Set the [`CacheMode`] that new nodes of this func adopt (see
+    /// [`Func::default_cache_mode`]). Defaults to [`CacheMode::None`]; raise it
+    /// for funcs whose output is worth caching by default.
+    pub fn default_cache_mode(mut self, mode: CacheMode) -> Self {
+        self.default_cache_mode = mode;
+        self
+    }
+
     pub fn input(mut self, input: FuncInput) -> Self {
         self.inputs.push(input);
         self
@@ -335,7 +352,8 @@ impl Func {
 
 #[cfg(test)]
 mod tests {
-    use crate::node::function::Func;
+    use crate::graph::CacheMode;
+    use crate::node::function::{Func, FuncId};
     use common::{SerdeFormat, deserialize};
 
     #[test]
@@ -347,6 +365,27 @@ mod tests {
         let func: Func = deserialize(legacy.as_bytes(), SerdeFormat::Json)?;
         assert_eq!(func.version, 0);
         assert_eq!(Func::default().version, 0);
+        // The `default_cache_mode` field postdates `version`, so a legacy func
+        // omits it too — `#[serde(default)]` must fill it with `None`.
+        assert_eq!(func.default_cache_mode, CacheMode::None);
         Ok(())
+    }
+
+    #[test]
+    fn default_cache_mode_defaults_to_none_and_builder_overrides() {
+        // Out of the box a func caches nothing — both `Func::default()` and the
+        // `Func::new` builder start at `CacheMode::None`.
+        assert_eq!(Func::default().default_cache_mode, CacheMode::None);
+        assert_eq!(
+            Func::new(FuncId::unique(), "f").default_cache_mode,
+            CacheMode::None
+        );
+
+        // The builder sets a hotter default; distinct inputs map to distinct
+        // stored modes (not a fixed constant).
+        for mode in [CacheMode::Ram, CacheMode::Disk, CacheMode::Both] {
+            let func = Func::new(FuncId::unique(), "f").default_cache_mode(mode);
+            assert_eq!(func.default_cache_mode, mode, "{mode:?} is stored verbatim");
+        }
     }
 }

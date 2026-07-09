@@ -2806,6 +2806,9 @@ mod execution {
         let mut graph = Graph::default();
         let mut node: Node = library.by_name("partial_writer").unwrap().into();
         node.id = "0b35e5e4-be30-4733-a5a2-9d474000de10".into();
+        // Retain the output buffer across runs so the in-place reuse is observable;
+        // nodes now default to `CacheMode::None`.
+        node.cache = CacheMode::Ram;
         graph.add(node);
         graph.validate();
 

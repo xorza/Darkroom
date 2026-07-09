@@ -55,9 +55,9 @@ fn cache_mode_bits_and_from_bits_round_trip() {
 }
 
 #[test]
-fn cache_mode_round_trips_and_defaults_to_ram() {
+fn cache_mode_round_trips_and_defaults_to_none() {
     use common::deserialize;
-    assert_eq!(CacheMode::default(), CacheMode::Ram);
+    assert_eq!(CacheMode::default(), CacheMode::None);
 
     let library = test_func_lib(TestFuncHooks::default());
     for mode in [
@@ -83,11 +83,42 @@ fn cache_mode_round_trips_and_defaults_to_ram() {
     }
 
     // A node authored before the `cache` field existed (or under the old `persist`
-    // name) has no `cache` key, so `#[serde(default)]` fills `Ram`.
+    // name) has no `cache` key, so `#[serde(default)]` fills the `CacheMode`
+    // default, `None`.
     let legacy = r#"{ "id": "00000000-0000-0000-0000-000000000001",
             "kind": { "Func": "00000000-0000-0000-0000-000000000002" }, "name": "n" }"#;
     let node: Node = deserialize(legacy.as_bytes(), SerdeFormat::Json).unwrap();
-    assert_eq!(node.cache, CacheMode::Ram);
+    assert_eq!(node.cache, CacheMode::None);
+}
+
+#[test]
+fn new_func_node_copies_its_func_default_cache_mode() {
+    // A fresh func node inherits its func's `default_cache_mode` — the out-of-box
+    // `None`, or whatever the func's builder raised it to.
+    let plain = Func::new(FuncId::unique(), "plain");
+    assert_eq!(
+        Node::from(&plain).cache,
+        CacheMode::None,
+        "default func → no caching"
+    );
+
+    let hot = Func::new(FuncId::unique(), "hot").default_cache_mode(CacheMode::Both);
+    assert_eq!(
+        Node::from(&hot).cache,
+        CacheMode::Both,
+        "func node copies the func's default_cache_mode"
+    );
+    // `add_func_node` routes through the same `From<&Func>`, so the graph-level
+    // constructor propagates it too.
+    let mut graph = Graph::default();
+    let id = graph.add_func_node(&hot);
+    assert_eq!(graph.by_id(&id).unwrap().cache, CacheMode::Both);
+
+    // The func-less constructors have no func to copy from and seed `None`.
+    assert_eq!(
+        Node::new(NodeKind::Func(FuncId::unique())).cache,
+        CacheMode::None
+    );
 }
 
 #[test]

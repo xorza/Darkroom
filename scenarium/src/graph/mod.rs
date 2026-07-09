@@ -171,8 +171,8 @@ mod binding_map_serde {
 /// then `Disk`/`Both` degrade to memory-only. See `execution/README.md` Part B.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum CacheMode {
-    None,
     #[default]
+    None,
     Ram,
     Disk,
     Both,
@@ -231,9 +231,11 @@ pub struct Node {
     pub kind: NodeKind,
     pub name: String,
 
-    /// Where this node's output is cached. See [`CacheMode`].
-    /// `#[serde(default)]` → `Ram` keeps pre-field (and pre-rename) documents
-    /// memory-only.
+    /// Where this node's output is cached. See [`CacheMode`]. A fresh func node
+    /// copies its func's `default_cache_mode`; the func-less constructors seed
+    /// `None`. `#[serde(default)]` → `None` (the [`CacheMode`] default) for a
+    /// pre-field (or pre-rename) document, so a legacy node caches nowhere until
+    /// re-toggled.
     #[serde(default)]
     pub cache: CacheMode,
 
@@ -768,7 +770,7 @@ impl Node {
             id: NodeId::unique(),
             kind,
             name: String::new(),
-            cache: CacheMode::Ram,
+            cache: CacheMode::None,
             disabled: false,
         }
     }
@@ -783,21 +785,22 @@ impl Node {
             id: NodeId::unique(),
             kind: NodeKind::Subgraph(r),
             name: def.name.clone(),
-            cache: CacheMode::Ram,
+            cache: CacheMode::None,
             disabled: false,
         }
     }
 }
 
 impl From<&Func> for Node {
-    /// A bare func instance (identity + name). Default input bindings are seeded
+    /// A bare func instance (identity + name), copying the func's
+    /// `default_cache_mode` into its `cache`. Default input bindings are seeded
     /// by `Graph::add_func_node`.
     fn from(func: &Func) -> Self {
         Node {
             id: NodeId::unique(),
             kind: NodeKind::Func(func.id),
             name: func.name.clone(),
-            cache: CacheMode::Ram,
+            cache: func.default_cache_mode,
             disabled: false,
         }
     }

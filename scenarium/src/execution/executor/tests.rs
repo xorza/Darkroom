@@ -39,6 +39,9 @@ impl Prog {
             inputs: Span::new(inputs_start, inputs.len() as u32),
             outputs: Span::new(outputs_start, outputs),
             lambda,
+            // `CacheMode` now defaults to `None`; these tests assume outputs are
+            // retained (`Ram`) unless a case flips it via `set_cache`.
+            cache: CacheMode::Ram,
             ..Default::default()
         });
         idx
