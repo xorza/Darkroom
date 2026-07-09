@@ -270,14 +270,21 @@ bar + tab strip), `menu_bar` (returns `MenuCommand`s), and `tab_bar` (renders
 the open-tab strip + "+" new-subgraph chip, emits `UiAction`s). The rest:
 
 - **`gui/canvas/`** — `mod.rs` is `GraphUI`, the canvas scope. It separates
-  **persistent** state (`background` dotted backdrop, `port_frame` geometry
+  **persistent** state (`background` dotted backdrop, the `CanvasGeometry`
   cache, `inspectors` open-panel set — survive tab switches) from a resettable
   `Gestures` bundle: `NodeUI` (node bodies + drag), `ConnectionUI` (wires +
   in-flight drag + snap), `BreakerUI` (RMB/Cmd+LMB scribble that severs wires /
   deletes nodes), `NewNodeUi` (right-click spawn popup), `SubgraphMenuUi`
   (RMB context menu on subgraph-instance nodes), `SelectionUI` (rubber-band),
   and the pan anchor. `pan_zoom` holds the viewport gesture + zoom math
-  (unit-tested).
+  (unit-tested). `cull.rs` is record-time viewport culling (unit-tested): only
+  nodes and wires intersecting the visible world rect are recorded (off-screen
+  ones cost no measure/paint). Safe because every node-subtree widget id
+  derives from the `NodeId`; a node whose text editor holds focus is exempt so
+  aperture's state sweep can't drop a mid-edit draft. Culled nodes keep their
+  world extents via `CanvasGeometry::node_world_rect` (current position + a
+  cross-frame size cache beside the port-offset cache), which also feeds the
+  rubber-band hit test and inspector-panel anchoring.
 - **`gui/canvas/inspector.rs`** — floating per-node inspection panels.
   `Inspectors` keeps a `NodeId → InspectMode` map (`Open` = transient, closes
   on any outside action; `Pinned` = sticky). The header `i` chip cycles
@@ -309,8 +316,10 @@ Key cross-cutting mechanisms:
   domain coords (`node_widget_id(id)`, `port_circle_wid(PortRef)`) so any pass
   can `ui.response_for(id)` without threading a cache. The canvas uses
   `WidgetId::auto_stable()`.
-- **`PortFrame`** (`gui/canvas/port_frame.rs`) — per-frame snapshot of each
-  port's geometry/hover/drag state, polled from last frame's responses.
+- **`CanvasGeometry`** (`gui/canvas/geometry.rs`) — the canvas's
+  response-derived geometry: per-frame snapshots of each port glyph's
+  geometry/hover/drag state plus the cross-frame node-size cache
+  (`node_sizes`), polled from last frame's responses in one pass.
   **Rebuilt in `prepass` and reused in `frame`** (the connection commit reads
   it); the order is an invariant enforced by call sequence. Port centers are
   recomputed from this frame's `node.pos` + cached intra-node offset so a

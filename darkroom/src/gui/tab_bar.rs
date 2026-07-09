@@ -66,7 +66,7 @@ fn tab_rename_wid(sub_id: SubgraphId) -> WidgetId {
 /// pass `Intent` push) is load-bearing: it lets the navigation phase
 /// settle the new target *before* this frame's record, so Pass A
 /// records the new tab and Pass A's cascades feed Pass B's
-/// `PortFrame` cache — without that, the switch lands in the
+/// `CanvasGeometry` cache — without that, the switch lands in the
 /// post-record drain, Pass A draws the old tab, and Pass B redraws
 /// the new tab with an empty port cache (no connections that frame).
 pub(crate) fn emit_tab_actions(ui: &Ui, tabs: &[TabRef], actions: &mut Vec<UiAction>) {

@@ -89,7 +89,7 @@ impl NewNodeUi {
         if (pending_source.is_some() || gesture == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
-            self.world_pos = to_world(local, scene);
+            self.world_pos = to_world(local, &scene.viewport);
             self.source = pending_source;
             self.menu.open_at(rect.min + local);
             // Fresh open: empty the filter and focus the search field this

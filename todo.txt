@@ -1,9 +1,7 @@
 scrolview on newnode popup
 
-draw only nodes in view
+owns_focus -simplify
 
 total used ram for node
 
 node title disapppears sometimes
-
-let mut child_rank: u32 = 0;

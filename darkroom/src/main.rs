@@ -147,7 +147,7 @@ fn run_gui(script_cfg: ScriptConfig) {
         config.window.maximized = w.maximized;
     }
     WinitHost::new(MAIN_WINDOW, config, move |ui, handle| {
-        // ui.debug_overlay_mut().damage_rect = true;
+        ui.debug_overlay_mut().damage_rect = true;
 
         App::new(ui, handle, script_cfg, preferences)
     })

@@ -1,4 +1,6 @@
-use aperture::{Brush, Color, LinearGradient, PointerButton, PointerEvent, PointerSense, Stop, Ui};
+use aperture::{
+    Brush, Color, LinearGradient, PointerButton, PointerEvent, PointerSense, Rect, Stop, Ui,
+};
 use glam::Vec2;
 use scenarium::data::DataType;
 use scenarium::graph::{Binding, InputPort, closes_data_cycle};
@@ -6,7 +8,8 @@ use scenarium::graph::{Binding, InputPort, closes_data_cycle};
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
-use crate::gui::canvas::port_frame::PortFrame;
+use crate::gui::canvas::cull::wire_visible;
+use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, add_cubic_wire};
 use crate::gui::canvas::{node_ports, outer_canvas_widget_id, pointer_world};
 use crate::gui::node::port_color::port_color;
@@ -76,7 +79,7 @@ pub(crate) struct ConnectionUI {
 /// ([`ConnectionUI::draw_in_flight`]), snap tracking, and data — only the
 /// terminating input differs (so `mode` is a discriminant, not distinct
 /// payloads). Identity-only — port centers resolve every frame from
-/// `PortFrame`, so a wire survives layout changes.
+/// `CanvasGeometry`, so a wire survives layout changes.
 #[derive(Clone, Copy, Debug)]
 struct InFlight {
     /// The port the wire started from.
@@ -104,7 +107,7 @@ impl ConnectionUI {
     /// Drive the in-flight wire: latch a fresh drag, track the snap
     /// target, and resolve on the active mode's terminating input.
     ///
-    /// Latch: the first port whose `PortFrame::drag_started` fires starts a
+    /// Latch: the first port whose `CanvasGeometry::drag_started` fires starts a
     /// [`InFlight::Held`] wire. While active, every port is rescanned each
     /// frame for the topmost opposite-kind port under the pointer
     /// (`snap_end`). [`InFlight::Held`] resolves on release; a drop on
@@ -116,7 +119,7 @@ impl ConnectionUI {
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
-        port_frame: &PortFrame,
+        geometry: &CanvasGeometry,
         resume: Option<PortRef>,
         out: &mut Vec<Intent>,
     ) {
@@ -132,7 +135,7 @@ impl ConnectionUI {
         }
         // Latch a fresh port drag only when idle.
         if self.state.is_none()
-            && let Some(start) = scan_drag_start(port_frame, scene)
+            && let Some(start) = scan_drag_start(geometry, scene)
         {
             self.state = Some(InFlight {
                 start,
@@ -149,12 +152,12 @@ impl ConnectionUI {
         };
 
         // Refresh the compatible port under the pointer for both modes.
-        state.snap_end = scan_snap_target(port_frame, ui, scene, state.start);
+        state.snap_end = scan_snap_target(geometry, ui, scene, state.start);
         self.state = Some(state);
 
         match state.mode {
             DragMode::Held => {
-                self.resolve_held(ui, scene, port_frame, state.start, state.snap_end, out)
+                self.resolve_held(ui, scene, geometry, state.start, state.snap_end, out)
             }
             DragMode::Floating => self.resolve_floating(ui, state.start, state.snap_end, out),
         }
@@ -179,14 +182,14 @@ impl ConnectionUI {
         &mut self,
         ui: &Ui,
         scene: &Scene,
-        port_frame: &PortFrame,
+        geometry: &CanvasGeometry,
         start: PortRef,
         snap_end: Option<PortRef>,
         out: &mut Vec<Intent>,
     ) {
-        // `PortFrame::dragging` rolls up `drag_delta().is_some() ||
+        // `CanvasGeometry::dragging` rolls up `drag_delta().is_some() ||
         // drag_started()`; its transition to `false` is the release edge.
-        if port_frame.ports.dragging(start) {
+        if geometry.ports.dragging(start) {
             return;
         }
         if let Some(end) = snap_end {
@@ -273,22 +276,25 @@ impl ConnectionUI {
 
     /// Compatible-kind port currently snapped under the pointer
     /// during an active drag, or `None`. Read by `GraphUI` to force
-    /// the hover state in `PortFrame` (otherwise aperture's
+    /// the hover state in `CanvasGeometry` (otherwise aperture's
     /// drag-capture suppression would hide it).
     pub(crate) fn snap_port(&self) -> Option<PortRef> {
         self.state.and_then(|s| s.snap_end)
     }
 
-    /// Paint every permanent connection on the current scene, marking
-    /// those the active breaker (`probe.state`) crosses as broken.
-    /// Hits get pushed onto `probe.state.broken` for the breaker's
-    /// release-frame drain.
+    /// Paint every permanent connection on the current scene that can
+    /// intersect `visible`, marking those the active breaker
+    /// (`probe.state`) crosses as broken. Hits get pushed onto
+    /// `probe.state.broken` for the breaker's release-frame drain. A
+    /// culled wire skips the breaker probe too — the scribble is always
+    /// on-screen, so it can't cross an off-screen curve.
     pub(crate) fn draw(
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &Scene,
-        port_frame: &PortFrame,
+        geometry: &CanvasGeometry,
+        visible: Option<Rect>,
         probe: &mut BreakerProbe<'_>,
     ) {
         let width = ctx.theme.connection_width;
@@ -307,12 +313,15 @@ impl ConnectionUI {
                 port_idx: c.tgt_port,
             };
             let (Some(p0), Some(p3)) = (
-                port_frame.ports.center(src_port),
-                port_frame.ports.center(tgt_port),
+                geometry.ports.center(src_port),
+                geometry.ports.center(tgt_port),
             ) else {
                 continue;
             };
             let handles = cubic_handles(p0, p3);
+            if !wire_visible(visible, p0, &handles, p3) {
+                continue;
+            }
             let broken = probe.crosses_cubic(p0, handles.p1, handles.p2, p3);
             if broken {
                 // unwrap: `broken == true` implies `state` is `Some`.
@@ -354,16 +363,16 @@ impl ConnectionUI {
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &Scene,
-        port_frame: &PortFrame,
+        geometry: &CanvasGeometry,
         canvas_origin: Vec2,
     ) {
         let Some(state) = self.state else { return };
         let start_port = state.start;
-        let Some(start) = port_frame.ports.center(start_port) else {
+        let Some(start) = geometry.ports.center(start_port) else {
             return;
         };
         let end = match state.snap_end {
-            Some(snap) => port_frame.ports.center(snap),
+            Some(snap) => geometry.ports.center(snap),
             None => pointer_world(ui, scene, canvas_origin),
         };
         let Some(end) = end else { return };
@@ -404,11 +413,11 @@ fn port_gradient(start: Color, end: Color) -> Brush {
 /// First port whose response shows `drag_started` this frame, or `None`.
 /// Iterates inputs first then outputs per node so the topmost recorded
 /// port wins ties (matches paint order).
-fn scan_drag_start(frame: &PortFrame, scene: &Scene) -> Option<PortRef> {
+fn scan_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<PortRef> {
     for n in &scene.nodes {
         for kind in [PortKind::Input, PortKind::Output] {
             for port in node_ports(n, kind) {
-                if frame.ports.drag_started(port) {
+                if geometry.ports.drag_started(port) {
                     return Some(port);
                 }
             }
@@ -436,7 +445,12 @@ fn input_const_only(scene: &Scene, port: PortRef) -> bool {
 /// `response.hovered`: aperture suppresses `hovered` on every widget except the
 /// LMB-capture owner during a drag, so while the start port owns the capture no
 /// other port can ever read `hovered = true`.
-fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -> Option<PortRef> {
+fn scan_snap_target(
+    geometry: &CanvasGeometry,
+    ui: &Ui,
+    scene: &Scene,
+    start: PortRef,
+) -> Option<PortRef> {
     let want_kind = start.kind.opposite();
     let pointer = ui.pointer_pos()?;
     // A const-only input rejects wired bindings: a drag that starts on one never
@@ -466,7 +480,7 @@ fn scan_snap_target(frame: &PortFrame, ui: &Ui, scene: &Scene, start: PortRef) -
             if input_const_only(scene, port) {
                 continue;
             }
-            if frame.ports.contains_pointer(port, pointer) {
+            if geometry.ports.contains_pointer(port, pointer) {
                 // Reject a drop onto an incompatible port so the wire
                 // won't latch. Geometrically only one port sits under the
                 // pointer, so a reject here falls through to `None` (drop)

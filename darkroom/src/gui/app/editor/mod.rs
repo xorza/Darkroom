@@ -242,7 +242,7 @@ impl Editor {
 
             // Rebuild the projection for this frame, after the navigation
             // phase has fully settled the document — so prepass and
-            // `PortFrame` never read a stale graph. Unconditional for a
+            // `CanvasGeometry` never read a stale graph. Unconditional for a
             // graph tab: `Scene` re-interns port names into aperture's
             // per-frame text arena (cleared each `Ui::frame`).
             self.rebuild_scene(target, library);
@@ -373,7 +373,7 @@ impl Editor {
     /// Note a possible active-graph change: when `target` differs from
     /// what `scene` last reflected, drop transient gesture state (so a
     /// drag started on one graph can't bleed into another) and request a
-    /// relayout. Keeps `PortFrame`'s offset cache, so a graph shown again
+    /// relayout. Keeps `CanvasGeometry`'s offset cache, so a graph shown again
     /// resolves its port centers immediately. The rebuild itself is the
     /// caller's unconditional one — this only reacts to the switch.
     fn sync_target(&mut self, target: GraphRef) {

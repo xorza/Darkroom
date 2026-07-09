@@ -6,8 +6,8 @@ use scenarium::graph::NodeId;
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
+use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::gui::node::node_widget_id;
 use crate::gui::scene::Scene;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
@@ -72,6 +72,7 @@ impl SelectionUI {
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
+        geometry: &CanvasGeometry,
         gesture: Option<CanvasGesture>,
         out: &mut Vec<Intent>,
     ) {
@@ -80,7 +81,7 @@ impl SelectionUI {
             && gesture == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
         {
-            let w = to_world(p, scene);
+            let w = to_world(p, &scene.viewport);
             // Shift is a gesture *parameter* (extend vs replace), not
             // arbitration — read it here, not in the classifier. Capture
             // the base once so the per-frame union doesn't re-read the doc.
@@ -107,23 +108,18 @@ impl SelectionUI {
             return;
         }
         if let Some(p) = resp.pointer_local {
-            band.current = to_world(p, scene);
+            band.current = to_world(p, &scene.viewport);
         }
         let rect = band.rect();
         let mut selected: BTreeSet<NodeId> = self.base.clone();
         for n in &scene.nodes {
-            // World body rect: `n.pos` is the node's pre-transform min
-            // (fed to `Panel::position`), `layout_rect.size` is already
-            // in world units. Unmeasured nodes (first frame) can't be
-            // hit yet — skip.
-            let Some(size) = ui
-                .response_for(node_widget_id(n.id))
-                .layout_rect
-                .map(|r| r.size)
-            else {
+            // The cached-size world rect, so nodes the viewport cull
+            // skipped this frame still sweep. Never-measured nodes
+            // (first frame) can't be hit yet — skip.
+            let Some(body) = geometry.node_world_rect(n) else {
                 continue;
             };
-            if rect.intersects(Rect { min: n.pos, size }) {
+            if rect.intersects(body) {
                 selected.insert(n.id);
             }
         }

@@ -117,7 +117,7 @@ impl MainWindow {
 
     /// Drop transient input bookkeeping (drag anchors, in-flight
     /// connection) when the active tab changes so a gesture started on
-    /// one graph can't bleed into another. Keeps `PortFrame`'s offset
+    /// one graph can't bleed into another. Keeps `CanvasGeometry`'s offset
     /// cache so the newly-shown graph's connections render immediately.
     pub(crate) fn reset_transient(&mut self) {
         self.graph_ui.clear_gestures();

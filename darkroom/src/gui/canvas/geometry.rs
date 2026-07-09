@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use aperture::{Rect, ResponseState, Ui};
+use aperture::{Rect, ResponseState, Size, Ui};
 use glam::Vec2;
 use scenarium::graph::NodeId;
 
@@ -9,13 +9,14 @@ use crate::gui::canvas::node_ports;
 use crate::gui::node::header::subscription_glyph_wid;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::{event_glyph_wid, port_circle_wid};
-use crate::gui::scene::Scene;
+use crate::gui::scene::{Scene, SceneNode};
 use crate::gui::{EventRef, PortKind, PortRef};
 
-/// Per-frame snapshot of the four `ResponseState` fields downstream
-/// consumers actually read. Built once at the top of
-/// [`crate::gui::canvas::GraphUI::frame`] by polling [`Ui::response_for`]
-/// on each port's deterministic [`port_circle_wid`]. Sized to the four
+/// The canvas's response-derived geometry: a per-frame snapshot of every
+/// port-ish glyph plus the cross-frame node-size cache, all filled by one
+/// [`Self::rebuild`] pass polling [`Ui::response_for`] on deterministic
+/// widget ids. Rebuilt in [`crate::gui::canvas::GraphUI::prepass`] and
+/// reused by `frame`. Each glyph snapshot is sized to the four
 /// bytes-and-bits we use (`layout_rect.center()`, `rect`, two edge bools)
 /// instead of the full `ResponseState`.
 ///
@@ -24,12 +25,13 @@ use crate::gui::{EventRef, PortKind, PortRef};
 /// edge bools default to `false` for them, so `drag_started` / `dragging`
 /// queries are correct without a presence check.
 ///
-/// The three key-domains are read directly by consumers via the public
-/// fields — `port_frame.ports.center(p)`, `port_frame.events.drag_started(e)`,
-/// `port_frame.subs.contains_pointer(id, ptr)` — rather than through a
-/// per-domain forwarding method each.
+/// The glyph domains are read directly by consumers via the public
+/// fields — `geometry.ports.center(p)`, `geometry.events.drag_started(e)`,
+/// `geometry.subs.contains_pointer(id, ptr)` — rather than through a
+/// per-domain forwarding method each; node body rects resolve through
+/// [`Self::node_world_rect`].
 #[derive(Default, Debug)]
-pub(crate) struct PortFrame {
+pub(crate) struct CanvasGeometry {
     /// Data-port circles, keyed by [`PortRef`].
     pub(crate) ports: PortLayer<PortRef>,
     /// Emitter event glyphs (the white triangles under a node's outputs),
@@ -39,6 +41,13 @@ pub(crate) struct PortFrame {
     /// by node — a subscription is whole-node, so one pin per node. The
     /// drop target for subscription wires.
     pub(crate) subs: PortLayer<NodeId>,
+    /// Last measured body size per node, kept **across frames** like
+    /// `PortLayer::offsets` — a culled node records no response, so its
+    /// world rect must come from the last time it measured. A node's size
+    /// depends only on its content, so a stale entry is off only across a
+    /// content edit applied while hidden and self-heals on next record.
+    /// Read through [`Self::node_world_rect`].
+    node_sizes: HashMap<NodeId, Size>,
 }
 
 /// One key-domain's port snapshot, split into two tiers by lifetime:
@@ -141,7 +150,19 @@ struct PortInfo {
     dragging: bool,
 }
 
-impl PortFrame {
+impl CanvasGeometry {
+    /// The node's world-space body rect *this frame*: the scene's current
+    /// position combined with the cached measured size — so a mid-drag or
+    /// culled node culls and band-hits where it is today, not where it
+    /// last recorded. `None` until the node's first record.
+    pub(crate) fn node_world_rect(&self, node: &SceneNode) -> Option<Rect> {
+        let size = *self.node_sizes.get(&node.id)?;
+        Some(Rect {
+            min: node.pos,
+            size,
+        })
+    }
+
     pub(crate) fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
         self.ports.live.clear();
         self.events.live.clear();
@@ -154,10 +175,11 @@ impl PortFrame {
             // ancestor-shared canvas-origin term cancels) and combine
             // with this frame's `n.pos` — curves anchor on the moved
             // node's *current* port positions, not last frame's.
-            let node_min = ui
-                .response_for(node_widget_id(n.id))
-                .layout_rect
-                .map(|r| r.min);
+            let node_rect = ui.response_for(node_widget_id(n.id)).layout_rect;
+            if let Some(r) = node_rect {
+                self.node_sizes.insert(n.id, r.size);
+            }
+            let node_min = node_rect.map(|r| r.min);
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in node_ports(n, kind) {
                     let r = ui.response_for(port_circle_wid(port));

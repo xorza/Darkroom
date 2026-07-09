@@ -62,7 +62,7 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
         .show(ui, |ui| {
             header_bar(ui, rcx, node, out);
             // Highlighted while an event drag is snapped to this pin.
-            let snapped = rcx.port_frame.subs.is_hovered(node.id);
+            let snapped = rcx.geometry.subs.is_hovered(node.id);
             subscription_glyph(ui, theme, node.id, snapped);
         });
 }
@@ -114,7 +114,7 @@ fn subscription_glyph(ui: &mut Ui, theme: &Theme, node_id: NodeId, hovered: bool
 }
 
 /// Stable id for a node's event-subscription pin. Keyed on the node (a
-/// subscription is whole-node, not per-port), so `PortFrame` /
+/// subscription is whole-node, not per-port), so `CanvasGeometry` /
 /// `SubscriptionUI` reconstruct it to poll the pin's geometry as a wire
 /// drop target.
 pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {

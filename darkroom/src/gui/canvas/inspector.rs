@@ -33,6 +33,7 @@ use scenarium::execution::stats::LogLevel;
 use scenarium::graph::NodeId;
 use scenarium::library::Library;
 
+use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::node::header::fmt_elapsed;
 use crate::gui::node::{exec_color, node_widget_id};
@@ -141,6 +142,7 @@ impl Inspectors {
         theme: &Theme,
         library: &Library,
         scene: &Scene,
+        geometry: &CanvasGeometry,
         run_state: &RunState,
     ) {
         let ctx = PanelDraw {
@@ -159,11 +161,13 @@ impl Inspectors {
             if node.boundary {
                 continue;
             }
-            // Last frame's body width places the panel just past the
-            // node's right edge; absent on the node's first frame.
-            let node_w = ui
-                .response_for(node_widget_id(id))
-                .layout_rect
+            // The cached body width places the panel just past the node's
+            // right edge — cached (not last frame's response) so the
+            // anchor holds when the viewport cull skips the node while its
+            // panel still peeks into view; absent before the node's first
+            // ever record.
+            let node_w = geometry
+                .node_world_rect(node)
                 .map(|r| r.size.w)
                 .unwrap_or(theme.node_min_width);
             let pos = node.pos + Vec2::new(node_w + PANEL_GAP, 0.0);

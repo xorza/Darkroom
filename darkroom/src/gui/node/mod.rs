@@ -7,10 +7,12 @@ pub(crate) mod value_editor;
 use crate::core::document::GraphRef;
 use crate::core::edit::intent::Intent;
 use crate::gui::canvas::breaker::BreakerProbe;
+use crate::gui::canvas::cull::node_visible;
+use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::node_ports;
-use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::node::header::{header, status_row, subgraph_badge_wid};
+use crate::gui::node::port_rename::port_rename_wid;
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid, ports_row};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
@@ -47,7 +49,7 @@ pub(crate) struct RecordCtx<'a> {
     /// stays a read-only mirror — the gesture no longer scribbles its
     /// preview into the committed field.
     pub(crate) selected: &'a BTreeSet<NodeId>,
-    pub(crate) port_frame: &'a PortFrame,
+    pub(crate) geometry: &'a CanvasGeometry,
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
     pub(crate) inspectors: &'a Inspectors,
@@ -60,7 +62,7 @@ pub(crate) struct RecordCtx<'a> {
 /// pointer at a time, so one anchor slot is enough.
 ///
 /// `draw_all` is the single entry point; `GraphUI` calls it once per
-/// frame after [`crate::gui::canvas::port_frame::PortFrame`] has been rebuilt
+/// frame after [`crate::gui::canvas::geometry::CanvasGeometry`] has been rebuilt
 /// from last-frame's responses.
 #[derive(Default, Debug)]
 pub(crate) struct NodeUI {
@@ -85,29 +87,44 @@ struct DragAnchor {
 }
 
 impl NodeUI {
-    /// Iterate every scene node, recording its widget tree and
-    /// pushing port circle centers into `centers`. Inserts into
-    /// `port_nodes` only when every port resolved a layout rect.
-    /// Emits an `Intent::MoveNodes` for any node holding an active
-    /// LMB drag on its body (port circles capture their own clicks
-    /// via `Sense::CLICK` so drags don't latch off the port grabs).
+    /// Record the widget tree of every scene node that can intersect
+    /// `visible` (plus the focus-owning node — see the loop comment),
+    /// skipping off-screen ones entirely. Emits selection/raise intents
+    /// for body clicks and latches the drag anchor for a body/title drag
+    /// (port circles capture their own presses via `Sense::CLICK`, so
+    /// drags don't latch off the port grabs); `prepass` converts the
+    /// anchor into `Intent::MoveNodes` on later frames.
     pub(crate) fn draw_all(
         &mut self,
         ui: &mut Ui,
         rcx: RecordCtx<'_>,
+        visible: Option<Rect>,
         probe: &mut BreakerProbe<'_>,
         out: &mut Vec<Intent>,
     ) {
         if let Some(b) = probe.state.as_deref_mut() {
             b.broken_nodes.clear();
         }
+        let focused = ui.focused_id();
         // Paint in `view_nodes` order (mirrored into `scene.nodes`) — later
         // draws sit on top, so the last node in the list is frontmost. The
         // order is persisted view state, so a raised node stays raised across
         // save/load and tab switches; `Intent::RaiseNode` moves a clicked node
         // to the end. `RecordCtx` is `Copy`, so the `&scene.nodes` borrow held
         // by the loop coexists with copying `rcx` into `draw_one`.
+        //
+        // Off-`visible` nodes are skipped entirely — no measure, arrange, or
+        // paint. Every widget id in a node's subtree derives from its
+        // `NodeId` (explicit `from_hash` ids, and aperture resolves auto ids
+        // parent-scoped under them), so culling a sibling can't re-key
+        // anything that stays on screen. Aperture *does* drop widget state
+        // for ids not recorded this frame, so a node whose text editor holds
+        // focus stays recorded even off-screen — otherwise panning away
+        // mid-edit would discard the draft.
         for n in rcx.scene.nodes.iter() {
+            if !node_visible(visible, rcx.geometry.node_world_rect(n)) && !owns_focus(n, focused) {
+                continue;
+            }
             self.draw_one(ui, rcx, n, probe, out);
         }
         // Drop the anchor if its target node vanished from the graph
@@ -428,6 +445,28 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>)
             }
         }
     }
+}
+
+/// Whether the focused widget is one of `node`'s text editors — the title
+/// rename, an input's const editor, or a boundary port rename (each editor
+/// carries exactly the id these helpers derive, so equality is the
+/// ownership test). Keeps the cull pass from unrecording a mid-edit node:
+/// aperture drops state rows for ids it doesn't see, which would discard
+/// the in-progress draft.
+fn owns_focus(node: &SceneNode, focused: Option<WidgetId>) -> bool {
+    let Some(f) = focused else {
+        return false;
+    };
+    if node_rename_wid(node.id) == f {
+        return true;
+    }
+    if (0..node.inputs.len as usize).any(|i| const_editor_wid(node.id, i) == f) {
+        return true;
+    }
+    node.boundary
+        && [PortKind::Input, PortKind::Output]
+            .into_iter()
+            .any(|kind| node_ports(node, kind).any(|p| port_rename_wid(p) == f))
 }
 
 /// The accent color for a node's last-run status, or `None` when it

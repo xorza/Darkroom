@@ -155,7 +155,7 @@ pub(crate) fn input_cell_wid(port: PortRef) -> WidgetId {
 /// Column 0: the input port circle + label, plus the right-click binding
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
-/// `PortFrame`/snap/draw reconstruct it from domain coords.
+/// `CanvasGeometry`/snap/draw reconstruct it from domain coords.
 fn input_label_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
@@ -184,7 +184,7 @@ fn input_label_cell(
             theme,
             &input.ty,
             PortKind::Input,
-            rcx.port_frame.ports.is_hovered(port),
+            rcx.geometry.ports.is_hovered(port),
         )
     };
     let overhang = theme.port_overhang();
@@ -298,7 +298,7 @@ fn output_cell(
         theme,
         &output.ty,
         PortKind::Output,
-        rcx.port_frame.ports.is_hovered(port),
+        rcx.geometry.ports.is_hovered(port),
     );
     let tip = port_tip(
         output.description.as_str(),
@@ -344,7 +344,7 @@ fn event_cell(
     let overhang = theme.port_overhang();
     let wid = event_glyph_wid(node_id, event_idx);
     let ev = EventRef { node_id, event_idx };
-    let fill = event_color(theme, rcx.port_frame.events.is_hovered(ev));
+    let fill = event_color(theme, rcx.geometry.events.is_hovered(ev));
     let tip = format!("event: {}", event.name);
     Panel::hstack()
         .id_salt(("event", event_idx))
@@ -368,7 +368,7 @@ fn event_cell(
 
 /// Stable widget id for an event port glyph. A separate id space from data
 /// ports (`port_circle_wid`) because events are indexed independently of
-/// outputs. `pub(crate)` so `PortFrame` / `SubscriptionUI` reconstruct it
+/// outputs. `pub(crate)` so `CanvasGeometry` / `SubscriptionUI` reconstruct it
 /// from domain coords (`EventRef`) to poll the drag.
 pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
     WidgetId::from_hash(("graph.node.event_glyph", node_id, event_idx))

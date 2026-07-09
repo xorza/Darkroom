@@ -215,7 +215,7 @@ impl BreakerUI {
             && self.state.is_none()
             && let Some(p) = resp.pointer_local
         {
-            self.state = Some(BreakerState::start(to_world(p, scene), button));
+            self.state = Some(BreakerState::start(to_world(p, &scene.viewport), button));
         }
         if self.state.is_some() && ui.escape_pressed() {
             self.state = None;
@@ -228,7 +228,7 @@ impl BreakerUI {
         ) {
             (Some(b), Some(_)) => {
                 if let Some(p) = resp.pointer_local {
-                    b.add_point(to_world(p, scene));
+                    b.add_point(to_world(p, &scene.viewport));
                 }
             }
             (Some(b), None) => {

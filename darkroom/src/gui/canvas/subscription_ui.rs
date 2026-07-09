@@ -1,4 +1,4 @@
-use aperture::{Brush, Ui};
+use aperture::{Brush, Rect, Ui};
 use glam::Vec2;
 use scenarium::graph::NodeId;
 
@@ -6,8 +6,9 @@ use crate::core::edit::intent::Intent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
+use crate::gui::canvas::cull::wire_visible;
+use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pointer_world;
-use crate::gui::canvas::port_frame::PortFrame;
 use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, add_cubic_wire};
 use crate::gui::node::port_color::event_color;
 use crate::gui::scene::Scene;
@@ -48,7 +49,7 @@ pub(crate) struct SubscriptionUI {
 /// The in-flight event wire, discriminated by which end it started from. Both
 /// directions commit the same `SetSubscription { subscribe: true }`; only the
 /// fixed end and the snap target differ. Identity-only — endpoints resolve every
-/// frame from `PortFrame`, so the wire survives layout changes and node moves.
+/// frame from `CanvasGeometry`, so the wire survives layout changes and node moves.
 #[derive(Clone, Copy, Debug)]
 enum InFlight {
     /// Started on an emitter event glyph; snapping to a subscription pin.
@@ -74,19 +75,19 @@ impl SubscriptionUI {
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
-        port_frame: &PortFrame,
+        geometry: &CanvasGeometry,
         out: &mut Vec<Intent>,
     ) {
         // Latch a fresh drag only when idle. An emitter and a pin can't both
         // start one this frame (distinct widget-id spaces, one press), so
         // preferring the emitter scan is arbitrary, not a conflict.
         if self.state.is_none() {
-            if let Some(emitter) = scan_event_drag_start(port_frame, scene) {
+            if let Some(emitter) = scan_event_drag_start(geometry, scene) {
                 self.state = Some(InFlight::FromEmitter {
                     emitter,
                     snap_sub: None,
                 });
-            } else if let Some(subscriber) = scan_sub_drag_start(port_frame, scene) {
+            } else if let Some(subscriber) = scan_sub_drag_start(geometry, scene) {
                 self.state = Some(InFlight::FromSubscriber {
                     subscriber,
                     snap_emitter: None,
@@ -105,15 +106,15 @@ impl SubscriptionUI {
         // drag_started()`, so its transition to `false` is the release edge.
         let still_dragging = match &mut state {
             InFlight::FromEmitter { emitter, snap_sub } => {
-                *snap_sub = scan_sub_target(port_frame, ui, scene, *emitter);
-                port_frame.events.dragging(*emitter)
+                *snap_sub = scan_sub_target(geometry, ui, scene, *emitter);
+                geometry.events.dragging(*emitter)
             }
             InFlight::FromSubscriber {
                 subscriber,
                 snap_emitter,
             } => {
-                *snap_emitter = scan_emitter_target(port_frame, ui, scene, *subscriber);
-                port_frame.subs.dragging(*subscriber)
+                *snap_emitter = scan_emitter_target(geometry, ui, scene, *subscriber);
+                geometry.subs.dragging(*subscriber)
             }
         };
         self.state = Some(state);
@@ -161,15 +162,19 @@ impl SubscriptionUI {
         }
     }
 
-    /// Paint every committed subscription wire on the current scene, marking
-    /// those the active breaker (`probe.state`) crosses as broken — pushed
-    /// onto `probe.state.broken_subscriptions` for the release-frame drain.
+    /// Paint every committed subscription wire on the current scene that
+    /// can intersect `visible`, marking those the active breaker
+    /// (`probe.state`) crosses as broken — pushed onto
+    /// `probe.state.broken_subscriptions` for the release-frame drain. A
+    /// culled wire skips the breaker probe too — the scribble is always
+    /// on-screen, so it can't cross an off-screen curve.
     pub(crate) fn draw(
         &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &Scene,
-        port_frame: &PortFrame,
+        geometry: &CanvasGeometry,
+        visible: Option<Rect>,
         probe: &mut BreakerProbe<'_>,
     ) {
         let width = ctx.theme.connection_width;
@@ -179,12 +184,15 @@ impl SubscriptionUI {
                 event_idx: s.event_idx,
             };
             let (Some(p0), Some(p3)) = (
-                port_frame.events.center(emitter),
-                port_frame.subs.center(s.subscriber),
+                geometry.events.center(emitter),
+                geometry.subs.center(s.subscriber),
             ) else {
                 continue;
             };
             let handles = event_handles(p0, p3);
+            if !wire_visible(visible, p0, &handles, p3) {
+                continue;
+            }
             let broken = probe.crosses_cubic(p0, handles.p1, handles.p2, p3);
             if broken {
                 // unwrap: `broken == true` implies `state` is `Some`.
@@ -216,17 +224,17 @@ impl SubscriptionUI {
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &Scene,
-        port_frame: &PortFrame,
+        geometry: &CanvasGeometry,
         canvas_origin: Vec2,
     ) {
         let (p0, p3) = match self.state {
             None => return,
             Some(InFlight::FromEmitter { emitter, snap_sub }) => {
-                let Some(p0) = port_frame.events.center(emitter) else {
+                let Some(p0) = geometry.events.center(emitter) else {
                     return;
                 };
                 let free = match snap_sub {
-                    Some(sub) => port_frame.subs.center(sub),
+                    Some(sub) => geometry.subs.center(sub),
                     None => pointer_world(ui, scene, canvas_origin),
                 };
                 let Some(p3) = free else { return };
@@ -236,11 +244,11 @@ impl SubscriptionUI {
                 subscriber,
                 snap_emitter,
             }) => {
-                let Some(p3) = port_frame.subs.center(subscriber) else {
+                let Some(p3) = geometry.subs.center(subscriber) else {
                     return;
                 };
                 let free = match snap_emitter {
-                    Some(e) => port_frame.events.center(e),
+                    Some(e) => geometry.events.center(e),
                     None => pointer_world(ui, scene, canvas_origin),
                 };
                 let Some(p0) = free else { return };
@@ -259,14 +267,14 @@ impl SubscriptionUI {
 }
 
 /// First emitter event glyph whose drag started this frame, or `None`.
-fn scan_event_drag_start(frame: &PortFrame, scene: &Scene) -> Option<EventRef> {
+fn scan_event_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<EventRef> {
     for n in &scene.nodes {
         for event_idx in 0..n.events.len as usize {
             let e = EventRef {
                 node_id: n.id,
                 event_idx,
             };
-            if frame.events.drag_started(e) {
+            if geometry.events.drag_started(e) {
                 return Some(e);
             }
         }
@@ -276,9 +284,9 @@ fn scan_event_drag_start(frame: &PortFrame, scene: &Scene) -> Option<EventRef> {
 
 /// First subscription pin whose drag started this frame, or `None`. Only
 /// terminal nodes render a pin, so only they can start a reverse event drag.
-fn scan_sub_drag_start(frame: &PortFrame, scene: &Scene) -> Option<NodeId> {
+fn scan_sub_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<NodeId> {
     for n in &scene.nodes {
-        if n.terminal && frame.subs.drag_started(n.id) {
+        if n.terminal && geometry.subs.drag_started(n.id) {
             return Some(n.id);
         }
     }
@@ -289,13 +297,18 @@ fn scan_sub_drag_start(frame: &PortFrame, scene: &Scene) -> Option<NodeId> {
 /// terminal node (the only kind that renders a pin) other than the emitter's
 /// own node. The pin-only target enforces "events connect only to
 /// subscribers"; the self-node skip rejects a node subscribing to itself.
-fn scan_sub_target(frame: &PortFrame, ui: &Ui, scene: &Scene, emitter: EventRef) -> Option<NodeId> {
+fn scan_sub_target(
+    geometry: &CanvasGeometry,
+    ui: &Ui,
+    scene: &Scene,
+    emitter: EventRef,
+) -> Option<NodeId> {
     let pointer = ui.pointer_pos()?;
     for n in &scene.nodes {
         if n.id == emitter.node_id || !n.terminal {
             continue;
         }
-        if frame.subs.contains_pointer(n.id, pointer) {
+        if geometry.subs.contains_pointer(n.id, pointer) {
             return Some(n.id);
         }
     }
@@ -307,7 +320,7 @@ fn scan_sub_target(frame: &PortFrame, ui: &Ui, scene: &Scene, emitter: EventRef)
 /// subscriber's own (a node can't subscribe to itself). Mirror of
 /// [`scan_sub_target`] for the reverse drag.
 fn scan_emitter_target(
-    frame: &PortFrame,
+    geometry: &CanvasGeometry,
     ui: &Ui,
     scene: &Scene,
     subscriber: NodeId,
@@ -322,7 +335,7 @@ fn scan_emitter_target(
                 node_id: n.id,
                 event_idx,
             };
-            if frame.events.contains_pointer(e, pointer) {
+            if geometry.events.contains_pointer(e, pointer) {
                 return Some(e);
             }
         }
