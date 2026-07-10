@@ -478,7 +478,7 @@ pub(crate) fn to_world(outer_local: Vec2, viewport: &Viewport) -> Vec2 {
 /// The pointer in inner-canvas world coords, or `None` when it's off-window.
 /// The free end of an in-flight wire that hasn't snapped to a target yet;
 /// `canvas_origin` is the inner canvas's pre-transform origin.
-pub(crate) fn pointer_world(ui: &Ui, scene: &Scene, canvas_origin: Vec2) -> Option<Vec2> {
+pub(crate) fn pointer_world(ui: &mut Ui, scene: &Scene, canvas_origin: Vec2) -> Option<Vec2> {
     ui.pointer_pos()
         .map(|p| to_world(p - canvas_origin, &scene.viewport))
 }

@@ -187,7 +187,7 @@ impl ConnectionUI {
     /// drop on empty canvas. While the button is still down, keep the wire.
     fn resolve_held(
         &mut self,
-        ui: &Ui,
+        ui: &mut Ui,
         scene: &Scene,
         geometry: &CanvasGeometry,
         start: PortRef,
@@ -258,7 +258,7 @@ impl ConnectionUI {
     /// intent, or `None` when the gesture doesn't apply — drag started
     /// on an output, released off the start node, the port is unknown,
     /// or the input is already a const (don't clobber the value).
-    fn const_drop(&self, ui: &Ui, scene: &Scene, start: PortRef) -> Option<Intent> {
+    fn const_drop(&self, ui: &mut Ui, scene: &Scene, start: PortRef) -> Option<Intent> {
         if start.kind != PortKind::Input {
             return None;
         }
@@ -469,7 +469,7 @@ fn input_const_only(scene: &Scene, port: PortRef) -> bool {
 /// other port can ever read `hovered = true`.
 fn scan_snap_target(
     geometry: &CanvasGeometry,
-    ui: &Ui,
+    ui: &mut Ui,
     scene: &Scene,
     start: PortRef,
 ) -> Option<PortRef> {
@@ -537,7 +537,7 @@ fn scan_snap_target(
 /// Whether the pointer is over the canvas but not over any node body —
 /// the "released into empty space" condition that offers the new-node
 /// palette. Uses the same arranged-rect hit test as `const_drop`.
-fn dropped_on_empty_canvas(ui: &Ui, scene: &Scene) -> bool {
+fn dropped_on_empty_canvas(ui: &mut Ui, scene: &Scene) -> bool {
     let Some(pointer) = ui.pointer_pos() else {
         return false;
     };

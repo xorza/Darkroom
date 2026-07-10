@@ -314,7 +314,7 @@ fn scan_sub_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<NodeI
 /// subscribers"; the self-node skip rejects a node subscribing to itself.
 fn scan_sub_target(
     geometry: &CanvasGeometry,
-    ui: &Ui,
+    ui: &mut Ui,
     scene: &Scene,
     emitter: EventRef,
 ) -> Option<NodeId> {
@@ -336,7 +336,7 @@ fn scan_sub_target(
 /// [`scan_sub_target`] for the reverse drag.
 fn scan_emitter_target(
     geometry: &CanvasGeometry,
-    ui: &Ui,
+    ui: &mut Ui,
     scene: &Scene,
     subscriber: NodeId,
 ) -> Option<EventRef> {

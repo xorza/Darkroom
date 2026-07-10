@@ -537,7 +537,7 @@ pub(crate) fn node_widget_id(node_id: NodeId) -> WidgetId {
 /// surface space at any pan/zoom. Occlusion-blind: a panel or chrome
 /// stacked over the node still counts as hovering it (an aperture
 /// `hover_within` would fix that properly).
-pub(crate) fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
+pub(crate) fn node_hovered(ui: &mut Ui, node_id: NodeId) -> bool {
     match (
         ui.response_for(node_widget_id(node_id)).rect,
         ui.pointer_pos(),

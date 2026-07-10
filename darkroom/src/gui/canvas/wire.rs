@@ -70,12 +70,18 @@ impl WireEmphasis {
     /// is hovered, so wires under nodes, panels, or floating chrome don't
     /// react to a pointer that can't reach them.
     pub(crate) fn resolve(
-        ui: &Ui,
+        ui: &mut Ui,
         scene: &Scene,
         canvas_origin: Vec2,
         canvas_bg: Color,
         fading: bool,
     ) -> Self {
+        // The `pointer_world` read inside auto-asserts a MOVE
+        // subscription (see `aperture::Ui::pointer_pos`), so the
+        // proximity highlight below keeps repainting as the pointer
+        // glides across bare canvas — without it the emphasis is
+        // invisible to hit-testing and a lit wire would stay lit on
+        // screen until an unrelated event forced a frame.
         let pointer = (!fading && ui.response_for(outer_canvas_widget_id()).hovered)
             .then(|| pointer_world(ui, scene, canvas_origin))
             .flatten();
