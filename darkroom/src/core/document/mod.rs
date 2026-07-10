@@ -39,6 +39,38 @@ pub enum GraphRef {
     Local(SubgraphId),
 }
 
+/// Whether a port consumes a binding (`Input`) or produces a value
+/// (`Output`). Scoped to the data-port subset until Trigger/Event are
+/// reintroduced. `Input` ports live in the left column, `Output` in
+/// the right; `opposite` flips between them for snap-target tests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PortKind {
+    Input,
+    Output,
+}
+
+impl PortKind {
+    pub fn opposite(self) -> Self {
+        match self {
+            PortKind::Input => PortKind::Output,
+            PortKind::Output => PortKind::Input,
+        }
+    }
+}
+
+/// One port's identity in the graph. Domain-keyed so UI passes can derive
+/// its `WidgetId` (see `crate::gui::node::port_row::port_circle_wid`)
+/// without threading a cache, and serializable so a persisted tab
+/// ([`TabRef::ImageViewer`]) can bind to it. Node ids are unique across
+/// the whole document (subgraph interiors included), so no graph ref is
+/// needed alongside.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PortRef {
+    pub node_id: NodeId,
+    pub kind: PortKind,
+    pub port_idx: usize,
+}
+
 /// What an editor tab shows. Most tabs are graphs — the root and any
 /// opened subgraph interiors ([`TabRef::Graph`]) — but a tab can also be
 /// a non-graph app view like [`TabRef::Preferences`] (the settings window).
@@ -50,10 +82,12 @@ pub enum TabRef {
     Graph(GraphRef),
     /// The app-preferences / settings view — no graph, no canvas.
     Preferences,
-    /// The full-resolution image viewer (singleton, like `Preferences`).
-    /// Its content is runtime-only ([`crate::gui::image_viewer`]); a
-    /// restored tab opens empty until a preview is clicked again.
-    ImageViewer,
+    /// A full-resolution viewer of one port's runtime image — one tab per
+    /// port, deduped on open. Content is runtime-only
+    /// (`crate::gui::image_viewer`): a restored tab opens empty and fills
+    /// itself after the next run. Pruned when its node is deleted, like a
+    /// subgraph tab whose def vanished.
+    ImageViewer(PortRef),
 }
 
 /// Which side of a subgraph def's interface a boundary-port edit targets:
@@ -266,6 +300,18 @@ fn default_tabs() -> Vec<TabRef> {
     vec![TabRef::Graph(GraphRef::Main)]
 }
 
+/// Recursive node lookup behind [`Document::find_node`], as a free fn so
+/// `ensure_valid_active`'s split borrow (`retain` on `tabs` while reading
+/// `graph`) can call it too.
+fn find_node_in<'a>(graph: &'a CoreGraph, id: &NodeId) -> Option<&'a Node> {
+    graph.by_id(id).or_else(|| {
+        graph
+            .subgraphs
+            .iter()
+            .find_map(|d| find_node_in(&d.graph, id))
+    })
+}
+
 /// Index of the slot named `expected`: `idx_hint` when it still holds
 /// that name (fast path / duplicate-name disambiguation), else the first
 /// slot matching by name. `None` when nothing matches.
@@ -361,8 +407,15 @@ impl Document {
     pub fn active_target(&self) -> Option<GraphRef> {
         match self.tabs[self.active] {
             TabRef::Graph(target) => Some(target),
-            TabRef::Preferences | TabRef::ImageViewer => None,
+            TabRef::Preferences | TabRef::ImageViewer(_) => None,
         }
+    }
+
+    /// The node behind `id`, searching the root graph and every local
+    /// subgraph interior (recursively). Node ids are unique document-wide,
+    /// so at most one match exists.
+    pub fn find_node(&self, id: &NodeId) -> Option<&Node> {
+        find_node_in(&self.graph, id)
     }
 
     /// Ensure a `GraphView` exists for a local subgraph interior,
@@ -402,13 +455,17 @@ impl Document {
         // resolve.
         if self.tabs.iter().any(|t| match t {
             TabRef::Graph(g) => self.graph_for(*g).is_none(),
-            TabRef::Preferences | TabRef::ImageViewer => false,
+            TabRef::ImageViewer(port) => self.find_node(&port.node_id).is_none(),
+            TabRef::Preferences => false,
         }) {
             // Split the borrow so `retain` (mut `tabs`) can read `graph`.
             let Document { graph, tabs, .. } = self;
             tabs.retain(|t| match t {
-                TabRef::Graph(GraphRef::Main) | TabRef::Preferences | TabRef::ImageViewer => true,
+                TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
                 TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(id).is_some(),
+                // A viewer tab dies with its node (mirrors a subgraph tab
+                // whose def vanished).
+                TabRef::ImageViewer(port) => find_node_in(graph, &port.node_id).is_some(),
             });
         }
         // Seed views for any `Local` tab missing one. Guarded by `any`
@@ -966,27 +1023,38 @@ mod tests {
         assert_eq!(doc.graph.subgraphs.len(), 2);
     }
 
+    /// An output-0 [`PortRef`] on `node_id`, for viewer-tab tests.
+    fn out_port(node_id: NodeId) -> PortRef {
+        PortRef {
+            node_id,
+            kind: PortKind::Output,
+            port_idx: 0,
+        }
+    }
+
     #[test]
     fn non_graph_tabs_have_no_target_and_survive_validation() {
         let mut doc = Document::default();
+        let node_id = add_node_at(&mut doc, Vec2::ZERO);
         // A graph tab resolves to a target; the appended non-graph tabs do not.
         assert_eq!(doc.active_target(), Some(GraphRef::Main));
-        doc.tabs.extend([TabRef::Preferences, TabRef::ImageViewer]);
+        doc.tabs
+            .extend([TabRef::Preferences, TabRef::ImageViewer(out_port(node_id))]);
         for active in [1, 2] {
             doc.active = active;
             assert_eq!(doc.active_tab(), doc.tabs[active]);
             assert_eq!(doc.active_target(), None, "a non-graph tab has no target");
         }
 
-        // A non-graph tab always resolves, so it's never pruned and the
-        // active index is left alone.
+        // Preferences always resolves; a viewer tab resolves while its
+        // node exists — neither is pruned and the active index holds.
         doc.ensure_valid_active();
         assert_eq!(
             doc.tabs,
             vec![
                 TabRef::Graph(GraphRef::Main),
                 TabRef::Preferences,
-                TabRef::ImageViewer
+                TabRef::ImageViewer(out_port(node_id))
             ]
         );
         assert_eq!(doc.active, 2);
@@ -996,11 +1064,12 @@ mod tests {
     #[test]
     fn ensure_valid_active_keeps_non_graph_tabs_when_a_subgraph_tab_vanishes() {
         let mut doc = Document::default();
+        let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let id = doc.create_subgraph();
         doc.tabs.extend([
             TabRef::Graph(GraphRef::Local(id)),
             TabRef::Preferences,
-            TabRef::ImageViewer,
+            TabRef::ImageViewer(out_port(node_id)),
         ]);
         doc.active = 3; // viewing the image tab
         // Drop the subgraph out from under its open tab.
@@ -1008,22 +1077,64 @@ mod tests {
 
         doc.ensure_valid_active();
         // The dead subgraph tab is pruned; Main + the non-graph tabs remain,
-        // and active is clamped back into range.
+        // and active follows its tab left one slot.
         assert_eq!(
             doc.tabs,
             vec![
                 TabRef::Graph(GraphRef::Main),
                 TabRef::Preferences,
-                TabRef::ImageViewer
+                TabRef::ImageViewer(out_port(node_id))
             ]
         );
         assert_eq!(doc.active, 2);
     }
 
     #[test]
+    fn ensure_valid_active_prunes_a_viewer_tab_whose_node_is_gone() {
+        let mut doc = Document::default();
+        let node_id = add_node_at(&mut doc, Vec2::ZERO);
+        doc.tabs.push(TabRef::ImageViewer(out_port(node_id)));
+        doc.ensure_valid_active();
+        assert_eq!(doc.tabs.len(), 2, "tab survives while the node exists");
+
+        // Delete the node: the viewer tab dies with it (like a subgraph
+        // tab whose def vanished).
+        doc.scope_mut(GraphRef::Main).unwrap().remove_node(&node_id);
+        doc.ensure_valid_active();
+        assert_eq!(doc.tabs, vec![TabRef::Graph(GraphRef::Main)]);
+        assert_eq!(doc.active, 0);
+    }
+
+    #[test]
+    fn find_node_reaches_subgraph_interiors() {
+        let mut doc = Document::default();
+        let root_id = add_node_at(&mut doc, Vec2::ZERO);
+        let sub = doc.create_subgraph();
+        // A func node inside the subgraph interior.
+        let interior = Node::new(NodeKind::Func(FuncId::unique()));
+        let interior_id = interior.id;
+        doc.graph
+            .subgraphs
+            .by_key_mut(&sub)
+            .unwrap()
+            .graph
+            .add(interior);
+
+        assert_eq!(doc.find_node(&root_id).unwrap().id, root_id);
+        assert_eq!(
+            doc.find_node(&interior_id).unwrap().id,
+            interior_id,
+            "lookup recurses into local subgraph interiors"
+        );
+        assert!(doc.find_node(&NodeId::unique()).is_none());
+    }
+
+    #[test]
     fn non_graph_tabs_round_trip_in_every_format() {
         let mut doc: Document = core_test_graph().into();
-        doc.tabs.extend([TabRef::Preferences, TabRef::ImageViewer]);
+        let node_id = doc.graph.iter().next().unwrap().id;
+        doc.tabs
+            .extend([TabRef::Preferences, TabRef::ImageViewer(out_port(node_id))]);
         for format in SerdeFormat::all_formats_for_testing() {
             let bytes = doc
                 .serialize(format)

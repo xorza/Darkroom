@@ -17,7 +17,7 @@ pub(crate) mod scene;
 pub(crate) mod status_bar;
 pub(crate) mod theme;
 
-use crate::core::document::GraphRef;
+use crate::core::document::{GraphRef, PortRef};
 use crate::gui::app::App;
 use aperture::WindowToken;
 
@@ -53,35 +53,6 @@ pub(crate) enum UiAction {
     /// Show this port's cached runtime image at full resolution in the
     /// image-viewer tab (an inspector preview thumbnail was clicked).
     OpenImageViewer(PortRef),
-}
-
-/// Whether a port consumes a binding (`Input`) or produces a value
-/// (`Output`). Scoped to the data-port subset until Trigger/Event are
-/// reintroduced. `Input` ports live in the left column, `Output` in
-/// the right; `opposite` flips between them for snap-target tests.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum PortKind {
-    Input,
-    Output,
-}
-
-impl PortKind {
-    pub(crate) fn opposite(self) -> Self {
-        match self {
-            PortKind::Input => PortKind::Output,
-            PortKind::Output => PortKind::Input,
-        }
-    }
-}
-
-/// One port's identity in the graph. Domain-keyed so prepass / record
-/// can derive its `WidgetId` via [`crate::gui::node::port_row::port_circle_wid`]
-/// without threading any cache.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct PortRef {
-    pub(crate) node_id: scenarium::graph::NodeId,
-    pub(crate) kind: PortKind,
-    pub(crate) port_idx: usize,
 }
 
 /// One event (emitter) port's identity. Events are indexed independently

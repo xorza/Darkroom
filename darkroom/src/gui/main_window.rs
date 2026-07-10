@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::mem::take;
 
 use aperture::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
 
-use crate::core::document::{Document, GraphRef, TabRef};
+use crate::core::document::{Document, GraphRef, PortRef, TabRef};
 use crate::core::edit::intent::Intent;
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
@@ -10,7 +11,7 @@ use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::GraphUI;
 use crate::gui::graph_toolbar;
-use crate::gui::image_viewer::ImageViewer;
+use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
 use crate::gui::node::emit_subgraph_opens;
 use crate::gui::preferences_view;
@@ -23,9 +24,11 @@ use crate::gui::tab_bar::{self, TabLabel};
 #[derive(Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
-    /// The full-resolution image-viewer pane ([`TabRef::ImageViewer`]);
-    /// fed by `Editor` when an inspector preview is clicked.
-    pub(crate) image_viewer: ImageViewer,
+    /// One full-resolution image-viewer pane per open viewer tab
+    /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Fed by
+    /// `Editor` (preview clicks + after-run refreshes), which also prunes
+    /// entries whose tab closed — dropping one frees its texture.
+    pub(crate) image_viewers: HashMap<PortRef, ImageViewer>,
     first_frame: bool,
 }
 
@@ -119,7 +122,7 @@ impl MainWindow {
                             command = Some(c);
                         }
                     }
-                    TabRef::ImageViewer => self.image_viewer.show(ui, ctx.theme),
+                    TabRef::ImageViewer(port) => self.viewer_mut(port).show(ui, ctx.theme),
                 }
                 // Bottom chrome: the cache-memory readout, below the content pane.
                 status_bar::show(ui, ctx);
@@ -137,6 +140,15 @@ impl MainWindow {
     /// cache so the newly-shown graph's connections render immediately.
     pub(crate) fn reset_transient(&mut self) {
         self.graph_ui.clear_gestures();
+    }
+
+    /// The viewer pane for `port`, created empty on first access — a
+    /// restored/undo-reopened tab has no state yet; it shows the hint
+    /// until the after-run refresh fills it.
+    pub(crate) fn viewer_mut(&mut self, port: PortRef) -> &mut ImageViewer {
+        self.image_viewers
+            .entry(port)
+            .or_insert_with(|| ImageViewer::new(port))
     }
 }
 
@@ -170,8 +182,8 @@ fn tab_labels(doc: &Document) -> Vec<TabLabel> {
                 subgraph_id: None,
                 closable: true,
             },
-            TabRef::ImageViewer => TabLabel {
-                text: "image".into(),
+            TabRef::ImageViewer(port) => TabLabel {
+                text: image_viewer::port_label(doc, *port).into(),
                 subgraph_id: None,
                 closable: true,
             },
@@ -183,7 +195,7 @@ impl Default for MainWindow {
     fn default() -> Self {
         Self {
             graph_ui: GraphUI::default(),
-            image_viewer: ImageViewer::default(),
+            image_viewers: HashMap::new(),
             first_frame: true,
         }
     }

@@ -12,7 +12,7 @@
 use aperture::Color;
 use scenarium::data::DataType;
 
-use crate::gui::PortKind;
+use crate::core::document::PortKind;
 use crate::gui::canvas::wire::toward;
 use crate::gui::theme::{Theme, ThemePreset};
 

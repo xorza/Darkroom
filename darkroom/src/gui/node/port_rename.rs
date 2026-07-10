@@ -8,8 +8,8 @@
 use aperture::{Configure, HAlign, Sense, SmolStr, Text, TextStyle, Tooltip, Ui, WidgetId};
 
 use crate::core::document::BoundarySide;
+use crate::core::document::PortRef;
 use crate::core::edit::intent::Intent;
-use crate::gui::PortRef;
 use crate::gui::node::{RecordCtx, click_intents};
 use crate::gui::widgets::inline_rename::InlineRename;
 

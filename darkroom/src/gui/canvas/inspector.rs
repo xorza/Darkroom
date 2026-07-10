@@ -33,6 +33,8 @@ use scenarium::execution::stats::LogLevel;
 use scenarium::graph::NodeId;
 use scenarium::library::Library;
 
+use crate::core::document::{PortKind, PortRef};
+use crate::gui::UiAction;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::node::header::fmt_elapsed;
@@ -41,7 +43,6 @@ use crate::gui::node_values::PortValueView;
 use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
-use crate::gui::{PortKind, PortRef, UiAction};
 
 /// Open state of a single node's inspector. Absence from
 /// [`Inspectors::modes`] is the third, `Closed`, state.

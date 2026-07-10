@@ -6,7 +6,9 @@ pub(crate) mod port_row;
 pub(crate) mod value_editor;
 
 use crate::core::document::GraphRef;
+use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::Intent;
+use crate::gui::UiAction;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::node_visible;
 use crate::gui::canvas::geometry::CanvasGeometry;
@@ -18,7 +20,6 @@ use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_w
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
-use crate::gui::{PortKind, PortRef, UiAction};
 use aperture::{
     Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };

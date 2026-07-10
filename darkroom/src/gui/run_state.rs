@@ -105,8 +105,9 @@ pub(crate) struct RunState {
     /// A run is in flight (`begin_run` → its `ExecutionFinished`). Drives the
     /// live repaint tick and whether the Cancel affordance shows.
     running: bool,
-    /// Current run epoch (tags value requests/replies).
-    run_id: RunId,
+    /// Current run epoch (tags value requests/replies). Read by the
+    /// image-viewer refresh to tell which run its content came from.
+    pub(crate) run_id: RunId,
     /// Nodes already asked about this epoch (insert-only; cleared only on
     /// a new epoch / `clear`). Dedups so the frame loop sends one request
     /// per node per run — a reply, including a `None` one, doesn't reopen

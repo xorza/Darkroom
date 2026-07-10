@@ -12,24 +12,26 @@
 //! [`App`]: crate::gui::app::App
 
 use aperture::Ui;
+use scenarium::data::DynamicValue;
 use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphDef;
 use scenarium::library::Library;
 
-use crate::core::document::{Document, GraphRef, TabRef};
+use crate::core::document::{Document, GraphRef, PortKind, PortRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::{
     Intent, NodeProperty, build_duplicate_intent_for, commit_intent_cascading,
 };
 use crate::core::io::preferences::Preferences;
 use crate::core::worker::ValueRequest;
+use crate::gui::UiAction;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
+use crate::gui::image_viewer;
 use crate::gui::main_window::MainWindow;
 use crate::gui::run_state::RunState;
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
-use crate::gui::{PortKind, PortRef, UiAction};
 
 use crate::gui::app::AppContext;
 
@@ -133,14 +135,23 @@ impl Editor {
         }
     }
 
-    /// Pending value requests for the open inspection panels: each open
-    /// node that has no value yet and no request in flight, marked
-    /// in-flight here and returned (with the current run epoch) for `App`
-    /// to forward to the worker. Keeps all request bookkeeping on the
-    /// projection; `App` only performs the IO.
+    /// Pending value requests for the open inspection panels **and** the
+    /// open image-viewer tabs' nodes (a viewer must refresh after a run
+    /// even when its node's panel is closed): each node not yet asked
+    /// this epoch, marked in-flight here and returned (with the current
+    /// run epoch) for `App` to forward to the worker. Keeps all request
+    /// bookkeeping on the projection; `App` only performs the IO.
     pub(crate) fn take_value_requests(&mut self) -> Vec<ValueRequest> {
-        self.run_state
-            .take_requests(self.main_window.graph_ui.open_inspector_nodes())
+        let viewer_nodes = self.document.tabs.iter().filter_map(|t| match t {
+            TabRef::ImageViewer(port) => Some(port.node_id),
+            _ => None,
+        });
+        self.run_state.take_requests(
+            self.main_window
+                .graph_ui
+                .open_inspector_nodes()
+                .chain(viewer_nodes),
+        )
     }
 
     /// Apply a single `intent` against the active target and record it as
@@ -232,6 +243,10 @@ impl Editor {
         // frame's `scene` to resolve tab/chip clicks, so it must run before
         // this frame's rebuild. After it, the active tab is fixed.
         self.navigate(ui, library);
+        // Tabs are settled: drop viewer state for closed tabs and fold the
+        // latest run's fetched values into the open viewers (values landed
+        // in `App`'s pre-frame drain, so a finished run shows this frame).
+        self.sync_image_viewers();
         // `Some` for a graph pane, `None` for a non-graph view (Preferences):
         // the scene projection + canvas edit pipeline run only when a graph
         // tab is active.
@@ -487,46 +502,67 @@ impl Editor {
         }
     }
 
-    /// Show `port`'s held runtime value in the image-viewer tab and focus
-    /// it. The value is the full `DynamicValue` the worker delivered for
-    /// the port's open inspector panel ([`PortValueView::full`]); `None`
-    /// (superseded run) still opens the tab, which explains itself.
-    /// Mirrors [`Self::open_preferences`]: adding the singleton tab is the
-    /// non-undoable part, focus routes through a recorded `SwitchTab`.
+    /// Show `port`'s held runtime value in its own image-viewer tab and
+    /// focus it — one tab per port, deduped. The value is the full
+    /// `DynamicValue` the worker delivered for the port's open inspector
+    /// panel ([`PortValueView::full`]); `None` (superseded run) still
+    /// opens the tab, which fills itself after the next run. Mirrors
+    /// [`Self::open_preferences`]: adding the tab is the non-undoable
+    /// part, focus routes through a recorded `SwitchTab`.
     ///
     /// [`PortValueView::full`]: crate::gui::node_values::PortValueView::full
     fn open_image_viewer(&mut self, port: PortRef) {
-        let value = self.run_state.values(port.node_id).and_then(|v| {
-            let ports = match port.kind {
-                PortKind::Input => &v.inputs,
-                PortKind::Output => &v.outputs,
-            };
-            ports.get(port.port_idx).and_then(|pv| pv.full.clone())
-        });
-        // Display name from the document, not the scene — the scene's
-        // interned strings are stale during the navigation phase.
-        let title = self
-            .document
-            .active_target()
-            .and_then(|target| self.document.graph_for(target))
-            .and_then(|graph| graph.by_id(&port.node_id))
-            .map(|node| node.name.clone())
-            .unwrap_or_default();
-        self.main_window.image_viewer.present(title, value);
+        let value = port_full_value(&self.run_state, port);
+        self.main_window.viewer_mut(port).present(
+            image_viewer::port_label(&self.document, port),
+            value,
+            self.run_state.run_id,
+        );
+        let index = self.tab_index_or_push(TabRef::ImageViewer(port));
+        self.intents.push(Intent::SwitchTab { to: index });
+    }
 
-        let index = match self
-            .document
-            .tabs
-            .iter()
-            .position(|t| *t == TabRef::ImageViewer)
-        {
+    /// Keep the viewer tabs in step with the document and the last run:
+    /// drop viewer state whose tab closed (freeing its texture), and
+    /// re-present each remaining tab's port from the current epoch's
+    /// fetched values — so every open viewer updates after a graph
+    /// execution, keeping the user's framing (see
+    /// [`refresh`](image_viewer::ImageViewer::refresh)).
+    /// Values arrive because [`Self::take_value_requests`] asks the worker
+    /// for viewer-tab nodes alongside open inspector panels.
+    fn sync_image_viewers(&mut self) {
+        let tabs = &self.document.tabs;
+        self.main_window
+            .image_viewers
+            .retain(|port, _| tabs.contains(&TabRef::ImageViewer(*port)));
+        for tab in &self.document.tabs {
+            let &TabRef::ImageViewer(port) = tab else {
+                continue;
+            };
+            // Nothing fetched for this node yet this epoch — keep showing
+            // the previous run's content rather than blanking mid-run.
+            if self.run_state.values(port.node_id).is_none() {
+                continue;
+            }
+            self.main_window.viewer_mut(port).refresh(
+                image_viewer::port_label(&self.document, port),
+                port_full_value(&self.run_state, port),
+                self.run_state.run_id,
+            );
+        }
+    }
+
+    /// Index of `tab` in the strip, appending it if absent — the shared
+    /// non-undoable half of opening any tab. Callers focus it through a
+    /// recorded `SwitchTab`.
+    fn tab_index_or_push(&mut self, tab: TabRef) -> usize {
+        match self.document.tabs.iter().position(|t| *t == tab) {
             Some(index) => index,
             None => {
-                self.document.tabs.push(TabRef::ImageViewer);
+                self.document.tabs.push(tab);
                 self.document.tabs.len() - 1
             }
-        };
-        self.intents.push(Intent::SwitchTab { to: index });
+        }
     }
 
     /// Open `target`'s tab and focus it. Adding the tab to the strip (lazily
@@ -536,19 +572,14 @@ impl Editor {
     /// reverses focus (the opened tab stays open) and a fresh open discards
     /// the redo tail, instead of leaving `active` mutated outside the record.
     fn open_graph(&mut self, target: GraphRef) {
-        let tab = TabRef::Graph(target);
-        let index = match self.document.tabs.iter().position(|t| *t == tab) {
-            Some(index) => index,
-            None => {
-                if let GraphRef::Local(id) = target
-                    && !self.document.ensure_sub_view(id)
-                {
-                    return; // subgraph vanished — nothing to open
-                }
-                self.document.tabs.push(tab);
-                self.document.tabs.len() - 1
-            }
-        };
+        // Idempotent view seeding, so it can run before the open-or-focus
+        // dedupe rather than only inside the "new tab" arm.
+        if let GraphRef::Local(id) = target
+            && !self.document.ensure_sub_view(id)
+        {
+            return; // subgraph vanished — nothing to open
+        }
+        let index = self.tab_index_or_push(TabRef::Graph(target));
         self.intents.push(Intent::SwitchTab { to: index });
     }
 
@@ -558,20 +589,22 @@ impl Editor {
     /// `SwitchTab`. Called from the File ▸ Preferences menu via `App`, so it
     /// records the switch and drains it immediately like every external edit.
     pub(crate) fn open_preferences(&mut self, library: &Library) {
-        let index = match self
-            .document
-            .tabs
-            .iter()
-            .position(|t| *t == TabRef::Preferences)
-        {
-            Some(index) => index,
-            None => {
-                self.document.tabs.push(TabRef::Preferences);
-                self.document.tabs.len() - 1
-            }
-        };
+        let index = self.tab_index_or_push(TabRef::Preferences);
         self.apply_edit(Intent::SwitchTab { to: index }, library);
     }
+}
+
+/// The full runtime value held for `port` in the last fetch, if any —
+/// `RunState`'s per-node view indexed by the port's side + slot. Free fn
+/// (not on `Editor`) so `open_image_viewer` / `sync_image_viewers` can
+/// call it while `self.main_window` is mutably borrowed.
+fn port_full_value(run_state: &RunState, port: PortRef) -> Option<DynamicValue> {
+    let values = run_state.values(port.node_id)?;
+    let ports = match port.kind {
+        PortKind::Input => &values.inputs,
+        PortKind::Output => &values.outputs,
+    };
+    ports.get(port.port_idx).and_then(|pv| pv.full.clone())
 }
 
 #[cfg(test)]
@@ -649,6 +682,74 @@ mod tests {
         editor.actions.push(UiAction::NewSubgraph);
         editor.apply_view_actions();
         assert!(editor.dirty, "creating a subgraph is unsaved work");
+    }
+
+    #[test]
+    fn image_viewer_tabs_dedupe_per_port_and_feed_value_requests() {
+        use glam::Vec2;
+        use scenarium::graph::{Node, NodeKind};
+        use scenarium::node::function::FuncId;
+
+        use crate::core::document::view_node::ViewNode;
+
+        let lib = Library::default();
+        let mut editor = Editor::new(Document::default());
+        let node = Node::new(NodeKind::Func(FuncId::unique()));
+        let id = node.id;
+        editor.document.graph.add(node);
+        editor.document.main_view.view_nodes.add(ViewNode {
+            id,
+            pos: Vec2::ZERO,
+        });
+        let port = |port_idx| PortRef {
+            node_id: id,
+            kind: PortKind::Output,
+            port_idx,
+        };
+        let open = |editor: &mut Editor, p| {
+            editor.actions.push(UiAction::OpenImageViewer(p));
+            editor.apply_view_actions();
+            editor.drain_intents(GraphRef::Main, &lib);
+        };
+
+        // First open adds + focuses the port's tab.
+        open(&mut editor, port(0));
+        assert_eq!(
+            editor.document.tabs,
+            vec![TabRef::Graph(GraphRef::Main), TabRef::ImageViewer(port(0))]
+        );
+        assert_eq!(editor.document.active, 1);
+
+        // Re-clicking the same port reuses its tab; a different port of
+        // the same node gets its own.
+        open(&mut editor, port(0));
+        assert_eq!(editor.document.tabs.len(), 2, "same port dedupes");
+        open(&mut editor, port(1));
+        assert_eq!(editor.document.tabs.len(), 3, "distinct port adds a tab");
+        assert_eq!(editor.document.active, 2);
+        assert!(editor.main_window.image_viewers.contains_key(&port(0)));
+        assert!(editor.main_window.image_viewers.contains_key(&port(1)));
+
+        // Viewer tabs feed the worker value fetch even with every
+        // inspector panel closed — this is what refreshes them after a
+        // run. One request per node per epoch (both tabs share the node).
+        let requests = editor.take_value_requests();
+        assert_eq!(requests.len(), 1, "one request per node per epoch");
+        assert_eq!(requests[0].node_id, id);
+
+        // Closing a tab drops its viewer state on the next sync (the
+        // remaining port's state survives).
+        editor
+            .document
+            .tabs
+            .retain(|t| *t != TabRef::ImageViewer(port(1)));
+        editor.document.ensure_valid_active();
+        editor.sync_image_viewers();
+        assert!(editor.main_window.image_viewers.contains_key(&port(0)));
+        assert!(
+            !editor.main_window.image_viewers.contains_key(&port(1)),
+            "closed tab's viewer state is pruned"
+        );
     }
 
     #[test]

@@ -5,12 +5,13 @@ use aperture::{Rect, ResponseState, Size, Ui};
 use glam::Vec2;
 use scenarium::graph::NodeId;
 
+use crate::core::document::{PortKind, PortRef};
+use crate::gui::EventRef;
 use crate::gui::canvas::node_ports;
 use crate::gui::node::header::subscription_glyph_wid;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::{event_glyph_wid, port_circle_wid};
 use crate::gui::scene::{Scene, SceneNode};
-use crate::gui::{EventRef, PortKind, PortRef};
 
 /// The canvas's response-derived geometry: a per-frame snapshot of every
 /// port-ish glyph plus the cross-frame node-size cache, all filled by one

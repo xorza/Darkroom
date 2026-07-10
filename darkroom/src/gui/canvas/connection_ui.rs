@@ -5,6 +5,7 @@ use glam::Vec2;
 use scenarium::data::DataType;
 use scenarium::graph::{Binding, InputPort, closes_data_cycle};
 
+use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
@@ -15,7 +16,6 @@ use crate::gui::canvas::{node_ports, outer_canvas_widget_id, pointer_world};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
 use crate::gui::scene::{InputBindingView, Scene};
-use crate::gui::{PortKind, PortRef};
 
 /// Upper bound on the *vertical-gap* term of the handle length, so a tall
 /// forward span bows into a gentle S rather than a huge loop.

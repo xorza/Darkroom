@@ -21,6 +21,7 @@ use scenarium::graph::NodeId;
 use std::collections::BTreeSet;
 
 use crate::core::document::Viewport;
+use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
@@ -38,7 +39,6 @@ use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::canvas::wire::WireEmphasis;
 use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_port_dblclicks};
 use crate::gui::scene::{Scene, SceneNode};
-use crate::gui::{PortKind, PortRef};
 
 /// Canvas-level UI scope: owns the port-widget-id cache, the
 /// `NodeUI` that renders every graph node, and the manual pan/zoom

@@ -17,7 +17,9 @@ use scenarium::graph::NodeId;
 use scenarium::library::Library;
 
 use crate::core::document::BoundarySide;
+use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::Intent;
+use crate::gui::EventRef;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
@@ -25,7 +27,6 @@ use crate::gui::node::{RecordCtx, node_hovered, set_input};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::{StaticValueEditorTheme, Theme};
-use crate::gui::{EventRef, PortKind, PortRef};
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
