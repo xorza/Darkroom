@@ -45,6 +45,12 @@ impl AnyState {
         self.boxed = Some(Box::new(value));
     }
 
+    /// Drop the held value (whatever its type), releasing anything it owns —
+    /// e.g. a watcher whose RAII guard keeps an OS resource open.
+    pub fn clear(&mut self) {
+        self.boxed = None;
+    }
+
     pub fn get_or_default<T>(&mut self) -> &mut T
     where
         T: Any + Send + Default,

@@ -121,7 +121,6 @@ impl Prog {
         self.program.output_types.extend_from_slice(types);
         self.program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),
-            inited: true,
             behavior,
             func_id: FuncId::from_u128(func),
             func_version: version,

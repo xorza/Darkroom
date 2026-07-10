@@ -303,13 +303,13 @@ impl ExecutionEngine {
         // state.
         self.planner.plan(&self.program, &seeds, &mut self.plan)?;
 
-        // Phase 2b: cache-aware refinement. Resolve which pure-structural nodes reuse a cache
-        // and cut every cone feeding only cache hits, yielding the `needed` mask — so a
-        // disk-cached node's stale upstream isn't recomputed on reopen. Mutates the cache
-        // (stamps digests, flags disk hits); the run loop re-derives each surviving node's
-        // digest as it reaches it (producers first) and materializes the disk frontier lazily.
-        let needed = self
-            .resolver
+        // Phase 2b: cache-aware refinement. Resolve every node's disposition — its reuse
+        // verdict merged with the backward cut, so a cone feeding only cache hits (a
+        // disk-cached node's stale upstream) isn't recomputed on reopen. Mutates the cache
+        // (stamps digests, flags disk hits). The column is authoritative for the run: the
+        // executor reads it rather than re-deriving (a digest folds live filesystem state
+        // and could drift mid-run).
+        self.resolver
             .resolve(&self.program, &self.plan, &mut self.cache);
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
@@ -320,7 +320,7 @@ impl ExecutionEngine {
             .run(
                 &self.program,
                 &self.plan,
-                needed,
+                &self.resolver.disposition,
                 &mut self.cache,
                 &self.flatten_map,
                 progress,
@@ -330,8 +330,9 @@ impl ExecutionEngine {
 
         // Phase 3b: reclaim RAM from values this run left off the active frontier and that the
         // disk store (written per-node above) can serve again on demand. Reuses the resolver's
-        // `needed` cut mask — the same active-frontier set — rather than recomputing a keep-set.
-        self.cache.evict_unused(&self.program, needed);
+        // disposition column — the same active-frontier set — rather than recomputing a keep-set.
+        self.cache
+            .evict_unused(&self.program, &self.resolver.disposition);
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.

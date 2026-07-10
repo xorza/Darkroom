@@ -7,7 +7,7 @@ use crate::node::function::FuncId;
 use common::Span;
 
 /// Hand-built program for cut tests: each node is `(terminal, &[producer_idx])` — an edge
-/// per listed producer, on its own input port. `compute_needed` reads only the bindings and
+/// per listed producer, on its own input port. `compute_disposition` reads only the bindings and
 /// the roots, so no digests/lambdas are needed. Node `idx` gets id `from_u128(idx + 1)`.
 #[derive(Default)]
 struct Fix {
@@ -31,7 +31,6 @@ impl Fix {
         self.program.output_types.push(DataType::Any);
         self.program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),
-            inited: true,
             func_id: FuncId::from_u128(idx as u128 + 1),
             inputs: Span::new(inputs_start, producers.len() as u32),
             outputs: Span::new(outputs_start, 1),
@@ -41,8 +40,9 @@ impl Fix {
     }
 }
 
-/// Run the backward cut over `fix` with the given roots and per-node resolution.
-fn needed_of(fix: &Fix, roots: &[NodeIdx], resolved: &[Resolved]) -> Vec<bool> {
+/// Run the backward cut over `fix` with the given roots and per-node resolution,
+/// returning each node's merged [`Disposition`].
+fn dispositions_of(fix: &Fix, roots: &[NodeIdx], resolved: &[Resolved]) -> Vec<Disposition> {
     let plan = ExecutionPlan {
         // Producer-first order for these fixtures is just index order (a producer is always
         // added before its consumer), matching the planner's post-order.
@@ -52,31 +52,31 @@ fn needed_of(fix: &Fix, roots: &[NodeIdx], resolved: &[Resolved]) -> Vec<bool> {
         roots: roots.to_vec(),
     };
     let resolved: NodeColumn<Resolved> = resolved.to_vec().into();
-    let mut needed = NodeColumn::default();
-    compute_needed(&fix.program, &plan, &resolved, &mut needed);
+    let mut disposition = NodeColumn::default();
+    compute_disposition(&fix.program, &plan, &resolved, &mut disposition);
     (0..fix.program.e_nodes.len())
-        .map(|i| needed[NodeIdx::from(i)])
+        .map(|i| disposition[NodeIdx::from(i)])
         .collect()
 }
 
 #[test]
 fn reuse_hit_prunes_its_whole_upstream_cone() {
     // src → mid → sink(root). sink runs, mid is a reuse hit ⇒ mid doesn't read src, so
-    // both mid's producer (src) is cut while mid itself stays needed (sink reads it).
+    // mid's producer (src) is cut while mid itself stays on the frontier (sink reads it).
     let mut f = Fix::default();
     let src = f.node(&[]);
     let mid = f.node(&[src]);
     let sink = f.node(&[mid]);
 
-    let needed = needed_of(
+    let dispositions = dispositions_of(
         &f,
         &[sink],
         &[Resolved::Run, Resolved::Reuse, Resolved::Run],
     );
     assert_eq!(
-        needed,
-        vec![false, true, true],
-        "src is cut (its only consumer reused); mid+sink needed"
+        dispositions,
+        vec![Disposition::Cut, Disposition::Reuse, Disposition::Run],
+        "src is cut (its only consumer reused); mid serves its cache; sink runs"
     );
 }
 
@@ -90,7 +90,7 @@ fn shared_producer_survives_when_one_consumer_runs() {
     let live = f.node(&[src]);
     let sink = f.node(&[cached, live]);
 
-    let needed = needed_of(
+    let dispositions = dispositions_of(
         &f,
         &[sink],
         &[
@@ -101,8 +101,13 @@ fn shared_producer_survives_when_one_consumer_runs() {
         ],
     );
     assert_eq!(
-        needed,
-        vec![true, true, true, true],
+        dispositions,
+        vec![
+            Disposition::Run,
+            Disposition::Reuse,
+            Disposition::Run,
+            Disposition::Run,
+        ],
         "src survives: the running consumer `live` still reads it"
     );
 }
@@ -116,14 +121,19 @@ fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
     let cached = f.node(&[src]);
     let sink = f.node(&[cached]);
 
-    let needed = needed_of(
+    let dispositions = dispositions_of(
         &f,
         &[sink],
         &[Resolved::Run, Resolved::Run, Resolved::Reuse, Resolved::Run],
     );
     assert_eq!(
-        needed,
-        vec![false, false, true, true],
+        dispositions,
+        vec![
+            Disposition::Cut,
+            Disposition::Cut,
+            Disposition::Reuse,
+            Disposition::Run,
+        ],
         "both deep and src are pruned behind the reuse hit"
     );
 }

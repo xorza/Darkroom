@@ -33,7 +33,6 @@ impl Fix {
         let idx = self.program.e_nodes.len();
         self.program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),
-            inited: true,
             terminal,
             func_id: FuncId::from_u128(idx as u128 + 1),
             inputs: Span::new(inputs_start, inputs.len() as u32),

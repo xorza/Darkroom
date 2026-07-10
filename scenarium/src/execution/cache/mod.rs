@@ -17,8 +17,9 @@ use common::{KeyIndexKey, KeyIndexVec};
 use crate::data::{DynamicValue, RamUsage};
 use crate::execution::NodeColumn;
 use crate::execution::digest::{Digest, node_digest};
-use crate::execution::disk_store::DiskStore;
+use crate::execution::disk_store::{DiskStore, Target};
 use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram, NodeIdx};
+use crate::execution::resolve::Disposition;
 use crate::graph::NodeId;
 use crate::node::special::SpecialNode;
 use crate::runtime::any_state::AnyState;
@@ -275,9 +276,11 @@ impl RuntimeCache {
     /// Stamp node `idx`'s content digest into its slot and return whether an unchanged output
     /// can be reused this run — resident in RAM ([`is_resident_hit`](Self::is_resident_hit)) or
     /// a blob on disk flagged now ([`mark_on_disk_if_present`](Self::mark_on_disk_if_present)).
-    /// The single place the digest is folded and the reuse verdict formed, shared by the pre-run
-    /// cut ([`Resolver`](crate::execution::resolve::Resolver)) and the run loop (`prepare_node`)
-    /// so the two can't drift. A `None` digest (an impure cone) never reuses.
+    /// The single place the digest is folded and the reuse verdict formed — called once per
+    /// node per run, by the pre-run [`Resolver`](crate::execution::resolve::Resolver) sweep;
+    /// the run loop reads the resolver's verdict rather than re-deriving (a digest folds live
+    /// filesystem state and could drift mid-run). A `None` digest (an impure cone) never
+    /// reuses.
     ///
     /// The two reuse paths are gated on the node's [`CacheMode`](crate::graph::CacheMode) bits:
     /// RAM reuse only for a `caches_in_ram` mode (`Ram`/`Both`), disk reuse only for a
@@ -330,13 +333,13 @@ impl RuntimeCache {
 
     /// Deserialize node `idx`'s disk blob into its slot. Returns whether the slot is resident
     /// afterward: `true` if already resident or the read succeeded. On a read failure (codec
-    /// gone, corrupt, an incompatible format, or deleted) the file is **deleted** and the slot
+    /// gone, corrupt, an incompatible format, a wrong output count, or deleted) the slot is
     /// cleared, so the demanding consumer is dropped this run and the *next* reopen recomputes
-    /// the node + rewrites a fresh blob — without the delete, [`DiskStore::store`]'s
-    /// skip-if-exists would keep the broken file forever. A blob can't be of the *wrong type*
-    /// for a matching digest: the output signature is folded into the digest, so a redefined
-    /// output re-keys rather than colliding.
-    pub(crate) fn hydrate_slot(&mut self, program: &ExecutionProgram, idx: NodeIdx) -> bool {
+    /// the node. A broken **content-addressed** blob is also deleted — without that,
+    /// [`DiskStore::store`]'s skip-if-exists would keep the broken file forever. An
+    /// **explicit-path** blob is the user's own file and is never deleted here: `store`
+    /// overwrites it on the recompute anyway.
+    pub(crate) async fn hydrate_slot(&mut self, program: &ExecutionProgram, idx: NodeIdx) -> bool {
         // A fresh value already in RAM needs no load. A *stale* resident value can't reach here:
         // `mark_on_disk_if_present` demotes "stale + blob on disk" to `OnDisk` (dropping the
         // stale value) before a consumer would read it.
@@ -350,14 +353,29 @@ impl RuntimeCache {
         if let Some(digest) = self.slots[idx].current_digest
             && let Some(target) = self.disk_store.blob_path(program, idx, Some(digest))
         {
-            if let Some(values) = self.disk_store.read(target.path()) {
-                self.hydrate(idx, values, digest);
-                return true;
+            // A content-addressed blob folds the output signature into its digest, so its
+            // count always matches — but an explicit-path (file-cache) blob is keyed on the
+            // path alone, and a user-pointed file can decode to any output count. Reject a
+            // mismatch here as a miss rather than letting a consumer's arity assert panic.
+            let arity = program.e_nodes[idx].outputs.len as usize;
+            match self.disk_store.read(target.path()).await {
+                Some(values) if values.len() == arity => {
+                    self.hydrate(idx, values, digest);
+                    return true;
+                }
+                Some(values) => {
+                    tracing::warn!(
+                        path = %target.path().display(),
+                        expected = arity,
+                        got = values.len(),
+                        "cached outputs have the wrong count; ignoring blob"
+                    );
+                }
+                None => {}
             }
-            // The blob didn't load — corrupt, an incompatible format, or vanished. Delete it so
-            // the recompute that follows writes a fresh one (otherwise the broken file lingers
-            // and `store` skips it as "already on disk", forever).
-            self.disk_store.delete(target.path());
+            if matches!(target, Target::Addressed(_)) {
+                self.disk_store.delete(target.path());
+            }
         }
         self.slots[idx].clear_output();
         false
@@ -367,12 +385,16 @@ impl RuntimeCache {
     /// of `idx` reads (its own outputs and its inputs' resolved values). Lets a disk-cached node
     /// no run touched still show its value when the editor selects it, without the run having
     /// eagerly loaded every blob.
-    pub(crate) fn hydrate_for_inspection(&mut self, program: &ExecutionProgram, idx: NodeIdx) {
-        self.hydrate_slot(program, idx);
+    pub(crate) async fn hydrate_for_inspection(
+        &mut self,
+        program: &ExecutionProgram,
+        idx: NodeIdx,
+    ) {
+        self.hydrate_slot(program, idx).await;
         let span = program.e_nodes[idx].inputs;
-        for input in &program.inputs[span.range()] {
-            if let ExecutionBinding::Bind(addr) = &input.binding {
-                self.hydrate_slot(program, addr.target_idx);
+        for pool_idx in span.range() {
+            if let ExecutionBinding::Bind(addr) = &program.inputs[pool_idx].binding {
+                self.hydrate_slot(program, addr.target_idx).await;
             }
         }
     }
@@ -436,18 +458,23 @@ impl RuntimeCache {
     /// *behind* the frontier when a downstream node became a disk hit), and a non-RAM value some
     /// consumer didn't reach (so its outputs never all went spent).
     ///
-    /// `needed` is the resolver's cut mask (reused here, not recomputed): `true` for a node some
-    /// running node will read — the active frontier. A **RAM-retaining** node (`Ram`/`Both`) on
-    /// that frontier stays resident for next run's RAM hit; every other resident value goes
-    /// through [`reclaim_slot`](Self::reclaim_slot), which demotes a reloadable one to disk and
+    /// `disposition` is the resolver's per-node column (reused here, not recomputed):
+    /// [`needed`](Disposition::needed) marks the active frontier — a node some running node
+    /// will read. A **RAM-retaining** node (`Ram`/`Both`) on that frontier stays resident
+    /// for next run's RAM hit; every other resident value goes through
+    /// [`reclaim_slot`](Self::reclaim_slot), which demotes a reloadable one to disk and
     /// drops a non-RAM one (a non-reloadable `Ram`/`Both` leftover is kept, its mode's promise).
-    pub(crate) fn evict_unused(&mut self, program: &ExecutionProgram, needed: &NodeColumn<bool>) {
+    pub(crate) fn evict_unused(
+        &mut self,
+        program: &ExecutionProgram,
+        disposition: &NodeColumn<Disposition>,
+    ) {
         for idx in program.node_indices() {
             if self.slots[idx].output_values().is_none() {
                 continue;
             }
             // A RAM-retaining node on the active frontier stays hot for the next run's RAM hit.
-            if program.e_nodes[idx].cache.caches_in_ram() && needed[idx] {
+            if program.e_nodes[idx].cache.caches_in_ram() && disposition[idx].needed() {
                 continue;
             }
             self.reclaim_slot(program, idx);

@@ -252,7 +252,9 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
 /// - An **`Impure`** node has no digest (`None`) — it varies per run, so it never caches and
 ///   always recomputes; a `Bind` producer with a `None` digest taints this node to `None`.
 /// - Otherwise fold every input structurally: a `Const`'s value + `FsPath` directory content
-///   ([`hash_fs_content`]), or a `Bind` producer's stamped `current_digest`.
+///   ([`hash_fs_content`]), or a `Bind` producer's stamped `current_digest`. Known gap: a
+///   `Bind`-delivered path value's file content is *not* keyed — see
+///   `scenarium/fs_path_digest_issue.md`.
 pub(crate) fn node_digest(
     program: &ExecutionProgram,
     idx: NodeIdx,

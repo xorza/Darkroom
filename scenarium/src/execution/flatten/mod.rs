@@ -24,7 +24,7 @@ use crate::execution::program::{
 };
 use crate::execution::stats::FlattenMap;
 use crate::graph::subgraph::SubgraphId;
-use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, Subscription};
+use crate::graph::{Binding, CacheMode, Graph, InputPort, NodeId, NodeKind, Subscription};
 use crate::library::Library;
 use crate::node::function::Func;
 use crate::node::special::SpecialNode;
@@ -58,9 +58,7 @@ pub(crate) struct Flattener {
     inputs_scratch: Vec<ExecutionInput>,
 }
 
-/// The graph's SoA pools, rebuilt each `build`. `inputs` is the new pool being
-/// filled (carries over reused nodes' bindings); `old_inputs` is last build's
-/// pool, kept readable for that carry-over. Outputs carry no static per-node
+/// The graph's SoA pools, rebuilt each `build`. Outputs carry no static per-node
 /// data, so there is no output pool — each node's output span is assigned from
 /// a running counter local to the build.
 pub(crate) struct Pools<'a> {
@@ -70,10 +68,9 @@ pub(crate) struct Pools<'a> {
 
 impl Flattener {
     /// Flatten `root` into `e_nodes` (via compact insert, preserving caches),
-    /// rebuilding the SoA pools. Inputs carry over each reused node's `binding`;
-    /// outputs/events are rebuilt fresh. Output spans are assigned from a running
-    /// counter local to the build; the program's total output count is then
-    /// `output_types.len()`, resolved separately.
+    /// rebuilding the SoA pools fresh from the library. Output spans are assigned
+    /// from a running counter local to the build; the program's total output count
+    /// is then `output_types.len()`, resolved separately.
     pub(crate) fn build(
         &mut self,
         e_nodes: &mut KeyIndexVec<NodeId, ExecutionNode>,
@@ -105,7 +102,6 @@ impl Flattener {
                 subs: &mut self.subs,
                 compact: e_nodes.compact_insert_start(),
                 cur_idx: 0,
-                old_inputs: pools.inputs.as_slice(),
                 new_inputs: &mut new_inputs,
                 n_outputs: 0,
                 events: pools.events,
@@ -200,8 +196,6 @@ struct Run<'a> {
     /// inserts in `set_input`: `compact_insert` only swaps slots at indices
     /// `>= write_idx`, never the already-compacted consumer.
     cur_idx: usize,
-    /// Last build's inputs pool, read to carry over reused nodes' bindings.
-    old_inputs: &'a [ExecutionInput],
     /// The inputs pool being built this update; `cur_idx`'s span is its tail.
     new_inputs: &'a mut Vec<ExecutionInput>,
     /// Running total of outputs emitted so far; also the next output span start.
@@ -274,18 +268,10 @@ impl<'a> Run<'a> {
 
             let flat_id = flatten_id(self.path.as_slice(), node.id);
             let input_count = func.inputs.len();
-            let (idx, e_node) = self.compact.insert_with(&flat_id, || ExecutionNode {
+            let (idx, _) = self.compact.insert_with(&flat_id, || ExecutionNode {
                 id: flat_id,
                 ..Default::default()
             });
-            let was_inited = e_node.inited;
-            let old_inputs_span = e_node.inputs;
-            if was_inited {
-                assert_eq!(
-                    e_node.func_id, func.id,
-                    "func changed under a reused node id"
-                );
-            }
 
             let outputs_start = self.n_outputs;
             self.n_outputs += func.outputs.len() as u32;
@@ -297,26 +283,24 @@ impl<'a> Run<'a> {
                 });
             }
 
+            // Rebuilt fresh from the func every build (never carried over from the
+            // last build): the library can evolve between updates — a changed
+            // `required` flag or a grown input list must land here, and the bindings
+            // loop below visits every port anyway.
             let inputs_start = self.new_inputs.len() as u32;
-            if was_inited {
-                self.new_inputs
-                    .extend_from_slice(&self.old_inputs[old_inputs_span.range()]);
-            } else {
-                for func_input in &func.inputs {
-                    self.new_inputs.push(ExecutionInput {
-                        required: func_input.required,
-                        ..Default::default()
-                    });
-                }
+            for func_input in &func.inputs {
+                self.new_inputs.push(ExecutionInput {
+                    required: func_input.required,
+                    ..Default::default()
+                });
             }
 
             let e_node = &mut self.compact[idx];
-            e_node.inited = true;
             e_node.func_id = func.id;
             e_node.func_version = func.version;
-            if !was_inited {
-                e_node.lambda = func.lambda.clone();
-            }
+            // Refreshed every build (an Arc clone), so a reused flat node can't keep
+            // executing a previous library's lambda after an in-session change.
+            e_node.lambda = func.lambda.clone();
             e_node.inputs = Span::new(inputs_start, input_count as u32);
             e_node.outputs = Span::new(outputs_start, func.outputs.len() as u32);
             e_node.events = Span::new(events_start, func.events.len() as u32);
@@ -326,6 +310,12 @@ impl<'a> Run<'a> {
             // by the content digest (a node with an impure cone has no digest and
             // so can't be disk-cached) — see `digest.rs`.
             e_node.cache = node.cache;
+            // A file-cache node's caching is the file at its path (bypass-aware,
+            // invalidated by deleting the file); a RAM mode would serve the resident
+            // value under the never-changing path key, ignoring both.
+            if matches!(special, Some(SpecialNode::CachePassthrough { .. })) {
+                e_node.cache = CacheMode::None;
+            }
             // Special-node identity + its per-instance config (e.g. cache bypass),
             // recognized by the engine.
             e_node.special = special;

@@ -6,6 +6,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use thiserror::Error;
@@ -29,7 +30,19 @@ pub(crate) enum Error {
 /// unreadable, or no longer decodes (corrupt / a custom type whose codec is gone).
 /// All mean "recompute" to the caller. A transient read error is logged but, like
 /// the rest, treated as a miss.
-pub(crate) fn read(path: &Path, library: &Library) -> Option<Vec<DynamicValue>> {
+///
+/// Mirrors [`write`]: the fs read + decode of a possibly huge blob runs on the
+/// blocking pool so it doesn't stall the async worker thread (progress events,
+/// cancel polling, other event-loop tasks).
+pub(crate) async fn read(path: &Path, library: &Arc<Library>) -> Option<Vec<DynamicValue>> {
+    let path = path.to_path_buf();
+    let library = library.clone();
+    tokio::task::spawn_blocking(move || read_blocking(&path, &library))
+        .await
+        .expect("cache read task panicked")
+}
+
+fn read_blocking(path: &Path, library: &Library) -> Option<Vec<DynamicValue>> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return None,

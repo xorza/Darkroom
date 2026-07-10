@@ -20,8 +20,8 @@ fn temp_file(tag: &str) -> TempFile {
     )))
 }
 
-fn library() -> Library {
-    Library::default()
+fn library() -> Arc<Library> {
+    Arc::new(Library::default())
 }
 
 #[tokio::test]
@@ -42,17 +42,17 @@ async fn write_then_read_round_trips_outputs() {
     .unwrap();
     assert!(wrote, "plain values are written");
 
-    let back = read(&file.0, &library()).expect("hit");
+    let back = read(&file.0, &library()).await.expect("hit");
     assert_eq!(back.len(), 3);
     assert!(matches!(back[0], DynamicValue::Unbound));
     assert_eq!(back[1].as_i64(), Some(7));
     assert_eq!(back[2].as_string(), Some("x"));
 }
 
-#[test]
-fn read_missing_is_none() {
+#[tokio::test]
+async fn read_missing_is_none() {
     let file = temp_file("missing");
-    assert!(read(&file.0, &library()).is_none());
+    assert!(read(&file.0, &library()).await.is_none());
 }
 
 /// A custom value with no registered codec — never cacheable.
@@ -112,7 +112,7 @@ async fn read_rejects_an_unknown_format_version() {
     std::fs::write(&file.0, &bytes).unwrap();
 
     assert!(
-        read(&file.0, &library()).is_none(),
+        read(&file.0, &library()).await.is_none(),
         "a blob with an unknown format version is treated as a miss"
     );
 }

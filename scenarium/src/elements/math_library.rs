@@ -3,7 +3,22 @@ use rand::{RngExt, SeedableRng};
 use crate::async_lambda;
 use crate::data::DataType;
 use crate::library::Library;
+use crate::node::func_lambda::{InvokeError, InvokeInput};
 use crate::node::function::{Func, FuncInput, FuncOutput};
+
+/// A lambda input coerced to `f64`, failing the invoke instead of panicking: a
+/// non-numeric value can legally reach a Float port through an `Any`-typed
+/// subgraph boundary, which compile-time validation can't see through — and a
+/// lambda panic would take down the whole worker task.
+fn float_input(inputs: &[InvokeInput], idx: usize) -> Result<f64, InvokeError> {
+    inputs[idx].value.as_f64().ok_or_else(|| {
+        InvokeError::External(anyhow::anyhow!(
+            "input {} is not a number: {:?}",
+            idx,
+            inputs[idx].value
+        ))
+    })
+}
 
 /// The built-in math nodes.
 pub fn math_library() -> Library {
@@ -35,8 +50,8 @@ pub fn math_library() -> Library {
                 let rng =
                     cache.get_or_default_with(|| rand::rngs::StdRng::from_rng(&mut rand::rng()));
 
-                let min: f64 = inputs[0].value.as_f64().unwrap();
-                let max: f64 = inputs[1].value.as_f64().unwrap();
+                let min: f64 = float_input(inputs, 0)?;
+                let max: f64 = float_input(inputs, 1)?;
                 let random = rng.random::<f64>();
                 let result = min + (max - min) * random;
 
@@ -66,8 +81,8 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64().unwrap();
-                let b: f64 = inputs[1].value.as_f64().unwrap();
+                let a: f64 = float_input(inputs, 0)?;
+                let b: f64 = float_input(inputs, 1)?;
                 let result = a + b;
 
                 outputs[0] = result.into();
@@ -96,8 +111,8 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64().unwrap();
-                let b: f64 = inputs[1].value.as_f64().unwrap();
+                let a: f64 = float_input(inputs, 0)?;
+                let b: f64 = float_input(inputs, 1)?;
                 let result = a - b;
 
                 outputs[0] = result.into();
@@ -126,8 +141,8 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64().unwrap();
-                let b: f64 = inputs[1].value.as_f64().unwrap();
+                let a: f64 = float_input(inputs, 0)?;
+                let b: f64 = float_input(inputs, 1)?;
                 let result = a * b;
 
                 outputs[0] = result.into();
@@ -159,8 +174,8 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 2);
 
-                let a: f64 = inputs[0].value.as_f64().unwrap();
-                let b: f64 = inputs[1].value.as_f64().unwrap();
+                let a: f64 = float_input(inputs, 0)?;
+                let b: f64 = float_input(inputs, 1)?;
                 let divide = a / b;
                 let modulo = a % b;
 
@@ -193,8 +208,8 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64().unwrap();
-                let b: f64 = inputs[1].value.as_f64().unwrap();
+                let a: f64 = float_input(inputs, 0)?;
+                let b: f64 = float_input(inputs, 1)?;
                 let power = a.powf(b);
 
                 outputs[0] = power.into();
@@ -218,7 +233,7 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64().unwrap();
+                let a: f64 = float_input(inputs, 0)?;
                 let sqrt = a.sqrt();
 
                 outputs[0] = sqrt.into();
@@ -242,7 +257,7 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64().unwrap();
+                let a: f64 = float_input(inputs, 0)?;
                 let sin = a.sin();
 
                 outputs[0] = sin.into();
@@ -266,7 +281,7 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64().unwrap();
+                let a: f64 = float_input(inputs, 0)?;
                 let cos = a.cos();
 
                 outputs[0] = cos.into();
@@ -290,7 +305,7 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64().unwrap();
+                let a: f64 = float_input(inputs, 0)?;
                 let tan = a.tan();
 
                 outputs[0] = tan.into();
@@ -314,7 +329,7 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let sin: f64 = inputs[0].value.as_f64().unwrap();
+                let sin: f64 = float_input(inputs, 0)?;
                 let asin = sin.asin();
 
                 outputs[0] = asin.into();
@@ -338,7 +353,7 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let cos: f64 = inputs[0].value.as_f64().unwrap();
+                let cos: f64 = float_input(inputs, 0)?;
                 let acos = cos.acos();
 
                 outputs[0] = acos.into();
@@ -362,7 +377,7 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let tan: f64 = inputs[0].value.as_f64().unwrap();
+                let tan: f64 = float_input(inputs, 0)?;
                 let atan = tan.atan();
 
                 outputs[0] = atan.into();
@@ -391,8 +406,8 @@ pub fn math_library() -> Library {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let value: f64 = inputs[0].value.as_f64().unwrap();
-                let base: f64 = inputs[1].value.as_f64().unwrap();
+                let value: f64 = float_input(inputs, 0)?;
+                let base: f64 = float_input(inputs, 1)?;
                 let log = value.log(base);
 
                 outputs[0] = log.into();
@@ -401,4 +416,74 @@ pub fn math_library() -> Library {
     );
 
     library
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::{DynamicValue, StaticValue};
+    use crate::node::func_lambda::OutputUsage;
+    use crate::runtime::any_state::AnyState;
+    use crate::runtime::context::ContextManager;
+    use crate::runtime::shared_any_state::SharedAnyState;
+
+    async fn invoke(
+        name: &str,
+        input_values: &[DynamicValue],
+    ) -> Result<DynamicValue, InvokeError> {
+        let lib = math_library();
+        let func = lib.by_name(name).unwrap();
+        let inputs: Vec<InvokeInput> = input_values
+            .iter()
+            .map(|v| InvokeInput { value: v.clone() })
+            .collect();
+        let usage = vec![OutputUsage::Needed(1); func.outputs.len()];
+        let mut outputs = vec![DynamicValue::Unbound; func.outputs.len()];
+        func.lambda
+            .invoke(
+                &mut ContextManager::default(),
+                &mut AnyState::default(),
+                &SharedAnyState::default(),
+                &inputs,
+                &usage,
+                &mut outputs,
+            )
+            .await?;
+        Ok(outputs[0].clone())
+    }
+
+    fn float(v: f64) -> DynamicValue {
+        StaticValue::Float(v).into()
+    }
+
+    /// The binary ops compute their hand-checked results, and a non-numeric input —
+    /// reachable at runtime through an `Any`-typed subgraph boundary — is an invoke
+    /// *error*, never a panic (a panic would kill the whole worker task).
+    #[tokio::test]
+    async fn ops_compute_and_reject_non_numeric_inputs() {
+        // a=2, b=3: 2+3=5, 2−3=−1, 2×3=6, 2³=8.
+        for (name, expected) in [
+            ("Add", 5.0),
+            ("Subtract", -1.0),
+            ("Multiply", 6.0),
+            ("Power", 8.0),
+        ] {
+            let out = invoke(name, &[float(2.0), float(3.0)]).await.unwrap();
+            assert_eq!(out.as_f64(), Some(expected), "{name}(2, 3)");
+        }
+
+        let text = DynamicValue::Static(StaticValue::String("not a number".into()));
+        assert!(
+            invoke("Add", &[text.clone(), float(3.0)]).await.is_err(),
+            "a String left operand errors instead of panicking"
+        );
+        assert!(
+            invoke("Add", &[float(2.0), text.clone()]).await.is_err(),
+            "a String right operand errors instead of panicking"
+        );
+        assert!(
+            invoke("Sine", &[text]).await.is_err(),
+            "unary ops error the same way"
+        );
+    }
 }

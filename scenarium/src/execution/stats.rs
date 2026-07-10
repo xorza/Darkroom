@@ -72,6 +72,14 @@ impl FlattenMap {
         self.leaves.insert(flat_id, Leaf { scope, interior });
     }
 
+    /// The authoring node `flat_id` maps to — its leaf's interior id — or `None`
+    /// when `flat_id` is unknown. The single-id inverse of the id remapping;
+    /// [`attribution`](Self::attribution) additionally yields the enclosing
+    /// composite instances.
+    pub fn interior(&self, flat_id: NodeId) -> Option<NodeId> {
+        self.leaves.get(&flat_id).map(|l| l.interior)
+    }
+
     /// The authoring nodes a flattened node's outcome attributes to: its
     /// own interior id, then each enclosing composite instance (innermost
     /// first, root excluded). Empty when `flat_id` is unknown. No

@@ -1461,6 +1461,104 @@ mod file_cache {
             "bypass recomputes the cache node, which re-needs and reruns get_a"
         );
     }
+
+    /// A user file that isn't a decodable blob is a *miss with the file preserved*:
+    /// the demanding consumer is dropped for the run with an upstream error, and the
+    /// engine never deletes the user's own file — only content-addressed blobs are
+    /// janitored on a failed decode.
+    #[tokio::test]
+    async fn undecodable_user_file_is_preserved_not_deleted() {
+        let file = temp_file("garbage");
+        std::fs::write(&file.0, b"not a cache blob").unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (graph, lib, _, _) = graph_with_cache(&file.0, calls.clone(), false);
+        let print_id = graph.by_name("Print").unwrap().id;
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+
+        assert_eq!(
+            std::fs::read(&file.0).unwrap(),
+            b"not a cache blob",
+            "the user's file must never be deleted on a failed decode"
+        );
+        assert!(
+            stats.node_errors.iter().any(|e| e.node_id == print_id),
+            "the consumer is dropped for the run instead"
+        );
+    }
+
+    /// A *valid* blob at the user's path can encode any output count (the path is
+    /// the whole key, so any file can be pointed at) — a count mismatch is a miss,
+    /// not a consumer-side arity panic, and the file survives.
+    #[tokio::test]
+    async fn wrong_arity_blob_is_a_miss_not_a_panic() {
+        let file = temp_file("arity");
+        // A valid blob holding TWO values; the cache node declares one output.
+        let two_values = vec![
+            DynamicValue::Static(StaticValue::Int(1)),
+            DynamicValue::Static(StaticValue::Int(2)),
+        ];
+        crate::execution::blob::write(
+            &file.0,
+            &two_values,
+            &Library::default(),
+            &mut crate::runtime::context::ContextManager::default(),
+        )
+        .await
+        .unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (graph, lib, _, _) = graph_with_cache(&file.0, calls.clone(), false);
+        let print_id = graph.by_name("Print").unwrap().id;
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+
+        assert!(
+            stats.node_errors.iter().any(|e| e.node_id == print_id),
+            "the consumer is dropped for the run, not panicked"
+        );
+        assert!(file.0.exists(), "the user's mismatched file survives");
+    }
+
+    /// A document authored when nodes defaulted to `CacheMode::Ram` may carry that
+    /// mode on a file-cache node; flatten neutralizes it — a RAM hit under the
+    /// never-changing path key would otherwise ignore both bypass and the documented
+    /// delete-the-file invalidation.
+    #[tokio::test]
+    async fn legacy_ram_mode_on_cache_node_is_neutralized() {
+        let file = temp_file("legacyram");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (mut graph, lib, _, cache_id) = graph_with_cache(&file.0, calls.clone(), false);
+        graph.by_id_mut(&cache_id).unwrap().cache = CacheMode::Ram;
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib).unwrap();
+        assert_eq!(
+            engine.by_id(&cache_id).unwrap().cache,
+            CacheMode::None,
+            "flatten forces the file-cache node off RAM caching"
+        );
+
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(file.0.exists(), "cold run writes the cache file");
+
+        // Deleting the cache file is the documented invalidation: the next run must
+        // re-execute the cache node and rewrite the file, not serve a stale resident
+        // value under the never-changing path key. (Its `get_a` input may still come
+        // from get_a's own RAM cache — that one is digest-valid.)
+        std::fs::remove_file(&file.0).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert!(
+            stats.executed_nodes.iter().any(|n| n.node_id == cache_id),
+            "a deleted cache file forces the cache node to re-execute"
+        );
+        assert!(file.0.exists(), "and the file is rewritten");
+    }
 }
 
 // === Graph Structure ===
@@ -4533,6 +4631,206 @@ mod mid_run_release {
             chain_peak(CacheMode::Ram).await,
             4,
             "Ram retains every stage for the whole run"
+        );
+    }
+}
+
+// === Compile / library-evolution regressions ===
+
+mod compile_regressions {
+    use super::*;
+    use crate::async_lambda;
+    use crate::graph::NodeKind;
+    use crate::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
+    use crate::node::function::{Func, FuncInput, FuncOutput};
+    use std::sync::Mutex as StdMutex;
+
+    /// The output-type pool is span-addressed: when a consumer precedes its producer
+    /// in insertion order, flatten's `set_input` claims the producer's *index* early
+    /// while output spans are assigned in emit order — an index-order sequential fill
+    /// would hand the two producers each other's types.
+    #[test]
+    fn output_types_follow_spans_when_consumer_precedes_producer() {
+        let library: Library = [
+            Func::new("7ab6d0c9-8c35-4364-b2e3-62ab1ba5a888", "make_int")
+                .category("Test")
+                .pure()
+                .output(FuncOutput::new("V", DataType::Int))
+                .lambda(async_lambda!(|_, _, _, _, _, outputs| {
+                    outputs[0] = StaticValue::Int(1).into();
+                    Ok(())
+                })),
+            Func::new("cbac49ae-bbb0-48d7-a586-086815a487a6", "make_str")
+                .category("Test")
+                .pure()
+                .output(FuncOutput::new("V", DataType::String))
+                .lambda(async_lambda!(|_, _, _, _, _, outputs| {
+                    outputs[0] = StaticValue::String("s".into()).into();
+                    Ok(())
+                })),
+            Func::new("001fccec-5732-41c6-b448-379d4cf40dc3", "sink")
+                .category("Test")
+                .terminal()
+                .input(FuncInput::required("In", DataType::Any))
+                .lambda(async_lambda!(|_, _, _, _, _, _| { Ok(()) })),
+        ]
+        .into();
+
+        // Insertion order: the consumer first, then the *other* producer, then the
+        // producer it binds — so `make_str` claims flat index 1 while its output span
+        // is assigned last.
+        let mut graph = Graph::default();
+        graph.add(node(&library, "sink", NodeId::unique()));
+        graph.add(node(&library, "make_int", NodeId::unique()));
+        graph.add(node(&library, "make_str", NodeId::unique()));
+        let sink_id = graph.by_name("sink").unwrap().id;
+        let str_id = graph.by_name("make_str").unwrap().id;
+        graph.set_input_binding(InputPort::new(sink_id, 0), (str_id, 0).into());
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &library).unwrap();
+
+        let make_int = engine.by_name("make_int").unwrap();
+        let make_str = engine.by_name("make_str").unwrap();
+        assert_eq!(
+            engine.program.node_output_types(make_int),
+            &[DataType::Int],
+            "make_int reads its own type, not its neighbor's"
+        );
+        assert_eq!(
+            engine.program.node_output_types(make_str),
+            &[DataType::String],
+            "make_str reads its own type, not its neighbor's"
+        );
+    }
+
+    /// An `Update` may carry an evolved library: a func that gained an input under
+    /// the same id must recompile without carrying stale per-input state (the old
+    /// carry-over indexed out of bounds), and a changed lambda — re-keyed by a
+    /// version bump — must actually run instead of the stale clone.
+    #[tokio::test]
+    async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
+        let printed = Arc::new(StdMutex::new(Vec::<i64>::new()));
+        let make_lib = |version: u64, result: i64, extra_input: bool| {
+            let mut lib = test_func_lib(TestFuncHooks {
+                print: {
+                    let p = printed.clone();
+                    Arc::new(move |v| p.lock().unwrap().push(v))
+                },
+                ..default_hooks()
+            });
+            let mut generator = Func::new("3cb06374-2a86-45e1-91db-fec227538a97", "generate")
+                .category("Test")
+                .pure()
+                .version(version)
+                .output(FuncOutput::new("V", DataType::Int))
+                .lambda(async_lambda!(move |_, _, _, _, _, outputs| {
+                    outputs[0] = StaticValue::Int(result).into();
+                    Ok(())
+                }));
+            if extra_input {
+                generator = generator.input(FuncInput::optional("Extra", DataType::Int));
+            }
+            lib.add(generator);
+            lib
+        };
+
+        let lib_v1 = make_lib(0, 1, false);
+        let mut graph = Graph::default();
+        graph.add(node(&lib_v1, "generate", NodeId::unique()));
+        graph.add(node(&lib_v1, "Print", NodeId::unique()));
+        let generate_id = graph.by_name("generate").unwrap().id;
+        let print_id = graph.by_name("Print").unwrap().id;
+        graph.set_input_binding(InputPort::new(print_id, 0), (generate_id, 0).into());
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib_v1).unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(*printed.lock().unwrap(), vec![1], "v1 lambda ran");
+
+        // v2: same FuncId, one more input, bumped version, different lambda.
+        let lib_v2 = make_lib(1, 2, true);
+        engine.update(&graph, &lib_v2).unwrap();
+        assert_eq!(
+            engine
+                .node_inputs(engine.by_name("generate").unwrap())
+                .len(),
+            1,
+            "the reused flat node picked up the grown input list"
+        );
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            *printed.lock().unwrap(),
+            vec![1, 2],
+            "the version bump re-keyed the digest and the *new* lambda ran"
+        );
+    }
+
+    /// Inspecting a node *inside* a subgraph goes by its authoring id — the flat id
+    /// is hashed from the descent path, so the query must resolve through the
+    /// flatten map instead of missing and silently returning nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn interior_node_inspection_resolves_authoring_id() {
+        let library = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(|| Ok(2)),
+            get_b: Arc::new(|| 4),
+            print: Arc::new(|_| {}),
+        });
+
+        // def: in(A,B) -> sum -> out
+        let in_node = Node::new(NodeKind::SubgraphInput);
+        let in_id = in_node.id;
+        let sum: Node = library.by_name("sum").unwrap().into();
+        let sum_interior_id = sum.id;
+        let out = Node::new(NodeKind::SubgraphOutput);
+        let out_id = out.id;
+        let mut def_graph = Graph::default();
+        def_graph.add(in_node);
+        def_graph.add(sum);
+        def_graph.add(out);
+        def_graph.set_input_binding(InputPort::new(sum_interior_id, 0), (in_id, 0).into());
+        def_graph.set_input_binding(InputPort::new(sum_interior_id, 1), (in_id, 1).into());
+        def_graph.set_input_binding(InputPort::new(out_id, 0), (sum_interior_id, 0).into());
+        let def = SubgraphDef::new(SubgraphId::unique(), "WrapSum")
+            .category("Test")
+            .graph(def_graph)
+            .input(FuncInput::required("A", DataType::Int))
+            .input(FuncInput::optional("B", DataType::Int))
+            .output(FuncOutput::new("Sum", DataType::Int));
+
+        let get_a: Node = library.by_name("get_a").unwrap().into();
+        let get_b: Node = library.by_name("get_b").unwrap().into();
+        let (a_id, b_id) = (get_a.id, get_b.id);
+        let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
+        let inst_id = inst.id;
+        let print: Node = library.by_name("Print").unwrap().into();
+        let print_id = print.id;
+
+        let mut graph = Graph::default();
+        graph.subgraphs.add(def);
+        graph.add(get_a);
+        graph.add(get_b);
+        graph.add(inst);
+        graph.add(print);
+        graph.set_input_binding(InputPort::new(inst_id, 0), (a_id, 0).into());
+        graph.set_input_binding(InputPort::new(inst_id, 1), (b_id, 0).into());
+        graph.set_input_binding(InputPort::new(print_id, 0), (inst_id, 0).into());
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library).unwrap();
+        eg.execute_terminals().await.unwrap();
+
+        assert!(
+            eg.by_id(&sum_interior_id).is_none(),
+            "interior ids are remapped at flatten — the key lookup alone must miss"
+        );
+        let values = eg
+            .get_argument_values(&sum_interior_id)
+            .expect("the interior node resolves through the flatten map");
+        assert_eq!(
+            values.outputs[0].as_i64(),
+            Some(6),
+            "2 + 4 computed inside the composite"
         );
     }
 }

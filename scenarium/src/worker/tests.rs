@@ -1670,3 +1670,136 @@ async fn disk_cache_persists_node_across_worker_restart() {
         "mult itself is not recomputed"
     );
 }
+
+/// An `Update` whose graph fails to compile must not silently kill a running
+/// event loop: the failure is reported, and the loop restarts on the prior
+/// (still intact) program.
+#[tokio::test]
+async fn failed_update_keeps_event_loop_running() {
+    let mut h = FrameHarness::with_callback_capacity(32).await;
+
+    h.worker
+        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
+        .unwrap();
+    let _ = h.compute_rx.recv().await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(h.worker.is_event_loop_started());
+
+    // A graph naming a func the library doesn't define — compile fails.
+    let mut bad_graph = Graph::default();
+    let mut ghost = Node::new(NodeKind::Func(
+        "76320daa-b802-4f46-876b-cdcb08a17c86".into(),
+    ));
+    ghost.id = NodeId::unique();
+    bad_graph.add(ghost);
+    h.worker
+        .send(WorkerMessage::Update {
+            graph: bad_graph,
+            library: h.library.clone(),
+        })
+        .unwrap();
+
+    // The failure is reported (frame ticks may interleave — drain until it shows)…
+    loop {
+        let result = timeout(Duration::from_secs(5), h.compute_rx.recv())
+            .await
+            .expect("the compile failure is reported")
+            .expect("channel open");
+        if matches!(result, Err(Error::InvalidGraph { .. })) {
+            break;
+        }
+        assert!(result.is_ok(), "only frame ticks may precede the failure");
+    }
+    // …and the loop is back on the prior program: a successful run (the restart,
+    // or a subsequent frame tick) follows and the loop reads as started.
+    let restart = timeout(Duration::from_secs(5), h.compute_rx.recv())
+        .await
+        .expect("the restarted loop keeps reporting")
+        .expect("channel open");
+    assert!(restart.is_ok(), "the prior program restarts the loop");
+    assert!(
+        h.worker.is_event_loop_started(),
+        "a failed update must not kill the event loop"
+    );
+}
+
+/// `SetDiskStore` flushes resident disk-backed values into the just-attached
+/// store: a `Both`-mode value computed while no store root existed (an unsaved
+/// document) would otherwise be a RAM hit on every later run — which never
+/// stores — and silently recompute on reopen.
+#[tokio::test]
+async fn set_disk_store_flushes_resident_disk_backed_values() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use crate::execution::disk_store::DiskStore;
+    use crate::graph::CacheMode;
+    use crate::testing::{TestFuncHooks, test_func_lib};
+
+    struct TempDir(std::path::PathBuf);
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let dir = {
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!(
+            "scenarium-worker-storeswap-{}-{n}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        TempDir(p)
+    };
+
+    let lib = Arc::new(test_func_lib(TestFuncHooks {
+        get_a: Arc::new(|| Ok(7)),
+        get_b: Arc::new(|| 11),
+        print: Arc::new(|_| {}),
+    }));
+    // get_a → mult (Both) → print.
+    let mut graph = Graph::default();
+    for name in ["get_a", "mult", "Print"] {
+        let node: Node = lib.by_name(name).unwrap().into();
+        graph.add(node);
+    }
+    let get_a_id = graph.by_name("get_a").unwrap().id;
+    let mult_id = graph.by_name("mult").unwrap().id;
+    let print_id = graph.by_name("Print").unwrap().id;
+    graph.by_id_mut(&mult_id).unwrap().cache = CacheMode::Both;
+    graph.set_input_binding(InputPort::new(mult_id, 0), (get_a_id, 0).into());
+    graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
+
+    let (tx, mut rx) = mpsc::channel(4);
+    let worker = Worker::new(move |report| {
+        if let WorkerReport::Finished(result) = report {
+            tx.try_send(result).ok();
+        }
+    });
+
+    // Run with NO store root: the Both value stays resident-only.
+    worker
+        .send_many([
+            WorkerMessage::Update {
+                graph,
+                library: lib.clone(),
+            },
+            WorkerMessage::ExecuteTerminals,
+        ])
+        .unwrap();
+    rx.recv().await.unwrap().unwrap();
+    assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 0);
+
+    // Attaching the store must flush the resident Both value as a blob.
+    let store = DiskStore::new(Arc::new(Library::default()), Some(dir.0.clone()));
+    worker.send(WorkerMessage::SetDiskStore(store)).unwrap();
+    let (sync_tx, sync_rx) = oneshot::channel();
+    worker.send(WorkerMessage::Sync { reply: sync_tx }).unwrap();
+    sync_rx.await.unwrap();
+
+    assert_eq!(
+        std::fs::read_dir(&dir.0).unwrap().count(),
+        1,
+        "the resident Both-mode value was flushed into the new store"
+    );
+}

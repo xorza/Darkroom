@@ -6,12 +6,13 @@
 //! [`Executor::run`] invokes each scheduled node's lambda and gathers stats.
 //! Each node's per-run result is one [`NodeOutcome`] in a column local to the run.
 //!
-//! **Pre-run cut.** [`run`](Executor::run) takes a `needed` mask precomputed by the
-//! [`Resolver`](crate::execution::resolve::Resolver): the pruned set of nodes some running
-//! node will read, with cones that feed only cache hits cut out (so a disk-cached node's
-//! stale upstream isn't recomputed on reopen). A pruned node gets [`NodeOutcome::Cut`]; the
-//! run loop otherwise walks the schedule unchanged, [`prepare_node`] re-deriving each
-//! surviving node's digest.
+//! **Pre-run resolution.** [`run`](Executor::run) takes the
+//! [`Resolver`](crate::execution::resolve::Resolver)'s [`Disposition`] column — each node's
+//! merged reuse-verdict + cut state, authoritative for the whole run (never re-derived
+//! here, since a digest folds live filesystem state and could drift mid-run). A cut node
+//! (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't recomputed
+//! on reopen) gets [`NodeOutcome::Cut`]; the run loop otherwise walks the schedule
+//! unchanged.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -32,6 +33,7 @@ use crate::runtime::context::ContextManager;
 use crate::execution::cache::RuntimeCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
+use crate::execution::resolve::Disposition;
 use crate::execution::{NodeColumn, RunError};
 
 /// What became of a node this run — the single per-node result column, so the run-time
@@ -109,18 +111,16 @@ impl Executor {
     }
 
     /// Walk `plan.process_order` (producer-first). For each node: skip it as
-    /// [`NodeOutcome::Cut`] if it's outside the `needed` mask (the resolver pruned its cone),
-    /// else stamp its output digest and decide reuse ([`RuntimeCache::stamp_and_check_reuse`]),
-    /// reuse from RAM/disk if unchanged, else invoke its lambda and persist
-    /// the result to disk right away (so a long run's earlier caches survive a later
-    /// failure or cancel). The `program`, `plan`, and `needed` mask are read-only. Returns
-    /// per-run stats.
+    /// [`NodeOutcome::Cut`] if the resolver pruned its cone, serve it from RAM/disk on
+    /// [`Disposition::Reuse`], else invoke its lambda and persist the result to disk right
+    /// away (so a long run's earlier caches survive a later failure or cancel). The
+    /// `program`, `plan`, and `disposition` column are read-only. Returns per-run stats.
     #[allow(clippy::too_many_arguments)] // an orchestration entry point; each arg is a distinct collaborator
     pub(crate) async fn run(
         &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
-        needed: &NodeColumn<bool>,
+        disposition: &NodeColumn<Disposition>,
         cache: &mut RuntimeCache,
         flatten: &FlattenMap,
         progress: Option<&UnboundedSender<RunProgress>>,
@@ -178,7 +178,7 @@ impl Executor {
                 executed_count = pos;
                 break;
             }
-            if !needed[e_node_idx] {
+            if disposition[e_node_idx] == Disposition::Cut {
                 // Pruned by the pre-run cut: every consumer that would read this node reused
                 // a cache, so its output is never read. Report it cached iff it still holds a
                 // usable value (a deeper disk cache), else it's simply not computed this run.
@@ -193,6 +193,16 @@ impl Executor {
                 continue;
             }
 
+            // The resolver's pre-run verdict is authoritative — re-deriving it here could
+            // drift when a digest folds live filesystem state (see `resolve.rs`). Reuse is
+            // served *before* the errored-dependency check: a digest-valid cached value
+            // stays valid even when an upstream re-ran for another consumer and failed, so
+            // it must not be cleared as skipped.
+            if disposition[e_node_idx] == Disposition::Reuse {
+                outcomes[e_node_idx] = NodeOutcome::Reused;
+                continue;
+            }
+
             let func_id = program.e_nodes[e_node_idx].func_id;
 
             if has_errored_dependency(program, &outcomes, e_node_idx) {
@@ -200,19 +210,13 @@ impl Executor {
                 continue;
             }
 
-            // Resolve the node's digest and cache state — the one and only digest
-            // computation (see [`prepare_node`]) — then act on the verdict. On `Run`,
-            // `inputs` has been populated with the node's resolved arguments.
-            match prepare_node(program, cache, output_usage, e_node_idx, &mut inputs) {
-                Readiness::Reuse => {
-                    outcomes[e_node_idx] = NodeOutcome::Reused;
-                    continue;
-                }
-                Readiness::InputsUnavailable => {
-                    mark_skipped(cache, &mut outcomes, e_node_idx, func_id);
-                    continue;
-                }
-                Readiness::Run => {}
+            // Load the node's inputs, pulling any disk-cached producer in on demand (the
+            // lazy frontier read) and releasing each producer whose last read this
+            // satisfies. A bound producer whose blob failed to load drops this node for
+            // the run like an errored dependency.
+            if !collect_inputs(program, cache, output_usage, e_node_idx, &mut inputs).await {
+                mark_skipped(cache, &mut outcomes, e_node_idx, func_id);
+                continue;
             }
 
             let output_count = program.e_nodes[e_node_idx].outputs.len as usize;
@@ -340,52 +344,6 @@ impl Executor {
     }
 }
 
-/// A node's cache verdict once its digest is resolved, produced by [`prepare_node`].
-enum Readiness {
-    /// An unchanged output is cached (resident in RAM, or a blob on disk) — serve it
-    /// without running the lambda.
-    Reuse,
-    /// A bound producer's disk blob failed to load (corrupt/deleted) — drop this node for
-    /// the run like an errored dependency; the removed blob recomputes next reopen.
-    InputsUnavailable,
-    /// The node must run; `inputs` has been filled with its resolved arguments.
-    Run,
-}
-
-/// Stamp node `idx`'s content digest and decide whether it reuses a cached output or must
-/// run, via [`RuntimeCache::stamp_and_check_reuse`] — the same call the pre-run
-/// [`resolve`](crate::execution::resolve) sweep makes, so the two can't diverge. Producer-first
-/// order means every `Bind` producer's digest is already stamped when this runs; the sweep
-/// already stamped the same digest, and this re-derives it idempotently (a cheap fold), so the
-/// run loop needs no special case for surviving reuse-vs-run nodes.
-///
-/// The digest folds producer digests + consts *without values*, and input collection is
-/// deferred until *after* the reuse check — so a node that turns out to reuse never loads its
-/// producers' outputs (and its now-unread producers can have been cut). On [`Readiness::Run`],
-/// `inputs` holds the resolved arguments.
-fn prepare_node(
-    program: &ExecutionProgram,
-    cache: &mut RuntimeCache,
-    output_usage: &mut [OutputUsage],
-    idx: NodeIdx,
-    inputs: &mut Vec<InvokeInput>,
-) -> Readiness {
-    // Stamp the digest and decide reuse through the one shared helper — the pre-run cut's
-    // `resolve_structural` makes the identical call, so the two verdicts can't drift. A disk
-    // hit is flagged but its bytes load lazily only when a running consumer reads them (so a
-    // disk-cached value behind another never enters RAM); a `None` digest (impure) never reuses.
-    if cache.stamp_and_check_reuse(program, idx) {
-        return Readiness::Reuse;
-    }
-
-    // Not reusing: load the node's inputs, pulling any disk-cached producer in on demand (the
-    // lazy frontier read) and releasing each producer whose last read this satisfies.
-    if !collect_inputs(program, cache, output_usage, idx, inputs) {
-        return Readiness::InputsUnavailable;
-    }
-    Readiness::Run
-}
-
 /// Drop node `idx` from this run as skipped-for-upstream: clear any stale cached output so
 /// it isn't served as this run's result, and record the outcome. Shared by the
 /// errored-dependency and failed-input-load paths, which are indistinguishable downstream.
@@ -417,7 +375,7 @@ fn has_errored_dependency(
 /// (corrupt/deleted): [`hydrate_slot`](RuntimeCache::hydrate_slot) then removes the bad
 /// blob, so this run drops the consumer (like an errored dependency) and the next reopen
 /// recomputes the producer fresh. Any other missing value is a planner bug.
-fn collect_inputs(
+async fn collect_inputs(
     program: &ExecutionProgram,
     cache: &mut RuntimeCache,
     output_usage: &mut [OutputUsage],
@@ -436,7 +394,7 @@ fn collect_inputs(
                 // reused-from-disk (marked `OnDisk`, not yet loaded) — hydrate the latter
                 // now, the lazy frontier read. A resident value is a no-op load; a failed
                 // one leaves the slot empty and drops this consumer for the run.
-                cache.hydrate_slot(program, target);
+                cache.hydrate_slot(program, target).await;
                 let value = {
                     let Some(outputs) = cache.slots[target].output_values() else {
                         return false;

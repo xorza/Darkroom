@@ -7,3 +7,6 @@ node title disapppears sometimes
 imaginarium failing tests
 
 avoid inputs values clone
+
+    #[serde(default)]
+    pub fs_path: bool,

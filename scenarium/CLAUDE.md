@@ -116,11 +116,12 @@ another never enters RAM — this is what survives a reopen); else the node runs
 (`resolve.rs`): before the run loop the executor resolves *every* node's digest + reuse
 (`resolve_structural` — folding each digest producer-first from upstream digests, no lambda,
 no value load — every digest being structural or the file-cache path key) and prunes every
-cone that feeds *only* reuse hits (`compute_needed`, a backward walk seeded from the plan's
+cone that feeds *only* reuse hits (`compute_disposition`, a backward walk seeded from the plan's
 `roots`), so a `Memory` (non-persist) node feeding a disk-cached *hit* is **not** recomputed
 on reopen. A cut node is reported `cached` iff it still holds a value (a deeper disk cache),
-else it's not computed this run. The run loop then re-derives each surviving node's digest
-idempotently (`prepare_node`). Output buffers aren't wiped; `evict_unused` demotes to disk
+else it's not computed this run. The resolver's verdicts are authoritative for the whole run:
+the run loop reads them rather than re-deriving (a digest folds live `FsPath` filesystem
+state and could drift mid-run). Output buffers aren't wiped; `evict_unused` demotes to disk
 only values the run's *executed* nodes didn't produce/read. A reused node counts as `cached`
 in stats. When `execute` is given
 a progress `UnboundedSender<RunProgress>`, the loop sends `RunPhase::Started`

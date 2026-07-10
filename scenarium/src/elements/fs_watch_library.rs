@@ -185,6 +185,11 @@ pub fn fs_watch_library() -> Library {
                                 // tearing down the live OS watch.
                                 w.debounce = debounce;
                             }
+                        } else {
+                            // Cleared path: tear the previous watcher down, or the old
+                            // directory keeps firing `Changed` (and holding its OS watch)
+                            // while the node outputs an empty path.
+                            event_state.lock().await.clear();
                         }
 
                         outputs[0] = StaticValue::FsPath(path).into();
@@ -420,6 +425,40 @@ mod tests {
         )
         .await;
         assert!(fired.is_err(), "event must not fire without a watcher");
+    }
+
+    /// Clearing the path tears the previous watcher down — otherwise the old
+    /// directory's OS watch stays installed and keeps firing `Changed` while
+    /// the node outputs an empty path.
+    #[tokio::test]
+    async fn clearing_path_tears_down_previous_watcher() {
+        let dir = unique_temp_dir();
+        let dir_str = dir.to_str().unwrap();
+        let lib = fs_watch_library();
+        let func = lib.by_name("Watch Directory").unwrap();
+
+        let mut ctx = ContextManager::default();
+        let mut state = AnyState::default();
+        let event_state = SharedAnyState::default();
+
+        invoke_watch(
+            &func.lambda,
+            &mut ctx,
+            &mut state,
+            &event_state,
+            dir_str,
+            true,
+        )
+        .await;
+        assert!(event_state.lock().await.get::<WatchState>().is_some());
+
+        invoke_watch(&func.lambda, &mut ctx, &mut state, &event_state, "", true).await;
+        assert!(
+            event_state.lock().await.get::<WatchState>().is_none(),
+            "the stale watcher must be dropped with its OS watch"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

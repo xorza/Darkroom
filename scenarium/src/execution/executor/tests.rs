@@ -4,10 +4,11 @@ use crate::data::{DataType, StaticValue};
 use crate::execution::cache::{RuntimeCache, ValueState};
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
+use crate::execution::resolve::Resolver;
 use crate::graph::CacheMode;
 use crate::graph::NodeId;
 use crate::node::func_lambda::FuncLambda;
-use crate::node::function::FuncId;
+use crate::node::function::{FuncBehavior, FuncId};
 use common::Span;
 
 /// Hand-built program with real lambdas. Node `idx` gets id `from_u128(idx+1)`,
@@ -34,7 +35,6 @@ impl Prog {
         let idx = self.program.e_nodes.len();
         self.program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),
-            inited: true,
             func_id: FuncId::from_u128(idx as u128 + 1),
             inputs: Span::new(inputs_start, inputs.len() as u32),
             outputs: Span::new(outputs_start, outputs),
@@ -90,21 +90,33 @@ async fn run(program: &ExecutionProgram, plan: &ExecutionPlan) -> (RuntimeCache,
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
     cache.reconcile(&program.e_nodes);
+    let stats = run_with(program, plan, &mut cache).await;
+    (cache, stats)
+}
+
+/// Like [`run`] but over a caller-owned cache, for multi-run tests (a reuse hit
+/// needs the prior run's stamped digests and resident values).
+async fn run_with(
+    program: &ExecutionProgram,
+    plan: &ExecutionPlan,
+    cache: &mut RuntimeCache,
+) -> ExecutionStats {
     let mut executor = Executor::default();
-    // Every node needed — drive the run loop directly, not the cut.
-    let needed: NodeColumn<bool> = vec![true; program.e_nodes.len()].into();
-    let stats = executor
+    // Resolve dispositions like the engine does. `straight_plan` roots every node, so
+    // the cut prunes nothing here — the cut itself is unit-tested in `resolve.rs`.
+    let mut resolver = Resolver::default();
+    resolver.resolve(program, plan, cache);
+    executor
         .run(
             program,
             plan,
-            &needed,
-            &mut cache,
+            &resolver.disposition,
+            cache,
             &FlattenMap::default(),
             None,
             CancelToken::never(),
         )
-        .await;
-    (cache, stats)
+        .await
 }
 
 #[tokio::test]
@@ -300,4 +312,79 @@ async fn frees_zero_consumer_output_right_after_it_runs() {
         Some(7),
         "B (Ram, no consumers) is kept hot"
     );
+}
+
+/// A consumer whose digest is unchanged serves its cached value even when the
+/// shared upstream re-ran for a *different* consumer and failed: the reuse verdict
+/// is checked before the errored-dependency skip, so the valid cache is neither
+/// cleared nor blamed for the upstream failure.
+#[tokio::test]
+async fn reuse_survives_failed_upstream_rerun() {
+    let mut p = Prog::default();
+    // A succeeds once (with 5), then fails every later invocation.
+    let a = p.node(
+        &[],
+        1,
+        async_lambda!(|_ctx, state, _ev, _inputs, _usage, outputs| {
+            if state.get::<bool>().is_some() {
+                return Err(anyhow::anyhow!("transient failure").into());
+            }
+            state.set(true);
+            outputs[0] = DynamicValue::Static(StaticValue::Int(5));
+            Ok(())
+        }),
+    );
+    let consumer = || {
+        async_lambda!(|_ctx, _state, _ev, inputs, _usage, outputs| {
+            let v = inputs[0].value.as_i64().unwrap();
+            outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
+            Ok(())
+        })
+    };
+    let b = p.node(&[bind(a, 0)], 1, consumer());
+    let c = p.node(&[bind(a, 0)], 1, consumer());
+    // Content-cacheable (the fixture default is `Impure` = no digest, never a hit).
+    for idx in [a, b, c] {
+        p.program.e_nodes[idx].behavior = FuncBehavior::Pure;
+    }
+    // A and C recompute every run; only B (the fixture default `Ram`) retains RAM.
+    p.set_cache(a, CacheMode::None);
+    p.set_cache(c, CacheMode::None);
+
+    // A's one output has two consumers; B/C outputs are unread terminal-ish sinks
+    // (count 1 keeps the release accounting off this test's path).
+    let plan = plan_with_usage(&p.program, vec![2, 1, 1]);
+    let mut cache = RuntimeCache::default();
+    cache.reconcile(&p.program.e_nodes);
+
+    // Run 1: A=5, B=C=6, everything computes.
+    let stats1 = run_with(&p.program, &plan, &mut cache).await;
+    assert_eq!(stats1.executed_nodes.len(), 3);
+    assert_eq!(cache.slots[b].output_values().unwrap()[0].as_i64(), Some(6));
+
+    // Run 2: A re-runs (nothing cached it) and fails. B's digest is unchanged, so it
+    // is served as cached — not skipped — and its resident 6 survives. C recomputes,
+    // sees the errored upstream, and is skipped.
+    let stats2 = run_with(&p.program, &plan, &mut cache).await;
+    let (a_id, b_id, c_id) = (
+        p.program.e_nodes[a].id,
+        p.program.e_nodes[b].id,
+        p.program.e_nodes[c].id,
+    );
+    assert!(
+        stats2.cached_nodes.contains(&b_id),
+        "B is a reuse hit despite A's failure"
+    );
+    assert_eq!(
+        cache.slots[b].output_values().unwrap()[0].as_i64(),
+        Some(6),
+        "B's valid cached value survives the sibling failure"
+    );
+    let errored: Vec<NodeId> = stats2.node_errors.iter().map(|e| e.node_id).collect();
+    assert!(errored.contains(&a_id), "A's own failure is reported");
+    assert!(
+        errored.contains(&c_id),
+        "C is skipped for the errored upstream"
+    );
+    assert!(!errored.contains(&b_id), "B carries no error");
 }

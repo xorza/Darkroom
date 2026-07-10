@@ -11,13 +11,31 @@ use crate::execution::{ArgumentValues, ExecutionEngine};
 use crate::graph::NodeId;
 
 impl ExecutionEngine {
-    /// Resident-only argument values. The public entry point is
-    /// [`Self::get_argument_values_with_previews`], which hydrates disk-cached
-    /// values first; this bare accessor reads whatever is in RAM, so a disk-only
-    /// node reads back empty. Kept `pub(crate)` to keep that footgun off the public
-    /// surface.
+    /// The flat execution node backing `node_id`. A top-level node keeps its authoring
+    /// id; a subgraph-interior node's flat id is hashed from the descent path, so the
+    /// editor's authoring id misses the key lookup — resolve it through the flatten
+    /// map's leaves instead. A def instanced more than once has several flat nodes per
+    /// interior id; the first (lowest index) is returned, an arbitrary-but-stable
+    /// representative for inspection.
+    fn resolve_query_idx(&self, node_id: &NodeId) -> Option<NodeIdx> {
+        if let Some(idx) = self.program.e_nodes.index_of_key(node_id) {
+            return Some(idx.into());
+        }
+        self.program
+            .node_indices()
+            .find(|&idx| self.flatten_map.interior(self.program.e_nodes[idx].id) == Some(*node_id))
+    }
+
+    /// Resident-only argument values, test inspection only. The production entry
+    /// point is [`Self::get_argument_values_with_previews`], which hydrates
+    /// disk-cached values first; this bare accessor reads whatever is in RAM, so a
+    /// disk-only node reads back empty.
+    #[cfg(test)]
     pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-        let idx: NodeIdx = self.program.e_nodes.index_of_key(node_id)?.into();
+        Some(self.argument_values_at(self.resolve_query_idx(node_id)?))
+    }
+
+    fn argument_values_at(&self, idx: NodeIdx) -> ArgumentValues {
         let e_node = &self.program.e_nodes[idx];
 
         let inputs = self.program.inputs[e_node.inputs.range()]
@@ -37,7 +55,7 @@ impl ExecutionEngine {
             .map(|o| o.to_vec())
             .unwrap_or_default();
 
-        Some(ArgumentValues { inputs, outputs })
+        ArgumentValues { inputs, outputs }
     }
 
     /// `get_argument_values` plus awaited preview resolution. Reads any disk-cached
@@ -48,10 +66,9 @@ impl ExecutionEngine {
         &mut self,
         node_id: &NodeId,
     ) -> Option<ArgumentValues> {
-        if let Some(idx) = self.program.e_nodes.index_of_key(node_id) {
-            self.cache.hydrate_for_inspection(&self.program, idx.into());
-        }
-        let mut values = self.get_argument_values(node_id)?;
+        let idx = self.resolve_query_idx(node_id)?;
+        self.cache.hydrate_for_inspection(&self.program, idx).await;
+        let mut values = self.argument_values_at(idx);
         let mut pending_previews = Vec::new();
         for value in values
             .inputs

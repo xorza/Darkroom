@@ -303,9 +303,10 @@ BLAKE3 `Digest`. The **executor** computes it for each node as it reaches the no
   `Const` path *alone* (`file_cache_digest`), deliberately excluding its `input[0]` cone —
   the path is the reproducibility boundary (Part C).
 
-A node's digest is computed at **execution** (the pre-run resolve sweep, then re-derived in
-the run loop), not `update`: only then are its producers' `current_digest`s stamped. The
-planner is purely structural and never touches digests.
+A node's digest is computed at **execution** (once per run, in the pre-run resolve sweep —
+the run loop reads the resolver's verdicts rather than re-deriving, since a digest folds
+live filesystem state and could drift mid-run), not `update`: only then are its producers'
+`current_digest`s stamped. The planner is purely structural and never touches digests.
 
 ## B.3 Storage (`blob.rs`)
 

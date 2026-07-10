@@ -99,14 +99,6 @@ pub(crate) struct ExecutionEvent {
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub(crate) struct ExecutionNode {
     pub id: NodeId,
-    /// Flatten's per-node reuse marker: `true` once this flat node has been emitted in
-    /// the engine's lifetime, so a *later* recompile that reuses the same flat id
-    /// preserves its bindings and skips re-cloning the lambda (see `flatten.rs`).
-    /// Compile scratch — persists across recompiles in memory, but `#[serde(skip)]` so a
-    /// deserialized program (whose `lambda` is also skipped) re-initializes
-    /// fully on its next flatten rather than being treated as an already-built node.
-    #[serde(skip)]
-    pub(crate) inited: bool,
 
     pub terminal: bool,
     /// Copied from the node's func at flatten. Only `Pure` is content-cacheable;
@@ -211,15 +203,18 @@ impl ExecutionProgram {
     /// flatten, where every compiled node's func is guaranteed present (`check_with`
     /// resolved them). An unresolved wildcard port stores `DataType::Any`. Builds
     /// into a fresh buffer first so the per-node reads don't alias the write-back.
+    /// Each node's types are written through its *span*: spans are assigned in
+    /// flatten emit order, which diverges from index order whenever a consumer's
+    /// `set_input` claimed its producer's index early — a sequential push would
+    /// hand nodes each other's types.
     pub(crate) fn resolve_output_types(&mut self, library: &Library) {
-        let capacity: usize = self.e_nodes.iter().map(|n| n.outputs.len as usize).sum();
-        let mut types = Vec::with_capacity(capacity);
+        let total: usize = self.e_nodes.iter().map(|n| n.outputs.len as usize).sum();
+        let mut types = vec![DataType::Any; total];
         for idx in self.node_indices() {
-            let port_count = self.e_nodes[idx].outputs.len as usize;
-            for port in 0..port_count {
-                types.push(
-                    effective_output_type(self, library, idx, port, 0).unwrap_or(DataType::Any),
-                );
+            let span = self.e_nodes[idx].outputs;
+            for port in 0..span.len as usize {
+                types[span.start as usize + port] =
+                    effective_output_type(self, library, idx, port, 0).unwrap_or(DataType::Any);
             }
         }
         self.output_types = types;

@@ -414,6 +414,11 @@ async fn worker_loop<ExecutionCallback>(
         // hydrates from the new config rather than the old.
         if let Some(cache) = intent.disk_store.take() {
             execution_engine.set_disk_store(cache);
+            // Flush resident disk-backed values into the just-attached store: a value
+            // computed while no store root was configured (an unsaved document) has no
+            // blob anywhere, and its later runs are RAM hits that never store — without
+            // this it would silently recompute on reopen despite its `Both` mode.
+            execution_engine.store_resident_caches().await;
         }
 
         let update_ok = match intent.graph_state.take() {
@@ -443,6 +448,15 @@ async fn worker_loop<ExecutionCallback>(
             execution_engine.store_resident_caches().await;
         }
 
+        if !update_ok {
+            // The failed update was reported and the prior program is intact. Drop this
+            // batch's terminals/events — they were meant for the graph that didn't
+            // compile — but let the event-loop restart below proceed on the prior
+            // program: a bad edit must not silently and permanently kill a running loop.
+            intent.execute_terminals = false;
+            intent.events.clear();
+        }
+
         let should_start_event_loop = match intent.loop_request {
             Some(LoopCommand::Start) => true,
             Some(LoopCommand::Stop) => false,
@@ -458,7 +472,7 @@ async fn worker_loop<ExecutionCallback>(
         // Empty graph is a normal state, not a failure: skip execute
         // silently. Events/terminals/StartEventLoop are no-ops until
         // a graph is loaded.
-        if update_ok && needs_execute && !execution_engine.is_empty() {
+        if needs_execute && !execution_engine.is_empty() {
             // Quiesce the event loop around execute(): closing the gate
             // stops lambdas from *starting a new iteration*. It does NOT
             // pause a lambda already inside `invoke()`, so this is not an

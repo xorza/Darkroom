@@ -108,8 +108,8 @@ impl DiskStore {
 
     /// Deserialize the blob at `path` into node outputs, or `None` if it can't be read/decoded
     /// (corrupt, an incompatible format, a missing codec, or gone).
-    pub(crate) fn read(&self, path: &Path) -> Option<Vec<DynamicValue>> {
-        blob::read(path, &self.library)
+    pub(crate) async fn read(&self, path: &Path) -> Option<Vec<DynamicValue>> {
+        blob::read(path, &self.library).await
     }
 
     /// Delete a blob — used to clear a file that failed to decode, so the recompute that
