@@ -52,7 +52,7 @@ pub fn worker_events_library() -> Library {
                             .get::<Slot<FpsEventState>>()
                             .expect("Node was never executed, nodes should be executed prior to registering events")
                             .clone();
-                        let fps_state = slot.peek_or_wait().await;
+                        let fps_state = slot.peek_async().await;
 
                         if fps_state.frequency.approximately_eq(0.0) {
                             tracing::info!("Frequency is zero, no FPS event");

@@ -38,7 +38,7 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 
 - `BitBuffer2` — bit-packed 2D bool buffer; indexes by `(x, y)` tuple and linear `usize`. No `IndexMut` (bits aren't independently addressable); mutate via `set`/`set_xy`. (The generic pixel `Buffer2<T>` moved to `imaginarium`.)
 - `KeyIndexVec<K, V>` — `V: KeyIndexKey<K>` (must expose `key(&self) -> &K`). `add`/`remove_by_key`/`by_key`/`index_of_key`, plus `compact_insert_start()` returning a `CompactInsert` guard whose `insert_with` deduplicates and which truncates + reindexes on drop.
-- `Slot<T>` — `send` (overwrites), `take`/`take_or_wait`, `peek`/`peek_or_wait` (Arc clone, keeps). For cross-task async value passing.
+- `Slot<T>` — `send` (overwrites), `take`/`take_async`, `peek`/`peek_async` (Arc clone, keeps). For cross-task async value passing.
 - `PauseGate` / `ReadyState` — race-safe via registering the `Notify` future *before* checking the flag/count.
 - `SerdeFormat` — `Json | Rhai | Bitcode | Toml | Lz4`; selected by file extension via `from_file_name`. (Lua and the old `Scn`/`ScnText` formats were removed.)
 

@@ -46,7 +46,7 @@ impl<T> Slot<T> {
 
     /// Takes the value if present, leaving the slot empty.
     ///
-    /// Returns `None` if the slot is empty, or if a `peek`/`peek_or_wait` clone
+    /// Returns `None` if the slot is empty, or if a `peek`/`peek_async` clone
     /// is still alive (the value can't be uniquely owned). In the contended
     /// case the value is left in the slot, not discarded.
     pub fn take(&self) -> Option<T> {
@@ -54,9 +54,9 @@ impl<T> Slot<T> {
     }
 
     /// Takes the value, waiting asynchronously if none exists.
-    /// Returns `Err` if a `peek`/`peek_or_wait` clone is still alive; the value
+    /// Returns `Err` if a `peek`/`peek_async` clone is still alive; the value
     /// stays in the slot in that case.
-    pub async fn take_or_wait(&self) -> Result<T, SlotError> {
+    pub async fn take_async(&self) -> Result<T, SlotError> {
         loop {
             let notified = self.notify.notified();
 
@@ -69,7 +69,7 @@ impl<T> Slot<T> {
 
     /// Removes and returns the value when it can be uniquely owned.
     ///
-    /// `Ok(None)` is empty; `Err` is contended — a live `peek`/`peek_or_wait`
+    /// `Ok(None)` is empty; `Err` is contended — a live `peek`/`peek_async`
     /// clone exists. Unlike a bare `swap` + `into_inner`, the contended path
     /// puts the value back so a failed take never drops it. The restore is a
     /// `compare_and_swap` so a racing `send` wins (its value stays, ours is
@@ -93,7 +93,7 @@ impl<T> Slot<T> {
     }
 
     /// Returns a clone of the value, waiting asynchronously if none exists.
-    pub async fn peek_or_wait(&self) -> Arc<T> {
+    pub async fn peek_async(&self) -> Arc<T> {
         loop {
             // Register for notification BEFORE checking value to avoid race condition
             let notified = self.notify.notified();
@@ -107,7 +107,7 @@ impl<T> Slot<T> {
     }
 
     /// Returns true if there is a value present. Note this is independent of
-    /// whether `take`/`take_or_wait` will succeed: those also fail when a `peek`
+    /// whether `take`/`take_async` will succeed: those also fail when a `peek`
     /// clone is still alive, so `has_value()` can be `true` while `take()` yields
     /// `None`.
     pub fn has_value(&self) -> bool {
@@ -209,11 +209,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn peek_or_wait_returns_immediately_if_value_exists() {
+    async fn peek_async_returns_immediately_if_value_exists() {
         let slot = Slot::default();
         slot.send(42);
 
-        let val = slot.peek_or_wait().await;
+        let val = slot.peek_async().await;
         assert_eq!(*val, 42);
 
         // Value should still be there
@@ -221,12 +221,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn peek_or_wait_waits_for_value() {
+    async fn peek_async_waits_for_value() {
         let slot = Slot::default();
         let slot_clone = slot.clone();
 
         let handle = tokio::spawn(async move {
-            let val = slot_clone.peek_or_wait().await;
+            let val = slot_clone.peek_async().await;
             *val
         });
 
@@ -245,14 +245,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn peek_or_wait_multiple_waiters() {
+    async fn peek_async_multiple_waiters() {
         let slot: Slot<i32> = Slot::default();
 
         let handles: Vec<_> = (0..5)
             .map(|_| {
                 let slot_clone = slot.clone();
                 tokio::spawn(async move {
-                    let val = slot_clone.peek_or_wait().await;
+                    let val = slot_clone.peek_async().await;
                     *val
                 })
             })
@@ -272,11 +272,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn take_or_wait_returns_immediately_if_value_exists() {
+    async fn take_async_returns_immediately_if_value_exists() {
         let slot = Slot::default();
         slot.send(42);
 
-        let val = slot.take_or_wait().await;
+        let val = slot.take_async().await;
         assert_eq!(val.unwrap(), 42);
 
         // Value should be gone
@@ -284,11 +284,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn take_or_wait_waits_for_value() {
+    async fn take_async_waits_for_value() {
         let slot = Slot::default();
         let slot_clone = slot.clone();
 
-        let handle = tokio::spawn(async move { slot_clone.take_or_wait().await });
+        let handle = tokio::spawn(async move { slot_clone.take_async().await });
 
         // Give the task a moment to start waiting
         tokio::task::yield_now().await;
@@ -308,15 +308,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn take_or_wait_returns_error_when_references_exist() {
+    async fn take_async_returns_error_when_references_exist() {
         let slot = Slot::default();
         slot.send(42);
 
         // Hold a reference via peek
         let peeked = slot.peek().unwrap();
 
-        // take_or_wait should return error since reference exists
-        let result = slot.take_or_wait().await;
+        // take_async should return error since reference exists
+        let result = slot.take_async().await;
         assert!(result.is_err());
 
         // ...and the value must NOT have been consumed by the failed take:
