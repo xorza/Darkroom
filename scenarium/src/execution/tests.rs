@@ -1366,7 +1366,9 @@ mod resource_binds {
 
     use super::*;
     use crate::async_lambda;
-    use crate::data::{CustomValue, FsPathConfig, FsPathMode, ResourceStamper, TypeId};
+    use crate::data::{
+        CustomValue, FsPathConfig, FsPathMode, ResourceStamp, ResourceStamper, TypeId,
+    };
     use crate::library::TypeEntry;
     use crate::node::function::{Func, FuncInput, FuncOutput};
 
@@ -1724,8 +1726,8 @@ mod resource_binds {
     #[derive(Debug)]
     struct StoreStamper(Arc<Store>);
     impl ResourceStamper for StoreStamper {
-        fn stamp(&self, _value: &DynamicValue, out: &mut Vec<u8>) {
-            out.extend_from_slice(&self.0.version.load(Ordering::SeqCst).to_le_bytes());
+        fn stamp(&self, _value: &DynamicValue) -> ResourceStamp {
+            ResourceStamp::from_bytes(&self.0.version.load(Ordering::SeqCst).to_le_bytes())
         }
     }
 

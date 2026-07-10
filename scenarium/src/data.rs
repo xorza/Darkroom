@@ -152,12 +152,46 @@ pub trait CustomValueCodec: Send + Sync + std::fmt::Debug {
 /// value (and everything upstream) is unchanged. `DataType::FsPath` is the built-in case
 /// (file `(len, mtime)` / directory fingerprint) and needs no registration.
 pub trait ResourceStamper: Send + Sync + std::fmt::Debug {
-    /// Append the referent's *current* identity for `value` to `out` — cheap external-state
-    /// metadata (a stat, a version counter, a cached etag), never a content read.
-    /// Deterministic for a given (value, external state); called at digest time, up to once
-    /// per run per consumer, so it must be fast. The digest folds `out` length-prefixed as
-    /// one unit, so the encoding within is the stamper's own business.
-    fn stamp(&self, value: &DynamicValue, out: &mut Vec<u8>);
+    /// The referent's *current* identity for `value` — cheap external-state metadata (a
+    /// stat, a version counter, a cached etag), never a content read. Deterministic for a
+    /// given (value, external state); called at digest time, up to once per run per
+    /// consumer, so it must be fast. The digest folds the stamp as one unit, so the
+    /// encoding within is the stamper's own business.
+    fn stamp(&self, value: &DynamicValue) -> ResourceStamp;
+}
+
+/// A resource referent's identity, packed into a fixed inline window — stamping never
+/// allocates. Holds up to [`Self::CAPACITY`] bytes plus the packed length, and the digest
+/// folds exactly the packed bytes, so `[1]` and `[1, 0]` stay distinct. Identity metadata
+/// is small by contract (`(len, mtime)` pairs, version counters, etags); hash anything
+/// wider down to fit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ResourceStamp {
+    bytes: [u8; Self::CAPACITY],
+    len: u8,
+}
+
+impl ResourceStamp {
+    pub const CAPACITY: usize = 32;
+
+    /// Pack `bytes` into the window. Asserts they fit — a wider stamp is a stamper bug
+    /// (hash the identity down instead).
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        assert!(
+            bytes.len() <= Self::CAPACITY,
+            "resource stamp exceeds {} bytes — hash wide identities down",
+            Self::CAPACITY
+        );
+        let mut stamp = ResourceStamp::default();
+        stamp.bytes[..bytes.len()].copy_from_slice(bytes);
+        stamp.len = bytes.len() as u8;
+        stamp
+    }
+
+    /// The packed identity bytes.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
 }
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -647,6 +681,29 @@ mod tests {
         fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
             self
         }
+    }
+
+    /// The inline stamp window: packs exactly the given bytes (`as_bytes` returns them,
+    /// not the padded window), keeps padding out of identity, and rejects oversize stamps.
+    #[test]
+    fn resource_stamp_packs_exact_bytes_inline() {
+        assert_eq!(ResourceStamp::from_bytes(&[1, 2, 3]).as_bytes(), [1, 2, 3]);
+        assert_eq!(ResourceStamp::from_bytes(&[]).as_bytes(), [0u8; 0]);
+
+        // Full window roundtrips.
+        let full: Vec<u8> = (0..32).collect();
+        assert_eq!(ResourceStamp::from_bytes(&full).as_bytes(), &full[..]);
+
+        // Zero padding is not identity: `[1]` and `[1, 0]` must stay distinct,
+        // which is what the digest fold relies on.
+        assert_ne!(
+            ResourceStamp::from_bytes(&[1]),
+            ResourceStamp::from_bytes(&[1, 0])
+        );
+
+        // A stamp wider than the window is a stamper bug, not a truncation.
+        let oversize = std::panic::catch_unwind(|| ResourceStamp::from_bytes(&[0; 33]));
+        assert!(oversize.is_err(), "33 bytes must be rejected");
     }
 
     #[test]

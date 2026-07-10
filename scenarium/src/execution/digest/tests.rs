@@ -387,13 +387,13 @@ fn custom_stamper_folds_referent_version() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use crate::data::{DynamicValue, ResourceStamper};
+    use crate::data::{DynamicValue, ResourceStamp, ResourceStamper};
 
     #[derive(Debug)]
     struct VersionStamper(Arc<AtomicU64>);
     impl ResourceStamper for VersionStamper {
-        fn stamp(&self, _value: &DynamicValue, out: &mut Vec<u8>) {
-            out.extend_from_slice(&self.0.load(Ordering::SeqCst).to_le_bytes());
+        fn stamp(&self, _value: &DynamicValue) -> ResourceStamp {
+            ResourceStamp::from_bytes(&self.0.load(Ordering::SeqCst).to_le_bytes())
         }
     }
 

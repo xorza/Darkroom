@@ -341,9 +341,9 @@ fn hash_bound_resource(
             }
         },
         InputStamper::Custom(stamper) => {
-            let mut stamp = Vec::new();
-            stamper.stamp(value, &mut stamp);
-            hasher.write_bytes(&[5]).write_len_prefixed(&stamp);
+            hasher
+                .write_bytes(&[5])
+                .write_len_prefixed(stamper.stamp(value).as_bytes());
         }
     }
     Some(())
