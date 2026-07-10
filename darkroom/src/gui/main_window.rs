@@ -10,6 +10,7 @@ use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::GraphUI;
 use crate::gui::graph_toolbar;
+use crate::gui::image_viewer::ImageViewer;
 use crate::gui::menu_bar;
 use crate::gui::node::emit_subgraph_opens;
 use crate::gui::preferences_view;
@@ -17,12 +18,14 @@ use crate::gui::scene::Scene;
 use crate::gui::status_bar;
 use crate::gui::tab_bar::{self, TabLabel};
 
-/// Top of darkroom's UI tree. Owns every persistent UI scope (right
-/// now just `GraphUI`); adding a new top-level pane is a new field
-/// + a new dispatch in `frame`.
+/// Top of darkroom's UI tree. Owns every persistent UI scope; adding a
+/// new top-level pane is a new field + a new dispatch in `frame`.
 #[derive(Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
+    /// The full-resolution image-viewer pane ([`TabRef::ImageViewer`]);
+    /// fed by `Editor` when an inspector preview is clicked.
+    pub(crate) image_viewer: ImageViewer,
     first_frame: bool,
 }
 
@@ -42,6 +45,9 @@ impl MainWindow {
     ) {
         tab_bar::emit_tab_actions(ui, &doc.tabs, actions);
         emit_subgraph_opens(ui, scene, actions);
+        self.graph_ui
+            .inspectors
+            .emit_preview_opens(ui, scene, actions);
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the
@@ -113,6 +119,7 @@ impl MainWindow {
                             command = Some(c);
                         }
                     }
+                    TabRef::ImageViewer => self.image_viewer.show(ui, ctx.theme),
                 }
                 // Bottom chrome: the cache-memory readout, below the content pane.
                 status_bar::show(ui, ctx);
@@ -163,6 +170,11 @@ fn tab_labels(doc: &Document) -> Vec<TabLabel> {
                 subgraph_id: None,
                 closable: true,
             },
+            TabRef::ImageViewer => TabLabel {
+                text: "image".into(),
+                subgraph_id: None,
+                closable: true,
+            },
         })
         .collect()
 }
@@ -171,6 +183,7 @@ impl Default for MainWindow {
     fn default() -> Self {
         Self {
             graph_ui: GraphUI::default(),
+            image_viewer: ImageViewer::default(),
             first_frame: true,
         }
     }

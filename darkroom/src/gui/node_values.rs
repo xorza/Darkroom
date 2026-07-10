@@ -2,10 +2,11 @@
 //! conversion from a worker [`ArgumentValues`] reply.
 //!
 //! Trivial values (numbers/strings/enums/paths) format straight to text;
-//! image values are reduced to the preview the worker resolved before
-//! replying and uploaded here as a GUI texture, so the full buffers never
-//! cross into the editor. The owning per-node store + fetch coordination
-//! lives in [`crate::gui::run_state::RunState`].
+//! image values upload the thumbnail the worker resolved before replying
+//! as a GUI texture, and additionally keep the full value (an `Arc` clone
+//! sharing the worker cache's buffer) so the image-viewer tab can show it
+//! at full resolution on demand. The owning per-node store + fetch
+//! coordination lives in [`crate::gui::run_state::RunState`].
 
 use aperture::{Image as PalImage, ImageHandle, Ui};
 use imaginarium::{ColorFormat, Image as RawImage};
@@ -19,6 +20,11 @@ use scenarium::execution::ArgumentValues;
 pub(crate) struct PortValueView {
     pub(crate) text: String,
     pub(crate) preview: Option<ImageHandle>,
+    /// The port's full runtime value, kept (a cheap `Arc` clone of the
+    /// worker's cached value) so clicking the thumbnail can show the image
+    /// at full resolution without a worker round-trip. `Some` only for
+    /// image values; dropped with the view on the next run.
+    pub(crate) full: Option<DynamicValue>,
 }
 
 /// A node's runtime values, indexed by port. `inputs[i]` / `outputs[i]`
@@ -41,7 +47,7 @@ pub(crate) fn build_view(ui: &Ui, values: ArgumentValues) -> NodeValueView {
             Some(value) => port_view(ui, value),
             None => PortValueView {
                 text: "-".to_string(),
-                preview: None,
+                ..Default::default()
             },
         })
         .collect();
@@ -56,13 +62,14 @@ pub(crate) fn build_view(ui: &Ui, values: ArgumentValues) -> NodeValueView {
 fn port_view(ui: &Ui, value: &DynamicValue) -> PortValueView {
     // The imaginarium-backed `Image` (the astro nodes' currency too) parks its
     // preview as an RGBA_U8 image; downcast and upload it.
-    let preview = value
-        .as_custom::<LensImage>()
+    let image = value.as_custom::<LensImage>();
+    let preview = image
         .and_then(LensImage::take_preview)
         .and_then(|preview| upload_preview(ui, preview));
     PortValueView {
         text: value.to_string(),
         preview,
+        full: image.is_some().then(|| value.clone()),
     }
 }
 

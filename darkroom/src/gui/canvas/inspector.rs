@@ -41,6 +41,7 @@ use crate::gui::node_values::PortValueView;
 use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
+use crate::gui::{PortKind, PortRef, UiAction};
 
 /// Open state of a single node's inspector. Absence from
 /// [`Inspectors::modes`] is the third, `Closed`, state.
@@ -130,6 +131,37 @@ impl Inspectors {
         }
         self.modes
             .retain(|id, _| scene.nodes.iter().any(|n| n.id == *id));
+    }
+
+    /// Prepass scan: surface clicks on preview thumbnails (from last
+    /// frame's responses, like every navigation input) as
+    /// [`UiAction::OpenImageViewer`] requests. Polls every port of every
+    /// open panel's node — a port that drew no thumbnail simply has no
+    /// response and reads unclicked.
+    pub(crate) fn emit_preview_opens(&self, ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
+        for &node_id in self.modes.keys() {
+            let Some(node) = scene.nodes.iter().find(|n| n.id == node_id) else {
+                continue;
+            };
+            let sides = [
+                (PortKind::Input, scene.inputs(node.inputs).len()),
+                (PortKind::Output, scene.outputs(node.outputs).len()),
+            ];
+            for (kind, count) in sides {
+                for port_idx in 0..count {
+                    if ui
+                        .response_for(preview_wid(node_id, kind, port_idx))
+                        .clicked
+                    {
+                        actions.push(UiAction::OpenImageViewer(PortRef {
+                            node_id,
+                            kind,
+                            port_idx,
+                        }));
+                    }
+                }
+            }
+        }
     }
 
     /// Record a panel for every open inspector, positioned just right of
@@ -276,7 +308,7 @@ impl Inspectors {
                         match values.and_then(|v| v.inputs.get(i)) {
                             Some(pv) => {
                                 port_row(ui, theme, ctx.library, name, &input.ty, Some(&pv.text));
-                                draw_preview(ui, theme, node.id, "in", i, pv);
+                                draw_preview(ui, theme, node.id, PortKind::Input, i, pv);
                             }
                             None => {
                                 let val = value_str(&input.binding);
@@ -301,7 +333,7 @@ impl Inspectors {
                         match values.and_then(|v| v.outputs.get(i)) {
                             Some(pv) => {
                                 port_row(ui, theme, ctx.library, name, &output.ty, Some(&pv.text));
-                                draw_preview(ui, theme, node.id, "out", i, pv);
+                                draw_preview(ui, theme, node.id, PortKind::Output, i, pv);
                             }
                             None => port_row(ui, theme, ctx.library, name, &output.ty, None),
                         }
@@ -416,11 +448,15 @@ fn port_label_text(library: &Library, name: &str, ty: &DataType) -> String {
 /// registered texture inside a hairline rounded frame — a dark image on
 /// the dark panel needs an edge to read as a framed object. No-op when
 /// the port has no preview.
+///
+/// The thumbnail is a click target: [`Inspectors::emit_preview_opens`]
+/// reads it in the prepass to open the full-resolution viewer tab. The
+/// frame brightens on hover as the affordance.
 fn draw_preview(
     ui: &mut Ui,
     theme: &Theme,
     node_id: NodeId,
-    side: &str,
+    kind: PortKind,
     idx: usize,
     pv: &PortValueView,
 ) {
@@ -434,17 +470,19 @@ fn draw_preview(
     let aspect = size.x as f32 / size.y as f32;
     let w = PREVIEW_MAX_WIDTH.min(size.x as f32);
     let h = w / aspect;
+    let wid = preview_wid(node_id, kind, idx);
+    let stroke_alpha = if ui.response_for(wid).hovered {
+        0.6
+    } else {
+        0.18
+    };
     Panel::vstack()
-        .id(WidgetId::from_hash((
-            "inspector.preview",
-            node_id,
-            side,
-            idx,
-        )))
+        .id(wid)
         .size((Sizing::Fixed(w), Sizing::Fixed(h)))
+        .sense(Sense::CLICK)
         .background(Background {
             fill: Color::TRANSPARENT.into(),
-            stroke: Stroke::solid(theme.colors.text_muted.with_alpha(0.18), 1.0),
+            stroke: Stroke::solid(theme.colors.text_muted.with_alpha(stroke_alpha), 1.0),
             corners: Corners::all(4.0),
             ..Default::default()
         })
@@ -523,6 +561,12 @@ pub(crate) fn inspect_badge_wid(node_id: NodeId) -> WidgetId {
 /// Stable id for a node's floating inspection panel.
 fn inspect_panel_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.inspect_panel", node_id))
+}
+
+/// Stable id for one port's preview thumbnail in a node's panel —
+/// domain-keyed so the prepass can poll its click without a cache.
+fn preview_wid(node_id: NodeId, kind: PortKind, idx: usize) -> WidgetId {
+    WidgetId::from_hash(("inspector.preview", node_id, kind, idx))
 }
 
 #[cfg(test)]

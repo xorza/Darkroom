@@ -1,6 +1,7 @@
 pub(crate) mod canvas;
 pub(crate) mod dialogs;
 pub(crate) mod graph_toolbar;
+pub(crate) mod image_viewer;
 pub(crate) mod main_window;
 pub(crate) mod menu_bar;
 pub(crate) mod node;
@@ -49,6 +50,9 @@ pub(crate) enum UiAction {
     /// Create a fresh empty subgraph and open it in a new tab (the "+"
     /// chip at the end of the strip).
     NewSubgraph,
+    /// Show this port's cached runtime image at full resolution in the
+    /// image-viewer tab (an inspector preview thumbnail was clicked).
+    OpenImageViewer(PortRef),
 }
 
 /// Whether a port consumes a binding (`Input`) or produces a value

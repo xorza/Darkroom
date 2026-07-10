@@ -67,7 +67,7 @@ pub(crate) struct GraphUI {
     /// Open inspection panels, keyed by node. Outside the gesture group
     /// so pinned panels survive a tab switch; panels only paint for nodes
     /// in the active scene, so off-tab ones hide and reappear.
-    inspectors: Inspectors,
+    pub(crate) inspectors: Inspectors,
     /// In-flight gesture controllers. Grouped so a tab switch can reset
     /// *all* of them in one assignment (`clear_gestures`) without the
     /// caller enumerating each — and so the persistent caches

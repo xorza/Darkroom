@@ -50,6 +50,10 @@ pub enum TabRef {
     Graph(GraphRef),
     /// The app-preferences / settings view — no graph, no canvas.
     Preferences,
+    /// The full-resolution image viewer (singleton, like `Preferences`).
+    /// Its content is runtime-only ([`crate::gui::image_viewer`]); a
+    /// restored tab opens empty until a preview is clicked again.
+    ImageViewer,
 }
 
 /// Which side of a subgraph def's interface a boundary-port edit targets:
@@ -357,7 +361,7 @@ impl Document {
     pub fn active_target(&self) -> Option<GraphRef> {
         match self.tabs[self.active] {
             TabRef::Graph(target) => Some(target),
-            TabRef::Preferences => None,
+            TabRef::Preferences | TabRef::ImageViewer => None,
         }
     }
 
@@ -398,12 +402,12 @@ impl Document {
         // resolve.
         if self.tabs.iter().any(|t| match t {
             TabRef::Graph(g) => self.graph_for(*g).is_none(),
-            TabRef::Preferences => false,
+            TabRef::Preferences | TabRef::ImageViewer => false,
         }) {
             // Split the borrow so `retain` (mut `tabs`) can read `graph`.
             let Document { graph, tabs, .. } = self;
             tabs.retain(|t| match t {
-                TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
+                TabRef::Graph(GraphRef::Main) | TabRef::Preferences | TabRef::ImageViewer => true,
                 TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(id).is_some(),
             });
         }
@@ -963,58 +967,71 @@ mod tests {
     }
 
     #[test]
-    fn preferences_tab_has_no_graph_target_and_survives_validation() {
+    fn non_graph_tabs_have_no_target_and_survive_validation() {
         let mut doc = Document::default();
-        // A graph tab resolves to a target; the appended Preferences tab does not.
+        // A graph tab resolves to a target; the appended non-graph tabs do not.
         assert_eq!(doc.active_target(), Some(GraphRef::Main));
-        doc.tabs.push(TabRef::Preferences);
-        doc.active = 1;
-        assert_eq!(doc.active_tab(), TabRef::Preferences);
-        assert_eq!(doc.active_target(), None, "a non-graph tab has no target");
+        doc.tabs.extend([TabRef::Preferences, TabRef::ImageViewer]);
+        for active in [1, 2] {
+            doc.active = active;
+            assert_eq!(doc.active_tab(), doc.tabs[active]);
+            assert_eq!(doc.active_target(), None, "a non-graph tab has no target");
+        }
 
         // A non-graph tab always resolves, so it's never pruned and the
         // active index is left alone.
         doc.ensure_valid_active();
         assert_eq!(
             doc.tabs,
-            vec![TabRef::Graph(GraphRef::Main), TabRef::Preferences]
+            vec![
+                TabRef::Graph(GraphRef::Main),
+                TabRef::Preferences,
+                TabRef::ImageViewer
+            ]
         );
-        assert_eq!(doc.active, 1);
+        assert_eq!(doc.active, 2);
         doc.validate();
     }
 
     #[test]
-    fn ensure_valid_active_keeps_preferences_when_a_subgraph_tab_vanishes() {
+    fn ensure_valid_active_keeps_non_graph_tabs_when_a_subgraph_tab_vanishes() {
         let mut doc = Document::default();
         let id = doc.create_subgraph();
-        doc.tabs
-            .extend([TabRef::Graph(GraphRef::Local(id)), TabRef::Preferences]);
-        doc.active = 2; // viewing the preferences tab
+        doc.tabs.extend([
+            TabRef::Graph(GraphRef::Local(id)),
+            TabRef::Preferences,
+            TabRef::ImageViewer,
+        ]);
+        doc.active = 3; // viewing the image tab
         // Drop the subgraph out from under its open tab.
         doc.graph.subgraphs.remove_by_key(&id);
 
         doc.ensure_valid_active();
-        // The dead subgraph tab is pruned; Main + Preferences remain, and active
-        // is clamped back into range.
+        // The dead subgraph tab is pruned; Main + the non-graph tabs remain,
+        // and active is clamped back into range.
         assert_eq!(
             doc.tabs,
-            vec![TabRef::Graph(GraphRef::Main), TabRef::Preferences]
+            vec![
+                TabRef::Graph(GraphRef::Main),
+                TabRef::Preferences,
+                TabRef::ImageViewer
+            ]
         );
-        assert_eq!(doc.active, 1);
+        assert_eq!(doc.active, 2);
     }
 
     #[test]
-    fn preferences_tab_round_trips_in_every_format() {
+    fn non_graph_tabs_round_trip_in_every_format() {
         let mut doc: Document = core_test_graph().into();
-        doc.tabs.push(TabRef::Preferences);
+        doc.tabs.extend([TabRef::Preferences, TabRef::ImageViewer]);
         for format in SerdeFormat::all_formats_for_testing() {
             let bytes = doc
                 .serialize(format)
-                .expect("serialize with a preferences tab");
+                .expect("serialize with non-graph tabs");
             let back = Document::deserialize(format, &bytes).expect("deserialize");
             assert_eq!(
                 back.tabs, doc.tabs,
-                "tabs (including Preferences) round-trip for {format:?}"
+                "tabs (including Preferences + ImageViewer) round-trip for {format:?}"
             );
         }
     }

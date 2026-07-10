@@ -83,12 +83,21 @@ pub(crate) fn emit_pan_zoom(
             &mut zoom,
             pivot,
             scroll_to_zoom_factor(resp.scroll_lines.y * line_px),
+            MIN_ZOOM,
+            MAX_ZOOM,
         );
     }
     if (resp.zoom_factor - 1.0).abs() > f32::EPSILON
         && let Some(pivot) = resp.pointer_local
     {
-        zoom_about(&mut pan, &mut zoom, pivot, resp.zoom_factor);
+        zoom_about(
+            &mut pan,
+            &mut zoom,
+            pivot,
+            resp.zoom_factor,
+            MIN_ZOOM,
+            MAX_ZOOM,
+        );
     }
     // Only emit when the gesture actually moved the viewport
     // (approx compare — exact float `!=` would emit on sub-epsilon
@@ -105,18 +114,27 @@ pub(crate) fn emit_pan_zoom(
 }
 
 /// Multiply `zoom` by `factor` while holding the pre-transform point
-/// under `pivot_local` fixed in the outer canvas. Operates on the
-/// caller's local `(pan, zoom)` so the gesture can fold several inputs
-/// before emitting one `Intent::SetViewport`. Standard zoom-about-
-/// cursor algebra: world point under cursor = `(pivot - pan) / zoom`;
-/// choose new pan so that same world point stays under the same screen
-/// pixel after scaling. Clamps to `[MIN_ZOOM, MAX_ZOOM]`; ignores
-/// non-finite / non-positive factors.
-fn zoom_about(pan: &mut Vec2, zoom: &mut f32, pivot_local: Vec2, factor: f32) {
+/// under `pivot_local` fixed in the pane. Operates on the caller's
+/// local `(pan, zoom)` so a gesture can fold several inputs before
+/// emitting/committing once. Standard zoom-about-cursor algebra: world
+/// point under cursor = `(pivot - pan) / zoom`; choose new pan so that
+/// same world point stays under the same screen pixel after scaling.
+/// Clamps to `[min_zoom, max_zoom]` (callers pass their own range —
+/// the canvas and the image viewer bound zoom differently); ignores
+/// non-finite / non-positive factors. Shared with
+/// [`crate::gui::image_viewer`].
+pub(crate) fn zoom_about(
+    pan: &mut Vec2,
+    zoom: &mut f32,
+    pivot_local: Vec2,
+    factor: f32,
+    min_zoom: f32,
+    max_zoom: f32,
+) {
     if !factor.is_finite() || factor <= 0.0 {
         return;
     }
-    let new_zoom = (*zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+    let new_zoom = (*zoom * factor).clamp(min_zoom, max_zoom);
     let effective = new_zoom / *zoom;
     *pan = pivot_local - (pivot_local - *pan) * effective;
     *zoom = new_zoom;
@@ -127,8 +145,8 @@ fn zoom_about(pan: &mut Vec2, zoom: &mut f32, pivot_local: Vec2, factor: f32) {
 /// down) to a multiplicative zoom factor. Negative `delta_y` (wheel
 /// up) zooms in (`factor > 1`); positive (wheel down) zooms out
 /// (`factor < 1`). Pure function so it can be unit-tested without
-/// spinning up a UI.
-fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
+/// spinning up a UI. Shared with [`crate::gui::image_viewer`].
+pub(crate) fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
     SCROLL_ZOOM_BASE.powf(-delta_y)
 }
 
@@ -353,7 +371,7 @@ mod tests {
         let (mut pan, mut zoom) = (Vec2::new(40.0, 20.0), 1.5);
         let pivot = Vec2::new(200.0, 150.0);
         let world_before = (pivot - pan) / zoom;
-        zoom_about(&mut pan, &mut zoom, pivot, 1.3);
+        zoom_about(&mut pan, &mut zoom, pivot, 1.3, MIN_ZOOM, MAX_ZOOM);
         let world_after = (pivot - pan) / zoom;
         let drift = (world_after - world_before).length();
         assert!(
@@ -372,7 +390,7 @@ mod tests {
         let world_before = (pivot - pan) / zoom;
         // 2 notches up.
         let factor = scroll_to_zoom_factor(-36.0);
-        zoom_about(&mut pan, &mut zoom, pivot, factor);
+        zoom_about(&mut pan, &mut zoom, pivot, factor, MIN_ZOOM, MAX_ZOOM);
         let world_after = (pivot - pan) / zoom;
         let drift = (world_after - world_before).length();
         assert!(drift < 1e-4, "drift {drift}");
@@ -388,7 +406,7 @@ mod tests {
         // requested factor).
         let (mut pan, mut zoom) = (Vec2::new(10.0, 10.0), MAX_ZOOM * 0.9);
         let pivot = Vec2::new(100.0, 100.0);
-        zoom_about(&mut pan, &mut zoom, pivot, 5.0);
+        zoom_about(&mut pan, &mut zoom, pivot, 5.0, MIN_ZOOM, MAX_ZOOM);
         assert!(
             (zoom - MAX_ZOOM).abs() < 1e-5,
             "expected saturation at MAX_ZOOM={MAX_ZOOM}, got {zoom}",
@@ -399,7 +417,7 @@ mod tests {
     fn zoom_about_clamps_to_min() {
         let (mut pan, mut zoom) = (Vec2::new(10.0, 10.0), MIN_ZOOM * 1.1);
         let pivot = Vec2::new(100.0, 100.0);
-        zoom_about(&mut pan, &mut zoom, pivot, 0.01);
+        zoom_about(&mut pan, &mut zoom, pivot, 0.01, MIN_ZOOM, MAX_ZOOM);
         assert!(
             (zoom - MIN_ZOOM).abs() < 1e-5,
             "expected saturation at MIN_ZOOM={MIN_ZOOM}, got {zoom}",
@@ -484,7 +502,14 @@ mod tests {
         let zoom0 = 1.25;
         for bad in [0.0_f32, -0.5, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
             let (mut pan, mut zoom) = (pan0, zoom0);
-            zoom_about(&mut pan, &mut zoom, Vec2::new(50.0, 50.0), bad);
+            zoom_about(
+                &mut pan,
+                &mut zoom,
+                Vec2::new(50.0, 50.0),
+                bad,
+                MIN_ZOOM,
+                MAX_ZOOM,
+            );
             assert_eq!(pan, pan0, "pan moved on bad factor {bad}");
             assert_eq!(zoom, zoom0, "zoom moved on bad factor {bad}");
         }

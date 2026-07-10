@@ -23,13 +23,13 @@ use crate::core::edit::intent::{
 };
 use crate::core::io::preferences::Preferences;
 use crate::core::worker::ValueRequest;
-use crate::gui::UiAction;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::main_window::MainWindow;
 use crate::gui::run_state::RunState;
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
+use crate::gui::{PortKind, PortRef, UiAction};
 
 use crate::gui::app::AppContext;
 
@@ -482,8 +482,51 @@ impl Editor {
                     self.dirty = true;
                     self.open_graph(GraphRef::Local(id));
                 }
+                UiAction::OpenImageViewer(port) => self.open_image_viewer(port),
             }
         }
+    }
+
+    /// Show `port`'s held runtime value in the image-viewer tab and focus
+    /// it. The value is the full `DynamicValue` the worker delivered for
+    /// the port's open inspector panel ([`PortValueView::full`]); `None`
+    /// (superseded run) still opens the tab, which explains itself.
+    /// Mirrors [`Self::open_preferences`]: adding the singleton tab is the
+    /// non-undoable part, focus routes through a recorded `SwitchTab`.
+    ///
+    /// [`PortValueView::full`]: crate::gui::node_values::PortValueView::full
+    fn open_image_viewer(&mut self, port: PortRef) {
+        let value = self.run_state.values(port.node_id).and_then(|v| {
+            let ports = match port.kind {
+                PortKind::Input => &v.inputs,
+                PortKind::Output => &v.outputs,
+            };
+            ports.get(port.port_idx).and_then(|pv| pv.full.clone())
+        });
+        // Display name from the document, not the scene — the scene's
+        // interned strings are stale during the navigation phase.
+        let title = self
+            .document
+            .active_target()
+            .and_then(|target| self.document.graph_for(target))
+            .and_then(|graph| graph.by_id(&port.node_id))
+            .map(|node| node.name.clone())
+            .unwrap_or_default();
+        self.main_window.image_viewer.present(title, value);
+
+        let index = match self
+            .document
+            .tabs
+            .iter()
+            .position(|t| *t == TabRef::ImageViewer)
+        {
+            Some(index) => index,
+            None => {
+                self.document.tabs.push(TabRef::ImageViewer);
+                self.document.tabs.len() - 1
+            }
+        };
+        self.intents.push(Intent::SwitchTab { to: index });
     }
 
     /// Open `target`'s tab and focus it. Adding the tab to the strip (lazily
