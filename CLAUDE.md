@@ -24,7 +24,7 @@ Six layers, bottom-up. A caller drives everything through a `ProcessingContext` 
 
 ### Image storage (`src/image/`)
 
-`ImageDesc` (`src/image/mod.rs:24`) = `{ width, height, color_format }` — a single `new` constructor. Pixel data is **always tightly packed**: `row_bytes() == width * bytes_per_pixel`, `size_in_bytes() == height * row_bytes()`, no inter-row padding. There is no `stride` field. `Image` (`src/image/mod.rs:36`) holds `bytes: AVec<u8, ConstAlign<ALIGNMENT>>` (16-byte aligned for SIMD) plus the `desc`. The GPU side is packed too (see the GPU wrapper section): there is no stride anywhere.
+`ImageDesc` (`src/image/mod.rs:24`) = `{ width, height, color_format }` — a single `new` constructor. Pixel data is **always tightly packed**: `row_bytes() == width * bytes_per_pixel`, `size_in_bytes() == height * row_bytes()`, no inter-row padding. There is no `stride` field. `Image` (`src/image/mod.rs:35`) holds `data: AnyImageData` (a typed `Buffer2<[T; N]>` per format) plus the `desc`; `bytes()`/`bytes_mut()` view the pixels as packed `&[u8]` zero-copy. The GPU side is packed too (see the GPU wrapper section): there is no stride anywhere.
 
 I/O (`src/image/io.rs`): PNG/JPG via the `image` crate, TIFF via `tiff.rs` (unlimited decoder for large astrophotography frames, U8/U16/U32/F32). `SUPPORTED_EXTENSIONS = ["png","jpg","jpeg","tiff","tif"]`. PNG save is U8/U16 only (no F32); JPG save needs `RGBA_U8` or `L_U8`.
 
