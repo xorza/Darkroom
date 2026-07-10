@@ -5,6 +5,3 @@ update ram usage on graph changes
 node title disapppears sometimes
 
 imaginarium failing tests
-
-    #[serde(default)]
-    pub fs_path: bool,
