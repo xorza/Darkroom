@@ -307,12 +307,16 @@ impl RuntimeCache {
     /// filesystem state and could drift mid-run). A `None` digest (an impure cone) never
     /// reuses.
     ///
-    /// The two reuse paths are gated on the node's [`CacheMode`](crate::graph::CacheMode) bits:
-    /// RAM reuse only for a `caches_in_ram` mode (`Ram`/`Both`), disk reuse only for a
-    /// `persists_to_disk` mode (`Disk`/`Both`, enforced in [`DiskStore::blob_path`]). So a `None`
-    /// node reuses neither and always recomputes; a `Disk` node reuses only from disk (its RAM
-    /// copy is demoted after each run). A `CachePassthrough` (file-cache) node bypasses these
-    /// gates — its explicit path is checked directly in `blob_path`.
+    /// RAM reuse trusts residency alone ([`is_resident_hit`](Self::is_resident_hit)): a
+    /// resident digest-valid value is always served. That's sound because the caching
+    /// *policy* acts entirely on what stays resident — a non-RAM value is drained mid-run
+    /// as its last consumer reads it, reclaimed by the end-of-run eviction, and inspection
+    /// hydration is a returned loan ([`hydrate_for_inspection`](Self::hydrate_for_inspection))
+    /// — so the only values resident *across* runs are those a `Ram`/`Both` mode or a
+    /// preview pin deliberately retained. Disk reuse stays gated on `persists_to_disk`
+    /// (`Disk`/`Both`, enforced in [`DiskStore::blob_path`]); a `CachePassthrough`
+    /// (file-cache) node bypasses that gate — its explicit path is checked directly in
+    /// `blob_path`.
     pub(crate) fn stamp_and_check_reuse(
         &mut self,
         program: &ExecutionProgram,
@@ -320,8 +324,8 @@ impl RuntimeCache {
     ) -> bool {
         let digest = node_digest(program, idx, self);
         self.slots[idx].current_digest = digest;
-        let ram_hit = program.e_nodes[idx].cache.caches_in_ram() && self.is_resident_hit(idx);
-        digest.is_some() && (ram_hit || self.mark_on_disk_if_present(program, idx))
+        digest.is_some()
+            && (self.is_resident_hit(idx) || self.mark_on_disk_if_present(program, idx))
     }
 
     /// The per-node "reuse from disk?" check, run once a node's digest is computed: if a

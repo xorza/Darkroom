@@ -177,9 +177,9 @@ pub struct ArgumentValues {
     pub outputs: Vec<DynamicValue>,
 }
 
-/// What seeds a run's schedule — the roots the planner walks back from. The three
+/// What seeds a run's schedule — the roots the planner walks back from. The four
 /// are independent and combine: a run can target terminal nodes, the event loop's
-/// triggerable events, and/or a set of injected events, all at once.
+/// triggerable events, a set of injected events, and/or specific nodes, all at once.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct RunSeeds {
     /// Include all terminal nodes — the ordinary "produce the outputs" trigger.
@@ -188,6 +188,12 @@ pub(crate) struct RunSeeds {
     pub event_triggers: bool,
     /// Run the subscribers of these specific fired events.
     pub events: Vec<EventRef>,
+    /// Run the cones of these specific nodes (authoring ids), retaining their outputs
+    /// in RAM for read-back — the on-demand "run to this node" / preview trigger. An id
+    /// that doesn't resolve against the compiled program (deleted, disabled, stale) is
+    /// dropped with a warning: node seeds ride alongside graph edits, so a miss is
+    /// expected input, not a logic error.
+    pub nodes: Vec<NodeId>,
 }
 
 // === Execution Engine ===
@@ -415,6 +421,21 @@ impl ExecutionEngine {
         .await
     }
 
+    pub(crate) async fn execute_nodes<T: IntoIterator<Item = NodeId>>(
+        &mut self,
+        nodes: T,
+    ) -> Result<ExecutionStats> {
+        self.execute(
+            RunSeeds {
+                nodes: nodes.into_iter().collect(),
+                ..Default::default()
+            },
+            None,
+            CancelToken::never(),
+        )
+        .await
+    }
+
     /// Run only the planning phase (no execution), leaving the schedule in
     /// `self.plan` for inspection.
     pub(crate) fn prepare_execution(
@@ -427,6 +448,7 @@ impl ExecutionEngine {
             terminals,
             event_triggers,
             events: events.to_vec(),
+            nodes: Vec::new(),
         };
         self.planner.plan(&self.program, &seeds, &mut self.plan)
     }
