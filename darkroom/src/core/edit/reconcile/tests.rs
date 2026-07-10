@@ -3,6 +3,7 @@ use scenarium::data::StaticValue;
 use scenarium::graph::Graph;
 use scenarium::graph::Node;
 use scenarium::graph::subgraph::SubgraphRef;
+use scenarium::node::function::{Func, FuncId};
 use scenarium::testing::{TestFuncHooks, test_func_lib};
 
 fn lib() -> Library {
@@ -279,14 +280,16 @@ fn passthrough_ports_are_null_typed() {
 
 #[test]
 fn passthrough_in_subgraph_exposes_the_resolved_output_type() {
-    use scenarium::node::special::SpecialNode;
-
-    // Interior: SubgraphInput → sum → CachePassthrough → SubgraphOutput. The
+    // Interior: SubgraphInput → sum → wildcard passthrough → SubgraphOutput. The
     // passthrough's output statically declares the wildcard `Any`, but the
     // exposed subgraph output must report `sum`'s real output type, resolved
-    // through it — otherwise wrapping a value in a file-cache would erase its
+    // through it — otherwise wrapping a value in a passthrough would erase its
     // type for the whole composite.
-    let library = lib();
+    let pass_func = Func::new(FuncId::unique(), "pass")
+        .input(FuncInput::required("x", DataType::Any))
+        .wildcard_output("o", 0);
+    let mut library = lib();
+    library.funcs.add(pass_func.clone());
     let sum_id = library.by_name("sum").unwrap().id;
     let want_ty = library.by_name("sum").unwrap().outputs[0].ty.declared();
     assert_ne!(
@@ -297,9 +300,7 @@ fn passthrough_in_subgraph_exposes_the_resolved_output_type() {
 
     let sgin = Node::new(NodeKind::SubgraphInput);
     let sum = Node::new(NodeKind::Func(sum_id));
-    let pass = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
-        bypass: false,
-    }));
+    let pass = Node::from(&pass_func);
     let sgout = Node::new(NodeKind::SubgraphOutput);
     let (sgin_id, sum_n, pass_id, sgout_id) = (sgin.id, sum.id, pass.id, sgout.id);
     let mut interior = Graph::default();

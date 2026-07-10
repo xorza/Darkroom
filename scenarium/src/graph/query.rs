@@ -38,8 +38,8 @@ impl Graph {
     }
 
     /// The effective type produced at output `port`, following *wildcard*
-    /// outputs up the graph: a wildcard output (e.g. a `CachePassthrough` /
-    /// reroute — see [`OutputType::Wildcard`](crate::node::function::OutputType))
+    /// outputs up the graph: a wildcard output (e.g. a passthrough / reroute —
+    /// see [`OutputType::Wildcard`](crate::node::function::OutputType))
     /// reports the resolved type of whatever feeds the input it mirrors, so a
     /// value's type survives the hop: a `Bind` follows the producer up, while a
     /// `Const` takes the mirrored input's declared type (which carries the full

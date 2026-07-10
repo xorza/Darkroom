@@ -58,8 +58,8 @@ pub struct FuncInput {
     pub description: Option<String>,
     /// When set, this input may only hold a `Const` literal — wiring an upstream
     /// output into it (a `Bind`) is rejected by graph validation and blocked in
-    /// the editor. For inputs the engine reads as a constant (e.g. the file-cache
-    /// node's `path`), so a stray connection can't silently defeat that.
+    /// the editor. For inputs a node reads as configuration, so a stray
+    /// connection can't silently defeat that.
     #[serde(default)]
     pub const_only: bool,
     #[serde(default)]
@@ -130,7 +130,7 @@ pub enum OutputType {
     /// A fixed, declared output type.
     Fixed(DataType),
     /// A polymorphic passthrough / reroute output whose type mirrors the
-    /// resolved type of input `mirrors` (e.g. the file-cache node). It reads as
+    /// resolved type of input `mirrors`. It reads as
     /// the wildcard `Any` until the editor resolves it by following the wire
     /// (see [`Graph::resolve_output_type`](crate::graph::Graph::resolve_output_type));
     /// the engine never type-checks, so it ignores the distinction.
@@ -192,8 +192,7 @@ pub struct Func {
     pub terminal: bool,
 
     /// Node manages its own output caching, so the editor's disk-cache (persist)
-    /// toggle is meaningless on it and hidden — e.g. the file-cache passthrough,
-    /// whose explicit-path store supersedes the generic content-addressed cache.
+    /// toggle is meaningless on it and hidden.
     /// `false` (the default) means a normal node that offers the toggle.
     #[serde(default)]
     pub uncacheable: bool,

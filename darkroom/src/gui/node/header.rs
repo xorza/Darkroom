@@ -285,8 +285,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // ports and the status glow keep the stage.
             //
             // Both suppressed where caching can't apply: boundary nodes (pure
-            // routing), self-caching nodes like the file-cache passthrough
-            // (`uncacheable`), terminal sinks (no downstream consumer to serve a
+            // routing), self-caching nodes (`uncacheable`), terminal sinks (no downstream consumer to serve a
             // cached output to), and impure nodes (no content digest, so no mode is
             // honored — the `~` marker shows why instead).
             if !node.uncacheable && !node.terminal && !node.impure {

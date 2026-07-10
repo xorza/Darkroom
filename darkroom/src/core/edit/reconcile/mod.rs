@@ -258,8 +258,8 @@ fn infer_used_input_type(
 
 /// Type of subgraph output `old`: the type of the interior producer bound
 /// into `SubgraphOutput` input `old`. Resolved via
-/// [`Graph::resolve_output_type`], so a producing `CachePassthrough` reports
-/// the type wired through it rather than its wildcard `Any` — the composite's
+/// [`Graph::resolve_output_type`], so a producing wildcard passthrough reports
+/// the type wired through it rather than its declared `Any` — the composite's
 /// exposed output keeps the value's real type.
 fn infer_used_output_type(
     interior: &Graph,

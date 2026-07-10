@@ -30,7 +30,7 @@ to the other:
 | `func_lambda.rs` | `FuncLambda`: the async node-function signature + `InvokeInput`/`InvokeResult`/`InvokeError`. |
 | `event_lambda.rs` | `EventLambda`: async event-handler signature. |
 | `macros.rs` | `async_lambda!` — ergonomic `FuncLambda` construction. |
-| `elements/` | Built-in node libraries: `math_library.rs` (Math), `system_library.rs` (System: print / to-string / concat), `worker_events_library.rs` (System: frame/fps events), `fs_watch_library.rs` (System: dir watch), `cache_passthrough.rs` (System: file cache), `run_terminals.rs` (System: "Run on Event" — a portless terminal sink that re-runs all terminals when a subscribed event fires). |
+| `elements/` | Built-in node libraries: `math_library.rs` (Math), `system_library.rs` (System: print / to-string / concat), `worker_events_library.rs` (System: frame/fps events), `fs_watch_library.rs` (System: dir watch), `run_terminals.rs` (System: "Run on Event" — a portless terminal sink that re-runs all terminals when a subscribed event fires). |
 | `execution/` | The compile→plan→execute pipeline (see below). |
 | `execution_stats.rs` | `ExecutionStats` per-run summary + `FlattenMap` (flat id → authoring attribution), `LogEntry`. |
 | `common/` | `AnyState` (per-node mutable state), `SharedAnyState` (concurrent event state). |
@@ -108,8 +108,7 @@ plus, for a **resource-declared** input (`FsPath`, or a custom type whose `TypeE
 `ResourceStamper`), the live identity of the referent behind the *delivered* value, so a
 wired reference re-keys its consumer like a const path does; unreadable value ⇒ `None`).
 `None` for an `Impure` node (never cached; a `None` producer taints its consumer to `None`).
-The one special case: a `CachePassthrough` (file-cache) node is keyed on its `Const` path
-*alone* (`file_cache_digest`), excluding its `input[0]` cone. Reuse is uniform: a resident
+Reuse is uniform: a resident
 value whose `produced_under == current_digest` (`is_resident_hit`) is served from RAM; else
 `RuntimeCache::mark_on_disk_if_present` stats a blob for that digest and reuses it (loaded
 lazily by `hydrate_slot` only when a running consumer reads it, so a disk-cached value behind
@@ -118,7 +117,7 @@ another never enters RAM — this is what survives a reopen); else the node runs
 `current_digest` is unchanged leaves its consumers' digests unchanged. **Pre-run cut**
 (`resolve.rs`): before the run loop the executor resolves *every* node's digest + reuse
 (`resolve_structural` — folding each digest producer-first from upstream digests, no lambda,
-no value load — nearly every digest being structural or the file-cache path key) and prunes
+no value load) and prunes
 every cone that feeds *only* reuse hits (`compute_disposition`, a backward walk seeded from
 the plan's `roots`), so a `Memory` (non-persist) node feeding a disk-cached *hit* is **not**
 recomputed on reopen. A cut node is reported `cached` iff it still holds a value (a deeper

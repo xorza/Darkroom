@@ -8,6 +8,14 @@ use crate::node::function::{Func, FuncId, FuncInput, FuncOutput};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::SerdeFormat;
 
+/// A passthrough func — one `Any` input, one wildcard output mirroring it. The
+/// generic hop for testing wildcard type resolution through a node.
+fn passthrough_func() -> Func {
+    Func::new(FuncId::unique(), "pass")
+        .input(FuncInput::required("x", DataType::Any))
+        .wildcard_output("o", 0)
+}
+
 #[test]
 fn roundtrip_serialization() -> anyhow::Result<()> {
     let graph = test_graph();
@@ -173,7 +181,6 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
     use crate::data::{DataType, StaticValue};
     use crate::library::Library;
-    use crate::node::special::SpecialNode;
 
     // Int and String never coerce (numerics coerce among themselves, but a
     // string is a distinct kind), so this pair exercises a real rejection.
@@ -185,16 +192,12 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
     let int_sink = Func::new(FuncId::unique(), "int_sink")
         .input(FuncInput::required("x", DataType::Int))
         .output(FuncOutput::new("o", DataType::Int));
+    let pass_func = passthrough_func();
     let mut library = Library::default();
     library.funcs.add(int_src.clone());
     library.funcs.add(str_sink.clone());
     library.funcs.add(int_sink.clone());
-
-    let pass = || {
-        Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
-            bypass: false,
-        }))
-    };
+    library.funcs.add(pass_func.clone());
 
     // Direct Int → String is rejected at the compile boundary.
     let mut g = Graph::default();
@@ -220,9 +223,7 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
     // Int → pass → String is rejected (the wildcard carries the real type).
     let mut g = Graph::default();
     let s = g.add_func_node(&int_src);
-    let p = pass();
-    let pid = p.id;
-    g.add(p);
+    let pid = g.add_func_node(&pass_func);
     g.set_input_binding(InputPort::new(pid, 0), Binding::bind(s, 0));
     let i = g.add_func_node(&int_sink);
     g.set_input_binding(InputPort::new(i, 0), Binding::bind(pid, 0));
@@ -267,25 +268,19 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
 fn resolve_output_type_follows_passthrough_chain() {
     use crate::data::{DataType, StaticValue};
     use crate::library::Library;
-    use crate::node::special::SpecialNode;
 
     // Int-out producer → pass1 → pass2. Both passthroughs declare a `Any`
     // (wildcard) output, but the resolved type must be the producer's `Int`.
     let producer = Func::new(FuncId::unique(), "src").output(FuncOutput::new("out", DataType::Int));
+    let pass_func = passthrough_func();
     let mut library = Library::default();
     library.funcs.add(producer.clone());
+    library.funcs.add(pass_func.clone());
 
     let mut graph = Graph::default();
     let src = graph.add_func_node(&producer);
-    let pass1 = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
-        bypass: false,
-    }));
-    let pass2 = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
-        bypass: false,
-    }));
-    let (p1, p2) = (pass1.id, pass2.id);
-    graph.add(pass1);
-    graph.add(pass2);
+    let p1 = graph.add_func_node(&pass_func);
+    let p2 = graph.add_func_node(&pass_func);
     graph.set_input_binding(InputPort::new(p1, 0), Binding::bind(src, 0));
     graph.set_input_binding(InputPort::new(p2, 0), Binding::bind(p1, 0));
 
@@ -391,7 +386,6 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
 fn edges_invalidated_by_follows_wildcard_chains() {
     use crate::data::DataType;
     use crate::library::Library;
-    use crate::node::special::SpecialNode;
 
     let float_src =
         Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float));
@@ -400,19 +394,14 @@ fn edges_invalidated_by_follows_wildcard_chains() {
     let float_sink = Func::new(FuncId::unique(), "fsink")
         .input(FuncInput::required("x", DataType::Float))
         .output(FuncOutput::new("o", DataType::Float));
+    let pass_func = passthrough_func();
     let mut library = Library::default();
     library.funcs.add(float_src.clone());
     library.funcs.add(str_src.clone());
     library.funcs.add(float_sink.clone());
+    library.funcs.add(pass_func.clone());
 
-    let add_pass = |g: &mut Graph| {
-        let node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
-            bypass: false,
-        }));
-        let id = node.id;
-        g.add(node);
-        id
-    };
+    let add_pass = |g: &mut Graph| g.add_func_node(&pass_func);
 
     // Float producer → pass1 → pass2 → Float sink: a valid chain.
     let mut g = Graph::default();
@@ -483,17 +472,13 @@ fn would_create_cycle_detects_direct_and_transitive_loops() {
 fn resolve_output_type_breaks_a_binding_cycle() {
     use crate::data::DataType;
     use crate::library::Library;
-    use crate::node::special::SpecialNode;
-
     // A passthrough whose value input binds to its own output — a cycle the
     // editor can momentarily hold. Resolution must terminate as `Any`.
-    let library = Library::default();
+    let pass_func = passthrough_func();
+    let mut library = Library::default();
+    library.funcs.add(pass_func.clone());
     let mut graph = Graph::default();
-    let pass = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
-        bypass: false,
-    }));
-    let id = pass.id;
-    graph.add(pass);
+    let id = graph.add_func_node(&pass_func);
     graph.set_input_binding(InputPort::new(id, 0), Binding::bind(id, 0));
 
     assert_eq!(

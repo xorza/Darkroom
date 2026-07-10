@@ -17,11 +17,10 @@ use common::{KeyIndexKey, KeyIndexVec};
 use crate::data::{DynamicValue, RamUsage};
 use crate::execution::NodeColumn;
 use crate::execution::digest::{Digest, node_digest};
-use crate::execution::disk_store::{DiskStore, Target};
+use crate::execution::disk_store::DiskStore;
 use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram, NodeIdx};
 use crate::execution::resolve::Disposition;
 use crate::graph::NodeId;
-use crate::node::special::SpecialNode;
 use crate::runtime::any_state::AnyState;
 use crate::runtime::context::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -310,13 +309,8 @@ impl RuntimeCache {
     /// RAM reuse trusts residency ([`is_resident_hit`](Self::is_resident_hit)): a resident
     /// digest-valid value is served, because a content digest attests the value produced
     /// under it — however the value came to be resident (mode retention, a preview pin, or
-    /// an inspection hydrating a blob). The one exception is the `CachePassthrough`
-    /// (file-cache) node: its digest is its path key and attests nothing — the file is the
-    /// real cache and deleting it the documented invalidation — so its residency is never
-    /// trusted; the disk check (which stats the actual file) is its only reuse path. Disk
-    /// reuse stays gated on `persists_to_disk` (`Disk`/`Both`, enforced in
-    /// [`DiskStore::blob_path`]); the file-cache node's explicit path is checked directly
-    /// in `blob_path`.
+    /// an inspection hydrating a blob). Disk reuse stays gated on `persists_to_disk`
+    /// (`Disk`/`Both`, enforced in [`DiskStore::blob_path`]).
     pub(crate) fn stamp_and_check_reuse(
         &mut self,
         program: &ExecutionProgram,
@@ -324,8 +318,8 @@ impl RuntimeCache {
     ) -> bool {
         let digest = node_digest(program, idx, self);
         self.slots[idx].current_digest = digest;
-        let ram_hit = self.is_resident_hit(idx) && !is_file_cache(program, idx);
-        digest.is_some() && (ram_hit || self.mark_on_disk_if_present(program, idx))
+        digest.is_some()
+            && (self.is_resident_hit(idx) || self.mark_on_disk_if_present(program, idx))
     }
 
     /// The per-node "reuse from disk?" check, run once a node's digest is computed: if a
@@ -333,16 +327,13 @@ impl RuntimeCache {
     /// resident value produced under a superseded digest) and return `true` — the node is served
     /// without running. The bytes stay on disk; they load lazily only when a running consumer
     /// reads the value ([`hydrate_slot`](Self::hydrate_slot)), so a disk-cached value behind
-    /// another never enters RAM. A bypassed cache-passthrough always recomputes.
+    /// another never enters RAM.
     pub(crate) fn mark_on_disk_if_present(
         &mut self,
         program: &ExecutionProgram,
         idx: NodeIdx,
     ) -> bool {
-        if is_bypassed(program, idx) {
-            return false;
-        }
-        let Some(target) = self
+        let Some(path) = self
             .disk_store
             .blob_path(program, idx, self.slots[idx].current_digest)
         else {
@@ -351,7 +342,7 @@ impl RuntimeCache {
         if self
             .disk_store
             .outputs_decodable(program.node_output_types(&program.e_nodes[idx]))
-            && target.path().exists()
+            && path.exists()
         {
             self.flag_on_disk(idx);
             true
@@ -364,10 +355,8 @@ impl RuntimeCache {
     /// afterward: `true` if already resident or the read succeeded. On a read failure (codec
     /// gone, corrupt, an incompatible format, a wrong output count, or deleted) the slot is
     /// cleared, so the demanding consumer is dropped this run and the *next* reopen recomputes
-    /// the node. A broken **content-addressed** blob is also deleted — without that,
-    /// [`DiskStore::store`]'s skip-if-exists would keep the broken file forever. An
-    /// **explicit-path** blob is the user's own file and is never deleted here: `store`
-    /// overwrites it on the recompute anyway.
+    /// the node. A broken blob is also deleted — without that, [`DiskStore::store`]'s
+    /// skip-if-exists would keep the broken file forever.
     pub(crate) async fn hydrate_slot(&mut self, program: &ExecutionProgram, idx: NodeIdx) -> bool {
         // A fresh value already in RAM needs no load. A *stale* resident value can't reach here:
         // `mark_on_disk_if_present` demotes "stale + blob on disk" to `OnDisk` (dropping the
@@ -380,21 +369,20 @@ impl RuntimeCache {
         }
         // The slot claimed an on-disk blob. Load it; on success it's resident.
         if let Some(digest) = self.slots[idx].current_digest
-            && let Some(target) = self.disk_store.blob_path(program, idx, Some(digest))
+            && let Some(path) = self.disk_store.blob_path(program, idx, Some(digest))
         {
-            // A content-addressed blob folds the output signature into its digest, so its
-            // count always matches — but an explicit-path (file-cache) blob is keyed on the
-            // path alone, and a user-pointed file can decode to any output count. Reject a
-            // mismatch here as a miss rather than letting a consumer's arity assert panic.
+            // A blob folds the output signature into its digest, so its count matches unless
+            // the file is damaged. Reject a mismatch here as a miss rather than letting a
+            // consumer's arity assert panic.
             let arity = program.e_nodes[idx].outputs.len as usize;
-            match self.disk_store.read(target.path()).await {
+            match self.disk_store.read(&path).await {
                 Some(values) if values.len() == arity => {
                     self.hydrate(idx, values, digest);
                     return true;
                 }
                 Some(values) => {
                     tracing::warn!(
-                        path = %target.path().display(),
+                        path = %path.display(),
                         expected = arity,
                         got = values.len(),
                         "cached outputs have the wrong count; ignoring blob"
@@ -402,9 +390,7 @@ impl RuntimeCache {
                 }
                 None => {}
             }
-            if matches!(target, Target::Addressed(_)) {
-                self.disk_store.delete(target.path());
-            }
+            self.disk_store.delete(&path);
         }
         self.slots[idx].clear_output();
         false
@@ -417,9 +403,7 @@ impl RuntimeCache {
     ///
     /// Hydrated values simply stay resident (until a later run's eviction demotes them):
     /// a content digest attests the value produced under it, so the reuse check serving a
-    /// hydrated leftover is correct — and the file-cache node, whose path-key digest
-    /// attests nothing, is the one node whose residency
-    /// [`stamp_and_check_reuse`](Self::stamp_and_check_reuse) never trusts.
+    /// hydrated leftover is correct.
     pub(crate) async fn hydrate_for_inspection(
         &mut self,
         program: &ExecutionProgram,
@@ -451,7 +435,7 @@ impl RuntimeCache {
         idx: NodeIdx,
         ctx: &'a mut ContextManager,
     ) -> impl Future<Output = ()> + 'a {
-        let target = self
+        let path = self
             .disk_store
             .blob_path(program, idx, self.slots[idx].current_digest);
         let outputs = self
@@ -460,10 +444,10 @@ impl RuntimeCache {
             .flatten();
         let disk = &self.disk_store;
         async move {
-            let (Some(target), Some(outputs)) = (target, outputs) else {
+            let (Some(path), Some(outputs)) = (path, outputs) else {
                 return;
             };
-            disk.store(&target, outputs, ctx).await;
+            disk.store(&path, outputs, ctx).await;
         }
     }
 
@@ -478,7 +462,7 @@ impl RuntimeCache {
         let reloadable = self
             .disk_store
             .blob_path(program, idx, self.slots[idx].current_digest)
-            .is_some_and(|target| target.path().exists());
+            .is_some_and(|path| path.exists());
         if reloadable {
             self.flag_on_disk(idx);
         } else if !program.e_nodes[idx].cache.caches_in_ram() {
@@ -520,23 +504,6 @@ impl RuntimeCache {
             self.reclaim_slot(program, idx);
         }
     }
-}
-
-/// True for a bypassed cache-passthrough node — recompute + overwrite, so never hydrate it.
-fn is_bypassed(program: &ExecutionProgram, idx: NodeIdx) -> bool {
-    matches!(
-        program.e_nodes[idx].special,
-        Some(SpecialNode::CachePassthrough { bypass: true })
-    )
-}
-
-/// True for any cache-passthrough (file-cache) node, bypassed or not. Its digest is a path
-/// key that attests nothing about the value, so the reuse check never trusts its residency.
-fn is_file_cache(program: &ExecutionProgram, idx: NodeIdx) -> bool {
-    matches!(
-        program.e_nodes[idx].special,
-        Some(SpecialNode::CachePassthrough { .. })
-    )
 }
 
 #[cfg(test)]

@@ -32,7 +32,6 @@ use crate::node::function::FuncId;
 
 pub(crate) mod blob;
 pub(crate) mod cache;
-pub(crate) mod cache_node;
 pub(crate) mod codec;
 pub(crate) mod digest;
 pub mod disk_store;
@@ -251,10 +250,9 @@ impl ExecutionEngine {
 
     /// Swap the [`DiskStore`] — the library snapshot (its type table supplies
     /// the custom-value codecs) plus the optional
-    /// content-addressed store root. At the next `update`, `persist` (content-
-    /// addressed) and `CachePassthrough` (explicit-path) outputs hydrate from their
-    /// files on a hit (skipping recompute), and freshly-computed ones are stored
-    /// after a run. The RAM cache is keyed by node id + digest, independent of the
+    /// content-addressed store root. At the next `update`, `persist` outputs hydrate
+    /// from their blobs on a hit (skipping recompute), and freshly-computed ones are
+    /// stored after a run. The RAM cache is keyed by node id + digest, independent of the
     /// root, so swapping keeps any warm in-memory outputs.
     pub(crate) fn set_disk_store(&mut self, disk_store: DiskStore) {
         self.cache.disk_store = disk_store;
@@ -383,10 +381,8 @@ impl ExecutionEngine {
     /// and so never re-executes to store itself.
     ///
     /// Never overwrites identical content: a content-addressed blob's path *is* its
-    /// content hash, so [`DiskStore::store`] skips it when it already exists.
-    /// Explicit-path (`CachePassthrough`) nodes are deliberately excluded here — their
-    /// file is (re)written by their own execution, so flushing them would overwrite an
-    /// identical file. Also a no-op for a node with no resident value.
+    /// content hash, so [`DiskStore::store`] skips it when it already exists. Also a
+    /// no-op for a node with no resident value.
     pub(crate) async fn store_resident_caches(&mut self) {
         for idx in self.program.node_indices() {
             if !self.program.e_nodes[idx].cache.persists_to_disk() {

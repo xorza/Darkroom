@@ -37,12 +37,10 @@ use blake3::Hasher;
 
 use crate::data::{DataType, StaticValue};
 use crate::execution::cache::RuntimeCache;
-use crate::execution::cache_node::file_cache_digest;
 use crate::execution::program::{
     ExecutionBinding, ExecutionPortAddress, ExecutionProgram, InputStamper, NodeIdx,
 };
 use crate::node::function::FuncBehavior;
-use crate::node::special::SpecialNode;
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
@@ -54,14 +52,6 @@ const DOMAIN: &[u8] = b"scenarium-cache-v1";
 /// as a digest where one is expected.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct Digest(pub(crate) [u8; 32]);
-
-impl Digest {
-    /// Start a [`DigestHasher`] — the fluent builder for combining several values into one
-    /// digest (the framework's structural fold, or the file-cache node's path key).
-    pub(crate) fn hasher() -> DigestHasher {
-        DigestHasher::new()
-    }
-}
 
 /// A fixed-size value that folds into a [`DigestHasher`] as its **little-endian** bytes, so
 /// a digest is stable across architectures. Implemented for the primitive number types plus
@@ -99,8 +89,8 @@ impl DigestPod for bool {
 }
 
 /// A fluent builder for a [`Digest`] — a thin wrapper over the BLAKE3 hasher with
-/// digest-friendly writers, used by the framework's structural fold and the file-cache
-/// node's path key. Deterministic and cross-architecture stable: PODs fold little-endian
+/// digest-friendly writers, used by the framework's structural fold. Deterministic and
+/// cross-architecture stable: PODs fold little-endian
 /// ([`DigestPod`]), and variable-length data is length-prefixed
 /// ([`write_str`](Self::write_str)) so `"ab"+"c"` can't collide with `"a"+"bc"`.
 #[derive(Clone, Debug)]
@@ -256,9 +246,6 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
 /// folding all read the node's stamped `current_digest`. Computed producer-first
 /// (topological), so a `Bind` producer's `current_digest` is already stamped when read.
 ///
-/// - **`CachePassthrough`** (the *file cache* node) is keyed on its `Const` path input alone
-///   ([`file_cache_digest`]) — its `input[0]` cone is deliberately excluded (the path is the
-///   reproducibility boundary), so it presents a digest even over an impure/expensive input.
 /// - An **`Impure`** node has no digest (`None`) — it varies per run, so it never caches and
 ///   always recomputes; a `Bind` producer with a `None` digest taints this node to `None`.
 /// - Otherwise fold every input structurally: a `Const`'s value + `FsPath` file/dir content
@@ -273,10 +260,6 @@ pub(crate) fn node_digest(
 ) -> Option<Digest> {
     let e_node = &program.e_nodes[idx];
 
-    // The file-cache node is keyed on its path alone, not its input cone (§Part C).
-    if matches!(e_node.special, Some(SpecialNode::CachePassthrough { .. })) {
-        return file_cache_digest(program.node_inputs(e_node));
-    }
     // Only a `Pure` node is content-cacheable; an `Impure` node varies per run, so it has no
     // digest and always recomputes.
     if e_node.behavior != FuncBehavior::Pure {

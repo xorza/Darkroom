@@ -1,7 +1,7 @@
 # `execution` — design notes
 
 The compile→plan→execute pipeline and its caches. This README is the long-form
-design home that the module's `//!` docs point at. Three parts:
+design home that the module's `//!` docs point at. Two parts:
 
 - **A. Subgraphs** — how composite nodes are authored and flattened away
   (`flatten.rs`; authoring types in `subgraph.rs`/`graph.rs`).
@@ -9,12 +9,6 @@ design home that the module's `//!` docs point at. Three parts:
   (`digest.rs`, `cache.rs`, `disk_store.rs`, `blob.rs`, `codec.rs`). The `RuntimeCache`
   (`cache.rs`) owns the RAM slots *and* the `DiskStore` (`disk_store.rs`, pure blob I/O) and runs
   the caching policy — reuse, hydration, persistence, eviction — over both.
-- **C. File cache** — the explicit-path `file cache` passthrough node
-  (`elements/cache_passthrough.rs`, `special.rs`).
-
-Parts B and C are two policies over one storage primitive (`blob.rs`); they differ
-only in how a node maps to a file and whether a present blob is rewritten.
-
 ---
 
 # Part A — Subgraphs (composite nodes)
@@ -235,8 +229,7 @@ Disk and RAM caching then work across composite boundaries with no special handl
 # Part B — Disk (content-addressed output) cache
 
 How a disk-backed node's outputs survive a reload — staying correct (never serve
-a stale value) and lean (never hold bytes a run won't use). The **explicit-path**
-cache (Part C) shares the same storage primitive but keys on a path.
+a stale value) and lean (never hold bytes a run won't use).
 
 ## B.0 The cache mode is two storage bits
 
@@ -258,8 +251,7 @@ consumer is a hit, the `None` node's cone is simply cut (§B.6) — never recomp
 value nothing reads. RAM reuse (`RuntimeCache::is_resident_hit`) trusts residency itself —
 a content digest attests the value produced under it, however it came to be resident; the
 RAM bit acts earlier, deciding what *stays* resident (the mid-run release and
-`evict_unused`, §B.6). The one exception is the file-cache node, whose path-key digest
-attests nothing: its residency is never trusted, only its actual file (Part C). Disk reuse
+`evict_unused`, §B.6). Disk reuse
 (`mark_on_disk_if_present`) is gated on `persists_to_disk`. `evict_unused` reclaims RAM the
 mode doesn't call to hold — demoting to a disk blob when one exists (lossless), else
 dropping only a non-RAM mode's value.
@@ -313,10 +305,6 @@ BLAKE3 `Digest`. The **executor** computes it for each node as it reaches the no
   re-keys it *without* a version bump. This is what makes "a blob exists for this digest
   but is the wrong type" impossible by construction: a type change is a key change, so
   the stale blob is never looked up.
-- **File-cache node.** The one special case: a `CachePassthrough` node is keyed on its
-  `Const` path *alone* (`file_cache_digest`), deliberately excluding its `input[0]` cone —
-  the path is the reproducibility boundary (Part C).
-
 A node's digest is computed at **execution** (once per run, in the pre-run resolve sweep —
 the run loop reads the resolver's verdicts rather than re-deriving, since a digest folds
 live filesystem state and could drift mid-run), not `update`: only then are its producers'
@@ -366,8 +354,7 @@ cache work. The executor first does a **pre-run cut** (`resolve.rs`): fold every
 producer-first (from upstream digests — no lambda, no value load), decide reuse, then prune
 any cone that feeds *only* reuse hits (a backward walk from the plan's roots). So a disk-cached
 node's now-unneeded upstream — a memory-only source, say — isn't recomputed on reopen. Nearly
-every digest is structural (or the file-cache node's path key), so nearly the whole graph
-resolves here; a digest folding a Bind-delivered resource value it can't read yet (§B.2 wired
+every digest is structural, so nearly the whole graph resolves here; a digest folding a Bind-delivered resource value it can't read yet (§B.2 wired
 resource inputs) stamps `None` — resolved `Run`, cone kept alive — and the run loop re-stamps
 it at reach time, serving the cache on a hit. Then, per surviving node, once its digest is
 computed:
@@ -409,8 +396,7 @@ computed:
 `hydrate_for_inspection`, so a disk-cached node no run touched still shows its value when
 the editor selects it. Hydrated values simply stay resident until a later run's eviction
 demotes them — sound to serve as reuse hits, since a content digest attests the value
-produced under it (B.0); the file-cache node, whose path-key digest attests nothing, is
-the one node whose residency the reuse check never trusts.
+produced under it (B.0).
 
 ### Worked example
 
@@ -436,66 +422,4 @@ source, which then runs.
   (`mark_on_disk_if_present`'s codec check keeps a codec-less blob off the hot path; a
   failed load deletes the bad blob and self-heals on the next reopen).
 
-The **file cache** is the one exception: its digest is the path alone (Part C), so a
-type-changing input rewire is *not* caught by the digest — it's the documented
-presence-based, user-managed invalidation.
-
 ---
-
-# Part C — File (explicit-path passthrough) cache
-
-The `file cache` node lets a user cache an arbitrary value to a **named file** and skip
-recomputing its upstream while that file exists — a manual, path-keyed cache distinct
-from the automatic content-addressed one (Part B).
-
-## C.1 The node (`elements/cache_passthrough.rs`, `special.rs`)
-
-It's a **special node** — identified by *kind* (`SpecialNode::CachePassthrough { bypass }`),
-not a registered `FuncId`. Its hardcoded interface + lambda come from
-`cache_passthrough_func()`:
-
-- `input[0]` **value** — required, the value to cache; the output is a **wildcard**
-  mirroring it, so any type passes through and the editor shows the concrete wired type.
-- `input[1]` **path** — a **const-only** `FsPath` (a wired binding would silently disable
-  caching). Its index is `CACHE_PATH_INPUT`.
-- The lambda is a plain passthrough: `output[0] = input[0]`. The **engine** does the
-  path-keyed file I/O around it.
-- The func is `uncacheable()` — it owns its caching, so the editor's generic
-  `CacheMode` toggles don't apply.
-
-## C.2 The path is the key (`file_cache_digest`)
-
-A cache node's content digest is its `Const` `FsPath` **alone** (`file_cache_digest`,
-dispatched from `node_digest` on the `CachePassthrough` special kind) — the framework skips
-the structural input fold and keys the node on the path, deliberately ignoring `input[0]`'s
-cone. So:
-
-- `input[0]` may be impure or expensive and the node still presents a digest — the path
-  *is* the reproducibility boundary.
-- **Presence, not content, decides the hit:** the file's `(len, mtime)` is *not* folded
-  in. While the file exists, the node is served from it and its passthrough lambda is
-  skipped. A non-const or empty path ⇒ no digest ⇒ never a hit, never stored.
-- A **resource value** served from the file is not laundered: a downstream consumer with a
-  resource-declared input re-keys on the delivered reference's live referent identity
-  regardless (§B.2 wired resource inputs), so caching an `FsPath` through this node can't
-  serve a stale decode.
-- **The input cone is cut.** Because the node presents a path-keyed digest, the pre-run cut
-  (Part B.6) resolves it like any other node: a served (reused) cache node prunes its
-  `input[0]` cone, so that upstream is *not* recomputed on reopen. The path key is what makes
-  this safe — the served value doesn't depend on the cone.
-
-## C.3 Load / store and `bypass`
-
-Load/store go through the same `DiskStore` as Part B, via `Target::Explicit(path)`
-(vs. `Target::Addressed(<root>/<hex(digest)>)`). The two policies differ only in:
-
-- **how a node maps to a file** — `DiskStore::blob_path`: explicit `FsPath` vs.
-  content-addressed digest path;
-- **whether a present blob is rewritten** — explicit path is always (over)written;
-  a content-addressed blob already on disk is skipped (same digest ⇒ same bytes).
-
-`bypass` (a per-instance flag riding in the `SpecialNode` variant, toggled in the UI)
-forces a recompute + overwrite every run, ignoring any existing file —
-`mark_on_disk_if_present` returns `false` for it, so it's never reused from the file.
-
-Invalidation is **user-managed**: delete the file, or flip `bypass`.

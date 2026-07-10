@@ -795,10 +795,9 @@ mod tests {
     #[test]
     fn undo_of_a_passthrough_rewire_restores_the_severed_edge() {
         use scenarium::data::DataType;
-        use scenarium::graph::{Binding, Graph, InputPort, Node, NodeKind};
+        use scenarium::graph::{Binding, Graph, InputPort};
         use scenarium::library::Library;
         use scenarium::node::function::{Func, FuncId, FuncInput, FuncOutput};
-        use scenarium::node::special::SpecialNode;
 
         let float_src =
             Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float));
@@ -807,19 +806,20 @@ mod tests {
         let float_sink = Func::new(FuncId::unique(), "fsink")
             .input(FuncInput::required("x", DataType::Float))
             .output(FuncOutput::new("o", DataType::Float));
-        let library = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
+        let pass_func = Func::new(FuncId::unique(), "pass")
+            .input(FuncInput::required("x", DataType::Any))
+            .wildcard_output("o", 0);
+        let library = Library::from([
+            float_src.clone(),
+            string_src.clone(),
+            float_sink.clone(),
+            pass_func.clone(),
+        ]);
 
         let mut graph = Graph::default();
         let fp = graph.add_func_node(&float_src);
         let sp = graph.add_func_node(&string_src);
-        let pass = {
-            let node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
-                bypass: false,
-            }));
-            let id = node.id;
-            graph.add(node);
-            id
-        };
+        let pass = graph.add_func_node(&pass_func);
         let sink = graph.add_func_node(&float_sink);
         graph.set_input_binding(InputPort::new(pass, 0), Binding::bind(fp, 0));
         graph.set_input_binding(InputPort::new(sink, 0), Binding::bind(pass, 0));

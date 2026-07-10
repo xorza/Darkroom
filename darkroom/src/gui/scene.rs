@@ -154,8 +154,8 @@ pub struct SceneNode {
     /// Where this node's output is cached ([`CacheMode`]). The header's two cache
     /// chips (RAM + disk) toggle its bits via `Intent::SetCacheMode`.
     pub cache: CacheMode,
-    /// Suppresses the header's cache chips. `true` for self-caching nodes (the
-    /// file-cache passthrough) and boundary/stub nodes that have no output to cache.
+    /// Suppresses the header's cache chips. `true` for self-caching nodes
+    /// and boundary/stub nodes that have no output to cache.
     pub uncacheable: bool,
     /// The node's func is `Impure`. An impure node has no content digest, so no
     /// cache mode is ever honored — the header hides both cache chips, like

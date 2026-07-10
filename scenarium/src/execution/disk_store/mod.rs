@@ -2,54 +2,24 @@
 //! read/write it" layer. Pure I/O — it holds the [`Library`] snapshot (its type table is the
 //! source of custom-value codecs) and the optional content-addressed root, and knows *nothing*
 //! about the [`RuntimeCache`](crate::execution::cache::RuntimeCache) that owns it and drives
-//! the reuse/eviction policy. Two addressing schemes over the one storage primitive
-//! ([`blob`]), differing only in how a node maps to a file and whether a present blob is
-//! rewritten:
-//!
-//! - **content-addressed** — a disk-backed (`Disk`/`Both`) node's outputs at
-//!   `<disk_root>/<hex(digest)>`, keyed by its content digest. Reproducible: any upstream
-//!   change re-keys it (so it's auto-invalidated), and identical computations dedup across
-//!   nodes/machines. A present blob is the same bytes, so [`store`](DiskStore::store) skips it.
-//! - **explicit-path** — a [`CachePassthrough`](crate::node::special::SpecialNode) node's
-//!   outputs at the `Const` `FsPath` in `input[1]`. The path *is* the key; the user manages
-//!   invalidation (delete the file, or the `bypass` toggle). Always (over)written. See
-//!   `README.md` Part C.
+//! the reuse/eviction policy. A disk-backed (`Disk`/`Both`) node's outputs live at
+//! `<disk_root>/<hex(digest)>`, keyed by its content digest. Reproducible: any upstream
+//! change re-keys it (so it's auto-invalidated), and identical computations dedup across
+//! nodes/machines. A present blob is the same bytes, so [`store`](DiskStore::store) skips it.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::data::{DataType, DynamicValue};
 use crate::execution::blob;
-use crate::execution::cache_node::cache_node_path;
 use crate::execution::digest::Digest;
 use crate::execution::program::{ExecutionProgram, NodeIdx};
 use crate::library::Library;
-use crate::node::special::SpecialNode;
 use crate::runtime::context::ContextManager;
 
-/// Where a node's outputs file lives, and how a present blob is treated on [`store`](DiskStore::store).
-#[derive(Debug)]
-pub(crate) enum Target {
-    /// `<disk_root>/<hex(digest)>` — content-addressed: a present blob is the same
-    /// bytes, so the store skips it (avoiding a redundant, possibly costly serialize).
-    Addressed(PathBuf),
-    /// An explicit path from `input[1]` — the store always (over)writes (a
-    /// bypass/miss run rewrites).
-    Explicit(PathBuf),
-}
-
-impl Target {
-    pub(crate) fn path(&self) -> &Path {
-        match self {
-            Target::Addressed(p) | Target::Explicit(p) => p,
-        }
-    }
-}
-
 /// Reads and writes node-output blobs on disk. Holds a snapshot of the [`Library`] (its type
-/// table is the source of custom-value codecs, used by both addressing schemes) and the
-/// optional content-addressed store root. Default is an empty library ⇒ no codecs, disk-backed
-/// nodes memory-only; `CachePassthrough` nodes always use their explicit path.
+/// table is the source of custom-value codecs) and the optional content-addressed store root.
+/// Default is an empty library ⇒ no codecs, disk-backed nodes memory-only.
 ///
 /// The snapshot is fine to hold across library swaps: codecs are registered once at assembly
 /// and never change (only subgraphs grow), so a held snapshot keeps every codec it will ever
@@ -63,35 +33,29 @@ pub struct DiskStore {
 
 impl DiskStore {
     /// Build a store over `library` (its type table supplies the custom-value codecs) and an
-    /// optional content-addressed store `disk_root` (`None` ⇒ `persist` nodes are memory-only;
-    /// `CachePassthrough` nodes always use their explicit path).
+    /// optional content-addressed store `disk_root` (`None` ⇒ `persist` nodes are
+    /// memory-only).
     pub fn new(library: Arc<Library>, disk_root: Option<PathBuf>) -> Self {
         Self { library, disk_root }
     }
 
-    /// The file node `idx` caches to, or `None` when it doesn't: a `CachePassthrough` with a
-    /// `Const` path → explicit; a disk-backed (`persists_to_disk`) node with a disk root and a
-    /// content `digest` → content-addressed; anything else → none. Takes the digest rather than
-    /// reading it off the cache, so this layer stays free of `RuntimeCache`.
+    /// The file node `idx` caches to — a disk-backed (`persists_to_disk`) node with a disk
+    /// root and a content `digest` — or `None` when it doesn't cache to disk. Takes the
+    /// digest rather than reading it off the cache, so this layer stays free of
+    /// `RuntimeCache`.
     pub(crate) fn blob_path(
         &self,
         program: &ExecutionProgram,
         idx: NodeIdx,
         digest: Option<Digest>,
-    ) -> Option<Target> {
+    ) -> Option<PathBuf> {
         let e_node = &program.e_nodes[idx];
-        if matches!(e_node.special, Some(SpecialNode::CachePassthrough { .. })) {
-            return cache_node_path(program.node_inputs(e_node))
-                .map(|p| Target::Explicit(PathBuf::from(p)));
+        if !e_node.cache.persists_to_disk() {
+            return None;
         }
-        if e_node.cache.persists_to_disk() {
-            let digest = digest?;
-            let mut buf = [0u8; 64];
-            return Some(Target::Addressed(
-                self.disk_root.as_ref()?.join(hex(&digest, &mut buf)),
-            ));
-        }
-        None
+        let digest = digest?;
+        let mut buf = [0u8; 64];
+        Some(self.disk_root.as_ref()?.join(hex(&digest, &mut buf)))
     }
 
     /// Whether every one of `types` could be decoded back from a blob: each `Custom` output
@@ -119,22 +83,22 @@ impl DiskStore {
         let _ = std::fs::remove_file(path);
     }
 
-    /// Serialize `outputs` to `target`'s file. A content-addressed (`Addressed`) blob already
-    /// on disk is the same bytes → skipped; an `Explicit` path is always (over)written. The
+    /// Serialize `outputs` to `path`. A blob already on disk is the same bytes
+    /// (content-addressed) → skipped, avoiding a redundant, possibly costly serialize. The
     /// outputs are **borrowed**, not cloned — the write future captures only the value slice
     /// (which is `Sync`), never the whole (non-`Sync`) cache, so the borrow can safely cross
     /// the serialize await. Best-effort: any failure is logged — caching never fails a run.
     pub(crate) async fn store(
         &self,
-        target: &Target,
+        path: &Path,
         outputs: &[DynamicValue],
         ctx: &mut ContextManager,
     ) {
-        if matches!(target, Target::Addressed(path) if path.exists()) {
+        if path.exists() {
             return;
         }
-        if let Err(e) = blob::write(target.path(), outputs, &self.library, ctx).await {
-            tracing::warn!(path = %target.path().display(), error = %e, "failed to write output cache");
+        if let Err(e) = blob::write(path, outputs, &self.library, ctx).await {
+            tracing::warn!(path = %path.display(), error = %e, "failed to write output cache");
         }
     }
 }

@@ -25,9 +25,7 @@ use crate::execution::program::{
 };
 use crate::execution::stats::FlattenMap;
 use crate::graph::subgraph::SubgraphId;
-use crate::graph::{
-    Binding, CacheMode, Graph, InputPort, NodeId, NodeKind, NodeSearch, Subscription,
-};
+use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, Subscription};
 use crate::library::Library;
 use crate::node::function::Func;
 use crate::node::special::SpecialNode;
@@ -329,14 +327,8 @@ impl<'a> Run<'a> {
             // by the content digest (a node with an impure cone has no digest and
             // so can't be disk-cached) — see `digest.rs`.
             e_node.cache = node.cache;
-            // A file-cache node's caching is the file at its path (bypass-aware,
-            // invalidated by deleting the file); a RAM mode would serve the resident
-            // value under the never-changing path key, ignoring both.
-            if matches!(special, Some(SpecialNode::CachePassthrough { .. })) {
-                e_node.cache = CacheMode::None;
-            }
-            // Special-node identity + its per-instance config (e.g. cache bypass),
-            // recognized by the engine.
+            // Special-node identity, recognized by the engine (the planner's
+            // run-terminals promotion).
             e_node.special = special;
             e_node.name.clear();
             e_node.name.push_str(&node.name);

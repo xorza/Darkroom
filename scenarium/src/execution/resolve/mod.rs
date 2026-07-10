@@ -12,9 +12,8 @@
 //! the run loop. [`compute_disposition`] is literally a mark-sweep from the run's roots that
 //! stops descending at a cache hit.
 //!
-//! Every node's digest is either structural (a fold of its inputs) or a contained special
-//! case (the file-cache node keys on its path), so the sweep stamps the *whole* graph ahead
-//! of the run. The one stamp it can leave imprecise is a digest folding a Bind-delivered
+//! Every node's digest is structural (a fold of its inputs), so the sweep stamps the
+//! *whole* graph ahead of the run. The one stamp it can leave imprecise is a digest folding a Bind-delivered
 //! *resource* value it can't read yet (`hash_bound_resource`, `digest.rs`): that folds to
 //! `None` here — "uncacheable, must run", which keeps the node's cone alive — and the run
 //! loop re-stamps it at reach time, once its producers have settled, possibly improving
@@ -100,7 +99,7 @@ impl Resolver {
 /// Producer-first pass classifying every node as [`Resolved::Reuse`] or [`Resolved::Run`],
 /// stamping its content digest as it goes so a consumer folds an already-stamped producer
 /// digest — the producer-first invariant the run loop also relies on. Nearly every digest is
-/// a structural fold (or the file-cache node's path key) and resolves here; one folding a
+/// a structural fold and resolves here; one folding a
 /// Bind-delivered resource value it can't read yet stamps `None` — `Run`, cone kept alive —
 /// and the run loop re-stamps it at reach time (see the module doc).
 fn resolve_structural(

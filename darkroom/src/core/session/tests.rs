@@ -124,9 +124,8 @@ fn apply_intents_severs_incompatible_passthrough_output_edges() {
     use scenarium::data::DataType;
     use scenarium::library::Library;
     use scenarium::node::function::{Func, FuncInput, FuncOutput};
-    use scenarium::node::special::SpecialNode;
 
-    // Float producer → cache passthrough → Float sink, all headless.
+    // Float producer → wildcard passthrough → Float sink, all headless.
     let float_src =
         Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float));
     let string_src =
@@ -134,19 +133,20 @@ fn apply_intents_severs_incompatible_passthrough_output_edges() {
     let float_sink = Func::new(FuncId::unique(), "fsink")
         .input(FuncInput::required("x", DataType::Float))
         .output(FuncOutput::new("o", DataType::Float));
-    let library = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
+    let pass_func = Func::new(FuncId::unique(), "pass")
+        .input(FuncInput::required("x", DataType::Any))
+        .wildcard_output("o", 0);
+    let library = Library::from([
+        float_src.clone(),
+        string_src.clone(),
+        float_sink.clone(),
+        pass_func.clone(),
+    ]);
 
     let mut doc = empty_document();
     let fp = doc.graph.add_func_node(&float_src);
     let sp = doc.graph.add_func_node(&string_src);
-    let pass = {
-        let node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
-            bypass: false,
-        }));
-        let id = node.id;
-        doc.graph.add(node);
-        id
-    };
+    let pass = doc.graph.add_func_node(&pass_func);
     let sink = doc.graph.add_func_node(&float_sink);
     doc.graph
         .set_input_binding(InputPort::new(pass, 0), Binding::bind(fp, 0));
@@ -182,7 +182,6 @@ fn apply_intents_severs_through_a_passthrough_chain() {
     use scenarium::data::DataType;
     use scenarium::library::Library;
     use scenarium::node::function::{Func, FuncInput, FuncOutput};
-    use scenarium::node::special::SpecialNode;
 
     // Float producer → pass1 → pass2 → Float sink: a valid two-passthrough chain.
     let float_src =
@@ -192,16 +191,17 @@ fn apply_intents_severs_through_a_passthrough_chain() {
     let float_sink = Func::new(FuncId::unique(), "fsink")
         .input(FuncInput::required("x", DataType::Float))
         .output(FuncOutput::new("o", DataType::Float));
-    let library = Library::from([float_src.clone(), string_src.clone(), float_sink.clone()]);
+    let pass_func = Func::new(FuncId::unique(), "pass")
+        .input(FuncInput::required("x", DataType::Any))
+        .wildcard_output("o", 0);
+    let library = Library::from([
+        float_src.clone(),
+        string_src.clone(),
+        float_sink.clone(),
+        pass_func.clone(),
+    ]);
 
-    let add_pass = |doc: &mut Document| {
-        let node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
-            bypass: false,
-        }));
-        let id = node.id;
-        doc.graph.add(node);
-        id
-    };
+    let add_pass = |doc: &mut Document| doc.graph.add_func_node(&pass_func);
 
     let mut doc = empty_document();
     let fp = doc.graph.add_func_node(&float_src);
