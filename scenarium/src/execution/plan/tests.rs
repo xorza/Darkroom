@@ -177,10 +177,10 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert_eq!(p.output_usage[1], 0, "B.0 unconsumed at plan level");
 
     // Node seeds combine with terminals: the same seed plus `terminals` schedules
-    // everything, and B stays pinned. An unresolvable seed id is dropped, not an error.
+    // everything, and B stays pinned.
     let seeds = RunSeeds {
         terminals: true,
-        nodes: vec![f.program.e_nodes[b].id, NodeId::from_u128(0xdead_beef)],
+        nodes: vec![f.program.e_nodes[b].id],
         ..Default::default()
     };
     planner
@@ -189,4 +189,16 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert_eq!(p.process_order, vec![a, b, c]);
     assert_eq!(p.pinned, vec![b]);
     assert_eq!(p.output_usage[1], 1, "B.0 now read by C");
+
+    // A seed id absent from the program is inconsistent caller state — a hard failure,
+    // not a silent skip.
+    let bogus = NodeId::from_u128(0xdead_beef);
+    let seeds = RunSeeds {
+        nodes: vec![bogus],
+        ..Default::default()
+    };
+    let err = planner
+        .plan(&f.program, &FlattenMap::default(), &seeds, &mut p)
+        .unwrap_err();
+    assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
 }

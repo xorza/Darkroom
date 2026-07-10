@@ -141,7 +141,7 @@ pub(crate) struct Planner {
 impl Planner {
     /// Build the per-run schedule into `plan` from the program and the run's `seeds`
     /// (the roots to walk back from); `flatten` resolves node seeds (authoring ids)
-    /// to flat roots. Errors only on a dependency cycle.
+    /// to flat roots. Errors on a dependency cycle or an unresolvable node seed.
     pub(crate) fn plan(
         &mut self,
         program: &ExecutionProgram,
@@ -153,7 +153,7 @@ impl Planner {
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
-        collect_roots(program, flatten, seeds, plan);
+        collect_roots(program, flatten, seeds, plan)?;
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
@@ -262,13 +262,19 @@ fn collect_roots(
     flatten: &FlattenMap,
     seeds: &RunSeeds,
     plan: &mut ExecutionPlan,
-) {
+) -> Result<()> {
     // `plan.reset` already cleared `roots`/`pinned`; this only pushes into them.
 
-    // Node seeds (on-demand preview): roots like any other, plus pinned so their
-    // outputs are computed and retained (see `ExecutionPlan::pinned`).
-    plan.roots.extend_from_slice(node_roots);
-    plan.pinned.extend_from_slice(node_roots);
+    // Node seeds (on-demand preview): roots like any other, plus pinned so their outputs
+    // are computed and retained (see `ExecutionPlan::pinned`). Seeds are batched with the
+    // graph they target, so an id that doesn't resolve (deleted, disabled, or stale) is
+    // inconsistent caller state — fail the run rather than silently skip the seed.
+    for &id in &seeds.nodes {
+        let idx = resolve_node_idx(program, flatten, &id)
+            .ok_or(Error::NodeSeedNotFound { node_id: id })?;
+        plan.roots.push(idx);
+        plan.pinned.push(idx);
+    }
 
     // Event subscribers. A `RunTerminals` sink among them fires no cone of its own — it
     // promotes this run to run all terminals (below), so it's skipped as a root here.
@@ -286,7 +292,7 @@ fn collect_roots(
     }
 
     if !run_terminals && !seeds.event_triggers {
-        return;
+        return Ok(());
     }
     // One sweep for both whole-graph seed kinds: terminal nodes (requested directly, or
     // promoted by a fired event reaching a `RunTerminals` sink) and — for the event
@@ -301,6 +307,7 @@ fn collect_roots(
             plan.roots.push(idx.into());
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -3784,19 +3784,19 @@ mod node_seeds {
     }
 
     /// A seed that doesn't resolve against the compiled program (deleted or disabled
-    /// node, stale id) is dropped — the run completes and executes nothing. The
+    /// node, stale id) fails the run — seeds are batched with the graph they target,
+    /// so a miss is inconsistent caller state, not something to silently skip. The
     /// panicking default hooks prove no lambda fires.
     #[tokio::test]
-    async fn unresolvable_node_seed_is_dropped_not_run() {
+    async fn unresolvable_node_seed_fails_the_run() {
         let library = test_func_lib(TestFuncHooks::default());
         let graph = test_graph();
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
         let bogus: NodeId = NodeId::from_u128(0xdead_beef);
-        let stats = eg.execute_nodes([bogus]).await.unwrap();
-        assert!(stats.executed_nodes.is_empty());
-        assert!(stats.cached_nodes.is_empty());
+        let err = eg.execute_nodes([bogus]).await.unwrap_err();
+        assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
     }
 }
 

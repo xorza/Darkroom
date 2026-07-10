@@ -133,6 +133,11 @@ pub enum Error {
     InvalidGraph { message: String },
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
     CycleDetected { node_id: NodeId },
+    /// A node seed didn't resolve against the compiled program. Seeds are batched with
+    /// the graph they target, so a miss means inconsistent caller state (or a disabled
+    /// target) — the run fails rather than silently skipping the seed.
+    #[error("node seed {node_id:?} not found in the compiled program")]
+    NodeSeedNotFound { node_id: NodeId },
     #[error("event lambda for node {node_id:?} panicked: {message}")]
     EventLambdaPanic { node_id: NodeId, message: String },
 }
@@ -189,10 +194,10 @@ pub(crate) struct RunSeeds {
     /// Run the subscribers of these specific fired events.
     pub events: Vec<EventRef>,
     /// Run the cones of these specific nodes (authoring ids), retaining their outputs
-    /// in RAM for read-back — the on-demand "run to this node" / preview trigger. An id
-    /// that doesn't resolve against the compiled program (deleted, disabled, stale) is
-    /// dropped with a warning: node seeds ride alongside graph edits, so a miss is
-    /// expected input, not a logic error.
+    /// in RAM for read-back — the on-demand "run to this node" / preview trigger. The
+    /// worker batches these with the graph they target, so an id that doesn't resolve
+    /// against the compiled program (deleted, disabled, stale) fails the run with
+    /// [`Error::NodeSeedNotFound`] — inconsistent caller state, never silently skipped.
     pub nodes: Vec<NodeId>,
 }
 
