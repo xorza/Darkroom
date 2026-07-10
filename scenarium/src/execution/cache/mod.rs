@@ -307,16 +307,16 @@ impl RuntimeCache {
     /// filesystem state and could drift mid-run). A `None` digest (an impure cone) never
     /// reuses.
     ///
-    /// RAM reuse trusts residency alone ([`is_resident_hit`](Self::is_resident_hit)): a
-    /// resident digest-valid value is always served. That's sound because the caching
-    /// *policy* acts entirely on what stays resident — a non-RAM value is drained mid-run
-    /// as its last consumer reads it, reclaimed by the end-of-run eviction, and inspection
-    /// hydration is a returned loan ([`hydrate_for_inspection`](Self::hydrate_for_inspection))
-    /// — so the only values resident *across* runs are those a `Ram`/`Both` mode or a
-    /// preview pin deliberately retained. Disk reuse stays gated on `persists_to_disk`
-    /// (`Disk`/`Both`, enforced in [`DiskStore::blob_path`]); a `CachePassthrough`
-    /// (file-cache) node bypasses that gate — its explicit path is checked directly in
-    /// `blob_path`.
+    /// RAM reuse trusts residency ([`is_resident_hit`](Self::is_resident_hit)): a resident
+    /// digest-valid value is served, because a content digest attests the value produced
+    /// under it — however the value came to be resident (mode retention, a preview pin, or
+    /// an inspection hydrating a blob). The one exception is the `CachePassthrough`
+    /// (file-cache) node: its digest is its path key and attests nothing — the file is the
+    /// real cache and deleting it the documented invalidation — so its residency is never
+    /// trusted; the disk check (which stats the actual file) is its only reuse path. Disk
+    /// reuse stays gated on `persists_to_disk` (`Disk`/`Both`, enforced in
+    /// [`DiskStore::blob_path`]); the file-cache node's explicit path is checked directly
+    /// in `blob_path`.
     pub(crate) fn stamp_and_check_reuse(
         &mut self,
         program: &ExecutionProgram,
@@ -415,15 +415,11 @@ impl RuntimeCache {
     /// no run touched still show its value when the editor selects it, without the run having
     /// eagerly loaded every blob.
     ///
-    /// Hydration here is a **loan**: the returned indices are the slots this call flipped
-    /// `OnDisk` → `Resident`, and the caller must hand them back via
-    /// [`flag_on_disk`](Self::flag_on_disk) once the values are read out. Residency is what
-    /// the reuse check trusts ([`stamp_and_check_reuse`](Self::stamp_and_check_reuse)), so an
-    /// inspection must not leave resident what the node's mode wouldn't retain — the
-    /// file-cache node in particular is keyed on its path alone, and a leaked resident value
-    /// would keep serving after its file (the documented invalidation) was deleted. A slot
-    /// already resident before this call (a RAM mode's or a preview pin's retention) is not
-    /// part of the loan and stays.
+    /// Hydrated values simply stay resident (until a later run's eviction demotes them):
+    /// a content digest attests the value produced under it, so the reuse check serving a
+    /// hydrated leftover is correct — and the file-cache node, whose path-key digest
+    /// attests nothing, is the one node whose residency
+    /// [`stamp_and_check_reuse`](Self::stamp_and_check_reuse) never trusts.
     pub(crate) async fn hydrate_for_inspection(
         &mut self,
         program: &ExecutionProgram,

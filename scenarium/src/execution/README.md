@@ -255,9 +255,11 @@ This is **storage only** — the mode never feeds the content digest (§B.2). Pu
 decides reproducibility; the mode decides where a reproducible value is stored. So a `None`
 node still has a digest: a downstream `Disk`/`Both` consumer caches normally and, when that
 consumer is a hit, the `None` node's cone is simply cut (§B.6) — never recomputed to feed a
-value nothing reads. RAM reuse (`RuntimeCache::is_resident_hit`) trusts residency itself;
-the RAM bit acts earlier, deciding what *stays* resident (the mid-run release and
-`evict_unused`, §B.6), so a resident digest-valid value is always served. Disk reuse
+value nothing reads. RAM reuse (`RuntimeCache::is_resident_hit`) trusts residency itself —
+a content digest attests the value produced under it, however it came to be resident; the
+RAM bit acts earlier, deciding what *stays* resident (the mid-run release and
+`evict_unused`, §B.6). The one exception is the file-cache node, whose path-key digest
+attests nothing: its residency is never trusted, only its actual file (Part C). Disk reuse
 (`mark_on_disk_if_present`) is gated on `persists_to_disk`. `evict_unused` reclaims RAM the
 mode doesn't call to hold — demoting to a disk blob when one exists (lossless), else
 dropping only a non-RAM mode's value.
@@ -405,10 +407,10 @@ computed:
 
 **Off-run path — inspection.** `get_argument_values_with_previews` loads on demand via
 `hydrate_for_inspection`, so a disk-cached node no run touched still shows its value when
-the editor selects it. The hydration is a **loan**: once the values are read out, every
-slot the inspection flipped `OnDisk` → `Resident` is flagged back. Serving trusts
-residency (B.0), so an inspection must not leave resident what the mode wouldn't retain —
-the file-cache node especially, whose path-key digest can't see a deleted file.
+the editor selects it. Hydrated values simply stay resident until a later run's eviction
+demotes them — sound to serve as reuse hits, since a content digest attests the value
+produced under it (B.0); the file-cache node, whose path-key digest attests nothing, is
+the one node whose residency the reuse check never trusts.
 
 ### Worked example
 

@@ -67,15 +67,11 @@ impl ExecutionEngine {
     /// value this node shows (its own outputs and its inputs' producers) into RAM first
     /// via [`hydrate_for_inspection`](crate::execution::cache::RuntimeCache::hydrate_for_inspection),
     /// so an inspected node the run reused-from-disk (or never touched) still resolves.
-    /// The hydration is a loan: once the values are cloned out (the reply's `Arc`s keep
-    /// the data alive), the loaned slots go back to `OnDisk` — inspection must not leave
-    /// resident what the node's mode wouldn't retain, since the reuse check trusts
-    /// residency.
     pub(crate) async fn get_argument_values_with_previews(
         &mut self,
         node_id: &NodeId,
     ) -> Option<ArgumentValues> {
-        let idx = self.resolve_query_idx(node_id)?;
+        let idx = resolve_node_idx(&self.program, &self.flatten_map, node_id)?;
         self.cache.hydrate_for_inspection(&self.program, idx).await;
         let mut values = self.argument_values_at(idx);
         let mut pending_previews = Vec::new();

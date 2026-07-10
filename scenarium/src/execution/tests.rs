@@ -334,9 +334,9 @@ mod cache_persistence {
             "the deeper cache is still flagged available on disk"
         );
 
-        // Inspecting `sum` pulls it in on demand: value correct — but only as a loan,
-        // returned to `OnDisk` once read, so inspection leaves no residency the node's
-        // mode wouldn't retain (the reuse check trusts residency).
+        // Inspecting `sum` pulls it in on demand: value correct, now resident (it stays
+        // warm until a later run's eviction demotes it — its content digest attests it,
+        // so the reuse check serving the leftover is sound).
         let vals = engine
             .get_argument_values_with_previews(&sum_id)
             .await
@@ -350,8 +350,8 @@ mod cache_persistence {
             engine
                 .runtime_slot(engine.by_name("sum").unwrap())
                 .output_values()
-                .is_none(),
-            "the inspection loan is returned: sum is back OnDisk, not resident"
+                .is_some(),
+            "inspection hydrated sum into RAM"
         );
     }
 
@@ -1577,14 +1577,14 @@ mod file_cache {
         assert!(file.0.exists(), "and the file is rewritten");
     }
 
-    /// Inspecting a file-cache node must not resurrect RAM serving. The node's digest is
-    /// its path key — it can't see the file — so a resident value leaked by inspection
-    /// would serve stale RAM forever after the file (the documented invalidation) is
-    /// deleted. The inspection loan prevents exactly that: the hydrated value is read
-    /// out, the slot goes back `OnDisk`, and the deleted file still invalidates.
+    /// A file-cache node's residency is never trusted by the reuse check: its digest is
+    /// its path key — it can't see the file — so a resident value (here left by an
+    /// inspection hydrating the blob) must not serve after the file (the documented
+    /// invalidation) is deleted. Only the disk check, which stats the actual file,
+    /// decides its reuse.
     #[tokio::test]
-    async fn inspection_loan_keeps_deleted_file_invalidation_working() {
-        let file = temp_file("inspectloan");
+    async fn inspected_cache_node_still_invalidates_on_file_delete() {
+        let file = temp_file("inspectstale");
         let calls = Arc::new(AtomicUsize::new(0));
         let (graph, lib, _, cache_id) = graph_with_cache(&file.0, calls.clone(), false);
 
@@ -1594,7 +1594,7 @@ mod file_cache {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(file.0.exists(), "cold run writes the cache file");
 
-        // Inspection hydrates the explicit-path blob and reads the value…
+        // Inspection hydrates the explicit-path blob — and the value stays resident.
         let vals = engine
             .get_argument_values_with_previews(&cache_id)
             .await
@@ -1605,21 +1605,18 @@ mod file_cache {
             "inspection reads the cached file value: {:?}",
             vals.outputs
         );
-        // …but returns the loan: nothing left resident to serve stale later.
-        assert!(
-            engine
-                .get_argument_values(&cache_id)
-                .unwrap()
-                .outputs
-                .is_empty(),
-            "the cache node is back OnDisk after inspection"
+        assert_eq!(
+            engine.get_argument_values(&cache_id).unwrap().outputs[0].as_i64(),
+            Some(7),
+            "the hydrated value stays resident after inspection"
         );
 
+        // The resident leftover must not mask the deleted file.
         std::fs::remove_file(&file.0).unwrap();
         let stats = engine.execute_terminals().await.unwrap();
         assert!(
             stats.executed_nodes.iter().any(|n| n.node_id == cache_id),
-            "the deleted file still invalidates after an inspection"
+            "the deleted file still invalidates despite the resident value"
         );
         assert!(file.0.exists(), "and the file is rewritten");
     }
@@ -3682,8 +3679,8 @@ mod node_seeds {
             "unpinned None-cache upstream is drained as usual"
         );
 
-        // The production inspection path must not treat the pinned value as a loan —
-        // it was resident before the inspection (no blob backs it), so it stays.
+        // The production inspection path leaves the pinned value resident (no blob backs
+        // it — hydration has nothing to do and touches nothing).
         let inspected = eg.get_argument_values_with_previews(&sum_id).await.unwrap();
         assert_eq!(inspected.outputs[0].as_i64(), Some(12));
         assert_eq!(
