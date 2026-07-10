@@ -213,6 +213,7 @@ impl Editor {
         theme: &Theme,
         preferences: &mut Preferences,
         events_running: bool,
+        status_error: Option<&str>,
     ) -> Option<AppCommand> {
         self.intents.clear();
         self.actions.clear();
@@ -277,6 +278,7 @@ impl Editor {
             library,
             run_state: &self.run_state,
             events_running,
+            status_error,
         };
         let command = self
             .main_window

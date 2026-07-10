@@ -83,7 +83,7 @@ impl ScriptArgs {
         }
         let bind = match &self.script_bind {
             Some(spec) => parse_bind_spec(spec).unwrap_or_else(|e| {
-                eprintln!("--script-bind: {e}; falling back to {DEFAULT_BIND}");
+                tracing::warn!("--script-bind: {e}; falling back to {DEFAULT_BIND}");
                 DEFAULT_BIND
             }),
             None => DEFAULT_BIND,
@@ -201,7 +201,7 @@ fn run_terminal(frontend: Frontend, script_cfg: ScriptConfig) {
     // `runtime` + `session` (→ the worker/script runtimes) drop at the end
     // of this fn, back in sync context — safe.
     if let Err(e) = result {
-        eprintln!("darkroom: {e}");
+        tracing::error!("darkroom: {e}");
         std::process::exit(1);
     }
 }

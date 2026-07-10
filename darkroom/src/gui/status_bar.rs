@@ -1,8 +1,10 @@
-//! The window's bottom status bar: a thin chrome strip reporting the runtime
-//! cache's memory footprint (system RAM and GPU VRAM), mirrored from the last
-//! run's `ExecutionStats`. Each pool shows only when non-zero, and the whole
-//! bar is omitted when the cache holds nothing — an empty graph never grows a
-//! blank strip.
+//! The window's bottom status bar: a thin chrome strip carrying the last
+//! failed action's message (left, error-colored — compile/run/save/load
+//! failures parked in `App::status_error` until a subsequent success clears
+//! them) and the runtime cache's memory footprint (right, system RAM and GPU
+//! VRAM mirrored from the last run's `ExecutionStats`; each pool shows only
+//! when non-zero). The whole bar is omitted when both are empty — an idle
+//! empty graph never grows a blank strip.
 
 use aperture::{
     Align, Background, Configure, HAlign, Panel, Sizing, Spacing, Text, TextStyle, Ui, VAlign,
@@ -17,12 +19,13 @@ const PAD_Y: f32 = 3.0;
 const FONT: f32 = 12.0;
 
 /// Draw the bottom status bar when there's something to report. Records no
-/// widget at all when the cache is empty, so the layout row collapses rather
-/// than leaving a blank strip.
+/// widget at all when there's neither a message nor cached memory, so the
+/// layout row collapses rather than leaving a blank strip.
 pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) {
-    let Some(label) = cache_ram_label(ctx.run_state.cache_ram) else {
+    let ram = cache_ram_label(ctx.run_state.cache_ram);
+    if ctx.status_error.is_none() && ram.is_none() {
         return;
-    };
+    }
     let colors = &ctx.theme.colors;
     Panel::hstack()
         .id_salt("status_bar")
@@ -34,13 +37,30 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) {
             ..Default::default()
         })
         .show(ui, |ui| {
-            Text::new(label)
-                .style(TextStyle {
-                    color: colors.text_muted,
-                    font_size_px: FONT,
-                    ..ui.theme.text
-                })
-                .show(ui);
+            if let Some(msg) = ctx.status_error {
+                Text::new(msg.to_string())
+                    .style(TextStyle {
+                        color: colors.exec_errored_glow,
+                        font_size_px: FONT,
+                        ..ui.theme.text
+                    })
+                    .show(ui);
+            }
+            // Spacer: pins the message to the left edge and the memory
+            // readout to the right.
+            Panel::hstack()
+                .id_salt("status_spacer")
+                .size((Sizing::FILL, Sizing::Hug))
+                .show(ui, |_| {});
+            if let Some(label) = ram {
+                Text::new(label)
+                    .style(TextStyle {
+                        color: colors.text_muted,
+                        font_size_px: FONT,
+                        ..ui.theme.text
+                    })
+                    .show(ui);
+            }
         });
 }
 

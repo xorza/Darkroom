@@ -6,5 +6,8 @@ darkroom string interning
 
 save cahhce files by nodeid
 
-flattenmap from compile - not worker callback
 pub(crate) type SharedLibrary = Arc<ArcSwap<Library>>; - simplify?
+
+audit error traces - which should be results
+
+push_status } report_error

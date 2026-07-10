@@ -141,12 +141,12 @@ impl Preferences {
         let bytes = match serialize(self, SerdeFormat::Toml) {
             Ok(bytes) => bytes,
             Err(err) => {
-                eprintln!("preferences save failed: {err}");
+                tracing::error!("preferences save failed: {err}");
                 return;
             }
         };
         if let Err(err) = std::fs::write(Self::path(), &bytes) {
-            eprintln!("preferences save failed: {err}");
+            tracing::error!("preferences save failed: {err}");
         }
     }
 }

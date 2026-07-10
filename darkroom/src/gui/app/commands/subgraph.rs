@@ -43,11 +43,15 @@ impl App {
     fn export_active_subgraph(&mut self) {
         let library = self.engine.library.load();
         let Some(def) = publish::subgraph_to_export(&self.editor.document, &library) else {
-            eprintln!("subgraph export: no subgraph selected or open");
+            self.report_error("subgraph export: no subgraph selected or open".into());
             return;
         };
         if let Some(path) = dialogs::pick_save_path(self.current_path.as_deref()) {
-            persistence::export_subgraph(def, &path);
+            if persistence::export_subgraph(def, &path) {
+                self.status_error = None;
+            } else {
+                self.report_error(format!("subgraph export failed: {}", path.display()));
+            }
         }
     }
 
@@ -61,6 +65,9 @@ impl App {
         };
         if let Some(def) = persistence::import_subgraph(&path) {
             self.editor.import_subgraph(def);
+            self.status_error = None;
+        } else {
+            self.report_error(format!("subgraph import failed: {}", path.display()));
         }
     }
 
@@ -75,8 +82,9 @@ impl App {
             // unsaved change (may over-flag when the link already existed).
             self.editor.dirty = true;
             library::save_library(self.engine.library.load().subgraphs.iter());
+            self.status_error = None;
         } else {
-            eprintln!("subgraph promote: no subgraph selected or open");
+            self.report_error("subgraph promote: no subgraph selected or open".into());
         }
     }
 
@@ -101,8 +109,9 @@ impl App {
             // publish touches only the library, so this may over-flag).
             self.editor.dirty = true;
             library::save_library(self.engine.library.load().subgraphs.iter());
+            self.status_error = None;
         } else {
-            eprintln!("subgraph publish: node is not a local subgraph");
+            self.report_error("subgraph publish: node is not a local subgraph".into());
         }
     }
 }

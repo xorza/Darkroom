@@ -3,8 +3,9 @@
 //! `crate::gui::dialogs`. Pure persistence — no app state, no undo stack,
 //! no preferences; callers orchestrate (when to load/save, what to do with the
 //! result), this only turns paths into values and values into files.
-//! Failures log to stderr and return `None`/`false` so a bad read/write
-//! degrades instead of crashing the session.
+//! Failures log the detail via `tracing` and return `None`/`false` so a bad
+//! read/write degrades instead of crashing; the GUI caller surfaces a short
+//! message in the status bar off the return value.
 
 use std::path::Path;
 
@@ -20,21 +21,21 @@ pub(crate) fn load_document(path: &Path) -> Option<Document> {
     let format = match SerdeFormat::from_file_name(&path.to_string_lossy()) {
         Ok(f) => f,
         Err(err) => {
-            eprintln!("load failed: unsupported file extension ({err})");
+            tracing::error!("load failed: unsupported file extension ({err})");
             return None;
         }
     };
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(err) => {
-            eprintln!("load failed: {} {err}", path.display());
+            tracing::error!("load failed: {} {err}", path.display());
             return None;
         }
     };
     match Document::deserialize(format, &bytes) {
         Ok(doc) => Some(doc),
         Err(err) => {
-            eprintln!("load failed: {} {err}", path.display());
+            tracing::error!("load failed: {} {err}", path.display());
             None
         }
     }
@@ -48,14 +49,14 @@ pub(crate) fn save_document(doc: &Document, path: &Path) -> bool {
     let bytes = match doc.serialize(format) {
         Ok(bytes) => bytes,
         Err(err) => {
-            eprintln!("save failed: {} {err}", path.display());
+            tracing::error!("save failed: {} {err}", path.display());
             return false;
         }
     };
     match std::fs::write(path, &bytes) {
         Ok(()) => true,
         Err(err) => {
-            eprintln!("save failed: {} {err}", path.display());
+            tracing::error!("save failed: {} {err}", path.display());
             false
         }
     }
@@ -70,14 +71,14 @@ pub(crate) fn export_subgraph(def: &SubgraphDef, path: &Path) -> bool {
     let bytes = match serialize(def, format) {
         Ok(bytes) => bytes,
         Err(err) => {
-            eprintln!("subgraph export failed: {} {err}", path.display());
+            tracing::error!("subgraph export failed: {} {err}", path.display());
             return false;
         }
     };
     match std::fs::write(path, &bytes) {
         Ok(()) => true,
         Err(err) => {
-            eprintln!("subgraph export failed: {} {err}", path.display());
+            tracing::error!("subgraph export failed: {} {err}", path.display());
             false
         }
     }
@@ -90,21 +91,21 @@ pub(crate) fn import_subgraph(path: &Path) -> Option<SubgraphDef> {
     let format = match SerdeFormat::from_file_name(&path.to_string_lossy()) {
         Ok(f) => f,
         Err(err) => {
-            eprintln!("subgraph import failed: unsupported file extension ({err})");
+            tracing::error!("subgraph import failed: unsupported file extension ({err})");
             return None;
         }
     };
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(err) => {
-            eprintln!("subgraph import failed: {} {err}", path.display());
+            tracing::error!("subgraph import failed: {} {err}", path.display());
             return None;
         }
     };
     match deserialize::<SubgraphDef>(&bytes, format) {
         Ok(def) => Some(def),
         Err(err) => {
-            eprintln!("subgraph import failed: {} {err}", path.display());
+            tracing::error!("subgraph import failed: {} {err}", path.display());
             None
         }
     }
