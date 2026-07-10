@@ -153,7 +153,9 @@ impl App {
                             stats.executed_nodes.len()
                         );
                     }
-                    run_state.set_results(&stats);
+                    // The stats' flat ids project through the compile-phase
+                    // flatten map the engine kept when it sent this run.
+                    run_state.set_results(&stats, &self.engine.flatten_map);
                 }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
                     eprintln!("compute failed: {err}");

@@ -41,7 +41,6 @@ impl App {
     /// loop, so the toggle drops in lockstep.
     pub(crate) fn run_graph(&mut self) {
         self.editor.run_state.begin_run();
-        self.engine.run_once(self.editor.document.graph.clone());
         self.events_running = false;
     }
 
@@ -51,8 +50,6 @@ impl App {
     /// full run — a preview run is just a run.
     pub(crate) fn run_node(&mut self, node_id: NodeId) {
         self.editor.run_state.begin_run();
-        self.engine
-            .run_node(self.editor.document.graph.clone(), node_id);
         self.events_running = false;
     }
 
