@@ -324,8 +324,8 @@ impl RuntimeCache {
     ) -> bool {
         let digest = node_digest(program, idx, self);
         self.slots[idx].current_digest = digest;
-        digest.is_some()
-            && (self.is_resident_hit(idx) || self.mark_on_disk_if_present(program, idx))
+        let ram_hit = self.is_resident_hit(idx) && !is_file_cache(program, idx);
+        digest.is_some() && (ram_hit || self.mark_on_disk_if_present(program, idx))
     }
 
     /// The per-node "reuse from disk?" check, run once a node's digest is computed: if a
@@ -527,6 +527,15 @@ fn is_bypassed(program: &ExecutionProgram, idx: NodeIdx) -> bool {
     matches!(
         program.e_nodes[idx].special,
         Some(SpecialNode::CachePassthrough { bypass: true })
+    )
+}
+
+/// True for any cache-passthrough (file-cache) node, bypassed or not. Its digest is a path
+/// key that attests nothing about the value, so the reuse check never trusts its residency.
+fn is_file_cache(program: &ExecutionProgram, idx: NodeIdx) -> bool {
+    matches!(
+        program.e_nodes[idx].special,
+        Some(SpecialNode::CachePassthrough { .. })
     )
 }
 
