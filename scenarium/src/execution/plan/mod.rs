@@ -64,12 +64,20 @@ pub(crate) struct ExecutionPlan {
     /// each lambda as [`OutputUsage`](crate::node::func_lambda::OutputUsage) so a node can
     /// skip computing outputs nobody reads.
     pub(crate) output_usage: Vec<u32>,
-    /// The nodes the backward walk started from — terminals, event subscribers, and
-    /// event-trigger owners (a node seeding via several categories may repeat; harmless).
-    /// The schedule's "must be available" set: the executor's pre-run cut seeds its `needed`
-    /// mask from these and prunes any cone reachable only through cache-hit consumers (see
-    /// [`Executor`](crate::execution::executor::Executor)).
+    /// The nodes the backward walk started from — terminals, event subscribers,
+    /// event-trigger owners, and node seeds (a node seeding via several categories may
+    /// repeat; harmless). The schedule's "must be available" set: the executor's pre-run
+    /// cut seeds its `needed` mask from these and prunes any cone reachable only through
+    /// cache-hit consumers (see [`Executor`](crate::execution::executor::Executor)).
     pub(crate) roots: Vec<NodeIdx>,
+    /// The node-seeded roots (on-demand preview targets), a subset of `roots`. A pinned
+    /// node's outputs gain one virtual consumer (so a lambda honoring
+    /// [`OutputUsage`](crate::node::func_lambda::OutputUsage) still computes them, and
+    /// the slot is never drained mid-run) and it is exempt from end-of-run eviction — a
+    /// seeded root has no real consumers, so without the pin its value would never
+    /// survive to be read back. Retention is all it takes for a repeated run to be a
+    /// RAM hit: the reuse check serves any resident digest-valid value.
+    pub(crate) pinned: Vec<NodeIdx>,
 }
 
 impl ExecutionPlan {
@@ -78,6 +86,7 @@ impl ExecutionPlan {
         self.verdicts.clear();
         self.output_usage.clear();
         self.roots.clear();
+        self.pinned.clear();
     }
 
     /// Clear the order and reset every per-node verdict to default at the given pool
@@ -88,6 +97,7 @@ impl ExecutionPlan {
         self.output_usage.clear();
         self.output_usage.resize(n_outputs, 0);
         self.roots.clear();
+        self.pinned.clear();
     }
 }
 
@@ -128,18 +138,21 @@ pub(crate) struct Planner {
 
 impl Planner {
     /// Build the per-run schedule into `plan` from the program and the run's `seeds`
-    /// (the roots to walk back from). Errors only on a dependency cycle.
+    /// (the roots to walk back from). `node_roots` is the flat resolution of
+    /// `seeds.nodes` — the engine resolves authoring ids before planning, since the
+    /// flatten map lives outside the program. Errors only on a dependency cycle.
     pub(crate) fn plan(
         &mut self,
         program: &ExecutionProgram,
         seeds: &RunSeeds,
+        node_roots: &[NodeIdx],
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
         plan.reset(program.e_nodes.len(), program.n_outputs());
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
-        collect_roots(program, seeds, plan);
+        collect_roots(program, seeds, node_roots, plan);
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
@@ -234,16 +247,27 @@ impl Planner {
 }
 
 /// Collect the run's walk roots into `plan.roots` — the seeds for both the backward walk and
-/// the executor's cut: every event subscriber, every terminal node, and (for the event loop)
-/// every node owning a subscribed event. Not deduped: a node seeding via several categories
-/// appears more than once, which is harmless — the walk's `Color` check skips a revisited root
-/// and the cut's `needed[root] = true` seeding is idempotent, so neither cares about repeats.
+/// the executor's cut: every event subscriber, every terminal node, (for the event loop)
+/// every node owning a subscribed event, and the pre-resolved node seeds. Not deduped: a node
+/// seeding via several categories appears more than once, which is harmless — the walk's
+/// `Color` check skips a revisited root and the cut's `needed[root] = true` seeding is
+/// idempotent, so neither cares about repeats.
 ///
 /// A [`RunTerminals`](SpecialNode::RunTerminals) node among a fired event's subscribers is not
 /// itself a root (it computes nothing); instead it promotes the run to include *every* terminal
 /// node — the "when this event fires, re-run the whole graph" trigger.
-fn collect_roots(program: &ExecutionProgram, seeds: &RunSeeds, plan: &mut ExecutionPlan) {
-    // `plan.reset` already cleared `roots`; this only pushes into it.
+fn collect_roots(
+    program: &ExecutionProgram,
+    seeds: &RunSeeds,
+    node_roots: &[NodeIdx],
+    plan: &mut ExecutionPlan,
+) {
+    // `plan.reset` already cleared `roots`/`pinned`; this only pushes into them.
+
+    // Node seeds (on-demand preview): roots like any other, plus pinned so their
+    // outputs are computed and retained (see `ExecutionPlan::pinned`).
+    plan.roots.extend_from_slice(node_roots);
+    plan.pinned.extend_from_slice(node_roots);
 
     // Event subscribers. A `RunTerminals` sink among them fires no cone of its own — it
     // promotes this run to run all terminals (below), so it's skipped as a root here.
@@ -260,25 +284,20 @@ fn collect_roots(program: &ExecutionProgram, seeds: &RunSeeds, plan: &mut Execut
         }
     }
 
-    // Terminal nodes — every one, whether requested directly (`seeds.terminals`) or promoted
-    // by a fired event reaching a `RunTerminals` sink.
-    if run_terminals {
-        for (idx, e) in program.e_nodes.iter().enumerate() {
-            if e.terminal {
-                plan.roots.push(idx.into());
-            }
-        }
+    if !run_terminals && !seeds.event_triggers {
+        return;
     }
-
-    // Nodes owning a subscribed event (drives the event loop).
-    if seeds.event_triggers {
-        for (idx, e) in program.e_nodes.iter().enumerate() {
-            if program.events[e.events.range()]
-                .iter()
-                .any(|ev| !ev.subscribers.is_empty())
-            {
-                plan.roots.push(idx.into());
-            }
+    // One sweep for both whole-graph seed kinds: terminal nodes (requested directly, or
+    // promoted by a fired event reaching a `RunTerminals` sink) and — for the event
+    // loop — nodes owning a subscribed event.
+    for (idx, e_node) in program.e_nodes.iter().enumerate() {
+        if (run_terminals && e_node.terminal)
+            || (seeds.event_triggers
+                && program.events[e_node.events.range()]
+                    .iter()
+                    .any(|ev| !ev.subscribers.is_empty()))
+        {
+            plan.roots.push(idx.into());
         }
     }
 }

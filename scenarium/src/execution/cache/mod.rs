@@ -414,6 +414,16 @@ impl RuntimeCache {
     /// of `idx` reads (its own outputs and its inputs' resolved values). Lets a disk-cached node
     /// no run touched still show its value when the editor selects it, without the run having
     /// eagerly loaded every blob.
+    ///
+    /// Hydration here is a **loan**: the returned indices are the slots this call flipped
+    /// `OnDisk` → `Resident`, and the caller must hand them back via
+    /// [`flag_on_disk`](Self::flag_on_disk) once the values are read out. Residency is what
+    /// the reuse check trusts ([`stamp_and_check_reuse`](Self::stamp_and_check_reuse)), so an
+    /// inspection must not leave resident what the node's mode wouldn't retain — the
+    /// file-cache node in particular is keyed on its path alone, and a leaked resident value
+    /// would keep serving after its file (the documented invalidation) was deleted. A slot
+    /// already resident before this call (a RAM mode's or a preview pin's retention) is not
+    /// part of the loan and stays.
     pub(crate) async fn hydrate_for_inspection(
         &mut self,
         program: &ExecutionProgram,
@@ -493,10 +503,15 @@ impl RuntimeCache {
     /// for next run's RAM hit; every other resident value goes through
     /// [`reclaim_slot`](Self::reclaim_slot), which demotes a reloadable one to disk and
     /// drops a non-RAM one (a non-reloadable `Ram`/`Both` leftover is kept, its mode's promise).
+    ///
+    /// `pinned` (the run's node-seeded preview roots) are kept resident regardless of cache
+    /// mode — a readable output was the point of their run. The pin lasts until a later
+    /// run's sweep, where an unchanged pinned value reads as a plain RAM hit.
     pub(crate) fn evict_unused(
         &mut self,
         program: &ExecutionProgram,
         disposition: &NodeColumn<Disposition>,
+        pinned: &[NodeIdx],
     ) {
         for idx in program.node_indices() {
             if self.slots[idx].output_values().is_none() {
@@ -504,6 +519,9 @@ impl RuntimeCache {
             }
             // A RAM-retaining node on the active frontier stays hot for the next run's RAM hit.
             if program.e_nodes[idx].cache.caches_in_ram() && disposition[idx].needed() {
+                continue;
+            }
+            if pinned.contains(&idx) {
                 continue;
             }
             self.reclaim_slot(program, idx);
