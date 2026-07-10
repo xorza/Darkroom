@@ -50,18 +50,16 @@ impl ContrastBrightness {
         self
     }
 
-    /// Applies contrast and brightness adjustment to an image using CPU.
+    /// Applies contrast and brightness adjustment to an image **in place** using CPU,
+    /// so an owning caller pays no output allocation.
     ///
     /// The formula applied to each color channel is:
     /// `output = (input - mid) * contrast + mid + brightness`
     ///
     /// Where `mid` is the middle value of the type's range.
     /// Alpha channel (if present) is preserved unchanged.
-    ///
-    /// # Panics
-    /// Panics if input and output images have different dimensions or color formats.
-    pub fn apply_cpu(&self, input: &Image, output: &mut Image) {
-        cpu::apply(self, input, output);
+    pub fn apply_cpu(&self, image: &mut Image) {
+        cpu::apply(self, image);
     }
 
     /// Applies the operation, automatically choosing CPU or GPU based on data location.
@@ -95,18 +93,19 @@ impl ContrastBrightness {
 
     /// Applies the operation using CPU with ImageBuffer.
     ///
-    /// Automatically downloads images from GPU if needed.
+    /// Automatically downloads images from GPU if needed. The op itself is in-place
+    /// ([`apply_cpu`](Self::apply_cpu)); this buffer-level entry point clones the
+    /// input into a fresh image first, preserving `execute`'s out-of-place contract.
+    /// `output` is replaced wholesale (any prior storage and descriptor dropped).
     pub fn execute_cpu(
         &self,
         ctx: &mut ProcessingContext,
         input: &ImageBuffer,
         output: &mut ImageBuffer,
     ) -> Result<()> {
-        let input_cpu = input.make_cpu(ctx)?;
-        let mut output_cpu = output.make_cpu_mut(ctx)?;
-
-        self.apply_cpu(&input_cpu, &mut output_cpu);
-
+        let mut image = input.make_cpu(ctx)?.clone();
+        self.apply_cpu(&mut image);
+        *output = ImageBuffer::from_cpu(image);
         Ok(())
     }
 }

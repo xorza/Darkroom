@@ -9,10 +9,9 @@ fn main() {
     let input = load_lena_rgba_u8();
     print_image_info("Input", &input);
 
-    let mut output = Image::new_black(input.desc).unwrap();
-
-    // CPU example
-    ContrastBrightness::new(1.5, 0.1).apply_cpu(&input, &mut output);
+    // CPU example — the op is in-place, so adjust a copy of the input.
+    let mut output = input.clone();
+    ContrastBrightness::new(1.5, 0.1).apply_cpu(&mut output);
     save_image(&output, "contrast_brightness_cpu.png");
 
     // GPU example

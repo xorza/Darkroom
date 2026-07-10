@@ -9,110 +9,116 @@ use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType};
 use crate::cpu_features;
 use crate::image::Image;
 
-/// Applies contrast and brightness adjustment to an image using CPU.
-pub(super) fn apply(params: &ContrastBrightness, input: &Image, output: &mut Image) {
-    assert_eq!(input.desc.width, output.desc.width, "width mismatch");
-    assert_eq!(input.desc.height, output.desc.height, "height mismatch");
-    assert_eq!(
-        input.desc.color_format, output.desc.color_format,
-        "color format mismatch"
+/// A SIMD row kernel: `(in_row, out_row, width, contrast, last)` where `last` is the
+/// format family's precomputed final argument — a fused offset for the u8 kernels, raw
+/// brightness for the f32 kernels (they fuse the offset internally).
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+type RowKernel = unsafe fn(&[u8], &mut [u8], usize, f32, f32);
+
+/// The SIMD row kernel for `format` on this arch (SSE4.1 / NEON), paired with its
+/// `last` argument, or `None` when the format has no SIMD path (u16) or the CPU
+/// lacks the feature — callers then fall back to the scalar path.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn simd_kernel(
+    format: crate::common::color_format::ColorFormat,
+    params: &ContrastBrightness,
+) -> Option<(RowKernel, f32)> {
+    #[cfg(target_arch = "x86_64")]
+    if !cpu_features::has_sse4_1() {
+        return None;
+    }
+
+    let u8_offset = 127.5 * (1.0 - params.contrast) + params.brightness * 255.0;
+    let key = (
+        format.channel_size,
+        format.channel_type,
+        format.channel_count,
     );
 
-    let channel_size = input.desc.color_format.channel_size;
-    let channel_type = input.desc.color_format.channel_type;
-
-    let channel_count = input.desc.color_format.channel_count;
-    let _ = channel_count; // Used in cfg-gated SIMD dispatch below
-
-    // Use SIMD-optimized paths when available
     #[cfg(target_arch = "x86_64")]
-    if cpu_features::has_sse4_1() {
-        match (channel_size, channel_type, channel_count) {
-            // u8 formats
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::L) => {
-                // SAFETY: SSE4.1 support verified above
-                unsafe { apply_u8_gray_sse41(input, output, *params) };
-                return;
-            }
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Rgb) => {
-                // SAFETY: SSE4.1 support verified above
-                unsafe { apply_u8_rgb_sse41(input, output, *params) };
-                return;
-            }
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Rgba) => {
-                // SAFETY: SSE4.1 support verified above
-                unsafe { apply_u8_rgba_sse41(input, output, *params) };
-                return;
-            }
-            // f32 formats
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::L) => {
-                // SAFETY: SSE4.1 support verified above
-                unsafe { apply_f32_gray_sse41(input, output, *params) };
-                return;
-            }
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Rgb) => {
-                // SAFETY: SSE4.1 support verified above
-                unsafe { apply_f32_rgb_sse41(input, output, *params) };
-                return;
-            }
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Rgba) => {
-                // SAFETY: SSE4.1 support verified above
-                unsafe { apply_f32_rgba_sse41(input, output, *params) };
-                return;
-            }
-            _ => {}
+    // SAFETY contract of each kernel: SSE4.1 support verified above.
+    let kernel = match key {
+        (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::L) => {
+            (process_row_u8_gray_sse41 as RowKernel, u8_offset)
         }
-    }
+        (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Rgb) => {
+            (process_row_u8_rgb_sse41 as RowKernel, u8_offset)
+        }
+        (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Rgba) => {
+            (process_row_u8_rgba_sse41 as RowKernel, u8_offset)
+        }
+        (ChannelSize::_32bit, ChannelType::Float, ChannelCount::L) => {
+            (process_row_f32_gray_sse41 as RowKernel, params.brightness)
+        }
+        (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Rgb) => {
+            (process_row_f32_rgb_sse41 as RowKernel, params.brightness)
+        }
+        (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Rgba) => {
+            (process_row_f32_rgba_sse41 as RowKernel, params.brightness)
+        }
+        _ => return None,
+    };
 
-    // Use NEON-optimized paths on aarch64
     #[cfg(target_arch = "aarch64")]
-    {
-        match (channel_size, channel_type, channel_count) {
-            // u8 formats
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::L) => {
-                // SAFETY: NEON is always available on aarch64
-                unsafe { apply_u8_gray_neon(input, output, *params) };
-                return;
-            }
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Rgb) => {
-                // SAFETY: NEON is always available on aarch64
-                unsafe { apply_u8_rgb_neon(input, output, *params) };
-                return;
-            }
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Rgba) => {
-                // SAFETY: NEON is always available on aarch64
-                unsafe { apply_u8_rgba_neon(input, output, *params) };
-                return;
-            }
-            // f32 formats
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::L) => {
-                // SAFETY: NEON is always available on aarch64
-                unsafe { apply_f32_gray_neon(input, output, *params) };
-                return;
-            }
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Rgb) => {
-                // SAFETY: NEON is always available on aarch64
-                unsafe { apply_f32_rgb_neon(input, output, *params) };
-                return;
-            }
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Rgba) => {
-                // SAFETY: NEON is always available on aarch64
-                unsafe { apply_f32_rgba_neon(input, output, *params) };
-                return;
-            }
-            _ => {}
+    // SAFETY contract of each kernel: NEON is always available on aarch64.
+    let kernel = match key {
+        (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::L) => {
+            (process_row_u8_gray_neon as RowKernel, u8_offset)
         }
+        (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Rgb) => {
+            (process_row_u8_rgb_neon as RowKernel, u8_offset)
+        }
+        (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Rgba) => {
+            (process_row_u8_rgba_neon as RowKernel, u8_offset)
+        }
+        (ChannelSize::_32bit, ChannelType::Float, ChannelCount::L) => {
+            (process_row_f32_gray_neon as RowKernel, params.brightness)
+        }
+        (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Rgb) => {
+            (process_row_f32_rgb_neon as RowKernel, params.brightness)
+        }
+        (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Rgba) => {
+            (process_row_f32_rgba_neon as RowKernel, params.brightness)
+        }
+        _ => return None,
+    };
+
+    Some(kernel)
+}
+
+/// Applies contrast and brightness adjustment to an image in place using CPU. The
+/// SIMD row kernels read and write distinct slices, so each row is bounced through a
+/// small per-thread scratch (one row, reused across the thread's rows) — no
+/// full-image allocation anywhere.
+pub(super) fn apply(params: &ContrastBrightness, image: &mut Image) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    if let Some((kernel, last)) = simd_kernel(image.desc.color_format, params) {
+        let width = image.desc.width;
+        let stride = image.desc.row_bytes();
+        let contrast = params.contrast;
+        image.bytes_mut().par_chunks_mut(stride).for_each_init(
+            || vec![0u8; stride],
+            |scratch, row| {
+                scratch.copy_from_slice(row);
+                // SAFETY: the kernel's feature requirement was verified by `simd_kernel`.
+                unsafe { kernel(scratch, row, width, contrast, last) };
+            },
+        );
+        return;
     }
 
-    match (channel_size, channel_type) {
+    match (
+        image.desc.color_format.channel_size,
+        image.desc.color_format.channel_type,
+    ) {
         (ChannelSize::_8bit, ChannelType::UInt) => {
-            apply_typed::<u8>(input, output, *params);
+            apply_typed::<u8>(image, *params);
         }
         (ChannelSize::_16bit, ChannelType::UInt) => {
-            apply_typed::<u16>(input, output, *params);
+            apply_typed::<u16>(image, *params);
         }
         (ChannelSize::_32bit, ChannelType::Float) => {
-            apply_typed::<f32>(input, output, *params);
+            apply_typed::<f32>(image, *params);
         }
         _ => {
             unreachable!("Unsupported color format for contrast/brightness")
@@ -153,21 +159,22 @@ impl ContrastBrightnessApply for f32 {
     }
 }
 
-fn apply_typed<T>(from: &Image, to: &mut Image, params: ContrastBrightness)
+/// The scalar reference: per-element in-place adjustment through
+/// [`ContrastBrightnessApply`]. The u16 formats always take this path; the SIMD
+/// formats fall back to it when the CPU lacks the feature, and the tests cross-check
+/// the SIMD kernels against it.
+fn apply_typed<T>(image: &mut Image, params: ContrastBrightness)
 where
     T: Pod + ContrastBrightnessApply,
 {
-    debug_assert_eq!(from.desc.width, to.desc.width);
-    debug_assert_eq!(from.desc.height, to.desc.height);
-    debug_assert_eq!(from.desc.color_format, to.desc.color_format);
     debug_assert_eq!(
-        from.desc.color_format.channel_size.byte_count() as usize,
+        image.desc.color_format.channel_size.byte_count() as usize,
         size_of::<T>()
     );
 
-    let width = from.desc.width;
-    let channels = from.desc.color_format.channel_count.channel_count() as usize;
-    let stride = from.desc.row_bytes();
+    let width = image.desc.width;
+    let channels = image.desc.color_format.channel_count.channel_count() as usize;
+    let stride = image.desc.row_bytes();
     let row_bytes = width * channels * size_of::<T>();
 
     let has_alpha = channels == 2 || channels == 4;
@@ -176,50 +183,20 @@ where
     let contrast = params.contrast;
     let brightness = params.brightness;
 
-    to.bytes_mut()
-        .par_chunks_mut(stride)
-        .enumerate()
-        .for_each(|(y, to_row)| {
-            let from_row = &from.bytes()[y * stride..];
-            let from_row: &[T] = bytemuck::cast_slice(&from_row[..row_bytes]);
-            let to_row: &mut [T] = bytemuck::cast_slice_mut(&mut to_row[..row_bytes]);
-
-            for x in 0..width {
-                let src = &from_row[x * channels..];
-                let dst = &mut to_row[x * channels..];
-
-                for c in 0..color_channels {
-                    dst[c] = src[c].apply(contrast, brightness);
-                }
-
-                if has_alpha {
-                    dst[channels - 1] = src[channels - 1];
-                }
+    image.bytes_mut().par_chunks_mut(stride).for_each(|row| {
+        let row: &mut [T] = bytemuck::cast_slice_mut(&mut row[..row_bytes]);
+        for pixel in row.chunks_exact_mut(channels) {
+            for value in &mut pixel[..color_channels] {
+                *value = value.apply(contrast, brightness);
             }
-        });
+            // Alpha (if present) is left untouched.
+        }
+    });
 }
 
 // ============================================================================
 // U8 GRAY SSE4.1
 // ============================================================================
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse4.1")]
-unsafe fn apply_u8_gray_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_u8_gray_sse41(in_row, out_row, width, contrast, offset) };
-        });
-}
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
@@ -279,7 +256,7 @@ unsafe fn process_row_u8_gray_sse41(
         // Scalar fallback
         while x < width {
             out_row[x] = (in_row[x] as f32 * contrast + offset)
-                .round()
+                .round_ties_even()
                 .clamp(0.0, 255.0) as u8;
             x += 1;
         }
@@ -289,24 +266,6 @@ unsafe fn process_row_u8_gray_sse41(
 // ============================================================================
 // U8 RGB SSE4.1
 // ============================================================================
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse4.1")]
-unsafe fn apply_u8_rgb_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_u8_rgb_sse41(in_row, out_row, width, contrast, offset) };
-        });
-}
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
@@ -377,7 +336,7 @@ unsafe fn process_row_u8_rgb_sse41(
         while x < width {
             for c in 0..3 {
                 out_row[x * 3 + c] = (in_row[x * 3 + c] as f32 * contrast + offset)
-                    .round()
+                    .round_ties_even()
                     .clamp(0.0, 255.0) as u8;
             }
             x += 1;
@@ -388,24 +347,6 @@ unsafe fn process_row_u8_rgb_sse41(
 // ============================================================================
 // U8 RGBA SSE4.1
 // ============================================================================
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse4.1")]
-unsafe fn apply_u8_rgba_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_u8_rgba_sse41(in_row, out_row, width, contrast, offset) };
-        });
-}
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
@@ -485,7 +426,7 @@ unsafe fn process_row_u8_rgba_sse41(
             let dst = &mut out_row[x * 4..];
             for c in 0..3 {
                 dst[c] = (src[c] as f32 * contrast + offset)
-                    .round()
+                    .round_ties_even()
                     .clamp(0.0, 255.0) as u8;
             }
             dst[3] = src[3];
@@ -497,24 +438,6 @@ unsafe fn process_row_u8_rgba_sse41(
 // ============================================================================
 // F32 GRAY SSE4.1
 // ============================================================================
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse4.1")]
-unsafe fn apply_f32_gray_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let brightness = params.brightness;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_f32_gray_sse41(in_row, out_row, width, contrast, brightness) };
-        });
-}
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
@@ -562,24 +485,6 @@ unsafe fn process_row_f32_gray_sse41(
 // ============================================================================
 // F32 RGB SSE4.1
 // ============================================================================
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse4.1")]
-unsafe fn apply_f32_rgb_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let brightness = params.brightness;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_f32_rgb_sse41(in_row, out_row, width, contrast, brightness) };
-        });
-}
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
@@ -647,24 +552,6 @@ unsafe fn process_row_f32_rgb_sse41(
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
-unsafe fn apply_f32_rgba_sse41(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let brightness = params.brightness;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_f32_rgba_sse41(in_row, out_row, width, contrast, brightness) };
-        });
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse4.1")]
 unsafe fn process_row_f32_rgba_sse41(
     in_row: &[u8],
     out_row: &mut [u8],
@@ -712,23 +599,6 @@ unsafe fn process_row_f32_rgba_sse41(
 // ============================================================================
 // U8 GRAY NEON
 // ============================================================================
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn apply_u8_gray_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_u8_gray_neon(in_row, out_row, width, contrast, offset) };
-        });
-}
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_u8_gray_neon(
@@ -787,7 +657,7 @@ unsafe fn process_row_u8_gray_neon(
         // Scalar fallback
         while x < width {
             out_row[x] = (in_row[x] as f32 * contrast + offset)
-                .round()
+                .round_ties_even()
                 .clamp(0.0, 255.0) as u8;
             x += 1;
         }
@@ -797,23 +667,6 @@ unsafe fn process_row_u8_gray_neon(
 // ============================================================================
 // U8 RGB NEON
 // ============================================================================
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn apply_u8_rgb_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_u8_rgb_neon(in_row, out_row, width, contrast, offset) };
-        });
-}
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_u8_rgb_neon(
@@ -872,7 +725,7 @@ unsafe fn process_row_u8_rgb_neon(
         while x < width {
             for c in 0..3 {
                 out_row[x * 3 + c] = (in_row[x * 3 + c] as f32 * contrast + offset)
-                    .round()
+                    .round_ties_even()
                     .clamp(0.0, 255.0) as u8;
             }
             x += 1;
@@ -883,23 +736,6 @@ unsafe fn process_row_u8_rgb_neon(
 // ============================================================================
 // U8 RGBA NEON
 // ============================================================================
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn apply_u8_rgba_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let offset = 127.5 * (1.0 - contrast) + params.brightness * 255.0;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_u8_rgba_neon(in_row, out_row, width, contrast, offset) };
-        });
-}
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_u8_rgba_neon(
@@ -962,7 +798,7 @@ unsafe fn process_row_u8_rgba_neon(
             let dst = &mut out_row[x * 4..];
             for c in 0..3 {
                 dst[c] = (src[c] as f32 * contrast + offset)
-                    .round()
+                    .round_ties_even()
                     .clamp(0.0, 255.0) as u8;
             }
             dst[3] = src[3];
@@ -974,23 +810,6 @@ unsafe fn process_row_u8_rgba_neon(
 // ============================================================================
 // F32 GRAY NEON
 // ============================================================================
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn apply_f32_gray_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let brightness = params.brightness;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_f32_gray_neon(in_row, out_row, width, contrast, brightness) };
-        });
-}
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_f32_gray_neon(
@@ -1037,23 +856,6 @@ unsafe fn process_row_f32_gray_neon(
 // ============================================================================
 // F32 RGB NEON
 // ============================================================================
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn apply_f32_rgb_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let brightness = params.brightness;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_f32_rgb_neon(in_row, out_row, width, contrast, brightness) };
-        });
-}
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_f32_rgb_neon(
@@ -1114,23 +916,6 @@ unsafe fn process_row_f32_rgb_neon(
 // ============================================================================
 
 #[cfg(target_arch = "aarch64")]
-unsafe fn apply_f32_rgba_neon(from: &Image, to: &mut Image, params: ContrastBrightness) {
-    let width = from.desc.width;
-    let in_stride = from.desc.row_bytes();
-    let out_stride = to.desc.row_bytes();
-    let contrast = params.contrast;
-    let brightness = params.brightness;
-
-    to.bytes_mut()
-        .par_chunks_mut(out_stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &from.bytes()[y * in_stride..];
-            unsafe { process_row_f32_rgba_neon(in_row, out_row, width, contrast, brightness) };
-        });
-}
-
-#[cfg(target_arch = "aarch64")]
 unsafe fn process_row_f32_rgba_neon(
     in_row: &[u8],
     out_row: &mut [u8],
@@ -1189,8 +974,8 @@ unsafe fn process_row_f32_rgba_neon(
 
 #[cfg(test)]
 mod tests {
-    use super::ContrastBrightness;
-    use crate::common::color_format::{ALL_FORMATS, ALPHA_FORMATS, ChannelType};
+    use super::{ContrastBrightness, apply_typed};
+    use crate::common::color_format::{ALL_FORMATS, ALPHA_FORMATS, ChannelSize, ChannelType};
     use crate::common::image_diff::{max_pixel_diff, pixels_equal};
     use crate::common::test_utils::{create_test_image, load_lena_rgba_u8_61x38};
     use crate::image::Image;
@@ -1207,9 +992,9 @@ mod tests {
     fn test_no_change_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 17, 5, 0);
-            let mut output = Image::new_black(input.desc).unwrap();
+            let mut output = input.clone();
 
-            ContrastBrightness::new(1.0, 0.0).apply_cpu(&input, &mut output);
+            ContrastBrightness::new(1.0, 0.0).apply_cpu(&mut output);
 
             if format.channel_type == ChannelType::Float {
                 // F32 has tiny rounding errors from SIMD floating-point arithmetic
@@ -1235,9 +1020,9 @@ mod tests {
     fn test_alpha_preserved_all_formats() {
         for format in ALPHA_FORMATS {
             let input = create_test_image(*format, 16, 4, 0);
-            let mut output = Image::new_black(input.desc).unwrap();
+            let mut output = input.clone();
 
-            ContrastBrightness::new(2.0, 0.3).apply_cpu(&input, &mut output);
+            ContrastBrightness::new(2.0, 0.3).apply_cpu(&mut output);
 
             let channels = format.channel_count.channel_count() as usize;
             let channel_size = format.channel_size.byte_count() as usize;
@@ -1269,9 +1054,9 @@ mod tests {
     fn test_brightness_increase_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 8, 2, 0);
-            let mut output = Image::new_black(input.desc).unwrap();
+            let mut output = input.clone();
 
-            ContrastBrightness::new(1.0, 0.2).apply_cpu(&input, &mut output);
+            ContrastBrightness::new(1.0, 0.2).apply_cpu(&mut output);
 
             assert!(
                 pixels_changed(&input, &output),
@@ -1284,9 +1069,9 @@ mod tests {
     fn test_brightness_decrease_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 8, 2, 0);
-            let mut output = Image::new_black(input.desc).unwrap();
+            let mut output = input.clone();
 
-            ContrastBrightness::new(1.0, -0.2).apply_cpu(&input, &mut output);
+            ContrastBrightness::new(1.0, -0.2).apply_cpu(&mut output);
 
             assert!(
                 pixels_changed(&input, &output),
@@ -1303,9 +1088,9 @@ mod tests {
     fn test_contrast_increase_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 8, 2, 0);
-            let mut output = Image::new_black(input.desc).unwrap();
+            let mut output = input.clone();
 
-            ContrastBrightness::new(2.0, 0.0).apply_cpu(&input, &mut output);
+            ContrastBrightness::new(2.0, 0.0).apply_cpu(&mut output);
 
             assert!(
                 pixels_changed(&input, &output),
@@ -1318,9 +1103,9 @@ mod tests {
     fn test_contrast_decrease_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 8, 2, 0);
-            let mut output = Image::new_black(input.desc).unwrap();
+            let mut output = input.clone();
 
-            ContrastBrightness::new(0.5, 0.0).apply_cpu(&input, &mut output);
+            ContrastBrightness::new(0.5, 0.0).apply_cpu(&mut output);
 
             assert!(
                 pixels_changed(&input, &output),
@@ -1337,9 +1122,9 @@ mod tests {
     fn test_combined_adjustment_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 17, 5, 0);
-            let mut output = Image::new_black(input.desc).unwrap();
+            let mut output = input.clone();
 
-            ContrastBrightness::new(1.5, 0.1).apply_cpu(&input, &mut output);
+            ContrastBrightness::new(1.5, 0.1).apply_cpu(&mut output);
 
             assert!(
                 pixels_changed(&input, &output),
@@ -1357,9 +1142,9 @@ mod tests {
         for format in ALL_FORMATS {
             // Use odd dimensions to trigger scalar fallback
             let input = create_test_image(*format, 17, 7, 0);
-            let mut output = Image::new_black(input.desc).unwrap();
+            let mut output = input.clone();
 
-            ContrastBrightness::new(1.3, -0.05).apply_cpu(&input, &mut output);
+            ContrastBrightness::new(1.3, -0.05).apply_cpu(&mut output);
 
             assert!(
                 pixels_changed(&input, &output),
@@ -1376,10 +1161,10 @@ mod tests {
     fn test_clamp_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 4, 2, 0);
-            let mut output = Image::new_black(input.desc).unwrap();
+            let mut output = input.clone();
 
             // Extreme brightness to trigger clamping
-            ContrastBrightness::new(1.0, 1.0).apply_cpu(&input, &mut output);
+            ContrastBrightness::new(1.0, 1.0).apply_cpu(&mut output);
 
             // Should not panic and output should be valid
             assert!(
@@ -1387,12 +1172,72 @@ mod tests {
                 "clamp overflow test failed for format {format}"
             );
 
-            // Test underflow
-            ContrastBrightness::new(1.0, -1.0).apply_cpu(&input, &mut output);
+            // Test underflow, again from the pristine input
+            let mut output = input.clone();
+            ContrastBrightness::new(1.0, -1.0).apply_cpu(&mut output);
             assert!(
                 !output.bytes().is_empty(),
                 "clamp underflow test failed for format {format}"
             );
+        }
+    }
+
+    // ========================================================================
+    // SIMD vs scalar cross-check
+    // ========================================================================
+
+    #[test]
+    fn test_simd_matches_scalar_reference_all_formats() {
+        // Sweep contrast-only, brightness-only, combined, and clamp-heavy params;
+        // 17×5 exercises the SIMD tail (width not a multiple of any simd_width).
+        for format in ALL_FORMATS {
+            for (contrast, brightness) in [(2.0, 0.0), (1.0, 0.2), (1.5, 0.1), (0.5, -0.8)] {
+                let input = create_test_image(*format, 17, 5, 0);
+                let op = ContrastBrightness::new(contrast, brightness);
+
+                // The public path picks the SIMD kernel when one exists.
+                let mut actual = input.clone();
+                op.apply_cpu(&mut actual);
+
+                // The scalar reference, forced.
+                let mut expected = input.clone();
+                match (format.channel_size, format.channel_type) {
+                    (ChannelSize::_8bit, ChannelType::UInt) => {
+                        apply_typed::<u8>(&mut expected, op);
+                    }
+                    (ChannelSize::_16bit, ChannelType::UInt) => {
+                        apply_typed::<u16>(&mut expected, op);
+                    }
+                    (ChannelSize::_32bit, ChannelType::Float) => {
+                        apply_typed::<f32>(&mut expected, op);
+                    }
+                    _ => unreachable!("unsupported format in ALL_FORMATS"),
+                }
+
+                if format.channel_type == ChannelType::Float {
+                    // The SIMD kernels fuse the offset (`v*c + o` vs the reference's
+                    // `(v-mid)*c + mid + b`) and NEON's vmlaq is a fused multiply-add,
+                    // so float results differ by ulps — same epsilon as the
+                    // no-change test.
+                    let diff = max_pixel_diff(&expected, &actual);
+                    assert!(
+                        diff < 1e-6,
+                        "SIMD path diverges from the scalar reference for {format} \
+                         (contrast={contrast}, brightness={brightness}): diff={diff}"
+                    );
+                } else {
+                    assert!(
+                        pixels_equal(&expected, &actual),
+                        "SIMD path diverges from the scalar reference for {format} \
+                         (contrast={contrast}, brightness={brightness})"
+                    );
+                }
+                // Sanity: the sweep actually transformed the pixels.
+                assert!(
+                    pixels_changed(&input, &actual),
+                    "params ({contrast}, {brightness}) left {format} unchanged"
+                );
+            }
         }
     }
 
@@ -1403,9 +1248,9 @@ mod tests {
     #[test]
     fn test_large_image() {
         let input = load_lena_rgba_u8_61x38();
-        let mut output = Image::new_black(input.desc).unwrap();
+        let mut output = input.clone();
 
-        ContrastBrightness::new(1.2, 0.05).apply_cpu(&input, &mut output);
+        ContrastBrightness::new(1.2, 0.05).apply_cpu(&mut output);
 
         assert!(
             pixels_changed(&input, &output),
