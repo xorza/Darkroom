@@ -154,44 +154,40 @@ pub(crate) fn deinterleave_f32(image: &Image) -> Vec<Buffer2<f32>> {
     }
 }
 
-/// Run a per-channel operation that needs contiguous 2D planes: deinterleave the channels, process
-/// them in place, and re-interleave. For the spatial ops ([`crate::image_ops::denoise`],
-/// [`crate::image_ops::background_extraction`]) whose per-channel 2D work is cache-friendly on planar data.
-pub(crate) fn process_planes(image: &mut Image, process: impl FnOnce(&mut [Buffer2<f32>])) {
-    let mut planes = deinterleave_f32(image);
-    process(&mut planes);
-    interleave_into(image, &planes);
+/// Run a per-channel operation that needs a contiguous 2D plane, **one channel at a
+/// time**: gather the channel into a reused plane, process it, scatter it back. For the
+/// spatial ops ([`crate::image_ops::denoise`], [`crate::image_ops::background_extraction`])
+/// whose per-channel 2D work is cache-friendly on planar data. Streaming bounds the
+/// planar scratch at a single plane whatever the channel count — a full RGB deinterleave
+/// would hold three (~an extra full image resident).
+pub(crate) fn process_channels(image: &mut Image, mut process: impl FnMut(&mut Buffer2<f32>)) {
+    let channels = image.desc.color_format.channel_count.channel_count() as usize;
+    let mut plane = Buffer2::new_default(image.desc.width, image.desc.height);
+    for channel in 0..channels {
+        gather_channel(image, channel, channels, &mut plane);
+        process(&mut plane);
+        scatter_channel(image, channel, channels, &plane);
+    }
 }
 
-/// Re-interleave channel planes back into `image`'s existing buffer — the in-place counterpart of
-/// [`interleave_f32`], avoiding a full-image reallocation (and its first-touch page faults) on the
-/// hot op path. `planes` must match `image`'s channel count and dimensions.
-fn interleave_into(image: &mut Image, planes: &[Buffer2<f32>]) {
+/// Copy channel `channel` of the interleaved `image` into `plane`.
+fn gather_channel(image: &Image, channel: usize, channels: usize, plane: &mut Buffer2<f32>) {
+    let samples: &[f32] = bytemuck::cast_slice(image.bytes());
+    plane
+        .pixels_mut()
+        .par_iter_mut()
+        .zip(samples[channel..].par_iter().step_by(channels))
+        .for_each(|(p, &s)| *p = s);
+}
+
+/// Write `plane` back as channel `channel` of the interleaved `image`.
+fn scatter_channel(image: &mut Image, channel: usize, channels: usize, plane: &Buffer2<f32>) {
     let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
-    match planes {
-        [l] => {
-            samples
-                .par_iter_mut()
-                .zip(l.pixels().par_iter())
-                .for_each(|(s, &v)| *s = v);
-        }
-        [r, g, b] => {
-            samples
-                .par_chunks_mut(3)
-                .zip(r.pixels().par_iter())
-                .zip(g.pixels().par_iter())
-                .zip(b.pixels().par_iter())
-                .for_each(|(((px, &rv), &gv), &bv)| {
-                    px[0] = rv;
-                    px[1] = gv;
-                    px[2] = bv;
-                });
-        }
-        _ => panic!(
-            "interleave_into expects 1 (L) or 3 (RGB) planes, got {}",
-            planes.len()
-        ),
-    }
+    samples[channel..]
+        .par_iter_mut()
+        .step_by(channels)
+        .zip(plane.pixels().par_iter())
+        .for_each(|(s, &p)| *s = p);
 }
 
 /// Re-interleave channel planes (1 or 3) into a **new** f32 `Image` — used by the ML ops, whose
@@ -284,22 +280,35 @@ mod tests {
     }
 
     #[test]
-    fn interleave_into_writes_planes_back_in_place() {
-        // Scatter modified planes into a scratch image's existing buffer; both L and RGB.
-        let mut rgb = rgb_f32(2, 1, vec![0.0; 6]);
-        let r = Buffer2::new(2, 1, vec![0.1, 0.4]);
-        let g = Buffer2::new(2, 1, vec![0.2, 0.5]);
-        let b = Buffer2::new(2, 1, vec![0.3, 0.6]);
-        interleave_into(&mut rgb, &[r, g, b]);
+    fn process_channels_streams_each_channel_planar_and_in_order() {
+        // Dyadic values so the +1.0 edit is exact in f32.
+        let mut rgb = rgb_f32(2, 1, vec![0.125, 0.25, 0.375, 0.5, 0.625, 0.75]);
+        let mut seen = Vec::new();
+        process_channels(&mut rgb, |plane| {
+            seen.push(plane.pixels().to_vec());
+            for p in plane.pixels_mut() {
+                *p += 1.0;
+            }
+        });
+        // Each channel arrived as its contiguous plane, R then G then B...
+        assert_eq!(
+            seen,
+            [vec![0.125, 0.5], vec![0.25, 0.625], vec![0.375, 0.75]]
+        );
+        // ...and the edits landed back in the right interleaved slots.
         let out: &[f32] = bytemuck::cast_slice(rgb.bytes());
-        assert_eq!(out, &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]); // interleaved pixel order
+        assert_eq!(out, &[1.125, 1.25, 1.375, 1.5, 1.625, 1.75]);
 
         let mut l = Image::new_with_data(
             ImageDesc::new(3, 1, ColorFormat::L_F32),
-            bytemuck::cast_slice(&[0.0f32; 3]).to_vec(),
+            bytemuck::cast_slice(&[0.25f32, 0.5, 0.75]).to_vec(),
         )
         .unwrap();
-        interleave_into(&mut l, &[Buffer2::new(3, 1, vec![0.2, 0.5, 0.9])]);
-        assert_eq!(bytemuck::cast_slice::<u8, f32>(l.bytes()), &[0.2, 0.5, 0.9]);
+        process_channels(&mut l, |plane| {
+            for p in plane.pixels_mut() {
+                *p *= 2.0;
+            }
+        });
+        assert_eq!(bytemuck::cast_slice::<u8, f32>(l.bytes()), &[0.5, 1.0, 1.5]);
     }
 }

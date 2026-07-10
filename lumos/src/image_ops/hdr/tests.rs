@@ -1,6 +1,7 @@
 use super::Hdr;
 use crate::image_ops::deinterleave_f32;
 use crate::image_ops::op::OpError;
+use crate::image_ops::wavelet::atrous_smooth;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
@@ -112,6 +113,54 @@ fn hdr_preserves_fine_detail() {
         tex_out > 0.5 * tex_in,
         "fine detail preserved: {tex_out} vs {tex_in}"
     );
+}
+
+/// The literal reference: materialize every detail layer, flatten the residual toward its
+/// mean, re-sum — the computation `hdr_map` collapses algebraically.
+fn reference_hdr(px: &[f32], w: usize, h: usize, scales: usize, amount: f32) -> Vec<f32> {
+    let mut c_curr = Buffer2::new(w, h, px.to_vec());
+    let mut c_next = Buffer2::new_default(w, h);
+    let mut tmp = Buffer2::new_default(w, h);
+    let mut layers: Vec<Vec<f32>> = Vec::new();
+    for j in 0..scales {
+        atrous_smooth(&c_curr, &mut c_next, &mut tmp, 1 << j);
+        layers.push(
+            c_curr
+                .pixels()
+                .iter()
+                .zip(c_next.pixels())
+                .map(|(&c, &n)| c - n)
+                .collect(),
+        );
+        std::mem::swap(&mut c_curr, &mut c_next);
+    }
+    let residual = c_curr.pixels();
+    let mean = residual.iter().sum::<f32>() / residual.len() as f32;
+    let keep = 1.0 - amount;
+    (0..w * h)
+        .map(|i| {
+            let flattened = mean + keep * (residual[i] - mean);
+            let details: f32 = layers.iter().map(|l| l[i]).sum();
+            (flattened + details).clamp(0.0, 1.0)
+        })
+        .collect()
+}
+
+#[test]
+fn hdr_matches_explicit_pyramid_reference() {
+    let (w, h) = (64, 48);
+    let (scales, amount) = (3, 0.6);
+    let px = dome(w, h);
+    let mut img = gray(w, h, px.clone());
+    Hdr { scales, amount }.apply(&mut img).unwrap();
+    let out = channel(&img, 0);
+    let expected = reference_hdr(&px, w, h, scales, amount);
+    for (o, e) in out.pixels().iter().zip(&expected) {
+        assert!(
+            (o - e).abs() < 1e-5,
+            "collapsed formula matches the layer pyramid: {o} vs {e}"
+        );
+    }
 }
 
 #[test]

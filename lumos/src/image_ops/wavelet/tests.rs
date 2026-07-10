@@ -1,4 +1,4 @@
-use super::{StarletTransform, atrous_smooth, max_scales, reflect};
+use super::{atrous_smooth, max_scales, reflect};
 use imaginarium::Buffer2;
 
 fn pattern(width: usize, height: usize) -> Buffer2<f32> {
@@ -57,13 +57,32 @@ fn atrous_smooth_preserves_constant() {
 }
 
 #[test]
-fn starlet_reconstructs_exactly() {
-    // image == residual + Σ layers (telescoping), within f32 rounding.
+fn starlet_details_telescope_exactly() {
+    // The starlet identity `image == c_J + Σ (c_j − c_{j+1})`, within f32 rounding.
+    // Both consumers (denoise, hdr) stream the transform and lean on this identity
+    // instead of materializing layers — pin it against `atrous_smooth` directly.
     let img = pattern(17, 13);
-    let t = StarletTransform::forward(&img, 4);
-    assert_eq!(t.layers.len(), 4);
-    let recon = t.reconstruct();
-    for (a, b) in recon.pixels().iter().zip(img.pixels()) {
-        assert!((a - b).abs() < 1e-4, "reconstruct {a} vs input {b}");
+    let mut c_curr = img.clone();
+    let mut c_next = Buffer2::new_default(17, 13);
+    let mut tmp = Buffer2::new_default(17, 13);
+    let mut details_sum = vec![0.0f32; 17 * 13];
+    for j in 0..4 {
+        atrous_smooth(&c_curr, &mut c_next, &mut tmp, 1 << j);
+        for ((s, &c), &n) in details_sum
+            .iter_mut()
+            .zip(c_curr.pixels())
+            .zip(c_next.pixels())
+        {
+            *s += c - n;
+        }
+        std::mem::swap(&mut c_curr, &mut c_next);
+    }
+    for ((&orig, &residual), &details) in img.pixels().iter().zip(c_curr.pixels()).zip(&details_sum)
+    {
+        let recon = residual + details;
+        assert!(
+            (recon - orig).abs() < 1e-4,
+            "residual + Σ details reconstructs: {recon} vs {orig}"
+        );
     }
 }

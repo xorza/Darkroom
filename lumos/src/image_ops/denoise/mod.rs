@@ -13,7 +13,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::image_ops::op::{OpError, ensure, require_f32_master};
-use crate::image_ops::process_planes;
+use crate::image_ops::process_channels;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
 use imaginarium::Image;
@@ -122,7 +122,19 @@ impl Denoise {
     pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
         self.validate()?;
         require_f32_master(image)?;
-        process_planes(image, |planes| denoise_core(planes, self));
+        let (width, height) = (image.desc.width, image.desc.height);
+        let scales = self.scales.min(max_scales(width, height));
+        let mut scratch = DenoiseScratch::new(width, height);
+        process_channels(image, |plane| {
+            denoise_plane(
+                plane,
+                scales,
+                self.k,
+                self.threshold,
+                self.strength,
+                &mut scratch,
+            );
+        });
         Ok(())
     }
 
@@ -136,23 +148,6 @@ impl Denoise {
         ensure((0.0..=1.0).contains(&self.strength), || {
             format!("denoise strength must be in [0, 1], got {}", self.strength)
         })
-    }
-}
-
-/// Denoise each channel plane (1 for L, 3 for RGB), reusing one scratch arena.
-fn denoise_core(planes: &mut [Buffer2<f32>], config: &Denoise) {
-    let (width, height) = (planes[0].width(), planes[0].height());
-    let scales = config.scales.min(max_scales(width, height));
-    let mut scratch = DenoiseScratch::new(width, height);
-    for plane in planes.iter_mut() {
-        denoise_plane(
-            plane,
-            scales,
-            config.k,
-            config.threshold,
-            config.strength,
-            &mut scratch,
-        );
     }
 }
 

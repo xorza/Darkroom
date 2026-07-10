@@ -18,7 +18,7 @@ use rayon::prelude::*;
 
 use crate::background_mesh::TileGrid;
 use crate::image_ops::op::{OpError, ensure, require_f32_master};
-use crate::image_ops::process_planes;
+use crate::image_ops::process_channels;
 use crate::math::statistics::MAD_TO_SIGMA;
 use imaginarium::Image;
 
@@ -115,7 +115,7 @@ impl ExtractBackground {
     pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
         self.validate()?;
         require_f32_master(image)?;
-        process_planes(image, |planes| extract_background_core(planes, self));
+        process_channels(image, |plane| extract_background_plane(plane, self));
         Ok(())
     }
 
@@ -135,41 +135,25 @@ impl ExtractBackground {
     }
 }
 
-/// The per-channel background fit + removal, over channel planes (1 for L, 3 for RGB).
-fn extract_background_core(planes: &mut [Buffer2<f32>], config: &ExtractBackground) {
-    for plane in planes.iter_mut() {
-        let model = model_channel(plane, config);
-        match config.mode {
-            BackgroundMode::Subtract => {
-                plane
-                    .pixels_mut()
-                    .par_iter_mut()
-                    .zip(model.pixels().par_iter())
-                    .for_each(|(p, &m)| *p -= m);
-            }
-            BackgroundMode::Divide => {
-                let mean = mean_of(model.pixels());
-                if mean <= 0.0 {
-                    continue; // degenerate model (all ≤ 0) — leave the channel untouched
-                }
-                let floor = config.divide_floor;
-                plane
-                    .pixels_mut()
-                    .par_iter_mut()
-                    .zip(model.pixels().par_iter())
-                    .for_each(|(p, &m)| *p /= (m / mean).max(floor));
-            }
-        }
-    }
-}
-
-/// The fitted background surface for a single channel, as a full-resolution plane.
-fn model_channel(channel: &Buffer2<f32>, config: &ExtractBackground) -> Buffer2<f32> {
-    let (w, h) = (channel.width(), channel.height());
-    let samples = collect_samples(channel, config.tile_size);
+/// Fit and remove the background surface of one channel plane, in place. The model is
+/// evaluated on the fly inside the removal pass ([`Surface::remove`]) — a degree ≤ 4
+/// polynomial needs no full-resolution model plane.
+fn extract_background_plane(plane: &mut Buffer2<f32>, config: &ExtractBackground) {
+    let samples = collect_samples(plane, config.tile_size);
     let terms = poly_terms(effective_degree(samples.len(), config.degree));
     let coeffs = fit_surface(&samples, &terms, config.rejection_sigma, config.iterations);
-    evaluate_plane(&coeffs, &terms, w, h)
+    let surface = Surface::new(&coeffs, &terms, plane.width(), plane.height());
+    match config.mode {
+        BackgroundMode::Subtract => surface.remove(plane, |p, m| p - m),
+        BackgroundMode::Divide => {
+            let mean = surface.mean();
+            if mean <= 0.0 {
+                return; // degenerate model (mean ≤ 0) — leave the channel untouched
+            }
+            let (mean, floor) = (mean as f32, config.divide_floor);
+            surface.remove(plane, |p, m| p / (m / mean).max(floor));
+        }
+    }
 }
 
 /// One robust sky sample per tile, at the tile centre, with coordinates normalized to `[-1, 1]`.
@@ -315,57 +299,111 @@ fn median_f64(v: &mut [f64]) -> f64 {
     }
 }
 
-/// Render the fitted polynomial to a full-resolution plane, parallel over rows.
+/// The fitted polynomial surface, packed for fast on-the-fly evaluation.
 ///
 /// Rather than re-evaluate the bivariate polynomial per pixel (a `powi` per term), the coefficients
 /// are packed into a `(degree+1)²` matrix `C[i][j]`. For each row `y` the powers `y^j` collapse `C`
 /// into a 1-D polynomial in `x` (`b[i] = Σ_j C[i][j]·y^j`), which every pixel in the row evaluates by
-/// Horner — `degree` fused multiply-adds, no `powi`.
-fn evaluate_plane(coeffs: &DVector<f64>, terms: &[(u32, u32)], w: usize, h: usize) -> Buffer2<f32> {
-    let degree = terms
-        .iter()
-        .map(|&(i, j)| (i + j) as usize)
-        .max()
-        .unwrap_or(0);
-    // `effective_degree` caps the surface at 4, so `degree + 1 ≤ 5` rows/cols fit fixed buffers.
-    assert!(degree <= 4, "background surface degree {degree} exceeds 4");
-    let d1 = degree + 1;
-    let mut c_mat = [0.0f64; 25]; // (degree+1)² ≤ 25, row-major `[i*d1 + j]`
-    for (&(i, j), &c) in terms.iter().zip(coeffs.iter()) {
-        c_mat[i as usize * d1 + j as usize] = c;
+/// Horner — `degree` fused multiply-adds, no `powi`, and no full-resolution model plane.
+struct Surface {
+    /// Row-major `C[i*d1 + j]` for the monomials `x^i·y^j`; `(degree+1)² ≤ 25`.
+    c_mat: [f64; 25],
+    degree: usize,
+    width: usize,
+    height: usize,
+}
+
+impl Surface {
+    fn new(coeffs: &DVector<f64>, terms: &[(u32, u32)], width: usize, height: usize) -> Self {
+        let degree = terms
+            .iter()
+            .map(|&(i, j)| (i + j) as usize)
+            .max()
+            .unwrap_or(0);
+        // `effective_degree` caps the surface at 4, so `degree + 1 ≤ 5` fits fixed buffers.
+        assert!(degree <= 4, "background surface degree {degree} exceeds 4");
+        let d1 = degree + 1;
+        let mut c_mat = [0.0f64; 25];
+        for (&(i, j), &c) in terms.iter().zip(coeffs.iter()) {
+            c_mat[i as usize * d1 + j as usize] = c;
+        }
+        Self {
+            c_mat,
+            degree,
+            width,
+            height,
+        }
     }
 
-    let mut px = vec![0.0f32; w * h];
-    px.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
-        let ny = norm(y as f64, h);
+    /// Collapse the y dimension for row `y`: `b[i] = Σ_j C[i][j]·y^j`.
+    fn row_coeffs(&self, y: usize) -> [f64; 5] {
+        let d1 = self.degree + 1;
+        let ny = norm(y as f64, self.height);
         let mut yp = [0.0f64; 5];
         yp[0] = 1.0;
         for j in 1..d1 {
             yp[j] = yp[j - 1] * ny;
         }
-        // Collapse the y dimension: b[i] = Σ_j C[i][j]·y^j.
         let mut b = [0.0f64; 5];
-        for i in 0..d1 {
-            b[i] = (0..d1).map(|j| c_mat[i * d1 + j] * yp[j]).sum();
+        for (i, b_i) in b[..d1].iter_mut().enumerate() {
+            *b_i = (0..d1).map(|j| self.c_mat[i * d1 + j] * yp[j]).sum();
         }
-        for (x, p) in row.iter_mut().enumerate() {
-            let nx = norm(x as f64, w);
-            let mut acc = b[degree];
-            for i in (0..degree).rev() {
-                acc = acc * nx + b[i];
+        b
+    }
+
+    /// Rewrite every pixel as `remove(pixel, model)`, evaluating the surface on the fly,
+    /// parallel over rows.
+    fn remove(&self, plane: &mut Buffer2<f32>, remove: impl Fn(f32, f32) -> f32 + Sync) {
+        let (w, degree) = (self.width, self.degree);
+        plane
+            .pixels_mut()
+            .par_chunks_mut(w)
+            .enumerate()
+            .for_each(|(y, row)| {
+                let b = self.row_coeffs(y);
+                for (x, p) in row.iter_mut().enumerate() {
+                    let nx = norm(x as f64, w);
+                    let mut acc = b[degree];
+                    for i in (0..degree).rev() {
+                        acc = acc * nx + b[i];
+                    }
+                    *p = remove(*p, acc as f32);
+                }
+            });
+    }
+
+    /// Mean of the surface over the pixel grid, exact in `O(w + h)`: the monomials are
+    /// separable, so `mean = Σ C[i][j] · mean_x(x^i) · mean_y(y^j)`.
+    fn mean(&self) -> f64 {
+        let d1 = self.degree + 1;
+        let mx = axis_moments(self.width, d1);
+        let my = axis_moments(self.height, d1);
+        let mut mean = 0.0;
+        for (i, &mx_i) in mx[..d1].iter().enumerate() {
+            for (j, &my_j) in my[..d1].iter().enumerate() {
+                mean += self.c_mat[i * d1 + j] * mx_i * my_j;
             }
-            *p = acc as f32;
         }
-    });
-    Buffer2::new(w, h, px)
+        mean
+    }
 }
 
-fn mean_of(px: &[f32]) -> f32 {
-    if px.is_empty() {
-        0.0
-    } else {
-        px.iter().sum::<f32>() / px.len() as f32
+/// Per-axis moments `mean(t^i)` for `i < d1` of the normalized coordinate over an
+/// `n`-pixel axis.
+fn axis_moments(n: usize, d1: usize) -> [f64; 5] {
+    let mut moments = [0.0f64; 5];
+    for k in 0..n {
+        let t = norm(k as f64, n);
+        let mut p = 1.0;
+        for moment in moments[..d1].iter_mut() {
+            *moment += p;
+            p *= t;
+        }
     }
+    for moment in &mut moments {
+        *moment /= n as f64;
+    }
+    moments
 }
 
 #[cfg(test)]

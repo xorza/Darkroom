@@ -3,13 +3,15 @@
 //! Reveal detail in an overexposed bright region (galaxy/nebula cores, Milky-Way star clouds) by
 //! compressing the **large-scale** brightness while preserving fine detail: à trous starlet
 //! decomposition, attenuate the coarse residual toward its mean, leave the detail layers, recombine.
-//! A **display-domain** (post-stretch) operation. Reuses [`crate::image_ops::wavelet::StarletTransform`].
+//! A **display-domain** (post-stretch) operation, streaming
+//! [`crate::image_ops::wavelet::atrous_smooth`] — see [`hdr_map`] for why the layer pyramid is
+//! never materialized.
 
 use rayon::prelude::*;
 
 use crate::image_ops::op::{OpError, ensure, require_f32_master};
 use crate::image_ops::remap_intensity;
-use crate::image_ops::wavelet::{StarletTransform, max_scales};
+use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use imaginarium::{Buffer2, Image};
 
 #[cfg(test)]
@@ -76,19 +78,31 @@ impl Hdr {
 
 /// The starlet residual-flattening on the combined intensity plane; [`Hdr::apply`] computes the
 /// intensity, runs this, then remaps the image's channels to it.
+///
+/// The detail layers are untouched by this op, so with the exact starlet identity
+/// `intensity == residual + Σ layers` the reconstruction collapses algebraically:
+/// `residual′ + Σ layers = intensity − amount·(residual − mean)`. Only the smoothed
+/// residual is ever computed — a streaming à trous over three reused planes — never the
+/// layer pyramid (`scales` full planes at ~100 MB each on a real master).
 fn hdr_map(intensity: &Buffer2<f32>, config: &Hdr) -> Buffer2<f32> {
     let (w, h) = (intensity.width(), intensity.height());
     let scales = config.scales.min(max_scales(w, h));
-    let mut transform = StarletTransform::forward(intensity, scales);
 
-    // Flatten the large-scale residual toward its mean by `amount` (keep = 1 − amount of the
-    // deviation), leaving the detail layers untouched.
-    let residual = &mut transform.residual;
+    let mut c_curr = intensity.clone();
+    let mut c_next = Buffer2::new_default(w, h);
+    let mut tmp = Buffer2::new_default(w, h);
+    for j in 0..scales {
+        atrous_smooth(&c_curr, &mut c_next, &mut tmp, 1 << j);
+        std::mem::swap(&mut c_curr, &mut c_next);
+    }
+    let mut residual = c_curr;
+
     let mean = residual.pixels().iter().sum::<f32>() / residual.len() as f32;
-    let keep = 1.0 - config.amount;
+    let amount = config.amount;
     residual
         .pixels_mut()
         .par_iter_mut()
-        .for_each(|v| *v = mean + keep * (*v - mean));
-    transform.reconstruct()
+        .zip(intensity.pixels().par_iter())
+        .for_each(|(r, &i)| *r = i - amount * (*r - mean));
+    residual
 }
