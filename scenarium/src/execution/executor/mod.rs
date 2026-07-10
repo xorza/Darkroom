@@ -82,11 +82,18 @@ pub(crate) struct Executor {
     /// it's the [`OutputUsage`] a lambda reads to skip unwanted outputs (still at its initial
     /// value when the node runs, since producers run before their consumers), and it counts
     /// *down* as each running consumer reads a bound producer — an output reaching `Skip`
-    /// (zero left) is spent, so its value is cleared one output at a time and, once every
-    /// output of the node is spent, the whole slot is reclaimed
+    /// (zero left) is spent, so a non-retained node's value is cleared one output at a time
+    /// and, once every output is spent, its whole slot is reclaimed
     /// ([`RuntimeCache::reclaim_slot`]) to trim peak RAM instead of holding it to end-of-run
     /// eviction. Reused across runs, reset each run.
     output_usage: Vec<OutputUsage>,
+    /// The run's retention policy, per node: `true` when the outputs must stay resident —
+    /// the node's mode caches in RAM (`Ram`/`Both`) or it's a node-seeded preview root
+    /// (`plan.pinned`). The single predicate every free/keep decision consults: the
+    /// move-on-last-use take, the spent-output release, the post-invoke drain reclaim
+    /// (all in this module), and the engine's end-of-run
+    /// [`evict_unused`](RuntimeCache::evict_unused). Reused across runs, rebuilt each run.
+    pub(crate) retain: NodeColumn<bool>,
     /// Per-run outcome per node (see [`NodeOutcome`]), indexed by `e_node_idx`. Reused
     /// across runs, reset to node count each run. The one per-node result column.
     outcomes: NodeColumn<NodeOutcome>,
@@ -130,9 +137,18 @@ impl Executor {
         self.outcomes
             .reset(program.e_nodes.len(), NodeOutcome::Pending);
 
+        // Build the run's retention policy (see the field doc): RAM-caching mode or pinned.
+        self.retain.reset(program.e_nodes.len(), false);
+        for idx in program.node_indices() {
+            self.retain[idx] = program.e_nodes[idx].cache.caches_in_ram();
+        }
+        for &idx in &plan.pinned {
+            self.retain[idx] = true;
+        }
+
         // Seed the run's live per-output consumer counts from the plan (`0` ⇒ `Skip`, the
         // lambda-facing "nobody reads this output"; `> 0` ⇒ `Needed`). This same column is
-        // counted down as consumers read, freeing each spent output (see `collect_inputs` and
+        // counted down as consumers read, marking each spent output (see `collect_inputs` and
         // the post-invoke release below).
         self.output_usage.clear();
         self.output_usage.extend(plan.output_usage.iter().map(|&c| {
@@ -142,6 +158,16 @@ impl Executor {
                 OutputUsage::Needed(c)
             }
         }));
+        // A pinned root's outputs have a real reader *after* the run — the preview fetch —
+        // so an output with zero in-run consumers still seeds `Needed(1)`: a usage-honoring
+        // lambda must compute it. Keeping the value is `retain`'s concern, not the count's.
+        for &idx in &plan.pinned {
+            for usage in &mut self.output_usage[program.e_nodes[idx].outputs.range()] {
+                if *usage == OutputUsage::Skip {
+                    *usage = OutputUsage::Needed(1);
+                }
+            }
+        }
 
         // The schedule is `process_order` (all reachable, producer-first). A
         // `MissingInputs` node can't run, so it's skipped here rather than pruned by a
@@ -229,6 +255,7 @@ impl Executor {
                 program,
                 cache,
                 &mut self.output_usage,
+                &self.retain,
                 e_node_idx,
                 &mut self.inputs,
             )
@@ -332,11 +359,10 @@ impl Executor {
                     .store_node(program, e_node_idx, &mut self.ctx_manager)
                     .await;
                 // A node no consumer reads (a terminal sink, or every output already `Skip`) is
-                // spent the instant it's stored — reclaim its non-RAM slot now rather than
-                // holding it to end-of-run eviction. A node that still owes reads is reclaimed
-                // later, in `collect_inputs`, when its last consumer lands.
-                if !e_node.cache.caches_in_ram()
-                    && node_drained(program, &self.output_usage, e_node_idx)
+                // spent the instant it's stored — reclaim its non-retained slot now rather
+                // than holding it to end-of-run eviction. A node that still owes reads is
+                // reclaimed later, in `collect_inputs`, when its last consumer lands.
+                if !self.retain[e_node_idx] && node_drained(program, &self.output_usage, e_node_idx)
                 {
                     cache.reclaim_slot(program, e_node_idx);
                 }
@@ -405,6 +431,7 @@ async fn collect_inputs(
     program: &ExecutionProgram,
     cache: &mut RuntimeCache,
     output_usage: &mut [OutputUsage],
+    retain: &NodeColumn<bool>,
     e_node_idx: NodeIdx,
     inputs: &mut Vec<InvokeInput>,
 ) -> Result<(), RunError> {
@@ -422,13 +449,13 @@ async fn collect_inputs(
                 // one leaves the slot empty and drops this consumer for the run.
                 cache.hydrate_slot(program, target).await;
                 let out_idx = program.e_nodes[target].outputs.start as usize + port;
-                // Move-on-last-use: on a non-RAM output's last read the release below
+                // Move-on-last-use: on a non-retained output's last read the release below
                 // drops the RAM copy anyway, so hand the consumer the slot's value
                 // itself — it becomes the sole `Arc` holder and `into_custom` can
-                // reuse the allocation in place. A RAM-retaining or still-owed output
+                // reuse the allocation in place. A retained or still-owed output
                 // is cloned as before.
-                let take = matches!(output_usage[out_idx], OutputUsage::Needed(1))
-                    && !program.e_nodes[target].cache.caches_in_ram();
+                let take =
+                    matches!(output_usage[out_idx], OutputUsage::Needed(1)) && !retain[target];
                 let Some(value) = cache.read_output_port(program, target, port, take) else {
                     return Err(RunError::InputLoadFailed {
                         func_id: program.e_nodes[e_node_idx].func_id,
@@ -441,7 +468,7 @@ async fn collect_inputs(
                 match output_usage[out_idx] {
                     OutputUsage::Needed(1) => {
                         output_usage[out_idx] = OutputUsage::Skip;
-                        release_spent_output(program, cache, output_usage, target, port);
+                        release_spent_output(program, cache, output_usage, retain, target, port);
                     }
                     OutputUsage::Needed(n) => output_usage[out_idx] = OutputUsage::Needed(n - 1),
                     OutputUsage::Skip => {
@@ -456,19 +483,20 @@ async fn collect_inputs(
     Ok(())
 }
 
-/// The last consumer of `target`'s output `port` just took its copy. A `Ram`/`Both` node
-/// stays hot for the next run; for a non-RAM one, that spent output is freed now rather than
-/// at end-of-run eviction — the whole slot reclaimed
+/// The last consumer of `target`'s output `port` just took its copy. A retained node
+/// (RAM-caching mode, or a pinned preview root) stays hot; for any other, that spent output
+/// is freed now rather than at end-of-run eviction — the whole slot reclaimed
 /// ([`RuntimeCache::reclaim_slot`], demoted to disk or dropped) once *every* output is spent,
 /// else just this one value cleared while sibling outputs are still owed to other consumers.
 fn release_spent_output(
     program: &ExecutionProgram,
     cache: &mut RuntimeCache,
     output_usage: &[OutputUsage],
+    retain: &NodeColumn<bool>,
     target: NodeIdx,
     port: usize,
 ) {
-    if program.e_nodes[target].cache.caches_in_ram() {
+    if retain[target] {
         return;
     }
     if node_drained(program, output_usage, target) {

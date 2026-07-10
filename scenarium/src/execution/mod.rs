@@ -348,9 +348,13 @@ impl ExecutionEngine {
 
         // Phase 3b: reclaim RAM from values this run left off the active frontier and that the
         // disk store (written per-node above) can serve again on demand. Reuses the resolver's
-        // disposition column — the same active-frontier set — rather than recomputing a keep-set.
-        self.cache
-            .evict_unused(&self.program, &self.resolver.disposition);
+        // disposition column (the active-frontier set) and the executor's retention policy
+        // (RAM modes + pinned preview roots) rather than recomputing either.
+        self.cache.evict_unused(
+            &self.program,
+            &self.resolver.disposition,
+            &self.executor.retain,
+        );
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.

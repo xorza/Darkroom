@@ -490,38 +490,35 @@ impl RuntimeCache {
         }
     }
 
-    /// After a run, reclaim RAM the run's cache modes don't call for holding. A non-RAM value
-    /// whose consumers all ran was already released mid-run the moment its last consumer read it
-    /// (the executor's [`reclaim_slot`](Self::reclaim_slot) call); this end-of-run sweep covers
-    /// the rest — prior-run leftovers this run never touched (e.g. a cached value that fell
-    /// *behind* the frontier when a downstream node became a disk hit), and a non-RAM value some
-    /// consumer didn't reach (so its outputs never all went spent).
+    /// After a run, reclaim RAM the run's retention policy doesn't call for holding. A
+    /// non-retained value whose consumers all ran was already released mid-run the moment its
+    /// last consumer read it (the executor's [`reclaim_slot`](Self::reclaim_slot) call); this
+    /// end-of-run sweep covers the rest — prior-run leftovers this run never touched (e.g. a
+    /// cached value that fell *behind* the frontier when a downstream node became a disk hit),
+    /// and a non-retained value some consumer didn't reach (so its outputs never all went
+    /// spent).
     ///
-    /// `disposition` is the resolver's per-node column (reused here, not recomputed):
-    /// [`needed`](Disposition::needed) marks the active frontier — a node some running node
-    /// will read. A **RAM-retaining** node (`Ram`/`Both`) on that frontier stays resident
-    /// for next run's RAM hit; every other resident value goes through
-    /// [`reclaim_slot`](Self::reclaim_slot), which demotes a reloadable one to disk and
-    /// drops a non-RAM one (a non-reloadable `Ram`/`Both` leftover is kept, its mode's promise).
-    ///
-    /// `pinned` (the run's node-seeded preview roots) are kept resident regardless of cache
-    /// mode — a readable output was the point of their run. The pin lasts until a later
-    /// run's sweep, where an unchanged pinned value reads as a plain RAM hit.
+    /// Both columns are per-run state reused here, not recomputed: `disposition` is the
+    /// resolver's — [`needed`](Disposition::needed) marks the active frontier, a node some
+    /// running node will read — and `retain` is the executor's retention policy (RAM-caching
+    /// mode, or a pinned preview root whose readable output was the point of its run). A
+    /// retained node on the frontier stays resident for the next run's RAM hit; every other
+    /// resident value goes through [`reclaim_slot`](Self::reclaim_slot), which demotes a
+    /// reloadable one to disk and drops a non-RAM one (a non-reloadable `Ram`/`Both` leftover
+    /// is kept, its mode's promise).
     pub(crate) fn evict_unused(
         &mut self,
         program: &ExecutionProgram,
         disposition: &NodeColumn<Disposition>,
-        pinned: &[NodeIdx],
+        retain: &NodeColumn<bool>,
     ) {
         for idx in program.node_indices() {
             if self.slots[idx].output_values().is_none() {
                 continue;
             }
-            // A RAM-retaining node on the active frontier stays hot for the next run's RAM hit.
-            if program.e_nodes[idx].cache.caches_in_ram() && disposition[idx].needed() {
-                continue;
-            }
-            if pinned.contains(&idx) {
+            // A retained node on the active frontier stays hot for the next run's RAM hit.
+            // (A pinned root is always on the frontier — roots seed the disposition walk.)
+            if retain[idx] && disposition[idx].needed() {
                 continue;
             }
             self.reclaim_slot(program, idx);

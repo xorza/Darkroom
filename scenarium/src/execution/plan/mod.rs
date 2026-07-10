@@ -70,13 +70,13 @@ pub(crate) struct ExecutionPlan {
     /// cut seeds its `needed` mask from these and prunes any cone reachable only through
     /// cache-hit consumers (see [`Executor`](crate::execution::executor::Executor)).
     pub(crate) roots: Vec<NodeIdx>,
-    /// The node-seeded roots (on-demand preview targets), a subset of `roots`. A pinned
-    /// node's outputs gain one virtual consumer (so a lambda honoring
-    /// [`OutputUsage`](crate::node::func_lambda::OutputUsage) still computes them, and
-    /// the slot is never drained mid-run) and it is exempt from end-of-run eviction — a
-    /// seeded root has no real consumers, so without the pin its value would never
-    /// survive to be read back. Retention is all it takes for a repeated run to be a
-    /// RAM hit: the reuse check serves any resident digest-valid value.
+    /// The node-seeded roots (on-demand preview targets), a subset of `roots`. Pinning
+    /// feeds the executor's per-run retention policy (`Executor::retain`): the node's
+    /// outputs stay resident through every release/eviction site whatever its cache
+    /// mode, and an output with zero in-run consumers is still computed (its usage
+    /// floors at `Needed(1)` — the preview fetch reads it after the run). Retention is
+    /// all it takes for a repeated run to be a RAM hit: the reuse check serves any
+    /// resident digest-valid value.
     pub(crate) pinned: Vec<NodeIdx>,
 }
 

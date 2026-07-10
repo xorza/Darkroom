@@ -78,6 +78,13 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
         assert!(seen_in_order.insert(idx));
     }
 
+    // Eviction keeps a retained node only while it's on the frontier, which for a pinned
+    // preview root holds because every pinned node is a walk root (roots seed the
+    // disposition walk).
+    for idx in &plan.pinned {
+        assert!(plan.roots.contains(idx));
+    }
+
     // Per-node verdict consistency is unrepresentable by construction (`NodeVerdict` is a
     // plain enum of mutually exclusive states), so only binding bounds remain to check.
     for e_node in program.e_nodes.iter() {
