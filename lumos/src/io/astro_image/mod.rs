@@ -577,14 +577,13 @@ impl From<&Image> for AstroImage {
     fn from(image: &Image) -> Self {
         // Already f32: deinterleave straight from the borrow (one copy). A
         // non-f32 image is rare here (the processing path is RGB_F32) and needs
-        // a format conversion, which can't borrow — so clone then convert.
+        // a format conversion first — `convert_to` reads the borrow directly.
         let target = astro_target_format(image);
         if image.desc.color_format == target {
             astro_from_f32_image(image)
         } else {
             let converted = image
-                .clone()
-                .convert(target)
+                .convert_to(target)
                 .expect("Failed to convert image to f32");
             astro_from_f32_image(&converted)
         }
