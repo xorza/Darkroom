@@ -371,8 +371,14 @@ fn hash_fs_path_identity(hasher: &mut DigestHasher, path: &str) {
                 .write_pod(id.len)
                 .write_pod(id.mtime_ns);
         }
-        // Missing/unreadable — distinct from both a file and a dir. The path string
-        // is folded by the caller, so distinct missing paths stay distinct.
+        // Missing/unreadable is a *keyed state*, not an error: the digest's only
+        // job is to key world state, and "absent" is a legitimate one (a `NewFile`
+        // save target before its first run, a loader that tolerates absence).
+        // Judging it stays with the node's lambda — the marker guarantees a cache
+        // miss, the node runs, and a lambda that needs the file fails right there
+        // with per-node attribution. Distinct from both the file and dir arms; the
+        // path string is folded by the caller, so distinct missing paths stay
+        // distinct.
         Err(_) => {
             hasher.write_bytes(&[2]);
         }
@@ -382,10 +388,14 @@ fn hash_fs_path_identity(hasher: &mut DigestHasher, path: &str) {
 /// Fold a directory's immediate entries into `hasher` in a deterministic order:
 /// entry count, then each entry's name and `(len, mtime)`, sorted by name
 /// (`read_dir` order isn't stable across platforms). An unreadable directory folds
-/// only its (zero) count.
+/// a sentinel count no real directory can reach, keying it apart from a
+/// readable-but-empty one.
 fn hash_dir_entries(hasher: &mut DigestHasher, dir: &str) {
+    // `u64::MAX` as the count: a cached "empty dir" result must not keep being
+    // served once the directory turns unreadable (and vice versa) — both fold
+    // `[1]` + count, so the count is what keys them apart.
     let Ok(read) = std::fs::read_dir(dir) else {
-        hasher.write_pod(0u64);
+        hasher.write_pod(u64::MAX);
         return;
     };
     let mut entries: Vec<(String, FileId)> = read

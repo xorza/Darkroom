@@ -27,6 +27,24 @@ fn dir_fingerprint_tracks_entry_changes() {
         hasher.finish()
     };
 
+    // An empty directory and an unreadable one must key apart — otherwise a
+    // value cached against "empty" keeps being served after the directory
+    // turns unreadable (the sentinel-count fix in `hash_dir_entries`).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let empty = fingerprint(&path);
+        let perms = |mode: u32| std::fs::Permissions::from_mode(mode);
+        std::fs::set_permissions(&dir, perms(0o000)).unwrap();
+        let unreadable = fingerprint(&path);
+        std::fs::set_permissions(&dir, perms(0o755)).unwrap();
+        assert_ne!(
+            unreadable, empty,
+            "an unreadable directory keys apart from an empty one"
+        );
+        assert_eq!(fingerprint(&path), empty, "readable again folds as before");
+    }
+
     std::fs::write(dir.join("a.fits"), b"one").unwrap();
     let base = fingerprint(&path);
     assert_eq!(
