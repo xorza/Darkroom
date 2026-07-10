@@ -900,9 +900,18 @@ mod cache_persistence {
             let mut engine = disk_engine(&dir);
             engine.update(&graph, &lib).unwrap();
             let stats = engine.execute_terminals().await.unwrap();
+            // The consumer reports the real reason — a failed cache load on its input,
+            // not "an upstream dependency errored" (no upstream node holds an error).
+            let print_id = graph.by_name("Print").unwrap().id;
+            assert_eq!(stats.node_errors.len(), 1);
+            assert_eq!(stats.node_errors[0].node_id, print_id);
             assert!(
-                !stats.node_errors.is_empty(),
-                "a corrupt read surfaces as a node error, not a crash"
+                matches!(
+                    stats.node_errors[0].error,
+                    RunError::InputLoadFailed { input: 0, .. }
+                ),
+                "the skip carries the input-load reason, got: {:?}",
+                stats.node_errors[0].error
             );
         }
         assert!(!blob.exists(), "the corrupt blob was deleted");

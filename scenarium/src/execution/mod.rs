@@ -151,6 +151,12 @@ pub enum RunError {
     // the editor attributed to the node — a raw id in the text would be noise.
     #[error("skipped: an upstream dependency errored")]
     SkippedUpstream { func_id: FuncId },
+    /// A bound input's disk-cached value failed to load (corrupt/deleted blob).
+    /// Distinct from [`SkippedUpstream`](Self::SkippedUpstream): no upstream node
+    /// holds an error to point at. The bad blob is deleted on the failed read, so
+    /// the producer recomputes next run. `input` is the consumer's input position.
+    #[error("skipped: a cached input failed to load from disk (recomputes next run)")]
+    InputLoadFailed { func_id: FuncId, input: usize },
     #[error("cancelled before completing")]
     Cancelled { func_id: FuncId },
 }

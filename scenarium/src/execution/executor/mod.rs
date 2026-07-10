@@ -27,7 +27,6 @@ use crate::execution::stats::{
 };
 use crate::graph::InputPort;
 use crate::node::func_lambda::{InvokeError, InvokeInput, OutputUsage};
-use crate::node::function::FuncId;
 use crate::runtime::context::ContextManager;
 
 use crate::execution::cache::RuntimeCache;
@@ -206,16 +205,24 @@ impl Executor {
             let func_id = program.e_nodes[e_node_idx].func_id;
 
             if has_errored_dependency(program, &outcomes, e_node_idx) {
-                mark_skipped(cache, &mut outcomes, e_node_idx, func_id);
+                mark_skipped(
+                    cache,
+                    &mut outcomes,
+                    e_node_idx,
+                    RunError::SkippedUpstream { func_id },
+                );
                 continue;
             }
 
             // Load the node's inputs, pulling any disk-cached producer in on demand (the
             // lazy frontier read) and releasing each producer whose last read this
             // satisfies. A bound producer whose blob failed to load drops this node for
-            // the run like an errored dependency.
-            if !collect_inputs(program, cache, output_usage, e_node_idx, &mut inputs).await {
-                mark_skipped(cache, &mut outcomes, e_node_idx, func_id);
+            // the run under its own reason (`InputLoadFailed`) — unlike an errored
+            // dependency, there is no upstream error to point at.
+            if let Err(error) =
+                collect_inputs(program, cache, output_usage, e_node_idx, &mut inputs).await
+            {
+                mark_skipped(cache, &mut outcomes, e_node_idx, error);
                 continue;
             }
 
@@ -344,19 +351,18 @@ impl Executor {
     }
 }
 
-/// Drop node `idx` from this run as skipped-for-upstream: clear any stale cached output so
-/// it isn't served as this run's result, and record the outcome. Shared by the
-/// errored-dependency and failed-input-load paths, which are indistinguishable downstream.
+/// Drop node `idx` from this run: clear any stale cached output so it isn't served as
+/// this run's result, and record the outcome under the caller's reason —
+/// [`RunError::SkippedUpstream`] for an errored dependency, [`RunError::InputLoadFailed`]
+/// for a cached input that failed to load.
 fn mark_skipped(
     cache: &mut RuntimeCache,
     outcomes: &mut NodeColumn<NodeOutcome>,
     idx: NodeIdx,
-    func_id: FuncId,
+    error: RunError,
 ) {
     cache.slots[idx].clear_output();
-    outcomes[idx] = NodeOutcome::Skipped {
-        error: RunError::SkippedUpstream { func_id },
-    };
+    outcomes[idx] = NodeOutcome::Skipped { error };
 }
 
 fn has_errored_dependency(
@@ -370,21 +376,21 @@ fn has_errored_dependency(
     })
 }
 
-/// Resolve `e_node_idx`'s inputs into `inputs`. Returns `false` if a bound producer's
-/// value can't be materialized — its disk blob was reused-from-disk but failed to load
-/// (corrupt/deleted): [`hydrate_slot`](RuntimeCache::hydrate_slot) then removes the bad
-/// blob, so this run drops the consumer (like an errored dependency) and the next reopen
-/// recomputes the producer fresh. Any other missing value is a planner bug.
+/// Resolve `e_node_idx`'s inputs into `inputs`. Fails with [`RunError::InputLoadFailed`]
+/// if a bound producer's value can't be materialized — its disk blob was reused-from-disk
+/// but failed to load (corrupt/deleted): [`hydrate_slot`](RuntimeCache::hydrate_slot) then
+/// removes the bad blob, so this run drops the consumer and the next reopen recomputes the
+/// producer fresh. Any other missing value is a planner bug.
 async fn collect_inputs(
     program: &ExecutionProgram,
     cache: &mut RuntimeCache,
     output_usage: &mut [OutputUsage],
     e_node_idx: NodeIdx,
     inputs: &mut Vec<InvokeInput>,
-) -> bool {
+) -> Result<(), RunError> {
     inputs.clear();
     let span = program.e_nodes[e_node_idx].inputs;
-    for pool_idx in span.range() {
+    for (input_idx, pool_idx) in span.range().enumerate() {
         let value = match &program.inputs[pool_idx].binding {
             ExecutionBinding::None => DynamicValue::Unbound,
             ExecutionBinding::Const(v) => v.into(),
@@ -404,7 +410,10 @@ async fn collect_inputs(
                 let take = matches!(output_usage[out_idx], OutputUsage::Needed(1))
                     && !program.e_nodes[target].cache.caches_in_ram();
                 let Some(value) = cache.read_output_port(program, target, port, take) else {
-                    return false;
+                    return Err(RunError::InputLoadFailed {
+                        func_id: program.e_nodes[e_node_idx].func_id,
+                        input: input_idx,
+                    });
                 };
                 // Count this read against the producer's output. Each `Bind` edge was counted
                 // once in the plan's usage, so when this output's count reaches `Skip` every
@@ -424,7 +433,7 @@ async fn collect_inputs(
         };
         inputs.push(InvokeInput { value });
     }
-    true
+    Ok(())
 }
 
 /// The last consumer of `target`'s output `port` just took its copy. A `Ram`/`Both` node
