@@ -16,7 +16,6 @@
 //! value that exists only once its producers settle: the loop re-stamps it at reach time
 //! and serves the cache on a hit. The run loop otherwise walks the schedule unchanged.
 
-use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::sync::mpsc::UnboundedSender;
@@ -578,9 +577,6 @@ fn collect_execution_stats(
         node_errors,
         // Filled by `run` from the context manager's per-run buffer.
         logs: Vec::new(),
-        // Filled by `ExecutionEngine::execute` from the flatten pass; the executor
-        // doesn't know the authoring graph.
-        flatten: Arc::default(),
         // Set by `run` from the cancel flag after the loop.
         cancelled: false,
         // Stamped by `ExecutionEngine::execute` after end-of-run eviction, when

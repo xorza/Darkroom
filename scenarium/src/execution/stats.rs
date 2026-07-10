@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Instant;
 
 use hashbrown::HashMap;
@@ -185,13 +184,9 @@ pub struct ExecutionStats {
     pub node_errors: Vec<NodeError>,
     /// Log lines emitted by node lambdas this run, in emission order.
     /// Keyed by flattened node id; project via [`FlattenMap::attribution`].
+    /// The map itself isn't carried here — the host compiled the graph, so it
+    /// already holds the [`FlattenMap`] of the program these stats came from.
     pub logs: Vec<LogEntry>,
-    /// How the run's graph was flattened, so a UI can project the
-    /// flattened-id stats above back onto the authoring nodes the user
-    /// sees (including subgraph interiors + instances). Shared (`Arc`) because the
-    /// map is fixed between updates: every run of one compiled graph hands out the
-    /// same map by refcount bump rather than deep-cloning it.
-    pub flatten: Arc<FlattenMap>,
     /// The run was cancelled mid-flight: scheduling stopped before every
     /// node ran (the already-running node still completed). The stat lists
     /// reflect only what actually ran.

@@ -333,10 +333,6 @@ impl ExecutionEngine {
         stats.node_ram = self.cache.resident_ram_by_node();
 
         stats.triggered_events = seeds.events;
-        // Annotate with how the graph was flattened so the stats' flat ids
-        // can be projected back onto authoring nodes (the executor itself
-        // stays oblivious to the authoring graph).
-        stats.flatten = self.compiled.flatten_map.clone();
 
         Ok(stats)
     }
