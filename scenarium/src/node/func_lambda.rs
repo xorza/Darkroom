@@ -34,6 +34,10 @@ pub enum InvokeError {
 
 pub type InvokeResult<T> = Result<T, InvokeError>;
 
+/// One resolved input handed to a lambda. The slice is `&mut` so a lambda can
+/// `std::mem::take` a value it wants to own (the executor never reads `inputs`
+/// again after the invoke); a taken `Custom` value is uniquely held whenever the
+/// producer was non-RAM single-consumer (see the executor's move-on-last-use).
 #[derive(Debug)]
 pub struct InvokeInput {
     pub value: DynamicValue,
@@ -46,7 +50,7 @@ pub trait AsyncLambdaFn:
         &'a mut ContextManager,
         &'a mut AnyState,
         &'a SharedAnyState,
-        &'a [InvokeInput],
+        &'a mut [InvokeInput],
         &'a [OutputUsage],
         &'a mut [DynamicValue],
     ) -> AsyncLambdaFuture<'a>
@@ -61,7 +65,7 @@ impl<T> AsyncLambdaFn for T where
             &'a mut ContextManager,
             &'a mut AnyState,
             &'a SharedAnyState,
-            &'a [InvokeInput],
+            &'a mut [InvokeInput],
             &'a [OutputUsage],
             &'a mut [DynamicValue],
         ) -> AsyncLambdaFuture<'a>
@@ -97,7 +101,7 @@ impl FuncLambda {
         ctx_manager: &mut ContextManager,
         state: &mut AnyState,
         event_state: &SharedAnyState,
-        inputs: &[InvokeInput],
+        inputs: &mut [InvokeInput],
         output_usage: &[OutputUsage],
         outputs: &mut [DynamicValue],
     ) -> InvokeResult<()> {

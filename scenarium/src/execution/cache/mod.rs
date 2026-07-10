@@ -259,6 +259,31 @@ impl RuntimeCache {
         self.slots[idx].value = ValueState::OnDisk;
     }
 
+    /// Read producer `idx`'s output `port` for a consumer: a clone of the value, or — with
+    /// `take` — the value itself, moved out of the slot (leaving `Unbound`). The move is the
+    /// executor's last-read fast path for a non-RAM producer: the RAM copy would be released
+    /// right after anyway, and handing over the slot's copy leaves the consumer as the sole
+    /// `Arc` holder so [`DynamicValue::into_custom`] can reuse the allocation in place.
+    /// `None` when the slot holds no resident values (a failed hydrate).
+    pub(crate) fn read_output_port(
+        &mut self,
+        program: &ExecutionProgram,
+        idx: NodeIdx,
+        port: usize,
+        take: bool,
+    ) -> Option<DynamicValue> {
+        let arity = program.e_nodes[idx].outputs.len as usize;
+        let ValueState::Resident { values, .. } = &mut self.slots[idx].value else {
+            return None;
+        };
+        assert_eq!(values.len(), arity);
+        Some(if take {
+            std::mem::take(&mut values[port])
+        } else {
+            values[port].clone()
+        })
+    }
+
     /// Clear a single output value of a resident slot (to `Unbound`), keeping its siblings — the
     /// mid-run per-output release for a non-RAM producer whose one output just went spent while
     /// others are still owed to other consumers. No-op if the slot isn't resident or `port` is

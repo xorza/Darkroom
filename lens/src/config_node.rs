@@ -15,7 +15,7 @@
 
 use std::any::Any;
 use std::fmt;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use common::{FieldKind, FieldValue, Introspect};
 use scenarium::data::{CustomValue, DataType, DynamicValue, EnumVariants, StaticValue, TypeId};
@@ -44,6 +44,10 @@ impl<T: NodeConfig> CustomValue for ConfigValue<T> {
     }
 
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
         self
     }
 }

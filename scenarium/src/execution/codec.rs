@@ -165,6 +165,9 @@ mod tests {
         fn as_any(&self) -> &dyn Any {
             self
         }
+        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+            self
+        }
     }
 
     #[derive(Debug)]
@@ -204,6 +207,9 @@ mod tests {
             OPAQUE_TYPE.into()
         }
         fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
             self
         }
     }

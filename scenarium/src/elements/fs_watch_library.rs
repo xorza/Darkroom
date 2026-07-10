@@ -233,7 +233,7 @@ mod tests {
         path: &str,
         recursive: bool,
     ) -> DynamicValue {
-        let inputs = [
+        let mut inputs = [
             InvokeInput {
                 value: StaticValue::FsPath(path.to_string()).into(),
             },
@@ -247,7 +247,7 @@ mod tests {
         let usage = [OutputUsage::Needed(1)];
         let mut outputs = [DynamicValue::Unbound];
         lambda
-            .invoke(ctx, state, event_state, &inputs, &usage, &mut outputs)
+            .invoke(ctx, state, event_state, &mut inputs, &usage, &mut outputs)
             .await
             .unwrap();
         outputs[0].clone()

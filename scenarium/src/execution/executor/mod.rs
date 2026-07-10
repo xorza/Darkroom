@@ -246,7 +246,7 @@ impl Executor {
                         &mut self.ctx_manager,
                         slot.state,
                         &event_state,
-                        &inputs,
+                        &mut inputs,
                         usage,
                         slot.outputs,
                     )
@@ -395,17 +395,20 @@ async fn collect_inputs(
                 // now, the lazy frontier read. A resident value is a no-op load; a failed
                 // one leaves the slot empty and drops this consumer for the run.
                 cache.hydrate_slot(program, target).await;
-                let value = {
-                    let Some(outputs) = cache.slots[target].output_values() else {
-                        return false;
-                    };
-                    assert_eq!(outputs.len(), program.e_nodes[target].outputs.len as usize);
-                    outputs[port].clone()
+                let out_idx = program.e_nodes[target].outputs.start as usize + port;
+                // Move-on-last-use: on a non-RAM output's last read the release below
+                // drops the RAM copy anyway, so hand the consumer the slot's value
+                // itself — it becomes the sole `Arc` holder and `into_custom` can
+                // reuse the allocation in place. A RAM-retaining or still-owed output
+                // is cloned as before.
+                let take = matches!(output_usage[out_idx], OutputUsage::Needed(1))
+                    && !program.e_nodes[target].cache.caches_in_ram();
+                let Some(value) = cache.read_output_port(program, target, port, take) else {
+                    return false;
                 };
                 // Count this read against the producer's output. Each `Bind` edge was counted
                 // once in the plan's usage, so when this output's count reaches `Skip` every
                 // in-run consumer has read it and it's spent — freed one output at a time here.
-                let out_idx = program.e_nodes[target].outputs.start as usize + port;
                 match output_usage[out_idx] {
                     OutputUsage::Needed(1) => {
                         output_usage[out_idx] = OutputUsage::Skip;

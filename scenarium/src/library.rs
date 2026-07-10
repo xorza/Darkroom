@@ -281,7 +281,7 @@ mod tests {
                 &mut ctx_manager,
                 &mut node_state,
                 &event_state,
-                &inputs,
+                &mut inputs,
                 &outputs_meta,
                 &mut outputs,
             )
@@ -303,7 +303,7 @@ mod tests {
                 &mut ctx_manager,
                 &mut node_state,
                 &event_state,
-                &inputs,
+                &mut inputs,
                 &outputs_meta,
                 &mut outputs,
             )

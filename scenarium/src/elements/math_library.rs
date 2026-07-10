@@ -433,7 +433,7 @@ mod tests {
     ) -> Result<DynamicValue, InvokeError> {
         let lib = math_library();
         let func = lib.by_name(name).unwrap();
-        let inputs: Vec<InvokeInput> = input_values
+        let mut inputs: Vec<InvokeInput> = input_values
             .iter()
             .map(|v| InvokeInput { value: v.clone() })
             .collect();
@@ -444,7 +444,7 @@ mod tests {
                 &mut ContextManager::default(),
                 &mut AnyState::default(),
                 &SharedAnyState::default(),
-                &inputs,
+                &mut inputs,
                 &usage,
                 &mut outputs,
             )

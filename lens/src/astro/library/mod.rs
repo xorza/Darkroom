@@ -409,7 +409,7 @@ pub fn astro_library() -> Library {
                                 .map(|preset| preset.config())
                         })
                         .expect("stretch method is validated at the compile boundary");
-                    let value = inputs[0].value.clone();
+                    let value = std::mem::take(&mut inputs[0].value);
                     outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
 
                     Ok(())
@@ -520,7 +520,7 @@ pub fn astro_library() -> Library {
                             })
                     })
                     .expect("background config is validated at the compile boundary");
-                let value = inputs[0].value.clone();
+                let value = std::mem::take(&mut inputs[0].value);
                 outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
                 Ok(())
             })
@@ -554,7 +554,7 @@ pub fn astro_library() -> Library {
                             ..Default::default()
                         }
                     });
-                let value = inputs[0].value.clone();
+                let value = std::mem::take(&mut inputs[0].value);
                 outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
                 Ok(())
             })
@@ -585,7 +585,7 @@ pub fn astro_library() -> Library {
                             .map(|preset| preset.config())
                     })
                     .expect("scnr method is validated at the compile boundary");
-                let value = inputs[0].value.clone();
+                let value = std::mem::take(&mut inputs[0].value);
                 outputs[0] = run_frame_op(value, move |img| method.apply(img)).await?;
                 Ok(())
             })
@@ -600,7 +600,7 @@ pub fn astro_library() -> Library {
         vec![frame_input("Image")],
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
-                let value = inputs[0].value.clone();
+                let value = std::mem::take(&mut inputs[0].value);
                 outputs[0] = run_frame_op(value, |img| NeutralizeBackground.apply(img)).await?;
                 Ok(())
             })
@@ -634,7 +634,7 @@ pub fn astro_library() -> Library {
                             ..Default::default()
                         }
                     });
-                let value = inputs[0].value.clone();
+                let value = std::mem::take(&mut inputs[0].value);
                 outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
                 Ok(())
             })
@@ -668,7 +668,7 @@ pub fn astro_library() -> Library {
                             ..Default::default()
                         }
                     });
-                let value = inputs[0].value.clone();
+                let value = std::mem::take(&mut inputs[0].value);
                 outputs[0] = run_frame_op(value, move |img| config.apply(img)).await?;
                 Ok(())
             })
@@ -684,7 +684,7 @@ pub fn astro_library() -> Library {
         FuncLambda::new(move |_, _, _, inputs, _, outputs| {
             Box::pin(async move {
                 let model = ml_model_paths().denoise;
-                let out = run_ml(&inputs[0].value, move |img| {
+                let out = run_ml(std::mem::take(&mut inputs[0].value), move |img| {
                     ml_denoise(img, &TiledOnnxConfig::new(model))
                 })
                 .await?;
@@ -714,7 +714,7 @@ pub fn astro_library() -> Library {
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
                     let model = ml_model_paths().star_removal;
-                    let result = run_ml(&inputs[0].value, move |img| {
+                    let result = run_ml(std::mem::take(&mut inputs[0].value), move |img| {
                         remove_stars(img, &TiledOnnxConfig::new(model))
                     })
                     .await?;
@@ -807,7 +807,7 @@ async fn run_frame_op<F>(value: DynamicValue, op: F) -> Result<DynamicValue, any
 where
     F: FnOnce(&mut RawImage) -> Result<(), OpError> + Send + 'static,
 {
-    let cpu = image_to_cpu(&value)?;
+    let cpu = image_to_cpu(value)?;
     let out = tokio::task::spawn_blocking(move || {
         let mut cpu = cpu;
         op(&mut cpu)?;
@@ -822,7 +822,7 @@ where
 /// Run a caller-supplied ONNX op (`ml_denoise` / `remove_stars`) off the worker: pull the input
 /// `Image` to CPU, run `op` on a blocking thread (ONNX inference), and surface an [`MlError`]
 /// (missing model file, image smaller than the model window) as the node's error.
-async fn run_ml<R, F>(value: &DynamicValue, op: F) -> anyhow::Result<R>
+async fn run_ml<R, F>(value: DynamicValue, op: F) -> anyhow::Result<R>
 where
     F: FnOnce(&RawImage) -> Result<R, MlError> + Send + 'static,
     R: Send + 'static,
@@ -834,17 +834,26 @@ where
         .map_err(anyhow::Error::from) // model load / inference failure
 }
 
-/// Extract an owned CPU `imaginarium::Image` from a node's `Image` input.
-fn image_to_cpu(value: &DynamicValue) -> anyhow::Result<RawImage> {
-    let image = value
-        .as_custom::<Image>()
-        .expect("image input type is validated at the compile boundary");
+/// Extract an owned CPU `imaginarium::Image` from a node's `Image` input. A uniquely
+/// held input — the executor's move-on-last-use, the steady state for non-RAM astro
+/// chains — is consumed without a pixel copy: its buffer is taken whole. A shared one
+/// (RAM-cached producer, fan-out, in-flight inspection) falls back to deep-cloning the
+/// CPU view, so correctness never depends on the move.
+fn image_to_cpu(value: DynamicValue) -> anyhow::Result<RawImage> {
     let cpu = ProcessingContext::cpu_only();
-    Ok(image
-        .buffer
-        .make_cpu(&cpu)
-        .map_err(anyhow::Error::from)?
-        .clone())
+    match value.into_custom::<Image>() {
+        Ok(image) => image.buffer.to_cpu(&cpu).map_err(anyhow::Error::from),
+        Err(value) => {
+            let image = value
+                .as_custom::<Image>()
+                .expect("image input type is validated at the compile boundary");
+            Ok(image
+                .buffer
+                .make_cpu(&cpu)
+                .map_err(anyhow::Error::from)?
+                .clone())
+        }
+    }
 }
 
 /// Build (or load from cache) the four calibration masters for `dirs`

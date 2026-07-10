@@ -98,7 +98,7 @@ mod tests {
         let mut ctx = ContextManager::default();
         let mut state = AnyState::default();
         let event_state = SharedAnyState::default();
-        let inputs = [InvokeInput { value: a }, InvokeInput { value: b }];
+        let mut inputs = [InvokeInput { value: a }, InvokeInput { value: b }];
         let mut outputs = [DynamicValue::Unbound];
         concat
             .lambda
@@ -106,7 +106,7 @@ mod tests {
                 &mut ctx,
                 &mut state,
                 &event_state,
-                &inputs,
+                &mut inputs,
                 &[OutputUsage::Needed(1)],
                 &mut outputs,
             )

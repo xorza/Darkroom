@@ -115,6 +115,9 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
         fn as_any(&self) -> &dyn Any {
             self
         }
+        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+            self
+        }
         fn ram_bytes(&self) -> RamUsage {
             RamUsage {
                 cpu: self.cpu,

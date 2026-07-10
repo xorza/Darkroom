@@ -92,6 +92,12 @@ pub trait CustomValue: Send + Sync + Display + 'static {
     }
     fn as_any(&self) -> &dyn Any;
 
+    /// Owning counterpart of [`as_any`](Self::as_any), backing
+    /// [`DynamicValue::into_custom`]. Always `{ self }` — it can't be defaulted
+    /// because the unsize coercion needs `Self: Sized`, which would make the
+    /// method uncallable on `dyn CustomValue`.
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
+
     /// This value's resident RAM footprint, split into system RAM vs GPU VRAM.
     /// Defaults to zero; heavy payloads (image buffers, stacked frames) override
     /// it so the runtime cache can report how much memory its resident values
@@ -377,6 +383,27 @@ impl DynamicValue {
         }
     }
 
+    /// The custom value moved out of its `Arc` — the owning counterpart of
+    /// [`as_custom`](Self::as_custom), for consumers that want to reuse the
+    /// allocation in place. Succeeds only when this is a uniquely-held `Custom`
+    /// of type `T`; otherwise returns `self` unchanged so the caller can fall
+    /// back to cloning through the borrow. Must stay opportunistic: another
+    /// holder (a RAM-cached slot, a second consumer, an in-flight inspection)
+    /// legitimately keeps the `Arc` shared.
+    pub fn into_custom<T: CustomValue>(self) -> Result<T, Self> {
+        let DynamicValue::Custom(data) = self else {
+            return Err(self);
+        };
+        if data.as_any().downcast_ref::<T>().is_none() {
+            return Err(DynamicValue::Custom(data));
+        }
+        let typed = data
+            .into_any()
+            .downcast::<T>()
+            .expect("type checked just above");
+        Arc::try_unwrap(typed).map_err(|shared| DynamicValue::Custom(shared))
+    }
+
     /// This value as text for the `To String` node — the inner value's
     /// [`StaticValue::to_value_string`], a custom value's `Display`, or the
     /// empty string when unbound.
@@ -585,6 +612,26 @@ impl FromStr for DataType {
 mod tests {
     use super::*;
 
+    /// A tiny displayable custom value shared by the tests below.
+    #[derive(Debug)]
+    struct Tag(&'static str);
+    impl Display for Tag {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "tag:{}", self.0)
+        }
+    }
+    impl CustomValue for Tag {
+        fn type_id(&self) -> TypeId {
+            TypeId::from_u128(0xaa)
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+            self
+        }
+    }
+
     #[test]
     fn type_id_from_name_is_deterministic_namespaced_and_v5() {
         let ns1 = TypeId::from_u128(0x11);
@@ -750,25 +797,58 @@ mod tests {
         );
         assert_eq!(DynamicValue::Unbound.to_value_string(), "");
 
-        #[derive(Debug)]
-        struct Tag(&'static str);
-        impl Display for Tag {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "tag:{}", self.0)
-            }
-        }
-        impl CustomValue for Tag {
-            fn type_id(&self) -> TypeId {
-                TypeId::from_u128(0xaa)
-            }
-            fn as_any(&self) -> &dyn Any {
-                self
-            }
-        }
         assert_eq!(
             DynamicValue::from_custom(Tag("z")).to_value_string(),
             "tag:z"
         );
+    }
+
+    #[test]
+    fn into_custom_moves_unique_values_and_rejects_shared_or_foreign() {
+        // Unique holder: the value moves out of its Arc.
+        let unique = DynamicValue::from_custom(Tag("solo"));
+        assert_eq!(unique.into_custom::<Tag>().unwrap().0, "solo");
+
+        // A second Arc holder (a cached slot, another consumer) blocks the
+        // move; the value comes back unchanged and stays readable by borrow.
+        let first = DynamicValue::from_custom(Tag("shared"));
+        let second = first.clone();
+        let returned = first.into_custom::<Tag>().unwrap_err();
+        assert_eq!(returned.as_custom::<Tag>().unwrap().0, "shared");
+        // Once the other holder drops, the same value moves.
+        drop(second);
+        assert_eq!(returned.into_custom::<Tag>().unwrap().0, "shared");
+
+        // A wrong target type hands the value back untouched.
+        #[derive(Debug)]
+        struct Other;
+        impl Display for Other {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "other")
+            }
+        }
+        impl CustomValue for Other {
+            fn type_id(&self) -> TypeId {
+                TypeId::from_u128(0xbb)
+            }
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+            fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+                self
+            }
+        }
+        let typed = DynamicValue::from_custom(Tag("typed"));
+        let back = typed.into_custom::<Other>().unwrap_err();
+        assert_eq!(back.as_custom::<Tag>().unwrap().0, "typed");
+
+        // Non-custom values are handed back too.
+        let unbound = DynamicValue::Unbound.into_custom::<Tag>().unwrap_err();
+        assert!(matches!(unbound, DynamicValue::Unbound));
+        let stat = DynamicValue::Static(StaticValue::Int(1))
+            .into_custom::<Tag>()
+            .unwrap_err();
+        assert_eq!(stat.as_i64(), Some(1));
     }
 
     #[test]

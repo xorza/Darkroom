@@ -1216,6 +1216,9 @@ mod cache_persistence {
             fn as_any(&self) -> &dyn Any {
                 self
             }
+            fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+                self
+            }
         }
         #[derive(Debug)]
         struct BlobCodec;
@@ -4548,6 +4551,9 @@ mod mid_run_release {
         fn as_any(&self) -> &dyn Any {
             self
         }
+        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+            self
+        }
     }
 
     /// A `relay` (pure, custom→custom, emits a fresh `Tracked`) + a terminal `sink` that
@@ -4632,6 +4638,103 @@ mod mid_run_release {
             4,
             "Ram retains every stage for the whole run"
         );
+    }
+
+    const PROBE_FUNC: &str = "a19f251a-465c-4a05-b9e3-f4a4c2389733";
+
+    /// [`relay_library`] plus a `probe` terminal that takes its input value out of the
+    /// invoke buffer and records whether it was uniquely owned (`into_custom` succeeded)
+    /// — the observable contract of the executor's move-on-last-use.
+    fn probe_library(
+        tracker: Arc<StdMutex<LiveTracker>>,
+        unique_reads: Arc<StdMutex<Vec<bool>>>,
+    ) -> Library {
+        let mut library = relay_library(tracker);
+        library.add(
+            Func::new(PROBE_FUNC, "probe")
+                .category("Test")
+                .terminal()
+                .input(FuncInput::required(
+                    "in",
+                    DataType::Custom(TRACKED_TYPE.into()),
+                ))
+                .lambda(async_lambda!(
+                    move |_, _, _, inputs, _, _| { reads = unique_reads.clone() } => {
+                        let value = std::mem::take(&mut inputs[0].value);
+                        reads
+                            .lock()
+                            .unwrap()
+                            .push(value.into_custom::<Tracked>().is_ok());
+                        Ok(())
+                    }
+                )),
+        );
+        library
+    }
+
+    /// Each probe's ownership observation, in invocation order, plus what stayed live.
+    struct ProbeRun {
+        unique_reads: Vec<bool>,
+        live_after: usize,
+    }
+
+    /// Run `relay → n_probes × probe` with the relay in `relay_mode`.
+    async fn probe_run(relay_mode: CacheMode, n_probes: usize) -> ProbeRun {
+        let tracker = Arc::new(StdMutex::new(LiveTracker::default()));
+        let unique_reads = Arc::new(StdMutex::new(Vec::new()));
+        let library = probe_library(tracker.clone(), unique_reads.clone());
+
+        let relay_id = NodeId::unique();
+        let mut graph = Graph::default();
+        let mut relay = node(&library, "relay", relay_id);
+        relay.cache = relay_mode;
+        graph.add(relay);
+        for _ in 0..n_probes {
+            let probe_id = NodeId::unique();
+            graph.add(node(&library, "probe", probe_id));
+            graph.set_input_binding(InputPort::new(probe_id, 0), (relay_id, 0).into());
+        }
+        graph.validate();
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &library).unwrap();
+        engine.execute_terminals().await.unwrap();
+
+        ProbeRun {
+            unique_reads: unique_reads.lock().unwrap().clone(),
+            live_after: tracker.lock().unwrap().current,
+        }
+    }
+
+    /// Move-on-last-use: the last read of a non-RAM output hands the consumer the slot's
+    /// own value — uniquely held, so an owning `into_custom` succeeds without a copy — and
+    /// nothing stays live after the run. A RAM-cached producer keeps its slot copy, so the
+    /// same probe observes a shared value; with fan-out only the final read is the move.
+    #[tokio::test]
+    async fn last_read_of_non_ram_output_is_uniquely_owned() {
+        let run = probe_run(CacheMode::None, 1).await;
+        assert_eq!(
+            run.unique_reads,
+            [true],
+            "sole consumer of a None producer owns the value"
+        );
+        assert_eq!(run.live_after, 0, "moved value dropped with the probe");
+
+        let run = probe_run(CacheMode::Ram, 1).await;
+        assert_eq!(
+            run.unique_reads,
+            [false],
+            "the RAM slot keeps a second Arc holder"
+        );
+        assert_eq!(run.live_after, 1, "the RAM slot retains the value");
+
+        let run = probe_run(CacheMode::None, 2).await;
+        assert_eq!(
+            run.unique_reads,
+            [false, true],
+            "with fan-out only the last read is the move"
+        );
+        assert_eq!(run.live_after, 0, "both probe copies dropped by run end");
     }
 }
 

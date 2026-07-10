@@ -12,6 +12,41 @@ fn func<'a>(lib: &'a Library, name: &str) -> &'a Func {
         .unwrap_or_else(|| panic!("{name} registered"))
 }
 
+/// `image_to_cpu` consumes a uniquely-held input without copying pixels (the
+/// move-on-last-use fast path) and deep-clones a shared one — pointer identity of
+/// the pixel allocation tells the two apart.
+#[test]
+fn image_to_cpu_moves_unique_input_and_clones_shared() {
+    let desc = imaginarium::ImageDesc::new(4, 3, imaginarium::ColorFormat::L_F32);
+
+    let raw = RawImage::new_black(desc).unwrap();
+    let pixels = raw.bytes().as_ptr();
+    let unique = DynamicValue::from_custom(Image::from(raw));
+    let out = image_to_cpu(unique).unwrap();
+    assert_eq!(
+        out.bytes().as_ptr(),
+        pixels,
+        "unique input: the pixel allocation is moved, not copied"
+    );
+
+    let raw = RawImage::new_black(desc).unwrap();
+    let pixels = raw.bytes().as_ptr();
+    let shared = DynamicValue::from_custom(Image::from(raw));
+    let second_holder = shared.clone();
+    let out = image_to_cpu(shared).unwrap();
+    assert_ne!(
+        out.bytes().as_ptr(),
+        pixels,
+        "shared input: the pixels are deep-cloned"
+    );
+    assert_eq!(out.desc, desc);
+    let original = second_holder.as_custom::<Image>().unwrap();
+    assert_eq!(
+        original.buffer.desc, desc,
+        "the shared original stays intact behind the other holder"
+    );
+}
+
 #[test]
 fn astro_image_path_filter_matches_from_file_extensions() {
     let DataType::FsPath(cfg) = &*ASTRO_IMAGE_PATH_DATA_TYPE else {

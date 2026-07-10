@@ -10,7 +10,7 @@ pub(crate) mod vision_ctx;
 
 use std::any::Any;
 use std::ops::{Deref, DerefMut};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use common::Slot;
 use imaginarium::Preview;
@@ -59,6 +59,10 @@ impl CustomValue for Image {
     }
 
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
         self
     }
 
