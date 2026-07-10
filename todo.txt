@@ -8,4 +8,3 @@ save cahhce files by nodeid
 
 flattenmap from compile - not worker callback
 pub(crate) type SharedLibrary = Arc<ArcSwap<Library>>; - simplify?
-  self.push_status(format!("compile failed: {e}")); instead of eprintln

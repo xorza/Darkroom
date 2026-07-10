@@ -19,7 +19,6 @@
 //! and `execute` (phases 2–3, run back-to-back).
 
 use std::ops::{Index, IndexMut};
-use std::sync::Arc;
 
 use common::CancelToken;
 use serde::{Deserialize, Serialize};
@@ -28,7 +27,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::data::DynamicValue;
 use crate::execution::compile::CompiledGraph;
-use crate::execution::stats::{ExecutionStats, FlattenMap, RunProgress};
+use crate::execution::stats::{ExecutionStats, RunProgress};
 use crate::graph::NodeId;
 use crate::node::function::FuncId;
 
@@ -57,7 +56,7 @@ use executor::Executor;
 use plan::{ExecutionPlan, Planner};
 #[cfg(test)]
 use program::ExecutionNode;
-use program::{ExecutionProgram, NodeIdx};
+use program::NodeIdx;
 use resolve::Resolver;
 
 /// A per-node column: a `Vec<T>` addressable *only* by [`NodeIdx`], never a raw
@@ -214,11 +213,10 @@ pub(crate) struct RunSeeds {
 /// persistent form is the [`ExecutionProgram`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
-    pub(crate) program: ExecutionProgram,
-    /// How the installed program was flattened (authoring↔execution id map).
-    /// Arrives with each [`CompiledGraph`] and is handed to each run's
-    /// `ExecutionStats` by refcount bump.
-    flatten_map: Arc<FlattenMap>,
+    /// The installed compile artifact: the program plus its flatten map
+    /// (authoring↔execution id map, handed to each run's `ExecutionStats` by
+    /// refcount bump). Replaced wholesale by [`Self::install`].
+    pub(crate) compiled: CompiledGraph,
     /// Per-node cross-run cache (output values, digests, node state) plus the [`DiskStore`]
     /// backing it and the caching policy over both — reuse, hydration, persistence, eviction.
     /// The RAM slots are reconciled to the node set at each `update`; the disk store is set via
@@ -237,16 +235,15 @@ impl ExecutionEngine {
     // === Accessors ===
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.program.e_nodes.is_empty()
+        self.compiled.program.e_nodes.is_empty()
     }
 
     // === State Management ===
 
     pub(crate) fn clear(&mut self) {
-        self.program.clear();
+        self.compiled = CompiledGraph::default();
         self.plan.clear();
         self.cache.clear();
-        self.flatten_map = Arc::default();
     }
 
     /// Swap the [`DiskStore`] — the library snapshot (its type table supplies
@@ -259,35 +256,23 @@ impl ExecutionEngine {
         self.cache.disk_store = disk_store;
     }
 
-    // === Phase 1: compile ===
+    // === Phase 1: install the compile artifact ===
 
-    pub(crate) fn update(&mut self, graph: &Graph, library: &Library) -> Result<()> {
-        // Validate the graph against the library before touching any state.
-        // The graph+library pair is untrusted input here (a document can be
-        // stale against an evolved library — a dropped func, a shrunk port
-        // list), so an invalid one is a recoverable error the caller
-        // surfaces, not a logic bug. Checking first leaves the prior program
-        // intact on error and lets the flatten pass resolve every reference
-        // infallibly.
-        if let Err(e) = graph.check_with(library) {
-            tracing::error!(error = %e, "graph update rejected: invalid graph");
-            return Err(Error::InvalidGraph {
-                message: e.to_string(),
-            });
-        }
+    /// Install a host-compiled [`CompiledGraph`] as the current program.
+    /// Infallible: everything that can go wrong went wrong at compile
+    /// ([`compile::Compiler`]), on the host's thread.
+    ///
+    /// The plan isn't cleared here: every `execute` re-`plan`s from scratch (the
+    /// planner `reset`s the buffer), and nothing reads the plan between an install
+    /// and the next run. `clear()` is reserved for full teardown (`Self::clear`).
+    pub(crate) fn install(&mut self, compiled: CompiledGraph) {
+        self.compiled = compiled;
 
         // Realign the runtime cache to the new node set (preserve by id,
         // default new, trim gone).
-        self.cache.reconcile(&self.program.e_nodes);
+        self.cache.reconcile(&self.compiled.program.e_nodes);
 
-        // Resolve the program's output-type pool from the full library (every func is
-        // present — `check_with` validated them), making the compiled program
-        // self-describing. Fed into the digest below (an output-signature change
-        // re-keys) and the disk cache's codec check, with no library at run time.
-        self.program.resolve_output_types(library);
-
-        validate::compiled(&self.program, &self.cache, library);
-        Ok(())
+        self.compiled.validate_installed(&self.cache);
     }
 
     // === Phases 2–3: plan then execute ===
@@ -304,9 +289,8 @@ impl ExecutionEngine {
     ) -> Result<ExecutionStats> {
         // Phase 2: schedule into the reusable plan buffer. Purely structural —
         // reachability + topological order + output usage + the walk roots, no cache/digest
-        // state. The flatten map resolves node seeds (authoring ids) to flat roots.
-        self.planner
-            .plan(&self.program, &self.flatten_map, &seeds, &mut self.plan)?;
+        // state. The artifact's flatten map resolves node seeds (authoring ids) to flat roots.
+        self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
 
         // Phase 2b: cache-aware refinement. Resolve every node's disposition — its reuse
         // verdict merged with the backward cut, so a cone feeding only cache hits (a
@@ -315,7 +299,7 @@ impl ExecutionEngine {
         // executor reads it rather than re-deriving (a digest folds live filesystem state
         // and could drift mid-run).
         self.resolver
-            .resolve(&self.program, &self.plan, &mut self.cache);
+            .resolve(&self.compiled.program, &self.plan, &mut self.cache);
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), not batched here — so a long run's earlier
@@ -323,11 +307,11 @@ impl ExecutionEngine {
         let mut stats = self
             .executor
             .run(
-                &self.program,
+                &self.compiled.program,
                 &self.plan,
                 &self.resolver.disposition,
                 &mut self.cache,
-                &self.flatten_map,
+                &self.compiled.flatten_map,
                 progress,
                 cancel,
             )
@@ -338,7 +322,7 @@ impl ExecutionEngine {
         // disposition column (the active-frontier set) and the executor's retention policy
         // (RAM modes + pinned preview roots) rather than recomputing either.
         self.cache.evict_unused(
-            &self.program,
+            &self.compiled.program,
             &self.resolver.disposition,
             &self.executor.retain,
         );
@@ -352,7 +336,7 @@ impl ExecutionEngine {
         // Annotate with how the graph was flattened so the stats' flat ids
         // can be projected back onto authoring nodes (the executor itself
         // stays oblivious to the authoring graph).
-        stats.flatten = self.flatten_map.clone();
+        stats.flatten = self.compiled.flatten_map.clone();
 
         Ok(stats)
     }
@@ -367,12 +351,12 @@ impl ExecutionEngine {
     /// content hash, so [`DiskStore::store`] skips it when it already exists. Also a
     /// no-op for a node with no resident value.
     pub(crate) async fn store_resident_caches(&mut self) {
-        for idx in self.program.node_indices() {
-            if !self.program.e_nodes[idx].cache.persists_to_disk() {
+        for idx in self.compiled.program.node_indices() {
+            if !self.compiled.program.e_nodes[idx].cache.persists_to_disk() {
                 continue;
             }
             self.cache
-                .store_node(&self.program, idx, &mut self.executor.ctx_manager)
+                .store_node(&self.compiled.program, idx, &mut self.executor.ctx_manager)
                 .await;
         }
     }
@@ -451,31 +435,36 @@ impl ExecutionEngine {
             events: events.to_vec(),
             nodes: Vec::new(),
         };
-        self.planner
-            .plan(&self.program, &self.flatten_map, &seeds, &mut self.plan)
+        self.planner.plan(&self.compiled, &seeds, &mut self.plan)
     }
 
     pub(crate) fn by_id(&self, node_id: &NodeId) -> Option<&ExecutionNode> {
-        self.program.e_nodes.by_key(node_id)
+        self.compiled.program.e_nodes.by_key(node_id)
     }
 
     pub(crate) fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
-        self.program
+        self.compiled
+            .program
             .e_nodes
             .iter()
             .find(|node| node.name == node_name)
     }
 
     pub(crate) fn node_inputs(&self, e_node: &ExecutionNode) -> &[program::ExecutionInput] {
-        self.program.node_inputs(e_node)
+        self.compiled.program.node_inputs(e_node)
     }
 
     pub(crate) fn node_events(&self, e_node: &ExecutionNode) -> &[program::ExecutionEvent] {
-        &self.program.events[e_node.events.range()]
+        &self.compiled.program.events[e_node.events.range()]
     }
 
     pub(crate) fn node_verdict(&self, e_node: &ExecutionNode) -> plan::NodeVerdict {
-        let idx = self.program.e_nodes.index_of_key(&e_node.id).unwrap();
+        let idx = self
+            .compiled
+            .program
+            .e_nodes
+            .index_of_key(&e_node.id)
+            .unwrap();
         self.plan.verdicts[idx.into()]
     }
 
@@ -496,6 +485,7 @@ impl ExecutionEngine {
     /// stamp `produced_under` from the current digest, so the planner sees a hit.
     pub(crate) fn set_output_values(&mut self, node_name: &str, values: Vec<DynamicValue>) {
         let idx = self
+            .compiled
             .program
             .e_nodes
             .index_of_key(&self.by_name(node_name).unwrap().id);

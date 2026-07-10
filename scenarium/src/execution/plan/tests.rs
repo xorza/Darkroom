@@ -5,11 +5,12 @@ use crate::graph::NodeId;
 use crate::node::function::FuncId;
 use common::Span;
 
-/// Hand-built program for planner tests. Node `idx` gets id `from_u128(idx+1)`.
-/// Inputs are `(required, binding)`.
+/// Hand-built compile artifact for planner tests (an empty flatten map — every
+/// node is "top-level", so seed ids resolve directly). Node `idx` gets id
+/// `from_u128(idx+1)`. Inputs are `(required, binding)`.
 #[derive(Default)]
 struct Fix {
-    program: ExecutionProgram,
+    compiled: CompiledGraph,
 }
 
 impl Fix {
@@ -19,20 +20,21 @@ impl Fix {
         inputs: &[(bool, ExecutionBinding)],
         outputs: u32,
     ) -> NodeIdx {
-        let inputs_start = self.program.inputs.len() as u32;
+        let program = &mut self.compiled.program;
+        let inputs_start = program.inputs.len() as u32;
         for (required, binding) in inputs {
-            self.program.inputs.push(ExecutionInput {
+            program.inputs.push(ExecutionInput {
                 required: *required,
                 stamper: None,
                 binding: binding.clone(),
             });
         }
-        let outputs_start = self.program.output_types.len() as u32;
-        self.program
+        let outputs_start = program.output_types.len() as u32;
+        program
             .output_types
             .resize(outputs_start as usize + outputs as usize, DataType::Any);
-        let idx = self.program.e_nodes.len();
-        self.program.e_nodes.add(ExecutionNode {
+        let idx = program.e_nodes.len();
+        program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),
             terminal,
             func_id: FuncId::from_u128(idx as u128 + 1),
@@ -61,7 +63,7 @@ fn plan(fix: &Fix) -> ExecutionPlan {
         ..Default::default()
     };
     planner
-        .plan(&fix.program, &FlattenMap::default(), &seeds, &mut plan)
+        .plan(&fix.compiled, &seeds, &mut plan)
         .expect("no cycle");
     plan
 }
@@ -140,7 +142,7 @@ fn dependency_cycle_is_rejected() {
         terminals: true,
         ..Default::default()
     };
-    let result = planner.plan(&f.program, &FlattenMap::default(), &seeds, &mut plan);
+    let result = planner.plan(&f.compiled, &seeds, &mut plan);
     assert!(matches!(result, Err(Error::CycleDetected { .. })));
 }
 
@@ -159,12 +161,10 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
     let seeds = RunSeeds {
-        nodes: vec![f.program.e_nodes[b].id],
+        nodes: vec![f.compiled.program.e_nodes[b].id],
         ..Default::default()
     };
-    planner
-        .plan(&f.program, &FlattenMap::default(), &seeds, &mut p)
-        .expect("no cycle");
+    planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
 
     assert_eq!(p.process_order, vec![a, b], "only B's cone, deps first");
     assert_eq!(p.roots, vec![b]);
@@ -180,12 +180,10 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // everything, and B stays pinned.
     let seeds = RunSeeds {
         terminals: true,
-        nodes: vec![f.program.e_nodes[b].id],
+        nodes: vec![f.compiled.program.e_nodes[b].id],
         ..Default::default()
     };
-    planner
-        .plan(&f.program, &FlattenMap::default(), &seeds, &mut p)
-        .expect("no cycle");
+    planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
     assert_eq!(p.process_order, vec![a, b, c]);
     assert_eq!(p.pinned, vec![b]);
     assert_eq!(p.output_usage[1], 1, "B.0 now read by C");
@@ -197,8 +195,6 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
         nodes: vec![bogus],
         ..Default::default()
     };
-    let err = planner
-        .plan(&f.program, &FlattenMap::default(), &seeds, &mut p)
-        .unwrap_err();
+    let err = planner.plan(&f.compiled, &seeds, &mut p).unwrap_err();
     assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
 }

@@ -186,13 +186,6 @@ pub(crate) struct ExecutionProgram {
 }
 
 impl ExecutionProgram {
-    pub(crate) fn clear(&mut self) {
-        self.e_nodes.clear();
-        self.inputs.clear();
-        self.events.clear();
-        self.output_types.clear();
-    }
-
     /// The program's total output count: the length of the `output_types` pool and the
     /// plan's `output_usage` column (every node's output span summed). Derived from
     /// `output_types` rather than stored, so it can't disagree with the pool it sizes.

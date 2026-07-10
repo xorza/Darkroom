@@ -9,6 +9,7 @@
 //! reused via a buffer on the engine and the `Planner` owns reusable DFS scratch, so a
 //! repeated plan on an unchanged graph allocates nothing.
 
+use crate::execution::compile::CompiledGraph;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram, NodeIdx};
 use crate::execution::query::resolve_node_idx;
 use crate::execution::stats::FlattenMap;
@@ -139,21 +140,22 @@ pub(crate) struct Planner {
 }
 
 impl Planner {
-    /// Build the per-run schedule into `plan` from the program and the run's `seeds`
-    /// (the roots to walk back from); `flatten` resolves node seeds (authoring ids)
-    /// to flat roots. Errors on a dependency cycle or an unresolvable node seed.
+    /// Build the per-run schedule into `plan` from the compiled artifact and the run's
+    /// `seeds` (the roots to walk back from); the artifact's flatten map resolves node
+    /// seeds (authoring ids) to flat roots. Errors on a dependency cycle or an
+    /// unresolvable node seed.
     pub(crate) fn plan(
         &mut self,
-        program: &ExecutionProgram,
-        flatten: &FlattenMap,
+        compiled: &CompiledGraph,
         seeds: &RunSeeds,
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
+        let program = &compiled.program;
         plan.reset(program.e_nodes.len(), program.n_outputs());
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
-        collect_roots(program, flatten, seeds, plan)?;
+        collect_roots(program, &compiled.flatten_map, seeds, plan)?;
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {

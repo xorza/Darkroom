@@ -14,22 +14,57 @@ use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::graph::NodeId;
 use crate::library::Library;
 
-/// Self-consistency of the compiled program against the `Library`, plus that the
-/// runtime cache stayed index-aligned to the nodes after `reconcile`. The source
-/// graph is gone after flattening, so this validates each `e_node` against its
-/// func and checks binding integrity.
-pub(crate) fn compiled(program: &ExecutionProgram, cache: &RuntimeCache, library: &Library) {
-    if !is_debug() {
-        return;
+impl CompiledGraph {
+    /// Self-consistency of the freshly compiled artifact against the `Library`
+    /// it was compiled from. The source graph is gone after flattening, so this
+    /// validates each `e_node` against its func and checks binding integrity.
+    /// Runs at compile (where the library is in hand); the library-free
+    /// install-side checks live in [`Self::validate_installed`].
+    pub(crate) fn validate(&self, library: &Library) {
+        if !is_debug() {
+            return;
+        }
+
+        let program = &self.program;
+        let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(program.e_nodes.len());
+        for e_node in program.e_nodes.iter() {
+            assert!(seen_node_ids.insert(e_node.id));
+
+            // A special node's interface is its hardcoded spec, not a library func.
+            let func = match e_node.special {
+                Some(s) => s.func(),
+                None => library.by_id(&e_node.func_id).unwrap(),
+            };
+            assert_eq!(e_node.inputs.len as usize, func.inputs.len());
+            assert_eq!(e_node.outputs.len as usize, func.outputs.len());
+            assert_eq!(e_node.events.len as usize, func.events.len());
+
+            for e_input in program.node_inputs(e_node) {
+                if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
+                    assert!(e_addr.target_idx.idx() < program.e_nodes.len());
+                    let target = &program.e_nodes[e_addr.target_idx];
+                    assert!(e_addr.port_idx < target.outputs.len as usize);
+                }
+            }
+        }
     }
 
-    assert_eq!(cache.slots.len(), program.e_nodes.len());
+    /// The engine's runtime `cache` stayed index-aligned to this artifact's
+    /// nodes after `reconcile` — the install-side half of the checks;
+    /// artifact-vs-library consistency runs at compile ([`Self::validate`]).
+    pub(crate) fn validate_installed(&self, cache: &RuntimeCache) {
+        if !is_debug() {
+            return;
+        }
 
-    for (idx, e_node) in program.e_nodes.iter().enumerate() {
-        let slot = &cache.slots[idx];
-        assert_eq!(slot.id, e_node.id);
-        if let Some(output_values) = slot.output_values() {
-            assert_eq!(output_values.len(), e_node.outputs.len as usize);
+        assert_eq!(cache.slots.len(), self.program.e_nodes.len());
+
+        for (idx, e_node) in self.program.e_nodes.iter().enumerate() {
+            let slot = &cache.slots[idx];
+            assert_eq!(slot.id, e_node.id);
+            if let Some(output_values) = slot.output_values() {
+                assert_eq!(output_values.len(), e_node.outputs.len as usize);
+            }
         }
     }
 }

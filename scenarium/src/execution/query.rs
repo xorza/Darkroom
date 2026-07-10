@@ -36,14 +36,14 @@ impl ExecutionEngine {
     /// disk-only node reads back empty.
     #[cfg(test)]
     pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-        let idx = resolve_node_idx(&self.program, &self.flatten_map, node_id)?;
+        let idx = resolve_node_idx(&self.compiled.program, &self.compiled.flatten_map, node_id)?;
         Some(self.argument_values_at(idx))
     }
 
     fn argument_values_at(&self, idx: NodeIdx) -> ArgumentValues {
-        let e_node = &self.program.e_nodes[idx];
+        let e_node = &self.compiled.program.e_nodes[idx];
 
-        let inputs = self.program.inputs[e_node.inputs.range()]
+        let inputs = self.compiled.program.inputs[e_node.inputs.range()]
             .iter()
             .map(|input| match &input.binding {
                 ExecutionBinding::None => None,
@@ -71,8 +71,10 @@ impl ExecutionEngine {
         &mut self,
         node_id: &NodeId,
     ) -> Option<ArgumentValues> {
-        let idx = resolve_node_idx(&self.program, &self.flatten_map, node_id)?;
-        self.cache.hydrate_for_inspection(&self.program, idx).await;
+        let idx = resolve_node_idx(&self.compiled.program, &self.compiled.flatten_map, node_id)?;
+        self.cache
+            .hydrate_for_inspection(&self.compiled.program, idx)
+            .await;
         let mut values = self.argument_values_at(idx);
         let mut pending_previews = Vec::new();
         for value in values
@@ -103,11 +105,16 @@ impl ExecutionEngine {
             .chain(stats.executed_nodes.iter().map(|n| n.node_id))
             .flat_map(|node_id| {
                 // One key lookup: `e_nodes` and `cache.slots` are index-aligned.
-                let idx = self.program.e_nodes.index_of_key(&node_id).unwrap();
-                let e_node = &self.program.e_nodes[idx];
+                let idx = self
+                    .compiled
+                    .program
+                    .e_nodes
+                    .index_of_key(&node_id)
+                    .unwrap();
+                let e_node = &self.compiled.program.e_nodes[idx];
                 let event_state = self.cache.slots[idx].event_state.clone();
                 let id = e_node.id;
-                self.program.events[e_node.events.range()]
+                self.compiled.program.events[e_node.events.range()]
                     .iter()
                     .enumerate()
                     .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())

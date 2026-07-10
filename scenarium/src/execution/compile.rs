@@ -32,8 +32,9 @@ pub struct CompileError {
 /// output types, and input stampers attached) plus the [`FlattenMap`] that
 /// projects flat ids back onto authoring nodes (node-seed resolution, stats
 /// attribution). Self-contained — executing it needs neither the authoring
-/// graph nor the library.
-#[derive(Debug)]
+/// graph nor the library. `Default` is the empty program (the engine's
+/// pre-install / cleared state).
+#[derive(Debug, Default)]
 pub struct CompiledGraph {
     pub(crate) program: ExecutionProgram,
     pub(crate) flatten_map: Arc<FlattenMap>,

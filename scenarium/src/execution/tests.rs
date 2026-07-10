@@ -26,7 +26,7 @@ fn execution_node_names_in_order(execution_graph: &ExecutionEngine) -> Vec<Strin
         .filter(|&&idx| {
             execution_graph.plan.verdicts[idx].wants_execute() && execution_graph.node_ran(idx)
         })
-        .map(|&idx| execution_graph.program.e_nodes[idx].name.clone())
+        .map(|&idx| execution_graph.compiled.program.e_nodes[idx].name.clone())
         .collect()
 }
 
@@ -1854,16 +1854,18 @@ mod graph_structure {
             ["sum", "mult", "Print"]
         );
 
-        assert_eq!(execution_graph.program.e_nodes.len(), 5);
+        assert_eq!(execution_graph.compiled.program.e_nodes.len(), 5);
         assert_eq!(execution_graph.plan.process_order.len(), 5);
         assert!(
             execution_graph
+                .compiled
                 .program
                 .node_indices()
                 .all(|i| !execution_graph.plan.verdicts[i].missing_required_inputs())
         );
         assert!(
             execution_graph
+                .compiled
                 .program
                 .node_indices()
                 .all(|i| execution_graph.plan.verdicts[i].wants_execute())
@@ -1928,7 +1930,7 @@ mod graph_structure {
 
         // A good compile establishes a program.
         execution_graph.update(&graph, &library).unwrap();
-        assert_eq!(execution_graph.program.e_nodes.len(), 5);
+        assert_eq!(execution_graph.compiled.program.e_nodes.len(), 5);
 
         // Re-compiling the same graph against a library that defines none of
         // its funcs is rejected with a message naming a missing func.
@@ -1942,7 +1944,7 @@ mod graph_structure {
 
         // The rejection happens before any mutation, so the prior program is
         // left intact rather than torn down.
-        assert_eq!(execution_graph.program.e_nodes.len(), 5);
+        assert_eq!(execution_graph.compiled.program.e_nodes.len(), 5);
     }
 
     #[test]
@@ -1955,7 +1957,7 @@ mod graph_structure {
 
         // The compiled `ExecutionProgram` is the serializable artifact; the
         // engine itself is not serializable.
-        let program = &execution_graph.program;
+        let program = &execution_graph.compiled.program;
         for format in SerdeFormat::all_formats_for_testing() {
             let serialized = common::serialize(program, format)?;
             let deserialized: ExecutionProgram = common::deserialize(&serialized, format)?;
@@ -3012,16 +3014,16 @@ mod invalidation {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_terminals().await?;
 
-        assert!(!execution_graph.program.e_nodes.is_empty());
+        assert!(!execution_graph.compiled.program.e_nodes.is_empty());
 
         execution_graph.clear();
 
-        assert!(execution_graph.program.e_nodes.is_empty());
+        assert!(execution_graph.compiled.program.e_nodes.is_empty());
         assert!(execution_graph.plan.process_order.is_empty());
         // The SoA pools are emptied too (not just the node list).
-        assert!(execution_graph.program.inputs.is_empty());
-        assert_eq!(execution_graph.program.n_outputs(), 0);
-        assert!(execution_graph.program.events.is_empty());
+        assert!(execution_graph.compiled.program.inputs.is_empty());
+        assert_eq!(execution_graph.compiled.program.n_outputs(), 0);
+        assert!(execution_graph.compiled.program.events.is_empty());
 
         Ok(())
     }
@@ -4013,7 +4015,12 @@ mod events {
         // The RunTerminals sink is itself a terminal, so it runs (its no-op lambda)
         // alongside the promoted terminals — never seeded as a plain subscriber cone.
         assert!(ran.contains(&"trigger".to_string()), "ran = {ran:?}");
-        let trigger_idx = eg.program.e_nodes.index_of_key(&trigger_id).unwrap();
+        let trigger_idx = eg
+            .compiled
+            .program
+            .e_nodes
+            .index_of_key(&trigger_id)
+            .unwrap();
         assert!(
             eg.plan.process_order.iter().any(|i| i.idx() == trigger_idx),
             "the RunTerminals sink runs as a terminal"
@@ -4162,7 +4169,7 @@ mod topology {
         let mut graph = test_graph();
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        assert_eq!(eg.program.e_nodes.len(), 5);
+        assert_eq!(eg.compiled.program.e_nodes.len(), 5);
 
         // Remove get_b — a middle node feeding sum[1] and mult[1] (both optional).
         // Forces compaction and target_idx remapping for the survivors.
@@ -4171,7 +4178,7 @@ mod topology {
         graph.validate();
 
         eg.update(&graph, &library).unwrap();
-        assert_eq!(eg.program.e_nodes.len(), 4);
+        assert_eq!(eg.compiled.program.e_nodes.len(), 4);
         assert!(eg.by_name("get_b").is_none());
 
         eg.execute_terminals().await?;
@@ -4288,7 +4295,7 @@ mod topology {
         eg.update(&graph, &library).unwrap();
         eg.execute_terminals().await?;
         assert_eq!(*calls_a.lock().await, 1); // get_a ran once
-        let idx_before = eg.program.e_nodes.index_of_key(&get_a_id).unwrap();
+        let idx_before = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
 
         // Remove get_b's chain — get_a's slot compacts toward the front.
         graph.remove_by_id(get_b_id);
@@ -4296,7 +4303,7 @@ mod topology {
         graph.validate();
 
         eg.update(&graph, &library).unwrap();
-        let idx_after = eg.program.e_nodes.index_of_key(&get_a_id).unwrap();
+        let idx_after = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
         assert_ne!(idx_before, idx_after, "get_a should have been reordered");
 
         let stats = eg.execute_terminals().await?;
@@ -4347,7 +4354,7 @@ mod topology {
             graph.set_input_binding(InputPort::new(pb, 0), (gb, 0).into());
             graph.validate();
             eg.update(&graph, &library).unwrap();
-            assert_eq!(eg.program.e_nodes.len(), 4, "round {round} grow");
+            assert_eq!(eg.compiled.program.e_nodes.len(), 4, "round {round} grow");
             printed.lock().await.clear();
             eg.execute_terminals().await?;
             let mut got = printed.lock().await.clone();
@@ -4359,7 +4366,7 @@ mod topology {
             graph.remove_by_id(pb);
             graph.validate();
             eg.update(&graph, &library).unwrap();
-            assert_eq!(eg.program.e_nodes.len(), 2, "round {round} shrink");
+            assert_eq!(eg.compiled.program.e_nodes.len(), 2, "round {round} shrink");
             printed.lock().await.clear();
             eg.execute_terminals().await?;
             assert_eq!(
@@ -4585,7 +4592,7 @@ mod subgraph {
 
     fn bind_target(eg: &ExecutionEngine, e: &ExecutionNode, input_idx: usize) -> NodeId {
         match &eg.node_inputs(e)[input_idx].binding {
-            ExecutionBinding::Bind(addr) => eg.program.e_nodes[addr.target_idx].id,
+            ExecutionBinding::Bind(addr) => eg.compiled.program.e_nodes[addr.target_idx].id,
             other => panic!("expected Bind, got {other:?}"),
         }
     }
@@ -4620,7 +4627,7 @@ mod subgraph {
         eg.update(&graph, &library).unwrap();
 
         // get_a, get_b, sum (interior), print — no composite/boundary nodes.
-        assert_eq!(eg.program.e_nodes.len(), 4);
+        assert_eq!(eg.compiled.program.e_nodes.len(), 4);
         let sum = eg.by_name("sum").unwrap();
         assert_eq!(bind_target(&eg, sum, 0), a_id);
         assert_eq!(bind_target(&eg, sum, 1), b_id);
@@ -4635,7 +4642,7 @@ mod subgraph {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        assert_eq!(eg.program.e_nodes.len(), graph.len());
+        assert_eq!(eg.compiled.program.e_nodes.len(), graph.len());
         for node in graph.iter() {
             assert!(eg.by_id(&node.id).is_some(), "id preserved");
         }
@@ -4664,6 +4671,7 @@ mod subgraph {
         eg.update(&graph, &library).unwrap();
 
         let sums: Vec<NodeId> = eg
+            .compiled
             .program
             .e_nodes
             .iter()
@@ -4704,11 +4712,11 @@ mod subgraph {
         // back to the authoring interior id then the enclosing instance.
         let sum_flat = eg.by_name("sum").unwrap().id;
         assert_ne!(sum_flat, interior_sum_id, "flattened id is remapped");
-        let attr: Vec<_> = eg.flatten_map.attribution(sum_flat).collect();
+        let attr: Vec<_> = eg.compiled.flatten_map.attribution(sum_flat).collect();
         assert_eq!(attr, vec![interior_sum_id, c_id]);
 
         // Top-level node: id unchanged, attribution is just itself.
-        let a_attr: Vec<_> = eg.flatten_map.attribution(a_id).collect();
+        let a_attr: Vec<_> = eg.compiled.flatten_map.attribution(a_id).collect();
         assert_eq!(a_attr, vec![a_id]);
     }
 
@@ -4735,7 +4743,7 @@ mod subgraph {
         eg.node_events(e)[event_idx]
             .subscribers
             .iter()
-            .map(|&i| eg.program.e_nodes[i].id)
+            .map(|&i| eg.compiled.program.e_nodes[i].id)
             .collect()
     }
 
@@ -4871,6 +4879,7 @@ mod subgraph {
         // Interior `sum` flat ids (sorted) — for the cache-stability check.
         let sum_ids = |eg: &ExecutionEngine| -> Vec<NodeId> {
             let mut ids: Vec<NodeId> = eg
+                .compiled
                 .program
                 .e_nodes
                 .iter()
@@ -5284,12 +5293,12 @@ mod compile_regressions {
         let make_int = engine.by_name("make_int").unwrap();
         let make_str = engine.by_name("make_str").unwrap();
         assert_eq!(
-            engine.program.node_output_types(make_int),
+            engine.compiled.program.node_output_types(make_int),
             &[DataType::Int],
             "make_int reads its own type, not its neighbor's"
         );
         assert_eq!(
-            engine.program.node_output_types(make_str),
+            engine.compiled.program.node_output_types(make_str),
             &[DataType::String],
             "make_str reads its own type, not its neighbor's"
         );
