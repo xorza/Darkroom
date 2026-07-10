@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use scenarium::execution::disk_store::DiskStore;
-use scenarium::graph::Graph;
+use scenarium::graph::{Graph, NodeId};
 
 use crate::core::io::cache::prepare_document_cache_root;
 use crate::core::library::{SharedLibrary, runtime_func_lib};
@@ -61,6 +61,14 @@ impl Engine {
     /// startup func lib). Results arrive via [`Self::drain_worker`].
     pub(crate) fn run_once(&self, graph: Graph) {
         self.worker.run_once(graph, self.library.load_full());
+    }
+
+    /// Send `graph` to the worker and evaluate only `node_id`'s upstream
+    /// cone, keeping its outputs resident for the preview fetch ("run to
+    /// this node"). Results arrive via [`Self::drain_worker`].
+    pub(crate) fn run_node(&self, graph: Graph, node_id: NodeId) {
+        self.worker
+            .run_node(graph, self.library.load_full(), node_id);
     }
 
     /// Persist resident caches to disk without running the graph — e.g. after a node's

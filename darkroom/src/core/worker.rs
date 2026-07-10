@@ -124,6 +124,19 @@ impl WorkerBridge {
         ]);
     }
 
+    /// Run one node's upstream cone: replace the worker's graph + lib,
+    /// then execute with the node as seed — its outputs stay resident for
+    /// the preview value fetch. One batched send so the seed always
+    /// targets the graph it was built against.
+    pub(crate) fn run_node(&self, graph: Graph, library: Arc<Library>, node_id: NodeId) {
+        let _ = self.worker.send_many([
+            WorkerMessage::Update { graph, library },
+            WorkerMessage::ExecuteNodes {
+                nodes: vec![node_id],
+            },
+        ]);
+    }
+
     /// Flush resident cache values to disk **without running the graph** — e.g. after
     /// a node's disk-cache toggle, so its in-RAM value is persisted now rather than
     /// waiting for the next run (a cache-hit node never re-executes to store itself).

@@ -233,6 +233,10 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   `Progress(RunProgress)` per node *as it runs*, then a final `Finished(stats)`.
   `WorkerBridge::deliver` maps these to `WorkerEvent::NodeProgress` /
   `ExecutionFinished` on the channel and pokes `host.request_repaint()`.
+- **Run to a node** (`App::run_node`, `RunCommand::Node`): same batch with
+  `ExecuteNodes` seeding one node's cone, its outputs pinned resident for the
+  preview fetch. Triggered from the node context menu's "Run to this node"
+  (omitted for disabled/instance nodes — they don't resolve as seeds).
 - **Per-document disk cache.** The worker starts memory-only;
   `Engine::set_document_cache` (called from `set_document_path` — i.e. on
   open/save/new and startup restore) sends `WorkerMessage::SetDiskCache` pointing

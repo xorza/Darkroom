@@ -3,6 +3,8 @@
 //! plus the `events_running` flag `App` mirrors so the toolbar toggle can't
 //! lag the worker's real state.
 
+use scenarium::graph::NodeId;
+
 use crate::gui::app::App;
 
 /// Graph execution + the worker event loop. Handled by [`App::handle_run`].
@@ -10,6 +12,9 @@ use crate::gui::app::App;
 pub(crate) enum RunCommand {
     /// Evaluate the graph once on the worker.
     Once,
+    /// Evaluate one node's upstream cone on the worker, keeping its
+    /// outputs resident for preview ("run to this node").
+    Node(NodeId),
     /// Request cancellation of the in-flight run.
     Cancel,
     /// Start the worker's event loop (emitter events → run subscribers).
@@ -22,6 +27,7 @@ impl App {
     pub(crate) fn handle_run(&mut self, command: RunCommand) {
         match command {
             RunCommand::Once => self.run_graph(),
+            RunCommand::Node(node_id) => self.run_node(node_id),
             RunCommand::Cancel => self.engine.cancel_run(),
             RunCommand::StartEvents => self.start_events(),
             RunCommand::StopEvents => self.stop_events(),
@@ -36,6 +42,17 @@ impl App {
     pub(crate) fn run_graph(&mut self) {
         self.editor.run_state.begin_run();
         self.engine.run_once(self.editor.document.graph.clone());
+        self.events_running = false;
+    }
+
+    /// Like [`Self::run_graph`], but seeds the run at one node: only its
+    /// upstream cone executes, and its outputs stay resident for the
+    /// preview value fetch. Same epoch and event-loop bookkeeping as a
+    /// full run — a preview run is just a run.
+    pub(crate) fn run_node(&mut self, node_id: NodeId) {
+        self.editor.run_state.begin_run();
+        self.engine
+            .run_node(self.editor.document.graph.clone(), node_id);
         self.events_running = false;
     }
 

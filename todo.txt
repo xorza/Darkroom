@@ -9,3 +9,5 @@ execute specific node for previews
 stamper - remove vec
 
 save cahhce files by nodeid
+
+Arc<Graph> or sond to worker compiled graph

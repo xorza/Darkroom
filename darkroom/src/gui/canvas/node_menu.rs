@@ -1,22 +1,30 @@
 use std::collections::BTreeSet;
 
 use aperture::{MenuItem, Ui};
+use scenarium::graph::NodeId;
 
 use crate::core::edit::intent::Intent;
+use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::node::node_widget_id;
 use crate::gui::scene::Scene;
 
-/// Right-click on a node body → a small popup with structural actions on
-/// the node (and, when it's part of a multi-selection, the whole set).
+/// Right-click on a node body → a small popup with actions on the node.
 /// The open is latched off *last* frame's node-body response; the shared
-/// [`AnchoredMenu`] handles the popup lifecycle. Picking an action stashes a
-/// [`NodeMenuAction`] the `Editor` resolves against the live selection
-/// (where the `Document` is available to build the clone / removal intents).
+/// [`AnchoredMenu`] handles the popup lifecycle. "Run to this node" resolves
+/// here (it only needs the clicked node's id) and surfaces an
+/// [`AppCommand`]; the structural picks stash a [`NodeMenuAction`] the
+/// `Editor` resolves against the live selection (where the `Document` is
+/// available to build the clone / removal intents).
 #[derive(Default, Debug)]
 pub(crate) struct NodeMenuUi {
     menu: AnchoredMenu,
     action: Option<NodeMenuAction>,
+    /// Node whose body opened the menu — the "Run to this node" target,
+    /// which is the clicked node regardless of the selection. Set at open,
+    /// read at pick (same latch as the subgraph menu's).
+    target: Option<NodeId>,
 }
 
 /// A structural action picked from a node's context menu. The target is the
@@ -29,8 +37,23 @@ pub(crate) enum NodeMenuAction {
     Remove,
 }
 
+/// A menu pick before routing: run resolves in place (into `cmd`) and
+/// carries its target, structural actions drain through
+/// [`NodeMenuUi::take_action`].
+#[derive(Copy, Clone, Debug)]
+enum MenuChoice {
+    Run(NodeId),
+    Action(NodeMenuAction),
+}
+
 impl NodeMenuUi {
-    pub(crate) fn apply(&mut self, ui: &mut Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    pub(crate) fn apply(
+        &mut self,
+        ui: &mut Ui,
+        scene: &Scene,
+        out: &mut Vec<Intent>,
+        cmd: &mut Option<AppCommand>,
+    ) {
         // Latch on a secondary-click of any node body (boundary interface
         // nodes carry no structural identity to duplicate/remove, so they're
         // skipped), read from last frame's response. Right-click selects the
@@ -46,34 +69,55 @@ impl NodeMenuUi {
                         to: BTreeSet::from([n.id]),
                     });
                 }
+                self.target = Some(n.id);
                 self.menu.open_at(p);
             }
         }
 
         let pick = self.menu.show(ui, "node_body_menu", None, |ui, popup| {
             let mut chosen = None;
+            // "Run to this node" shows only when the clicked node can be a
+            // run seed: a disabled node is flattened out of the program, and
+            // a subgraph instance dissolves into its interior — neither
+            // resolves. (The body only runs while the menu is open.)
+            let run_target = self
+                .target
+                .and_then(|id| scene.nodes.iter().find(|n| n.id == id))
+                .filter(|n| !n.disabled && n.subgraph.is_none())
+                .map(|n| n.id);
+            if let Some(node_id) = run_target {
+                if MenuItem::new("Run to this node").show(ui, popup).clicked() {
+                    chosen = Some(MenuChoice::Run(node_id));
+                }
+                MenuItem::separator(ui);
+            }
             if MenuItem::new("Duplicate").show(ui, popup).clicked() {
-                chosen = Some(NodeMenuAction::Duplicate);
+                chosen = Some(MenuChoice::Action(NodeMenuAction::Duplicate));
             }
             if MenuItem::new("Duplicate with incoming connections")
                 .show(ui, popup)
                 .clicked()
             {
-                chosen = Some(NodeMenuAction::DuplicateWithIncoming);
+                chosen = Some(MenuChoice::Action(NodeMenuAction::DuplicateWithIncoming));
             }
             MenuItem::separator(ui);
             if MenuItem::new("Remove").show(ui, popup).clicked() {
-                chosen = Some(NodeMenuAction::Remove);
+                chosen = Some(MenuChoice::Action(NodeMenuAction::Remove));
             }
             chosen
         });
-        if let Some(action) = pick {
-            self.action = Some(action);
+        match pick {
+            Some(MenuChoice::Run(node_id)) => {
+                *cmd = Some(AppCommand::Run(RunCommand::Node(node_id)));
+            }
+            Some(MenuChoice::Action(action)) => self.action = Some(action),
+            None => {}
         }
     }
 
-    /// Take the action picked since the last call, if any. The `Editor`
-    /// drains this each frame and resolves it against the live selection.
+    /// Take the structural action picked since the last call, if any. The
+    /// `Editor` drains this each frame and resolves it against the live
+    /// selection.
     pub(crate) fn take_action(&mut self) -> Option<NodeMenuAction> {
         self.action.take()
     }

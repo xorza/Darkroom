@@ -206,7 +206,7 @@ impl GraphUI {
             .new_node_ui
             .apply(ui, ctx, scene, popup_gesture, pending_connection, out);
         self.gestures.subgraph_menu.apply(ui, scene, out, cmd);
-        self.gestures.node_menu.apply(ui, scene, out);
+        self.gestures.node_menu.apply(ui, scene, out, cmd);
         // A click on an FsPath input's pick button surfaces a deferred
         // PickInputPath command (App opens the dialog outside the record).
         // The node UI returns a domain request; the canvas — which owns the
