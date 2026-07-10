@@ -138,6 +138,13 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
             ..Default::default()
         })
         .show(ui, |ui| {
+            // The run affordance leads the band, ahead of the title — the
+            // one control that *does* something with the node's output
+            // rather than configuring it. Only on nodes that resolve as a
+            // run seed.
+            if node.runnable() {
+                play_chip(ui, theme, node);
+            }
             title(ui, rcx, node, out);
             // FILL spacer splits the title (left) from the run-state cluster
             // (right): the last-run time, the descriptive markers, then inspect.
@@ -333,6 +340,62 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
         });
 }
 
+/// The header's play chip: run the graph up to this node and keep its
+/// outputs for preview — the same command as the context menu's "Run to
+/// this node". Control-family framing (bordered [`BADGE_SIZE`] square,
+/// hover-lifted tint), but the glyph is the SDF play triangle rather than
+/// a font glyph, echoing the ports' triangle vocabulary and staying
+/// optically centered at any zoom. Quiet at rest — muted ink like the
+/// other idle controls — and takes the palette's success green
+/// (`exec_executed_glow`) on hover: "go", pointing at the outcome the
+/// click delivers. The click is read at canvas level via
+/// [`play_badge_wid`] and translated into the run command there (node
+/// code never names `AppCommand`).
+fn play_chip(ui: &mut Ui, theme: &Theme, node: &SceneNode) {
+    let wid = play_badge_wid(node.id);
+    let hovered = ui.response_for(wid).hovered;
+    let color = if hovered {
+        theme.colors.exec_executed_glow
+    } else {
+        theme.colors.text_muted
+    };
+    let mut background = Background {
+        stroke: Stroke::solid(color, 1.0),
+        corners: Corners::all(3.0),
+        ..Default::default()
+    };
+    if hovered {
+        background.fill = color.with_alpha(CHIP_TINT_ALPHA).into();
+    }
+    let chip = Panel::zstack()
+        .id(wid)
+        .size((Sizing::Fixed(BADGE_SIZE), Sizing::Fixed(BADGE_SIZE)))
+        .sense(Sense::CLICK)
+        .background(background)
+        .show(ui, |ui| {
+            // Play triangle about the chip center, nudged right — a play
+            // mark's visual center sits left of its bounding box's. Points
+            // are inset by the rounding radius: the SDF rounds by dilating,
+            // so the glyph grows back out to the intended extents.
+            const R: f32 = 1.5;
+            const HALF_W: f32 = 3.75;
+            const HALF_H: f32 = 4.5;
+            const NUDGE: f32 = 0.75;
+            let c = Vec2::splat(BADGE_SIZE * 0.5);
+            ui.add_shape(Shape::Triangle {
+                a: c + Vec2::new(NUDGE - HALF_W + R, R - HALF_H),
+                b: c + Vec2::new(NUDGE - HALF_W + R, HALF_H - R),
+                c: c + Vec2::new(NUDGE + HALF_W - R, 0.0),
+                radius: R,
+                fill: color.into(),
+                stroke: Stroke::ZERO,
+            });
+        });
+    Tooltip::for_(&chip.response.snapshot())
+        .text("Run to this node — execute its upstream cone and keep the output for preview")
+        .show(ui);
+}
+
 /// The node title: an inline-renamable label. Double-click swaps it for
 /// a `TextEdit`; commit emits [`Intent::RenameNode`], single-click
 /// selects (the label would otherwise swallow the body's click). Same
@@ -358,6 +421,13 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
             to,
         });
     }
+}
+
+/// Stable id for a node's clickable run-to-node play chip. `pub(crate)` so
+/// the canvas-level scan ([`crate::gui::node::emit_play_clicks`]) can poll
+/// the click from last frame's response.
+pub(crate) fn play_badge_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.play_badge", node_id))
 }
 
 /// Stable id for a node's clickable enable/disable chip.

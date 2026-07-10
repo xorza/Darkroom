@@ -14,7 +14,9 @@ use crate::gui::canvas::cull::node_visible;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::node_ports;
-use crate::gui::node::header::{header, status_row, subgraph_badge_wid, subscription_pin};
+use crate::gui::node::header::{
+    header, play_badge_wid, status_row, subgraph_badge_wid, subscription_pin,
+};
 use crate::gui::node::memory_row::memory_row;
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid, ports_row};
 use crate::gui::run_state::ExecStatus;
@@ -383,6 +385,19 @@ pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAc
             actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
         }
     }
+}
+
+/// Scan for a click on a node's header play chip (read from last frame's
+/// response), returning the node to run to. First hit wins — one run per
+/// frame. The node UI surfaces only the domain fact (which node); the
+/// canvas translates it into the run command. The `runnable` guard matches
+/// where the chip draws, so a stale response can't seed an unrunnable node.
+pub(crate) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
+    scene
+        .nodes
+        .iter()
+        .find(|n| n.runnable() && ui.response_for(play_badge_wid(n.id)).clicked)
+        .map(|n| n.id)
 }
 
 /// A click on an `FsPath` input's inline pick button, surfaced for the

@@ -77,13 +77,12 @@ impl NodeMenuUi {
         let pick = self.menu.show(ui, "node_body_menu", None, |ui, popup| {
             let mut chosen = None;
             // "Run to this node" shows only when the clicked node can be a
-            // run seed: a disabled node is flattened out of the program, and
-            // a subgraph instance dissolves into its interior — neither
-            // resolves. (The body only runs while the menu is open.)
+            // run seed (same rule as the header play chip). The body only
+            // runs while the menu is open.
             let run_target = self
                 .target
                 .and_then(|id| scene.nodes.iter().find(|n| n.id == id))
-                .filter(|n| !n.disabled && n.subgraph.is_none())
+                .filter(|n| n.runnable())
                 .map(|n| n.id);
             if let Some(node_id) = run_target {
                 if MenuItem::new("Run to this node").show(ui, popup).clicked() {

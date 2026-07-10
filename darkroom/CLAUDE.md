@@ -235,8 +235,11 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   `ExecutionFinished` on the channel and pokes `host.request_repaint()`.
 - **Run to a node** (`App::run_node`, `RunCommand::Node`): same batch with
   `ExecuteNodes` seeding one node's cone, its outputs pinned resident for the
-  preview fetch. Triggered from the node context menu's "Run to this node"
-  (omitted for disabled/instance nodes — they don't resolve as seeds).
+  preview fetch. Two triggers, both gated on `SceneNode::runnable` (disabled/
+  instance/boundary/missing nodes don't resolve as seeds): the header's play
+  chip left of the title (drawn in `gui/node/header.rs`, click scanned by
+  `emit_play_clicks` and translated at canvas level) and the node context
+  menu's "Run to this node".
 - **Per-document disk cache.** The worker starts memory-only;
   `Engine::set_document_cache` (called from `set_document_path` — i.e. on
   open/save/new and startup restore) sends `WorkerMessage::SetDiskCache` pointing
@@ -303,8 +306,9 @@ the open-tab strip + "+" new-subgraph chip, emits `UiAction`s). The rest:
   inputs (live values when fetched, else static bindings), outputs, log tail.
 - **`gui/node/`** — the node-body widget: `mod.rs` is `NodeUI` (node bodies +
   drag; emits `MoveNodes`, subgraph-open requests, port-disconnect
-  double-clicks), with sub-widgets `header` (title + `S`/`T`/`D`/`R`/`↓`/`i`
-  badges: subgraph / terminal / disable / RAM-cache / disk-cache / inspect; the
+  double-clicks), with sub-widgets `header` (play chip + title +
+  `S`/`T`/`D`/`R`/`↓`/`i` badges: run-to-node / subgraph / terminal / disable /
+  RAM-cache / disk-cache / inspect; the
   `R` and `↓` chips flip the two bits of `Node::cache` (`CacheMode`
   `None`/`Ram`/`Disk`/`Both`) via `SetCacheMode`), `port_row` (the two port
   columns + circles + binding menu; a required input's port paints in the

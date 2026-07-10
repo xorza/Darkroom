@@ -26,6 +26,7 @@ use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::edit::EditCommand;
+use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
@@ -37,7 +38,7 @@ use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::canvas::wire::WireEmphasis;
-use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_port_dblclicks};
+use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_play_clicks, emit_port_dblclicks};
 use crate::gui::scene::{Scene, SceneNode};
 
 /// Canvas-level UI scope: owns the port-widget-id cache, the
@@ -216,6 +217,13 @@ impl GraphUI {
             && let Some(req) = emit_path_picks(ui, scene)
         {
             *cmd = Some(AppCommand::Edit(EditCommand::PickInputPath(req)));
+        }
+        // A header play-chip click runs that node's cone — the same command
+        // the context menu's "Run to this node" resolves to.
+        if cmd.is_none()
+            && let Some(node_id) = emit_play_clicks(ui, scene)
+        {
+            *cmd = Some(AppCommand::Run(RunCommand::Node(node_id)));
         }
         // Bake the snap target into `CanvasGeometry.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it

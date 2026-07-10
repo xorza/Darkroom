@@ -182,6 +182,16 @@ pub struct SceneNode {
     pub missing: bool,
 }
 
+impl SceneNode {
+    /// Whether this node can seed a "run to this node" — drives the header
+    /// play chip and the context-menu item. A disabled node is flattened
+    /// out of the program, an instance/boundary node has no flat identity,
+    /// and a `missing` stub resolves to nothing — none makes a valid seed.
+    pub fn runnable(&self) -> bool {
+        !self.boundary && !self.disabled && !self.missing && self.subgraph.is_none()
+    }
+}
+
 impl KeyIndexKey<NodeId> for SceneNode {
     fn key(&self) -> &NodeId {
         &self.id
@@ -685,6 +695,10 @@ mod tests {
             input_node.boundary && output_node.boundary,
             "boundary nodes are flagged so const affordances are suppressed"
         );
+        assert!(
+            !input_node.runnable() && !output_node.runnable(),
+            "boundary nodes offer no run affordance — they have no flat identity"
+        );
 
         // SubgraphOutput: one input per def *output* plus the "+"
         // placeholder; 0 outputs.
@@ -783,6 +797,14 @@ mod tests {
         assert!(
             !scene.inputs(known_node.inputs).is_empty(),
             "the resolved func still renders its interface"
+        );
+
+        // Run seeding follows resolution: the resolved func can be run to,
+        // the stubs (and any subgraph instance) can't.
+        assert!(known_node.runnable(), "a resolved func node is runnable");
+        assert!(
+            !ghost_func_node.runnable() && !ghost_sub_node.runnable(),
+            "stubs offer no run affordance — they resolve to nothing"
         );
     }
 
