@@ -9,7 +9,9 @@ use crate::image::conversion_format::{
 };
 use crate::image::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 use crate::image::{IMAGE_DATA_TYPE, IMAGE_TYPE_ID, Image};
-use imaginarium::{Blend, BlendMode, ContrastBrightness, SUPPORTED_EXTENSIONS, Transform, Vec2};
+use imaginarium::{
+    Blend, BlendMode, ColorFormat, ContrastBrightness, SUPPORTED_EXTENSIONS, Transform, Vec2,
+};
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode, StaticValue};
 use scenarium::library::{Library, TypeEntry};
 use scenarium::node::func_lambda::FuncLambda;
@@ -49,24 +51,18 @@ pub fn image_library() -> Library {
                     assert_eq!(inputs.len(), 3);
                     assert_eq!(outputs.len(), 1);
 
-                    let input_image = inputs[0].value.as_custom::<Image>().unwrap();
-
+                    let value = std::mem::take(&mut inputs[0].value);
                     let brightness = inputs[1].value.as_f64().unwrap() as f32;
                     let contrast = inputs[2].value.as_f64().unwrap() as f32;
 
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
-                    let mut output_buffer = imaginarium::ImageBuffer::new_empty(input_image.desc);
-
-                    ContrastBrightness::new(contrast, brightness)
-                        .execute(
-                            &mut vision_ctx.processing_ctx,
-                            input_image,
-                            &mut output_buffer,
-                        )
-                        .map_err(anyhow::Error::from)?;
-
-                    outputs[0] = DynamicValue::from_custom(Image::from(output_buffer));
+                    let image = adjust_image(
+                        ContrastBrightness::new(contrast, brightness),
+                        &mut vision_ctx.processing_ctx,
+                        value,
+                    )?;
+                    outputs[0] = DynamicValue::from_custom(image);
 
                     Ok(())
                 })
@@ -81,14 +77,8 @@ pub fn image_library() -> Library {
             .category("Image")
             .pure()
             .input(
-                FuncInput::required(
-                    "Path",
-                    DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
-                        FsPathMode::ExistingFile,
-                        SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
-                    ))),
-                )
-                .description("Image file to load."),
+                FuncInput::required("Path", image_fs_path(FsPathMode::ExistingFile))
+                    .description("Image file to load."),
             )
             .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Loaded image."))
             .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
@@ -116,14 +106,8 @@ pub fn image_library() -> Library {
                 FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to save."),
             )
             .input(
-                FuncInput::required(
-                    "Path",
-                    DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
-                        FsPathMode::NewFile,
-                        SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
-                    ))),
-                )
-                .description("Destination file; the extension picks the container."),
+                FuncInput::required("Path", image_fs_path(FsPathMode::NewFile))
+                    .description("Destination file; the extension picks the container."),
             )
             .input(
                 enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
@@ -146,19 +130,14 @@ pub fn image_library() -> Library {
                         .make_cpu(&vision_ctx.processing_ctx)
                         .map_err(anyhow::Error::from)?;
 
-                    let target_format = ConversionFormat::from_str(format_str)
-                        .expect("Invalid conversion format")
-                        .to_color_format();
-
-                    match target_format {
-                        Some(fmt) => cpu_image
-                            .clone()
-                            .convert(fmt)
+                    match conversion_target(format_str, cpu_image.desc.color_format) {
+                        Some(format) => cpu_image
+                            .convert_to(format)
                             .map_err(anyhow::Error::from)?
-                            .save_file(path)
-                            .map_err(anyhow::Error::from)?,
-                        None => cpu_image.save_file(path).map_err(anyhow::Error::from)?,
+                            .save_file(path),
+                        None => cpu_image.save_file(path),
                     }
+                    .map_err(anyhow::Error::from)?;
 
                     Ok(())
                 })
@@ -190,27 +169,37 @@ pub fn image_library() -> Library {
                         assert_eq!(inputs.len(), 2);
                         assert_eq!(outputs.len(), 1);
 
-                        let input_image = inputs[0].value.as_custom::<Image>().unwrap();
+                        let value = std::mem::take(&mut inputs[0].value);
                         let format_str = inputs[1].value.as_enum().unwrap();
-                        let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
-                        let cpu_image = input_image
-                            .make_cpu(&vision_ctx.processing_ctx)
-                            .map_err(anyhow::Error::from)?;
-
-                        let target_format = ConversionFormat::from_str(format_str)
-                            .expect("Invalid conversion format")
-                            .to_color_format();
-
-                        let converted = match target_format {
-                            Some(fmt) => cpu_image
-                                .clone()
-                                .convert(fmt)
-                                .map_err(anyhow::Error::from)?,
-                            None => cpu_image.clone(),
+                        let converted = {
+                            let image = value
+                                .as_custom::<Image>()
+                                .expect("image input type is validated at the compile boundary");
+                            match conversion_target(format_str, image.desc.color_format) {
+                                Some(format) => {
+                                    let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
+                                    let cpu_image = image
+                                        .make_cpu(&vision_ctx.processing_ctx)
+                                        .map_err(anyhow::Error::from)?;
+                                    Some(
+                                        cpu_image
+                                            .convert_to(format)
+                                            .map_err(anyhow::Error::from)?,
+                                    )
+                                }
+                                None => None,
+                            }
                         };
 
-                        outputs[0] = DynamicValue::from_custom(Image::from(converted));
+                        outputs[0] = match converted {
+                            Some(image) => DynamicValue::from_custom(Image::from(image)),
+                            // "As Is", or already in the requested format: pass the input
+                            // through untouched — the same value, zero copies, no forced
+                            // CPU download. Sharing the Arc across slots is safe: any
+                            // downstream in-place op sees a shared value and clones.
+                            None => value,
+                        };
 
                         Ok(())
                     })
@@ -368,6 +357,64 @@ pub fn image_library() -> Library {
     library
 }
 
+/// The FsPath input type for image files — the extensions `read_file`/`save_file`
+/// accept.
+fn image_fs_path(mode: FsPathMode) -> DataType {
+    DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
+        mode,
+        SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
+    )))
+}
+
+/// Resolve a `Format` enum input against the image's current format: `None` when the
+/// pick is "As Is" or the image is already in that format — no conversion needed.
+fn conversion_target(format_str: &str, current: ColorFormat) -> Option<ColorFormat> {
+    let format = ConversionFormat::from_str(format_str)
+        .expect("enum input is validated at the compile boundary")
+        .to_color_format()?;
+    (format != current).then_some(format)
+}
+
+/// Apply `op` to an image value: a uniquely-owned, CPU-resident input is adjusted
+/// **in place** (the executor's move-on-last-use hands the node the sole holder, so
+/// the allocation is reused and no output image is allocated); a shared or
+/// GPU-resident one goes through the allocate-fresh-output path as before.
+fn adjust_image(
+    op: ContrastBrightness,
+    ctx: &mut imaginarium::ProcessingContext,
+    value: DynamicValue,
+) -> anyhow::Result<Image> {
+    match value.into_custom::<Image>() {
+        Ok(mut image) if image.is_cpu() => {
+            {
+                // `make_cpu_mut` through `DerefMut` also invalidates the preview.
+                let mut cpu = image.make_cpu_mut(ctx).map_err(anyhow::Error::from)?;
+                op.apply_cpu(&mut cpu);
+            }
+            Ok(image)
+        }
+        // A GPU-resident unique input keeps the GPU pipeline: fresh output, GPU op.
+        Ok(image) => adjust_into_fresh(op, ctx, &image),
+        Err(value) => {
+            let input = value
+                .as_custom::<Image>()
+                .expect("image input type is validated at the compile boundary");
+            adjust_into_fresh(op, ctx, input)
+        }
+    }
+}
+
+fn adjust_into_fresh(
+    op: ContrastBrightness,
+    ctx: &mut imaginarium::ProcessingContext,
+    input: &Image,
+) -> anyhow::Result<Image> {
+    let mut output = imaginarium::ImageBuffer::new_empty(input.desc);
+    op.execute(ctx, input, &mut output)
+        .map_err(anyhow::Error::from)?;
+    Ok(Image::from(output))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,6 +424,79 @@ mod tests {
             .iter()
             .find(|f| f.name == name)
             .unwrap_or_else(|| panic!("{name} registered"))
+    }
+
+    /// `adjust_image` reuses a uniquely-held CPU input's allocation and leaves a
+    /// shared input untouched behind a fresh output — with identical pixels either
+    /// way. Pointer identity of the pixel bytes tells the two paths apart.
+    #[test]
+    fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
+        let desc = imaginarium::ImageDesc::new(9, 4, imaginarium::ColorFormat::RGBA_U8);
+        let op = ContrastBrightness::new(1.5, 0.1);
+        let mut ctx = imaginarium::ProcessingContext::cpu_only();
+
+        // A non-uniform pattern so the adjustment visibly changes bytes.
+        let pattern: Vec<u8> = (0..desc.size_in_bytes()).map(|i| (i % 251) as u8).collect();
+        let patterned_image = || {
+            let mut img = imaginarium::Image::new_black(desc).unwrap();
+            img.bytes_mut().copy_from_slice(&pattern);
+            img
+        };
+
+        // Unique CPU input: adjusted in place — the pixel allocation is reused.
+        let img = patterned_image();
+        let unique_ptr = img.bytes().as_ptr();
+        let unique = DynamicValue::from_custom(Image::from(img));
+        let adjusted = adjust_image(op, &mut ctx, unique).unwrap();
+        let adjusted_cpu = adjusted.buffer.make_cpu(&ctx).unwrap();
+        assert_eq!(
+            adjusted_cpu.bytes().as_ptr(),
+            unique_ptr,
+            "unique CPU input is adjusted in place"
+        );
+        assert_ne!(
+            adjusted_cpu.bytes(),
+            pattern.as_slice(),
+            "adjustment changed the pixels"
+        );
+
+        // Shared input: a second holder blocks the move → fresh output, original intact.
+        let img = patterned_image();
+        let shared_ptr = img.bytes().as_ptr();
+        let shared = DynamicValue::from_custom(Image::from(img));
+        let holder = shared.clone();
+        let adjusted_shared = adjust_image(op, &mut ctx, shared).unwrap();
+        let shared_cpu = adjusted_shared.buffer.make_cpu(&ctx).unwrap();
+        assert_ne!(
+            shared_cpu.bytes().as_ptr(),
+            shared_ptr,
+            "shared input gets a fresh output allocation"
+        );
+        let original = holder.as_custom::<Image>().unwrap();
+        let original_cpu = original.buffer.make_cpu(&ctx).unwrap();
+        assert_eq!(original_cpu.bytes().as_ptr(), shared_ptr);
+        assert_eq!(
+            original_cpu.bytes(),
+            pattern.as_slice(),
+            "the shared original is untouched"
+        );
+
+        // Both paths compute identical pixels.
+        assert_eq!(adjusted_cpu.bytes(), shared_cpu.bytes());
+    }
+
+    #[test]
+    fn conversion_target_collapses_as_is_and_matching_format() {
+        // "As Is" never converts, whatever the source format.
+        assert_eq!(conversion_target("As Is", ColorFormat::RGB_U8), None);
+        // A pick matching the source format is a no-op too — the node passes the
+        // input value through instead of copying it.
+        assert_eq!(conversion_target("RGB u8", ColorFormat::RGB_U8), None);
+        // A genuinely different format converts.
+        assert_eq!(
+            conversion_target("RGB u8", ColorFormat::RGBA_F32),
+            Some(ColorFormat::RGB_U8)
+        );
     }
 
     #[test]
