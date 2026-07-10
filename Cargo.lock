@@ -205,7 +205,7 @@ dependencies = [
  "half",
  "image",
  "padding-struct",
- "pollster",
+ "pollster 1.0.0",
  "profiling",
  "rayon",
  "rustc-hash 2.1.3",
@@ -2172,7 +2172,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "image",
  "paste",
- "pollster",
+ "pollster 1.0.0",
  "quickbench 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rayon",
  "serde",
@@ -3632,6 +3632,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
+name = "pollster"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2560ec4d09f0d4db1fb45518d099d74954dd3da5855a0fcb84f2779b5b41a59e"
+
+[[package]]
 name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4144,7 +4150,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "percent-encoding",
- "pollster",
+ "pollster 0.4.0",
  "raw-window-handle",
  "wasm-bindgen",
  "wasm-bindgen-futures",
