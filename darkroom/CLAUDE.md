@@ -89,9 +89,10 @@ everything else is grouped by responsibility:
    `ArgumentValues` off the worker channel into `editor.run_state`.
 2. **editor frame** (`editor.frame`) — the full edit pipeline; returns an
    optional `MenuCommand`.
-3. **request open-panel values** (`request_open_panel_values`) — for each open
-   inspector node, ask the worker for fresh input/output values (deduped per
-   run epoch).
+3. **request watched values** (`request_watched_values`) — drain the run
+   state's per-frame watch registry (open inspector panels + image-viewer
+   tabs registered their nodes during the editor frame) into worker value
+   requests (deduped per run epoch).
 4. **handle menu command** (`handle_menu_command`) — file/theme dialogs +
    `Run` execute *last*, outside the record, so the blocking dialog holds no
    frame borrows. `Run` calls `App::run_graph`.
@@ -257,12 +258,15 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 - **Status + logs persist across re-runs** (the glow doesn't blank during
   compute); runtime *values* invalidate immediately on `begin_run` and are
   fetched on demand.
-- **On-demand values**: open inspector panels drive `App::request_open_panel_values`,
-  which sends a `ValueRequest { node_id, run_id }` (the `run_id` epoch drops
+- **On-demand values**: every surface showing runtime values — open inspector
+  panels and image-viewer tabs — registers its nodes per frame in `RunState`'s
+  watch registry (`RunState::watch`); `App::request_watched_values` drains it
+  into `ValueRequest { node_id, run_id }` sends (the `run_id` epoch drops
   stale replies). The worker spawns a forwarder task; its `ArgumentValues`
   reply (`inputs`/`outputs`) lands on a later frame, where
   `node_values::build_view` formats text + uploads image previews as aperture
-  textures into `RunState`.
+  textures into `RunState` (each image port also keeps its full value for the
+  viewer tab).
 
 ### GUI tree (`src/gui/`)
 Top level is the chrome: `MainWindow` (zstack: graph behind a floating menu

@@ -167,11 +167,13 @@ impl App {
         }
     }
 
-    /// Forward the editor's pending value requests (open panels with no
-    /// value yet) to the worker. Run after the frame's record, when the
-    /// panel set is settled; the reply arrives on a later frame's drain.
-    fn request_open_panel_values(&mut self) {
-        for req in self.editor.take_value_requests() {
+    /// Forward the frame's pending value requests to the worker: the
+    /// editor's frame registered every value-showing surface (inspector
+    /// panels, image-viewer tabs) into the run state's watch registry;
+    /// drain it here, after the record. The reply arrives on a later
+    /// frame's drain.
+    fn request_watched_values(&mut self) {
+        for req in self.editor.run_state.take_requests() {
             self.engine.request_argument_values(req);
         }
     }
@@ -336,9 +338,9 @@ impl aperture::App for App {
             self.engine.save_caches(self.editor.document.graph.clone());
         }
 
-        // The frame settled which inspector panels are open; request the
-        // runtime values for any that still need them.
-        self.request_open_panel_values();
+        // The frame registered everything watching runtime values; request
+        // any that still need fetching this epoch.
+        self.request_watched_values();
 
         // Menu side effects run last so the blocking file dialog opens
         // after the frame's record + drain. Loading replaces the

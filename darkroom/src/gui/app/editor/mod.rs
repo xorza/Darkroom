@@ -23,7 +23,6 @@ use crate::core::edit::intent::{
     Intent, NodeProperty, build_duplicate_intent_for, commit_intent_cascading,
 };
 use crate::core::io::preferences::Preferences;
-use crate::core::worker::ValueRequest;
 use crate::gui::UiAction;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
@@ -106,10 +105,11 @@ pub(crate) struct Editor {
     /// `NodeId`s so it resolves against any tab (root or subgraph
     /// interior): execution status (the glow + header time, projected into
     /// each `SceneNode::exec_status` at rebuild), log lines, and the
-    /// runtime values fetched on demand for open inspection panels. `App`
-    /// drives it as it drains the worker (`RunState::set_results` /
-    /// `ingest_values` / `clear`); requests go through `take_value_requests`
-    /// here, which also reads the open-panel set. Off the serialized state.
+    /// runtime values fetched on demand for the watching surfaces (open
+    /// inspection panels, image-viewer tabs — each registers per frame
+    /// via `RunState::watch`). `App` drives it as it drains the worker
+    /// (`RunState::set_results` / `ingest_values` / `clear`) and forwards
+    /// its `take_requests`. Off the serialized state.
     pub(crate) run_state: RunState,
 }
 
@@ -133,25 +133,6 @@ impl Editor {
             actions: Vec::new(),
             run_state: RunState::default(),
         }
-    }
-
-    /// Pending value requests for the open inspection panels **and** the
-    /// open image-viewer tabs' nodes (a viewer must refresh after a run
-    /// even when its node's panel is closed): each node not yet asked
-    /// this epoch, marked in-flight here and returned (with the current
-    /// run epoch) for `App` to forward to the worker. Keeps all request
-    /// bookkeeping on the projection; `App` only performs the IO.
-    pub(crate) fn take_value_requests(&mut self) -> Vec<ValueRequest> {
-        let viewer_nodes = self.document.tabs.iter().filter_map(|t| match t {
-            TabRef::ImageViewer(port) => Some(port.node_id),
-            _ => None,
-        });
-        self.run_state.take_requests(
-            self.main_window
-                .graph_ui
-                .open_inspector_nodes()
-                .chain(viewer_nodes),
-        )
     }
 
     /// Apply a single `intent` against the active target and record it as
@@ -243,6 +224,14 @@ impl Editor {
         // frame's `scene` to resolve tab/chip clicks, so it must run before
         // this frame's rebuild. After it, the active tab is fixed.
         self.navigate(ui, library);
+        // Register this frame's value watchers: every surface showing
+        // runtime values re-declares its nodes into the run state's watch
+        // registry, which `App` drains into worker requests after the
+        // frame. Open inspector panels register here; image-viewer tabs
+        // in `sync_image_viewers` (their sync loop).
+        for node_id in self.main_window.graph_ui.open_inspector_nodes() {
+            self.run_state.watch(node_id);
+        }
         // Tabs are settled: drop viewer state for closed tabs and fold the
         // latest run's fetched values into the open viewers (values landed
         // in `App`'s pre-frame drain, so a finished run shows this frame).
@@ -523,13 +512,12 @@ impl Editor {
     }
 
     /// Keep the viewer tabs in step with the document and the last run:
-    /// drop viewer state whose tab closed (freeing its texture), and
-    /// re-present each remaining tab's port from the current epoch's
-    /// fetched values — so every open viewer updates after a graph
-    /// execution, keeping the user's framing (see
-    /// [`refresh`](image_viewer::ImageViewer::refresh)).
-    /// Values arrive because [`Self::take_value_requests`] asks the worker
-    /// for viewer-tab nodes alongside open inspector panels.
+    /// drop viewer state whose tab closed (freeing its texture), register
+    /// each remaining tab's node in the run state's watch registry (a
+    /// viewer must fetch values even when its node's panel is closed),
+    /// and re-present its port from the current epoch's fetched values —
+    /// so every open viewer updates after a graph execution, keeping the
+    /// user's framing (see [`refresh`](image_viewer::ImageViewer::refresh)).
     fn sync_image_viewers(&mut self) {
         let tabs = &self.document.tabs;
         self.main_window
@@ -539,6 +527,7 @@ impl Editor {
             let &TabRef::ImageViewer(port) = tab else {
                 continue;
             };
+            self.run_state.watch(port.node_id);
             // Nothing fetched for this node yet this epoch — keep showing
             // the previous run's content rather than blanking mid-run.
             if self.run_state.values(port.node_id).is_none() {
@@ -730,10 +719,12 @@ mod tests {
         assert!(editor.main_window.image_viewers.contains_key(&port(0)));
         assert!(editor.main_window.image_viewers.contains_key(&port(1)));
 
-        // Viewer tabs feed the worker value fetch even with every
-        // inspector panel closed — this is what refreshes them after a
-        // run. One request per node per epoch (both tabs share the node).
-        let requests = editor.take_value_requests();
+        // Viewer tabs register themselves in the run state's watch
+        // registry even with every inspector panel closed — this is what
+        // refreshes them after a run. One request per node per epoch
+        // (both tabs share the node).
+        editor.sync_image_viewers();
+        let requests = editor.run_state.take_requests();
         assert_eq!(requests.len(), 1, "one request per node per epoch");
         assert_eq!(requests[0].node_id, id);
 
