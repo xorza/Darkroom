@@ -12,7 +12,7 @@ wgpu = ["dep:wgpu", "dep:pollster", "dep:tokio"]
 wgpu = { version = "30.0", features = ["metal", "vulkan", "dx12"], optional = true }
 thiserror = { version = "2.0" }
 bytemuck = { version = "1.25", features = ["derive", "extern_crate_alloc"] }
-pollster = { version = "0.4", optional = true }
+pollster = { version = "1.0", optional = true }
 glam = { version = "0.33", features = ["serde"] }
 strum = { version = "0.28" }
 strum_macros = { version = "0.28" }
