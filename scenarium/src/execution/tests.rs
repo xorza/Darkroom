@@ -1592,6 +1592,7 @@ mod resource_binds {
 
     const MAKE_PATH: &str = "be2c3976-3a4f-4ed3-bfe6-8eafb35f084a";
     const LOAD_TEXT: &str = "5abcd2e7-f023-4122-8215-f6305c8b4a7e";
+    const ANNOTATE: &str = "b8d6cc90-3c6e-4bdc-aaed-30b6740a9d5d";
     const CAPTURE: &str = "1a9629a9-dfbe-4665-b2b9-6f0d5c21f290";
 
     /// A temp file path removed on drop.
@@ -1657,8 +1658,15 @@ mod resource_binds {
 
     /// `make_path` (pure: `String` const in → `FsPath` value out — a producer whose own
     /// digest does *not* track the file, like any path-computing node) → `load_text`
-    /// (pure: declared-`FsPath` input, reads the file, counts invocations) → `capture`.
-    fn path_lib(loads: Arc<AtomicUsize>, captured: Arc<StdMutex<String>>) -> Library {
+    /// (pure: declared-`FsPath` input, reads the file, counts invocations) → `annotate`
+    /// (pure, *downstream* of the late-stamped loader: brackets the text, counts
+    /// invocations — proves the reach-time re-stamp cascades so downstream caches still
+    /// hit) → `capture`.
+    fn path_lib(
+        loads: Arc<AtomicUsize>,
+        annotates: Arc<AtomicUsize>,
+        captured: Arc<StdMutex<String>>,
+    ) -> Library {
         let mut lib = Library::default();
         lib.add(
             Func::new(MAKE_PATH, "make_path")
@@ -1694,13 +1702,36 @@ mod resource_binds {
                     }
                 )),
         );
+        lib.add(
+            Func::new(ANNOTATE, "annotate")
+                .category("Test")
+                .pure()
+                .input(FuncInput::required("Text", DataType::String))
+                .output(FuncOutput::new("Text", DataType::String))
+                .lambda(async_lambda!(
+                    move |_, _, _, inputs, _, outputs| { annotates = annotates.clone() } => {
+                        annotates.fetch_add(1, Ordering::SeqCst);
+                        let text = inputs[0].value.as_string().unwrap();
+                        outputs[0] = StaticValue::String(format!("[{text}]")).into();
+                        Ok(())
+                    }
+                )),
+        );
         lib.add(capture_func(captured));
         lib
     }
 
-    /// `make_path(const name = data path) → load_text → capture`, the two pure nodes on
-    /// the given cache mode. Fixed node ids so reopened engines address the same slots.
-    fn path_graph(lib: &Library, data_path: &str, mode: CacheMode) -> (Graph, NodeId, NodeId) {
+    struct PathFixture {
+        graph: Graph,
+        make_id: NodeId,
+        load_id: NodeId,
+        annotate_id: NodeId,
+    }
+
+    /// `make_path(const name = data path) → load_text → annotate → capture`, the three
+    /// pure nodes on the given cache mode. Fixed node ids so reopened engines address the
+    /// same slots.
+    fn path_graph(lib: &Library, data_path: &str, mode: CacheMode) -> PathFixture {
         let mut graph = Graph::default();
         let mut make = node(lib, "make_path", NodeId::from_u128(1));
         make.cache = mode;
@@ -1708,9 +1739,13 @@ mod resource_binds {
         let mut load = node(lib, "load_text", NodeId::from_u128(2));
         load.cache = mode;
         graph.add(load);
+        let mut annotate = node(lib, "annotate", NodeId::from_u128(4));
+        annotate.cache = mode;
+        graph.add(annotate);
         graph.add(node(lib, "capture", NodeId::from_u128(3)));
         let make_id = graph.by_name("make_path").unwrap().id;
         let load_id = graph.by_name("load_text").unwrap().id;
+        let annotate_id = graph.by_name("annotate").unwrap().id;
         bind(
             &mut graph,
             "make_path",
@@ -1718,8 +1753,14 @@ mod resource_binds {
             Binding::Const(StaticValue::String(data_path.to_string())),
         );
         bind(&mut graph, "load_text", 0, (make_id, 0).into());
-        bind(&mut graph, "capture", 0, (load_id, 0).into());
-        (graph, make_id, load_id)
+        bind(&mut graph, "annotate", 0, (load_id, 0).into());
+        bind(&mut graph, "capture", 0, (annotate_id, 0).into());
+        PathFixture {
+            graph,
+            make_id,
+            load_id,
+            annotate_id,
+        }
     }
 
     fn ran(stats: &ExecutionStats, id: NodeId) -> bool {
@@ -1736,32 +1777,41 @@ mod resource_binds {
         let data = temp_file("ram");
         std::fs::write(&data.0, "v1").unwrap();
         let loads = Arc::new(AtomicUsize::new(0));
+        let annotates = Arc::new(AtomicUsize::new(0));
         let captured = Arc::new(StdMutex::new(String::new()));
-        let lib = path_lib(loads.clone(), captured.clone());
-        let (graph, make_id, load_id) = path_graph(&lib, &data.0.to_string_lossy(), CacheMode::Ram);
+        let lib = path_lib(loads.clone(), annotates.clone(), captured.clone());
+        let fx = path_graph(&lib, &data.0.to_string_lossy(), CacheMode::Ram);
 
         let mut engine = ExecutionEngine::default();
-        engine.update(&graph, &lib).unwrap();
+        engine.update(&fx.graph, &lib).unwrap();
 
         // Cold run: everything computes (the loader's pre-run digest is None — the
         // delivered value doesn't exist yet — so it re-stamps at reach time and runs).
         engine.execute_terminals().await.unwrap();
         assert_eq!(loads.load(Ordering::SeqCst), 1);
-        assert_eq!(*captured.lock().unwrap(), "v1");
+        assert_eq!(annotates.load(Ordering::SeqCst), 1);
+        assert_eq!(*captured.lock().unwrap(), "[v1]");
 
-        // Unchanged file: the loader reuses its RAM value under the full digest
-        // (producer port + live file identity).
+        // Unchanged file: the loader reuses its RAM value under the full digest (producer
+        // port + live file identity), and its *downstream* — whose digest folds the
+        // loader's — skips too.
         let stats = engine.execute_terminals().await.unwrap();
         assert_eq!(
             loads.load(Ordering::SeqCst),
             1,
             "unchanged file ⇒ the wired-path loader stays cached"
         );
-        assert!(stats.cached_nodes.contains(&load_id));
+        assert!(stats.cached_nodes.contains(&fx.load_id));
+        assert_eq!(
+            annotates.load(Ordering::SeqCst),
+            1,
+            "downstream of the late-stamped loader skips compute on its hit"
+        );
+        assert!(stats.cached_nodes.contains(&fx.annotate_id));
 
-        // Edit the file (different length ⇒ unambiguous identity change). Only the loader
-        // re-keys: its structural upstream is untouched (make_path stays a RAM hit), so the
-        // recompute is driven purely by the delivered value's file identity.
+        // Edit the file (different length ⇒ unambiguous identity change). The loader
+        // re-keys off the delivered value's file identity and the change propagates to its
+        // downstream — while the structural upstream (make_path) stays a RAM hit.
         std::fs::write(&data.0, "v2-longer").unwrap();
         let stats = engine.execute_terminals().await.unwrap();
         assert_eq!(
@@ -1770,69 +1820,91 @@ mod resource_binds {
             "a file edit re-keys the loader through the wired path"
         );
         assert_eq!(
+            annotates.load(Ordering::SeqCst),
+            2,
+            "the loader's new digest invalidates its downstream"
+        );
+        assert_eq!(
             *captured.lock().unwrap(),
-            "v2-longer",
+            "[v2-longer]",
             "the fresh content flows downstream"
         );
         assert!(
-            !ran(&stats, make_id),
+            !ran(&stats, fx.make_id),
             "the path producer itself stays cached — nothing structural changed"
         );
-        assert!(ran(&stats, load_id));
+        assert!(ran(&stats, fx.load_id));
     }
 
     /// Disk persistence across a reopen with a wired path: the loader's blob is keyed
     /// under the delivered path's live identity, so a fresh engine reuses it while the
     /// file is unchanged — hydrating the on-disk path producer just to stamp — and
-    /// recomputes once the file changes, while the producer itself stays a disk hit.
+    /// recomputes once the file changes, while the producer itself stays a disk hit. The
+    /// downstream `annotate` proves the re-stamp *cascade*: on reopen its own pre-run
+    /// digest is `None` too (it folds the loader's), and its reach-time re-stamp lands on
+    /// its blob — the whole tainted cone skips compute, not just the loader.
     #[tokio::test]
     async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
         let dir = TempDir::new("disk");
         let data = temp_file("disk-data");
         std::fs::write(&data.0, "v1").unwrap();
         let loads = Arc::new(AtomicUsize::new(0));
+        let annotates = Arc::new(AtomicUsize::new(0));
         let captured = Arc::new(StdMutex::new(String::new()));
-        let lib = path_lib(loads.clone(), captured.clone());
-        let (graph, make_id, load_id) =
-            path_graph(&lib, &data.0.to_string_lossy(), CacheMode::Disk);
+        let lib = path_lib(loads.clone(), annotates.clone(), captured.clone());
+        let fx = path_graph(&lib, &data.0.to_string_lossy(), CacheMode::Disk);
 
-        // Cold run: computes and stores both blobs.
+        // Cold run: computes and stores the blobs.
         let mut engine = disk_engine(&dir);
-        engine.update(&graph, &lib).unwrap();
+        engine.update(&fx.graph, &lib).unwrap();
         engine.execute_terminals().await.unwrap();
         assert_eq!(loads.load(Ordering::SeqCst), 1);
+        assert_eq!(annotates.load(Ordering::SeqCst), 1);
 
-        // Reopen, unchanged file: the loader is a disk hit under the re-stamped digest.
+        // Reopen, unchanged file: the loader is a disk hit under the re-stamped digest,
+        // and so is its downstream — each re-stamped at reach time, producer-first.
         let mut engine = disk_engine(&dir);
-        engine.update(&graph, &lib).unwrap();
+        engine.update(&fx.graph, &lib).unwrap();
         let stats = engine.execute_terminals().await.unwrap();
         assert_eq!(
             loads.load(Ordering::SeqCst),
             1,
             "reopen with an unchanged file serves the loader from disk"
         );
-        assert!(stats.cached_nodes.contains(&load_id));
-        assert!(!ran(&stats, load_id));
+        assert!(stats.cached_nodes.contains(&fx.load_id));
+        assert!(!ran(&stats, fx.load_id));
+        assert_eq!(
+            annotates.load(Ordering::SeqCst),
+            1,
+            "downstream of the late-stamped loader is a disk hit too"
+        );
+        assert!(stats.cached_nodes.contains(&fx.annotate_id));
         assert_eq!(
             *captured.lock().unwrap(),
-            "v1",
+            "[v1]",
             "the terminal reads the hydrated disk value"
         );
 
-        // Reopen after an edit: the loader's key moved ⇒ recompute; the path producer's
-        // own digest is unchanged, so it stays a disk hit feeding the recompute.
+        // Reopen after an edit: the loader's key moved ⇒ recompute, propagating to its
+        // downstream; the path producer's own digest is unchanged, so it stays a disk hit
+        // feeding the recompute.
         std::fs::write(&data.0, "v2-longer").unwrap();
         let mut engine = disk_engine(&dir);
-        engine.update(&graph, &lib).unwrap();
+        engine.update(&fx.graph, &lib).unwrap();
         let stats = engine.execute_terminals().await.unwrap();
         assert_eq!(
             loads.load(Ordering::SeqCst),
             2,
             "reopen after a file edit recomputes the loader"
         );
-        assert_eq!(*captured.lock().unwrap(), "v2-longer");
+        assert_eq!(
+            annotates.load(Ordering::SeqCst),
+            2,
+            "the loader's new digest invalidates its downstream"
+        );
+        assert_eq!(*captured.lock().unwrap(), "[v2-longer]");
         assert!(
-            !ran(&stats, make_id),
+            !ran(&stats, fx.make_id),
             "the path producer is served from its blob, not recomputed"
         );
     }
@@ -1850,7 +1922,11 @@ mod resource_binds {
         std::fs::write(&data.0, "v1").unwrap();
         let loads = Arc::new(AtomicUsize::new(0));
         let captured = Arc::new(StdMutex::new(String::new()));
-        let lib = path_lib(loads.clone(), captured.clone());
+        let lib = path_lib(
+            loads.clone(),
+            Arc::new(AtomicUsize::new(0)),
+            captured.clone(),
+        );
 
         // file-cache(value = const data path, path = const cache file) → load_text → capture.
         let mut graph = Graph::default();
