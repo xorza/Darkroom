@@ -33,7 +33,7 @@ use glam::Vec2;
 use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
 use scenarium::graph::{
-    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, Subscription,
+    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, Subscription,
 };
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
@@ -523,7 +523,7 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
         }
         Intent::RemoveNode { node_id } => {
             let view_node = view.view_nodes.by_key(&node_id)?.clone();
-            let node = graph.by_id(&node_id)?.clone();
+            let node = graph.find_node(&node_id, NodeSearch::TopLevel)?.clone();
             let was_selected = view.selected_nodes.contains(&node_id);
             GraphStep::RemoveNode {
                 view_node,
@@ -543,7 +543,10 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             GraphStep::MoveNodes { grabbed, moves }
         }
         Intent::RenameNode { node_id, to } => GraphStep::RenameNode {
-            from: graph.by_id(&node_id)?.name.clone(),
+            from: graph
+                .find_node(&node_id, NodeSearch::TopLevel)?
+                .name
+                .clone(),
             node_id,
             to,
         },
@@ -552,7 +555,7 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             input_idx,
             to,
         } => {
-            graph.by_id(&node_id)?;
+            graph.find_node(&node_id, NodeSearch::TopLevel)?;
             GraphStep::SetInput {
                 from: graph.input_binding(InputPort::new(node_id, input_idx)),
                 node_id,
@@ -575,7 +578,7 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             }
         }
         Intent::SetNodeProperty { node_id, to } => {
-            let node = graph.by_id(&node_id)?;
+            let node = graph.find_node(&node_id, NodeSearch::TopLevel)?;
             // Capture the *same* property's current value as `from` for revert.
             let from = match to {
                 NodeProperty::Disabled(_) => NodeProperty::Disabled(node.disabled),
@@ -584,7 +587,8 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             GraphStep::SetNodeProperty { node_id, from, to }
         }
         Intent::DetachSubgraph { node_id } => {
-            let NodeKind::Subgraph(SubgraphRef::Local(from_id)) = graph.by_id(&node_id)?.kind
+            let NodeKind::Subgraph(SubgraphRef::Local(from_id)) =
+                graph.find_node(&node_id, NodeSearch::TopLevel)?.kind
             else {
                 return None; // not a local subgraph instance — nothing to fork
             };
@@ -611,8 +615,8 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             // An unsubscribe of a vanished node no-ops naturally (nothing is
             // subscribed → from == to == false), so it needs no existence check.
             if subscribe {
-                graph.by_id(&emitter)?;
-                graph.by_id(&subscriber)?;
+                graph.find_node(&emitter, NodeSearch::TopLevel)?;
+                graph.find_node(&subscriber, NodeSearch::TopLevel)?;
             }
             GraphStep::SetSubscription {
                 from: graph.is_subscribed(emitter, event_idx, subscriber),
@@ -742,7 +746,7 @@ pub fn build_duplicate_intent_for(
     let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
     let mut nodes = Vec::new();
     for old_id in node_ids {
-        let Some(node) = graph.by_id(old_id) else {
+        let Some(node) = graph.find_node(old_id, NodeSearch::TopLevel) else {
             continue;
         };
         let new_id = NodeId::unique();
@@ -881,7 +885,10 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             bindings,
         } => {
             assert!(
-                scope.graph.by_id(&node.id).is_none(),
+                scope
+                    .graph
+                    .find_node(&node.id, NodeSearch::TopLevel)
+                    .is_none(),
                 "apply AddNode expects node to be absent"
             );
             if let Some(def) = def {
@@ -914,7 +921,10 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         }
         GraphStep::RemoveNode { node, .. } => {
             assert!(
-                scope.graph.by_id(&node.id).is_some(),
+                scope
+                    .graph
+                    .find_node(&node.id, NodeSearch::TopLevel)
+                    .is_some(),
                 "apply RemoveNode expects node to be present"
             );
             scope.remove_node(&node.id);
@@ -927,7 +937,11 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             }
         }
         GraphStep::RenameNode { node_id, to, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().name = to.clone();
+            scope
+                .graph
+                .find_node_mut(node_id, NodeSearch::TopLevel)
+                .unwrap()
+                .name = to.clone();
         }
         GraphStep::SetInput {
             node_id,
@@ -952,8 +966,11 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         }
         GraphStep::DetachSubgraph { node_id, def, .. } => {
             scope.graph.subgraphs.add((**def).clone());
-            scope.graph.by_id_mut(node_id).unwrap().kind =
-                NodeKind::Subgraph(SubgraphRef::Local(def.id));
+            scope
+                .graph
+                .find_node_mut(node_id, NodeSearch::TopLevel)
+                .unwrap()
+                .kind = NodeKind::Subgraph(SubgraphRef::Local(def.id));
         }
         GraphStep::SetViewport { to, .. } => {
             scope.view.viewport = *to;
@@ -987,7 +1004,10 @@ fn set_subscription(
 /// Write one [`NodeProperty`] into its node field. Shared by `apply_graph`
 /// (writes `to`) and `revert_graph` (writes `from`).
 fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProperty) {
-    let node = scope.graph.by_id_mut(node_id).unwrap();
+    let node = scope
+        .graph
+        .find_node_mut(node_id, NodeSearch::TopLevel)
+        .unwrap();
     match prop {
         NodeProperty::Disabled(v) => node.disabled = v,
         NodeProperty::RuntimeCache(v) => node.cache = v,
@@ -1063,7 +1083,10 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         } => {
             let removed_node_id = node.id;
             assert!(
-                scope.graph.by_id(&node.id).is_none(),
+                scope
+                    .graph
+                    .find_node(&node.id, NodeSearch::TopLevel)
+                    .is_none(),
                 "revert RemoveNode expects removed node to be absent"
             );
             scope.graph.add(node.clone());
@@ -1081,7 +1104,11 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             }
         }
         GraphStep::RenameNode { node_id, from, .. } => {
-            scope.graph.by_id_mut(node_id).unwrap().name = from.clone();
+            scope
+                .graph
+                .find_node_mut(node_id, NodeSearch::TopLevel)
+                .unwrap()
+                .name = from.clone();
         }
         GraphStep::SetInput {
             node_id,
@@ -1111,8 +1138,11 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             from_id,
             def,
         } => {
-            scope.graph.by_id_mut(node_id).unwrap().kind =
-                NodeKind::Subgraph(SubgraphRef::Local(*from_id));
+            scope
+                .graph
+                .find_node_mut(node_id, NodeSearch::TopLevel)
+                .unwrap()
+                .kind = NodeKind::Subgraph(SubgraphRef::Local(*from_id));
             scope.graph.subgraphs.remove_by_key(&def.id);
         }
         GraphStep::SetViewport { from, .. } => {
@@ -1625,8 +1655,19 @@ mod tests {
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
         // Fresh nodes default to no caching (None) and enabled.
-        assert_eq!(doc.graph.by_id(&id).unwrap().cache, CacheMode::None);
-        assert!(!doc.graph.by_id(&id).unwrap().disabled);
+        assert_eq!(
+            doc.graph
+                .find_node(&id, NodeSearch::TopLevel)
+                .unwrap()
+                .cache,
+            CacheMode::None
+        );
+        assert!(
+            !doc.graph
+                .find_node(&id, NodeSearch::TopLevel)
+                .unwrap()
+                .disabled
+        );
 
         // Both properties ride the one `SetNodeProperty` path. A representative flip
         // each (the cache header chips: None→Both/Ram/Disk; the disable chip: →on),
@@ -1645,7 +1686,7 @@ mod tests {
                 GraphRef::Main,
             )
             .unwrap_or_else(|| panic!("{to:?} is a real change, not a no-op"));
-            let node = doc.graph.by_id(&id).unwrap();
+            let node = doc.graph.find_node(&id, NodeSearch::TopLevel).unwrap();
             match to {
                 NodeProperty::RuntimeCache(m) => assert_eq!(node.cache, m),
                 NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
@@ -1659,7 +1700,7 @@ mod tests {
                 "each toggle is its own undo entry"
             );
             revert_step(&step, &mut doc, GraphRef::Main);
-            let node = doc.graph.by_id(&id).unwrap();
+            let node = doc.graph.find_node(&id, NodeSearch::TopLevel).unwrap();
             assert_eq!(node.cache, CacheMode::None, "revert restores the cache");
             assert!(!node.disabled, "revert restores the disable flag");
         }

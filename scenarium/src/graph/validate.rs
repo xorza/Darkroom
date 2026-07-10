@@ -111,9 +111,11 @@ impl Graph {
         // interior emitter that actually exposes that event.
         if let Some(def) = ctx_def {
             for event in &def.events {
-                let emitter = self.by_id(&event.emitter).with_context(|| {
-                    format!("exposed event names missing emitter {:?}", event.emitter)
-                })?;
+                let emitter = self
+                    .find_node(&event.emitter, NodeSearch::TopLevel)
+                    .with_context(|| {
+                        format!("exposed event names missing emitter {:?}", event.emitter)
+                    })?;
                 ensure!(
                     event.emitter_event_idx < self.event_count(emitter, library, ctx_def),
                     "exposed event index {} out of range on {:?}",
@@ -126,7 +128,7 @@ impl Graph {
         // Every binding addresses ports that exist on both ends.
         for (dst, binding) in self.bindings.iter() {
             let consumer = self
-                .by_id(&dst.node_id)
+                .find_node(&dst.node_id, NodeSearch::TopLevel)
                 .with_context(|| format!("binding on missing node {:?}", dst.node_id))?;
             ensure!(
                 dst.port_idx < self.input_count(consumer, library, ctx_def),
@@ -142,7 +144,7 @@ impl Graph {
                     dst.node_id
                 );
                 let producer = self
-                    .by_id(&src.node_id)
+                    .find_node(&src.node_id, NodeSearch::TopLevel)
                     .with_context(|| format!("binding from missing node {:?}", src.node_id))?;
                 ensure!(
                     src.port_idx < self.output_count(producer, library, ctx_def),
@@ -186,7 +188,7 @@ impl Graph {
         // Every subscription targets an event the emitter actually exposes.
         for s in self.subscriptions.iter() {
             let emitter = self
-                .by_id(&s.emitter)
+                .find_node(&s.emitter, NodeSearch::TopLevel)
                 .with_context(|| format!("subscription from missing emitter {:?}", s.emitter))?;
             ensure!(
                 s.event_idx < self.event_count(emitter, library, ctx_def),

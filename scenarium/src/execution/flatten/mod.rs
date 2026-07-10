@@ -25,7 +25,9 @@ use crate::execution::program::{
 };
 use crate::execution::stats::FlattenMap;
 use crate::graph::subgraph::SubgraphId;
-use crate::graph::{Binding, CacheMode, Graph, InputPort, NodeId, NodeKind, Subscription};
+use crate::graph::{
+    Binding, CacheMode, Graph, InputPort, NodeId, NodeKind, NodeSearch, Subscription,
+};
 use crate::library::Library;
 use crate::node::function::Func;
 use crate::node::special::SpecialNode;
@@ -153,7 +155,7 @@ fn graph_at<'a>(root: &'a Graph, library: &'a Library, path: &[NodeId]) -> &'a G
     let mut graph = root;
     for id in path {
         let r = graph
-            .by_id(id)
+            .find_node(id, NodeSearch::TopLevel)
             .unwrap()
             .kind
             .as_subgraph()
@@ -394,7 +396,7 @@ impl<'a> Run<'a> {
     /// it ultimately fires, following composite exposed-event mappings inward.
     fn resolve_emitter(&mut self, node_id: NodeId, event_idx: usize) -> Option<(NodeId, usize)> {
         let graph = self.current();
-        let node = graph.by_id(&node_id)?;
+        let node = graph.find_node(&node_id, NodeSearch::TopLevel)?;
         if node.disabled {
             return None; // a disabled node fires no events
         }
@@ -422,10 +424,16 @@ impl<'a> Run<'a> {
     fn resolve_subscriber(&mut self, node_id: NodeId, emitter: NodeId, event_idx: usize) {
         let graph = self.current();
         // A disabled node runs nothing, so it receives no events.
-        if graph.by_id(&node_id).is_some_and(|n| n.disabled) {
+        if graph
+            .find_node(&node_id, NodeSearch::TopLevel)
+            .is_some_and(|n| n.disabled)
+        {
             return;
         }
-        match graph.by_id(&node_id).map(|n| &n.kind) {
+        match graph
+            .find_node(&node_id, NodeSearch::TopLevel)
+            .map(|n| &n.kind)
+        {
             // A special node subscribes like a func: it flattens to one leaf and
             // becomes the flat subscriber. `RunTerminals` in particular relies on
             // this edge so the planner sees it among a fired event's subscribers.
@@ -494,7 +502,9 @@ impl<'a> Run<'a> {
     /// nodes. Leaves the descent stack as it found it.
     fn resolve(&mut self, node_id: NodeId, port_idx: usize) -> Source {
         let graph = self.current();
-        let node = graph.by_id(&node_id).expect("binding to a missing node");
+        let node = graph
+            .find_node(&node_id, NodeSearch::TopLevel)
+            .expect("binding to a missing node");
         // A disabled producer emits nothing, so its outputs have no source:
         // treat the wire as unbound (matches `emit` skipping the node).
         if node.disabled {

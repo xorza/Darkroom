@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::*;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::graph::{Binding, CacheMode, InputPort, Node};
+use crate::graph::{Binding, CacheMode, InputPort, Node, NodeSearch};
 use crate::node::function::FuncBehavior;
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::{FloatExt, SerdeFormat};
@@ -1545,7 +1545,10 @@ mod file_cache {
         let file = temp_file("legacyram");
         let calls = Arc::new(AtomicUsize::new(0));
         let (mut graph, lib, _, cache_id) = graph_with_cache(&file.0, calls.clone(), false);
-        graph.by_id_mut(&cache_id).unwrap().cache = CacheMode::Ram;
+        graph
+            .find_node_mut(&cache_id, NodeSearch::TopLevel)
+            .unwrap()
+            .cache = CacheMode::Ram;
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &lib).unwrap();
@@ -2455,7 +2458,10 @@ mod disabled_nodes {
         let library = test_func_lib(TestFuncHooks::default());
 
         let sum_id = graph.by_name("sum").unwrap().id;
-        graph.by_id_mut(&sum_id).unwrap().disabled = true;
+        graph
+            .find_node_mut(&sum_id, NodeSearch::TopLevel)
+            .unwrap()
+            .disabled = true;
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
@@ -2497,7 +2503,10 @@ mod disabled_nodes {
         let mut library = test_func_lib(TestFuncHooks::default());
 
         let sum_id = graph.by_name("sum").unwrap().id;
-        graph.by_id_mut(&sum_id).unwrap().disabled = true;
+        graph
+            .find_node_mut(&sum_id, NodeSearch::TopLevel)
+            .unwrap()
+            .disabled = true;
         library.by_name_mut("mult").unwrap().inputs[0].required = false;
 
         let mut execution_graph = ExecutionEngine::default();

@@ -276,6 +276,15 @@ impl Node {
     }
 }
 
+/// How deep a node lookup reaches: this graph's own nodes only, or also
+/// every local subgraph interior, recursively. The argument to
+/// [`Graph::find_node`] / [`Graph::find_node_mut`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NodeSearch {
+    TopLevel,
+    Recursive,
+}
+
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     nodes: KeyIndexVec<NodeId, Node>,
@@ -530,11 +539,11 @@ impl Graph {
     /// but type-incompatible binding stays (auto-dropping a retyped wire is a
     /// stronger call left to the run / [`Self::check_with`]).
     fn binding_live(&self, dst: InputPort, binding: &Binding, library: &Library) -> bool {
-        self.by_id(&dst.node_id)
+        self.find_node(&dst.node_id, NodeSearch::TopLevel)
             .is_some_and(|c| self.port_in_range(c, dst.port_idx, true, library))
             && match binding {
                 Binding::Bind(src) => self
-                    .by_id(&src.node_id)
+                    .find_node(&src.node_id, NodeSearch::TopLevel)
                     .is_some_and(|p| self.port_in_range(p, src.port_idx, false, library)),
                 Binding::None | Binding::Const(_) => true,
             }
@@ -545,7 +554,7 @@ impl Graph {
     /// *missing* from the library has unknowable arity, so it's kept (valid
     /// again once the library is restored); a removed emitter drops the edge.
     fn subscription_live(&self, s: &Subscription, library: &Library) -> bool {
-        match self.by_id(&s.emitter) {
+        match self.find_node(&s.emitter, NodeSearch::TopLevel) {
             None => false,
             Some(emitter) => self
                 .event_count_opt(emitter, library)
@@ -623,13 +632,38 @@ impl Graph {
         self.nodes.iter_mut().find(|node| node.name == name)
     }
 
-    pub fn by_id(&self, id: &NodeId) -> Option<&Node> {
+    /// The node with `id`, at the depth `search` selects. Node ids are
+    /// unique across a whole document (subgraph interiors included), so a
+    /// [`Recursive`](NodeSearch::Recursive) hit is unambiguous.
+    pub fn find_node(&self, id: &NodeId, search: NodeSearch) -> Option<&Node> {
         assert!(!id.is_nil());
-        self.nodes.by_key(id)
+        match self.nodes.by_key(id) {
+            Some(node) => Some(node),
+            None => match search {
+                NodeSearch::TopLevel => None,
+                NodeSearch::Recursive => self
+                    .subgraphs
+                    .iter()
+                    .find_map(|d| d.graph.find_node(id, NodeSearch::Recursive)),
+            },
+        }
     }
-    pub fn by_id_mut(&mut self, id: &NodeId) -> Option<&mut Node> {
+
+    /// Mutable counterpart of [`Self::find_node`].
+    pub fn find_node_mut(&mut self, id: &NodeId, search: NodeSearch) -> Option<&mut Node> {
         assert!(!id.is_nil());
-        self.nodes.by_key_mut(id)
+        // Probe immutably first: returning the mutable borrow straight out
+        // of an `if let` would hold it for the whole function under NLL.
+        if self.nodes.by_key(id).is_some() {
+            return self.nodes.by_key_mut(id);
+        }
+        match search {
+            NodeSearch::TopLevel => None,
+            NodeSearch::Recursive => self
+                .subgraphs
+                .iter_mut()
+                .find_map(|d| d.graph.find_node_mut(id, NodeSearch::Recursive)),
+        }
     }
 
     pub fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {

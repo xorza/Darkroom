@@ -8,7 +8,7 @@ use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::stats::{ExecutionStats, RunPhase};
 use crate::execution::{Error, Result as ExecResult};
-use crate::graph::{Graph, InputPort, Node, NodeId, NodeKind};
+use crate::graph::{Graph, InputPort, Node, NodeId, NodeKind, NodeSearch};
 use crate::library::Library;
 use crate::node::event_lambda::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -1611,7 +1611,10 @@ async fn disk_cache_persists_node_across_worker_restart() {
     let get_a_id = graph.by_name("get_a").unwrap().id;
     let mult_id = graph.by_name("mult").unwrap().id;
     let print_id = graph.by_name("Print").unwrap().id;
-    graph.by_id_mut(&mult_id).unwrap().cache = CacheMode::Disk;
+    graph
+        .find_node_mut(&mult_id, NodeSearch::TopLevel)
+        .unwrap()
+        .cache = CacheMode::Disk;
     graph.set_input_binding(InputPort::new(mult_id, 0), (get_a_id, 0).into());
     graph.set_input_binding(InputPort::new(mult_id, 1), (get_a_id, 0).into());
     graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
@@ -1766,7 +1769,10 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
     let get_a_id = graph.by_name("get_a").unwrap().id;
     let mult_id = graph.by_name("mult").unwrap().id;
     let print_id = graph.by_name("Print").unwrap().id;
-    graph.by_id_mut(&mult_id).unwrap().cache = CacheMode::Both;
+    graph
+        .find_node_mut(&mult_id, NodeSearch::TopLevel)
+        .unwrap()
+        .cache = CacheMode::Both;
     graph.set_input_binding(InputPort::new(mult_id, 0), (get_a_id, 0).into());
     graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
 

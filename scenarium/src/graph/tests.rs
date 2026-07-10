@@ -1,8 +1,8 @@
 use crate::data::DataType;
 use crate::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use crate::graph::{
-    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, OutputPort, Subscription,
-    closes_data_cycle,
+    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
+    Subscription, closes_data_cycle,
 };
 use crate::node::function::{Func, FuncId, FuncInput, FuncOutput};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
@@ -112,7 +112,10 @@ fn new_func_node_copies_its_func_default_cache_mode() {
     // constructor propagates it too.
     let mut graph = Graph::default();
     let id = graph.add_func_node(&hot);
-    assert_eq!(graph.by_id(&id).unwrap().cache, CacheMode::Both);
+    assert_eq!(
+        graph.find_node(&id, NodeSearch::TopLevel).unwrap().cache,
+        CacheMode::Both
+    );
 
     // The func-less constructors have no func to copy from and seed `None`.
     assert_eq!(
@@ -698,7 +701,10 @@ fn wiring_snapshot_round_trips_through_restore() {
     // Add a subscription that touches `sum` so both arms are exercised.
     graph.subscribe(get_a_id, 0, sum_id);
 
-    let node = graph.by_id(&sum_id).unwrap().clone();
+    let node = graph
+        .find_node(&sum_id, NodeSearch::TopLevel)
+        .unwrap()
+        .clone();
     let bindings = graph.bindings_touching(sum_id);
     let subs = graph.subscriptions_touching(sum_id);
 
@@ -740,7 +746,13 @@ fn add_func_node_seeds_default_const_binding() {
     let mut graph = Graph::default();
     let id = graph.add_func_node(&func);
 
-    assert_eq!(graph.by_id(&id).unwrap().func_id(), Some(func.id));
+    assert_eq!(
+        graph
+            .find_node(&id, NodeSearch::TopLevel)
+            .unwrap()
+            .func_id(),
+        Some(func.id)
+    );
     assert_eq!(
         graph.input_binding(InputPort::new(id, 0)),
         Binding::Const(7i64.into())
@@ -777,6 +789,68 @@ fn add_subgraph_node_seeds_default_const_binding() {
         Binding::Const(3i64.into())
     );
     assert_eq!(graph.input_binding(InputPort::new(id, 1)), Binding::None);
+}
+
+#[test]
+fn find_node_search_scope_gates_subgraph_interiors() {
+    // A top-level node plus one two-levels-deep: a local def whose
+    // interior holds another local def with the target node inside.
+    let mut inner_graph = Graph::default();
+    let deep = Node::new(NodeKind::Func(FuncId::unique()));
+    let deep_id = deep.id;
+    inner_graph.add(deep);
+    let inner = SubgraphDef::new(SubgraphId::unique(), "Inner").graph(inner_graph);
+
+    let mut outer_graph = Graph::default();
+    outer_graph.subgraphs.add(inner);
+    let outer = SubgraphDef::new(SubgraphId::unique(), "Outer").graph(outer_graph);
+
+    let mut graph = Graph::default();
+    let top = Node::new(NodeKind::Func(FuncId::unique()));
+    let top_id = top.id;
+    graph.add(top);
+    graph.subgraphs.add(outer);
+
+    // Top-level node: found either way.
+    assert_eq!(
+        graph.find_node(&top_id, NodeSearch::TopLevel).unwrap().id,
+        top_id
+    );
+    assert_eq!(
+        graph.find_node(&top_id, NodeSearch::Recursive).unwrap().id,
+        top_id
+    );
+    // Interior node: invisible to TopLevel, found two levels down by
+    // Recursive; an unknown id misses both ways.
+    assert!(graph.find_node(&deep_id, NodeSearch::TopLevel).is_none());
+    assert_eq!(
+        graph.find_node(&deep_id, NodeSearch::Recursive).unwrap().id,
+        deep_id
+    );
+    assert!(
+        graph
+            .find_node(&NodeId::unique(), NodeSearch::Recursive)
+            .is_none()
+    );
+
+    // The mutable lookup resolves identically and its edit lands on the
+    // nested node.
+    graph
+        .find_node_mut(&deep_id, NodeSearch::Recursive)
+        .unwrap()
+        .name = "renamed".to_owned();
+    assert_eq!(
+        graph
+            .find_node(&deep_id, NodeSearch::Recursive)
+            .unwrap()
+            .name,
+        "renamed"
+    );
+    assert!(
+        graph
+            .find_node_mut(&deep_id, NodeSearch::TopLevel)
+            .is_none()
+    );
 }
 
 // === Definition resolution ===

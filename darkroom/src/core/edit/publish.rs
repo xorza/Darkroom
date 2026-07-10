@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
-use scenarium::graph::{NodeId, NodeKind};
+use scenarium::graph::{NodeId, NodeKind, NodeSearch};
 use scenarium::library::Library;
 
 use crate::core::document::{Document, GraphRef};
@@ -38,7 +38,8 @@ pub(crate) fn publish_local_def(
     let mut lib = library.load_full();
     let Some((local_id, mut published, existing_lib)) = (|| {
         let scope = document.scope(target)?;
-        let NodeKind::Subgraph(SubgraphRef::Local(local_id)) = scope.graph.by_id(&node_id)?.kind
+        let NodeKind::Subgraph(SubgraphRef::Local(local_id)) =
+            scope.graph.find_node(&node_id, NodeSearch::TopLevel)?.kind
         else {
             return None;
         };
@@ -182,7 +183,7 @@ fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotab
     let graph = document.graph_for(target)?;
     if let Some(view) = document.view(target) {
         for nid in &view.selected_nodes {
-            if let Some(node) = graph.by_id(nid)
+            if let Some(node) = graph.find_node(nid, NodeSearch::TopLevel)
                 && let NodeKind::Subgraph(sref) = node.kind
                 && graph.resolve_def(sref, library).is_some()
             {

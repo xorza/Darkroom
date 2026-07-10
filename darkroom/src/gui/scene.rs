@@ -6,7 +6,9 @@ use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
 use scenarium::data::{DataType, RamUsage, StaticValue};
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
-use scenarium::graph::{Binding, CacheMode, Graph, NodeId, NodeKind, OutputPort, Subscription};
+use scenarium::graph::{
+    Binding, CacheMode, Graph, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
+};
 use scenarium::library::Library;
 use scenarium::node::function::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 
@@ -226,7 +228,7 @@ impl Scene {
         self.value_variants_pool.clear();
 
         for vn in view.view_nodes.iter() {
-            let Some(node) = graph.by_id(&vn.id) else {
+            let Some(node) = graph.find_node(&vn.id, NodeSearch::TopLevel) else {
                 continue;
             };
             // A node's interface (port names + input defaults) comes from

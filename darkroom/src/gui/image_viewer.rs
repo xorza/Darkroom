@@ -29,6 +29,7 @@ use glam::{UVec2, Vec2};
 use imaginarium::{Preview, ProcessingContext};
 use lens::Image as LensImage;
 use scenarium::data::DynamicValue;
+use scenarium::graph::NodeSearch;
 
 use crate::core::document::{Document, PortKind, PortRef};
 use crate::core::worker::RunId;
@@ -377,7 +378,8 @@ impl RenderedImage {
 /// The one formatter for both the tab strip and the viewer title.
 pub(crate) fn port_label(doc: &Document, port: PortRef) -> String {
     let name = doc
-        .find_node(&port.node_id)
+        .graph
+        .find_node(&port.node_id, NodeSearch::Recursive)
         .map(|n| n.name.as_str())
         .filter(|n| !n.is_empty())
         .unwrap_or("image");

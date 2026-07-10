@@ -5,7 +5,7 @@ use common::{KeyIndexVec, SerdeFormat, is_debug};
 use glam::Vec2;
 use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
-use scenarium::graph::{Graph as CoreGraph, NodeId};
+use scenarium::graph::{Graph as CoreGraph, NodeId, NodeSearch};
 use scenarium::graph::{Node, NodeKind};
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
@@ -300,18 +300,6 @@ fn default_tabs() -> Vec<TabRef> {
     vec![TabRef::Graph(GraphRef::Main)]
 }
 
-/// Recursive node lookup behind [`Document::find_node`], as a free fn so
-/// `ensure_valid_active`'s split borrow (`retain` on `tabs` while reading
-/// `graph`) can call it too.
-fn find_node_in<'a>(graph: &'a CoreGraph, id: &NodeId) -> Option<&'a Node> {
-    graph.by_id(id).or_else(|| {
-        graph
-            .subgraphs
-            .iter()
-            .find_map(|d| find_node_in(&d.graph, id))
-    })
-}
-
 /// Index of the slot named `expected`: `idx_hint` when it still holds
 /// that name (fast path / duplicate-name disambiguation), else the first
 /// slot matching by name. `None` when nothing matches.
@@ -411,13 +399,6 @@ impl Document {
         }
     }
 
-    /// The node behind `id`, searching the root graph and every local
-    /// subgraph interior (recursively). Node ids are unique document-wide,
-    /// so at most one match exists.
-    pub fn find_node(&self, id: &NodeId) -> Option<&Node> {
-        find_node_in(&self.graph, id)
-    }
-
     /// Ensure a `GraphView` exists for a local subgraph interior,
     /// auto-laying-out its nodes on first creation. Returns `false` if
     /// the subgraph no longer exists.
@@ -455,7 +436,10 @@ impl Document {
         // resolve.
         if self.tabs.iter().any(|t| match t {
             TabRef::Graph(g) => self.graph_for(*g).is_none(),
-            TabRef::ImageViewer(port) => self.find_node(&port.node_id).is_none(),
+            TabRef::ImageViewer(port) => self
+                .graph
+                .find_node(&port.node_id, NodeSearch::Recursive)
+                .is_none(),
             TabRef::Preferences => false,
         }) {
             // Split the borrow so `retain` (mut `tabs`) can read `graph`.
@@ -465,7 +449,9 @@ impl Document {
                 TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(id).is_some(),
                 // A viewer tab dies with its node (mirrors a subgraph tab
                 // whose def vanished).
-                TabRef::ImageViewer(port) => find_node_in(graph, &port.node_id).is_some(),
+                TabRef::ImageViewer(port) => graph
+                    .find_node(&port.node_id, NodeSearch::Recursive)
+                    .is_some(),
             });
         }
         // Seed views for any `Local` tab missing one. Guarded by `any`
@@ -791,7 +777,12 @@ mod tests {
             Some(lib_id),
             "copy records its library origin"
         );
-        assert!(doc.graph.by_id(&node_id).is_some(), "instance node added");
+        assert!(
+            doc.graph
+                .find_node(&node_id, NodeSearch::TopLevel)
+                .is_some(),
+            "instance node added"
+        );
 
         revert_step(&step, &mut doc, GraphRef::Main);
         assert!(
@@ -799,7 +790,9 @@ mod tests {
             "undo removes the def"
         );
         assert!(
-            doc.graph.by_id(&node_id).is_none(),
+            doc.graph
+                .find_node(&node_id, NodeSearch::TopLevel)
+                .is_none(),
             "undo removes the instance node"
         );
     }
@@ -855,7 +848,10 @@ mod tests {
             "the second fresh copy was dropped"
         );
         assert_eq!(
-            doc.graph.by_id(&node_b).unwrap().kind,
+            doc.graph
+                .find_node(&node_b, NodeSearch::TopLevel)
+                .unwrap()
+                .kind,
             NodeKind::Subgraph(SubgraphRef::Local(def_a_id)),
             "second instance points at the first instance's local def"
         );
@@ -889,8 +885,11 @@ mod tests {
         apply_step(&step, &mut doc, GraphRef::Main);
 
         assert_eq!(doc.graph.subgraphs.len(), 2, "fork adds a second local def");
-        let NodeKind::Subgraph(SubgraphRef::Local(new_id)) =
-            doc.graph.by_id(&node_id).unwrap().kind
+        let NodeKind::Subgraph(SubgraphRef::Local(new_id)) = doc
+            .graph
+            .find_node(&node_id, NodeSearch::TopLevel)
+            .unwrap()
+            .kind
         else {
             panic!("node should still be a local subgraph");
         };
@@ -903,8 +902,11 @@ mod tests {
 
         revert_step(&step, &mut doc, GraphRef::Main);
         assert_eq!(doc.graph.subgraphs.len(), 1, "undo drops the fork");
-        let NodeKind::Subgraph(SubgraphRef::Local(restored)) =
-            doc.graph.by_id(&node_id).unwrap().kind
+        let NodeKind::Subgraph(SubgraphRef::Local(restored)) = doc
+            .graph
+            .find_node(&node_id, NodeSearch::TopLevel)
+            .unwrap()
+            .kind
         else {
             panic!("node should still be a local subgraph");
         };
@@ -942,7 +944,13 @@ mod tests {
 
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
-        assert!(!doc.graph.by_id(&id).unwrap().disabled, "starts enabled");
+        assert!(
+            !doc.graph
+                .find_node(&id, NodeSearch::TopLevel)
+                .unwrap()
+                .disabled,
+            "starts enabled"
+        );
 
         let step = build_step(
             Intent::SetNodeProperty {
@@ -954,11 +962,20 @@ mod tests {
         )
         .expect("builds");
         apply_step(&step, &mut doc, GraphRef::Main);
-        assert!(doc.graph.by_id(&id).unwrap().disabled, "apply disables");
+        assert!(
+            doc.graph
+                .find_node(&id, NodeSearch::TopLevel)
+                .unwrap()
+                .disabled,
+            "apply disables"
+        );
 
         revert_step(&step, &mut doc, GraphRef::Main);
         assert!(
-            !doc.graph.by_id(&id).unwrap().disabled,
+            !doc.graph
+                .find_node(&id, NodeSearch::TopLevel)
+                .unwrap()
+                .disabled,
             "revert re-enables (restores the captured `from`)"
         );
     }
@@ -1103,30 +1120,6 @@ mod tests {
         doc.ensure_valid_active();
         assert_eq!(doc.tabs, vec![TabRef::Graph(GraphRef::Main)]);
         assert_eq!(doc.active, 0);
-    }
-
-    #[test]
-    fn find_node_reaches_subgraph_interiors() {
-        let mut doc = Document::default();
-        let root_id = add_node_at(&mut doc, Vec2::ZERO);
-        let sub = doc.create_subgraph();
-        // A func node inside the subgraph interior.
-        let interior = Node::new(NodeKind::Func(FuncId::unique()));
-        let interior_id = interior.id;
-        doc.graph
-            .subgraphs
-            .by_key_mut(&sub)
-            .unwrap()
-            .graph
-            .add(interior);
-
-        assert_eq!(doc.find_node(&root_id).unwrap().id, root_id);
-        assert_eq!(
-            doc.find_node(&interior_id).unwrap().id,
-            interior_id,
-            "lookup recurses into local subgraph interiors"
-        );
-        assert!(doc.find_node(&NodeId::unique()).is_none());
     }
 
     #[test]

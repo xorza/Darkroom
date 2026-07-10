@@ -27,7 +27,7 @@ impl Graph {
         library: &'a Library,
         port: InputPort,
     ) -> Option<&'a FuncInput> {
-        let node = self.by_id(&port.node_id)?;
+        let node = self.find_node(&port.node_id, NodeSearch::TopLevel)?;
         let inputs = match &node.kind {
             NodeKind::Func(func_id) => &library.by_id(func_id)?.inputs,
             NodeKind::Subgraph(r) => &self.resolve_def(*r, library)?.inputs,
@@ -124,7 +124,7 @@ impl Graph {
     /// or `None` for a boundary / unresolved node. The output-side mirror of
     /// [`Self::input_spec`].
     fn output_spec<'a>(&'a self, library: &'a Library, port: OutputPort) -> Option<&'a FuncOutput> {
-        let node = self.by_id(&port.node_id)?;
+        let node = self.find_node(&port.node_id, NodeSearch::TopLevel)?;
         self.node_outputs(library, node)?.get(port.port_idx)
     }
 
@@ -137,7 +137,7 @@ impl Graph {
         node_id: NodeId,
         input_idx: usize,
     ) -> Vec<OutputPort> {
-        let Some(node) = self.by_id(&node_id) else {
+        let Some(node) = self.find_node(&node_id, NodeSearch::TopLevel) else {
             return Vec::new();
         };
         let Some(outputs) = self.node_outputs(library, node) else {
