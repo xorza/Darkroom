@@ -124,11 +124,14 @@ impl Session {
         }
     }
 
-    /// Reconcile if needed, then send the whole graph to the worker for one
-    /// evaluation. Results arrive on a later [`Self::tick`] as status lines.
+    /// Reconcile if needed, then compile + send the graph to the worker for
+    /// one evaluation. A compile error lands as a status line immediately;
+    /// run results arrive on a later [`Self::tick`].
     pub(crate) fn run_graph(&mut self) {
         self.reconcile_if_needed();
-        self.engine.run_once(self.document.graph.clone());
+        if let Err(e) = self.engine.run_once(&self.document.graph) {
+            self.push_status(format!("compile failed: {e}"));
+        }
     }
 
     /// Write the document back to the file it was opened from. Returns

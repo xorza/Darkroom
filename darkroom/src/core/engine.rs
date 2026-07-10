@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+use scenarium::execution::compile::{CompileError, Compiler};
 use scenarium::execution::disk_store::DiskStore;
 use scenarium::graph::{Graph, NodeId};
 
@@ -23,6 +24,9 @@ pub(crate) struct Engine {
     /// [`SharedLibrary`].
     pub(crate) library: SharedLibrary,
     worker: WorkerBridge,
+    /// Long-lived so the flatten scratch is reused across compiles instead of
+    /// reallocated per run.
+    compiler: Compiler,
     /// `Some` only when `--script-tcp` bound a listener.
     script: Option<ScriptHost>,
 }
@@ -43,6 +47,7 @@ impl Engine {
         Self {
             library,
             worker,
+            compiler: Compiler::default(),
             script,
         }
     }

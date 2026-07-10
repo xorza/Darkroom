@@ -2,8 +2,10 @@ use std::sync::Arc;
 
 use super::*;
 use crate::data::{DataType, DynamicValue, StaticValue};
+use crate::execution::compile::CompileError;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::graph::{Binding, CacheMode, InputPort, Node, NodeSearch};
+use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeSearch};
+use crate::library::Library;
 use crate::node::function::FuncBehavior;
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::{FloatExt, SerdeFormat};
@@ -1930,12 +1932,9 @@ mod graph_structure {
 
         // Re-compiling the same graph against a library that defines none of
         // its funcs is rejected with a message naming a missing func.
-        let err = execution_graph
+        let CompileError { message } = execution_graph
             .update(&graph, &Library::default())
             .unwrap_err();
-        let Error::InvalidGraph { message } = err else {
-            panic!("expected InvalidGraph, got {err:?}");
-        };
         assert!(
             message.contains("absent from the library"),
             "message should explain the missing func, got: {message}"
@@ -2884,10 +2883,7 @@ mod composite_behavior {
         // A `Local` def resolves from the graph itself, so the walk reaches
         // the interior even with an empty library — and flags its `get_b`.
         let mut eg = ExecutionEngine::default();
-        let err = eg.update(&graph, &Library::default()).unwrap_err();
-        let Error::InvalidGraph { message } = err else {
-            panic!("expected InvalidGraph, got {err:?}");
-        };
+        let CompileError { message } = eg.update(&graph, &Library::default()).unwrap_err();
         let get_b = library.by_name("get_b").unwrap().id;
         assert!(
             message.contains(&format!("{get_b:?}")),

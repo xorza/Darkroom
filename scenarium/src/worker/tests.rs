@@ -6,9 +6,10 @@ use tokio::time::{Duration, timeout};
 
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
+use crate::execution::Result as ExecResult;
+use crate::execution::compile::Compiler;
 use crate::execution::stats::{ExecutionStats, RunPhase};
-use crate::execution::{Error, Result as ExecResult};
-use crate::graph::{Graph, InputPort, Node, NodeId, NodeKind, NodeSearch};
+use crate::graph::{Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
 use crate::node::event_lambda::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -69,8 +70,9 @@ impl FrameHarness {
 
     fn update_msg(&self) -> WorkerMessage {
         WorkerMessage::Update {
-            graph: self.graph.clone(),
-            library: self.library.clone(),
+            compiled: Compiler::default()
+                .compile(&self.graph, &self.library)
+                .unwrap(),
         }
     }
 
@@ -148,50 +150,6 @@ async fn test_worker() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-#[tokio::test]
-async fn update_with_missing_func_reports_error_then_recovers() {
-    let mut h = FrameHarness::new().await;
-
-    // A graph naming a func id the library doesn't define (e.g. a document
-    // saved against a library that has since dropped the func).
-    let mut bad_graph = Graph::default();
-    let mut ghost = Node::new(NodeKind::Func(
-        "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
-    ));
-    ghost.id = NodeId::unique();
-    bad_graph.add(ghost);
-
-    h.worker
-        .send_many([
-            WorkerMessage::Update {
-                graph: bad_graph,
-                library: h.library.clone(),
-            },
-            WorkerMessage::ExecuteTerminals,
-        ])
-        .unwrap();
-
-    // The compile failure surfaces as a Finished(Err(InvalidGraph)) — not a
-    // panic, and not a silently-dropped run.
-    let result = h.compute_rx.recv().await.expect("a Finished report");
-    assert!(
-        matches!(result, Err(Error::InvalidGraph { .. })),
-        "expected InvalidGraph, got {result:?}"
-    );
-
-    // The bad update doesn't wedge the worker: a good graph then runs fine.
-    h.worker
-        .send_many([h.update_msg(), h.inject_frame_event()])
-        .unwrap();
-    let stats = h
-        .compute_rx
-        .recv()
-        .await
-        .expect("a Finished report")
-        .expect("the recovered run succeeds");
-    assert_eq!(stats.executed_nodes.len(), 3);
 }
 
 #[tokio::test]
@@ -452,8 +410,7 @@ async fn execute_terminals_triggers_terminal_nodes() {
     worker
         .send_many([
             WorkerMessage::Update {
-                graph,
-                library: Arc::new(library),
+                compiled: Compiler::default().compile(&graph, &library).unwrap(),
             },
             WorkerMessage::ExecuteTerminals,
         ])
@@ -493,8 +450,7 @@ async fn worker_streams_node_progress_before_finished() {
     worker
         .send_many([
             WorkerMessage::Update {
-                graph,
-                library: Arc::new(library),
+                compiled: Compiler::default().compile(&graph, &library).unwrap(),
             },
             WorkerMessage::ExecuteTerminals,
         ])
@@ -559,8 +515,7 @@ async fn stale_cancel_is_cleared_at_run_start() {
     worker
         .send_many([
             WorkerMessage::Update {
-                graph,
-                library: Arc::new(library),
+                compiled: Compiler::default().compile(&graph, &library).unwrap(),
             },
             WorkerMessage::ExecuteTerminals,
         ])
@@ -646,8 +601,7 @@ async fn execute_nodes_runs_cone_and_serves_pinned_value() {
     worker
         .send_many([
             WorkerMessage::Update {
-                graph,
-                library: Arc::new(library),
+                compiled: Compiler::default().compile(&graph, &library).unwrap(),
             },
             WorkerMessage::ExecuteNodes {
                 nodes: vec![sum_id],
@@ -1033,8 +987,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     worker
         .send_many([
             WorkerMessage::Update {
-                graph,
-                library: Arc::new(library),
+                compiled: Compiler::default().compile(&graph, &library).unwrap(),
             },
             WorkerMessage::ExecuteTerminals,
             WorkerMessage::StartEventLoop,
@@ -1094,8 +1047,7 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     // land in the channel before the worker task is polled.
     worker
         .send_many([WorkerMessage::Update {
-            graph,
-            library: Arc::new(library),
+            compiled: Compiler::default().compile(&graph, &library).unwrap(),
         }])
         .unwrap();
     worker.send_many([WorkerMessage::ExecuteTerminals]).unwrap();
@@ -1224,6 +1176,14 @@ fn scan_deduplicates_events() {
     );
 }
 
+/// A trivially-valid `Update` payload for scan tests, which only inspect the
+/// reduced intent — the program's content is irrelevant.
+fn empty_compiled() -> crate::execution::compile::CompiledGraph {
+    Compiler::default()
+        .compile(&Graph::default(), &Library::default())
+        .unwrap()
+}
+
 #[test]
 fn scan_exit_dominates_entire_batch() {
     // Exit is sticky across the whole batch: every other command
@@ -1234,8 +1194,7 @@ fn scan_exit_dominates_entire_batch() {
         WorkerMessage::Exit,
         WorkerMessage::StartEventLoop, // post-Exit: dropped
         WorkerMessage::Update {
-            graph: Graph::default(),
-            library: Arc::new(Library::default()),
+            compiled: empty_compiled(),
         },
     ]);
 
@@ -1262,23 +1221,18 @@ fn scan_update_overwrites_earlier_update_in_same_batch() {
     // Two Updates in one batch: the last one wins. This is
     // implicit today (Option::replace) but worth pinning since
     // callers do send [Update(A), Update(B)] during rapid edits.
-    let empty_graph = Graph::default();
-    let library = Arc::new(Library::default());
-
     let intent = scan(vec![
         WorkerMessage::Update {
-            graph: empty_graph.clone(),
-            library: library.clone(),
+            compiled: empty_compiled(),
         },
         WorkerMessage::Update {
-            graph: empty_graph.clone(),
-            library: library.clone(),
+            compiled: empty_compiled(),
         },
     ]);
 
     assert!(matches!(
         intent.graph_state,
-        Some(crate::worker::GraphOp::Replace(_, _))
+        Some(crate::worker::GraphOp::Replace(_))
     ));
 }
 
@@ -1289,15 +1243,11 @@ fn scan_clear_then_update_yields_replace() {
     let intent = scan(vec![
         WorkerMessage::Clear,
         WorkerMessage::Update {
-            graph: Graph::default(),
-            library: Arc::new(Library::default()),
+            compiled: empty_compiled(),
         },
     ]);
     assert!(
-        matches!(
-            intent.graph_state,
-            Some(crate::worker::GraphOp::Replace(_, _))
-        ),
+        matches!(intent.graph_state, Some(crate::worker::GraphOp::Replace(_))),
         "last write (Update) wins over earlier Clear"
     );
 }
@@ -1306,8 +1256,7 @@ fn scan_clear_then_update_yields_replace() {
 fn scan_update_then_clear_yields_clear() {
     let intent = scan(vec![
         WorkerMessage::Update {
-            graph: Graph::default(),
-            library: Arc::new(Library::default()),
+            compiled: empty_compiled(),
         },
         WorkerMessage::Clear,
     ]);
@@ -1699,12 +1648,14 @@ async fn disk_cache_persists_node_across_worker_restart() {
             }
         });
         // SetDiskStore shares the batch with Update, proving it's applied before
-        // the compile hydrates.
+        // the install hydrates.
         let cache = DiskStore::new(Arc::new(Library::default()), Some(root.to_path_buf()));
         worker
             .send_many([
                 WorkerMessage::SetDiskStore(cache),
-                WorkerMessage::Update { graph, library },
+                WorkerMessage::Update {
+                    compiled: Compiler::default().compile(&graph, &library).unwrap(),
+                },
                 WorkerMessage::ExecuteTerminals,
             ])
             .unwrap();
@@ -1743,58 +1694,6 @@ async fn disk_cache_persists_node_across_worker_restart() {
     assert!(
         !stats.executed_nodes.iter().any(|n| n.node_id == mult_id),
         "mult itself is not recomputed"
-    );
-}
-
-/// An `Update` whose graph fails to compile must not silently kill a running
-/// event loop: the failure is reported, and the loop restarts on the prior
-/// (still intact) program.
-#[tokio::test]
-async fn failed_update_keeps_event_loop_running() {
-    let mut h = FrameHarness::with_callback_capacity(32).await;
-
-    h.worker
-        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
-        .unwrap();
-    let _ = h.compute_rx.recv().await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(h.worker.is_event_loop_started());
-
-    // A graph naming a func the library doesn't define — compile fails.
-    let mut bad_graph = Graph::default();
-    let mut ghost = Node::new(NodeKind::Func(
-        "76320daa-b802-4f46-876b-cdcb08a17c86".into(),
-    ));
-    ghost.id = NodeId::unique();
-    bad_graph.add(ghost);
-    h.worker
-        .send(WorkerMessage::Update {
-            graph: bad_graph,
-            library: h.library.clone(),
-        })
-        .unwrap();
-
-    // The failure is reported (frame ticks may interleave — drain until it shows)…
-    loop {
-        let result = timeout(Duration::from_secs(5), h.compute_rx.recv())
-            .await
-            .expect("the compile failure is reported")
-            .expect("channel open");
-        if matches!(result, Err(Error::InvalidGraph { .. })) {
-            break;
-        }
-        assert!(result.is_ok(), "only frame ticks may precede the failure");
-    }
-    // …and the loop is back on the prior program: a successful run (the restart,
-    // or a subsequent frame tick) follows and the loop reads as started.
-    let restart = timeout(Duration::from_secs(5), h.compute_rx.recv())
-        .await
-        .expect("the restarted loop keeps reporting")
-        .expect("channel open");
-    assert!(restart.is_ok(), "the prior program restarts the loop");
-    assert!(
-        h.worker.is_event_loop_started(),
-        "a failed update must not kill the event loop"
     );
 }
 
@@ -1859,8 +1758,7 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
     worker
         .send_many([
             WorkerMessage::Update {
-                graph,
-                library: lib.clone(),
+                compiled: Compiler::default().compile(&graph, &lib).unwrap(),
             },
             WorkerMessage::ExecuteTerminals,
         ])

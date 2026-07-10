@@ -9,14 +9,13 @@
 //! into a single commit); inbound is a plain `std::sync::mpsc` because
 //! the consumer is the synchronous frame loop on the main thread.
 
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use scenarium::execution::compile::CompiledGraph;
 use scenarium::execution::disk_store::DiskStore;
 use scenarium::execution::stats::{ExecutionStats, RunProgress};
 use scenarium::execution::{ArgumentValues, Error as ExecError};
-use scenarium::graph::{Graph, NodeId};
-use scenarium::library::Library;
+use scenarium::graph::NodeId;
 use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
@@ -113,24 +112,24 @@ impl WorkerBridge {
         (wake)();
     }
 
-    /// Run the graph once: replace the worker's graph + lib, then
+    /// Run the compiled program once: install it on the worker, then
     /// execute its terminals. One batched send so the worker commits
     /// both as a unit. A dropped send (worker already exited) is a
     /// harmless shutdown no-op.
-    pub(crate) fn run_once(&self, graph: Graph, library: Arc<Library>) {
+    pub(crate) fn run_once(&self, compiled: CompiledGraph) {
         let _ = self.worker.send_many([
-            WorkerMessage::Update { graph, library },
+            WorkerMessage::Update { compiled },
             WorkerMessage::ExecuteTerminals,
         ]);
     }
 
-    /// Run one node's upstream cone: replace the worker's graph + lib,
-    /// then execute with the node as seed — its outputs stay resident for
+    /// Run one node's upstream cone: install the compiled program, then
+    /// execute with the node as seed — its outputs stay resident for
     /// the preview value fetch. One batched send so the seed always
-    /// targets the graph it was built against.
-    pub(crate) fn run_node(&self, graph: Graph, library: Arc<Library>, node_id: NodeId) {
+    /// targets the program it was compiled against.
+    pub(crate) fn run_node(&self, compiled: CompiledGraph, node_id: NodeId) {
         let _ = self.worker.send_many([
-            WorkerMessage::Update { graph, library },
+            WorkerMessage::Update { compiled },
             WorkerMessage::ExecuteNodes {
                 nodes: vec![node_id],
             },
@@ -140,10 +139,8 @@ impl WorkerBridge {
     /// Flush resident cache values to disk **without running the graph** — e.g. after
     /// a node's disk-cache toggle, so its in-RAM value is persisted now rather than
     /// waiting for the next run (a cache-hit node never re-executes to store itself).
-    pub(crate) fn save_caches(&self, graph: Graph, library: Arc<Library>) {
-        let _ = self
-            .worker
-            .send(WorkerMessage::SaveCaches { graph, library });
+    pub(crate) fn save_caches(&self, compiled: CompiledGraph) {
+        let _ = self.worker.send(WorkerMessage::SaveCaches { compiled });
     }
 
     /// Swap the engine's output cache (codec registry + content-addressed store
@@ -160,12 +157,12 @@ impl WorkerBridge {
         self.worker.request_cancel();
     }
 
-    /// Start the event loop on the current graph: load it, then run the loop
-    /// that fires each emitter's events and executes their subscribers. One
-    /// batched send so the `Update` and `StartEventLoop` commit as a unit.
-    pub(crate) fn start_event_loop(&self, graph: Graph, library: Arc<Library>) {
+    /// Start the event loop on the compiled program: install it, then run the
+    /// loop that fires each emitter's events and executes their subscribers.
+    /// One batched send so the `Update` and `StartEventLoop` commit as a unit.
+    pub(crate) fn start_event_loop(&self, compiled: CompiledGraph) {
         let _ = self.worker.send_many([
-            WorkerMessage::Update { graph, library },
+            WorkerMessage::Update { compiled },
             WorkerMessage::StartEventLoop,
         ]);
     }

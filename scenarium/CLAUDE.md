@@ -67,7 +67,12 @@ emitter's event outward so a parent can subscribe.
 
 ## Execution pipeline (`execution/`)
 
-Three phases, driven by `ExecutionEngine` (`execution/mod.rs`):
+Three phases. Compile runs on the **host's** thread (`compile.rs` —
+`Compiler::compile(&mut self, graph, library) -> Result<CompiledGraph, CompileError>`,
+errors synchronous at the call site; the `Compiler` is long-lived, owning the
+`Flattener` scratch so buffers are reused across compiles). The run-side phases
+are driven by `ExecutionEngine` (`execution/mod.rs`), which receives the ready
+`CompiledGraph` (program + flatten map) via its infallible `install`:
 
 **1. Compile — flatten authoring `Graph` → `ExecutionProgram`** (`flatten.rs`).
 Composites dissolve; only interior func nodes survive, with deterministically
@@ -156,12 +161,13 @@ node libraries.
 
 `Worker` (`worker/mod.rs:79`) wraps a tokio task fed by `UnboundedSender<Vec<WorkerMessage>>`.
 A `Vec<WorkerMessage>` is **one atomic commit unit** — no partial batches.
-`WorkerMessage` covers `Update{graph, library}`, `Clear`, `ExecuteTerminals`,
+`WorkerMessage` covers `Update{compiled}` (a host-compiled `CompiledGraph` —
+compile errors never reach the worker; install is infallible), `SaveCaches{compiled}`,
+`Clear`, `ExecuteTerminals`, `ExecuteNodes`,
 `InjectEvents`, `Start/StopEventLoop`, `Sync`, `RequestArgumentValues`,
-`SetDiskCache(Option<DiskCache>)` (swap the engine's disk cache — applied before
-any same-batch graph op so the next `Update` hydrates from the new store),
-`Exit`. Disk caching is set initially via `Worker::new(disk_cache, callback)` and
-repointed at runtime via `SetDiskCache` (e.g. a per-document cache dir).
+`SetDiskStore(DiskStore)` (swap the engine's disk store — applied before
+any same-batch graph op so the next `Update` hydrates from the new store, e.g.
+a per-document cache dir), `Exit`.
 The host callback receives a `WorkerReport`: a live `Progress(RunProgress)` per
 node *during* a run (forwarded from a `mpsc` the executor sends on, drained
 concurrently with the run in the worker `select!`), then a single

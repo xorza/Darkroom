@@ -1,7 +1,10 @@
 //! Node-graph execution as an explicit three-phase pipeline:
 //!
-//! 1. **compile** — [`ExecutionEngine::update`] flattens the authoring `Graph`
-//!    into an immutable [`ExecutionProgram`](program::ExecutionProgram).
+//! 1. **compile** — the [`Compiler`](compile::Compiler) flattens the authoring
+//!    `Graph` into an immutable [`ExecutionProgram`](program::ExecutionProgram).
+//!    Runs on the *host's* thread (compile errors are synchronous); the resulting
+//!    [`CompiledGraph`](compile::CompiledGraph) is installed into the engine
+//!    via [`ExecutionEngine::install`], which cannot fail.
 //! 2. **plan** — the [`Planner`](plan::Planner) turns the program into an
 //!    [`ExecutionPlan`](plan::ExecutionPlan) (the schedule). Purely structural —
 //!    reachability + topological order + output usage, no cache/digest state.
@@ -11,9 +14,9 @@
 //!    then walks the surviving schedule producer-first, computing each node's
 //!    content digest and deciding reuse (RAM / disk) or recompute inline.
 //!
-//! [`ExecutionEngine`] owns every piece (program, plan, planner, the cross-run
-//! cache, and executor) and exposes `update` (phase 1) and `execute` (phases
-//! 2–3, run back-to-back).
+//! [`ExecutionEngine`] owns the run-side pieces (program, plan, planner, the
+//! cross-run cache, and executor) and exposes `install` (phase 1's artifact)
+//! and `execute` (phases 2–3, run back-to-back).
 
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
@@ -24,15 +27,15 @@ use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::data::DynamicValue;
-use crate::execution::flatten::Flattener;
+use crate::execution::compile::CompiledGraph;
 use crate::execution::stats::{ExecutionStats, FlattenMap, RunProgress};
-use crate::graph::{Graph, NodeId};
-use crate::library::Library;
+use crate::graph::NodeId;
 use crate::node::function::FuncId;
 
 pub(crate) mod blob;
 pub(crate) mod cache;
 pub(crate) mod codec;
+pub mod compile;
 pub(crate) mod digest;
 pub mod disk_store;
 pub mod event;
@@ -119,17 +122,17 @@ impl<T> IndexMut<NodeIdx> for NodeColumn<T> {
 
 // === Error Types ===
 
-/// An **operation-level** failure that aborts a whole compile / plan / run: the graph
-/// won't compile ([`InvalidGraph`](Error::InvalidGraph)), the schedule has a cycle
-/// ([`CycleDetected`](Error::CycleDetected)), or the event loop's lambda panicked
+/// An **operation-level** failure that aborts a whole plan / run: the schedule has a
+/// cycle ([`CycleDetected`](Error::CycleDetected)), a node seed didn't resolve
+/// ([`NodeSeedNotFound`](Error::NodeSeedNotFound)), or the event loop's lambda panicked
 /// ([`EventLambdaPanic`](Error::EventLambdaPanic)). It's the error type of the engine's
 /// `Result`-returning entry points. A *single node's* run failure is a [`RunError`]
 /// (collected into [`ExecutionStats::node_errors`](crate::execution::stats::ExecutionStats)),
-/// never one of these — the two phases can't be confused at the type level.
+/// never one of these; a graph that won't compile is a
+/// [`CompileError`](compile::CompileError), produced on the host before anything
+/// reaches the engine — the phases can't be confused at the type level.
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum Error {
-    #[error("invalid graph: {message}")]
-    InvalidGraph { message: String },
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
     CycleDetected { node_id: NodeId },
     /// A node seed didn't resolve against the compiled program. Seeds are batched with
@@ -202,21 +205,19 @@ pub(crate) struct RunSeeds {
 
 // === Execution Engine ===
 
-/// The three-phase pipeline container. Owns the compiled `program`, the
-/// `flattener` (compile scratch) and its `flatten` map (flat↔authoring ids), the
-/// reusable `plan` buffer, the `planner` (scheduling scratch), the cross-run `cache`
-/// (per-node outputs + state, plus its owned `DiskStore` file persistence and the
-/// caching policy), and the `executor` (run loop + context). Not serializable — the
+/// The run-side pipeline container. Owns the installed `program` and its
+/// `flatten_map` (flat↔authoring ids), the reusable `plan` buffer, the `planner`
+/// (scheduling scratch), the cross-run `cache` (per-node outputs + state, plus its
+/// owned `DiskStore` file persistence and the caching policy), and the `executor`
+/// (run loop + context). Compilation happens on the host ([`compile::Compiler`]);
+/// the engine only ever receives ready [`CompiledGraph`]s. Not serializable — the
 /// persistent form is the [`ExecutionProgram`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
     pub(crate) program: ExecutionProgram,
-    /// Reusable subgraph-flattening scratch (kept across compiles).
-    flattener: Flattener,
-    /// How the last `update` flattened the graph (authoring↔execution id map).
-    /// Rebuilt each compile via `Arc::make_mut` (no clone when no prior run's stats
-    /// still hold it), and handed to each run's `ExecutionStats` by refcount bump.
-    /// Compile scratch, not part of the serialized program.
+    /// How the installed program was flattened (authoring↔execution id map).
+    /// Arrives with each [`CompiledGraph`] and is handed to each run's
+    /// `ExecutionStats` by refcount bump.
     flatten_map: Arc<FlattenMap>,
     /// Per-node cross-run cache (output values, digests, node state) plus the [`DiskStore`]
     /// backing it and the caching policy over both — reuse, hydration, persistence, eviction.
@@ -245,7 +246,7 @@ impl ExecutionEngine {
         self.program.clear();
         self.plan.clear();
         self.cache.clear();
-        Arc::make_mut(&mut self.flatten_map).reset();
+        self.flatten_map = Arc::default();
     }
 
     /// Swap the [`DiskStore`] — the library snapshot (its type table supplies
@@ -275,25 +276,7 @@ impl ExecutionEngine {
             });
         }
 
-        // The plan isn't cleared here: every `execute` re-`plan`s from scratch (the
-        // planner `reset`s the buffer), and nothing reads the plan between a compile
-        // and the next run. `clear()` is reserved for full teardown (`Self::clear`).
-
-        // Flatten subgraphs straight into execution nodes — no intermediate
-        // `Graph`. Everything below is boundary-agnostic (func nodes only). The output
-        // count is derived from the resolved `output_types` pool below, not stored.
-        self.flattener.build(
-            &mut self.program.e_nodes,
-            flatten::Pools {
-                inputs: &mut self.program.inputs,
-                events: &mut self.program.events,
-            },
-            graph,
-            library,
-            Arc::make_mut(&mut self.flatten_map),
-        );
-
-        // Realign the runtime cache to the rebuilt node set (preserve by id,
+        // Realign the runtime cache to the new node set (preserve by id,
         // default new, trim gone).
         self.cache.reconcile(&self.program.e_nodes);
 
@@ -400,6 +383,18 @@ impl ExecutionEngine {
 /// executor reads it straight from the live `ExecutionPlan`.
 #[cfg(test)]
 impl ExecutionEngine {
+    /// Compile + install in one step — the pre-split `update` shape the
+    /// in-tree tests are written against. Production compiles on the host
+    /// (a long-lived [`compile::Compiler`]) and sends the artifact to the worker.
+    pub(crate) fn update(
+        &mut self,
+        graph: &crate::graph::Graph,
+        library: &crate::library::Library,
+    ) -> std::result::Result<(), compile::CompileError> {
+        self.install(compile::Compiler::default().compile(graph, library)?);
+        Ok(())
+    }
+
     pub(crate) async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
         self.execute(
             RunSeeds {

@@ -36,8 +36,8 @@ use crate::node::special::SpecialNode;
 /// forever. The emit descent rejects recursion precisely via `seen` first.
 const MAX_DEPTH: usize = 256;
 
-/// Reusable flattening scratch, owned by the `ExecutionGraph` so its buffer is
-/// not re-allocated every `update`. The only state is the descent path
+/// Reusable flattening scratch, owned by the [`Compiler`](crate::execution::compile::Compiler)
+/// so its buffers are not re-allocated every compile. The only state is the descent path
 /// (`path`); the current graph at each level is re-derived from it on demand
 /// (`graph_at`), which is cheap at realistic nesting depth and keeps the
 /// struct free of borrowed references (so it can persist).

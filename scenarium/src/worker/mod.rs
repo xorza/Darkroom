@@ -10,12 +10,12 @@ use common::CancelToken;
 use common::PauseGate;
 use common::ReadyState;
 
+use crate::execution::compile::CompiledGraph;
 use crate::execution::disk_store::DiskStore;
 use crate::execution::event::{EventRef, EventTrigger};
 use crate::execution::stats::{ExecutionStats, RunProgress};
 use crate::execution::{ArgumentValues, Error, ExecutionEngine, Result, RunSeeds};
-use crate::graph::{Graph, NodeId};
-use crate::library::Library;
+use crate::graph::NodeId;
 
 /// What the worker reports back to its host: live per-node [`RunProgress`]
 /// during a run, then a single [`WorkerReport::Finished`] with the run's full
@@ -48,9 +48,11 @@ pub enum WorkerMessage {
         events: Vec<EventRef>,
     },
 
+    /// Install a host-compiled program as current. Infallible on the worker:
+    /// compile errors surfaced synchronously at the host's `compile` call, so
+    /// a graph that doesn't compile is never sent.
     Update {
-        graph: Graph,
-        library: Arc<Library>,
+        compiled: CompiledGraph,
     },
     /// Make the program current (like `Update`, so a just-toggled `persist` flag is
     /// reflected) and flush any resident cache value to disk — but **don't run the
@@ -58,8 +60,7 @@ pub enum WorkerMessage {
     /// without paying for a full re-execution. A cache-hit node never re-executes, so
     /// its value would otherwise reach disk only on an unrelated input change.
     SaveCaches {
-        graph: Graph,
-        library: Arc<Library>,
+        compiled: CompiledGraph,
     },
     Clear,
     /// Swap the engine's output cache (codec registry + content-addressed store
@@ -111,8 +112,8 @@ pub struct Worker {
 
 impl Worker {
     /// Spin up a worker. The engine starts memory-only; the host configures its
-    /// output cache via [`WorkerMessage::SetValueRegistry`] (once) and
-    /// [`WorkerMessage::SetDiskRoot`] (e.g. per active document).
+    /// output cache via [`WorkerMessage::SetDiskStore`] (e.g. per active
+    /// document).
     pub fn new<ExecutionCallback>(callback: ExecutionCallback) -> Self
     where
         ExecutionCallback: Fn(WorkerReport) + Send + 'static,
@@ -248,7 +249,7 @@ where
 #[derive(Debug)]
 enum GraphOp {
     Clear,
-    Replace(Graph, Arc<Library>),
+    Replace(CompiledGraph),
 }
 
 /// Event-loop intent after a batch is scanned.
@@ -322,11 +323,11 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
                 };
             }
             WorkerMessage::InjectEvents { events } => intent.events.extend(events),
-            WorkerMessage::Update { graph, library } => {
-                intent.graph_state = Some(GraphOp::Replace(graph, library));
+            WorkerMessage::Update { compiled } => {
+                intent.graph_state = Some(GraphOp::Replace(compiled));
             }
-            WorkerMessage::SaveCaches { graph, library } => {
-                intent.graph_state = Some(GraphOp::Replace(graph, library));
+            WorkerMessage::SaveCaches { compiled } => {
+                intent.graph_state = Some(GraphOp::Replace(compiled));
                 intent.save_caches = true;
             }
             WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
@@ -431,41 +432,19 @@ async fn worker_loop<ExecutionCallback>(
             execution_engine.store_resident_caches().await;
         }
 
-        let update_ok = match intent.graph_state.take() {
-            Some(GraphOp::Clear) => {
-                execution_engine.clear();
-                true
-            }
-            Some(GraphOp::Replace(graph, library)) => {
+        match intent.graph_state.take() {
+            Some(GraphOp::Clear) => execution_engine.clear(),
+            Some(GraphOp::Replace(compiled)) => {
                 tracing::info!("Graph updated");
-                match execution_engine.update(&graph, &library) {
-                    Ok(()) => true,
-                    Err(e) => {
-                        // Compile failed (e.g. a func missing from the lib):
-                        // report it like a run failure and skip execute —
-                        // the prior program is left untouched by `update`.
-                        (execution_callback)(WorkerReport::Finished(Err(e)));
-                        false
-                    }
-                }
+                execution_engine.install(compiled);
             }
-            None => true,
-        };
+            None => {}
+        }
 
         // `SaveCaches`: flush resident cache values to disk after the update, without
         // running the graph (a cache-hit node won't re-execute to store itself).
-        if intent.save_caches && update_ok && !execution_engine.is_empty() {
+        if intent.save_caches && !execution_engine.is_empty() {
             execution_engine.store_resident_caches().await;
-        }
-
-        if !update_ok {
-            // The failed update was reported and the prior program is intact. Drop this
-            // batch's terminals/nodes/events — they were meant for the graph that didn't
-            // compile — but let the event-loop restart below proceed on the prior
-            // program: a bad edit must not silently and permanently kill a running loop.
-            intent.execute_terminals = false;
-            intent.execute_nodes.clear();
-            intent.events.clear();
         }
 
         let should_start_event_loop = match intent.loop_request {

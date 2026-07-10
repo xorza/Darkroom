@@ -227,8 +227,12 @@ the active `GraphView` each rebuild; the gesture writes back via intents.
 Execution is **decoupled from the UI thread**. `WorkerBridge` owns a tokio
 multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 
-- `App::run_graph` clones the active graph + library and sends an
-  `[Update, ExecuteTerminals]` batch to the worker. The worker evaluates on its
+- `App::run_graph` compiles the active graph against the library **on the UI
+  thread** (`Engine::run_once` → the engine-owned long-lived
+  `scenarium::execution::compile::Compiler`) and sends the
+  `CompiledGraph` in an `[Update, ExecuteTerminals]` batch to the worker. A
+  compile error surfaces synchronously — no run starts, `begin_run` is skipped,
+  and the worker's prior program is untouched. The worker evaluates on its
   runtime and replies via callback with a `scenarium::WorkerReport`: a live
   `Progress(RunProgress)` per node *as it runs*, then a final `Finished(stats)`.
   `WorkerBridge::deliver` maps these to `WorkerEvent::NodeProgress` /
