@@ -61,7 +61,7 @@ fn plan(fix: &Fix) -> ExecutionPlan {
         ..Default::default()
     };
     planner
-        .plan(&fix.program, &seeds, &[], &mut plan)
+        .plan(&fix.program, &FlattenMap::default(), &seeds, &mut plan)
         .expect("no cycle");
     plan
 }
@@ -140,16 +140,17 @@ fn dependency_cycle_is_rejected() {
         terminals: true,
         ..Default::default()
     };
-    let result = planner.plan(&f.program, &seeds, &[], &mut plan);
+    let result = planner.plan(&f.program, &FlattenMap::default(), &seeds, &mut plan);
     assert!(matches!(result, Err(Error::CycleDetected { .. })));
 }
 
 #[test]
 fn node_seed_schedules_only_its_cone_and_pins_it() {
-    // A → B → C (C terminal). Seeding node B schedules only [A, B] — C is upstream of
-    // nothing seeded — and records B as both a root and a pinned node. B's output has
-    // no scheduled consumer, so its plan-level usage stays 0; the *executor* adds the
-    // virtual pin consumer, keeping the plan purely structural.
+    // A → B → C (C terminal). Seeding node B (by authoring id — top-level ids resolve
+    // straight against the program) schedules only [A, B] — C is upstream of nothing
+    // seeded — and records B as both a root and a pinned node. B's output has no
+    // scheduled consumer, so its plan-level usage stays 0; the *executor* floors a
+    // pinned node's usage, keeping the plan purely structural.
     let mut f = Fix::default();
     let a = f.node(false, &[], 1);
     let b = f.node(false, &[(false, bind(a, 0))], 1);
@@ -157,9 +158,12 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
 
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
-    let seeds = RunSeeds::default();
+    let seeds = RunSeeds {
+        nodes: vec![f.program.e_nodes[b].id],
+        ..Default::default()
+    };
     planner
-        .plan(&f.program, &seeds, &[b], &mut p)
+        .plan(&f.program, &FlattenMap::default(), &seeds, &mut p)
         .expect("no cycle");
 
     assert_eq!(p.process_order, vec![a, b], "only B's cone, deps first");
@@ -173,13 +177,14 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert_eq!(p.output_usage[1], 0, "B.0 unconsumed at plan level");
 
     // Node seeds combine with terminals: the same seed plus `terminals` schedules
-    // everything, and B stays pinned.
+    // everything, and B stays pinned. An unresolvable seed id is dropped, not an error.
     let seeds = RunSeeds {
         terminals: true,
+        nodes: vec![f.program.e_nodes[b].id, NodeId::from_u128(0xdead_beef)],
         ..Default::default()
     };
     planner
-        .plan(&f.program, &seeds, &[b], &mut p)
+        .plan(&f.program, &FlattenMap::default(), &seeds, &mut p)
         .expect("no cycle");
     assert_eq!(p.process_order, vec![a, b, c]);
     assert_eq!(p.pinned, vec![b]);

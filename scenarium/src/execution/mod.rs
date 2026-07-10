@@ -318,8 +318,9 @@ impl ExecutionEngine {
     ) -> Result<ExecutionStats> {
         // Phase 2: schedule into the reusable plan buffer. Purely structural —
         // reachability + topological order + output usage + the walk roots, no cache/digest
-        // state.
-        self.planner.plan(&self.program, &seeds, &mut self.plan)?;
+        // state. The flatten map resolves node seeds (authoring ids) to flat roots.
+        self.planner
+            .plan(&self.program, &self.flatten_map, &seeds, &mut self.plan)?;
 
         // Phase 2b: cache-aware refinement. Resolve every node's disposition — its reuse
         // verdict merged with the backward cut, so a cone feeding only cache hits (a
@@ -454,7 +455,8 @@ impl ExecutionEngine {
             events: events.to_vec(),
             nodes: Vec::new(),
         };
-        self.planner.plan(&self.program, &seeds, &mut self.plan)
+        self.planner
+            .plan(&self.program, &self.flatten_map, &seeds, &mut self.plan)
     }
 
     pub(crate) fn by_id(&self, node_id: &NodeId) -> Option<&ExecutionNode> {

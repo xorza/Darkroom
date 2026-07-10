@@ -10,29 +10,34 @@ use crate::execution::stats::ExecutionStats;
 use crate::execution::{ArgumentValues, ExecutionEngine};
 use crate::graph::NodeId;
 
-impl ExecutionEngine {
-    /// The flat execution node backing `node_id`. A top-level node keeps its authoring
-    /// id; a subgraph-interior node's flat id is hashed from the descent path, so the
-    /// editor's authoring id misses the key lookup — resolve it through the flatten
-    /// map's leaves instead. A def instanced more than once has several flat nodes per
-    /// interior id; the first (lowest index) is returned, an arbitrary-but-stable
-    /// representative for inspection.
-    fn resolve_query_idx(&self, node_id: &NodeId) -> Option<NodeIdx> {
-        if let Some(idx) = self.program.e_nodes.index_of_key(node_id) {
-            return Some(idx.into());
-        }
-        self.program
-            .node_indices()
-            .find(|&idx| self.flatten_map.interior(self.program.e_nodes[idx].id) == Some(*node_id))
+/// The flat execution node backing authoring id `node_id`. A top-level node keeps its
+/// authoring id; a subgraph-interior node's flat id is hashed from the descent path, so
+/// the authoring id misses the key lookup — resolve it through the flatten map's leaves
+/// instead. A def instanced more than once has several flat nodes per interior id; the
+/// first (lowest index) is returned, an arbitrary-but-stable representative for
+/// inspection and node seeding.
+pub(crate) fn resolve_node_idx(
+    program: &ExecutionProgram,
+    flatten: &FlattenMap,
+    node_id: &NodeId,
+) -> Option<NodeIdx> {
+    if let Some(idx) = program.e_nodes.index_of_key(node_id) {
+        return Some(idx.into());
     }
+    program
+        .node_indices()
+        .find(|&idx| flatten.interior(program.e_nodes[idx].id) == Some(*node_id))
+}
 
+impl ExecutionEngine {
     /// Resident-only argument values, test inspection only. The production entry
     /// point is [`Self::get_argument_values_with_previews`], which hydrates
     /// disk-cached values first; this bare accessor reads whatever is in RAM, so a
     /// disk-only node reads back empty.
     #[cfg(test)]
     pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-        Some(self.argument_values_at(self.resolve_query_idx(node_id)?))
+        let idx = resolve_node_idx(&self.program, &self.flatten_map, node_id)?;
+        Some(self.argument_values_at(idx))
     }
 
     fn argument_values_at(&self, idx: NodeIdx) -> ArgumentValues {
@@ -62,6 +67,10 @@ impl ExecutionEngine {
     /// value this node shows (its own outputs and its inputs' producers) into RAM first
     /// via [`hydrate_for_inspection`](crate::execution::cache::RuntimeCache::hydrate_for_inspection),
     /// so an inspected node the run reused-from-disk (or never touched) still resolves.
+    /// The hydration is a loan: once the values are cloned out (the reply's `Arc`s keep
+    /// the data alive), the loaned slots go back to `OnDisk` — inspection must not leave
+    /// resident what the node's mode wouldn't retain, since the reuse check trusts
+    /// residency.
     pub(crate) async fn get_argument_values_with_previews(
         &mut self,
         node_id: &NodeId,

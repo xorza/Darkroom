@@ -10,6 +10,8 @@
 //! repeated plan on an unchanged graph allocates nothing.
 
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram, NodeIdx};
+use crate::execution::query::resolve_node_idx;
+use crate::execution::stats::FlattenMap;
 use crate::execution::{Error, NodeColumn, Result, RunSeeds, validate};
 use crate::node::special::SpecialNode;
 
@@ -138,21 +140,20 @@ pub(crate) struct Planner {
 
 impl Planner {
     /// Build the per-run schedule into `plan` from the program and the run's `seeds`
-    /// (the roots to walk back from). `node_roots` is the flat resolution of
-    /// `seeds.nodes` — the engine resolves authoring ids before planning, since the
-    /// flatten map lives outside the program. Errors only on a dependency cycle.
+    /// (the roots to walk back from); `flatten` resolves node seeds (authoring ids)
+    /// to flat roots. Errors only on a dependency cycle.
     pub(crate) fn plan(
         &mut self,
         program: &ExecutionProgram,
+        flatten: &FlattenMap,
         seeds: &RunSeeds,
-        node_roots: &[NodeIdx],
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
         plan.reset(program.e_nodes.len(), program.n_outputs());
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
-        collect_roots(program, seeds, node_roots, plan);
+        collect_roots(program, flatten, seeds, plan);
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
@@ -247,19 +248,19 @@ impl Planner {
 }
 
 /// Collect the run's walk roots into `plan.roots` — the seeds for both the backward walk and
-/// the executor's cut: every event subscriber, every terminal node, (for the event loop)
-/// every node owning a subscribed event, and the pre-resolved node seeds. Not deduped: a node
-/// seeding via several categories appears more than once, which is harmless — the walk's
-/// `Color` check skips a revisited root and the cut's `needed[root] = true` seeding is
-/// idempotent, so neither cares about repeats.
+/// the executor's cut: the node seeds (authoring ids resolved to flat nodes here), every
+/// event subscriber, every terminal node, and (for the event loop) every node owning a
+/// subscribed event. Not deduped: a node seeding via several categories appears more than
+/// once, which is harmless — the walk's `Color` check skips a revisited root and the cut's
+/// `needed[root] = true` seeding is idempotent, so neither cares about repeats.
 ///
 /// A [`RunTerminals`](SpecialNode::RunTerminals) node among a fired event's subscribers is not
 /// itself a root (it computes nothing); instead it promotes the run to include *every* terminal
 /// node — the "when this event fires, re-run the whole graph" trigger.
 fn collect_roots(
     program: &ExecutionProgram,
+    flatten: &FlattenMap,
     seeds: &RunSeeds,
-    node_roots: &[NodeIdx],
     plan: &mut ExecutionPlan,
 ) {
     // `plan.reset` already cleared `roots`/`pinned`; this only pushes into them.
