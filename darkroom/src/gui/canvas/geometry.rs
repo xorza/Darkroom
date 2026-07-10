@@ -235,3 +235,16 @@ fn snapshot<K: Eq + Hash + Copy>(
         dragging: r.drag_started() || r.drag_delta().is_some(),
     }
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    impl CanvasGeometry {
+        /// Seed the cross-frame size cache directly, standing in for a
+        /// past frame's record of the node.
+        pub(crate) fn seed_node_size(&mut self, id: NodeId, size: Size) {
+            self.node_sizes.insert(id, size);
+        }
+    }
+}

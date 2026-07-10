@@ -17,6 +17,7 @@ use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
+use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
@@ -69,6 +70,7 @@ pub(crate) fn show(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
     scene: &Scene,
+    geometry: &CanvasGeometry,
     out: &mut Vec<Intent>,
 ) -> Option<AppCommand> {
     let mut command = None;
@@ -145,10 +147,20 @@ pub(crate) fn show(
                 .background(pill_background(ctx.theme))
                 .show(ui, |ui| {
                     if action_button(ui, ctx.theme, reset_view_wid(), "Reset view", draw_reset) {
-                        out.extend(pan_zoom::view_action_intent(ui, scene, ViewAction::Reset));
+                        out.extend(pan_zoom::view_action_intent(
+                            ui,
+                            geometry,
+                            scene,
+                            ViewAction::Reset,
+                        ));
                     }
                     if action_button(ui, ctx.theme, show_all_wid(), "Show all", draw_show_all) {
-                        out.extend(pan_zoom::view_action_intent(ui, scene, ViewAction::ShowAll));
+                        out.extend(pan_zoom::view_action_intent(
+                            ui,
+                            geometry,
+                            scene,
+                            ViewAction::ShowAll,
+                        ));
                     }
                     if action_button(
                         ui,
@@ -159,6 +171,7 @@ pub(crate) fn show(
                     ) {
                         out.extend(pan_zoom::view_action_intent(
                             ui,
+                            geometry,
                             scene,
                             ViewAction::ShowSelected,
                         ));

@@ -10,8 +10,8 @@ use glam::Vec2;
 
 use crate::core::document::Viewport;
 use crate::core::edit::intent::Intent;
+use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
-use crate::gui::node::node_widget_id;
 use crate::gui::scene::Scene;
 
 /// Bounds on the canvas zoom factor. Pinch / scroll-zoom deltas
@@ -151,29 +151,34 @@ pub(crate) enum ViewAction {
 
 /// Compute the `SetViewport` intent a [`ViewAction`] implies, or `None`
 /// when there's nothing to frame — `ShowSelected` with an empty
-/// selection, no nodes to fit, or the viewport not yet measured. Reads
-/// last frame's node/canvas geometry via `Ui::response_for`; node world
-/// size comes from the body's pre-transform `layout_rect`, position from
+/// selection, no nodes to fit, or the viewport not yet measured. The
+/// pane size comes from the outer canvas's `layout_rect`; node extents
+/// come from `geometry`'s cross-frame size cache, position from
 /// `SceneNode::pos`.
-pub(crate) fn view_action_intent(ui: &Ui, scene: &Scene, action: ViewAction) -> Option<Intent> {
+pub(crate) fn view_action_intent(
+    ui: &Ui,
+    geometry: &CanvasGeometry,
+    scene: &Scene,
+    action: ViewAction,
+) -> Option<Intent> {
     let vp = ui.response_for(outer_canvas_widget_id()).layout_rect?.size;
     let pane = Vec2::new(vp.w, vp.h);
     let to = match action {
-        ViewAction::Reset => reset_target(ui, scene, pane),
-        ViewAction::ShowAll => fit_target(node_bounds(ui, scene, false)?, pane),
+        ViewAction::Reset => reset_target(geometry, scene, pane),
+        ViewAction::ShowAll => fit_target(node_bounds(geometry, scene, false)?, pane),
         ViewAction::ShowSelected => {
             if scene.selected_nodes.is_empty() {
                 return None;
             }
-            fit_target(node_bounds(ui, scene, true)?, pane)
+            fit_target(node_bounds(geometry, scene, true)?, pane)
         }
     };
     Some(Intent::SetViewport { to })
 }
 
 /// 1:1 zoom, centered on all content (world origin when the graph is empty).
-fn reset_target(ui: &Ui, scene: &Scene, pane: Vec2) -> Viewport {
-    let pan = match node_bounds(ui, scene, false) {
+fn reset_target(geometry: &CanvasGeometry, scene: &Scene, pane: Vec2) -> Viewport {
+    let pan = match node_bounds(geometry, scene, false) {
         Some(b) => pane * 0.5 - b.center(),
         None => Vec2::ZERO,
     };
@@ -181,25 +186,33 @@ fn reset_target(ui: &Ui, scene: &Scene, pane: Vec2) -> Viewport {
 }
 
 /// World-space (inner-canvas pre-transform) bounding box of the framed
-/// nodes — every node, or only the selected ones. Position is
-/// `SceneNode::pos` (document world coords); extent is the node body's
-/// last-arranged `layout_rect` size (pre-transform, so unscaled), or a
-/// point when it hasn't measured yet. `None` when no node qualifies.
-fn node_bounds(ui: &Ui, scene: &Scene, selected_only: bool) -> Option<Rect> {
-    let mut acc: Option<Rect> = None;
+/// nodes — every node, or only the selected ones. Each node's rect comes
+/// from [`CanvasGeometry::node_world_rect`] (current `SceneNode::pos` +
+/// cached measured size) — NOT from live responses, because culled
+/// off-screen nodes record none and would drop out of the fit entirely.
+/// A node that has never measured counts as a point at its position;
+/// the fold is manual min/max (not `Rect::union`, which treats a
+/// zero-size rect as identity and would discard that point too).
+/// `None` when no node qualifies.
+fn node_bounds(geometry: &CanvasGeometry, scene: &Scene, selected_only: bool) -> Option<Rect> {
+    let mut acc: Option<(Vec2, Vec2)> = None;
     for n in &scene.nodes {
         if selected_only && !scene.selected_nodes.contains(&n.id) {
             continue;
         }
-        let size = ui
-            .response_for(node_widget_id(n.id))
-            .layout_rect
-            .map(|r| r.size)
-            .unwrap_or(Size::ZERO);
-        let rect = Rect { min: n.pos, size };
-        acc = Some(acc.map_or(rect, |a| a.union(rect)));
+        let rect = geometry.node_world_rect(n).unwrap_or(Rect {
+            min: n.pos,
+            size: Size::ZERO,
+        });
+        acc = Some(match acc {
+            Some((min, max)) => (min.min(rect.min), max.max(rect.max())),
+            None => (rect.min, rect.max()),
+        });
     }
-    acc
+    acc.map(|(min, max)| Rect {
+        min,
+        size: Size::new(max.x - min.x, max.y - min.y),
+    })
 }
 
 /// Fit `bounds` (world coords) centered in a `viewport`-sized pane,
@@ -230,7 +243,48 @@ fn fit_target(bounds: Rect, pane: Vec2) -> Viewport {
 
 #[cfg(test)]
 mod tests {
+    use scenarium::graph::NodeId;
+
     use super::*;
+    use crate::gui::scene::test_support::scene_node_stub;
+
+    #[test]
+    fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
+        // Regression for "Show all leaves nodes offscreen": node extents
+        // must come from the cross-frame size cache, because a culled
+        // (off-screen) node records no response the frame the button is
+        // pressed. Three nodes:
+        //   a: (0,0) 150×80      — on-screen, size cached
+        //   b: (1000,500) 200×100 — culled, but its size is still cached
+        //   c: (-50,300) never measured — contributes a point
+        let (a, b, c) = (NodeId::unique(), NodeId::unique(), NodeId::unique());
+        let mut scene = Scene::default();
+        scene.nodes.add(scene_node_stub(a, Vec2::new(0.0, 0.0)));
+        scene
+            .nodes
+            .add(scene_node_stub(b, Vec2::new(1000.0, 500.0)));
+        scene.nodes.add(scene_node_stub(c, Vec2::new(-50.0, 300.0)));
+        let mut geometry = CanvasGeometry::default();
+        geometry.seed_node_size(a, Size::new(150.0, 80.0));
+        geometry.seed_node_size(b, Size::new(200.0, 100.0));
+
+        // Union: min = c's x / a's y = (-50, 0); max = b's far corner
+        // (1000+200, 500+100) = (1200, 600) → size (1250, 600). Without
+        // the cache, b would count as a point and max.x would be 1000 —
+        // its whole 200×100 body left outside the fit.
+        let all = node_bounds(&geometry, &scene, false).unwrap();
+        assert_eq!(all.min, Vec2::new(-50.0, 0.0));
+        assert_eq!(all.size, Size::new(1250.0, 600.0));
+
+        // selected_only filters to exactly the selected node's rect.
+        scene.selected_nodes.insert(b);
+        let sel = node_bounds(&geometry, &scene, true).unwrap();
+        assert_eq!(sel.min, Vec2::new(1000.0, 500.0));
+        assert_eq!(sel.size, Size::new(200.0, 100.0));
+
+        // Empty scene → nothing to frame.
+        assert!(node_bounds(&geometry, &Scene::default(), false).is_none());
+    }
 
     #[test]
     fn scroll_to_zoom_factor_zero_delta_is_identity() {

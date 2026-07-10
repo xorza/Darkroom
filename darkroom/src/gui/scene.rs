@@ -569,6 +569,36 @@ fn extend_pool<T>(pool: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Span
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    /// Minimal node for viewport/bounds math tests: identity + position
+    /// only, every render field defaulted.
+    pub(crate) fn scene_node_stub(id: NodeId, pos: Vec2) -> SceneNode {
+        SceneNode {
+            id,
+            pos,
+            name: SmolStr::default(),
+            kind_label: SmolStr::default(),
+            description: SmolStr::default(),
+            inputs: Span::default(),
+            outputs: Span::default(),
+            events: Span::default(),
+            subgraph: None,
+            terminal: false,
+            disabled: false,
+            cache: CacheMode::None,
+            uncacheable: false,
+            impure: false,
+            boundary: false,
+            exec_status: ExecStatus::None,
+            ram: RamUsage::default(),
+            missing: false,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use scenarium::data::DataType;

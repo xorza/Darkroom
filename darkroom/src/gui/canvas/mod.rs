@@ -63,7 +63,7 @@ use crate::gui::{PortKind, PortRef};
 #[derive(Default, Debug)]
 pub(crate) struct GraphUI {
     background: CanvasBackground,
-    geometry: CanvasGeometry,
+    pub(crate) geometry: CanvasGeometry,
     /// Open inspection panels, keyed by node. Outside the gesture group
     /// so pinned panels survive a tab switch; panels only paint for nodes
     /// in the active scene, so off-tab ones hide and reappear.
