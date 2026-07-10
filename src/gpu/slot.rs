@@ -40,11 +40,14 @@ impl<T> Slot<T> {
         self.notify.notify_waiters();
     }
 
+    /// Non-blocking take. Kept for API completeness with the waiting variants;
+    /// production currently only uses those.
+    #[allow(dead_code)]
     pub fn take(&self) -> Option<T> {
         self.value.swap(None).and_then(Arc::into_inner)
     }
 
-    pub async fn take_or_wait(&self) -> Result<T, TakeError> {
+    pub async fn take_async(&self) -> Result<T, TakeError> {
         loop {
             // Register for notification BEFORE checking value to avoid lost-wakeup.
             let notified = self.notify.notified();
@@ -53,6 +56,11 @@ impl<T> Slot<T> {
             }
             notified.await;
         }
+    }
+
+    /// Blocking counterpart of `take_async` for sync callers; parks the thread.
+    pub fn take_blocking(&self) -> Result<T, TakeError> {
+        pollster::block_on(self.take_async())
     }
 }
 
@@ -63,14 +71,9 @@ mod tests {
     #[test]
     fn send_and_take() {
         let slot = Slot::default();
+        assert!(slot.take().is_none());
         slot.send(42);
         assert_eq!(slot.take().unwrap(), 42);
-        assert!(slot.take().is_none());
-    }
-
-    #[test]
-    fn take_empty_returns_none() {
-        let slot: Slot<i32> = Slot::default();
         assert!(slot.take().is_none());
     }
 
@@ -93,19 +96,34 @@ mod tests {
         assert!(a.take().is_none());
     }
 
+    #[test]
+    fn take_blocking_waits_for_cross_thread_send() {
+        let slot = Slot::default();
+        let sender = std::thread::spawn({
+            let slot = slot.clone();
+            move || {
+                // Give the main thread a moment to park in take_blocking.
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                slot.send(5);
+            }
+        });
+        assert_eq!(slot.take_blocking().unwrap(), 5);
+        sender.join().unwrap();
+    }
+
     #[tokio::test]
-    async fn take_or_wait_returns_immediately_if_value_exists() {
+    async fn take_async_returns_immediately_if_value_exists() {
         let slot = Slot::default();
         slot.send(42);
-        assert_eq!(slot.take_or_wait().await.unwrap(), 42);
+        assert_eq!(slot.take_async().await.unwrap(), 42);
         assert!(slot.take().is_none());
     }
 
     #[tokio::test]
-    async fn take_or_wait_waits_for_value() {
+    async fn take_async_waits_for_value() {
         let slot = Slot::default();
         let clone = slot.clone();
-        let handle = tokio::spawn(async move { clone.take_or_wait().await });
+        let handle = tokio::spawn(async move { clone.take_async().await });
 
         tokio::task::yield_now().await;
         slot.send(123);

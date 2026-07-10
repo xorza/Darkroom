@@ -142,8 +142,10 @@ impl GpuImage {
 
         ctx.wait();
 
-        slot.take()
-            .expect("map_async callback not invoked after device.poll")
+        // A concurrent poll on a shared device may claim this callback and fire
+        // it just after our wait returns — block on the handoff, not the poll.
+        slot.take_blocking()
+            .unwrap()
             .map_err(|err| Error::Gpu(err.to_string()))?;
 
         let data = buffer_slice
@@ -190,7 +192,7 @@ impl GpuImage {
             }
         });
 
-        slot.take_or_wait()
+        slot.take_async()
             .await
             .unwrap()
             .map_err(|err| Error::Gpu(err.to_string()))?;
