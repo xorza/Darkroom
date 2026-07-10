@@ -137,8 +137,9 @@ in stats. When `execute` is given
 a progress `UnboundedSender<RunProgress>`, the loop sends `RunPhase::Started`
 before each lambda and `Finished{elapsed}` after — node ids resolved to authoring
 attribution via the `FlattenMap` so the consumer needn't be. Stats (executed,
-cached, missing inputs, errors, drained logs, `FlattenMap`) are collected into
-`ExecutionStats`.
+cached, missing inputs, errors, drained logs) are collected into
+`ExecutionStats`, keyed by *flat* ids with no map of their own — the host
+compiled the graph, so it already holds the `FlattenMap` to project them.
 
 ## Functions and lambdas
 

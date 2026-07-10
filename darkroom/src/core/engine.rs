@@ -5,9 +5,11 @@
 //! drain/run primitives live here once instead of in both shells.
 
 use std::path::Path;
+use std::sync::Arc;
 
-use scenarium::execution::compile::{CompileError, Compiler};
+use scenarium::execution::compile::{CompileError, CompiledGraph, Compiler};
 use scenarium::execution::disk_store::DiskStore;
+use scenarium::execution::stats::FlattenMap;
 use scenarium::graph::{Graph, NodeId};
 
 use crate::core::io::cache::prepare_document_cache_root;
@@ -27,6 +29,10 @@ pub(crate) struct Engine {
     /// Long-lived so the flatten scratch is reused across compiles instead of
     /// reallocated per run.
     compiler: Compiler,
+    /// The flatten map of the last program sent to the worker — the worker's
+    /// stats are keyed by flat ids and carry no map of their own (the host
+    /// compiled, so it already has it). Frontends project stats through this.
+    pub(crate) flatten_map: Arc<FlattenMap>,
     /// `Some` only when `--script-tcp` bound a listener.
     script: Option<ScriptHost>,
 }
@@ -48,8 +54,19 @@ impl Engine {
             library,
             worker,
             compiler: Compiler::default(),
+            flatten_map: Arc::default(),
             script,
         }
+    }
+
+    /// Compile `graph` against the current library and record the artifact's
+    /// flatten map as the engine's current one — every send below installs its
+    /// artifact on the worker, so the map here always mirrors the program the
+    /// worker's next stats come from.
+    fn compile(&mut self, graph: &Graph) -> Result<CompiledGraph, CompileError> {
+        let compiled = self.compiler.compile(graph, &self.library.load())?;
+        self.flatten_map = compiled.flatten_map.clone();
+        Ok(compiled)
     }
 
     /// Point the content-addressed cache at `doc_path`'s project-local store
@@ -62,24 +79,33 @@ impl Engine {
             .set_disk_store(DiskStore::new(self.library.load_full(), root));
     }
 
-    /// Send `graph` to the worker for one evaluation (paired with the
-    /// startup func lib). Results arrive via [`Self::drain_worker`].
-    pub(crate) fn run_once(&self, graph: Graph) {
-        self.worker.run_once(graph, self.library.load_full());
+    /// Compile `graph` against the current library and send it to the worker
+    /// for one evaluation. A compile error returns synchronously — nothing is
+    /// sent, the worker's program is untouched. Results arrive via
+    /// [`Self::drain_worker`].
+    pub(crate) fn run_once(&mut self, graph: &Graph) -> Result<(), CompileError> {
+        let compiled = self.compile(graph)?;
+        self.worker.run_once(compiled);
+        Ok(())
     }
 
-    /// Send `graph` to the worker and evaluate only `node_id`'s upstream
-    /// cone, keeping its outputs resident for the preview fetch ("run to
-    /// this node"). Results arrive via [`Self::drain_worker`].
-    pub(crate) fn run_node(&self, graph: Graph, node_id: NodeId) {
-        self.worker
-            .run_node(graph, self.library.load_full(), node_id);
+    /// Compile `graph` and evaluate only `node_id`'s upstream cone, keeping
+    /// its outputs resident for the preview fetch ("run to this node"). A
+    /// compile error returns synchronously — nothing is sent. Results arrive
+    /// via [`Self::drain_worker`].
+    pub(crate) fn run_node(&mut self, graph: &Graph, node_id: NodeId) -> Result<(), CompileError> {
+        let compiled = self.compile(graph)?;
+        self.worker.run_node(compiled, node_id);
+        Ok(())
     }
 
     /// Persist resident caches to disk without running the graph — e.g. after a node's
-    /// disk-cache toggle, so its RAM value reaches disk immediately.
-    pub(crate) fn save_caches(&self, graph: Graph) {
-        self.worker.save_caches(graph, self.library.load_full());
+    /// disk-cache toggle, so its RAM value reaches disk immediately. The recompile
+    /// carries the just-toggled cache mode to the worker.
+    pub(crate) fn save_caches(&mut self, graph: &Graph) -> Result<(), CompileError> {
+        let compiled = self.compile(graph)?;
+        self.worker.save_caches(compiled);
+        Ok(())
     }
 
     /// Request cancellation of the in-flight run (coarse — the running node
@@ -88,11 +114,14 @@ impl Engine {
         self.worker.cancel_run();
     }
 
-    /// Start the event loop on `graph` (loads it, then fires events). The
-    /// worker's `Update` tears down any prior loop first.
-    pub(crate) fn start_event_loop(&self, graph: Graph) {
-        self.worker
-            .start_event_loop(graph, self.library.load_full());
+    /// Start the event loop on `graph` (compiles + loads it, then fires
+    /// events). The worker's `Update` tears down any prior loop first. A
+    /// compile error returns synchronously — the loop's running state is
+    /// untouched.
+    pub(crate) fn start_event_loop(&mut self, graph: &Graph) -> Result<(), CompileError> {
+        let compiled = self.compile(graph)?;
+        self.worker.start_event_loop(compiled);
+        Ok(())
     }
 
     /// Stop the event loop.

@@ -37,7 +37,10 @@ pub struct CompileError {
 #[derive(Debug, Default)]
 pub struct CompiledGraph {
     pub(crate) program: ExecutionProgram,
-    pub(crate) flatten_map: Arc<FlattenMap>,
+    /// Public: hosts keep this after sending the artifact to the worker —
+    /// run stats come back keyed by flat ids with no map of their own, so
+    /// projecting them onto authoring nodes uses the compile-phase map.
+    pub flatten_map: Arc<FlattenMap>,
 }
 
 /// The compile entry point, owning the reusable [`Flattener`] scratch so the
