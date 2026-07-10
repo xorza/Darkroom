@@ -194,8 +194,27 @@ fn convert_same_format_returns_same_image() {
     let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
     let img = Image::new_with_data(desc, data.clone()).unwrap();
 
+    // Same format is a move-through: the very same allocation comes back.
+    let ptr = img.bytes().as_ptr();
     let converted = img.convert(ColorFormat::RGBA_U8).unwrap();
     assert_eq!(converted.bytes(), &data[..]);
+    assert_eq!(converted.bytes().as_ptr(), ptr);
+}
+
+#[test]
+fn convert_to_borrows_and_matches_convert() {
+    let desc = ImageDesc::new(2, 2, ColorFormat::RGBA_U8);
+    let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let img = Image::new_with_data(desc, data.clone()).unwrap();
+
+    // The borrowing form leaves the source untouched and readable afterward...
+    let via_borrow = img.convert_to(ColorFormat::RGB_U16).unwrap();
+    assert_eq!(img.bytes(), &data[..]);
+
+    // ...and produces exactly what the consuming form does.
+    let via_move = img.convert(ColorFormat::RGB_U16).unwrap();
+    assert_eq!(via_borrow.desc, via_move.desc);
+    assert_eq!(via_borrow.bytes(), via_move.bytes());
 }
 
 #[test]

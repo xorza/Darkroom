@@ -114,16 +114,24 @@ impl Image {
     }
 
     pub fn convert(self, color_format: ColorFormat) -> Result<Image> {
-        color_format.validate()?;
-
         if self.desc.color_format == color_format {
+            color_format.validate()?;
             return Ok(self);
         }
+        self.convert_to(color_format)
+    }
+
+    /// Borrowing counterpart of [`convert`](Self::convert): converts into a freshly
+    /// allocated image, leaving `self` alone — a caller that only holds a view (e.g.
+    /// a CPU borrow of an `ImageBuffer`) skips the source deep-copy that `convert`'s
+    /// `self` receiver would force. Same-format is a valid (if pointless) full copy.
+    pub fn convert_to(&self, color_format: ColorFormat) -> Result<Image> {
+        color_format.validate()?;
 
         let desc = ImageDesc::new(self.desc.width, self.desc.height, color_format);
         let mut result = Image::new_black(desc)?;
 
-        convert_image(&self, &mut result);
+        convert_image(self, &mut result);
 
         Ok(result)
     }
