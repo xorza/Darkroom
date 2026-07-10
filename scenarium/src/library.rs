@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::data::CustomValueCodec;
+use crate::data::{CustomValueCodec, ResourceStamper};
 use crate::data::{DataType, EnumVariants, TypeId};
 use crate::graph::subgraph::{SubgraphDef, SubgraphId};
 use crate::node::function::{Func, FuncId};
@@ -43,15 +43,19 @@ impl TypeDecl {
 }
 
 /// A registered type: its serializable [`TypeDecl`] plus the optional runtime
-/// [`CustomValueCodec`] that makes its values disk-cacheable. The codec is
-/// `#[serde(skip)]` and re-attached when the library is assembled in-process —
-/// the same split [`Func`] uses for its [`lambda`](Func::lambda). An `Enum`
-/// never carries one (enum values serialize directly as `StaticValue`).
+/// attachments — the [`CustomValueCodec`] that makes its values disk-cacheable, and the
+/// [`ResourceStamper`] that marks it a resource-reference type (its values name external
+/// state whose identity folds into consumers' digests — see `execution/digest`). Both are
+/// `#[serde(skip)]` and re-attached when the library is assembled in-process — the same
+/// split [`Func`] uses for its [`lambda`](Func::lambda). An `Enum` never carries either
+/// (enum values serialize directly as `StaticValue`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TypeEntry {
     pub decl: TypeDecl,
     #[serde(skip, default)]
     pub codec: Option<Arc<dyn CustomValueCodec>>,
+    #[serde(skip, default)]
+    pub stamper: Option<Arc<dyn ResourceStamper>>,
 }
 
 impl TypeEntry {
@@ -62,6 +66,7 @@ impl TypeEntry {
                 display_name: display_name.into(),
             },
             codec: None,
+            stamper: None,
         }
     }
 
@@ -71,11 +76,15 @@ impl TypeEntry {
         codec: Arc<dyn CustomValueCodec>,
     ) -> Self {
         Self {
-            decl: TypeDecl::Custom {
-                display_name: display_name.into(),
-            },
             codec: Some(codec),
+            ..Self::custom(display_name)
         }
+    }
+
+    /// Declare this a resource-reference type by attaching its [`ResourceStamper`].
+    pub fn with_stamper(mut self, stamper: Arc<dyn ResourceStamper>) -> Self {
+        self.stamper = Some(stamper);
+        self
     }
 
     /// An enum type with the variant names taken from `E` (via strum).
@@ -92,6 +101,7 @@ impl TypeEntry {
                 variants,
             },
             codec: None,
+            stamper: None,
         }
     }
 }

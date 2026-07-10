@@ -292,6 +292,16 @@ BLAKE3 `Digest`. The **executor** computes it for each node as it reaches the no
   fingerprint of its entries (§`hash_dir_entries`), so the same path holding different
   bytes, or a folder gaining/losing/editing a file, invalidates. This is what re-keys
   `build_masters` when its calibration folders change.
+- **Wired resource inputs.** A **resource reference** arriving over a `Bind` edge — an
+  `FsPath` value, or a value of a custom type with a registered
+  `ResourceStamper` (`TypeEntry::with_stamper`) — folds the *referent's* live identity,
+  read off the **delivered value** (`hash_bound_resource`). The fold is gated on the
+  consumer's *declared* input type (the contract "this node dereferences the reference"),
+  resolved onto the input at flatten (`InputStamper`). The value must exist first: pre-run
+  the fold taints the digest `None` ("uncacheable, must run", keeping the cone alive), and
+  the run loop **re-stamps** such a node at reach time — its producers settled by then —
+  serving the cache on a hit. So a loader fed by any path- or handle-producing node re-keys
+  when the referent changes and still caches when it doesn't.
 - **Output ports** of a multi-output node are disambiguated (`port_digest_of`); a
   `DOMAIN` separator versions the hashing scheme itself.
 - **Output signature.** Each node's resolved output types (arity + each type, wildcards
@@ -351,9 +361,12 @@ All of it happens *during the run*, not at plan time — the planner is structur
 cache work. The executor first does a **pre-run cut** (`resolve.rs`): fold every node's digest
 producer-first (from upstream digests — no lambda, no value load), decide reuse, then prune
 any cone that feeds *only* reuse hits (a backward walk from the plan's roots). So a disk-cached
-node's now-unneeded upstream — a memory-only source, say — isn't recomputed on reopen. Every
-digest is structural (or the file-cache node's path key), so the whole graph resolves here —
-there are no deferred nodes. Then, per surviving node, once its digest is computed:
+node's now-unneeded upstream — a memory-only source, say — isn't recomputed on reopen. Nearly
+every digest is structural (or the file-cache node's path key), so nearly the whole graph
+resolves here; a digest folding a Bind-delivered resource value it can't read yet (§B.2 wired
+resource inputs) stamps `None` — resolved `Run`, cone kept alive — and the run loop re-stamps
+it at reach time, serving the cache on a hit. Then, per surviving node, once its digest is
+computed:
 
 1. **`is_resident_hit`?** — reuse the RAM value, done.
 2. **else `mark_on_disk_if_present`.** If a blob exists for the digest **and** the
@@ -453,6 +466,10 @@ cone. So:
 - **Presence, not content, decides the hit:** the file's `(len, mtime)` is *not* folded
   in. While the file exists, the node is served from it and its passthrough lambda is
   skipped. A non-const or empty path ⇒ no digest ⇒ never a hit, never stored.
+- A **resource value** served from the file is not laundered: a downstream consumer with a
+  resource-declared input re-keys on the delivered reference's live referent identity
+  regardless (§B.2 wired resource inputs), so caching an `FsPath` through this node can't
+  serve a stale decode.
 - **The input cone is cut.** Because the node presents a path-keyed digest, the pre-run cut
   (Part B.6) resolves it like any other node: a served (reused) cache node prunes its
   `input[0]` cone, so that upstream is *not* recomputed on reopen. The path key is what makes

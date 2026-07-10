@@ -24,7 +24,7 @@ to the other:
 | `graph.rs` | `Graph`, `Node`, `Binding`, `Subscription`, ports, `NodeKind`, `CacheMode`. Authoring model + validation. |
 | `subgraph.rs` | `SubgraphDef`, `SubgraphRef` (Linked/Local), `SubgraphEvent`. Composite definitions and their exposed interface. |
 | `function.rs` | `Func` (definition), `FuncInput`/`FuncOutput`, `FuncBehavior`. |
-| `library.rs` | `Library` (the registry: funcs + shared subgraphs + nominal types), `TypeDecl`/`TypeEntry` (type metadata + optional disk codec). |
+| `library.rs` | `Library` (the registry: funcs + shared subgraphs + nominal types), `TypeDecl`/`TypeEntry` (type metadata + optional disk codec + optional `ResourceStamper` marking a resource-reference type). |
 | `data.rs` | Value model: `StaticValue` (editor consts), `DynamicValue` (runtime), `DataType` (`Custom`/`Enum` carry only a `TypeId`; metadata lives on `Library`), `CustomValue` trait. |
 | `context.rs` | `ContextManager` (per-run resource store + log sink + the run's cancel flag via `cancel_flag()`, which a lambda clones into off-thread work to bail early), `ContextType` (lazy-init type token). |
 | `func_lambda.rs` | `FuncLambda`: the async node-function signature + `InvokeInput`/`InvokeResult`/`InvokeError`. |
@@ -103,7 +103,10 @@ caches `output_values` + the `produced_under` digest, per-node `AnyState`/`Share
 
 **One output digest.** The whole cache keys off a single `RuntimeSlot::current_digest`
 (`digest.rs`). `node_digest` folds func id/version + output types + each input (a `Const`'s
-value + `FsPath` directory content, or a `Bind` producer's already-stamped `current_digest`).
+value + `FsPath` file/dir content, or a `Bind` producer's already-stamped `current_digest` —
+plus, for a **resource-declared** input (`FsPath`, or a custom type whose `TypeEntry` has a
+`ResourceStamper`), the live identity of the referent behind the *delivered* value, so a
+wired reference re-keys its consumer like a const path does; unreadable value ⇒ `None`).
 `None` for an `Impure` node (never cached; a `None` producer taints its consumer to `None`).
 The one special case: a `CachePassthrough` (file-cache) node is keyed on its `Const` path
 *alone* (`file_cache_digest`), excluding its `input[0]` cone. Reuse is uniform: a resident
@@ -115,13 +118,16 @@ another never enters RAM — this is what survives a reopen); else the node runs
 `current_digest` is unchanged leaves its consumers' digests unchanged. **Pre-run cut**
 (`resolve.rs`): before the run loop the executor resolves *every* node's digest + reuse
 (`resolve_structural` — folding each digest producer-first from upstream digests, no lambda,
-no value load — every digest being structural or the file-cache path key) and prunes every
-cone that feeds *only* reuse hits (`compute_disposition`, a backward walk seeded from the plan's
-`roots`), so a `Memory` (non-persist) node feeding a disk-cached *hit* is **not** recomputed
-on reopen. A cut node is reported `cached` iff it still holds a value (a deeper disk cache),
-else it's not computed this run. The resolver's verdicts are authoritative for the whole run:
-the run loop reads them rather than re-deriving (a digest folds live `FsPath` filesystem
-state and could drift mid-run). Output buffers aren't wiped; `evict_unused` demotes to disk
+no value load — nearly every digest being structural or the file-cache path key) and prunes
+every cone that feeds *only* reuse hits (`compute_disposition`, a backward walk seeded from
+the plan's `roots`), so a `Memory` (non-persist) node feeding a disk-cached *hit* is **not**
+recomputed on reopen. A cut node is reported `cached` iff it still holds a value (a deeper
+disk cache), else it's not computed this run. The resolver's verdicts are authoritative for
+the whole run: a `Reuse` is never re-derived by the run loop (a digest folds live external
+state and could drift mid-run). The one sanctioned improvement is a `Run` whose stamped
+digest is `None` — a digest folding a Bind-delivered resource value not yet readable: the
+loop re-stamps it at reach time (hydrating `OnDisk` resource producers just to stamp) and
+serves the cache on a hit, so wired-reference loaders stay cacheable. Output buffers aren't wiped; `evict_unused` demotes to disk
 only values the run's *executed* nodes didn't produce/read. A reused node counts as `cached`
 in stats. When `execute` is given
 a progress `UnboundedSender<RunProgress>`, the loop sends `RunPhase::Started`

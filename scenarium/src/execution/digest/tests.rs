@@ -101,6 +101,13 @@ impl Prog {
         )
     }
 
+    /// Mark input `input_idx` of node `idx` resource-typed with `stamper` (inputs default
+    /// to none) — gates the Bind-side referent-identity fold.
+    fn stamp_input(&mut self, idx: usize, input_idx: usize, stamper: InputStamper) {
+        let pool = self.program.e_nodes[idx].inputs.start as usize + input_idx;
+        self.program.inputs[pool].stamper = Some(stamper);
+    }
+
     fn add_with(
         &mut self,
         behavior: FuncBehavior,
@@ -113,6 +120,7 @@ impl Prog {
         for binding in bindings {
             self.program.inputs.push(ExecutionInput {
                 required: false,
+                stamper: None,
                 binding: binding.clone(),
             });
         }
@@ -286,6 +294,151 @@ fn fs_path_folds_file_identity_and_path() {
         NodeIdx(0),
     );
     assert_ne!(d_missing, d_other, "different path ⇒ different digest");
+}
+
+/// A **Bind-delivered** path re-keys its consumer like a const one: the fold reads the
+/// producer's delivered value and stats the pointed-at file live — but only through an
+/// `FsPath`-declared input, and only once the value is readable (unreadable ⇒ `None`,
+/// the taint the run loop's reach-time re-stamp resolves).
+#[test]
+fn bound_fs_path_folds_delivered_file_identity() {
+    use crate::data::DynamicValue;
+
+    let file = std::env::temp_dir().join(format!(
+        "scenarium-digest-bound-fs-{}.bin",
+        std::process::id()
+    ));
+    let path = file.to_string_lossy().into_owned();
+
+    // producer (0) → consumer (1) with its input declared `FsPath`; a control consumer (2)
+    // reads the same port through an undeclared input — no fold.
+    let mut p = Prog::default();
+    p.add(10, 0, 1, &[]);
+    p.add(20, 0, 1, &[bind(0, 0)]);
+    p.add(20, 0, 1, &[bind(0, 0)]);
+    p.stamp_input(1, 0, InputStamper::FsPath);
+
+    // Stamp the producer and install `value` as its delivered output (`None` leaves the
+    // slot empty — an unreadable value), then fold both consumers.
+    let digests_with = |value: Option<DynamicValue>| {
+        let mut cache = RuntimeCache::default();
+        cache.reconcile(&p.program.e_nodes);
+        let producer = node_digest(&p.program, NodeIdx(0), &cache).unwrap();
+        cache.slots[NodeIdx(0)].current_digest = Some(producer);
+        if let Some(value) = value {
+            cache.hydrate(NodeIdx(0), vec![value], producer);
+        }
+        (
+            node_digest(&p.program, NodeIdx(1), &cache),
+            node_digest(&p.program, NodeIdx(2), &cache),
+        )
+    };
+    let fs_path = || Some(DynamicValue::Static(StaticValue::FsPath(path.clone())));
+
+    std::fs::write(&file, b"x").unwrap(); // len 1
+    let (typed_len1, plain_len1) = digests_with(fs_path());
+    assert!(typed_len1.is_some() && plain_len1.is_some());
+    assert_eq!(
+        digests_with(fs_path()).0,
+        typed_len1,
+        "an unchanged file folds identically"
+    );
+
+    std::fs::write(&file, b"xyz").unwrap(); // len 3 — the file identity changed
+    let (typed_len3, plain_len3) = digests_with(fs_path());
+    assert_ne!(
+        typed_len1, typed_len3,
+        "a wired path's file change re-keys the FsPath-declared consumer"
+    );
+    assert_eq!(
+        plain_len1, plain_len3,
+        "an undeclared input folds no file identity — structural digest only"
+    );
+
+    std::fs::remove_file(&file).unwrap();
+    let (typed_missing, _) = digests_with(fs_path());
+    assert_ne!(typed_len3, typed_missing, "file presence must matter");
+
+    // A delivered non-path value folds a distinct marker — still cacheable.
+    let (typed_int, _) = digests_with(Some(DynamicValue::Static(StaticValue::Int(7))));
+    assert!(typed_int.is_some(), "a mis-typed wire stays cacheable");
+    assert_ne!(
+        typed_int, typed_missing,
+        "a non-path delivered value hashes apart from a missing path"
+    );
+
+    // An unreadable delivered value (producer not resident) taints only the declared consumer.
+    let (typed_unread, plain_unread) = digests_with(None);
+    assert_eq!(
+        typed_unread, None,
+        "unreadable reference value ⇒ None digest"
+    );
+    assert!(
+        plain_unread.is_some(),
+        "the undeclared consumer never reads the value, so it still folds"
+    );
+}
+
+/// A registered [`ResourceStamper`] keys a consumer on the *referent's* state, not the
+/// reference value: bumping the external version re-keys the stamped consumer while the
+/// producer and an unstamped sibling stay put — the stamp is read live at every fold.
+#[test]
+fn custom_stamper_folds_referent_version() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use crate::data::{DynamicValue, ResourceStamper};
+
+    #[derive(Debug)]
+    struct VersionStamper(Arc<AtomicU64>);
+    impl ResourceStamper for VersionStamper {
+        fn stamp(&self, _value: &DynamicValue, out: &mut Vec<u8>) {
+            out.extend_from_slice(&self.0.load(Ordering::SeqCst).to_le_bytes());
+        }
+    }
+
+    let version = Arc::new(AtomicU64::new(1));
+
+    // producer (0) → stamped consumer (1); control consumer (2) reads the same port
+    // unstamped. The delivered value is an ordinary resident value — what identity it
+    // yields is the stamper's business, not the framework's.
+    let mut p = Prog::default();
+    p.add(10, 0, 1, &[]);
+    p.add(20, 0, 1, &[bind(0, 0)]);
+    p.add(20, 0, 1, &[bind(0, 0)]);
+    p.stamp_input(
+        1,
+        0,
+        InputStamper::Custom(Arc::new(VersionStamper(version.clone()))),
+    );
+
+    let digests = || {
+        let mut cache = RuntimeCache::default();
+        cache.reconcile(&p.program.e_nodes);
+        let producer = node_digest(&p.program, NodeIdx(0), &cache).unwrap();
+        cache.slots[NodeIdx(0)].current_digest = Some(producer);
+        cache.hydrate(NodeIdx(0), vec![StaticValue::Int(42).into()], producer);
+        (
+            node_digest(&p.program, NodeIdx(1), &cache),
+            node_digest(&p.program, NodeIdx(2), &cache),
+        )
+    };
+
+    let (stamped_v1, plain_v1) = digests();
+    assert!(stamped_v1.is_some());
+    assert_eq!(
+        digests().0,
+        stamped_v1,
+        "an unchanged referent folds identically"
+    );
+
+    version.store(2, Ordering::SeqCst);
+    let (stamped_v2, plain_v2) = digests();
+    assert_ne!(
+        stamped_v1, stamped_v2,
+        "a referent version bump re-keys the stamped consumer"
+    );
+    assert_eq!(plain_v1, plain_v2, "the unstamped sibling is untouched");
 }
 
 #[test]

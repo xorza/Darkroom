@@ -13,8 +13,12 @@
 //! stops descending at a cache hit.
 //!
 //! Every node's digest is either structural (a fold of its inputs) or a contained special
-//! case (the file-cache node keys on its path), so the sweep can resolve the *whole* graph
-//! ahead of the run — there is nothing it must defer.
+//! case (the file-cache node keys on its path), so the sweep stamps the *whole* graph ahead
+//! of the run. The one stamp it can leave imprecise is a digest folding a Bind-delivered
+//! *resource* value it can't read yet (`hash_bound_resource`, `digest.rs`): that folds to
+//! `None` here — "uncacheable, must run", which keeps the node's cone alive — and the run
+//! loop re-stamps it at reach time, once its producers have settled, possibly improving
+//! `Run` to a reuse.
 
 use crate::execution::NodeColumn;
 use crate::execution::cache::RuntimeCache;
@@ -38,9 +42,12 @@ enum Resolved {
 /// What the run loop does with one node — the resolver's single exposed column, merging the
 /// reuse verdict with the backward cut so the three states are mutually exclusive by
 /// construction (a pruned reuse hit can't also read as `Reuse`). Authoritative for the whole
-/// run: never re-derived by the executor, since a node digest folds live filesystem state
-/// (`FsPath` len/mtime, directory listings) and a second derivation mid-run could flip a
-/// verdict after the cut already pruned its producers.
+/// run: a `Reuse` is never re-derived by the executor, since a node digest folds live
+/// external state (`FsPath` len/mtime, resource stamps) and a second derivation mid-run
+/// could flip a verdict after the cut already pruned its producers. The safe direction is
+/// allowed once: the run loop re-stamps a `Run` node whose digest folded to `None` here (a
+/// Bind-delivered resource value not yet readable) — its cone was kept alive, so improving
+/// it to a reuse at reach time contradicts nothing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Disposition {
     /// Pruned by the cut: no running node reads this node this run. The default — a node
@@ -92,8 +99,10 @@ impl Resolver {
 
 /// Producer-first pass classifying every node as [`Resolved::Reuse`] or [`Resolved::Run`],
 /// stamping its content digest as it goes so a consumer folds an already-stamped producer
-/// digest — the producer-first invariant the run loop also relies on. Every digest is a
-/// structural fold (or the file-cache node's path key), so the whole graph resolves here.
+/// digest — the producer-first invariant the run loop also relies on. Nearly every digest is
+/// a structural fold (or the file-cache node's path key) and resolves here; one folding a
+/// Bind-delivered resource value it can't read yet stamps `None` — `Run`, cone kept alive —
+/// and the run loop re-stamps it at reach time (see the module doc).
 fn resolve_structural(
     program: &ExecutionProgram,
     cache: &mut RuntimeCache,

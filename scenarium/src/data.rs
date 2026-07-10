@@ -143,6 +143,23 @@ pub trait CustomValueCodec: Send + Sync + std::fmt::Debug {
     fn decode(&self, bytes: Vec<u8>) -> std::result::Result<Arc<dyn CustomValue>, CodecError>;
 }
 
+/// Referent-identity resolver for a **resource-reference** type — one whose values *name*
+/// external state (an asset id, a handle, a path-like key) rather than contain it.
+/// Registered once on the type's [`Library`](crate::library::Library) entry, like a
+/// [`CustomValueCodec`]. An input *declared* with such a type is the contract "this node
+/// dereferences the reference": the digest folds the referent's current identity on top of
+/// the structural fold, so a changed referent re-keys the consumer even when the reference
+/// value (and everything upstream) is unchanged. `DataType::FsPath` is the built-in case
+/// (file `(len, mtime)` / directory fingerprint) and needs no registration.
+pub trait ResourceStamper: Send + Sync + std::fmt::Debug {
+    /// Append the referent's *current* identity for `value` to `out` — cheap external-state
+    /// metadata (a stat, a version counter, a cached etag), never a content read.
+    /// Deterministic for a given (value, external state); called at digest time, up to once
+    /// per run per consumer, so it must be fast. The digest folds `out` length-prefixed as
+    /// one unit, so the encoding within is the stamper's own business.
+    fn stamp(&self, value: &DynamicValue, out: &mut Vec<u8>);
+}
+
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FsPathMode {
     #[default]

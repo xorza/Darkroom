@@ -25,6 +25,7 @@ impl Prog {
         for binding in inputs {
             self.program.inputs.push(ExecutionInput {
                 required: false,
+                stamper: None,
                 binding: binding.clone(),
             });
         }

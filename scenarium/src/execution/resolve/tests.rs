@@ -20,6 +20,7 @@ impl Fix {
         for &p in producers {
             self.program.inputs.push(ExecutionInput {
                 required: false,
+                stamper: None,
                 binding: ExecutionBinding::Bind(ExecutionPortAddress {
                     target_idx: p,
                     port_idx: 0,

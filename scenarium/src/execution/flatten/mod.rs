@@ -18,9 +18,10 @@ use common::FnvHasher;
 use common::{CompactInsert, KeyIndexVec, Span};
 use hashbrown::HashSet;
 
-use crate::data::StaticValue;
+use crate::data::{DataType, StaticValue};
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
+    InputStamper,
 };
 use crate::execution::stats::FlattenMap;
 use crate::graph::subgraph::SubgraphId;
@@ -128,6 +129,21 @@ impl Flattener {
                     .push(subscriber.into());
             }
         }
+    }
+}
+
+/// The [`InputStamper`] for an input declared with a resource-reference type: `FsPath` is
+/// built-in; a nominal custom type resolves through the [`ResourceStamper`] registered on
+/// its library entry (absent registration ⇒ not a resource type). `None` for everything
+/// else — the digest folds no referent identity for the input.
+fn input_stamper(ty: &DataType, library: &Library) -> Option<InputStamper> {
+    match ty {
+        DataType::FsPath(_) => Some(InputStamper::FsPath),
+        DataType::Custom(type_id) => {
+            let stamper = library.types.get(type_id)?.stamper.clone()?;
+            Some(InputStamper::Custom(stamper))
+        }
+        _ => None,
     }
 }
 
@@ -291,6 +307,7 @@ impl<'a> Run<'a> {
             for func_input in &func.inputs {
                 self.new_inputs.push(ExecutionInput {
                     required: func_input.required,
+                    stamper: input_stamper(&func_input.data_type, library),
                     ..Default::default()
                 });
             }

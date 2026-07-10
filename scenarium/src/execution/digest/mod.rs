@@ -21,7 +21,15 @@
 //! - **`FsPath` identity is `(len, mtime)`** — a file's own, or a directory's
 //!   entries' ([`hash_fs_path_identity`]), so a folder-reading node can be `Pure` and
 //!   still re-key when its contents change. A same-size edit within mtime granularity
-//!   can slip through; a full content hash is the opt-in resolver.
+//!   can slip through; a full content hash is the opt-in resolver. The same tier holds
+//!   for any registered [`ResourceStamper`](crate::data::ResourceStamper): a stamp is
+//!   cheap referent *metadata*, and stamps are machine-local (mtimes, local versions),
+//!   so resource-keyed blobs don't transfer across machines.
+//! - **A reference is dereferenced only through an input declared with its resource
+//!   type.** Const and Bind-delivered references both fold the referent's identity, but
+//!   only where the consumer's input is declared `FsPath` (or a stamper-registered custom
+//!   type) — a lambda that reads a file through an `Any`/`String` input keys nothing and
+//!   can serve stale content. Declare the type.
 //! - **Custom-value blob format** is the codec's responsibility, not the digest's — see
 //!   `CustomValueCodec::decode`; a breaking codec change needs a `DOMAIN` bump.
 
@@ -30,7 +38,9 @@ use blake3::Hasher;
 use crate::data::{DataType, StaticValue};
 use crate::execution::cache::RuntimeCache;
 use crate::execution::cache_node::file_cache_digest;
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
+use crate::execution::program::{
+    ExecutionBinding, ExecutionPortAddress, ExecutionProgram, InputStamper, NodeIdx,
+};
 use crate::node::function::FuncBehavior;
 use crate::node::special::SpecialNode;
 
@@ -251,10 +261,11 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
 ///   reproducibility boundary), so it presents a digest even over an impure/expensive input.
 /// - An **`Impure`** node has no digest (`None`) — it varies per run, so it never caches and
 ///   always recomputes; a `Bind` producer with a `None` digest taints this node to `None`.
-/// - Otherwise fold every input structurally: a `Const`'s value + `FsPath` directory content
-///   ([`hash_fs_content`]), or a `Bind` producer's stamped `current_digest`. Known gap: a
-///   `Bind`-delivered path value's file content is *not* keyed — see
-///   `scenarium/fs_path_digest_issue.md`.
+/// - Otherwise fold every input structurally: a `Const`'s value + `FsPath` file/dir content
+///   ([`hash_fs_content`]), or a `Bind` producer's stamped `current_digest` — plus, for a
+///   resource-typed input, the live identity of the referent behind the *delivered* value
+///   ([`hash_bound_resource`]). That last fold needs the producer's value: unreadable ⇒
+///   `None`, and the run loop re-stamps such a node at reach time, once its producers settled.
 pub(crate) fn node_digest(
     program: &ExecutionProgram,
     idx: NodeIdx,
@@ -285,7 +296,8 @@ pub(crate) fn node_digest(
     }
 
     for pool_idx in e_node.inputs.range() {
-        match &program.inputs[pool_idx].binding {
+        let input = &program.inputs[pool_idx];
+        match &input.binding {
             ExecutionBinding::None => {
                 hasher.write_bytes(&[0]);
             }
@@ -301,10 +313,57 @@ pub(crate) fn node_digest(
                 hasher
                     .write_bytes(&[2])
                     .write_digest(&port_digest_of(node, addr.port_idx));
+                // A resource-typed input dereferences the delivered reference, so the
+                // external state behind the *runtime value* is part of this node's key —
+                // the Bind-side counterpart of the `Const` arm's `hash_fs_content`. Needs
+                // the producer's value; unreadable (pre-run) ⇒ `None`, re-stamped at reach
+                // time by the run loop.
+                if let Some(stamper) = &input.stamper {
+                    hash_bound_resource(&mut hasher, cache, addr, stamper)?;
+                }
             }
         }
     }
     Some(hasher.finish())
+}
+
+/// Fold the referent identity behind a **Bind-delivered** resource input: read the
+/// delivered value off the producer's resident slot and fold what the input's
+/// [`InputStamper`] derives from it — the built-in `FsPath` file/dir identity
+/// ([`hash_fs_path_identity`]), or a registered [`ResourceStamper`]'s stamp bytes
+/// (length-prefixed, so its internal encoding can't collide across calls) — so a wired
+/// reference re-keys its consumer exactly like a const path does. The producer's value
+/// must exist first: an unreadable value (producer not resident) is `None`, tainting the
+/// node's digest — the pre-run sweep stamps it "uncacheable, must run", and the run loop
+/// then *re-stamps* at reach time, when the producers have settled and any `OnDisk`
+/// resource producer was hydrated (`executor.rs`). A value the built-in path stamper
+/// can't read as a path (a mis-typed wire) folds a distinct marker instead.
+fn hash_bound_resource(
+    hasher: &mut DigestHasher,
+    cache: &RuntimeCache,
+    addr: &ExecutionPortAddress,
+    stamper: &InputStamper,
+) -> Option<()> {
+    let value = cache.slots[addr.target_idx]
+        .output_values()?
+        .get(addr.port_idx)?;
+    match stamper {
+        InputStamper::FsPath => match value.as_fs_path() {
+            Some(path) => {
+                hasher.write_bytes(&[3]);
+                hash_fs_path_identity(hasher, path);
+            }
+            None => {
+                hasher.write_bytes(&[4]);
+            }
+        },
+        InputStamper::Custom(stamper) => {
+            let mut stamp = Vec::new();
+            stamper.stamp(value, &mut stamp);
+            hasher.write_bytes(&[5]).write_len_prefixed(&stamp);
+        }
+    }
+    Some(())
 }
 
 /// Fold an `FsPath` input's external identity into `hasher`: for a regular file its

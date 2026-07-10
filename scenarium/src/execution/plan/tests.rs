@@ -23,6 +23,7 @@ impl Fix {
         for (required, binding) in inputs {
             self.program.inputs.push(ExecutionInput {
                 required: *required,
+                stamper: None,
                 binding: binding.clone(),
             });
         }

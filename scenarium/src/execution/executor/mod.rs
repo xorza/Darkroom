@@ -8,11 +8,13 @@
 //!
 //! **Pre-run resolution.** [`run`](Executor::run) takes the
 //! [`Resolver`](crate::execution::resolve::Resolver)'s [`Disposition`] column — each node's
-//! merged reuse-verdict + cut state, authoritative for the whole run (never re-derived
-//! here, since a digest folds live filesystem state and could drift mid-run). A cut node
-//! (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't recomputed
-//! on reopen) gets [`NodeOutcome::Cut`]; the run loop otherwise walks the schedule
-//! unchanged.
+//! merged reuse-verdict + cut state, authoritative for the whole run (a `Reuse` is never
+//! re-derived here, since a digest folds live filesystem state and could drift mid-run). A
+//! cut node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
+//! recomputed on reopen) gets [`NodeOutcome::Cut`]. The one verdict the loop *improves* is
+//! a `Run` whose stamped digest is `None` — a digest folding a Bind-delivered resource
+//! value that exists only once its producers settle: the loop re-stamps it at reach time
+//! and serves the cache on a hit. The run loop otherwise walks the schedule unchanged.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -192,12 +194,26 @@ impl Executor {
                 continue;
             }
 
-            // The resolver's pre-run verdict is authoritative — re-deriving it here could
-            // drift when a digest folds live filesystem state (see `resolve.rs`). Reuse is
-            // served *before* the errored-dependency check: a digest-valid cached value
-            // stays valid even when an upstream re-ran for another consumer and failed, so
-            // it must not be cleared as skipped.
-            if disposition[e_node_idx] == Disposition::Reuse {
+            // The resolver's pre-run verdict is authoritative — a `Reuse` is never
+            // re-derived here, since its producers may already be pruned (see `resolve.rs`).
+            // The one sanctioned improvement is a `Run` whose stamped digest is `None`: the
+            // resolver taints a node whose digest folds a Bind-delivered resource value it
+            // couldn't read yet (`hash_bound_resource`). Its producers settled earlier in
+            // this walk (the `Run` verdict kept them alive), so re-stamp it now and serve
+            // the cache on a hit — a genuinely uncacheable node (an impure cone) just
+            // re-folds to `None` and runs as before. Reuse is served *before* the
+            // errored-dependency check: a digest-valid cached value stays valid even when an
+            // upstream re-ran for another consumer and failed, so it must not be cleared as
+            // skipped.
+            let reused = match disposition[e_node_idx] {
+                Disposition::Reuse => true,
+                Disposition::Run if cache.slots[e_node_idx].current_digest.is_none() => {
+                    hydrate_resource_producers(program, cache, e_node_idx).await;
+                    cache.stamp_and_check_reuse(program, e_node_idx)
+                }
+                _ => false,
+            };
+            if reused {
                 outcomes[e_node_idx] = NodeOutcome::Reused;
                 continue;
             }
@@ -348,6 +364,28 @@ impl Executor {
         self.inputs = inputs;
         self.outcomes = outcomes;
         stats
+    }
+}
+
+/// Hydrate the producers feeding node `idx`'s resource-typed bound inputs, so the
+/// reach-time re-stamp can read the delivered reference values (an `OnDisk` producer's
+/// value lives in its blob). Loading a blob just for the stamp is the cost of wiring a
+/// reference over a disk-cached producer. A failed hydrate leaves the value unreadable and
+/// the fold taints the digest to `None` — uncacheable, so the node proceeds to run and
+/// `collect_inputs` reports the real load failure.
+async fn hydrate_resource_producers(
+    program: &ExecutionProgram,
+    cache: &mut RuntimeCache,
+    idx: NodeIdx,
+) {
+    let span = program.e_nodes[idx].inputs;
+    for pool_idx in span.range() {
+        let input = &program.inputs[pool_idx];
+        if input.stamper.is_some()
+            && let ExecutionBinding::Bind(addr) = &input.binding
+        {
+            cache.hydrate_slot(program, addr.target_idx).await;
+        }
     }
 }
 

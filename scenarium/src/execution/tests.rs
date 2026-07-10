@@ -1573,6 +1573,496 @@ mod file_cache {
     }
 }
 
+// === Wired resource references (Bind-delivered referent digests) ===
+
+mod resource_binds {
+    use std::any::Any;
+    use std::fmt;
+    use std::path::PathBuf;
+    use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::async_lambda;
+    use crate::data::{CustomValue, FsPathConfig, FsPathMode, ResourceStamper, TypeId};
+    use crate::graph::NodeKind;
+    use crate::library::TypeEntry;
+    use crate::node::function::{Func, FuncInput, FuncOutput};
+    use crate::node::special::SpecialNode;
+
+    const MAKE_PATH: &str = "be2c3976-3a4f-4ed3-bfe6-8eafb35f084a";
+    const LOAD_TEXT: &str = "5abcd2e7-f023-4122-8215-f6305c8b4a7e";
+    const CAPTURE: &str = "1a9629a9-dfbe-4665-b2b9-6f0d5c21f290";
+
+    /// A temp file path removed on drop.
+    struct TempFile(PathBuf);
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    fn temp_file(tag: &str) -> TempFile {
+        static C: AtomicU64 = AtomicU64::new(0);
+        let n = C.fetch_add(1, Ordering::Relaxed);
+        TempFile(std::env::temp_dir().join(format!(
+            "scenarium-resbind-{tag}-{}-{n}.bin",
+            std::process::id()
+        )))
+    }
+
+    /// A unique temp directory removed on drop (the disk store root for the reopen test).
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            static C: AtomicU64 = AtomicU64::new(0);
+            let n = C.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!(
+                "scenarium-resbind-{tag}-{}-{n}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn disk_engine(dir: &TempDir) -> ExecutionEngine {
+        use crate::execution::disk_store::DiskStore;
+        let mut engine = ExecutionEngine::default();
+        engine.set_disk_store(DiskStore::new(
+            Arc::new(Library::default()),
+            Some(dir.0.clone()),
+        ));
+        engine
+    }
+
+    /// The terminal sink both fixtures share: records the received value's text.
+    fn capture_func(captured: Arc<StdMutex<String>>) -> Func {
+        Func::new(CAPTURE, "capture")
+            .category("Test")
+            .terminal()
+            .input(FuncInput::required("Value", DataType::Any))
+            .lambda(async_lambda!(
+                move |_, _, _, inputs, _, _| { captured = captured.clone() } => {
+                    *captured.lock().unwrap() =
+                        inputs[0].value.as_string().unwrap_or_default().to_string();
+                    Ok(())
+                }
+            ))
+    }
+
+    /// `make_path` (pure: `String` const in → `FsPath` value out — a producer whose own
+    /// digest does *not* track the file, like any path-computing node) → `load_text`
+    /// (pure: declared-`FsPath` input, reads the file, counts invocations) → `capture`.
+    fn path_lib(loads: Arc<AtomicUsize>, captured: Arc<StdMutex<String>>) -> Library {
+        let mut lib = Library::default();
+        lib.add(
+            Func::new(MAKE_PATH, "make_path")
+                .category("Test")
+                .pure()
+                .input(FuncInput::required("Name", DataType::String))
+                .output(FuncOutput::new(
+                    "Path",
+                    DataType::FsPath(Arc::new(FsPathConfig::default())),
+                ))
+                .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
+                    let path = inputs[0].value.as_string().unwrap().to_string();
+                    outputs[0] = StaticValue::FsPath(path).into();
+                    Ok(())
+                })),
+        );
+        lib.add(
+            Func::new(LOAD_TEXT, "load_text")
+                .category("Test")
+                .pure()
+                .input(FuncInput::required(
+                    "Path",
+                    DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile))),
+                ))
+                .output(FuncOutput::new("Text", DataType::String))
+                .lambda(async_lambda!(
+                    move |_, _, _, inputs, _, outputs| { loads = loads.clone() } => {
+                        loads.fetch_add(1, Ordering::SeqCst);
+                        let path = inputs[0].value.as_fs_path().unwrap().to_string();
+                        let text = std::fs::read_to_string(&path).map_err(anyhow::Error::from)?;
+                        outputs[0] = StaticValue::String(text).into();
+                        Ok(())
+                    }
+                )),
+        );
+        lib.add(capture_func(captured));
+        lib
+    }
+
+    /// `make_path(const name = data path) → load_text → capture`, the two pure nodes on
+    /// the given cache mode. Fixed node ids so reopened engines address the same slots.
+    fn path_graph(lib: &Library, data_path: &str, mode: CacheMode) -> (Graph, NodeId, NodeId) {
+        let mut graph = Graph::default();
+        let mut make = node(lib, "make_path", NodeId::from_u128(1));
+        make.cache = mode;
+        graph.add(make);
+        let mut load = node(lib, "load_text", NodeId::from_u128(2));
+        load.cache = mode;
+        graph.add(load);
+        graph.add(node(lib, "capture", NodeId::from_u128(3)));
+        let make_id = graph.by_name("make_path").unwrap().id;
+        let load_id = graph.by_name("load_text").unwrap().id;
+        bind(
+            &mut graph,
+            "make_path",
+            0,
+            Binding::Const(StaticValue::String(data_path.to_string())),
+        );
+        bind(&mut graph, "load_text", 0, (make_id, 0).into());
+        bind(&mut graph, "capture", 0, (load_id, 0).into());
+        (graph, make_id, load_id)
+    }
+
+    fn ran(stats: &ExecutionStats, id: NodeId) -> bool {
+        stats.executed_nodes.iter().any(|n| n.node_id == id)
+    }
+
+    /// The core regression: a path arriving over a **Bind** edge keys the loader on the
+    /// file behind the *delivered value*. Editing the file re-keys and recomputes the
+    /// loader (pre-fix the chain's digests never changed, so the stale decode was served
+    /// forever), while an unchanged file still reuses the cache — the reach-time re-stamp
+    /// keeps wired-path loaders cacheable instead of tainting them uncacheable.
+    #[tokio::test]
+    async fn wired_path_rekeys_loader_on_file_change() {
+        let data = temp_file("ram");
+        std::fs::write(&data.0, "v1").unwrap();
+        let loads = Arc::new(AtomicUsize::new(0));
+        let captured = Arc::new(StdMutex::new(String::new()));
+        let lib = path_lib(loads.clone(), captured.clone());
+        let (graph, make_id, load_id) = path_graph(&lib, &data.0.to_string_lossy(), CacheMode::Ram);
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib).unwrap();
+
+        // Cold run: everything computes (the loader's pre-run digest is None — the
+        // delivered value doesn't exist yet — so it re-stamps at reach time and runs).
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
+        assert_eq!(*captured.lock().unwrap(), "v1");
+
+        // Unchanged file: the loader reuses its RAM value under the full digest
+        // (producer port + live file identity).
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            loads.load(Ordering::SeqCst),
+            1,
+            "unchanged file ⇒ the wired-path loader stays cached"
+        );
+        assert!(stats.cached_nodes.contains(&load_id));
+
+        // Edit the file (different length ⇒ unambiguous identity change). Only the loader
+        // re-keys: its structural upstream is untouched (make_path stays a RAM hit), so the
+        // recompute is driven purely by the delivered value's file identity.
+        std::fs::write(&data.0, "v2-longer").unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            loads.load(Ordering::SeqCst),
+            2,
+            "a file edit re-keys the loader through the wired path"
+        );
+        assert_eq!(
+            *captured.lock().unwrap(),
+            "v2-longer",
+            "the fresh content flows downstream"
+        );
+        assert!(
+            !ran(&stats, make_id),
+            "the path producer itself stays cached — nothing structural changed"
+        );
+        assert!(ran(&stats, load_id));
+    }
+
+    /// Disk persistence across a reopen with a wired path: the loader's blob is keyed
+    /// under the delivered path's live identity, so a fresh engine reuses it while the
+    /// file is unchanged — hydrating the on-disk path producer just to stamp — and
+    /// recomputes once the file changes, while the producer itself stays a disk hit.
+    #[tokio::test]
+    async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
+        let dir = TempDir::new("disk");
+        let data = temp_file("disk-data");
+        std::fs::write(&data.0, "v1").unwrap();
+        let loads = Arc::new(AtomicUsize::new(0));
+        let captured = Arc::new(StdMutex::new(String::new()));
+        let lib = path_lib(loads.clone(), captured.clone());
+        let (graph, make_id, load_id) =
+            path_graph(&lib, &data.0.to_string_lossy(), CacheMode::Disk);
+
+        // Cold run: computes and stores both blobs.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &lib).unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
+
+        // Reopen, unchanged file: the loader is a disk hit under the re-stamped digest.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &lib).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            loads.load(Ordering::SeqCst),
+            1,
+            "reopen with an unchanged file serves the loader from disk"
+        );
+        assert!(stats.cached_nodes.contains(&load_id));
+        assert!(!ran(&stats, load_id));
+        assert_eq!(
+            *captured.lock().unwrap(),
+            "v1",
+            "the terminal reads the hydrated disk value"
+        );
+
+        // Reopen after an edit: the loader's key moved ⇒ recompute; the path producer's
+        // own digest is unchanged, so it stays a disk hit feeding the recompute.
+        std::fs::write(&data.0, "v2-longer").unwrap();
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &lib).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            loads.load(Ordering::SeqCst),
+            2,
+            "reopen after a file edit recomputes the loader"
+        );
+        assert_eq!(*captured.lock().unwrap(), "v2-longer");
+        assert!(
+            !ran(&stats, make_id),
+            "the path producer is served from its blob, not recomputed"
+        );
+    }
+
+    /// The exact stale-cache scenario from the original digest-gap issue: `Const path →
+    /// file-cache passthrough → loader`. The file-cache node is keyed on its cache-file
+    /// path alone, so pre-fix nothing in the chain tracked the data file and the loader
+    /// served its stale decode forever. Now the loader keys on the delivered path's live
+    /// identity: even while the passthrough is *still served from its file* (its
+    /// documented, path-keyed behavior), editing the data file re-keys the loader.
+    #[tokio::test]
+    async fn file_cache_passthrough_no_longer_launders_path_identity() {
+        let data = temp_file("fcache-data");
+        let cache_file = temp_file("fcache-store");
+        std::fs::write(&data.0, "v1").unwrap();
+        let loads = Arc::new(AtomicUsize::new(0));
+        let captured = Arc::new(StdMutex::new(String::new()));
+        let lib = path_lib(loads.clone(), captured.clone());
+
+        // file-cache(value = const data path, path = const cache file) → load_text → capture.
+        let mut graph = Graph::default();
+        let cache_node = Node::new(NodeKind::Special(SpecialNode::CachePassthrough {
+            bypass: false,
+        }));
+        let cache_id = cache_node.id;
+        graph.add(cache_node);
+        let mut load = node(&lib, "load_text", NodeId::unique());
+        load.cache = CacheMode::Ram;
+        graph.add(load);
+        graph.add(node(&lib, "capture", NodeId::unique()));
+        let load_id = graph.by_name("load_text").unwrap().id;
+        graph.set_input_binding(
+            InputPort::new(cache_id, 0),
+            Binding::Const(StaticValue::FsPath(data.0.to_string_lossy().into_owned())),
+        );
+        graph.set_input_binding(
+            InputPort::new(cache_id, 1),
+            Binding::Const(StaticValue::FsPath(
+                cache_file.0.to_string_lossy().into_owned(),
+            )),
+        );
+        bind(&mut graph, "load_text", 0, (cache_id, 0).into());
+        bind(&mut graph, "capture", 0, (load_id, 0).into());
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib).unwrap();
+
+        // Cold: the passthrough runs (cache file absent) and writes it; the loader reads v1.
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
+        assert_eq!(*captured.lock().unwrap(), "v1");
+        assert!(
+            cache_file.0.exists(),
+            "the passthrough wrote its cache file"
+        );
+
+        // Unchanged: the passthrough serves from its file and the loader stays cached —
+        // re-keying on the delivered path must not degrade it to always-recompute.
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            loads.load(Ordering::SeqCst),
+            1,
+            "unchanged file ⇒ loader reused"
+        );
+        assert!(
+            !ran(&stats, cache_id),
+            "the passthrough is served from its file"
+        );
+        assert!(stats.cached_nodes.contains(&load_id));
+
+        // Edit the data file. The passthrough is *still served* (its key is the cache-file
+        // path, by design) — yet the loader re-keys off the delivered value and recomputes:
+        // the identity laundering the issue documented is closed.
+        std::fs::write(&data.0, "v2-longer").unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            loads.load(Ordering::SeqCst),
+            2,
+            "the loader recomputes despite every structural digest being unchanged"
+        );
+        assert_eq!(*captured.lock().unwrap(), "v2-longer");
+        assert!(
+            !ran(&stats, cache_id),
+            "the passthrough itself is still served from its cache file"
+        );
+        assert!(ran(&stats, load_id));
+    }
+
+    const STORE_TYPE: &str = "cbedef18-3a26-4a61-bdf4-5ec651e304d9";
+    const MAKE_HANDLE: &str = "94dcaefc-c7aa-40ea-a297-33bfbfe68f72";
+    const READ_STORE: &str = "bf9e0a40-a2ad-411c-8144-a8ae8f5ab491";
+
+    /// The external state a [`StoreHandle`] names: versioned mutable content — the
+    /// referent the stamper folds and the reader dereferences.
+    #[derive(Debug, Default)]
+    struct Store {
+        version: AtomicU64,
+        content: StdMutex<String>,
+    }
+
+    /// A custom resource-reference value: names the store, contains nothing.
+    #[derive(Debug)]
+    struct StoreHandle;
+    impl fmt::Display for StoreHandle {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "StoreHandle")
+        }
+    }
+    impl CustomValue for StoreHandle {
+        fn type_id(&self) -> TypeId {
+            STORE_TYPE.into()
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+            self
+        }
+    }
+
+    #[derive(Debug)]
+    struct StoreStamper(Arc<Store>);
+    impl ResourceStamper for StoreStamper {
+        fn stamp(&self, _value: &DynamicValue, out: &mut Vec<u8>) {
+            out.extend_from_slice(&self.0.version.load(Ordering::SeqCst).to_le_bytes());
+        }
+    }
+
+    /// End-to-end wiring of a **registered** resource type: `TypeEntry::with_stamper` →
+    /// flatten resolves the input's stamper → digest folds the referent version →
+    /// reach-time re-stamp keeps the reader cacheable. Bumping the store's version is the
+    /// only change between runs — no value, const, or structural digest moves — and the
+    /// reader must recompute exactly then.
+    #[tokio::test]
+    async fn registered_resource_type_rekeys_reader_on_referent_change() {
+        let store = Arc::new(Store {
+            version: AtomicU64::new(1),
+            content: StdMutex::new("v1".into()),
+        });
+        let reads = Arc::new(AtomicUsize::new(0));
+        let captured = Arc::new(StdMutex::new(String::new()));
+
+        let mut lib = Library::default();
+        lib.register_type(
+            STORE_TYPE,
+            TypeEntry::custom("StoreHandle").with_stamper(Arc::new(StoreStamper(store.clone()))),
+        );
+        lib.add(
+            Func::new(MAKE_HANDLE, "make_handle")
+                .category("Test")
+                .pure()
+                .output(FuncOutput::new(
+                    "Handle",
+                    DataType::Custom(STORE_TYPE.into()),
+                ))
+                .lambda(async_lambda!(move |_, _, _, _, _, outputs| {
+                    outputs[0] = DynamicValue::from_custom(StoreHandle);
+                    Ok(())
+                })),
+        );
+        let (lambda_store, lambda_reads) = (store.clone(), reads.clone());
+        lib.add(
+            Func::new(READ_STORE, "read_store")
+                .category("Test")
+                .pure()
+                .input(FuncInput::required(
+                    "Handle",
+                    DataType::Custom(STORE_TYPE.into()),
+                ))
+                .output(FuncOutput::new("Text", DataType::String))
+                .lambda(async_lambda!(
+                    move |_, _, _, _inputs, _, outputs| {
+                        store = lambda_store.clone(),
+                        reads = lambda_reads.clone()
+                    } => {
+                        reads.fetch_add(1, Ordering::SeqCst);
+                        outputs[0] =
+                            StaticValue::String(store.content.lock().unwrap().clone()).into();
+                        Ok(())
+                    }
+                )),
+        );
+        lib.add(capture_func(captured.clone()));
+
+        // make_handle(Ram) → read_store(Ram) → capture.
+        let mut graph = Graph::default();
+        let mut make = node(&lib, "make_handle", NodeId::unique());
+        make.cache = CacheMode::Ram;
+        graph.add(make);
+        let mut read = node(&lib, "read_store", NodeId::unique());
+        read.cache = CacheMode::Ram;
+        graph.add(read);
+        graph.add(node(&lib, "capture", NodeId::unique()));
+        let make_id = graph.by_name("make_handle").unwrap().id;
+        let read_id = graph.by_name("read_store").unwrap().id;
+        bind(&mut graph, "read_store", 0, (make_id, 0).into());
+        bind(&mut graph, "capture", 0, (read_id, 0).into());
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib).unwrap();
+
+        // Cold run computes; a second run with the referent unchanged is a cache hit.
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        assert_eq!(*captured.lock().unwrap(), "v1");
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            1,
+            "unchanged referent ⇒ the reader stays cached"
+        );
+        assert!(stats.cached_nodes.contains(&read_id));
+
+        // Mutate the referent: version bump + new content. Nothing structural changed —
+        // only the stamper sees it — and the reader recomputes while the handle producer
+        // stays a RAM hit.
+        store.version.store(2, Ordering::SeqCst);
+        *store.content.lock().unwrap() = "v2".into();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            2,
+            "a referent version bump re-keys the reader"
+        );
+        assert_eq!(*captured.lock().unwrap(), "v2");
+        assert!(!ran(&stats, make_id), "the handle producer stays cached");
+        assert!(ran(&stats, read_id));
+    }
+}
+
 // === Graph Structure ===
 
 mod graph_structure {

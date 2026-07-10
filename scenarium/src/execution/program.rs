@@ -5,11 +5,12 @@
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan).
 
 use std::ops::{Index, IndexMut};
+use std::sync::Arc;
 
 use common::{KeyIndexKey, KeyIndexVec, Span};
 use serde::{Deserialize, Serialize};
 
-use crate::data::{DataType, StaticValue};
+use crate::data::{DataType, ResourceStamper, StaticValue};
 use crate::graph::{CacheMode, NodeId};
 use crate::library::Library;
 use crate::node::event_lambda::EventLambda;
@@ -76,9 +77,26 @@ pub(crate) enum ExecutionBinding {
 
 // === Execution Node Components ===
 
+/// How an input's delivered value folds its **referent's** identity into the consumer's
+/// content digest — present iff the input is *declared* with a resource-reference type
+/// (the contract "this node dereferences the reference"), resolved from the func spec +
+/// library at flatten. `FsPath` is structural (a `DataType` variant) and folds through the
+/// digest's built-in file/dir identity; a nominal custom type folds through the
+/// [`ResourceStamper`] registered on its library entry.
+#[derive(Debug, Clone)]
+pub(crate) enum InputStamper {
+    FsPath,
+    Custom(Arc<dyn ResourceStamper>),
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct ExecutionInput {
     pub required: bool,
+    /// `Some` iff this input is declared with a resource-reference type (see
+    /// [`InputStamper`]). Runtime-only, like [`ExecutionNode::lambda`]: re-resolved from
+    /// the library at every flatten, absent on a deserialized program.
+    #[serde(skip, default)]
+    pub stamper: Option<InputStamper>,
     pub binding: ExecutionBinding,
 }
 
