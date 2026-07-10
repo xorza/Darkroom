@@ -85,7 +85,8 @@ pub(crate) struct Executor {
     /// (zero left) is spent, so a non-retained node's value is cleared one output at a time
     /// and, once every output is spent, its whole slot is reclaimed
     /// ([`RuntimeCache::reclaim_slot`]) to trim peak RAM instead of holding it to end-of-run
-    /// eviction. Reused across runs, reset each run.
+    /// eviction. Pure bookkeeping of in-run reads; whether a spent value may actually be
+    /// freed is [`retain`](Self::retain)'s call. Reused across runs, reset each run.
     output_usage: Vec<OutputUsage>,
     /// The run's retention policy, per node: `true` when the outputs must stay resident —
     /// the node's mode caches in RAM (`Ram`/`Both`) or it's a node-seeded preview root
