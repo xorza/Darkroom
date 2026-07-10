@@ -610,7 +610,7 @@ pub fn astro_library() -> Library {
     // hdr_compress
     library.add(processing_func(
         "300a2ec5-0ccd-47ec-b282-030eea41441c",
-        "HDR Compress",
+        "HDR Compression",
         "Compresses large-scale dynamic range (multiscale HDR).",
         vec![
             frame_input("Image"),
@@ -696,7 +696,7 @@ pub fn astro_library() -> Library {
 
     // remove_stars — caller-supplied StarNet ONNX model → starless + recovered stars layers.
     library.add(
-        Func::new("60c31a76-eed4-467c-9ba3-5c89d294a91b", "Remove Stars")
+        Func::new("60c31a76-eed4-467c-9ba3-5c89d294a91b", "ML Star Removal")
             .description(
                 "Removes stars with a caller-supplied StarNet ONNX model (starless + stars).",
             )

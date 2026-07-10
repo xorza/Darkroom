@@ -235,7 +235,7 @@ fn processing_nodes_are_registered() {
         "Denoise",
         "SCNR",
         "Neutralize Background",
-        "HDR Compress",
+        "HDR Compression",
         "Local Contrast",
     ] {
         let f = func(&lib, name);
@@ -264,7 +264,7 @@ fn scalar_per_frame_nodes_take_optional_config_overrides() {
             config_data_type::<DenoiseConfigDef>(),
         ),
         (
-            "HDR Compress",
+            "HDR Compression",
             "Build HDR Config",
             config_data_type::<HdrConfigDef>(),
         ),
@@ -400,7 +400,7 @@ fn ml_denoise_node_is_registered() {
 #[test]
 fn remove_stars_node_has_starless_and_stars_outputs() {
     let lib = astro_library();
-    let f = func(&lib, "Remove Stars");
+    let f = func(&lib, "ML Star Removal");
     assert_eq!(f.category, "Astro");
     let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, ["Image"]);
