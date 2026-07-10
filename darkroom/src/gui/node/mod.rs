@@ -529,22 +529,17 @@ pub(crate) fn node_widget_id(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.body", node_id))
 }
 
-/// Pointer-over-node, from last frame's arranged body rect. The body
-/// response's own `hovered` flag misses most of the node's area — ports,
-/// chips, and editors capture the hit — so hover-reveal affordances (the
-/// value-editor chips) test the rect directly. Uses the *screen-space*
-/// `rect` (`transform.apply_rect(layout_rect)`) to match `pointer_pos`'s
-/// surface space at any pan/zoom. Occlusion-blind: a panel or chrome
-/// stacked over the node still counts as hovering it (an aperture
-/// `hover_within` would fix that properly).
-pub(crate) fn node_hovered(ui: &mut Ui, node_id: NodeId) -> bool {
-    match (
-        ui.response_for(node_widget_id(node_id)).rect,
-        ui.pointer_pos(),
-    ) {
-        (Some(rect), Some(p)) => rect.contains(p),
-        _ => false,
-    }
+/// Pointer-over-node for hover-reveal affordances (the value-editor
+/// chips). The body response's own `hovered` flag misses most of the
+/// node's area — ports, chips, and editors capture the hit — so this
+/// asks whether the hover *target* sits anywhere in the node's subtree.
+/// Target-derived (not a raw `pointer_pos` rect test) on purpose: it
+/// can only change when the hover target changes, which is exactly when
+/// a repaint is already scheduled — no `MOVE` subscription needed — and
+/// it's occlusion-aware (a panel stacked over the node wins the
+/// pointer).
+pub(crate) fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
+    ui.hover_within(node_widget_id(node_id))
 }
 
 /// Stable id for a node's inline title-rename editor (and its idle

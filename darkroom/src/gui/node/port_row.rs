@@ -402,26 +402,34 @@ pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
 /// 90°), the same `port_size` box and edge overhang as a data port's circle,
 /// so it lines up with the outputs above it. `fill` carries the hover state;
 /// `tip` shows as a hover tooltip. Senses `CLICK | DRAG` so a subscription
-/// wire can be dragged out of it.
+/// wire can be dragged out of it. Like `circle_frame`, the sensing box is
+/// `PORT_HIT_SCALE`-grown with the extra pulled back out of layout via
+/// negative margin, so the triangle stays put while hover/grab (and the
+/// wire hover-highlight zone) get generous.
 fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: Spacing, tip: &str) {
     let port = theme.port_size;
+    let hit = port * PORT_HIT_SCALE;
+    let inset = (hit - port) * 0.5;
+    let [l, t, r_m, b] = margin.as_array();
+    let hit_margin = Spacing::new(l - inset, t - inset, r_m - inset, b - inset);
     let glyph = Panel::zstack()
         .id(wid)
-        .size((Sizing::Fixed(port), Sizing::Fixed(port)))
-        .margin(margin)
+        .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
+        .margin(hit_margin)
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
-            // Right-pointing isosceles triangle filling the port box: the apex
-            // points outward (away from the node body), matching the emit
+            // Right-pointing isosceles triangle filling the port box (offset
+            // by `inset` to center in the grown hit box): the apex points
+            // outward (away from the node body), matching the emit
             // direction. SDF-antialiased via the triangle primitive. Vertices
             // are inset by the corner radius: the SDF rounds by *dilating*
             // (`sdf - radius`), so the rounded result grows back out to the
             // port box instead of past it.
             let r = EVENT_TRIANGLE_RADIUS;
             ui.add_shape(Shape::Triangle {
-                a: Vec2::new(r, r),
-                b: Vec2::new(r, port - r),
-                c: Vec2::new(port - r, port * 0.5),
+                a: Vec2::new(inset + r, inset + r),
+                b: Vec2::new(inset + r, inset + port - r),
+                c: Vec2::new(inset + port - r, inset + port * 0.5),
                 radius: r,
                 fill: fill.into(),
                 stroke: Stroke::ZERO,
@@ -434,9 +442,14 @@ fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: S
     }
 }
 
-/// Hover / grab box scaled past the painted dot so ports are easier to
-/// hit and snap to, while the visible circle stays `port_size`.
-const PORT_HIT_SCALE: f32 = 1.8;
+/// Hover / grab box scaled past the painted glyph so ports, event
+/// triangles, and subscription pins are easier to hit and snap to,
+/// while the visible shape stays `port_size`. The enlarged box is also
+/// what keeps the wire hover-highlight repaint-correct: the glyph's own
+/// (hover-target) box carries the emphasis zone, so entering/leaving it
+/// is a hover-target change and repaints without any pointer
+/// subscription.
+pub(crate) const PORT_HIT_SCALE: f32 = 1.8;
 
 /// Corner rounding of the event triangles (emitter glyph + subscription
 /// pin), matching the soft corners of the rest of the chrome.

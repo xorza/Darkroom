@@ -17,7 +17,7 @@ use scenarium::graph::{CacheMode, NodeId};
 use crate::core::edit::intent::{Intent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::port_color::event_color;
-use crate::gui::node::port_row::EVENT_TRIANGLE_RADIUS;
+use crate::gui::node::port_row::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
 use crate::gui::node::{RecordCtx, click_intents, exec_color, node_rename_wid};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::SceneNode;
@@ -58,16 +58,19 @@ pub(crate) fn fmt_elapsed(secs: f64) -> String {
 /// incoming wire. Recorded by `NodeUI::draw_one` immediately *before* its
 /// node's body, so it peeks out from behind the corner while keeping the
 /// node stack's paint order (above lower nodes, below raised ones) and the
-/// cull decision. The port-sized box is centered on the corner (world
-/// coords), the same half-on-the-edge geometry the port circles use. It's
-/// both a drop target for an emitter's event wire *and* a drag source —
-/// pulling from the *protruding* half starts a subscription wire aimed at
-/// an emitter (see `SubscriptionUI`); the body-covered half yields presses
-/// to the node, while drop-snapping (rect-based) still accepts the whole
-/// box. `hovered` (set while a drag snaps to it) tints the triangle as
-/// drop feedback.
+/// cull decision. The `PORT_HIT_SCALE`-grown box is centered on the corner
+/// (world coords) while the triangle paints port-sized — the same
+/// generous-hit-box treatment the port circles get. It's both a drop
+/// target for an emitter's event wire *and* a drag source — pulling from
+/// the *protruding* half starts a subscription wire aimed at an emitter
+/// (see `SubscriptionUI`); the body-covered half yields presses to the
+/// node (the body records after, so it hit-tests on top), while
+/// drop-snapping (rect-based) still accepts the whole box. `hovered` (set
+/// while a drag snaps to it) tints the triangle as drop feedback.
 pub(crate) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hovered: bool) {
     let port = theme.port_size;
+    let hit = port * PORT_HIT_SCALE;
+    let inset = (hit - port) * 0.5;
     // Rotate the base (left-pointing) triangle +45° about its center so the
     // apex points up-left, aligned with the wire arriving from there. The
     // rotated points are passed straight to the SDF triangle primitive; the
@@ -76,19 +79,19 @@ pub(crate) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hov
     // corner radius: the SDF rounds by *dilating* (`sdf - radius`), so the
     // rounded result grows back to the port box instead of past it.
     let r = EVENT_TRIANGLE_RADIUS;
-    let c = Vec2::splat(port * 0.5);
+    let c = Vec2::splat(hit * 0.5);
     let rot = Vec2::from_angle(std::f32::consts::FRAC_PI_4);
     let tf = |v: Vec2| c + rot.rotate(v - c);
     let pin = Panel::zstack()
         .id(subscription_glyph_wid(node.id))
-        .position(node.pos - Vec2::splat(theme.port_radius()))
-        .size((Sizing::Fixed(port), Sizing::Fixed(port)))
+        .position(node.pos - Vec2::splat(hit * 0.5))
+        .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
             ui.add_shape(Shape::Triangle {
-                a: tf(Vec2::new(port - r, r)),
-                b: tf(Vec2::new(port - r, port - r)),
-                c: tf(Vec2::new(r, port * 0.5)),
+                a: tf(Vec2::new(inset + port - r, inset + r)),
+                b: tf(Vec2::new(inset + port - r, inset + port - r)),
+                c: tf(Vec2::new(inset + r, inset + port * 0.5)),
                 radius: r,
                 fill: event_color(theme, hovered).into(),
                 stroke: Stroke::ZERO,

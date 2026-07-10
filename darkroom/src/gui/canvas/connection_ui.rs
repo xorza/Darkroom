@@ -355,7 +355,7 @@ impl ConnectionUI {
             // width against the (breaker-faded) rest of the set.
             let endpoint_hover =
                 geometry.ports.is_hovered(src_port) || geometry.ports.is_hovered(tgt_port);
-            let hovered = !broken && emphasis.hovered(endpoint_hover, p0, &handles, p3);
+            let hovered = !broken && emphasis.hovered(endpoint_hover);
             let brush = if broken {
                 Brush::Solid(ctx.theme.colors.connection_broken)
             } else {

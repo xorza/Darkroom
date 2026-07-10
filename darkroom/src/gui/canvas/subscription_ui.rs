@@ -218,7 +218,7 @@ impl SubscriptionUI {
             // against the breaker-faded rest of the set.
             let endpoint_hover =
                 geometry.events.is_hovered(emitter) || geometry.subs.is_hovered(s.subscriber);
-            let hovered = !broken && emphasis.hovered(endpoint_hover, p0, &handles, p3);
+            let hovered = !broken && emphasis.hovered(endpoint_hover);
             let brush = if broken {
                 Brush::Solid(ctx.theme.colors.connection_broken)
             } else {

@@ -338,13 +338,8 @@ impl GraphUI {
                             let fading = connection_ui.dragging()
                                 || subscription_ui.dragging()
                                 || probe.state.is_some();
-                            let emphasis = WireEmphasis::resolve(
-                                ui,
-                                scene,
-                                canvas_origin,
-                                ctx.theme.colors.canvas_bg,
-                                fading,
-                            );
+                            let emphasis =
+                                WireEmphasis::resolve(ctx.theme.colors.canvas_bg, fading);
                             connection_ui
                                 .draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
                             // Subscription wires sit under the node bodies
