@@ -6,13 +6,5 @@ node title disapppears sometimes
 
 imaginarium failing tests
 
-avoid inputs values clone
-
     #[serde(default)]
     pub fs_path: bool,
-
-
- if !collect_inputs(program, cache, output_usage, e_node_idx, &mut inputs).await {
-                mark_skipped(cache, &mut outcomes, e_node_idx, func_id);
-                continue;
-            }
