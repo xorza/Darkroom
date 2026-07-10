@@ -255,10 +255,12 @@ This is **storage only** — the mode never feeds the content digest (§B.2). Pu
 decides reproducibility; the mode decides where a reproducible value is stored. So a `None`
 node still has a digest: a downstream `Disk`/`Both` consumer caches normally and, when that
 consumer is a hit, the `None` node's cone is simply cut (§B.6) — never recomputed to feed a
-value nothing reads. The two reuse paths gate independently: RAM reuse
-(`RuntimeCache::is_resident_hit`) needs `caches_in_ram`; disk reuse (`mark_on_disk_if_present`)
-needs `persists_to_disk`. `evict_unused` then reclaims RAM the mode doesn't call to hold —
-demoting to a disk blob when one exists (lossless), else dropping only a non-RAM mode's value.
+value nothing reads. RAM reuse (`RuntimeCache::is_resident_hit`) trusts residency itself;
+the RAM bit acts earlier, deciding what *stays* resident (the mid-run release and
+`evict_unused`, §B.6), so a resident digest-valid value is always served. Disk reuse
+(`mark_on_disk_if_present`) is gated on `persists_to_disk`. `evict_unused` reclaims RAM the
+mode doesn't call to hold — demoting to a disk blob when one exists (lossless), else
+dropping only a non-RAM mode's value.
 
 ## B.1 What opts into disk
 
@@ -393,7 +395,9 @@ computed:
 6. **after the run → `evict_unused`.** The same `reclaim_slot` decision, swept over the
    leftovers step 5 didn't reach — a prior run's untouched value, or a non-RAM value a consumer
    never read (so its outputs never all went spent). A `caches_in_ram` node (`Ram`/`Both`) the
-   run executed or read stays resident; every other resident value goes through `reclaim_slot`:
+   run executed or read stays resident — as does a node-seeded preview root (`plan.pinned`),
+   whose retained value is the point of its run; every other resident value goes through
+   `reclaim_slot`:
    demoted to `OnDisk` **iff** a blob can serve it again (lossless — a later run or inspection
    reloads), else a **non-RAM** value (`None`, or a `Disk` value whose blob is missing) is
    dropped outright and a `Ram`/`Both` leftover with no blob is kept — so eviction never forces
@@ -401,7 +405,10 @@ computed:
 
 **Off-run path — inspection.** `get_argument_values_with_previews` loads on demand via
 `hydrate_for_inspection`, so a disk-cached node no run touched still shows its value when
-the editor selects it.
+the editor selects it. The hydration is a **loan**: once the values are read out, every
+slot the inspection flipped `OnDisk` → `Resident` is flagged back. Serving trusts
+residency (B.0), so an inspection must not leave resident what the mode wouldn't retain —
+the file-cache node especially, whose path-key digest can't see a deleted file.
 
 ### Worked example
 

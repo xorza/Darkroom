@@ -334,7 +334,9 @@ mod cache_persistence {
             "the deeper cache is still flagged available on disk"
         );
 
-        // Inspecting `sum` pulls it in on demand: value correct, now resident.
+        // Inspecting `sum` pulls it in on demand: value correct — but only as a loan,
+        // returned to `OnDisk` once read, so inspection leaves no residency the node's
+        // mode wouldn't retain (the reuse check trusts residency).
         let vals = engine
             .get_argument_values_with_previews(&sum_id)
             .await
@@ -348,8 +350,8 @@ mod cache_persistence {
             engine
                 .runtime_slot(engine.by_name("sum").unwrap())
                 .output_values()
-                .is_some(),
-            "inspection hydrated sum into RAM"
+                .is_none(),
+            "the inspection loan is returned: sum is back OnDisk, not resident"
         );
     }
 
@@ -1571,6 +1573,53 @@ mod file_cache {
         assert!(
             stats.executed_nodes.iter().any(|n| n.node_id == cache_id),
             "a deleted cache file forces the cache node to re-execute"
+        );
+        assert!(file.0.exists(), "and the file is rewritten");
+    }
+
+    /// Inspecting a file-cache node must not resurrect RAM serving. The node's digest is
+    /// its path key — it can't see the file — so a resident value leaked by inspection
+    /// would serve stale RAM forever after the file (the documented invalidation) is
+    /// deleted. The inspection loan prevents exactly that: the hydrated value is read
+    /// out, the slot goes back `OnDisk`, and the deleted file still invalidates.
+    #[tokio::test]
+    async fn inspection_loan_keeps_deleted_file_invalidation_working() {
+        let file = temp_file("inspectloan");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (graph, lib, _, cache_id) = graph_with_cache(&file.0, calls.clone(), false);
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &lib).unwrap();
+        engine.execute_terminals().await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(file.0.exists(), "cold run writes the cache file");
+
+        // Inspection hydrates the explicit-path blob and reads the value…
+        let vals = engine
+            .get_argument_values_with_previews(&cache_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            vals.outputs[0].as_i64(),
+            Some(7),
+            "inspection reads the cached file value: {:?}",
+            vals.outputs
+        );
+        // …but returns the loan: nothing left resident to serve stale later.
+        assert!(
+            engine
+                .get_argument_values(&cache_id)
+                .unwrap()
+                .outputs
+                .is_empty(),
+            "the cache node is back OnDisk after inspection"
+        );
+
+        std::fs::remove_file(&file.0).unwrap();
+        let stats = engine.execute_terminals().await.unwrap();
+        assert!(
+            stats.executed_nodes.iter().any(|n| n.node_id == cache_id),
+            "the deleted file still invalidates after an inspection"
         );
         assert!(file.0.exists(), "and the file is rewritten");
     }
@@ -3233,6 +3282,53 @@ mod composite_behavior {
             "doubly-nested impure interior recomputes"
         );
     }
+
+    /// A node seed can target a *subgraph-interior* node by its authoring id: the seed
+    /// resolves through the flatten map (interior flat ids are hashed from the descent
+    /// path), runs just that node, and its value reads back under the same authoring id.
+    /// The terminal `print` (panicking hook) never fires.
+    #[tokio::test]
+    async fn seeding_a_subgraph_interior_node_runs_only_it() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let get_b_calls = Arc::new(AtomicUsize::new(0));
+        let library = test_func_lib(TestFuncHooks {
+            get_b: Arc::new({
+                let calls = Arc::clone(&get_b_calls);
+                move || {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    11
+                }
+            }),
+            ..Default::default()
+        });
+
+        // `impure_output_def`'s interior by hand, keeping the interior node's id.
+        let inner = func_node(&library, "get_b", "inner");
+        let inner_id = inner.id;
+        let so = Node::new(NodeKind::SubgraphOutput);
+        let so_id = so.id;
+        let mut interior = Graph::default();
+        interior.add(inner);
+        interior.add(so);
+        interior.set_input_binding(InputPort::new(so_id, 0), (inner_id, 0).into());
+        let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000c1", "S")
+            .graph(interior)
+            .output(int_output("Out"));
+        let graph = main_with(&library, def);
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library).unwrap();
+
+        let stats = eg.execute_nodes([inner_id]).await.unwrap();
+        assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(stats.executed_nodes.len(), 1);
+        assert_eq!(
+            eg.get_argument_values(&inner_id).unwrap().outputs[0].as_i64(),
+            Some(11),
+            "interior value reads back under its authoring id"
+        );
+    }
 }
 
 // === Cycle Detection ===
@@ -3531,6 +3627,176 @@ mod execution {
         );
 
         Ok(())
+    }
+}
+
+// === Node Seeds (on-demand preview runs) ===
+
+mod node_seeds {
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// `test_graph` with every node's cache mode forced to `None`, so any value that
+    /// survives a run does so through the node-seed pin, not a retention mode.
+    fn uncached_test_graph() -> Graph {
+        let mut graph = test_graph();
+        for node in graph.iter_mut() {
+            node.cache = CacheMode::None;
+        }
+        graph
+    }
+
+    /// Seeding `sum` runs exactly its cone (`get_a`, `get_b`, `sum`) — never the
+    /// downstream `mult`/`Print` (the panicking default `print` hook proves it) — and
+    /// retains `sum`'s output for read-back despite `CacheMode::None`, while its
+    /// equally-uncached upstream is drained as usual.
+    #[tokio::test]
+    async fn seeded_run_executes_only_the_cone_and_retains_the_output() {
+        let library = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(|| Ok(1)),
+            get_b: Arc::new(|| 11),
+            ..Default::default()
+        });
+        let graph = uncached_test_graph();
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library).unwrap();
+
+        let sum_id = graph.by_name("sum").unwrap().id;
+        let stats = eg.execute_nodes([sum_id]).await.unwrap();
+        assert_eq!(stats.executed_nodes.len(), 3);
+
+        let mut ran = execution_node_names_in_order(&eg);
+        ran.sort();
+        assert_eq!(ran, ["get_a", "get_b", "sum"], "only sum's cone runs");
+
+        let values = eg.get_argument_values(&sum_id).unwrap();
+        assert_eq!(values.outputs[0].as_i64(), Some(12), "1 + 11, retained");
+
+        let get_a_id = graph.by_name("get_a").unwrap().id;
+        assert!(
+            eg.get_argument_values(&get_a_id)
+                .unwrap()
+                .outputs
+                .is_empty(),
+            "unpinned None-cache upstream is drained as usual"
+        );
+
+        // The production inspection path must not treat the pinned value as a loan —
+        // it was resident before the inspection (no blob backs it), so it stays.
+        let inspected = eg.get_argument_values_with_previews(&sum_id).await.unwrap();
+        assert_eq!(inspected.outputs[0].as_i64(), Some(12));
+        assert_eq!(
+            eg.get_argument_values(&sum_id).unwrap().outputs[0].as_i64(),
+            Some(12),
+            "still resident after inspection"
+        );
+    }
+
+    /// A second seeded run of an unchanged graph recomputes nothing: the pinned value
+    /// survived eviction, its digest still matches, so the whole cone is a cache hit —
+    /// this is what makes repeated previews (and auto-preview) cheap.
+    #[tokio::test]
+    async fn second_seeded_run_reuses_the_pinned_value() {
+        let get_a_calls = Arc::new(AtomicUsize::new(0));
+        let get_b_calls = Arc::new(AtomicUsize::new(0));
+        let library = test_func_lib(TestFuncHooks {
+            get_a: Arc::new({
+                let calls = Arc::clone(&get_a_calls);
+                move || {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    Ok(1)
+                }
+            }),
+            get_b: Arc::new({
+                let calls = Arc::clone(&get_b_calls);
+                move || {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    11
+                }
+            }),
+            ..Default::default()
+        });
+        let graph = uncached_test_graph();
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library).unwrap();
+
+        let sum_id = graph.by_name("sum").unwrap().id;
+        eg.execute_nodes([sum_id]).await.unwrap();
+        assert_eq!(get_a_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
+
+        let stats = eg.execute_nodes([sum_id]).await.unwrap();
+        assert_eq!(get_a_calls.load(Ordering::Relaxed), 1, "cone not re-run");
+        assert_eq!(get_b_calls.load(Ordering::Relaxed), 1, "cone not re-run");
+        assert!(stats.executed_nodes.is_empty());
+        assert!(stats.cached_nodes.contains(&sum_id), "sum served from RAM");
+        assert_eq!(
+            eg.get_argument_values(&sum_id).unwrap().outputs[0].as_i64(),
+            Some(12),
+            "still readable after the reuse run"
+        );
+    }
+
+    /// Node seeds combine with a terminal run: one run drives the terminals (`Print`
+    /// fires with 132 = (1+11)*11) *and* pins `sum` — whose value survives its real
+    /// consumer's read via the extra virtual consumer — while the unpinned `mult` is
+    /// drained by `Print` as usual.
+    #[tokio::test]
+    async fn node_seed_combines_with_a_terminal_run_and_still_retains() {
+        let printed: Arc<StdMutex<Vec<i64>>> = Arc::new(StdMutex::new(Vec::new()));
+        let library = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(|| Ok(1)),
+            get_b: Arc::new(|| 11),
+            print: Arc::new({
+                let printed = Arc::clone(&printed);
+                move |v| printed.lock().unwrap().push(v)
+            }),
+        });
+        let graph = uncached_test_graph();
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library).unwrap();
+
+        let sum_id = graph.by_name("sum").unwrap().id;
+        eg.execute(
+            RunSeeds {
+                terminals: true,
+                nodes: vec![sum_id],
+                ..Default::default()
+            },
+            None,
+            CancelToken::never(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(*printed.lock().unwrap(), [132], "(1 + 11) * 11");
+        assert_eq!(
+            eg.get_argument_values(&sum_id).unwrap().outputs[0].as_i64(),
+            Some(12),
+            "pinned value survives its real consumer's read"
+        );
+        let mult_id = graph.by_name("mult").unwrap().id;
+        assert!(
+            eg.get_argument_values(&mult_id).unwrap().outputs.is_empty(),
+            "unpinned None-cache node is drained by its consumer"
+        );
+    }
+
+    /// A seed that doesn't resolve against the compiled program (deleted or disabled
+    /// node, stale id) is dropped — the run completes and executes nothing. The
+    /// panicking default hooks prove no lambda fires.
+    #[tokio::test]
+    async fn unresolvable_node_seed_is_dropped_not_run() {
+        let library = test_func_lib(TestFuncHooks::default());
+        let graph = test_graph();
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library).unwrap();
+
+        let bogus: NodeId = NodeId::from_u128(0xdead_beef);
+        let stats = eg.execute_nodes([bogus]).await.unwrap();
+        assert!(stats.executed_nodes.is_empty());
+        assert!(stats.cached_nodes.is_empty());
     }
 }
 

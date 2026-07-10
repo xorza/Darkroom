@@ -51,6 +51,7 @@ fn dispositions_of(fix: &Fix, roots: &[NodeIdx], resolved: &[Resolved]) -> Vec<D
         verdicts: vec![NodeVerdict::Execute; fix.program.e_nodes.len()].into(),
         output_usage: vec![0; fix.program.n_outputs()],
         roots: roots.to_vec(),
+        pinned: Vec::new(),
     };
     let resolved: NodeColumn<Resolved> = resolved.to_vec().into();
     let mut disposition = NodeColumn::default();

@@ -67,6 +67,13 @@ pub enum WorkerMessage {
     /// hydrates from the new config — e.g. repointing at a per-document store dir.
     SetDiskStore(DiskStore),
     ExecuteTerminals,
+    /// Execute the cones of these specific nodes (authoring ids), retaining their
+    /// outputs in RAM for read-back via [`WorkerMessage::RequestArgumentValues`] —
+    /// the editor's "run to this node" / preview trigger. Combines with a same-batch
+    /// `ExecuteTerminals` into one run.
+    ExecuteNodes {
+        nodes: Vec<NodeId>,
+    },
     StartEventLoop,
     StopEventLoop,
     /// Reserved external sync primitive: the oneshot fires after every
@@ -275,6 +282,7 @@ enum LoopCommand {
 /// | `save_caches`         | SaveCaches                  | idempotent flag (persist, no run) |
 /// | `loop_request`        | StartEventLoop, StopEventLoop | last-write-wins |
 /// | `execute_terminals`   | ExecuteTerminals            | idempotent flag |
+/// | `execute_nodes`       | ExecuteNodes                | set union (dedup) |
 /// | `events`              | InjectEvents                | set union (dedup) |
 /// | `syncs`               | Sync                        | all fire      |
 /// | `argument_requests`   | RequestArgumentValues       | all fire, post-commit snapshot |
@@ -290,6 +298,7 @@ struct BatchIntent {
     save_caches: bool,
     loop_request: Option<LoopCommand>,
     execute_terminals: bool,
+    execute_nodes: HashSet<NodeId>,
     exit: bool,
     events: HashSet<EventRef>,
     syncs: Vec<oneshot::Sender<()>>,
@@ -323,6 +332,7 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
             WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
             WorkerMessage::SetDiskStore(cache) => intent.disk_store = Some(cache),
             WorkerMessage::ExecuteTerminals => intent.execute_terminals = true,
+            WorkerMessage::ExecuteNodes { nodes } => intent.execute_nodes.extend(nodes),
             WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
             WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
             WorkerMessage::Sync { reply } => {
@@ -450,10 +460,11 @@ async fn worker_loop<ExecutionCallback>(
 
         if !update_ok {
             // The failed update was reported and the prior program is intact. Drop this
-            // batch's terminals/events — they were meant for the graph that didn't
+            // batch's terminals/nodes/events — they were meant for the graph that didn't
             // compile — but let the event-loop restart below proceed on the prior
             // program: a bad edit must not silently and permanently kill a running loop.
             intent.execute_terminals = false;
+            intent.execute_nodes.clear();
             intent.events.clear();
         }
 
@@ -466,8 +477,10 @@ async fn worker_loop<ExecutionCallback>(
             None => loop_was_running_before_stop,
         };
 
-        let needs_execute =
-            intent.execute_terminals || !intent.events.is_empty() || should_start_event_loop;
+        let needs_execute = intent.execute_terminals
+            || !intent.execute_nodes.is_empty()
+            || !intent.events.is_empty()
+            || should_start_event_loop;
 
         // Empty graph is a normal state, not a failure: skip execute
         // silently. Events/terminals/StartEventLoop are no-ops until
@@ -502,6 +515,7 @@ async fn worker_loop<ExecutionCallback>(
                         terminals: intent.execute_terminals,
                         event_triggers: in_loop,
                         events: intent.events.drain().collect(),
+                        nodes: intent.execute_nodes.drain().collect(),
                     },
                     Some(&prog_tx),
                     cancel.clone(),

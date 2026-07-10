@@ -84,6 +84,7 @@ fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
         verdicts: vec![NodeVerdict::Execute; n].into(),
         output_usage: vec![1; program.n_outputs()],
         roots: (0..n).map(NodeIdx::from).collect(),
+        pinned: Vec::new(),
     }
 }
 
@@ -221,6 +222,54 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
         cache.slots[b].output_values().unwrap()[0].as_i64(),
         Some(8),
         "B (Ram) keeps its own output (7+1)"
+    );
+}
+
+/// A pinned (node-seeded preview) root gets one virtual consumer per output: the lambda
+/// sees `Needed(1)` instead of `Skip`, and the `None`-cache slot survives the post-store
+/// drain reclaim. The unpinned control on the same program reads `Skip` and is reclaimed
+/// the moment it's stored.
+#[tokio::test]
+async fn pinned_root_sees_needed_usage_and_survives_drain() {
+    use crate::node::func_lambda::OutputUsage;
+    use std::sync::Mutex;
+
+    let seen: Arc<Mutex<Option<OutputUsage>>> = Arc::new(Mutex::new(None));
+    let probe_seen = Arc::clone(&seen);
+    let mut p = Prog::default();
+    let probe = async_lambda!(
+        move |_ctx, _s, _ev, _inputs, usage, outputs| { seen = Arc::clone(&probe_seen) } => {
+            *seen.lock().unwrap() = Some(usage[0]);
+            outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+            Ok(())
+        }
+    );
+    let a = p.node(&[], 1, probe);
+    p.set_cache(a, CacheMode::None);
+
+    // Unpinned root, no consumers (usage 0): the lambda reads `Skip` and the slot is
+    // reclaimed the instant it's stored.
+    let plan = plan_with_usage(&p.program, vec![0]);
+    let (cache, _stats) = run(&p.program, &plan).await;
+    assert_eq!(*seen.lock().unwrap(), Some(OutputUsage::Skip));
+    assert!(
+        matches!(cache.slots[a].value, ValueState::Empty),
+        "unpinned Skip root is drained at store time: {:?}",
+        cache.slots[a].value
+    );
+
+    // Pinned: same program, same zero consumers — the virtual consumer flips the
+    // lambda-visible usage to `Needed(1)` and the value stays resident.
+    let plan = ExecutionPlan {
+        pinned: vec![a.into()],
+        ..plan_with_usage(&p.program, vec![0])
+    };
+    let (cache, _stats) = run(&p.program, &plan).await;
+    assert_eq!(*seen.lock().unwrap(), Some(OutputUsage::Needed(1)));
+    assert_eq!(
+        cache.slots[a].output_values().unwrap()[0].as_i64(),
+        Some(7),
+        "pinned root's value survives the run"
     );
 }
 
@@ -403,9 +452,12 @@ async fn reuse_survives_failed_upstream_rerun() {
     p.set_cache(a, CacheMode::None);
     p.set_cache(c, CacheMode::None);
 
-    // A's one output has two consumers; B/C outputs are unread terminal-ish sinks
-    // (count 1 keeps the release accounting off this test's path).
-    let plan = plan_with_usage(&p.program, vec![2, 1, 1]);
+    // A's one output has two consumers; B/C outputs are unread sinks. B's count 1 keeps
+    // the release accounting off this test's path (Ram retains regardless); C's count 0
+    // lets the store-time drain reclaim it — the executor harness has no end-of-run
+    // eviction phase, and a `None` value left resident would serve as a reuse hit in
+    // run 2 (residency is what the reuse check trusts), masking the skip under test.
+    let plan = plan_with_usage(&p.program, vec![2, 1, 0]);
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program.e_nodes);
 

@@ -617,6 +617,66 @@ async fn request_argument_values_invokes_callback() {
     assert!(values.is_some());
 }
 
+/// `ExecuteNodes` end-to-end: an `Update` + `ExecuteNodes` batch runs only the seeded
+/// node's cone (3 of the fixture's 5 nodes; the terminal `Print` panics if reached),
+/// and the pinned output — every node forced to `CacheMode::None` — is then served by
+/// `RequestArgumentValues`.
+#[tokio::test]
+async fn execute_nodes_runs_cone_and_serves_pinned_value() {
+    use crate::graph::CacheMode;
+    use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
+
+    let library = test_func_lib(TestFuncHooks {
+        get_a: Arc::new(|| Ok(1)),
+        get_b: Arc::new(|| 11),
+        ..Default::default()
+    });
+    let mut graph = test_graph();
+    for node in graph.iter_mut() {
+        node.cache = CacheMode::None;
+    }
+    let sum_id = graph.by_name("sum").unwrap().id;
+
+    let (tx, mut rx) = mpsc::channel(8);
+    let worker = Worker::new(move |report| {
+        if let WorkerReport::Finished(result) = report {
+            tx.try_send(result).ok();
+        }
+    });
+    worker
+        .send_many([
+            WorkerMessage::Update {
+                graph,
+                library: Arc::new(library),
+            },
+            WorkerMessage::ExecuteNodes {
+                nodes: vec![sum_id],
+            },
+        ])
+        .unwrap();
+
+    let stats = timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("worker timed out")
+        .expect("worker channel closed")
+        .expect("run ok");
+    assert_eq!(stats.executed_nodes.len(), 3, "only sum's cone ran");
+
+    let (reply, reply_rx) = oneshot::channel();
+    worker
+        .send(WorkerMessage::RequestArgumentValues {
+            node_id: sum_id,
+            reply,
+        })
+        .unwrap();
+    let values = timeout(Duration::from_millis(500), reply_rx)
+        .await
+        .expect("Reply timeout")
+        .expect("Reply sender dropped")
+        .expect("sum resolves");
+    assert_eq!(values.outputs[0].as_i64(), Some(12), "1 + 11, retained");
+}
+
 #[tokio::test]
 async fn sync_fires_after_execution() {
     let mut h = FrameHarness::new().await;
@@ -1101,6 +1161,12 @@ fn scan_accumulates_simple_flags() {
         WorkerMessage::InjectEvents {
             events: vec![event],
         },
+        WorkerMessage::ExecuteNodes {
+            nodes: vec![node_id],
+        },
+        WorkerMessage::ExecuteNodes {
+            nodes: vec![node_id],
+        },
         WorkerMessage::Sync { reply: reply_ack },
         WorkerMessage::RequestArgumentValues {
             node_id,
@@ -1120,6 +1186,12 @@ fn scan_accumulates_simple_flags() {
     assert!(!intent.exit);
     assert_eq!(intent.events.len(), 1);
     assert!(intent.events.contains(&event));
+    assert_eq!(
+        intent.execute_nodes.len(),
+        1,
+        "duplicate node seeds union to one"
+    );
+    assert!(intent.execute_nodes.contains(&node_id));
     assert_eq!(intent.syncs.len(), 1);
     assert_eq!(intent.argument_requests.len(), 1);
     assert_eq!(intent.argument_requests[0].0, node_id);

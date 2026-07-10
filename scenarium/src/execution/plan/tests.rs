@@ -61,7 +61,7 @@ fn plan(fix: &Fix) -> ExecutionPlan {
         ..Default::default()
     };
     planner
-        .plan(&fix.program, &seeds, &mut plan)
+        .plan(&fix.program, &seeds, &[], &mut plan)
         .expect("no cycle");
     plan
 }
@@ -140,6 +140,48 @@ fn dependency_cycle_is_rejected() {
         terminals: true,
         ..Default::default()
     };
-    let result = planner.plan(&f.program, &seeds, &mut plan);
+    let result = planner.plan(&f.program, &seeds, &[], &mut plan);
     assert!(matches!(result, Err(Error::CycleDetected { .. })));
+}
+
+#[test]
+fn node_seed_schedules_only_its_cone_and_pins_it() {
+    // A → B → C (C terminal). Seeding node B schedules only [A, B] — C is upstream of
+    // nothing seeded — and records B as both a root and a pinned node. B's output has
+    // no scheduled consumer, so its plan-level usage stays 0; the *executor* adds the
+    // virtual pin consumer, keeping the plan purely structural.
+    let mut f = Fix::default();
+    let a = f.node(false, &[], 1);
+    let b = f.node(false, &[(false, bind(a, 0))], 1);
+    let c = f.node(true, &[(false, bind(b, 0))], 1);
+
+    let mut planner = Planner::default();
+    let mut p = ExecutionPlan::default();
+    let seeds = RunSeeds::default();
+    planner
+        .plan(&f.program, &seeds, &[b], &mut p)
+        .expect("no cycle");
+
+    assert_eq!(p.process_order, vec![a, b], "only B's cone, deps first");
+    assert_eq!(p.roots, vec![b]);
+    assert_eq!(p.pinned, vec![b]);
+    assert!(p.verdicts[a].wants_execute());
+    assert!(p.verdicts[b].wants_execute());
+    assert!(!p.verdicts[c].wants_execute(), "C never verdicted");
+    // A.0 is read by B (usage 1); B.0 has no consumer in this plan.
+    assert_eq!(p.output_usage[0], 1, "A.0 read by B");
+    assert_eq!(p.output_usage[1], 0, "B.0 unconsumed at plan level");
+
+    // Node seeds combine with terminals: the same seed plus `terminals` schedules
+    // everything, and B stays pinned.
+    let seeds = RunSeeds {
+        terminals: true,
+        ..Default::default()
+    };
+    planner
+        .plan(&f.program, &seeds, &[b], &mut p)
+        .expect("no cycle");
+    assert_eq!(p.process_order, vec![a, b, c]);
+    assert_eq!(p.pinned, vec![b]);
+    assert_eq!(p.output_usage[1], 1, "B.0 now read by C");
 }
