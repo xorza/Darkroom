@@ -315,6 +315,57 @@ async fn frees_zero_consumer_output_right_after_it_runs() {
     );
 }
 
+/// A node whose func has no implementation attached can't execute: it's reported as
+/// its own per-node [`RunError::MissingLambda`] (not silently skipped), any stale
+/// cached value is dropped so it can't be served as this run's result, and its
+/// consumers skip with the usual errored-upstream propagation.
+#[tokio::test]
+async fn missing_lambda_reports_error_and_skips_consumers() {
+    let mut p = Prog::default();
+    let a = p.node(&[], 1, FuncLambda::None);
+    let consumer = async_lambda!(|_ctx, _state, _ev, inputs, _usage, outputs| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].value.as_i64().unwrap()));
+        Ok(())
+    });
+    let b = p.node(&[bind(a, 0)], 1, consumer);
+
+    let plan = straight_plan(&p.program);
+    let mut cache = RuntimeCache::default();
+    cache.reconcile(&p.program.e_nodes);
+    // A stale prior value on the lambda-less node must not be served as this run's result.
+    cache.slots[a].value = ValueState::Resident {
+        values: vec![DynamicValue::Static(StaticValue::Int(9))],
+        produced_under: None,
+    };
+    let stats = run_with(&p.program, &plan, &mut cache).await;
+
+    assert!(
+        stats.executed_nodes.is_empty(),
+        "neither node ran: A has no lambda, B skips on the errored upstream"
+    );
+    assert!(
+        cache.slots[a].output_values().is_none(),
+        "A's stale value is dropped, not served"
+    );
+    let error_of = |idx: usize| {
+        stats
+            .node_errors
+            .iter()
+            .find(|e| e.node_id == p.program.e_nodes[idx].id)
+            .map(|e| &e.error)
+    };
+    assert!(
+        matches!(error_of(a), Some(RunError::MissingLambda { .. })),
+        "A reports its missing implementation: {:?}",
+        error_of(a)
+    );
+    assert!(
+        matches!(error_of(b), Some(RunError::SkippedUpstream { .. })),
+        "B skips as errored-upstream: {:?}",
+        error_of(b)
+    );
+}
+
 /// A consumer whose digest is unchanged serves its cached value even when the
 /// shared upstream re-ran for a *different* consumer and failed: the reuse verdict
 /// is checked before the errored-dependency skip, so the valid cache is neither

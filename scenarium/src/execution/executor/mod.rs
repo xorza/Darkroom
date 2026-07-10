@@ -57,7 +57,8 @@ enum NodeOutcome {
     Ran { secs: f64 },
     /// Its lambda ran but errored — an invoke failure, or a cancel mid-invoke.
     Failed { secs: f64, error: RunError },
-    /// Never ran — an upstream dependency errored, or a bound input's blob failed to load.
+    /// Never ran — an upstream dependency errored, a bound input's blob failed to load,
+    /// or its func has no implementation attached.
     Skipped { error: RunError },
 }
 
@@ -165,7 +166,21 @@ impl Executor {
                 };
                 continue;
             }
-            if e_node.lambda.is_none() || !plan.verdicts[e_node_idx].wants_execute() {
+            if !plan.verdicts[e_node_idx].wants_execute() {
+                continue;
+            }
+            // A func registered without an implementation can't execute — a host/library
+            // configuration error, reported on the node every run (before the reuse check,
+            // so it can't flicker with cache state); its consumers skip as errored-upstream.
+            if e_node.lambda.is_none() {
+                mark_skipped(
+                    cache,
+                    &mut self.outcomes,
+                    e_node_idx,
+                    RunError::MissingLambda {
+                        func_id: e_node.func_id,
+                    },
+                );
                 continue;
             }
 
@@ -359,7 +374,8 @@ async fn hydrate_resource_producers(
 /// Drop node `idx` from this run: clear any stale cached output so it isn't served as
 /// this run's result, and record the outcome under the caller's reason —
 /// [`RunError::SkippedUpstream`] for an errored dependency, [`RunError::InputLoadFailed`]
-/// for a cached input that failed to load.
+/// for a cached input that failed to load, [`RunError::MissingLambda`] for a func with
+/// no implementation.
 fn mark_skipped(
     cache: &mut RuntimeCache,
     outcomes: &mut NodeColumn<NodeOutcome>,
