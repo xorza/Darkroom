@@ -573,21 +573,14 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
     let muted_edge = p.text_muted.with_alpha(0.18);
     let panel_edge = p.text_muted.with_alpha(0.22);
 
-    // Every recoloured surface is a rounded fill + optional stroke with no
-    // shadow (only the tooltip lifts — built inline below). `surface` is the
-    // base; `solid_bg` / `flat_round` are the two common shapes on top of it,
-    // so the corner radius and shadow default live in exactly one place. The
-    // recipe mirrors aperture's own theme defaults — only palette values differ.
-    let surface = |fill: Color, stroke: Stroke, corner: f32| Background {
-        fill: fill.into(),
-        stroke,
-        corners: Corners::all(corner),
-        shadow: Shadow::NONE,
-    };
+    // darkroom's two standard chip shapes, both a 4 px rounded fill over
+    // aperture's `Background::rounded` primitive — `solid_bg` adds a stroke,
+    // `flat_round` is bare. Other radii (toggles, the 6 px menu panel) build
+    // on the primitive inline.
     let solid_bg = |fill: Color, stroke: Color, stroke_w: f32| {
-        surface(fill, Stroke::solid(stroke, stroke_w), 4.0)
+        Background::rounded(fill, Corners::all(4.0)).with_stroke(Stroke::solid(stroke, stroke_w))
     };
-    let flat_round = |fill: Color| surface(fill, Stroke::ZERO, 4.0);
+    let flat_round = |fill: Color| Background::rounded(fill, Corners::all(4.0));
     let disabled_text = Some(TextStyle::default().with_color(p.text_disabled));
 
     // Top-level surfaces + text.
@@ -624,7 +617,9 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
     // corner radius (square checkbox vs pill radio) stays correct.
     let recolour_toggle = |toggle: &mut aperture::ToggleTheme, corner: f32| {
         let edge = p.text_muted.with_alpha(0.35);
-        let make = |fill: Color, stroke: Stroke| Some(surface(fill, stroke, corner));
+        let make = |fill: Color, stroke: Stroke| {
+            Some(Background::rounded(fill, Corners::all(corner)).with_stroke(stroke))
+        };
         toggle.unchecked.normal.background = make(p.elem_hover, Stroke::solid(edge, 1.0));
         toggle.unchecked.hovered.background = make(p.elem_active, Stroke::solid(edge, 1.0));
         toggle.unchecked.pressed.background =
@@ -652,7 +647,8 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
 
     // Context menu — panel + item rows + shortcut + separator.
     // (`ContextMenuTheme::default` recipe.)
-    t.context_menu.panel = surface(p.elem, Stroke::solid(panel_edge, 1.0), 6.0);
+    t.context_menu.panel =
+        Background::rounded(p.elem, Corners::all(6.0)).with_stroke(Stroke::solid(panel_edge, 1.0));
     t.context_menu.item.normal.background = None;
     t.context_menu.item.hovered.background = Some(flat_round(p.elem_hover));
     t.context_menu.item.disabled.background = None;
@@ -662,18 +658,15 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
 
     // Tooltip — `TooltipTheme::default` recipe; the panel keeps its
     // drop shadow so the bubble lifts off whatever it overlaps.
-    t.tooltip.panel = Background {
-        fill: p.elem.into(),
-        stroke: Stroke::solid(panel_edge, 1.0),
-        corners: Corners::all(4.0),
-        shadow: Shadow {
+    t.tooltip.panel = Background::rounded(p.elem, Corners::all(4.0))
+        .with_stroke(Stroke::solid(panel_edge, 1.0))
+        .with_shadow(Shadow {
             color: Color::linear_rgba(0.0, 0.0, 0.0, 0.6),
             offset: glam::Vec2::new(2.0, 2.0),
             blur: 5.0,
             spread: 0.0,
             inset: false,
-        },
-    };
+        });
     t.tooltip.text.color = p.text;
 }
 
