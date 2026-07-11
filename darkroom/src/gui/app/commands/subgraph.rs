@@ -93,8 +93,8 @@ impl App {
         {
             // Re-points the local def's `origin` in the document — an
             // unsaved change (may over-flag when the link already existed).
+            // The status outcome is owned by `edit_library`.
             self.editor.dirty = true;
-            self.engine.status.error = None;
         } else {
             self.engine
                 .status
@@ -120,8 +120,8 @@ impl App {
             // Publishing a fresh entry re-points the local def's `origin`
             // in the document — an unsaved change (an update-in-place
             // publish touches only the library, so this may over-flag).
+            // The status outcome is owned by `edit_library`.
             self.editor.dirty = true;
-            self.engine.status.error = None;
         } else {
             self.engine
                 .status

@@ -14,7 +14,7 @@ use scenarium::graph::{Graph, NodeId};
 use scenarium::library::Library;
 
 use crate::core::io::cache::prepare_document_cache_root;
-use crate::core::io::library::save_library;
+use crate::core::io::library::{load_library, save_library};
 use crate::core::library::runtime_func_lib;
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::status::StatusLog;
@@ -56,10 +56,23 @@ impl Engine {
     /// unless `script_cfg` enabled a listener). The worker + script host are
     /// both woken through `wake`.
     pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
-        let library = runtime_func_lib();
+        let mut library = runtime_func_lib();
+        // A failed load degrades to an empty library instead of blocking
+        // startup; `load_library` moved the file aside so nothing here can
+        // overwrite it (reported below, once the status log exists).
+        let load_error = match load_library() {
+            Ok(defs) => {
+                for def in defs {
+                    library.add_subgraph(def);
+                }
+                None
+            }
+            Err(err) => Some(err),
+        };
+        let library = Arc::new(library);
         let worker = WorkerBridge::new(wake.clone());
         let script = ScriptHost::start(script_cfg, library.clone(), wake);
-        let engine = Self {
+        let mut engine = Self {
             library,
             worker,
             disk_root: None,
@@ -71,6 +84,9 @@ impl Engine {
         // Install the store up front (memory-only until a document has a
         // path); `set_document_cache` repoints the root as documents open.
         engine.refresh_disk_store();
+        if let Some(err) = load_error {
+            engine.status.error(format!("library load failed: {err}"));
+        }
         engine
     }
 
@@ -89,10 +105,17 @@ impl Engine {
     /// codec table). The script host's frozen startup snapshot is exempt by
     /// design — scripts only read the func table, which no edit touches
     /// (edits grow subgraph defs).
+    ///
+    /// Owns the persist outcome in [`Self::status`]: a saved change clears
+    /// the sticky error, a failed save reports — callers must not overwrite
+    /// it with their own success signal.
     pub(crate) fn edit_library(&mut self, edit: impl FnOnce(&mut Library) -> bool) -> bool {
         let changed = edit(Arc::make_mut(&mut self.library));
         if changed {
-            save_library(self.library.subgraphs.iter());
+            match save_library(self.library.subgraphs.iter()) {
+                Ok(()) => self.status.error = None,
+                Err(err) => self.status.error(format!("library save failed: {err}")),
+            }
             self.refresh_disk_store();
         }
         changed
