@@ -295,6 +295,22 @@ pub struct Document {
     pub layout: DockLayout,
 }
 
+/// Whether a tab still resolves against the graph: `Main` and
+/// `Preferences` always do, a subgraph tab lives with its def, and a
+/// viewer tab dies with its node (mirroring a subgraph tab whose def
+/// vanished). The single predicate behind
+/// [`Document::ensure_valid_layout`]'s fast-path *and* its prune, so
+/// the two can't drift.
+fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
+    match tab {
+        TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
+        TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(&id).is_some(),
+        TabRef::ImageViewer(port) => graph
+            .find_node(&port.node_id, NodeSearch::Recursive)
+            .is_some(),
+    }
+}
+
 /// Index of the slot named `expected`: `idx_hint` when it still holds
 /// that name (fast path / duplicate-name disambiguation), else the first
 /// slot matching by name. `None` when nothing matches.
@@ -412,27 +428,12 @@ impl Document {
     /// panicking on a later `view(target).expect(..)`.
     pub fn ensure_valid_layout(&mut self) {
         // Common case: every tab still resolves — touch nothing (no
-        // per-frame allocation). Non-graph tabs other than viewers (e.g.
-        // `Preferences`) always resolve.
-        if self.layout.all_tabs().any(|t| match t {
-            TabRef::Graph(g) => self.graph_for(g).is_none(),
-            TabRef::ImageViewer(port) => self
-                .graph
-                .find_node(&port.node_id, NodeSearch::Recursive)
-                .is_none(),
-            TabRef::Preferences => false,
-        }) {
+        // per-frame allocation). Only when something died does the
+        // retain (and its re-pack) run, against the same predicate.
+        if self.layout.all_tabs().any(|t| !tab_alive(&self.graph, t)) {
             // Split the borrow so the layout retain can read `graph`.
             let Document { graph, layout, .. } = self;
-            layout.retain_tabs(|t| match t {
-                TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
-                TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(&id).is_some(),
-                // A viewer tab dies with its node (mirrors a subgraph tab
-                // whose def vanished).
-                TabRef::ImageViewer(port) => graph
-                    .find_node(&port.node_id, NodeSearch::Recursive)
-                    .is_some(),
-            });
+            layout.retain_tabs(|t| tab_alive(graph, t));
         }
         // Seed views for any `Local` tab missing one. Guarded by `any`
         // so the common (all-seeded) case allocates nothing.

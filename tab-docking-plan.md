@@ -1,5 +1,14 @@
 # Dockable tabs — implementation plan
 
+> **Status:** Phases 0–1 shipped. Implementation deviations from the plan
+> below: the aperture `Splitter` takes one `FnMut(&mut Ui, SplitHalf)` body
+> instead of two closures (a recursive walk can't capture `&mut self`
+> twice); `SetRatio` addresses splits by `DockPath` (turns packed into one
+> byte) instead of `Vec<bool>`; the tree is stored as a flat, canonically
+> pre-ordered `Vec<DockNode>` instead of boxed children; split depth is
+> capped at 4. Remaining: phase 2 (drag & drop + drop-zone highlight),
+> phase 3 (cursor icons, strip reorder), phase 4 (multi-canvas).
+
 Drag a tab chip (image viewer, preferences) out of its strip and drop it onto
 another pane to split that pane horizontally or vertically — with a live
 translucent highlight of the region the drop would create — or drop it onto

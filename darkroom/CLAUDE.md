@@ -119,10 +119,10 @@ edits or records. `Editor` owns the pipeline state:
 One frame:
 
 1. **clear scratch** — `intents` + `actions`.
-2. **navigate** — apply keyboard undo/redo (which can replay a `SwitchTab`),
-   then surface tab activate/close + subgraph-open/new clicks off last frame's
-   responses as `UiAction`s. Open mutates the tab list directly; activate/close
-   queue undoable `SwitchTab` / `CloseTab` intents. After this the active
+2. **navigate** — apply keyboard undo/redo (which can replay a dock-layout
+   change), then surface tab activate/close + subgraph-open/new clicks off
+   last frame's responses as `UiAction`s. Open mutates the layout directly;
+   activate/close queue undoable `Intent::Dock` ops. After this the active
    target is fixed for the rest of the frame.
 3. **sync_target** — if the active graph changed since last frame, drop
    transient gesture state and flag a relayout. Does not rebuild.
@@ -158,8 +158,16 @@ Everything else is editor view-state, split per graph:
   auto-laid-out on first open). **All of this is persisted and undoable by
   design** — reopening restores camera + selection, and Ctrl+Z walks them
   alongside structural edits.
-- **`tabs` / `active`** — open editor tabs (`tabs[0]` is always `Main`) and the
-  visible index. Also persisted; switching tabs is an undoable `SwitchTab`.
+- **`layout: DockLayout`** (`src/document/dock.rs`) — the pane arrangement:
+  a binary split tree stored as a flat, canonically pre-ordered
+  `Vec<DockNode>` whose leaves are `TabGroup`s (tabs + per-group active),
+  plus the focused group. The *primary* group holds the `Main` graph tab
+  (successor of the old "tabs[0] is Main"); graph tabs are pinned there —
+  one canvas — while viewer/preferences tabs split into their own panes
+  (right-click a chip → "Split right/down", capped at 4 nested splits).
+  Splits are addressed by `DockPath` (turns from the root packed into one
+  byte). Also persisted; every layout mutation is an undoable
+  `Intent::Dock`.
 - **`EditScope` / `EditScopeRef`** — graph+view borrowed *together* for a
   target, so an edit touches both atomically. Get them via
   `Document::scope_mut(target)` / `scope(target)`.
@@ -173,14 +181,20 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   "set X to Y". `build_step(intent, &doc, target)` reads the pre-mutation
   snapshot and folds both halves into one self-contained `UndoStep`;
   `apply_step`/`revert_step` write the "to"/"from" halves against `target`.
-  `SwitchTab`/`CloseTab` are graph-agnostic and special-cased ahead of the
-  scope lookup. Adding a variant touches ~6 spots — the doc comment lists them.
+  `Intent::Dock` is graph-agnostic and special-cased ahead of the scope
+  lookup: `build_step` snapshots the whole `DockLayout` before/after the op
+  into one `DocStep::Dock { from, to }` (the tree is tiny), so every layout
+  mutation — activate, close, move/split, divider resize — is uniformly
+  reversible by assignment, and refused/degenerate ops fall out as `from ==
+  to` no-ops. Adding a variant touches ~6 spots — the doc comment lists them.
 - Variants: `AddNode`, `DuplicateNodes`, `RemoveNode`, `MoveNodes`,
   `RenameNode`, `SetInput`, `SetSelection`, `RaiseNode`, `SetNodeProperty`
   (a `NodeProperty::Disabled`/`Cache` — one intent backs both scalar toggles),
   `SetSubscription` (`subscribe: bool` — one intent backs subscribe + unsubscribe),
   `DetachSubgraph`, `SetViewport`, `RenameBoundaryPort`, `RenameSubgraph`,
-  plus document-global `SwitchTab` / `CloseTab`.
+  plus document-global `Dock(DockIntent)` (`ActivateTab` / `CloseTab` /
+  `MoveTab` / `SetRatio` — activations coalesce as a switch burst, one
+  divider's drag coalesces per `DockPath`).
 - `DuplicateNodes` is assembled from the current selection by
   `intent::build_duplicate_intent` (free fn next to `build_step`, not a
   `Document` method — `Document` is the persisted model, intent
@@ -190,11 +204,12 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   the right graph+view. Consecutive same-`GestureKey` *and* same-target steps
   coalesce in place (a node drag = many `MoveNodes` intents → one undo entry).
 - **`UiAction`** (`gui/mod.rs`) is the navigation-request transport from the
-  UI layer to `Editor`: `ActivateTab`/`CloseTab` become undoable
-  `SwitchTab`/`CloseTab`. `OpenGraph`/`NewSubgraph` add the tab (and, for
-  `NewSubgraph`, the def + instance) to the document directly — that part
-  isn't undoable — but focus the tab through the same recorded `SwitchTab`,
-  so undo faithfully reverses focus while leaving the opened tab in place.
+  UI layer to `Editor`: `ActivateTab`/`CloseTab` (group-keyed) become
+  undoable `Intent::Dock` ops. `OpenGraph`/`NewSubgraph`/`OpenImageViewer`
+  add the tab via `DockLayout::find_or_insert` (graph tabs into the primary
+  group, others into the focused one) — that part isn't undoable — but
+  focus the tab through the same recorded activation, so undo faithfully
+  reverses focus while leaving the opened tab in place.
 - Per-step properties (`is_noop`, `requires_relayout`, `requires_reconcile`,
   `gesture_key`, `coalesce`) are methods on `UndoStep`, exhaustive over the
   variants so a new one won't compile until it declares its behavior.
@@ -285,9 +300,14 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   viewer tab).
 
 ### GUI tree (`src/gui/`)
-Top level is the chrome: `MainWindow` (zstack: graph behind a floating menu
-bar + tab strip), `menu_bar` (returns `MenuCommand`s), and `tab_bar` (renders
-the open-tab strip + "+" new-subgraph chip, emits `UiAction`s). The rest:
+Top level is the chrome: `MainWindow` (menu-bar band, then a recursive walk
+of `Document::layout`'s dock tree — splits render through the aperture
+`Splitter` with ratio drags surfacing as `DockIntent::SetRatio`, groups as
+panes; the walk threads its borrows through a `DockWalk` bundle),
+`menu_bar` (returns `MenuCommand`s), and `tab_bar` (renders one strip per
+group — chips, close buttons, the right-click split menu — and emits
+group-keyed `UiAction`s; the focused group's active tab wears the full
+accent cap). The rest:
 
 - **`gui/canvas/`** — `mod.rs` is `GraphUI`, the canvas scope. It separates
   **persistent** state (`background` dotted backdrop, the `CanvasGeometry`
