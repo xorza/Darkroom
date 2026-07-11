@@ -10,9 +10,6 @@
 /.claude/scheduled_tasks.lock
 
 
-/patch.diff
-/style.toml
-/config.toml
 
 # Claude Code sandbox sentinel files
 /.bash_profile
@@ -37,11 +34,9 @@
 
 test_output
 tmp/
+.tmp/
 log/
 **/*.log
 **/__pycache__/
-.tmp/
-darkroom.preferences.rhai
-darkroom.library.rhai
 darkroom.preferences.toml
-.cargo/config.toml
+patch.diff

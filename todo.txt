@@ -9,3 +9,5 @@ cleanup binary caches
 do not comoute stars in input unused
 
 cache input values for image viewer
+
+tooltip near the edge of screen overflows
