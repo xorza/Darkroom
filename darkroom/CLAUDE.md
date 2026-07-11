@@ -67,9 +67,11 @@ everything else is grouped by responsibility:
   `cache.rs` (per-document disk-cache root: `<stem>.darkroom-cache/` beside the
   file, with a self-ignoring `.gitignore`).
 - **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/
-  overlays/inspectors), `node/` (the node-body widget cluster), `widgets/`
-  (reusable widgets like inline-rename), plus `main_window`, `menu_bar`,
-  `tab_bar` chrome.
+  overlays/inspectors), `node/` (the node-body widget cluster), `dock/`
+  (the dock's whole GUI half behind the two-call `DockUi` — pane-tree
+  rendering, per-group strips, divider resize, drag-docking), `widgets/`
+  (reusable widgets like inline-rename), plus `main_window`, `menu_bar`
+  chrome.
 
 ## Architecture: App vs Editor split
 
@@ -300,14 +302,19 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   viewer tab).
 
 ### GUI tree (`src/gui/`)
-Top level is the chrome: `MainWindow` (menu-bar band, then a recursive walk
-of `Document::layout`'s dock tree — splits render through the aperture
-`Splitter` with ratio drags surfacing as `DockIntent::SetRatio`, groups as
-panes; the walk threads its borrows through a `DockWalk` bundle),
-`menu_bar` (returns `MenuCommand`s), and `tab_bar` (renders one strip per
-group — chips, close buttons, the right-click split menu — and emits
-group-keyed `UiAction`s; the focused group's active tab wears the full
-accent cap). The rest:
+Top level is the chrome: `MainWindow` (menu-bar band + status bar around
+the dock; its one real job is the `content` closure saying what each tab
+kind looks like) and `menu_bar` (returns `MenuCommand`s). Everything
+pane-shaped lives in `gui/dock/` behind `DockUi`, integrated in exactly
+two calls: `scan` in the navigation phase (tab activate/close clicks +
+the drag-docking lifecycle, off last frame's responses) and `render` in
+the record (the recursive dock-tree walk — splits as aperture `Splitter`s
+whose ratio drags surface as `DockIntent::SetRatio`, groups as
+strip-over-content panes — plus the drag's drop-zone highlight, ghost
+chip, and grabbing cursor). `dock/strip.rs` is the chip row (close
+buttons, inline subgraph rename, the right-click split menu; the focused
+group's active tab wears the full accent cap); `dock/drag.rs` is the
+gesture state + the pure pointer→drop-zone classification. The rest:
 
 - **`gui/canvas/`** — `mod.rs` is `GraphUI`, the canvas scope. It separates
   **persistent** state (`background` dotted backdrop, the `CanvasGeometry`

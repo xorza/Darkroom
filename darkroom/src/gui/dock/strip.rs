@@ -278,7 +278,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
     // Outer carries the accent fill + click sense + the 2px top inset; the
     // inner carries the tab fill + content, nested `ACCENT` px lower so the
     // accent shows only as a top cap. Movable tabs also sense drags —
-    // the docking gesture (`gui::dock_drag`); the 4 px latch threshold
+    // the docking gesture (`gui::dock::drag`); the 4 px latch threshold
     // keeps plain clicks working unchanged.
     let sense = if movable(label.tab) {
         Sense::CLICK | Sense::DRAG

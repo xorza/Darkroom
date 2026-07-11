@@ -1,6 +1,6 @@
 //! Tab drag-and-drop between dock panes: the gesture state plus the
 //! pure pointer→drop-zone classification. The gesture itself is driven
-//! by `MainWindow` — armed in the navigation scan off a chip's
+//! by [`DockUi`](super::DockUi) — armed in the navigation scan off a chip's
 //! `drag_started`, resolved on `drag_stopped` into a
 //! `UiAction::MoveTab`, and painted during record as a drop-zone
 //! highlight + a ghost chip on the tooltip layer. Everything

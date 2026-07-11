@@ -1,13 +1,12 @@
 pub(crate) mod canvas;
 pub(crate) mod dialogs;
-pub(crate) mod dock_drag;
+pub(crate) mod dock;
 pub(crate) mod graph_toolbar;
 pub(crate) mod image_viewer;
 pub(crate) mod main_window;
 pub(crate) mod menu_bar;
 pub(crate) mod node;
 pub(crate) mod preferences_view;
-pub(crate) mod tab_bar;
 pub(crate) mod widgets;
 
 pub(crate) mod app;
