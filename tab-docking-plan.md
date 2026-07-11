@@ -9,9 +9,13 @@
 > capped at 4. Phase 3's non-DnD half also shipped: aperture grew
 > `Ui::set_cursor(CursorIcon)` (per-record-pass reset, host applies on
 > change) and the `Splitter` requests resize cursors over its divider.
-> Remaining: phase 2 (drag & drop + drop-zone highlight + ghost chip),
-> the DnD-dependent phase-3 polish (grabbing cursor mid-drag, strip
-> insertion caret, highlight fade), phase 4 (multi-canvas).
+> **Phase 2 shipped** (`gui/dock_drag.rs`): drag a movable chip →
+> 5-zone classification (strip insert with caret, center join, edge
+> splits — suppressed at the nesting cap) → accent highlight + ghost
+> chip on the tooltip layer, grabbing cursor, Esc cancels, release
+> commits through `DockIntent::MoveTab`. Strip reorder rides the same
+> insert zones. Remaining: highlight fade polish, phase 4
+> (multi-canvas).
 
 Drag a tab chip (image viewer, preferences) out of its strip and drop it onto
 another pane to split that pane horizontally or vertically — with a live

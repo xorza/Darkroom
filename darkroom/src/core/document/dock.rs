@@ -138,7 +138,7 @@ impl SplitSide {
 }
 
 /// Where a moved tab lands — the payload of `DockIntent::MoveTab`.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DockDrop {
     /// Join `group`'s strip at `index` (clamped to its length).
     Into { group: TabGroupId, index: usize },
@@ -426,6 +426,13 @@ impl DockLayout {
             }
         }
         self.normalize();
+    }
+
+    /// Whether `group`'s pane may still split (the [`MAX_SPLIT_DEPTH`]
+    /// nesting cap) — lets the drag-drop UI skip offering edge zones
+    /// that [`Self::move_tab`] would refuse anyway.
+    pub fn can_split(&self, group: TabGroupId) -> bool {
+        self.group_depth(group).is_some_and(|d| d < MAX_SPLIT_DEPTH)
     }
 
     /// Number of split ancestors above `id`'s group — what

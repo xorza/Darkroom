@@ -1,5 +1,6 @@
 pub(crate) mod canvas;
 pub(crate) mod dialogs;
+pub(crate) mod dock_drag;
 pub(crate) mod graph_toolbar;
 pub(crate) mod image_viewer;
 pub(crate) mod main_window;
@@ -17,8 +18,8 @@ pub(crate) mod scene;
 pub(crate) mod status_bar;
 pub(crate) mod theme;
 
-use crate::core::document::dock::TabGroupId;
-use crate::core::document::{GraphRef, PortRef};
+use crate::core::document::dock::{DockDrop, TabGroupId};
+use crate::core::document::{GraphRef, PortRef, TabRef};
 use crate::gui::app::App;
 use aperture::WindowToken;
 
@@ -54,6 +55,9 @@ pub(crate) enum UiAction {
     /// Show this port's cached runtime image at full resolution in the
     /// image-viewer tab (an inspector preview thumbnail was clicked).
     OpenImageViewer(PortRef),
+    /// Commit a finished tab drag: move `tab` to the drop the pointer
+    /// released over.
+    MoveTab { tab: TabRef, to: DockDrop },
 }
 
 /// One event (emitter) port's identity. Events are indexed independently

@@ -481,6 +481,10 @@ impl Editor {
                     self.intents
                         .push(Intent::Dock(DockIntent::CloseTab { group, index }));
                 }
+                UiAction::MoveTab { tab, to } => {
+                    self.intents
+                        .push(Intent::Dock(DockIntent::MoveTab { tab, to }));
+                }
                 UiAction::NewSubgraph => {
                     // Creating the def + instance isn't undoable (no undo
                     // history references the fresh def, so the stack stays

@@ -38,9 +38,9 @@ fn closable(tab: TabRef) -> bool {
     tab != TabRef::Graph(GraphRef::Main)
 }
 
-/// Non-graph tabs can move between panes (the split menu); graph tabs
-/// are pinned to the primary pane.
-fn movable(tab: TabRef) -> bool {
+/// Non-graph tabs can move between panes (drag or the split menu);
+/// graph tabs are pinned to the primary pane.
+pub(crate) fn movable(tab: TabRef) -> bool {
     !matches!(tab, TabRef::Graph(_))
 }
 
@@ -52,10 +52,17 @@ fn renamable_subgraph(tab: TabRef) -> Option<SubgraphId> {
     }
 }
 
-/// Stable id for `group`'s tab chip at `index` — deterministic so
-/// prepass can read its click without the live response.
-fn tab_chip_wid(group: TabGroupId, index: usize) -> WidgetId {
+/// Stable id for `group`'s tab chip at `index` — deterministic so the
+/// prepass (activation clicks, the drag scan) can read it without the
+/// live response.
+pub(crate) fn tab_chip_wid(group: TabGroupId, index: usize) -> WidgetId {
     WidgetId::from_hash(("dock.tab", group, index))
+}
+
+/// Stable id for `group`'s whole strip row — the drag scan's
+/// insertion-zone rect.
+pub(crate) fn strip_wid(group: TabGroupId) -> WidgetId {
+    WidgetId::from_hash(("dock.strip", group))
 }
 
 /// Stable id for the close button of `group`'s tab at `index`.
@@ -193,7 +200,7 @@ pub(crate) fn show(
     // The strip wears the chrome band; the active tab below punches
     // through to `canvas_bg` so it reads as one piece with the pane.
     Panel::hstack()
-        .id(WidgetId::from_hash(("dock.strip", group.id)))
+        .id(strip_wid(group.id))
         .size((Sizing::FILL, Sizing::Hug))
         .padding(Spacing::new(6.0, 4.0, 6.0, 0.0))
         .gap(3.0)
@@ -270,11 +277,18 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
     };
     // Outer carries the accent fill + click sense + the 2px top inset; the
     // inner carries the tab fill + content, nested `ACCENT` px lower so the
-    // accent shows only as a top cap.
+    // accent shows only as a top cap. Movable tabs also sense drags —
+    // the docking gesture (`gui::dock_drag`); the 4 px latch threshold
+    // keeps plain clicks working unchanged.
+    let sense = if movable(label.tab) {
+        Sense::CLICK | Sense::DRAG
+    } else {
+        Sense::CLICK
+    };
     Panel::hstack()
         .id(tab_chip_wid(s.group, index))
         .size((Sizing::Hug, Sizing::Hug))
-        .sense(Sense::CLICK)
+        .sense(sense)
         .padding(Spacing::new(0.0, outer_top, 0.0, 0.0))
         .background(outer_bg)
         .show(ui, |ui| {
