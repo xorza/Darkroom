@@ -1402,7 +1402,7 @@ mod tests {
             {
                 let from = DockLayout::default();
                 let mut to = from.clone();
-                to.insert_tab(to.primary().id, TabRef::Preferences);
+                to.find_or_insert(TabRef::Preferences, to.primary().id);
                 UndoStep::Doc(DocStep::Dock {
                     from,
                     to,

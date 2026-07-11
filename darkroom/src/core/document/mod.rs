@@ -1032,9 +1032,9 @@ mod tests {
         // The canvas target follows the primary group's *visible* tab: a
         // graph resolves, an activated non-graph tab means no canvas.
         assert_eq!(doc.active_target(), Some(GraphRef::Main));
-        doc.layout.insert_tab(primary, TabRef::Preferences);
+        doc.layout.find_or_insert(TabRef::Preferences, primary);
         doc.layout
-            .insert_tab(primary, TabRef::ImageViewer(out_port(node_id)));
+            .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
         for active in [1, 2] {
             doc.layout.activate(primary, active);
             assert_eq!(doc.active_target(), None, "a non-graph tab has no target");
@@ -1062,10 +1062,10 @@ mod tests {
         let id = doc.create_subgraph();
         let primary = doc.layout.primary().id;
         doc.layout
-            .insert_tab(primary, TabRef::Graph(GraphRef::Local(id)));
-        doc.layout.insert_tab(primary, TabRef::Preferences);
+            .find_or_insert(TabRef::Graph(GraphRef::Local(id)), primary);
+        doc.layout.find_or_insert(TabRef::Preferences, primary);
         doc.layout
-            .insert_tab(primary, TabRef::ImageViewer(out_port(node_id)));
+            .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
         doc.layout.activate(primary, 3); // viewing the image tab
         // Drop the subgraph out from under its open tab.
         doc.graph.subgraphs.remove_by_key(&id);
@@ -1091,7 +1091,7 @@ mod tests {
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let primary = doc.layout.primary().id;
         doc.layout
-            .insert_tab(primary, TabRef::ImageViewer(out_port(node_id)));
+            .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
         doc.ensure_valid_layout();
         assert_eq!(
             all_tabs(&doc).len(),
@@ -1114,9 +1114,9 @@ mod tests {
         let mut doc: Document = core_test_graph().into();
         let node_id = doc.graph.iter().next().unwrap().id;
         let primary = doc.layout.primary().id;
-        doc.layout.insert_tab(primary, TabRef::Preferences);
+        doc.layout.find_or_insert(TabRef::Preferences, primary);
         doc.layout
-            .insert_tab(primary, TabRef::ImageViewer(out_port(node_id)));
+            .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
         // A split pane too, so the whole tree shape round-trips — not
         // just a flat strip.
         doc.layout.move_tab(

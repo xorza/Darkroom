@@ -15,9 +15,9 @@ fn doc_with_distinct_tabs() -> Document {
     let mut doc: Document = test_graph().into();
     let primary = doc.layout.primary().id;
     doc.layout
-        .insert_tab(primary, TabRef::Graph(GraphRef::Local(a)));
+        .find_or_insert(TabRef::Graph(GraphRef::Local(a)), primary);
     doc.layout
-        .insert_tab(primary, TabRef::Graph(GraphRef::Local(b)));
+        .find_or_insert(TabRef::Graph(GraphRef::Local(b)), primary);
     doc
 }
 

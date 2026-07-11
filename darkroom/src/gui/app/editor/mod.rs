@@ -17,7 +17,7 @@ use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphDef;
 use scenarium::library::Library;
 
-use crate::core::document::dock::{TabAddress, TabGroupId};
+use crate::core::document::dock::TabAddress;
 use crate::core::document::{Document, GraphRef, PortKind, PortRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::{
@@ -512,7 +512,10 @@ impl Editor {
             self.run_state.run_id,
         );
         let group = self.document.layout.focused;
-        let addr = self.tab_address_or_insert(TabRef::ImageViewer(port), group);
+        let addr = self
+            .document
+            .layout
+            .find_or_insert(TabRef::ImageViewer(port), group);
         self.push_activate(addr);
     }
 
@@ -546,16 +549,6 @@ impl Editor {
         }
     }
 
-    /// `tab`'s address in the layout, inserting it into `group`'s strip
-    /// if absent — the shared non-undoable half of opening any tab.
-    /// Callers focus it through a recorded activation.
-    fn tab_address_or_insert(&mut self, tab: TabRef, group: TabGroupId) -> TabAddress {
-        match self.document.layout.find_tab(tab) {
-            Some(addr) => addr,
-            None => self.document.layout.insert_tab(group, tab),
-        }
-    }
-
     /// Queue the recorded focus/activation half of an open.
     fn push_activate(&mut self, addr: TabAddress) {
         self.intents.push(activate_intent(addr));
@@ -578,7 +571,10 @@ impl Editor {
             return; // subgraph vanished — nothing to open
         }
         let group = self.document.layout.primary().id;
-        let addr = self.tab_address_or_insert(TabRef::Graph(target), group);
+        let addr = self
+            .document
+            .layout
+            .find_or_insert(TabRef::Graph(target), group);
         self.push_activate(addr);
     }
 
@@ -590,7 +586,10 @@ impl Editor {
     /// immediately like every external edit.
     pub(crate) fn open_preferences(&mut self, library: &Library) {
         let group = self.document.layout.focused;
-        let addr = self.tab_address_or_insert(TabRef::Preferences, group);
+        let addr = self
+            .document
+            .layout
+            .find_or_insert(TabRef::Preferences, group);
         self.apply_edit(activate_intent(addr), library);
     }
 }
