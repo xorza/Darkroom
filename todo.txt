@@ -13,3 +13,5 @@ cache input values for image viewer
 tooltip near the edge of screen overflows
 
 special preview node
+
+space between panels and remove separator color
