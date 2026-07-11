@@ -43,14 +43,18 @@ impl App {
     fn export_active_subgraph(&mut self) {
         let library = self.engine.library.load();
         let Some(def) = publish::subgraph_to_export(&self.editor.document, &library) else {
-            self.report_error("subgraph export: no subgraph selected or open".into());
+            self.engine
+                .status
+                .error("subgraph export: no subgraph selected or open".into());
             return;
         };
         if let Some(path) = dialogs::pick_save_path(self.current_path.as_deref()) {
             if persistence::export_subgraph(def, &path) {
-                self.status_error = None;
+                self.engine.status.error = None;
             } else {
-                self.report_error(format!("subgraph export failed: {}", path.display()));
+                self.engine
+                    .status
+                    .error(format!("subgraph export failed: {}", path.display()));
             }
         }
     }
@@ -65,9 +69,11 @@ impl App {
         };
         if let Some(def) = persistence::import_subgraph(&path) {
             self.editor.import_subgraph(def);
-            self.status_error = None;
+            self.engine.status.error = None;
         } else {
-            self.report_error(format!("subgraph import failed: {}", path.display()));
+            self.engine
+                .status
+                .error(format!("subgraph import failed: {}", path.display()));
         }
     }
 
@@ -82,9 +88,11 @@ impl App {
             // unsaved change (may over-flag when the link already existed).
             self.editor.dirty = true;
             library::save_library(self.engine.library.load().subgraphs.iter());
-            self.status_error = None;
+            self.engine.status.error = None;
         } else {
-            self.report_error("subgraph promote: no subgraph selected or open".into());
+            self.engine
+                .status
+                .error("subgraph promote: no subgraph selected or open".into());
         }
     }
 
@@ -109,9 +117,11 @@ impl App {
             // publish touches only the library, so this may over-flag).
             self.editor.dirty = true;
             library::save_library(self.engine.library.load().subgraphs.iter());
-            self.status_error = None;
+            self.engine.status.error = None;
         } else {
-            self.report_error("subgraph publish: node is not a local subgraph".into());
+            self.engine
+                .status
+                .error("subgraph publish: node is not a local subgraph".into());
         }
     }
 }

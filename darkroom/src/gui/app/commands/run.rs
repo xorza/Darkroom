@@ -35,18 +35,16 @@ impl App {
     }
 
     /// Compile the document graph and execute its terminals once on the
-    /// worker. A compile error surfaces here, synchronously — no run starts,
-    /// so the prior run's values/status stay untouched. On success, opens a
-    /// fresh value-cache epoch — a re-run invalidates last run's per-node
-    /// values and tags the replies the open panels request. The worker's
-    /// `Update` tears down any running event loop, so the toggle drops in
-    /// lockstep.
+    /// worker. A compile error is reported to the engine's status log
+    /// synchronously — no run starts, so the prior run's values/status stay
+    /// untouched. On success, opens a fresh value-cache epoch — a re-run
+    /// invalidates last run's per-node values and tags the replies the open
+    /// panels request. The worker's `Update` tears down any running event
+    /// loop, so the toggle drops in lockstep.
     pub(crate) fn run_graph(&mut self) {
-        if let Err(e) = self.engine.run_once(&self.editor.document.graph) {
-            self.report_error(format!("compile failed: {e}"));
+        if !self.engine.run_once(&self.editor.document.graph) {
             return;
         }
-        self.status_error = None;
         self.editor.run_state.begin_run();
         self.events_running = false;
     }
@@ -56,25 +54,21 @@ impl App {
     /// preview value fetch. Same epoch and event-loop bookkeeping as a
     /// full run — a preview run is just a run.
     pub(crate) fn run_node(&mut self, node_id: NodeId) {
-        if let Err(e) = self.engine.run_node(&self.editor.document.graph, node_id) {
-            self.report_error(format!("compile failed: {e}"));
+        if !self.engine.run_node(&self.editor.document.graph, node_id) {
             return;
         }
-        self.status_error = None;
         self.editor.run_state.begin_run();
         self.events_running = false;
     }
 
     /// Start the worker's event loop on the current graph: emitter events
-    /// fire their subscribers until stopped. A compile error leaves the
-    /// loop's running state as it was — nothing reached the worker.
+    /// fire their subscribers until stopped. A compile error (reported to
+    /// the engine's status log) leaves the loop's running state as it was —
+    /// nothing reached the worker.
     fn start_events(&mut self) {
-        if let Err(e) = self.engine.start_event_loop(&self.editor.document.graph) {
-            self.report_error(format!("compile failed: {e}"));
-            return;
+        if self.engine.start_event_loop(&self.editor.document.graph) {
+            self.events_running = true;
         }
-        self.status_error = None;
-        self.events_running = true;
     }
 
     /// Stop the worker's event loop.

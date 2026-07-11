@@ -1,10 +1,11 @@
 //! The window's bottom status bar: a thin chrome strip carrying the last
 //! failed action's message (left, error-colored — compile/run/save/load
-//! failures parked in `App::status_error` until a subsequent success clears
-//! them) and the runtime cache's memory footprint (right, system RAM and GPU
-//! VRAM mirrored from the last run's `ExecutionStats`; each pool shows only
-//! when non-zero). The whole bar is omitted when both are empty — an idle
-//! empty graph never grows a blank strip.
+//! failures parked in the engine's [`StatusLog`](crate::core::status::StatusLog)
+//! error slot until a subsequent success clears it) and the runtime cache's
+//! memory footprint (right, system RAM and GPU VRAM mirrored from the last
+//! run's `ExecutionStats`; each pool shows only when non-zero). The whole bar
+//! is omitted when both are empty — an idle empty graph never grows a blank
+//! strip.
 
 use aperture::{
     Align, Background, Configure, HAlign, Panel, Sizing, Spacing, Text, TextStyle, Ui, VAlign,

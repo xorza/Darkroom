@@ -355,12 +355,16 @@ linked library entry in place, else creates a new one.
 
 `Preferences` (`darkroom.preferences.toml` in cwd) persists last-theme-name +
 last-document so the next launch reopens where you left off. Failures degrade
-rather than crash and report through two channels: the detail goes to the
-`tracing` log (no bare `eprintln!` anywhere in darkroom), and user-facing
-failures (compile/run/save/load/subgraph ops) park a short message in
-`App::status_error` via `App::report_error`, shown error-colored in the bottom
-status bar until a subsequent success of the same family (a run kick, a
-finished run, a file op) clears it.
+rather than crash and report through `core/status.rs`'s `StatusLog`, the
+user-facing outcome log owned by `Engine` and shared by every frontend (no
+bare `eprintln!` anywhere in darkroom; every entry also goes to `tracing`).
+It keeps a capped rolling history — the TUI `status` command renders it —
+plus a sticky `error` slot holding the last failure
+(`StatusLog::report_error`), shown error-colored in the GUI's bottom status
+bar until a subsequent success of the same family (a run kick, a finished
+run, a file op) assigns `None`. Compile failures report themselves from
+`Engine::compile`; frontends report their own outcomes (run results, file
+ops, subgraph ops).
 
 ### Theme (`src/theme.rs`)
 The look is **code-defined**, not embedded TOML. Module consts hold every

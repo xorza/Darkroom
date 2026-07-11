@@ -3,15 +3,14 @@
 //! evaluation worker + script host), and drains their inbound queues on
 //! each [`Session::tick`]. No Aperture, no undo stack, no inspector —
 //! scripts mutate the graph, trigger runs, and `print`/`shutdown`; the
-//! worker's results and script `print`s land on a small status log the
-//! driver can show.
+//! worker's results and script `print`s land on the engine's shared
+//! [`StatusLog`](crate::core::status::StatusLog) the driver can show.
 //!
 //! The GUI ([`crate::gui::app::App`]) is the parallel shell over the same
 //! [`Engine`] with its own per-frame orchestration; `tui`/`headless` share
 //! this one. The pieces it reuses — [`Document`], the engine, and the
 //! `build_step`/`apply_step` intent machinery — are all GUI-free.
 
-use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use scenarium::graph::Graph as CoreGraph;
@@ -29,21 +28,16 @@ use crate::core::worker::WorkerEvent;
 #[cfg(test)]
 mod tests;
 
-/// Cap on the retained status log (lines). Oldest lines drop off the front
-/// so a long-running session can't grow it without bound.
-const STATUS_LOG_CAP: usize = 200;
-
 #[derive(Debug)]
 pub(crate) struct Session {
     document: Document,
-    /// Shared runtime services (func lib + worker + script host).
-    engine: Engine,
+    /// Shared runtime services (func lib + worker + script host + the
+    /// [`StatusLog`](crate::core::status::StatusLog) the TUI `status`
+    /// command renders).
+    pub(crate) engine: Engine,
     /// Set when a script edit can change a subgraph's derived interface;
     /// the graph is reconciled before the next run / save.
     needs_reconcile: bool,
-    /// Rolling status log (worker summaries, script `print`s, errors),
-    /// surfaced by the TUI `status` command. Bounded by [`STATUS_LOG_CAP`].
-    status: VecDeque<String>,
     /// Where `save` writes, if a document was opened at startup.
     current_path: Option<PathBuf>,
     /// Flipped by a script `shutdown()`; the driver loop polls
@@ -77,7 +71,6 @@ impl Session {
             document,
             engine,
             needs_reconcile: true,
-            status: VecDeque::new(),
             current_path,
             quit: false,
         };
@@ -94,14 +87,11 @@ impl Session {
         self.document.graph.len()
     }
 
-    pub(crate) fn status_lines(&self) -> impl Iterator<Item = &str> {
-        self.status.iter().map(String::as_str)
-    }
-
     /// Drain the worker + script inbound queues and act on them: apply
     /// script edits to the document, summarize worker results onto the
-    /// status log, and (if a script asked) reconcile + run the graph. No
-    /// rendering — the driver decides how to surface [`Self::status_lines`].
+    /// engine's status log, and (if a script asked) reconcile + run the
+    /// graph. No rendering — the driver decides how to surface
+    /// `engine.status.lines()`.
     pub(crate) fn tick(&mut self) {
         self.drain_worker();
         // Drain to a Vec so the `&mut self.engine` borrow is released before
@@ -110,7 +100,7 @@ impl Session {
         let mut run = false;
         for event in inbound {
             match event {
-                ScriptMessage::Print { msg } => self.push_status(format!("script: {msg}")),
+                ScriptMessage::Print { msg } => self.engine.status.info(format!("script: {msg}")),
                 ScriptMessage::Apply(intents) => {
                     let library = self.engine.library.load();
                     self.needs_reconcile |= apply_intents(&mut self.document, intents, &library);
@@ -125,13 +115,12 @@ impl Session {
     }
 
     /// Reconcile if needed, then compile + send the graph to the worker for
-    /// one evaluation. A compile error lands as a status line immediately;
-    /// run results arrive on a later [`Self::tick`].
+    /// one evaluation. A compile error lands on the engine's status log
+    /// immediately (reported by [`Engine::run_once`]); run results arrive on
+    /// a later [`Self::tick`].
     pub(crate) fn run_graph(&mut self) {
         self.reconcile_if_needed();
-        if let Err(e) = self.engine.run_once(&self.document.graph) {
-            self.push_status(format!("compile failed: {e}"));
-        }
+        self.engine.run_once(&self.document.graph);
     }
 
     /// Write the document back to the file it was opened from. Returns
@@ -153,22 +142,26 @@ impl Session {
     }
 
     fn drain_worker(&mut self) {
-        // Collect to drop the `self.engine` borrow before `push_status`.
+        // Collect to drop the channel borrow before the status writes below
+        // (both live on `self.engine`).
         let events: Vec<WorkerEvent> = self.engine.drain_worker().collect();
         for event in events {
             match event {
                 WorkerEvent::ExecutionFinished(Ok(stats)) => {
-                    self.push_status(format!(
+                    self.engine.status.error = None;
+                    self.engine.status.info(format!(
                         "run finished: {} node(s), {:.3}s",
                         stats.executed_nodes.len(),
                         stats.elapsed_secs
                     ));
                     for log in &stats.logs {
-                        self.push_status(format!("  [{:?}] {}", log.level, log.message));
+                        self.engine
+                            .status
+                            .info(format!("  [{:?}] {}", log.level, log.message));
                     }
                 }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
-                    self.push_status(format!("run failed: {err}"));
+                    self.engine.status.error(format!("run failed: {err}"));
                 }
                 // Headless/TUI surfaces only the final summary, not live
                 // per-node progress or per-node argument values.
@@ -176,14 +169,6 @@ impl Session {
                 WorkerEvent::ArgumentValues { .. } => {}
             }
         }
-    }
-
-    fn push_status(&mut self, line: String) {
-        tracing::info!(target: "darkroom::session", "{line}");
-        if self.status.len() >= STATUS_LOG_CAP {
-            self.status.pop_front();
-        }
-        self.status.push_back(line);
     }
 }
 

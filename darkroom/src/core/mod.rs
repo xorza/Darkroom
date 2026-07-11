@@ -11,6 +11,7 @@ pub(crate) mod io;
 pub(crate) mod library;
 pub(crate) mod script;
 pub(crate) mod session;
+pub(crate) mod status;
 pub(crate) mod theme_pref;
 pub(crate) mod wake;
 pub(crate) mod worker;

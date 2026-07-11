@@ -40,8 +40,9 @@ pub(crate) struct AppContext<'a> {
     /// so the button can't lag a frame behind (and `Update` from a one-shot
     /// run, which tears the loop down, resets it in lockstep).
     pub(crate) events_running: bool,
-    /// The last failed action's message ([`App::status_error`]), shown in the
-    /// status bar until a subsequent success clears it.
+    /// The last failed action's message (the engine's
+    /// [`StatusLog::error`](crate::core::status::StatusLog) slot), shown in
+    /// the status bar until a subsequent success clears it.
     pub(crate) status_error: Option<&'a str>,
 }
 
@@ -79,11 +80,6 @@ pub(crate) struct App {
     /// Raised when a quit is requested (window close, File ▸ Quit) with
     /// unsaved changes; cleared when the user answers.
     confirm_quit: bool,
-    /// The last failed action's message (compile/run/save/load/…), shown in
-    /// the status bar. Set via [`Self::report_error`]; cleared when a
-    /// subsequent action of the same family succeeds (a run kick, a finished
-    /// run, a file op), so it reads as "the outcome of the last thing tried".
-    status_error: Option<String>,
 }
 
 impl App {
@@ -123,7 +119,6 @@ impl App {
             preferences,
             events_running: false,
             confirm_quit: false,
-            status_error: None,
         };
         // Resolve the saved preference: `System` (the default) follows
         // the OS light/dark setting, re-queried each launch.
@@ -152,7 +147,8 @@ impl App {
     /// state (uploading any preview textures via `ui`). Drained before the
     /// editor's scene rebuild so they reflect the latest run.
     fn drain_worker_events(&mut self, ui: &Ui) {
-        // Collect to drop the `self.engine` borrow before `report_error`.
+        // Collect to drop the channel borrow before the status writes below
+        // (both live on `self.engine`).
         let events: Vec<WorkerEvent> = self.engine.drain_worker().collect();
         for event in events {
             let run_state = &mut self.editor.run_state;
@@ -170,11 +166,11 @@ impl App {
                     // A finished run supersedes any lingering failure message
                     // (e.g. an earlier event-loop tick's), so the loop
                     // self-heals in the status bar too.
-                    self.status_error = None;
+                    self.engine.status.error = None;
                 }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
                     run_state.clear();
-                    self.report_error(format!("run failed: {err}"));
+                    self.engine.status.error(format!("run failed: {err}"));
                 }
                 WorkerEvent::NodeProgress(progress) => run_state.apply_progress(&progress),
                 WorkerEvent::ArgumentValues { request, values } => {
@@ -182,14 +178,6 @@ impl App {
                 }
             }
         }
-    }
-
-    /// Report a failed action: log it and park the message in the status
-    /// bar's message slot, where it stays until a subsequent success
-    /// (run kick, finished run, file op) clears `status_error`.
-    pub(crate) fn report_error(&mut self, message: String) {
-        tracing::error!("{message}");
-        self.status_error = Some(message);
     }
 
     /// Forward the frame's pending value requests to the worker: the
@@ -212,7 +200,7 @@ impl App {
         let mut run = false;
         for event in events {
             match event {
-                ScriptMessage::Print { msg } => tracing::info!("script: {msg}"),
+                ScriptMessage::Print { msg } => self.engine.status.info(format!("script: {msg}")),
                 ScriptMessage::Apply(intents) => {
                     let library = self.engine.library.load();
                     self.editor.apply_external_intents(intents, &library);
@@ -354,16 +342,15 @@ impl aperture::App for App {
             &self.theme,
             &mut self.preferences,
             self.events_running,
-            self.status_error.as_deref(),
+            self.engine.status.error.as_deref(),
         );
 
         // A disk-cache toggle this frame: flush the node's resident value to disk now
         // (a `SaveCaches` to the worker — refresh the program + persist, no re-run),
-        // instead of waiting for the next evaluation.
-        if self.editor.take_caches_dirty()
-            && let Err(e) = self.engine.save_caches(&self.editor.document.graph)
-        {
-            self.report_error(format!("compile failed: {e}"));
+        // instead of waiting for the next evaluation. A compile failure is
+        // reported to the engine's status log; nothing is sent.
+        if self.editor.take_caches_dirty() {
+            self.engine.save_caches(&self.editor.document.graph);
         }
 
         // The frame registered everything watching runtime values; request

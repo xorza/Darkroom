@@ -53,14 +53,16 @@ impl App {
     /// The failure surfaces in the status bar; the detail is in the log.
     pub(crate) fn load_document(&mut self, path: &Path) -> bool {
         let Some(doc) = persistence::load_document(path) else {
-            self.report_error(format!("load failed: {}", path.display()));
+            self.engine
+                .status
+                .error(format!("load failed: {}", path.display()));
             return false;
         };
         // Fresh editor around the loaded doc — see `new_document` for why
         // a wholesale reset (rather than poking individual fields) is right.
         self.editor = Editor::new(doc);
         self.set_document_path(Some(path.to_path_buf()));
-        self.status_error = None;
+        self.engine.status.error = None;
         true
     }
 
@@ -84,9 +86,11 @@ impl App {
         if persistence::save_document(&self.editor.document, path) {
             self.editor.dirty = false;
             self.set_document_path(Some(path.to_path_buf()));
-            self.status_error = None;
+            self.engine.status.error = None;
         } else {
-            self.report_error(format!("save failed: {}", path.display()));
+            self.engine
+                .status
+                .error(format!("save failed: {}", path.display()));
         }
     }
 

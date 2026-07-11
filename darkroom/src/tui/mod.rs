@@ -49,7 +49,7 @@ fn handle_command(session: &mut Session, cmd: &str) -> bool {
         "help" => println!("commands: help, status, nodes, run, save, quit"),
         "status" => {
             let mut any = false;
-            for line in session.status_lines() {
+            for line in session.engine.status.lines() {
                 println!("{line}");
                 any = true;
             }
