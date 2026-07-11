@@ -766,9 +766,9 @@ mod tests {
         // (adding it isn't undoable), and `active` returns to its real prior
         // value rather than a stale stored index.
         assert!(undo(&mut editor));
-        assert_eq!(editor.document.active, 0, "undo restores the prior focus");
+        assert_eq!(active(&editor), 0, "undo restores the prior focus");
         assert_eq!(
-            editor.document.tabs.len(),
+            tabs(&editor).len(),
             2,
             "undo reverses focus, not the tab open"
         );
@@ -776,22 +776,18 @@ mod tests {
         // A fresh open after that undo is a new action: it discards the
         // redoable tail instead of leaving it replayable on a stale `active`.
         open(&mut editor, GraphRef::Local(b));
-        assert_eq!(editor.document.active, 2);
+        assert_eq!(active(&editor), 2);
         assert!(
             !redo(&mut editor),
             "the undone switch is unreachable after a fresh open"
         );
-        assert_eq!(editor.document.active, 2);
+        assert_eq!(active(&editor), 2);
 
-        // Re-focusing an already-open tab also routes through `SwitchTab`:
-        // `active` follows and no second tab is added.
+        // Re-focusing an already-open tab also routes through a recorded
+        // activation: `active` follows and no second tab is added.
         open(&mut editor, GraphRef::Local(a));
-        assert_eq!(editor.document.active, 1, "re-focus moves active");
-        assert_eq!(
-            editor.document.tabs.len(),
-            3,
-            "re-focusing an open tab adds none"
-        );
+        assert_eq!(active(&editor), 1, "re-focus moves active");
+        assert_eq!(tabs(&editor).len(), 3, "re-focusing an open tab adds none");
     }
 
     #[test]

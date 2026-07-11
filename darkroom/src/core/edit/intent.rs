@@ -157,19 +157,11 @@ pub enum Intent {
     SetViewport {
         to: Viewport,
     },
-    /// Make the tab at index `to` active. Document-global (not scoped to
-    /// any one graph); undoable and coalescing so a flurry of switches
-    /// collapses into a single history entry.
-    SwitchTab {
-        to: usize,
-    },
-    /// Close the tab at `index`. Document-global; undoable so a closed
-    /// subgraph tab can be reopened with Ctrl+Z. The `Main` tab (index 0)
-    /// is never closable — `build_step` drops the intent if it targets it
-    /// or an out-of-range index.
-    CloseTab {
-        index: usize,
-    },
+    /// Mutate the dock layout (activate/close a tab, move one between
+    /// panes, resize a split). Document-global; `build_step` snapshots
+    /// the whole layout before/after (it's tiny), so every dock op is
+    /// one uniform, trivially reversible step.
+    Dock(DockIntent),
     /// Rename a subgraph interface port (`def.inputs[idx]` for
     /// `side = Input`, `def.outputs[idx]` for `Output`). Scoped to the
     /// active `Local` target — `build_step` reads the `SubgraphId` from
@@ -200,6 +192,25 @@ pub enum Intent {
         subscriber: NodeId,
         subscribe: bool,
     },
+}
+
+/// One dock-layout mutation — the payload of [`Intent::Dock`]. All
+/// variants lower to the same snapshot [`DocStep::Dock`]; they differ
+/// only in the op applied and the gesture key (a tab-switch burst and a
+/// divider drag each coalesce, a close or move never does).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DockIntent {
+    /// Make `group`'s tab at `index` visible and focus the group.
+    ActivateTab { group: TabGroupId, index: usize },
+    /// Close `group`'s tab at `index`. The `Main` tab never closes —
+    /// the layout op refuses it, yielding a no-op step that's dropped.
+    CloseTab { group: TabGroupId, index: usize },
+    /// Move `tab` to `to` — into another strip or splitting a pane.
+    MoveTab { tab: TabRef, to: DockDrop },
+    /// Set the ratio of the split at `split` (a flat-tree index, stable
+    /// between structural changes — a stale one no-ops in the layout).
+    /// Emitted per frame by a divider drag; coalesces per split.
+    SetRatio { split: NodeIdx, ratio: f32 },
 }
 
 /// Self-contained undo-stack entry. Each leaf variant carries both
@@ -325,18 +336,15 @@ pub enum GraphStep {
 /// they bypass the `EditScope` resolution entirely.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DocStep {
-    SwitchTab {
-        from: usize,
-        to: usize,
-    },
-    /// Captures everything needed to reopen the closed tab: the removed
-    /// `target` and `index` (re-inserted on revert) plus the active index
-    /// before/after the close.
-    CloseTab {
-        index: usize,
-        target: TabRef,
-        from_active: usize,
-        to_active: usize,
+    /// Whole-layout snapshot around one dock op (activate/close/move/
+    /// resize) — the tree is a handful of nodes, so both halves ride the
+    /// step and apply/revert are plain assignments. `key` is the gesture
+    /// this op coalesces under (a switch burst, one divider's drag),
+    /// derived from the intent at build time.
+    Dock {
+        from: DockLayout,
+        to: DockLayout,
+        key: Option<GestureKey>,
     },
     /// `sub_id` is resolved at build time so apply/revert are
     /// self-contained (don't need the drain target). Carries both names.
@@ -419,10 +427,9 @@ impl GraphStep {
 impl DocStep {
     fn is_noop(&self) -> bool {
         match self {
-            DocStep::SwitchTab { from, to } => from == to,
-            // A close always removes a tab (build_step drops invalid
-            // targets up front), so it's never a no-op.
-            DocStep::CloseTab { .. } => false,
+            // Covers every degenerate dock op in one comparison: same-tab
+            // activation, a refused close/move, an unchanged ratio.
+            DocStep::Dock { from, to, .. } => from == to,
             DocStep::RenameBoundaryPort { from, to, .. } => from == to,
             DocStep::RenameSubgraph { from, to, .. } => from == to,
         }
@@ -438,33 +445,23 @@ impl DocStep {
 /// vanished nodes individually rather than dropping the whole batch.)
 pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<UndoStep> {
     // Document-global intents don't resolve a graph scope.
-    if let Intent::SwitchTab { to } = intent {
-        return Some(UndoStep::Doc(DocStep::SwitchTab {
-            from: doc.active,
-            to,
-        }));
-    }
-    if let Intent::CloseTab { index } = intent {
-        // `Main` (index 0) is never closable, and a stale index is dropped.
-        if index == 0 || index >= doc.tabs.len() {
-            return None;
-        }
-        let from_active = doc.active;
-        // Mirror `apply`'s active recompute so the forward step is
-        // self-contained: shift left if we closed left of the cursor,
-        // then clamp into the post-removal range (len shrinks by one).
-        let mut to_active = if from_active > index {
-            from_active - 1
-        } else {
-            from_active
+    if let Intent::Dock(dock) = intent {
+        let key = match &dock {
+            DockIntent::ActivateTab { .. } => Some(GestureKey::TabSwitch),
+            DockIntent::SetRatio { split, .. } => Some(GestureKey::DockResize(*split)),
+            DockIntent::CloseTab { .. } | DockIntent::MoveTab { .. } => None,
         };
-        to_active = to_active.min(doc.tabs.len() - 2);
-        return Some(UndoStep::Doc(DocStep::CloseTab {
-            index,
-            target: doc.tabs[index],
-            from_active,
-            to_active,
-        }));
+        let from = doc.layout.clone();
+        let mut to = from.clone();
+        match dock {
+            DockIntent::ActivateTab { group, index } => to.activate(group, index),
+            DockIntent::CloseTab { group, index } => to.close_tab(group, index),
+            DockIntent::MoveTab { tab, to: drop } => to.move_tab(tab, drop),
+            DockIntent::SetRatio { split, ratio } => to.set_ratio(split, ratio),
+        }
+        // Refused/degenerate ops leave `to == from`; the is_noop filter
+        // drops the step.
+        return Some(UndoStep::Doc(DocStep::Dock { from, to, key }));
     }
     if let Intent::RenameSubgraph { id, to } = intent {
         let from = doc.graph.subgraphs.by_key(&id)?.name.clone();
@@ -487,10 +484,7 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
     }
     let EditScopeRef { graph, view } = doc.scope(target)?;
     let step = match intent {
-        Intent::SwitchTab { .. }
-        | Intent::CloseTab { .. }
-        | Intent::RenameBoundaryPort { .. }
-        | Intent::RenameSubgraph { .. } => {
+        Intent::Dock(_) | Intent::RenameBoundaryPort { .. } | Intent::RenameSubgraph { .. } => {
             unreachable!("document-global intents handled above")
         }
         Intent::AddNode {
@@ -853,13 +847,7 @@ pub fn apply_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
 /// Forward-apply a document-global step.
 fn apply_doc(step: &DocStep, doc: &mut Document) {
     match step {
-        DocStep::SwitchTab { to, .. } => doc.active = *to,
-        DocStep::CloseTab {
-            index, to_active, ..
-        } => {
-            doc.tabs.remove(*index);
-            doc.active = *to_active;
-        }
+        DocStep::Dock { to, .. } => doc.layout = to.clone(),
         DocStep::RenameBoundaryPort {
             sub_id,
             side,
@@ -1027,16 +1015,7 @@ pub fn revert_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
 /// Backward-apply a document-global step.
 fn revert_doc(step: &DocStep, doc: &mut Document) {
     match step {
-        DocStep::SwitchTab { from, .. } => doc.active = *from,
-        DocStep::CloseTab {
-            index,
-            target,
-            from_active,
-            ..
-        } => {
-            doc.tabs.insert(*index, *target);
-            doc.active = *from_active;
-        }
+        DocStep::Dock { from, .. } => doc.layout = from.clone(),
         DocStep::RenameBoundaryPort {
             sub_id,
             side,
@@ -1168,12 +1147,11 @@ impl UndoStep {
     /// purpose — a new variant must declare its layout effect.
     pub fn requires_relayout(&self) -> bool {
         match self {
-        // Switching or closing a tab swaps which graph the scene renders
-        // (and reshapes the tab strip); a port rename changes a label's
-        // width so the node remeasures — all relayout the canvas.
+        // A dock change reshapes panes/strips (and can swap which graph
+        // the scene renders); a port rename changes a label's width so
+        // the node remeasures — all relayout the canvas.
         UndoStep::Doc(
-            DocStep::SwitchTab { .. }
-            | DocStep::CloseTab { .. }
+            DocStep::Dock { .. }
             | DocStep::RenameBoundaryPort { .. }
             // Subgraph rename changes the tab-strip label's width.
             | DocStep::RenameSubgraph { .. },
@@ -1256,7 +1234,7 @@ impl UndoStep {
     pub fn dirties_document(&self) -> bool {
         match self {
             // Navigation only — panning, zooming, selecting, restacking, or
-            // switching/closing tabs is view state the user doesn't "save".
+            // rearranging tabs/panes is view state the user doesn't "save".
             // Stacking order rides in `view_nodes` and still writes on any
             // save (like selection), but a bare restack shouldn't nag on exit.
             UndoStep::Graph(
@@ -1264,7 +1242,7 @@ impl UndoStep {
                 | GraphStep::RaiseNode { .. }
                 | GraphStep::SetViewport { .. },
             )
-            | UndoStep::Doc(DocStep::SwitchTab { .. } | DocStep::CloseTab { .. }) => false,
+            | UndoStep::Doc(DocStep::Dock { .. }) => false,
             // Graph data + node layout — real edits worth persisting.
             UndoStep::Graph(
                 GraphStep::AddNode { .. }
@@ -1293,12 +1271,11 @@ impl UndoStep {
             UndoStep::Graph(GraphStep::MoveNodes { grabbed, .. }) => {
                 Some(GestureKey::NodeDrag(*grabbed))
             }
-            // Consecutive tab switches collapse into one entry: the merged
-            // step keeps the original `from` and adopts the latest `to`, so
-            // a burst of tabbing undoes back to where it started in one step.
-            UndoStep::Doc(DocStep::SwitchTab { .. }) => Some(GestureKey::TabSwitch),
-            // Everything else is its own undo entry — e.g. closing two tabs
-            // in a row shouldn't collapse into one Ctrl+Z.
+            // The key was derived from the dock intent at build time:
+            // tab-switch bursts and one divider's drag frames collapse
+            // into single entries; a close or move never coalesces.
+            UndoStep::Doc(DocStep::Dock { key, .. }) => *key,
+            // Everything else is its own undo entry.
             UndoStep::Graph(
                 GraphStep::AddNode { .. }
                 | GraphStep::DuplicateNodes { .. }
@@ -1311,11 +1288,9 @@ impl UndoStep {
                 | GraphStep::DetachSubgraph { .. }
                 | GraphStep::SetSubscription { .. },
             )
-            | UndoStep::Doc(
-                DocStep::CloseTab { .. }
-                | DocStep::RenameBoundaryPort { .. }
-                | DocStep::RenameSubgraph { .. },
-            ) => None,
+            | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameSubgraph { .. }) => {
+                None
+            }
         }
     }
 
@@ -1362,22 +1337,28 @@ impl UndoStep {
                 }))
             }
             (
-                UndoStep::Doc(DocStep::SwitchTab { from, .. }),
-                UndoStep::Doc(DocStep::SwitchTab { to, .. }),
-            ) => Some(UndoStep::Doc(DocStep::SwitchTab {
-                from: *from,
-                to: *to,
+                UndoStep::Doc(DocStep::Dock { from, key, .. }),
+                UndoStep::Doc(DocStep::Dock { to, .. }),
+            ) => Some(UndoStep::Doc(DocStep::Dock {
+                from: from.clone(),
+                to: to.clone(),
+                key: *key,
             })),
             _ => None,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Serde because [`DocStep::Dock`] stores its key on the step (the undo
+/// stack packs steps with bitcode).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GestureKey {
     Viewport,
     NodeDrag(NodeId),
     TabSwitch,
+    /// One divider's drag, keyed by the split's flat-tree index, so two
+    /// different dividers never coalesce.
+    DockResize(NodeIdx),
 }
 
 #[cfg(test)]
@@ -1417,13 +1398,16 @@ mod tests {
                     zoom: 2.0,
                 },
             }),
-            UndoStep::Doc(DocStep::SwitchTab { from: 0, to: 1 }),
-            UndoStep::Doc(DocStep::CloseTab {
-                index: 1,
-                target: TabRef::Graph(GraphRef::Main),
-                from_active: 1,
-                to_active: 0,
-            }),
+            {
+                let from = DockLayout::default();
+                let mut to = from.clone();
+                to.insert_tab(to.primary().id, TabRef::Preferences);
+                UndoStep::Doc(DocStep::Dock {
+                    from,
+                    to,
+                    key: None,
+                })
+            },
         ];
         for step in &navigation {
             assert!(

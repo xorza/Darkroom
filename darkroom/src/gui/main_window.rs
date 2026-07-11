@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::mem::take;
 
-use aperture::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
+use aperture::{
+    Align, Background, Configure, Panel, Sizing, SplitHalf, Splitter, Ui, VAlign, WidgetId,
+};
 
 use crate::core::document::{Document, GraphRef, PortRef, TabRef};
 use crate::core::edit::intent::Intent;
@@ -152,17 +154,20 @@ impl MainWindow {
     }
 }
 
-/// Project the document's open-tab list into the strip's per-tab
-/// labels. Lives here (not in `tab_bar`) so the strip stays
-/// document-agnostic — same split as `Scene` for the canvas.
-fn tab_labels(doc: &Document) -> Vec<TabLabel> {
-    doc.tabs
+/// Project one group's tabs into the strip's per-tab labels. Lives here
+/// (not in `tab_bar`) so the strip stays document-agnostic — same split
+/// as `Scene` for the canvas.
+fn tab_labels(doc: &Document, group: &TabGroup) -> Vec<TabLabel> {
+    group
+        .tabs
         .iter()
         .map(|t| match t {
             TabRef::Graph(GraphRef::Main) => TabLabel {
+                tab: *t,
                 text: "main".into(),
                 subgraph_id: None,
                 closable: false,
+                movable: false,
             },
             TabRef::Graph(GraphRef::Local(id)) => {
                 let name = doc
@@ -172,20 +177,26 @@ fn tab_labels(doc: &Document) -> Vec<TabLabel> {
                     .map(|d| d.name.clone())
                     .unwrap_or_else(|| "subgraph".to_string());
                 TabLabel {
+                    tab: *t,
                     text: name.into(),
                     subgraph_id: Some(*id),
                     closable: true,
+                    movable: false,
                 }
             }
             TabRef::Preferences => TabLabel {
+                tab: *t,
                 text: "preferences".into(),
                 subgraph_id: None,
                 closable: true,
+                movable: true,
             },
             TabRef::ImageViewer(port) => TabLabel {
+                tab: *t,
                 text: image_viewer::port_label(doc, *port).into(),
                 subgraph_id: None,
                 closable: true,
+                movable: true,
             },
         })
         .collect()
