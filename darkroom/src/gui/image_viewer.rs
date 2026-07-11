@@ -33,6 +33,7 @@ use scenarium::data::DynamicValue;
 use scenarium::graph::NodeSearch;
 
 use crate::core::document::{Document, PortKind, PortRef};
+use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
 use crate::core::worker::RunId;
 use crate::gui::canvas::pan_zoom::{scroll_to_zoom_factor, zoom_about};
 use crate::gui::theme::Theme;
@@ -54,19 +55,6 @@ const MAX_ZOOM: f32 = 32.0;
 /// (doesn't pan/zoom with the image) — it's a transparency reference,
 /// not content.
 const CHECKER_SQUARE_PX: f32 = 8.0;
-
-/// Backdrop behind (and around) the image. Runtime-only viewer state,
-/// like the pan/zoom framing.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum ViewerBackground {
-    /// The editor's canvas fill — the resting default.
-    #[default]
-    Theme,
-    Black,
-    White,
-    /// Neutral gray checkerboard — the transparency reference.
-    Checker,
-}
 
 /// One image-viewer tab's state: what it shows and how it's framed.
 /// Lives in the `MainWindow`'s per-port viewer map, keyed by (and
@@ -103,13 +91,10 @@ pub(crate) struct ImageViewer {
     view: Option<ViewerViewport>,
     /// Pan-drag bookkeeping: the viewport pan at drag start.
     pan_anchor: Option<Vec2>,
-    /// Backdrop mode, picked from the control panel.
-    background: ViewerBackground,
-    /// Texel sampling for the shown image, toggled from the control
-    /// panel. Starts at `Nearest` — hard texels for pixel peeping;
-    /// `Linear` smooths.
-    filter: ImageFilter,
     /// Lazily registered checkerboard tile for the `Checker` backdrop.
+    /// The backdrop *choice* (and the sampling filter) live in
+    /// [`ViewerPreferences`] — one persisted setting shared by every
+    /// viewer tab, threaded into [`Self::show`] each frame.
     checker: Option<ImageHandle>,
 }
 
@@ -147,8 +132,6 @@ impl ImageViewer {
             content_epoch: None,
             view: None,
             pan_anchor: None,
-            background: ViewerBackground::default(),
-            filter: ImageFilter::Nearest,
             checker: None,
         }
     }
@@ -220,8 +203,16 @@ impl ImageViewer {
 
     /// Draw the viewer pane (the whole tab content). Converts + uploads a
     /// pending value first, then applies last frame's pan/zoom gestures,
-    /// then paints image (or message) and the header readout.
-    pub(crate) fn show(&mut self, ui: &mut Ui, theme: &Theme) {
+    /// then paints image (or message), the header readout, and the
+    /// control panel. `prefs` carries the shared backdrop/sampling
+    /// choices; returns `true` when the panel edited them (the caller
+    /// persists).
+    pub(crate) fn show(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        prefs: &mut ViewerPreferences,
+    ) -> bool {
         if let Some(value) = self.pending.take() {
             match render_full(&value) {
                 Ok(rendered) => {
@@ -250,11 +241,12 @@ impl ImageViewer {
         self.apply_gestures(ui);
 
         let pane = pane_size(ui, self.port);
-        let fill = match self.background {
+        let fill = match prefs.background {
             ViewerBackground::Theme | ViewerBackground::Checker => theme.colors.canvas_bg,
             ViewerBackground::Black => Color::BLACK,
             ViewerBackground::White => Color::WHITE,
         };
+        let mut prefs_changed = false;
         Panel::zstack()
             .id(pane_wid(self.port))
             .size((Sizing::FILL, Sizing::FILL))
@@ -265,7 +257,7 @@ impl ImageViewer {
                 ..Default::default()
             })
             .show(ui, |ui| {
-                if self.background == ViewerBackground::Checker
+                if prefs.background == ViewerBackground::Checker
                     && let Some(pane) = pane
                 {
                     self.draw_checker(ui, pane);
@@ -279,7 +271,7 @@ impl ImageViewer {
                             handle: handle.clone(),
                             local_rect: Some(draw_rect(handle.size().as_vec2(), v)),
                             fit: ImageFit::Fill,
-                            filter: self.filter,
+                            filter: prefs.filter,
                             tint: Color::WHITE,
                         });
                     }
@@ -289,7 +281,7 @@ impl ImageViewer {
                             handle: handle.clone(),
                             local_rect: None,
                             fit: ImageFit::Contain,
-                            filter: self.filter,
+                            filter: prefs.filter,
                             tint: Color::WHITE,
                         });
                     }
@@ -306,9 +298,10 @@ impl ImageViewer {
                 }
                 self.header(ui, theme, pane);
                 if self.image.is_some() {
-                    self.controls(ui, theme, pane);
+                    prefs_changed = self.controls(ui, theme, pane, prefs);
                 }
             });
+        prefs_changed
     }
 
     /// The screen-fixed checkerboard backdrop across the whole pane. One
@@ -379,13 +372,21 @@ impl ImageViewer {
     /// The floating control panel in the pane's top-right corner — the
     /// viewer twin of the graph toolbar: function groups on stacked
     /// frosted pills, opaque chip buttons raised off each pill. The top
-    /// pill frames the view (fit, 100%); the column below holds
-    /// appearance — the backdrop radio stack and, past a rule, the
-    /// sampling toggle. Drawn after the image so the buttons hit-test
-    /// above the pane's gesture surface. Framing clicks land next frame
-    /// (responses lag the record by one frame) — imperceptible.
-    fn controls(&mut self, ui: &mut Ui, theme: &Theme, pane: Option<Vec2>) {
+    /// pill frames the view (fit, 100%); the column below edits the
+    /// shared appearance preferences — the backdrop radio stack and,
+    /// past a rule, the sampling toggle. Returns `true` when `prefs`
+    /// changed. Drawn after the image so the buttons hit-test above the
+    /// pane's gesture surface. Framing clicks land next frame (responses
+    /// lag the record by one frame) — imperceptible.
+    fn controls(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        pane: Option<Vec2>,
+        prefs: &mut ViewerPreferences,
+    ) -> bool {
         let port = self.port;
+        let mut changed = false;
         Panel::vstack()
             .id(control_wid(port, "panel"))
             .size((Sizing::Hug, Sizing::Hug))
@@ -410,63 +411,25 @@ impl ImageViewer {
                 });
                 let appearance = Panel::vstack().id(control_wid(port, "pill_appearance"));
                 pill(ui, theme, appearance, |ui| {
-                    for (mode, key, tip) in [
-                        (ViewerBackground::Theme, "bg_theme", "Theme background"),
-                        (ViewerBackground::Black, "bg_black", "Black background"),
-                        (ViewerBackground::White, "bg_white", "White background"),
-                        (
-                            ViewerBackground::Checker,
-                            "bg_checker",
-                            "Checkerboard background",
-                        ),
+                    for (mode, tip) in [
+                        (ViewerBackground::Theme, "Theme background"),
+                        (ViewerBackground::Black, "Black background"),
+                        (ViewerBackground::White, "White background"),
+                        (ViewerBackground::Checker, "Checkerboard background"),
                     ] {
-                        if self.background_swatch(ui, theme, mode, key, tip) {
-                            self.background = mode;
+                        let selected = prefs.background == mode;
+                        if background_swatch(ui, theme, port, mode, selected, tip) && !selected {
+                            prefs.background = mode;
+                            changed = true;
                         }
                     }
                     // Rule between the backdrop radio stack and the
                     // sampling toggle — two concepts, one pill.
                     pill_rule(ui, theme);
-                    self.filter_toggle(ui, theme);
+                    changed |= filter_toggle(ui, theme, port, &mut prefs.filter);
                 });
             });
-    }
-
-    /// One backdrop-mode button: a neutral chip whose glyph is a swatch
-    /// of the mode itself, ringed with the selection accent when active.
-    fn background_swatch(
-        &self,
-        ui: &mut Ui,
-        theme: &Theme,
-        mode: ViewerBackground,
-        key: &'static str,
-        tip: &'static str,
-    ) -> bool {
-        let selected = self.background == mode;
-        Chip::new(control_wid(self.port, key), tip).show(ui, theme, |ui, s, _| {
-            draw_swatch(ui, s, theme, mode, selected)
-        })
-    }
-
-    /// The nearest/bilinear sampling toggle: accent-filled while nearest
-    /// is active, neutral otherwise.
-    fn filter_toggle(&mut self, ui: &mut Ui, theme: &Theme) {
-        let nearest = self.filter == ImageFilter::Nearest;
-        let tip = if nearest {
-            "Sampling: nearest — click for bilinear"
-        } else {
-            "Sampling: bilinear — click for nearest"
-        };
-        if Chip::new(control_wid(self.port, "filter"), tip)
-            .toggled(nearest)
-            .show(ui, theme, draw_pixels)
-        {
-            self.filter = if nearest {
-                ImageFilter::Linear
-            } else {
-                ImageFilter::Nearest
-            };
-        }
+        changed
     }
 
     /// Fold last frame's pane gestures into the viewport: left/middle-drag
@@ -582,6 +545,51 @@ fn pane_wid(port: PortRef) -> WidgetId {
 /// Stable id for one control-panel widget, keyed by port + role.
 fn control_wid(port: PortRef, key: &'static str) -> WidgetId {
     WidgetId::from_hash(("image_viewer.controls", port, key))
+}
+
+/// One backdrop-mode chip: its glyph is a swatch of the mode itself,
+/// ringed with the selection accent when `selected`. Returns whether it
+/// was clicked.
+fn background_swatch(
+    ui: &mut Ui,
+    theme: &Theme,
+    port: PortRef,
+    mode: ViewerBackground,
+    selected: bool,
+    tip: &'static str,
+) -> bool {
+    let key = match mode {
+        ViewerBackground::Theme => "bg_theme",
+        ViewerBackground::Black => "bg_black",
+        ViewerBackground::White => "bg_white",
+        ViewerBackground::Checker => "bg_checker",
+    };
+    Chip::new(control_wid(port, key), tip).show(ui, theme, |ui, s, _| {
+        draw_swatch(ui, s, theme, mode, selected)
+    })
+}
+
+/// The nearest/bilinear sampling toggle: accent-filled while nearest is
+/// active. Flips `filter` on click; returns whether it changed.
+fn filter_toggle(ui: &mut Ui, theme: &Theme, port: PortRef, filter: &mut ImageFilter) -> bool {
+    let nearest = *filter == ImageFilter::Nearest;
+    let tip = if nearest {
+        "Sampling: nearest — click for bilinear"
+    } else {
+        "Sampling: bilinear — click for nearest"
+    };
+    if Chip::new(control_wid(port, "filter"), tip)
+        .toggled(nearest)
+        .show(ui, theme, draw_pixels)
+    {
+        *filter = if nearest {
+            ImageFilter::Linear
+        } else {
+            ImageFilter::Nearest
+        };
+        return true;
+    }
+    false
 }
 
 /// Checkerboard grays (sRGB bytes) — shared by the backdrop tile and

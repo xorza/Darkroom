@@ -15,10 +15,11 @@ use crate::gui::theme::Theme;
 /// Preferences edits. Handled by [`App::handle_prefs`].
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum PrefsCommand {
-    /// The Preferences tab edited a field of [`crate::core::io::preferences::Preferences`]
-    /// in place (any checkbox / radio / path field). `App` re-syncs derived
-    /// state (theme palette, ML paths) and persists — one command for every
-    /// field, so adding a preference needs no new command.
+    /// A field of [`crate::core::io::preferences::Preferences`] was edited
+    /// in place — by the Preferences tab (any checkbox / radio / path field)
+    /// or the image viewer's toolbar (backdrop / sampling). `App` re-syncs
+    /// derived state (theme palette, ML paths) and persists — one command
+    /// for every field, so adding a preference needs no new command.
     Changed,
     /// Open an ONNX file dialog for one of the ML model paths (the "Browse…"
     /// buttons) — the blocking dialog runs outside the record, unlike the

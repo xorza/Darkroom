@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use aperture::ImageFilter;
 use common::{SerdeFormat, deserialize, serialize};
 use glam::{IVec2, UVec2};
 
@@ -37,12 +38,51 @@ pub struct Preferences {
     /// Main window geometry from the last session, restored at launch so
     /// the editor reopens at the same size / position. `None` on first run
     /// (platform picks). A TOML `[window]` table — a table field, so it
-    /// sits with `ml_models` after every scalar key.
+    /// sits with the other tables after every scalar key.
     pub window: Option<WindowState>,
+    /// Image-viewer toolbar choices (backdrop + sampling), shared by all
+    /// viewer tabs: a toolbar click in any viewer edits this in place and
+    /// persists. A TOML `[viewer]` table.
+    pub viewer: ViewerPreferences,
     /// ONNX model paths for lens's ML nodes (`ml_denoise` / `remove_stars`).
     /// A TOML `[ml_models]` table — must stay the **last** field, as TOML
     /// tables follow all scalar keys at the same level.
     pub ml_models: MlModelPreferences,
+}
+
+/// Backdrop behind (and around) a viewer's image, as offered by the
+/// viewer toolbar's swatch row. Frontend-agnostic persisted choice,
+/// like [`ThemeChoice`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ViewerBackground {
+    /// The editor's canvas fill — the resting default.
+    #[default]
+    Theme,
+    Black,
+    White,
+    /// Neutral gray checkerboard — the transparency reference.
+    Checker,
+}
+
+/// Persisted image-viewer toolbar state. One global setting (not
+/// per-tab): every viewer pane reads and edits the same choices.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ViewerPreferences {
+    pub background: ViewerBackground,
+    /// Texel sampling for the shown image. Defaults to `Nearest` — hard
+    /// texels for pixel peeping; `Linear` smooths.
+    pub filter: ImageFilter,
+}
+
+impl Default for ViewerPreferences {
+    fn default() -> Self {
+        Self {
+            background: ViewerBackground::default(),
+            filter: ImageFilter::Nearest,
+        }
+    }
 }
 
 /// Persisted main-window geometry. `size` is logical pixels (DPI-independent,
@@ -69,6 +109,7 @@ impl Default for Preferences {
             load_last_document: true,
             confirm_unsaved_on_exit: true,
             window: None,
+            viewer: ViewerPreferences::default(),
             ml_models: MlModelPreferences::default(),
         }
     }
@@ -173,6 +214,11 @@ mod tests {
                 maximized: true,
                 position: Some(IVec2::new(120, -40)),
             }),
+            // Non-defaults (defaults are Theme + Nearest).
+            viewer: ViewerPreferences {
+                background: ViewerBackground::Checker,
+                filter: ImageFilter::Linear,
+            },
             ml_models: MlModelPreferences {
                 denoise: PathBuf::from("/models/d.onnx"),
                 star_removal: PathBuf::from("/models/s.onnx"),
@@ -190,6 +236,13 @@ mod tests {
                 maximized: true,
                 position: Some(IVec2::new(120, -40)),
             })
+        );
+        assert_eq!(
+            back.viewer,
+            ViewerPreferences {
+                background: ViewerBackground::Checker,
+                filter: ImageFilter::Linear,
+            }
         );
         assert_eq!(back.ml_models.denoise, PathBuf::from("/models/d.onnx"));
         assert_eq!(back.ml_models.star_removal, PathBuf::from("/models/s.onnx"));
@@ -210,6 +263,10 @@ mod tests {
         assert!(back.confirm_unsaved_on_exit);
         // No remembered window geometry until a session saves one.
         assert_eq!(back.window, None);
+        // Viewer toolbar defaults: theme backdrop, nearest sampling.
+        assert_eq!(back.viewer, ViewerPreferences::default());
+        assert_eq!(back.viewer.background, ViewerBackground::Theme);
+        assert_eq!(back.viewer.filter, ImageFilter::Nearest);
         // ML model paths default to lens's canonical bare filenames.
         assert_eq!(
             back.ml_models.denoise,

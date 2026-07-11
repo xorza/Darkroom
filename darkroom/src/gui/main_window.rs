@@ -9,6 +9,7 @@ use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
 use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::prefs::PrefsCommand;
 use crate::gui::canvas::GraphUI;
 use crate::gui::dock::DockUi;
 use crate::gui::graph_toolbar;
@@ -122,10 +123,16 @@ impl MainWindow {
                             command = Some(c);
                         }
                     }
-                    TabRef::ImageViewer(port) => image_viewers
-                        .entry(port)
-                        .or_insert_with(|| ImageViewer::new(port))
-                        .show(ui, ctx.theme),
+                    TabRef::ImageViewer(port) => {
+                        let viewer = image_viewers
+                            .entry(port)
+                            .or_insert_with(|| ImageViewer::new(port));
+                        // Viewer-toolbar edits ride the same in-place
+                        // prefs path as the Preferences tab.
+                        if viewer.show(ui, ctx.theme, &mut prefs.viewer) {
+                            command = Some(AppCommand::Prefs(PrefsCommand::Changed));
+                        }
+                    }
                 });
                 // Bottom chrome: the cache-memory readout, below the panes.
                 status_bar::show(ui, ctx);
