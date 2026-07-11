@@ -31,7 +31,6 @@ use crate::execution::stats::{ExecutionStats, RunProgress};
 use crate::graph::NodeId;
 use crate::node::function::FuncId;
 
-pub(crate) mod blob;
 pub(crate) mod cache;
 pub(crate) mod codec;
 pub mod compile;

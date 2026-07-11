@@ -6,7 +6,7 @@ design home that the module's `//!` docs point at. Two parts:
 - **A. Subgraphs** — how composite nodes are authored and flattened away
   (`flatten.rs`; authoring types in `subgraph.rs`/`graph.rs`).
 - **B. Disk cache** — the node-keyed, digest-stamped output cache for disk-backed (`Disk`/`Both`) nodes
-  (`digest.rs`, `cache.rs`, `disk_store.rs`, `blob.rs`, `codec.rs`). The `RuntimeCache`
+  (`digest.rs`, `cache.rs`, `disk_store.rs`, `codec.rs`). The `RuntimeCache`
   (`cache.rs`) owns the RAM slots *and* the `DiskStore` (`disk_store.rs`, pure blob I/O) and runs
   the caching policy — reuse, hydration, persistence, eviction — over both.
 ---
@@ -310,7 +310,7 @@ the run loop reads the resolver's verdicts rather than re-deriving, since a dige
 live filesystem state and could drift mid-run), not `update`: only then are its producers'
 `current_digest`s stamped. The planner is purely structural and never touches digests.
 
-## B.3 Storage (`blob.rs`)
+## B.3 Storage (`disk_store.rs`)
 
 A node's blob lives at `<disk_root>/<hex(node id)>` — **one file per node** — with the
 content digest it was produced under as the file's first 32 bytes. The digest header is
