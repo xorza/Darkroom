@@ -20,10 +20,8 @@ use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
 use crate::gui::scene::Scene;
-use crate::gui::theme::Theme;
 use crate::gui::widgets::toolbar::{
-    BUTTON_GAP, PILL_PADDING, TOOLBAR_MARGIN, action_button, dot, frame, glyph_button,
-    pill_background, stroked_rect,
+    BUTTON_GAP, TOOLBAR_MARGIN, action_button, dot, frame, pill, stroked_rect, toggle_button,
 };
 
 fn run_button_wid() -> WidgetId {
@@ -68,13 +66,11 @@ pub(crate) fn show(
         .show(ui, |ui| {
             // Top row: run/cancel + event-loop toggles, side by side on their
             // own chrome pill.
-            Panel::hstack()
-                .id_salt("graph_toolbar_run")
-                .size((Sizing::Hug, Sizing::Hug))
-                .gap(BUTTON_GAP)
-                .padding(Spacing::all(PILL_PADDING))
-                .background(pill_background(ctx.theme))
-                .show(ui, |ui| {
+            pill(
+                ui,
+                ctx.theme,
+                Panel::hstack().id_salt("graph_toolbar_run"),
+                |ui| {
                     // Run / cancel: toggled while a one-shot run is in flight.
                     let running = ctx.run_state.is_running();
                     let run_tip = if running { "Cancel run" } else { "Run" };
@@ -87,6 +83,7 @@ pub(crate) fn show(
                         run_button_wid(),
                         running,
                         ctx.theme.colors.exec_executed_glow,
+                        ctx.theme.colors.exec_running_glow,
                         run_tip,
                         draw_play,
                     ) {
@@ -108,6 +105,7 @@ pub(crate) fn show(
                         events_button_wid(),
                         ctx.events_running,
                         ctx.theme.colors.text_muted,
+                        ctx.theme.colors.exec_running_glow,
                         events_tip,
                         draw_play_bar,
                     ) {
@@ -117,83 +115,49 @@ pub(crate) fn show(
                             AppCommand::Run(RunCommand::StartEvents)
                         });
                     }
-                });
+                },
+            );
             // View-framing actions, stacked under the run row on their own
             // chrome pill. Each emits a `SetViewport` intent (undoable), so they
             // ride the same path as a manual pan/zoom rather than mutating the
             // viewport out of band.
-            Panel::vstack()
+            let framing = Panel::vstack()
                 .id_salt("graph_toolbar_framing")
-                .size((Sizing::Hug, Sizing::Hug))
-                .child_align(Align::new(HAlign::Left, VAlign::Top))
-                .gap(BUTTON_GAP)
-                .padding(Spacing::all(PILL_PADDING))
-                .background(pill_background(ctx.theme))
-                .show(ui, |ui| {
-                    if action_button(ui, ctx.theme, reset_view_wid(), "Reset view", draw_reset) {
-                        out.extend(pan_zoom::view_action_intent(
-                            ui,
-                            geometry,
-                            scene,
-                            ViewAction::Reset,
-                        ));
-                    }
-                    if action_button(ui, ctx.theme, show_all_wid(), "Show all", draw_show_all) {
-                        out.extend(pan_zoom::view_action_intent(
-                            ui,
-                            geometry,
-                            scene,
-                            ViewAction::ShowAll,
-                        ));
-                    }
-                    if action_button(
+                .child_align(Align::new(HAlign::Left, VAlign::Top));
+            pill(ui, ctx.theme, framing, |ui| {
+                if action_button(ui, ctx.theme, reset_view_wid(), "Reset view", draw_reset) {
+                    out.extend(pan_zoom::view_action_intent(
                         ui,
-                        ctx.theme,
-                        show_selected_wid(),
-                        "Show selected",
-                        draw_show_selected,
-                    ) {
-                        out.extend(pan_zoom::view_action_intent(
-                            ui,
-                            geometry,
-                            scene,
-                            ViewAction::ShowSelected,
-                        ));
-                    }
-                });
+                        geometry,
+                        scene,
+                        ViewAction::Reset,
+                    ));
+                }
+                if action_button(ui, ctx.theme, show_all_wid(), "Show all", draw_show_all) {
+                    out.extend(pan_zoom::view_action_intent(
+                        ui,
+                        geometry,
+                        scene,
+                        ViewAction::ShowAll,
+                    ));
+                }
+                if action_button(
+                    ui,
+                    ctx.theme,
+                    show_selected_wid(),
+                    "Show selected",
+                    draw_show_selected,
+                ) {
+                    out.extend(pan_zoom::view_action_intent(
+                        ui,
+                        geometry,
+                        scene,
+                        ViewAction::ShowSelected,
+                    ));
+                }
+            });
         });
     command
-}
-
-/// One square glyph toggle, an opaque chip raised off the group pill. `toggled`
-/// inverts it (the running-glow fill with a dark glyph); idle is a neutral fill
-/// (lighter on hover) with the caller's `idle_glyph` ink. Returns whether it
-/// was clicked.
-fn toggle_button(
-    ui: &mut Ui,
-    theme: &Theme,
-    wid: WidgetId,
-    toggled: bool,
-    idle_glyph: Color,
-    tip: &'static str,
-    draw_glyph: impl FnOnce(&mut Ui, f32, Color),
-) -> bool {
-    let hovered = ui.response_for(wid).hovered;
-    // Glyph and fill vary on different axes: the glyph only inverts for
-    // the toggled state, the fill also lifts on hover.
-    let glyph = if toggled {
-        theme.colors.chrome_fill
-    } else {
-        idle_glyph
-    };
-    let fill = if toggled {
-        theme.colors.exec_running_glow
-    } else if hovered {
-        theme.colors.header_fill
-    } else {
-        theme.colors.node_fill
-    };
-    glyph_button(ui, wid, fill, glyph, tip, draw_glyph)
 }
 
 /// A right-pointing play triangle (run once), optically centered in the box.

@@ -37,7 +37,7 @@ use crate::core::worker::RunId;
 use crate::gui::canvas::pan_zoom::{scroll_to_zoom_factor, zoom_about};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::toolbar::{
-    BUTTON_GAP, PILL_PADDING, TOOLBAR_MARGIN, action_button, glyph_button, pill_background,
+    BUTTON_GAP, TOOLBAR_MARGIN, action_button, pill, pill_background, pill_rule, toggle_button,
 };
 
 /// Longest texture side we upload. Conservative device
@@ -148,14 +148,21 @@ impl ImageViewer {
         }
     }
 
+    /// Back to fit-to-pane framing (and cancel any pan in progress) —
+    /// shared by present, the fit button, double-click, and a
+    /// dimensions-changed refresh.
+    fn reset_framing(&mut self) {
+        self.view = None;
+        self.pan_anchor = None;
+    }
+
     /// Show `value` as this viewer's content, resetting the framing to
     /// fit — the preview-click path. `value` is the port's held runtime
     /// value from `epoch` (`None` when it's no longer cached, which shows
     /// a message and leaves the epoch unset so the next run's value still
     /// fills the pane).
     pub(crate) fn present(&mut self, title: String, value: Option<DynamicValue>, epoch: RunId) {
-        self.view = None;
-        self.pan_anchor = None;
+        self.reset_framing();
         self.set_content(title, value, epoch);
         // A missing value on an explicit click is a transient condition
         // (mid-run, superseded epoch): stay epoch-less so the run's
@@ -220,8 +227,7 @@ impl ImageViewer {
                         .as_ref()
                         .is_none_or(|old| old.size() != rendered.image_size());
                     if dims_changed {
-                        self.view = None;
-                        self.pan_anchor = None;
+                        self.reset_framing();
                     }
                     self.native_size = rendered.native_size;
                     self.image = Some(ui.register_image(rendered.image));
@@ -345,70 +351,77 @@ impl ImageViewer {
         if let Some(zoom) = zoom {
             text.push_str(&format!(" · {:.0}%", zoom * 100.0));
         }
-        // A hugging chip on the canvas fill so the readout stays legible
-        // over bright image regions.
+        // A frosted readout pill — the text sibling of the toolbar chrome,
+        // floating inset from the corner like the control pills opposite,
+        // so the readout stays legible over bright image regions.
         Panel::hstack()
             .id_salt("viewer_header")
             .size((Sizing::Hug, Sizing::Hug))
-            .padding(Spacing::new(8.0, 4.0, 8.0, 4.0))
-            .background(Background {
-                fill: theme.colors.canvas_bg.with_alpha(0.8).into(),
-                ..Default::default()
-            })
+            .margin(Spacing::new(TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0, 0.0))
+            .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
+            .background(pill_background(theme))
             .show(ui, |ui| {
                 Text::new(text).style(muted_style(theme, ui)).show(ui);
             });
     }
 
-    /// The floating control pill in the pane's top-right corner: view
-    /// framing (fit, 100%), backdrop swatches, and the sampling toggle.
-    /// Drawn after the image so the buttons hit-test above the pane's
-    /// gesture surface; the pill itself senses too, so a drag starting
-    /// between buttons never pans the image. Framing clicks land next
-    /// frame (responses lag the record by one frame) — imperceptible.
+    /// The floating control panel in the pane's top-right corner — the
+    /// viewer twin of the graph toolbar: function groups on stacked
+    /// frosted pills, opaque chip buttons raised off each pill. The top
+    /// pill frames the view (fit, 100%); the column below holds
+    /// appearance — the backdrop radio stack and, past a rule, the
+    /// sampling toggle. Drawn after the image so the buttons hit-test
+    /// above the pane's gesture surface. Framing clicks land next frame
+    /// (responses lag the record by one frame) — imperceptible.
     fn controls(&mut self, ui: &mut Ui, theme: &Theme, pane: Option<Vec2>) {
         let port = self.port;
-        Panel::hstack()
-            .id(control_wid(port, "pill"))
+        Panel::vstack()
+            .id(control_wid(port, "panel"))
             .size((Sizing::Hug, Sizing::Hug))
             .align(Align::new(HAlign::Right, VAlign::Top))
+            .child_align(Align::new(HAlign::Right, VAlign::Top))
             .margin(Spacing::new(0.0, TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0))
             .gap(BUTTON_GAP)
-            .padding(Spacing::all(PILL_PADDING))
-            .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL)
-            .background(pill_background(theme))
             .show(ui, |ui| {
-                if action_button(ui, theme, control_wid(port, "fit"), "Fit to view", draw_fit) {
-                    self.view = None;
-                    self.pan_anchor = None;
-                }
-                if action_button(
-                    ui,
-                    theme,
-                    control_wid(port, "100"),
-                    "Zoom to 100%",
-                    draw_100,
-                ) && let (Some(handle), Some(pane)) = (&self.image, pane)
-                {
-                    let img = handle.size().as_vec2();
-                    let v = self.view.unwrap_or_else(|| fit_viewport(img, pane));
-                    self.view = Some(zoom_about_pane_center(v, 1.0, pane));
-                }
-                for (mode, key, tip) in [
-                    (ViewerBackground::Theme, "bg_theme", "Theme background"),
-                    (ViewerBackground::Black, "bg_black", "Black background"),
-                    (ViewerBackground::White, "bg_white", "White background"),
-                    (
-                        ViewerBackground::Checker,
-                        "bg_checker",
-                        "Checkerboard background",
-                    ),
-                ] {
-                    if self.background_swatch(ui, theme, mode, key, tip) {
-                        self.background = mode;
+                let framing = Panel::hstack().id(control_wid(port, "pill_framing"));
+                pill(ui, theme, framing, |ui| {
+                    if action_button(ui, theme, control_wid(port, "fit"), "Fit to view", draw_fit) {
+                        self.reset_framing();
                     }
-                }
-                self.filter_toggle(ui, theme);
+                    if action_button(
+                        ui,
+                        theme,
+                        control_wid(port, "100"),
+                        "Zoom to 100%",
+                        draw_100,
+                    ) && let (Some(handle), Some(pane)) = (&self.image, pane)
+                    {
+                        let img = handle.size().as_vec2();
+                        let v = self.view.unwrap_or_else(|| fit_viewport(img, pane));
+                        self.view = Some(zoom_about_pane_center(v, 1.0, pane));
+                    }
+                });
+                let appearance = Panel::vstack().id(control_wid(port, "pill_appearance"));
+                pill(ui, theme, appearance, |ui| {
+                    for (mode, key, tip) in [
+                        (ViewerBackground::Theme, "bg_theme", "Theme background"),
+                        (ViewerBackground::Black, "bg_black", "Black background"),
+                        (ViewerBackground::White, "bg_white", "White background"),
+                        (
+                            ViewerBackground::Checker,
+                            "bg_checker",
+                            "Checkerboard background",
+                        ),
+                    ] {
+                        if self.background_swatch(ui, theme, mode, key, tip) {
+                            self.background = mode;
+                        }
+                    }
+                    // Rule between the backdrop radio stack and the
+                    // sampling toggle — two concepts, one pill.
+                    pill_rule(ui, theme);
+                    self.filter_toggle(ui, theme);
+                });
             });
     }
 
@@ -422,15 +435,8 @@ impl ImageViewer {
         key: &'static str,
         tip: &'static str,
     ) -> bool {
-        let wid = control_wid(self.port, key);
-        let hovered = ui.response_for(wid).hovered;
-        let fill = if hovered {
-            theme.colors.header_fill
-        } else {
-            theme.colors.node_fill
-        };
         let selected = self.background == mode;
-        glyph_button(ui, wid, fill, theme.colors.text_muted, tip, |ui, s, _| {
+        action_button(ui, theme, control_wid(self.port, key), tip, |ui, s, _| {
             draw_swatch(ui, s, theme, mode, selected)
         })
     }
@@ -439,21 +445,21 @@ impl ImageViewer {
     /// is active, neutral otherwise.
     fn filter_toggle(&mut self, ui: &mut Ui, theme: &Theme) {
         let nearest = self.filter == ImageFilter::Nearest;
-        let wid = control_wid(self.port, "filter");
-        let hovered = ui.response_for(wid).hovered;
-        let (fill, glyph) = if nearest {
-            (theme.colors.selection_rect, theme.colors.chrome_fill)
-        } else if hovered {
-            (theme.colors.header_fill, theme.colors.text_muted)
-        } else {
-            (theme.colors.node_fill, theme.colors.text_muted)
-        };
         let tip = if nearest {
             "Sampling: nearest — click for bilinear"
         } else {
             "Sampling: bilinear — click for nearest"
         };
-        if glyph_button(ui, wid, fill, glyph, tip, draw_pixels) {
+        if toggle_button(
+            ui,
+            theme,
+            control_wid(self.port, "filter"),
+            nearest,
+            theme.colors.text_muted,
+            theme.colors.selection_rect,
+            tip,
+            draw_pixels,
+        ) {
             self.filter = if nearest {
                 ImageFilter::Linear
             } else {
@@ -479,8 +485,7 @@ impl ImageViewer {
             return;
         }
         if resp.double_clicked() {
-            self.view = None;
-            self.pan_anchor = None;
+            self.reset_framing();
             return;
         }
         let adjusting = resp.drag_started_by(PointerButton::Left)
