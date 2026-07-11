@@ -21,7 +21,7 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
 use crate::gui::scene::Scene;
 use crate::gui::widgets::toolbar::{
-    BUTTON_GAP, TOOLBAR_MARGIN, action_button, dot, frame, pill, stroked_rect, toggle_button,
+    BUTTON_GAP, Chip, TOOLBAR_MARGIN, dot, frame, pill, stroked_rect,
 };
 
 fn run_button_wid() -> WidgetId {
@@ -77,16 +77,12 @@ pub(crate) fn show(
                     // Run is the one primary action in the cluster — it alone
                     // idles with the accent glyph; the event-loop toggle sits
                     // muted beside it like the framing buttons below.
-                    if toggle_button(
-                        ui,
-                        ctx.theme,
-                        run_button_wid(),
-                        running,
-                        ctx.theme.colors.exec_executed_glow,
-                        ctx.theme.colors.exec_running_glow,
-                        run_tip,
-                        draw_play,
-                    ) {
+                    if Chip::new(run_button_wid(), run_tip)
+                        .toggled(running)
+                        .idle_glyph(ctx.theme.colors.exec_executed_glow)
+                        .toggled_fill(ctx.theme.colors.exec_running_glow)
+                        .show(ui, ctx.theme, draw_play)
+                    {
                         command = Some(if running {
                             AppCommand::Run(RunCommand::Cancel)
                         } else {
@@ -99,16 +95,11 @@ pub(crate) fn show(
                     } else {
                         "Start events"
                     };
-                    if toggle_button(
-                        ui,
-                        ctx.theme,
-                        events_button_wid(),
-                        ctx.events_running,
-                        ctx.theme.colors.text_muted,
-                        ctx.theme.colors.exec_running_glow,
-                        events_tip,
-                        draw_play_bar,
-                    ) {
+                    if Chip::new(events_button_wid(), events_tip)
+                        .toggled(ctx.events_running)
+                        .toggled_fill(ctx.theme.colors.exec_running_glow)
+                        .show(ui, ctx.theme, draw_play_bar)
+                    {
                         command = Some(if ctx.events_running {
                             AppCommand::Run(RunCommand::StopEvents)
                         } else {
@@ -125,7 +116,7 @@ pub(crate) fn show(
                 .id_salt("graph_toolbar_framing")
                 .child_align(Align::new(HAlign::Left, VAlign::Top));
             pill(ui, ctx.theme, framing, |ui| {
-                if action_button(ui, ctx.theme, reset_view_wid(), "Reset view", draw_reset) {
+                if Chip::new(reset_view_wid(), "Reset view").show(ui, ctx.theme, draw_reset) {
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
@@ -133,7 +124,7 @@ pub(crate) fn show(
                         ViewAction::Reset,
                     ));
                 }
-                if action_button(ui, ctx.theme, show_all_wid(), "Show all", draw_show_all) {
+                if Chip::new(show_all_wid(), "Show all").show(ui, ctx.theme, draw_show_all) {
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
@@ -141,11 +132,9 @@ pub(crate) fn show(
                         ViewAction::ShowAll,
                     ));
                 }
-                if action_button(
+                if Chip::new(show_selected_wid(), "Show selected").show(
                     ui,
                     ctx.theme,
-                    show_selected_wid(),
-                    "Show selected",
                     draw_show_selected,
                 ) {
                     out.extend(pan_zoom::view_action_intent(

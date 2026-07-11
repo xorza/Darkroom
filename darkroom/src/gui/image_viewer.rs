@@ -37,7 +37,7 @@ use crate::core::worker::RunId;
 use crate::gui::canvas::pan_zoom::{scroll_to_zoom_factor, zoom_about};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::toolbar::{
-    BUTTON_GAP, TOOLBAR_MARGIN, action_button, pill, pill_background, pill_rule, toggle_button,
+    BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill, pill_background, pill_rule,
 };
 
 /// Longest texture side we upload. Conservative device
@@ -385,16 +385,12 @@ impl ImageViewer {
             .show(ui, |ui| {
                 let framing = Panel::hstack().id(control_wid(port, "pill_framing"));
                 pill(ui, theme, framing, |ui| {
-                    if action_button(ui, theme, control_wid(port, "fit"), "Fit to view", draw_fit) {
+                    if Chip::new(control_wid(port, "fit"), "Fit to view").show(ui, theme, draw_fit)
+                    {
                         self.reset_framing();
                     }
-                    if action_button(
-                        ui,
-                        theme,
-                        control_wid(port, "100"),
-                        "Zoom to 100%",
-                        draw_100,
-                    ) && let (Some(handle), Some(pane)) = (&self.image, pane)
+                    if Chip::new(control_wid(port, "100"), "Zoom to 100%").show(ui, theme, draw_100)
+                        && let (Some(handle), Some(pane)) = (&self.image, pane)
                     {
                         let img = handle.size().as_vec2();
                         let v = self.view.unwrap_or_else(|| fit_viewport(img, pane));
@@ -436,7 +432,7 @@ impl ImageViewer {
         tip: &'static str,
     ) -> bool {
         let selected = self.background == mode;
-        action_button(ui, theme, control_wid(self.port, key), tip, |ui, s, _| {
+        Chip::new(control_wid(self.port, key), tip).show(ui, theme, |ui, s, _| {
             draw_swatch(ui, s, theme, mode, selected)
         })
     }
@@ -450,16 +446,10 @@ impl ImageViewer {
         } else {
             "Sampling: bilinear — click for nearest"
         };
-        if toggle_button(
-            ui,
-            theme,
-            control_wid(self.port, "filter"),
-            nearest,
-            theme.colors.text_muted,
-            theme.colors.selection_rect,
-            tip,
-            draw_pixels,
-        ) {
+        if Chip::new(control_wid(self.port, "filter"), tip)
+            .toggled(nearest)
+            .show(ui, theme, draw_pixels)
+        {
             self.filter = if nearest {
                 ImageFilter::Linear
             } else {
