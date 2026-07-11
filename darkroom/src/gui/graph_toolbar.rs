@@ -8,8 +8,8 @@
 //! while the framing buttons emit an `Intent::SetViewport` directly.
 
 use aperture::{
-    Align, Color, Configure, Corners, HAlign, Panel, Rect, Shape, Sizing, Spacing, Stroke, Ui,
-    VAlign, WidgetId,
+    Align, Color, Configure, HAlign, Panel, Rect, Shape, Sizing, Spacing, Stroke, Ui, VAlign,
+    WidgetId,
 };
 use glam::Vec2;
 

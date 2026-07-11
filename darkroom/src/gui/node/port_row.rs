@@ -7,8 +7,8 @@
 //! affordance lives in [`crate::gui::node::port_rename`].
 
 use aperture::{
-    Align, Color, Configure, ContextMenu, Corners, Grid, HAlign, MenuItem, Panel, Rect, Sense,
-    Shape, Sizing, Spacing, Stroke, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
+    Align, Color, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, Rect, Sense, Shape,
+    Sizing, Spacing, Stroke, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use glam::Vec2;
 use scenarium::data::{DataType, FsPathMode};

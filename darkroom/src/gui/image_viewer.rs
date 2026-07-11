@@ -511,7 +511,7 @@ fn control_wid(port: PortRef, key: &'static str) -> WidgetId {
 
 /// The backdrop radio roster — mode, widget-id key, tooltip — the one
 /// table behind the controls loop and the swatch ids.
-const BACKDROPS: [(ViewerBackground, &'static str, &'static str); 4] = [
+const BACKDROPS: [(ViewerBackground, &str, &str); 4] = [
     (ViewerBackground::Theme, "bg_theme", "Theme background"),
     (ViewerBackground::Black, "bg_black", "Black background"),
     (ViewerBackground::White, "bg_white", "White background"),

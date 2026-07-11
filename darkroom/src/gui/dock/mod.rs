@@ -23,7 +23,7 @@ pub(crate) mod strip;
 
 use aperture::{
     Background, Configure, Corners, CursorIcon, Layer, Panel, Rect, Sizing, SmolStr, Spacing,
-    SplitHalf, Splitter, Stroke, Text, TextStyle, Ui, WidgetId,
+    SplitHalf, Splitter, Stroke, Text, Ui, WidgetId,
 };
 use glam::Vec2;
 

@@ -28,7 +28,7 @@ use aperture::{
     Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
 };
 use glam::Vec2;
-use scenarium::data::{DataType, StaticValue};
+use scenarium::data::DataType;
 use scenarium::execution::stats::LogLevel;
 use scenarium::graph::NodeId;
 use scenarium::library::Library;
@@ -451,6 +451,10 @@ fn port_label_text(library: &Library, name: &str, ty: &DataType) -> String {
 /// the dark panel needs an edge to read as a framed object. No-op when
 /// the port has no preview.
 ///
+/// The rounded corners come from a `Shape::WindowedRect` over the image
+/// (wedges filled with the panel surface, stroke on the boundary), not
+/// `clip_rounded` — same look without the stencil-mask pass.
+///
 /// The thumbnail is a click target: [`Inspectors::emit_preview_opens`]
 /// reads it in the prepass to open the full-resolution viewer tab. The
 /// frame brightens on hover as the affordance.
@@ -482,13 +486,6 @@ fn draw_preview(
         .id(wid)
         .size((Sizing::Fixed(w), Sizing::Fixed(h)))
         .sense(Sense::CLICK)
-        .background(Background {
-            fill: Color::TRANSPARENT.into(),
-            stroke: Stroke::solid(theme.colors.text_muted.with_alpha(stroke_alpha), 1.0),
-            corners: Corners::all(4.0),
-            ..Default::default()
-        })
-        .clip_rounded()
         .show(ui, |ui| {
             ui.add_shape(Shape::Image {
                 handle: handle.clone(),
@@ -496,6 +493,12 @@ fn draw_preview(
                 fit: ImageFit::Contain,
                 filter: ImageFilter::Linear,
                 tint: Color::WHITE,
+            });
+            ui.add_shape(Shape::WindowedRect {
+                local_rect: None,
+                corners: Corners::all(4.0),
+                fill: theme.colors.node_fill.into(),
+                stroke: Stroke::solid(theme.colors.text_muted.with_alpha(stroke_alpha), 1.0),
             });
         });
 }
