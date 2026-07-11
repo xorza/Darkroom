@@ -27,7 +27,7 @@ use aperture::{
     VAlign, WidgetId,
 };
 use glam::{UVec2, Vec2};
-use imaginarium::{Preview, ProcessingContext};
+use imaginarium::{ColorFormat, Preview, ProcessingContext};
 use lens::Image as LensImage;
 use scenarium::data::DynamicValue;
 use scenarium::graph::NodeSearch;
@@ -89,6 +89,9 @@ pub(crate) struct ImageViewer {
     image: Option<ImageHandle>,
     /// Source dimensions before the texture-cap downscale.
     native_size: UVec2,
+    /// Source pixel format before the RGBA8 view conversion, for the
+    /// header readout; `None` while nothing is shown.
+    native_format: Option<ColorFormat>,
     /// Why the pane is empty, when it is.
     message: Option<String>,
     /// Run epoch of the current content (`shown`/message), `None` while
@@ -121,11 +124,12 @@ struct ViewerViewport {
 }
 
 /// An RGBA8 render of a full image value, ready to register, plus the
-/// source dimensions it was derived from.
+/// source dimensions and pixel format it was derived from.
 #[derive(Debug)]
 struct RenderedImage {
     image: aperture::Image,
     native_size: UVec2,
+    native_format: ColorFormat,
 }
 
 impl ImageViewer {
@@ -138,6 +142,7 @@ impl ImageViewer {
             shown: None,
             image: None,
             native_size: UVec2::ZERO,
+            native_format: None,
             message: None,
             content_epoch: None,
             view: None,
@@ -207,6 +212,7 @@ impl ImageViewer {
                 self.pending = None;
                 self.image = None;
                 self.native_size = UVec2::ZERO;
+                self.native_format = None;
                 self.message = Some("port has no image value".to_owned());
             }
         }
@@ -230,11 +236,13 @@ impl ImageViewer {
                         self.reset_framing();
                     }
                     self.native_size = rendered.native_size;
+                    self.native_format = Some(rendered.native_format);
                     self.image = Some(ui.register_image(rendered.image));
                 }
                 Err(message) => {
                     self.image = None;
                     self.native_size = UVec2::ZERO;
+                    self.native_format = None;
                     self.message = Some(message);
                 }
             }
@@ -340,6 +348,9 @@ impl ImageViewer {
             self.native_size.x,
             self.native_size.y,
         );
+        if let Some(format) = self.native_format {
+            text.push_str(&format!(" · {format}"));
+        }
         if handle.size() != self.native_size {
             text.push_str(" · downscaled view");
         }
@@ -779,6 +790,7 @@ fn render_full(value: &DynamicValue) -> Result<RenderedImage, String> {
     if native_size.x == 0 || native_size.y == 0 {
         return Err("image is empty".to_owned());
     }
+    let native_format = cpu.desc.color_format;
     let target = capped_target(native_size);
     // 1:1 passes through as a plain RGBA8 convert (Preview never upscales).
     let rgba = Preview::new(target.x as usize, target.y as usize).to_rgba8(&cpu);
@@ -790,6 +802,7 @@ fn render_full(value: &DynamicValue) -> Result<RenderedImage, String> {
             rgba.into_bytes(),
         ),
         native_size,
+        native_format,
     })
 }
 
@@ -876,9 +889,20 @@ mod tests {
 
         let rendered = render_full(&value).expect("cpu image renders");
         assert_eq!(rendered.native_size, UVec2::new(2, 1));
+        assert_eq!(rendered.native_format, ColorFormat::RGBA_U8);
         assert_eq!(rendered.image.width, 2);
         assert_eq!(rendered.image.height, 1);
         assert_eq!(rendered.image.pixels, bytes);
+
+        // A non-RGBA8 source reports its own format — the header shows
+        // the source pixels, not the RGBA8 view conversion. One RGB_F32
+        // texel = 12 bytes.
+        let desc = ImageDesc::new(1, 1, ColorFormat::RGB_F32);
+        let raw = RawImage::new_with_data(desc, vec![0; 12]).unwrap();
+        let value = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
+        let rendered = render_full(&value).expect("f32 image renders");
+        assert_eq!(rendered.native_format, ColorFormat::RGB_F32);
+        assert_eq!(rendered.image.pixels.len(), 4, "converted to 1×1 RGBA8");
 
         // Non-image values are refused with a reason, not a panic.
         let err = render_full(&DynamicValue::from(42i64)).unwrap_err();
