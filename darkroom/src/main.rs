@@ -141,11 +141,14 @@ fn run_gui(script_cfg: ScriptConfig) {
     // instance for the app so we don't read the file twice.
     let preferences = Preferences::load();
     let mut window = WindowConfig::new("Darkroom");
-    window.icon = load_icon();
+    if let Some(icon) = load_icon() {
+        window = window.icon(icon);
+    }
     if let Some(w) = &preferences.window {
-        window.inner_size = Some(w.size);
-        window.position = w.position;
-        window.maximized = w.maximized;
+        window = window.inner_size(w.size).maximized(w.maximized);
+        if let Some(pos) = w.position {
+            window = window.position(pos);
+        }
     }
     WinitHost::builder(MAIN_WINDOW)
         .window(window)
