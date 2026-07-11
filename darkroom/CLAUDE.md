@@ -241,7 +241,7 @@ A flat, per-frame snapshot rebuilt from the *active* graph+view every frame
 so it *must* be rebuilt before any widget reads it. Port names, types, and
 input-binding snapshots are flattened into pooled `Vec`s sliced per node (zero
 per-node allocation in steady state). Each `SceneNode` carries its
-`exec_status` (copied from `run_state`) to drive the status glow + header time
+`exec_status` (copied from `run_state`) to drive the status glow + run-time
 label. Scene is read-only mirror state — viewport/selection are copied *from*
 the active `GraphView` each rebuild; the gesture writes back via intents.
 

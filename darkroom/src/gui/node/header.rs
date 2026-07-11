@@ -2,9 +2,9 @@
 //! visual families so a toggle can't be mistaken for a fact. **Controls** are
 //! bordered, hover-lifting chips you act on — `S` subgraph-open, `D` disable,
 //! `R`/`↓` cache, and the `i` inspect chip. **Markers** are flat tinted pills
-//! that only describe the node — `T` terminal and `~` impure. The descriptive
-//! side (run-time label + markers) rides in the [`header`] band beside the
-//! title; the interactive controls sit in the [`status_row`] below it. Drawn as
+//! that only describe the node — `T` terminal and `~` impure. The markers ride
+//! in the [`header`] band beside the title; the run-time label (left) and the
+//! interactive controls (right) share the [`status_row`] below it. Drawn as
 //! the top children of each node body by [`crate::gui::node::NodeUI`].
 
 use aperture::{
@@ -110,11 +110,10 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.subscription_glyph", node_id))
 }
 
-/// The header bar: the node title (left) and the run-state cluster (right) —
-/// the last-run time, the descriptive markers (`T`/`~`), then the inspect chip.
-/// A `FILL` spacer between them keeps the title from reflowing as the time
-/// appears and disappears, so these can share one band with it (the interactive
-/// controls stay in [`status_row`] below). The terminal nodes' event-
+/// The header bar: the node title (left) and the descriptive cluster (right) —
+/// the markers (`T`/`~`), then the inspect chip. A `FILL` spacer between them
+/// pins the cluster to the right edge (the run-time label and the interactive
+/// controls ride in [`status_row`] below). The terminal nodes' event-
 /// subscription pin is *not* drawn here — it records at canvas level, before the
 /// node bodies, so it peeks out from behind the node's corner.
 pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
@@ -146,38 +145,12 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
                 play_chip(ui, theme, node);
             }
             title(ui, rcx, node, out);
-            // FILL spacer splits the title (left) from the run-state cluster
-            // (right): the last-run time, the descriptive markers, then inspect.
+            // FILL spacer splits the title (left) from the descriptive cluster
+            // (right): the markers, then inspect.
             Panel::hstack()
                 .id_salt("header_spacer")
                 .size((Sizing::FILL, Sizing::Hug))
                 .show(ui, |_| {});
-            // Last-run time, tied to the node's status color — the final time
-            // once executed, or live elapsed-so-far while running (`App::frame`
-            // repaints so it ticks). Mono/tabular so it holds a column across a
-            // stack of nodes. Lives in the header rather than a second row, so
-            // the node is one band shorter.
-            let elapsed = match node.exec_status {
-                ExecStatus::Executed(secs) => Some(secs),
-                ExecStatus::Running(at) => Some(at.elapsed().as_secs_f64()),
-                _ => None,
-            };
-            if let Some(secs) = elapsed {
-                let color = exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
-                // A comet spinner while computing, just left of the live time,
-                // so glow + spin + ticking time read as one "running" cue.
-                if matches!(node.exec_status, ExecStatus::Running(_)) {
-                    Spinner::new().size(BADGE_FONT).color(color).show(ui);
-                }
-                Text::new(fmt_elapsed(secs))
-                    .style(TextStyle {
-                        color,
-                        font_size_px: BADGE_FONT,
-                        family: FontFamily::Mono,
-                        ..ui.theme.text
-                    })
-                    .show(ui);
-            }
             // Read-only markers — what the node *is* (flat tinted pills, not
             // interactive, so they read as labels). They ride here beside the
             // title; the interactive controls stay in `status_row` below.
@@ -223,12 +196,11 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
         });
 }
 
-/// The controls strip under the header: a `FILL` spacer, then the interactive
-/// chips right-aligned — `S` subgraph-open, `D` disable, `R`/`↓` cache. What you
-/// can *do* to the node, kept in its own row so the actions group apart from the
-/// title's identity + state. The descriptive markers and run-time moved up into
-/// the [`header`]. The disable chip always shows, so the row's height is
-/// reserved regardless.
+/// The strip under the header: the run-time label left-aligned, a `FILL`
+/// spacer, then the interactive chips right-aligned — `S` subgraph-open, `D`
+/// disable, `R`/`↓` cache. The controls group apart from the title's identity
+/// (header above); the run-time reads as the row's status counterweight. The
+/// disable chip always shows, so the row's height is reserved regardless.
 pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     Panel::hstack()
@@ -240,9 +212,33 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            // Leading FILL spacer pushes the controls to the right edge; the
-            // markers + run-time that used to share this row now ride in the
-            // header above.
+            // Last-run time leads the row, tied to the node's status color —
+            // the final time once executed, or live elapsed-so-far while
+            // running (`App::frame` repaints so it ticks). Mono/tabular so it
+            // holds a column across a stack of nodes.
+            let elapsed = match node.exec_status {
+                ExecStatus::Executed(secs) => Some(secs),
+                ExecStatus::Running(at) => Some(at.elapsed().as_secs_f64()),
+                _ => None,
+            };
+            if let Some(secs) = elapsed {
+                let color = exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
+                // A comet spinner while computing, just left of the live time,
+                // so glow + spin + ticking time read as one "running" cue.
+                if matches!(node.exec_status, ExecStatus::Running(_)) {
+                    Spinner::new().size(BADGE_FONT).color(color).show(ui);
+                }
+                Text::new(fmt_elapsed(secs))
+                    .style(TextStyle {
+                        color,
+                        font_size_px: BADGE_FONT,
+                        family: FontFamily::Mono,
+                        ..ui.theme.text
+                    })
+                    .show(ui);
+            }
+            // FILL spacer pushes the controls to the right edge, keeping the
+            // run-time label pinned left.
             Panel::hstack()
                 .id_salt("ctrl_spacer")
                 .size((Sizing::FILL, Sizing::Hug))
