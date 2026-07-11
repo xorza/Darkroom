@@ -7,7 +7,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use aperture::{WindowIcon, WinitHost, WinitHostConfig};
+use aperture::{WindowConfig, WindowIcon, WinitHost};
 use clap::{Parser, Subcommand};
 use common::is_debug;
 use tokio::sync::Notify;
@@ -140,19 +140,21 @@ fn run_gui(script_cfg: ScriptConfig) {
     // first window is already up, too late to size it). Reuse the same
     // instance for the app so we don't read the file twice.
     let preferences = Preferences::load();
-    let mut config = WinitHostConfig::new("Darkroom");
-    config.window.icon = load_icon();
+    let mut window = WindowConfig::new("Darkroom");
+    window.icon = load_icon();
     if let Some(w) = &preferences.window {
-        config.window.inner_size = Some(w.size);
-        config.window.position = w.position;
-        config.window.maximized = w.maximized;
+        window.inner_size = Some(w.size);
+        window.position = w.position;
+        window.maximized = w.maximized;
     }
-    WinitHost::new(MAIN_WINDOW, config, move |ui, handle| {
-        ui.debug_overlay_mut().damage_rect = is_debug();
+    WinitHost::builder(MAIN_WINDOW)
+        .window(window)
+        .build(move |ui, handle| {
+            ui.debug_overlay_mut().damage_rect = is_debug();
 
-        App::new(ui, handle, script_cfg, preferences)
-    })
-    .run();
+            App::new(ui, handle, script_cfg, preferences)
+        })
+        .run();
 }
 
 /// Decode the baked-in window icon (PNG → RGBA8) for the title bar /
