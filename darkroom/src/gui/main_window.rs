@@ -5,8 +5,11 @@ use aperture::{
     Align, Background, Configure, Panel, Sizing, SplitHalf, Splitter, Ui, VAlign, WidgetId,
 };
 
+use crate::core::document::dock::{
+    DockLayout, DockNode, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
+};
 use crate::core::document::{Document, GraphRef, PortRef, TabRef};
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::{DockIntent, Intent};
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
 use crate::gui::app::AppContext;
@@ -21,8 +24,11 @@ use crate::gui::scene::Scene;
 use crate::gui::status_bar;
 use crate::gui::tab_bar::{self, TabLabel};
 
+/// Smallest a dock pane can be squeezed on its split axis, in logical px.
+const MIN_PANE: f32 = 220.0;
+
 /// Top of darkroom's UI tree. Owns every persistent UI scope; adding a
-/// new top-level pane is a new field + a new dispatch in `frame`.
+/// new top-level pane *kind* is a new arm in `render_group`'s dispatch.
 #[derive(Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
@@ -32,6 +38,29 @@ pub(crate) struct MainWindow {
     /// entries whose tab closed — dropping one frees its texture.
     pub(crate) image_viewers: HashMap<PortRef, ImageViewer>,
     first_frame: bool,
+}
+
+/// Stable id for a group's pane container — the rect drop-zone math and
+/// hover tests will key off (drag-docking phase).
+fn pane_wid(group: TabGroupId) -> WidgetId {
+    WidgetId::from_hash(("dock.pane", group))
+}
+
+/// Stable id for the splitter at a tree path.
+fn splitter_wid(path: DockPath) -> WidgetId {
+    WidgetId::from_hash(("dock.splitter", path))
+}
+
+/// Borrows threaded through the dock-tree walk — one bundle instead of a
+/// six-way parameter fan-out at every recursion level (the
+/// [`AppContext`] pattern, walk-scoped and carrying the mutable halves).
+struct DockWalk<'a> {
+    ctx: &'a AppContext<'a>,
+    scene: &'a Scene,
+    prefs: &'a mut Preferences,
+    doc: &'a Document,
+    out: &'a mut Vec<Intent>,
+    command: &'a mut Option<AppCommand>,
 }
 
 impl MainWindow {
@@ -48,7 +77,7 @@ impl MainWindow {
         scene: &Scene,
         actions: &mut Vec<UiAction>,
     ) {
-        tab_bar::emit_tab_actions(ui, &doc.tabs, actions);
+        tab_bar::emit_tab_actions(ui, &doc.layout, actions);
         emit_subgraph_opens(ui, scene, actions);
         self.graph_ui
             .inspectors
@@ -61,7 +90,6 @@ impl MainWindow {
         self.graph_ui.prepass(ui, scene, out);
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
@@ -72,12 +100,9 @@ impl MainWindow {
         out: &mut Vec<Intent>,
     ) -> Option<AppCommand> {
         let mut command = None;
-        let tabs = tab_labels(doc);
-        // Menu bar and tab strip share one row: "File" hugs the left, the
-        // tab strip fills the rest. Both read on the `chrome_fill` band;
-        // the graph pane (canvas_bg) fills the rest below, and the active
-        // tab punches through to that same color so it looks continuous
-        // with the canvas below it.
+        // The menu bar rides its own chrome band; each pane below carries
+        // its own tab strip, and the dock tree fills the space between
+        // menu and status bar.
         let chrome = ctx.theme.colors.chrome_fill;
         Panel::vstack()
             .auto_id()
@@ -93,40 +118,17 @@ impl MainWindow {
                     })
                     .show(ui, |ui| {
                         command = menu_bar::show(ui);
-                        tab_bar::show(ui, ctx.theme, &tabs, doc.active, out);
                     });
-                // The content pane below the strip is the active tab's view:
-                // the graph canvas for a graph tab, or the preferences window for
-                // the non-graph Preferences tab.
-                match doc.active_tab() {
-                    TabRef::Graph(_) => {
-                        // Overlay the run/cancel toggle on the canvas's
-                        // top-left corner; it hit-tests above the canvas, so a
-                        // click on it never starts a pan.
-                        Panel::zstack()
-                            .id_salt("graph_overlay")
-                            .size((Sizing::FILL, Sizing::FILL))
-                            .show(ui, |ui| {
-                                self.graph_ui.frame(ui, ctx, scene, out, &mut command);
-                                if let Some(c) = graph_toolbar::show(
-                                    ui,
-                                    ctx,
-                                    scene,
-                                    &self.graph_ui.geometry,
-                                    out,
-                                ) {
-                                    command = Some(c);
-                                }
-                            });
-                    }
-                    TabRef::Preferences => {
-                        if let Some(c) = preferences_view::show(ui, ctx.theme, prefs) {
-                            command = Some(c);
-                        }
-                    }
-                    TabRef::ImageViewer(port) => self.viewer_mut(port).show(ui, ctx.theme),
-                }
-                // Bottom chrome: the cache-memory readout, below the content pane.
+                let mut walk = DockWalk {
+                    ctx,
+                    scene,
+                    prefs,
+                    doc,
+                    out,
+                    command: &mut command,
+                };
+                self.render_dock(ui, &mut walk, DockLayout::ROOT, DockPath::ROOT);
+                // Bottom chrome: the cache-memory readout, below the panes.
                 status_bar::show(ui, ctx);
             });
 
@@ -134,6 +136,92 @@ impl MainWindow {
             ui.request_relayout();
         }
         command
+    }
+
+    /// Recursive walk of the dock tree: a split renders as an aperture
+    /// `Splitter` (ratio changes surface as `DockIntent::SetRatio`), a
+    /// group as its strip + the active tab's view.
+    fn render_dock(&mut self, ui: &mut Ui, w: &mut DockWalk<'_>, idx: NodeIdx, path: DockPath) {
+        // Copy the `&Document` out of the walk so the node borrow lives
+        // off the document directly, leaving `w` free for the recursion.
+        let doc = w.doc;
+        match doc.layout.node(idx) {
+            DockNode::Group(group) => self.render_group(ui, w, group),
+            DockNode::Split(split) => {
+                let DockSplit {
+                    dir,
+                    ratio,
+                    first,
+                    second,
+                } = *split;
+                let mut live_ratio = ratio;
+                let splitter = match dir {
+                    SplitDir::Row => Splitter::horizontal(&mut live_ratio),
+                    SplitDir::Column => Splitter::vertical(&mut live_ratio),
+                };
+                splitter
+                    .id(splitter_wid(path))
+                    .min_pane(MIN_PANE)
+                    .show(ui, |ui, half| {
+                        let (child, child_path) = match half {
+                            SplitHalf::First => (first, path.first()),
+                            SplitHalf::Second => (second, path.second()),
+                        };
+                        self.render_dock(ui, w, child, child_path);
+                    });
+                // The widget wrote the divider drag into `live_ratio`; the
+                // layout itself only changes through the recorded intent
+                // (drained post-record, coalescing per divider).
+                if live_ratio != ratio {
+                    w.out.push(Intent::Dock(DockIntent::SetRatio {
+                        split: path,
+                        ratio: live_ratio,
+                    }));
+                }
+            }
+        }
+    }
+
+    /// One pane: the group's tab strip over its active tab's view.
+    fn render_group(&mut self, ui: &mut Ui, w: &mut DockWalk<'_>, group: &TabGroup) {
+        let labels = tab_labels(w.doc, group);
+        let focused = w.doc.layout.focused == group.id;
+        Panel::vstack()
+            .id(pane_wid(group.id))
+            .size((Sizing::FILL, Sizing::FILL))
+            .show(ui, |ui| {
+                tab_bar::show(ui, w.ctx.theme, group, &labels, focused, w.out);
+                match group.active_tab() {
+                    TabRef::Graph(_) => {
+                        // Overlay the run/cancel toggle on the canvas's
+                        // top-left corner; it hit-tests above the canvas, so a
+                        // click on it never starts a pan. Graph tabs live only
+                        // in the primary group, so the single canvas scope
+                        // can't be recorded twice.
+                        Panel::zstack()
+                            .id_salt("graph_overlay")
+                            .size((Sizing::FILL, Sizing::FILL))
+                            .show(ui, |ui| {
+                                self.graph_ui.frame(ui, w.ctx, w.scene, w.out, w.command);
+                                if let Some(c) = graph_toolbar::show(
+                                    ui,
+                                    w.ctx,
+                                    w.scene,
+                                    &self.graph_ui.geometry,
+                                    w.out,
+                                ) {
+                                    *w.command = Some(c);
+                                }
+                            });
+                    }
+                    TabRef::Preferences => {
+                        if let Some(c) = preferences_view::show(ui, w.ctx.theme, w.prefs) {
+                            *w.command = Some(c);
+                        }
+                    }
+                    TabRef::ImageViewer(port) => self.viewer_mut(port).show(ui, w.ctx.theme),
+                }
+            });
     }
 
     /// Drop transient input bookkeeping (drag anchors, in-flight
@@ -154,50 +242,28 @@ impl MainWindow {
     }
 }
 
-/// Project one group's tabs into the strip's per-tab labels. Lives here
+/// Project one group's tabs into the strip's per-tab labels — the label
+/// text is the one thing the strip needs the `Document` for. Lives here
 /// (not in `tab_bar`) so the strip stays document-agnostic — same split
 /// as `Scene` for the canvas.
 fn tab_labels(doc: &Document, group: &TabGroup) -> Vec<TabLabel> {
     group
         .tabs
         .iter()
-        .map(|t| match t {
-            TabRef::Graph(GraphRef::Main) => TabLabel {
-                tab: *t,
-                text: "main".into(),
-                subgraph_id: None,
-                closable: false,
-                movable: false,
-            },
-            TabRef::Graph(GraphRef::Local(id)) => {
-                let name = doc
+        .map(|&tab| {
+            let text = match tab {
+                TabRef::Graph(GraphRef::Main) => "main".into(),
+                TabRef::Graph(GraphRef::Local(id)) => doc
                     .graph
                     .subgraphs
-                    .by_key(id)
-                    .map(|d| d.name.clone())
-                    .unwrap_or_else(|| "subgraph".to_string());
-                TabLabel {
-                    tab: *t,
-                    text: name.into(),
-                    subgraph_id: Some(*id),
-                    closable: true,
-                    movable: false,
-                }
-            }
-            TabRef::Preferences => TabLabel {
-                tab: *t,
-                text: "preferences".into(),
-                subgraph_id: None,
-                closable: true,
-                movable: true,
-            },
-            TabRef::ImageViewer(port) => TabLabel {
-                tab: *t,
-                text: image_viewer::port_label(doc, *port).into(),
-                subgraph_id: None,
-                closable: true,
-                movable: true,
-            },
+                    .by_key(&id)
+                    .map(|d| d.name.as_str())
+                    .unwrap_or("subgraph")
+                    .into(),
+                TabRef::Preferences => "preferences".into(),
+                TabRef::ImageViewer(port) => image_viewer::port_label(doc, port).into(),
+            };
+            TabLabel { tab, text }
         })
         .collect()
 }
