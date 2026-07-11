@@ -8,8 +8,8 @@
 //! while the framing buttons emit an `Intent::SetViewport` directly.
 
 use aperture::{
-    Align, Background, Color, Configure, Corners, HAlign, Panel, Rect, Sense, Shape, Sizing,
-    Spacing, Stroke, Tooltip, Ui, VAlign, WidgetId,
+    Align, Color, Configure, Corners, HAlign, Panel, Rect, Shape, Sizing, Spacing, Stroke, Ui,
+    VAlign, WidgetId,
 };
 use glam::Vec2;
 
@@ -21,26 +21,10 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
-
-/// Side of each square button, in px.
-const BUTTON_SIZE: f32 = 30.0;
-/// Inset of the toolbar from the graph view's top-left corner.
-const TOOLBAR_MARGIN: f32 = 8.0;
-/// Gap between buttons.
-const BUTTON_GAP: f32 = 6.0;
-/// Corner radius of a button's rounded-rect background.
-const BUTTON_RADIUS: f32 = 6.0;
-/// Opacity of a group pill's frosted chrome backdrop. Keeps the toolbar
-/// readable over an empty canvas *and* over a node it happens to sit on — the
-/// backdrop color sits between the canvas and node fills, so a bit of
-/// translucency still contrasts against both while the node stays faintly
-/// visible through it.
-const PILL_BG_ALPHA: f32 = 0.7;
-/// Padding between a group pill's chrome edge and the buttons inside it.
-const PILL_PADDING: f32 = 4.0;
-/// Corner radius of a group pill's chrome backdrop — the button radius grown
-/// by the padding so the pill's rounding stays concentric with the buttons'.
-const PILL_RADIUS: f32 = BUTTON_RADIUS + PILL_PADDING;
+use crate::gui::widgets::toolbar::{
+    BUTTON_GAP, PILL_PADDING, TOOLBAR_MARGIN, action_button, dot, frame, glyph_button,
+    pill_background, stroked_rect,
+};
 
 fn run_button_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.graph.run_button")
@@ -212,64 +196,6 @@ fn toggle_button(
     glyph_button(ui, wid, fill, glyph, tip, draw_glyph)
 }
 
-/// One square momentary button (no toggled state), an opaque chip raised off the
-/// group pill: neutral fill that lifts on hover, with a muted glyph. Used by the
-/// view-framing actions. Returns whether it was clicked.
-fn action_button(
-    ui: &mut Ui,
-    theme: &Theme,
-    wid: WidgetId,
-    tip: &'static str,
-    draw_glyph: impl FnOnce(&mut Ui, f32, Color),
-) -> bool {
-    let hovered = ui.response_for(wid).hovered;
-    let fill = if hovered {
-        theme.colors.header_fill
-    } else {
-        theme.colors.node_fill
-    };
-    glyph_button(ui, wid, fill, theme.colors.text_muted, tip, draw_glyph)
-}
-
-/// The frosted chrome backdrop shared by both toolbar group pills.
-fn pill_background(theme: &Theme) -> Background {
-    Background {
-        fill: theme.colors.chrome_fill.with_alpha(PILL_BG_ALPHA).into(),
-        corners: Corners::all(PILL_RADIUS),
-        ..Default::default()
-    }
-}
-
-/// Shared square-button body: a `fill` rounded-rect background, the icon
-/// painted centered in the `BUTTON_SIZE` box by `draw_glyph` in `glyph`,
-/// and a hover `tip`. Returns whether it was clicked this frame.
-fn glyph_button(
-    ui: &mut Ui,
-    wid: WidgetId,
-    fill: Color,
-    glyph: Color,
-    tip: &'static str,
-    draw_glyph: impl FnOnce(&mut Ui, f32, Color),
-) -> bool {
-    let s = BUTTON_SIZE;
-    let button = Panel::zstack()
-        .id(wid)
-        .size((Sizing::Fixed(s), Sizing::Fixed(s)))
-        .sense(Sense::CLICK)
-        .background(Background {
-            fill: fill.into(),
-            corners: Corners::all(BUTTON_RADIUS),
-            ..Default::default()
-        })
-        .show(ui, |ui| draw_glyph(ui, s, glyph));
-    // Take the owned snapshot + click result so the button's `ui` borrow
-    // ends before the tooltip records into `ui`.
-    let snapshot = button.response.snapshot();
-    let clicked = button.response.clicked();
-    Tooltip::for_(&snapshot).text(tip).show(ui);
-    clicked
-}
-
 /// A right-pointing play triangle (run once), optically centered in the box.
 fn draw_play(ui: &mut Ui, s: f32, color: Color) {
     ui.add_shape(Shape::Triangle {
@@ -331,33 +257,6 @@ fn draw_show_selected(ui: &mut Ui, s: f32, color: Color) {
     ui.add_shape(Shape::RoundedRect {
         local_rect: Some(Rect::new(o, o, inner, inner)),
         corners: Corners::all(s * 0.04),
-        fill: color.into(),
-        stroke: Stroke::ZERO,
-    });
-}
-
-/// The shared rounded-rect outline both fit-buttons frame their contents in.
-fn frame(ui: &mut Ui, s: f32, color: Color) {
-    let w = s * 0.62;
-    let o = (s - w) * 0.5;
-    stroked_rect(ui, Rect::new(o, o, w, w), s * 0.08, color, s * 0.06);
-}
-
-/// A rounded-rect outline (transparent fill, `color` stroke of `width`).
-fn stroked_rect(ui: &mut Ui, rect: Rect, radius: f32, color: Color, width: f32) {
-    ui.add_shape(Shape::RoundedRect {
-        local_rect: Some(rect),
-        corners: Corners::all(radius),
-        fill: Color::TRANSPARENT.into(),
-        stroke: Stroke::solid(color, width),
-    });
-}
-
-/// A small filled circle of radius `r` centered at `(cx, cy)`.
-fn dot(ui: &mut Ui, cx: f32, cy: f32, r: f32, color: Color) {
-    ui.add_shape(Shape::RoundedRect {
-        local_rect: Some(Rect::new(cx - r, cy - r, 2.0 * r, 2.0 * r)),
-        corners: Corners::all(r),
         fill: color.into(),
         stroke: Stroke::ZERO,
     });

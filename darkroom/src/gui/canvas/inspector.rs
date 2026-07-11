@@ -24,8 +24,8 @@
 use std::collections::HashMap;
 
 use aperture::{
-    Background, Color, Configure, Corners, FontWeight, ImageFit, Panel, Sense, Shadow, Shape,
-    Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
+    Background, Color, Configure, Corners, FontWeight, ImageFilter, ImageFit, Panel, Sense, Shadow,
+    Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
 };
 use glam::Vec2;
 use scenarium::data::{DataType, StaticValue};
@@ -493,6 +493,7 @@ fn draw_preview(
                 handle: handle.clone(),
                 local_rect: None,
                 fit: ImageFit::Contain,
+                filter: ImageFilter::Linear,
                 tint: Color::WHITE,
             });
         });

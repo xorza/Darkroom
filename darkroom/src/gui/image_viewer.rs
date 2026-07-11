@@ -22,8 +22,9 @@
 //! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
 
 use aperture::{
-    Align, Background, Color, Configure, ImageFit, ImageHandle, Panel, PointerButton, Rect, Sense,
-    Shape, Size, Sizing, Spacing, Text, TextStyle, Ui, WidgetId,
+    Align, Background, Color, Configure, Corners, HAlign, ImageFilter, ImageFit, ImageHandle,
+    Panel, PointerButton, Rect, Sense, Shape, Size, Sizing, Spacing, Stroke, Text, TextStyle, Ui,
+    VAlign, WidgetId,
 };
 use glam::{UVec2, Vec2};
 use imaginarium::{Preview, ProcessingContext};
@@ -35,6 +36,9 @@ use crate::core::document::{Document, PortKind, PortRef};
 use crate::core::worker::RunId;
 use crate::gui::canvas::pan_zoom::{scroll_to_zoom_factor, zoom_about};
 use crate::gui::theme::Theme;
+use crate::gui::widgets::toolbar::{
+    BUTTON_GAP, PILL_PADDING, TOOLBAR_MARGIN, action_button, glyph_button, pill_background,
+};
 
 /// Longest texture side we upload. Conservative device
 /// `max_texture_dimension_2d` (aperture doesn't expose the real limit);
@@ -45,6 +49,24 @@ const MAX_TEXTURE_DIM: usize = 8192;
 /// texture-capped 8k frame in a small pane, in for pixel peeping.
 const MIN_ZOOM: f32 = 0.02;
 const MAX_ZOOM: f32 = 32.0;
+
+/// On-screen side of one checkerboard square, logical px. Screen-fixed
+/// (doesn't pan/zoom with the image) — it's a transparency reference,
+/// not content.
+const CHECKER_SQUARE_PX: f32 = 8.0;
+
+/// Backdrop behind (and around) the image. Runtime-only viewer state,
+/// like the pan/zoom framing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ViewerBackground {
+    /// The editor's canvas fill — the resting default.
+    #[default]
+    Theme,
+    Black,
+    White,
+    /// Neutral gray checkerboard — the transparency reference.
+    Checker,
+}
 
 /// One image-viewer tab's state: what it shows and how it's framed.
 /// Lives in the `MainWindow`'s per-port viewer map, keyed by (and
@@ -78,6 +100,14 @@ pub(crate) struct ImageViewer {
     view: Option<ViewerViewport>,
     /// Pan-drag bookkeeping: the viewport pan at drag start.
     pan_anchor: Option<Vec2>,
+    /// Backdrop mode, picked from the control panel.
+    background: ViewerBackground,
+    /// Texel sampling for the shown image, toggled from the control
+    /// panel. Starts at `Nearest` — hard texels for pixel peeping;
+    /// `Linear` smooths.
+    filter: ImageFilter,
+    /// Lazily registered checkerboard tile for the `Checker` backdrop.
+    checker: Option<ImageHandle>,
 }
 
 /// The viewer's viewport: the image's top-left offset in pane-local px
@@ -112,6 +142,9 @@ impl ImageViewer {
             content_epoch: None,
             view: None,
             pan_anchor: None,
+            background: ViewerBackground::default(),
+            filter: ImageFilter::Nearest,
+            checker: None,
         }
     }
 
@@ -203,16 +236,26 @@ impl ImageViewer {
         self.apply_gestures(ui);
 
         let pane = pane_size(ui, self.port);
+        let fill = match self.background {
+            ViewerBackground::Theme | ViewerBackground::Checker => theme.colors.canvas_bg,
+            ViewerBackground::Black => Color::BLACK,
+            ViewerBackground::White => Color::WHITE,
+        };
         Panel::zstack()
             .id(pane_wid(self.port))
             .size((Sizing::FILL, Sizing::FILL))
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
             .background(Background {
-                fill: theme.colors.canvas_bg.into(),
+                fill: fill.into(),
                 ..Default::default()
             })
             .show(ui, |ui| {
+                if self.background == ViewerBackground::Checker
+                    && let Some(pane) = pane
+                {
+                    self.draw_checker(ui, pane);
+                }
                 match (&self.image, pane) {
                     (Some(handle), Some(pane)) => {
                         let v = self
@@ -222,6 +265,7 @@ impl ImageViewer {
                             handle: handle.clone(),
                             local_rect: Some(draw_rect(handle.size().as_vec2(), v)),
                             fit: ImageFit::Fill,
+                            filter: self.filter,
                             tint: Color::WHITE,
                         });
                     }
@@ -231,6 +275,7 @@ impl ImageViewer {
                             handle: handle.clone(),
                             local_rect: None,
                             fit: ImageFit::Contain,
+                            filter: self.filter,
                             tint: Color::WHITE,
                         });
                     }
@@ -246,7 +291,31 @@ impl ImageViewer {
                     }
                 }
                 self.header(ui, theme, pane);
+                if self.image.is_some() {
+                    self.controls(ui, theme, pane);
+                }
             });
+    }
+
+    /// The screen-fixed checkerboard backdrop across the whole pane. One
+    /// tiled 2×2 texture; `Nearest` keeps the squares crisp at any pane
+    /// size and DPI.
+    fn draw_checker(&mut self, ui: &mut Ui, pane: Vec2) {
+        let handle = self
+            .checker
+            .get_or_insert_with(|| ui.register_image(checker_image()))
+            .clone();
+        ui.add_shape(Shape::Image {
+            handle,
+            local_rect: None,
+            fit: ImageFit::Tile {
+                offset: Vec2::ZERO,
+                // The 2×2 tile is one checker period = 2 squares across.
+                scale: pane / (2.0 * CHECKER_SQUARE_PX),
+            },
+            filter: ImageFilter::Nearest,
+            tint: Color::WHITE,
+        });
     }
 
     /// The top-left readout: source port, native dimensions, whether the
@@ -289,6 +358,108 @@ impl ImageViewer {
             .show(ui, |ui| {
                 Text::new(text).style(muted_style(theme, ui)).show(ui);
             });
+    }
+
+    /// The floating control pill in the pane's top-right corner: view
+    /// framing (fit, 100%), backdrop swatches, and the sampling toggle.
+    /// Drawn after the image so the buttons hit-test above the pane's
+    /// gesture surface; the pill itself senses too, so a drag starting
+    /// between buttons never pans the image. Framing clicks land next
+    /// frame (responses lag the record by one frame) — imperceptible.
+    fn controls(&mut self, ui: &mut Ui, theme: &Theme, pane: Option<Vec2>) {
+        let port = self.port;
+        Panel::hstack()
+            .id(control_wid(port, "pill"))
+            .size((Sizing::Hug, Sizing::Hug))
+            .align(Align::new(HAlign::Right, VAlign::Top))
+            .margin(Spacing::new(0.0, TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0))
+            .gap(BUTTON_GAP)
+            .padding(Spacing::all(PILL_PADDING))
+            .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL)
+            .background(pill_background(theme))
+            .show(ui, |ui| {
+                if action_button(ui, theme, control_wid(port, "fit"), "Fit to view", draw_fit) {
+                    self.view = None;
+                    self.pan_anchor = None;
+                }
+                if action_button(
+                    ui,
+                    theme,
+                    control_wid(port, "100"),
+                    "Zoom to 100%",
+                    draw_100,
+                ) && let (Some(handle), Some(pane)) = (&self.image, pane)
+                {
+                    let img = handle.size().as_vec2();
+                    let v = self.view.unwrap_or_else(|| fit_viewport(img, pane));
+                    self.view = Some(zoom_about_pane_center(v, 1.0, pane));
+                }
+                for (mode, key, tip) in [
+                    (ViewerBackground::Theme, "bg_theme", "Theme background"),
+                    (ViewerBackground::Black, "bg_black", "Black background"),
+                    (ViewerBackground::White, "bg_white", "White background"),
+                    (
+                        ViewerBackground::Checker,
+                        "bg_checker",
+                        "Checkerboard background",
+                    ),
+                ] {
+                    if self.background_swatch(ui, theme, mode, key, tip) {
+                        self.background = mode;
+                    }
+                }
+                self.filter_toggle(ui, theme);
+            });
+    }
+
+    /// One backdrop-mode button: a neutral chip whose glyph is a swatch
+    /// of the mode itself, ringed with the selection accent when active.
+    fn background_swatch(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        mode: ViewerBackground,
+        key: &'static str,
+        tip: &'static str,
+    ) -> bool {
+        let wid = control_wid(self.port, key);
+        let hovered = ui.response_for(wid).hovered;
+        let fill = if hovered {
+            theme.colors.header_fill
+        } else {
+            theme.colors.node_fill
+        };
+        let selected = self.background == mode;
+        glyph_button(ui, wid, fill, theme.colors.text_muted, tip, |ui, s, _| {
+            draw_swatch(ui, s, theme, mode, selected)
+        })
+    }
+
+    /// The nearest/bilinear sampling toggle: accent-filled while nearest
+    /// is active, neutral otherwise.
+    fn filter_toggle(&mut self, ui: &mut Ui, theme: &Theme) {
+        let nearest = self.filter == ImageFilter::Nearest;
+        let wid = control_wid(self.port, "filter");
+        let hovered = ui.response_for(wid).hovered;
+        let (fill, glyph) = if nearest {
+            (theme.colors.selection_rect, theme.colors.chrome_fill)
+        } else if hovered {
+            (theme.colors.header_fill, theme.colors.text_muted)
+        } else {
+            (theme.colors.node_fill, theme.colors.text_muted)
+        };
+        let tip = if nearest {
+            "Sampling: nearest — click for bilinear"
+        } else {
+            "Sampling: bilinear — click for nearest"
+        };
+        if glyph_button(ui, wid, fill, glyph, tip, draw_pixels) {
+            self.filter = if nearest {
+                ImageFilter::Linear
+            } else {
+                ImageFilter::Nearest
+            };
+        }
     }
 
     /// Fold last frame's pane gestures into the viewport: left/middle-drag
@@ -400,6 +571,159 @@ fn pane_size(ui: &Ui, port: PortRef) -> Option<Vec2> {
 /// viewer tabs can't cross-feed their gesture responses.
 fn pane_wid(port: PortRef) -> WidgetId {
     WidgetId::from_hash(("image_viewer.pane", port))
+}
+
+/// Stable id for one control-panel widget, keyed by port + role.
+fn control_wid(port: PortRef, key: &'static str) -> WidgetId {
+    WidgetId::from_hash(("image_viewer.controls", port, key))
+}
+
+/// Checkerboard grays (sRGB bytes) — shared by the backdrop tile and
+/// its control-panel swatch. Fixed regardless of theme: the checker is
+/// a neutral transparency reference, not chrome.
+const CHECKER_LIGHT_U8: u8 = 77; // #4d4d4d
+const CHECKER_DARK_U8: u8 = 51; // #333333
+
+/// The 2×2 checkerboard tile — one full checker period, stamped across
+/// the pane via `ImageFit::Tile` + `ImageFilter::Nearest`.
+fn checker_image() -> aperture::Image {
+    const L: u8 = CHECKER_LIGHT_U8;
+    const D: u8 = CHECKER_DARK_U8;
+    let px = [
+        [L, L, L, 255],
+        [D, D, D, 255],
+        [D, D, D, 255],
+        [L, L, L, 255],
+    ];
+    aperture::Image::from_rgba8(2, 2, px.into_iter().flatten().collect())
+}
+
+/// The viewport at `zoom` that keeps the texel under the pane center
+/// fixed — the button sibling of the cursor-anchored wheel zoom.
+fn zoom_about_pane_center(mut v: ViewerViewport, zoom: f32, pane: Vec2) -> ViewerViewport {
+    let factor = zoom / v.zoom;
+    zoom_about(
+        &mut v.pan,
+        &mut v.zoom,
+        pane * 0.5,
+        factor,
+        MIN_ZOOM,
+        MAX_ZOOM,
+    );
+    v
+}
+
+/// Four inward corner brackets — "fit the image to the view".
+fn draw_fit(ui: &mut Ui, s: f32, color: Color) {
+    let t = s * 0.07; // bar thickness
+    let len = s * 0.18; // bar length
+    let o = s * 0.26; // inset from the button edge
+    let far = s - o;
+    // An L in each corner: horizontal bar + vertical bar.
+    let bars = [
+        (o, o, len, t),
+        (o, o, t, len),
+        (far - len, o, len, t),
+        (far - t, o, t, len),
+        (o, far - t, len, t),
+        (o, far - len, t, len),
+        (far - len, far - t, len, t),
+        (far - t, far - len, t, len),
+    ];
+    for (x, y, w, h) in bars {
+        ui.add_shape(Shape::RoundedRect {
+            local_rect: Some(Rect::new(x, y, w, h)),
+            corners: Corners::all(t * 0.5),
+            fill: color.into(),
+            stroke: Stroke::ZERO,
+        });
+    }
+}
+
+/// "1:1" label — zoom to 100%.
+fn draw_100(ui: &mut Ui, _s: f32, color: Color) {
+    let style = TextStyle {
+        color,
+        font_size_px: 11.0,
+        ..ui.theme.text
+    };
+    Text::new("1:1").style(style).align(Align::CENTER).show(ui);
+}
+
+/// 2×2 grid of hard squares — nearest (pixelated) sampling.
+fn draw_pixels(ui: &mut Ui, s: f32, color: Color) {
+    let cell = s * 0.18;
+    let gap = s * 0.08;
+    let o = (s - (2.0 * cell + gap)) * 0.5;
+    for iy in 0..2 {
+        for ix in 0..2 {
+            let x = o + ix as f32 * (cell + gap);
+            let y = o + iy as f32 * (cell + gap);
+            ui.add_shape(Shape::RoundedRect {
+                local_rect: Some(Rect::new(x, y, cell, cell)),
+                corners: Corners::all(1.0),
+                fill: color.into(),
+                stroke: Stroke::ZERO,
+            });
+        }
+    }
+}
+
+/// A backdrop-mode swatch: an inset square filled with the mode itself
+/// (mini checker for `Checker`), ringed with the selection accent when
+/// active.
+fn draw_swatch(ui: &mut Ui, s: f32, theme: &Theme, mode: ViewerBackground, selected: bool) {
+    let d = s * 0.54;
+    let o = (s - d) * 0.5;
+    let rect = Rect::new(o, o, d, d);
+    match mode {
+        ViewerBackground::Checker => {
+            let light = Color::rgb_u8(CHECKER_LIGHT_U8, CHECKER_LIGHT_U8, CHECKER_LIGHT_U8);
+            let dark = Color::rgb_u8(CHECKER_DARK_U8, CHECKER_DARK_U8, CHECKER_DARK_U8);
+            ui.add_shape(Shape::RoundedRect {
+                local_rect: Some(rect),
+                corners: Corners::all(2.0),
+                fill: dark.into(),
+                stroke: Stroke::ZERO,
+            });
+            // Two light quads on the diagonal make the 2×2 mini checker.
+            let h = d * 0.5;
+            for cell in [Rect::new(o, o, h, h), Rect::new(o + h, o + h, h, h)] {
+                ui.add_shape(Shape::RoundedRect {
+                    local_rect: Some(cell),
+                    corners: Corners::all(0.0),
+                    fill: light.into(),
+                    stroke: Stroke::ZERO,
+                });
+            }
+        }
+        _ => {
+            let fill = match mode {
+                ViewerBackground::Theme => theme.colors.canvas_bg,
+                ViewerBackground::Black => Color::BLACK,
+                ViewerBackground::White => Color::WHITE,
+                ViewerBackground::Checker => unreachable!(),
+            };
+            ui.add_shape(Shape::RoundedRect {
+                local_rect: Some(rect),
+                corners: Corners::all(2.0),
+                fill: fill.into(),
+                stroke: Stroke::ZERO,
+            });
+        }
+    }
+    // Ring on top so the checker quads can't cover it.
+    let ring = if selected {
+        Stroke::solid(theme.colors.selection_rect, 2.0)
+    } else {
+        Stroke::solid(theme.colors.text_muted.with_alpha(0.4), 1.0)
+    };
+    ui.add_shape(Shape::RoundedRect {
+        local_rect: Some(rect),
+        corners: Corners::all(2.0),
+        fill: Color::TRANSPARENT.into(),
+        stroke: ring,
+    });
 }
 
 /// Whether two dynamic values share the same custom payload (`Arc`
@@ -620,6 +944,42 @@ mod tests {
         viewer.refresh("n · out 0".to_owned(), Some(image_value(2, 2)), 7);
         assert_eq!(viewer.content_epoch, Some(7));
         assert!(viewer.pending.is_some());
+    }
+
+    #[test]
+    fn zoom_about_pane_center_keeps_center_texel() {
+        // Start from the fit of 400×200 in an 800×800 pane: zoom 2,
+        // pan (0, 200). The texel under the pane center (400, 400) is
+        // ((400 - 0)/2, (400 - 200)/2) = (200, 100) — the image center.
+        let fit = fit_viewport(Vec2::new(400.0, 200.0), Vec2::new(800.0, 800.0));
+        assert_eq!(fit.zoom, 2.0);
+
+        // Zoom to 100%: pan' = center - texel·1 = (400-200, 400-100).
+        let pane = Vec2::new(800.0, 800.0);
+        let v = zoom_about_pane_center(fit, 1.0, pane);
+        assert_eq!(v.zoom, 1.0);
+        assert_eq!(v.pan, Vec2::new(200.0, 300.0));
+
+        // The invariant holds for an arbitrary target too: zoom 4 →
+        // pan' = center - texel·4 = (400-800, 400-400) = (-400, 0).
+        let v = zoom_about_pane_center(fit, 4.0, pane);
+        assert_eq!(v.zoom, 4.0);
+        assert_eq!(v.pan, Vec2::new(-400.0, 0.0));
+    }
+
+    #[test]
+    fn checker_image_is_one_2x2_period() {
+        let img = checker_image();
+        assert_eq!((img.width, img.height), (2, 2));
+        const L: u8 = CHECKER_LIGHT_U8;
+        const D: u8 = CHECKER_DARK_U8;
+        // Row-major light/dark, dark/light — one full checker period.
+        #[rustfmt::skip]
+        let expected = [
+            L, L, L, 255,  D, D, D, 255,
+            D, D, D, 255,  L, L, L, 255,
+        ];
+        assert_eq!(img.pixels, expected);
     }
 
     #[test]

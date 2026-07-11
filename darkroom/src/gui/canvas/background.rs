@@ -1,4 +1,4 @@
-use aperture::{Color, ColorU8, Image, ImageFit, ImageHandle, Shape, Ui};
+use aperture::{Color, ColorU8, Image, ImageFilter, ImageFit, ImageHandle, Shape, Ui};
 use glam::Vec2;
 
 use crate::gui::app::AppContext;
@@ -85,6 +85,7 @@ impl CanvasBackground {
                 offset: -pan / tile_px,
                 scale: Vec2::new(size.w, size.h) / tile_px,
             },
+            filter: ImageFilter::Linear,
             tint: Color::WHITE,
         });
     }
