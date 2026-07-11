@@ -230,21 +230,18 @@ impl Inspectors {
             InspectMode::Pinned => theme.colors.badge_subgraph,
             InspectMode::Open => Color::TRANSPARENT,
         };
-        let chrome = Background {
-            fill: theme.colors.node_fill.into(),
-            stroke: Stroke::solid(border, 1.0),
-            corners: Corners::all(theme.node_corner_radius),
-            // Same elevation swatch as the node bodies, so every floating
-            // surface casts one kind of shadow (bigger blur — the panel
-            // sits higher).
-            shadow: Shadow {
-                color: theme.colors.node_ambient_shadow,
-                offset: Vec2::new(0.0, 3.0),
-                blur: 12.0,
-                spread: 0.0,
-                inset: false,
-            },
-        };
+        let chrome = Background::rounded(
+            theme.colors.node_fill,
+            Corners::all(theme.node_corner_radius),
+        )
+        .with_stroke(Stroke::solid(border, 1.0))
+        // Same elevation swatch as the node bodies, so every floating
+        // surface casts one kind of shadow (bigger blur — the panel sits higher).
+        .with_shadow(Shadow::drop(
+            theme.colors.node_ambient_shadow,
+            Vec2::new(0.0, 3.0),
+            12.0,
+        ));
         Panel::vstack()
             .id(inspect_panel_wid(node.id))
             .position(pos)

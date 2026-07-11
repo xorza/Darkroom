@@ -660,13 +660,11 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
     // drop shadow so the bubble lifts off whatever it overlaps.
     t.tooltip.panel = Background::rounded(p.elem, Corners::all(4.0))
         .with_stroke(Stroke::solid(panel_edge, 1.0))
-        .with_shadow(Shadow {
-            color: Color::linear_rgba(0.0, 0.0, 0.0, 0.6),
-            offset: glam::Vec2::new(2.0, 2.0),
-            blur: 5.0,
-            spread: 0.0,
-            inset: false,
-        });
+        .with_shadow(Shadow::drop(
+            Color::linear_rgba(0.0, 0.0, 0.0, 0.6),
+            glam::Vec2::new(2.0, 2.0),
+            5.0,
+        ));
     t.tooltip.text.color = p.text;
 }
 

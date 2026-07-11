@@ -237,12 +237,14 @@ impl NodeUI {
             .min_size((theme.node_min_width, theme.node_min_height))
             .size((Sizing::Hug, Sizing::Hug))
             .sense(Sense::CLICK | Sense::DRAG)
-            .background(Background {
-                fill: theme.colors.node_fill.into(),
-                stroke: Stroke::solid(border, border_width),
-                corners: Corners::all(theme.node_corner_radius),
-                shadow,
-            })
+            .background(
+                Background::rounded(
+                    theme.colors.node_fill,
+                    Corners::all(theme.node_corner_radius),
+                )
+                .with_stroke(Stroke::solid(border, border_width))
+                .with_shadow(shadow),
+            )
             .show(ui, |ui| {
                 header(ui, rcx, node, out);
                 status_row(ui, rcx, node, out);
@@ -515,20 +517,8 @@ fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
         // the ambient shadow, and a tighter halo would leave a just-run node
         // sitting flatter than its idle neighbors. Kept a touch tighter than
         // the ambient shadow so the status reads as a crisp halo, not a bloom.
-        Some(color) => Shadow {
-            color,
-            offset: Vec2::ZERO,
-            blur: 3.0,
-            spread: 0.5,
-            inset: false,
-        },
-        None => Shadow {
-            color: theme.colors.node_ambient_shadow,
-            offset: Vec2::new(0.0, 3.0),
-            blur: 10.0,
-            spread: 0.0,
-            inset: false,
-        },
+        Some(color) => Shadow::drop(color, Vec2::ZERO, 3.0).with_spread(0.5),
+        None => Shadow::drop(theme.colors.node_ambient_shadow, Vec2::new(0.0, 3.0), 10.0),
     }
 }
 

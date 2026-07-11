@@ -289,15 +289,10 @@ fn draw_drag_feedback(ui: &mut Ui, theme: &Theme, doc: &Document, dragged: &TabD
             Panel::zstack()
                 .id(WidgetId::from_hash("dock.drag_highlight"))
                 .size((Sizing::FILL, Sizing::FILL))
-                .background(Background {
-                    fill: accent.with_alpha(0.18).into(),
-                    stroke: Stroke {
-                        brush: accent.into(),
-                        width: 1.5,
-                    },
-                    corners: Corners::all(2.0),
-                    ..Default::default()
-                })
+                .background(
+                    Background::rounded(accent.with_alpha(0.18), Corners::all(2.0))
+                        .with_stroke(Stroke::solid(accent, 1.5)),
+                )
                 .show(ui, |_| {});
         });
     }
@@ -309,15 +304,10 @@ fn draw_drag_feedback(ui: &mut Ui, theme: &Theme, doc: &Document, dragged: &TabD
                 .id(WidgetId::from_hash("dock.drag_ghost"))
                 .size((Sizing::Hug, Sizing::Hug))
                 .padding(Spacing::new(10.0, 4.0, 10.0, 4.0))
-                .background(Background {
-                    fill: theme.colors.chrome_fill.into(),
-                    stroke: Stroke {
-                        brush: accent.into(),
-                        width: 1.0,
-                    },
-                    corners: Corners::all(4.0),
-                    ..Default::default()
-                })
+                .background(
+                    Background::rounded(theme.colors.chrome_fill, Corners::all(4.0))
+                        .with_stroke(Stroke::solid(accent, 1.0)),
+                )
                 .show(ui, |ui| {
                     Text::new(text).style(label_style).show(ui);
                 });
