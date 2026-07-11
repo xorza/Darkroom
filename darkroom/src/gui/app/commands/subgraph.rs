@@ -41,7 +41,7 @@ impl App {
     /// wins; otherwise, when the active tab is itself a subgraph, that
     /// open subgraph is exported. No-op when neither resolves.
     fn export_active_subgraph(&mut self) {
-        let library = self.engine.library.load();
+        let library = self.engine.library.clone();
         let Some(def) = publish::subgraph_to_export(&self.editor.document, &library) else {
             self.engine
                 .status
@@ -83,11 +83,11 @@ impl App {
     /// entry (see [`publish::promote_to_library`]). No-op when nothing
     /// resolves.
     fn promote_active_subgraph(&mut self) {
-        if publish::promote_to_library(&mut self.editor.document, &self.engine.library) {
+        if publish::promote_to_library(&mut self.editor.document, &mut self.engine.library) {
             // Re-points the local def's `origin` in the document — an
             // unsaved change (may over-flag when the link already existed).
             self.editor.dirty = true;
-            library::save_library(self.engine.library.load().subgraphs.iter());
+            library::save_library(self.engine.library.subgraphs.iter());
             self.engine.status.error = None;
         } else {
             self.engine
@@ -108,7 +108,7 @@ impl App {
         };
         if publish::publish_local_def(
             &mut self.editor.document,
-            &self.engine.library,
+            &mut self.engine.library,
             target,
             node_id,
         ) {
@@ -116,7 +116,7 @@ impl App {
             // in the document — an unsaved change (an update-in-place
             // publish touches only the library, so this may over-flag).
             self.editor.dirty = true;
-            library::save_library(self.engine.library.load().subgraphs.iter());
+            library::save_library(self.engine.library.subgraphs.iter());
             self.engine.status.error = None;
         } else {
             self.engine

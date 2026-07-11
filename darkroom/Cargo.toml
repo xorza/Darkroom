@@ -16,7 +16,7 @@ image = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
 anyhow = { workspace = true }
-arc-swap = { workspace = true }
+
 dark-light = { workspace = true }
 rfd = { workspace = true }
 tokio = { workspace = true }

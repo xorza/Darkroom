@@ -7,7 +7,6 @@
 
 use std::sync::Arc;
 
-use arc_swap::ArcSwap;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use scenarium::graph::{NodeId, NodeKind, NodeSearch};
 use scenarium::library::Library;
@@ -27,15 +26,14 @@ use crate::core::document::{Document, GraphRef};
 /// deliberately *not* routed through undo.
 pub(crate) fn publish_local_def(
     document: &mut Document,
-    library: &ArcSwap<Library>,
+    library: &mut Arc<Library>,
     target: GraphRef,
     node_id: NodeId,
 ) -> bool {
-    // Load a snapshot and resolve read-only first (so a non-subgraph node
-    // returns before the `Arc::make_mut` clone). `fresh_copy` already gives
-    // fresh interior ids + `origin: None` — the shape a library def wants;
-    // we keep or override its id below.
-    let mut lib = library.load_full();
+    // Resolve read-only first (so a non-subgraph node returns before the
+    // `Arc::make_mut` clone). `fresh_copy` already gives fresh interior ids +
+    // `origin: None` — the shape a library def wants; we keep or override its
+    // id below.
     let Some((local_id, mut published, existing_lib)) = (|| {
         let scope = document.scope(target)?;
         let NodeKind::Subgraph(SubgraphRef::Local(local_id)) =
@@ -44,27 +42,18 @@ pub(crate) fn publish_local_def(
             return None;
         };
         let local = scope.graph.subgraphs.by_key(&local_id)?;
-        let existing_lib = local.origin.filter(|id| lib.subgraph_by_id(id).is_some());
+        let existing_lib = local
+            .origin
+            .filter(|id| library.subgraph_by_id(id).is_some());
         Some((local_id, local.fresh_copy(), existing_lib))
     })() else {
         return false;
     };
 
-    let new_origin = match existing_lib {
-        Some(lib_id) => {
-            published.id = lib_id;
-            Arc::make_mut(&mut lib).add_subgraph(published);
-            lib_id
-        }
-        None => {
-            let new_id = published.id;
-            Arc::make_mut(&mut lib).add_subgraph(published);
-            new_id
-        }
-    };
-    // Swap the grown copy in so the worker and any running scripts pick it
-    // up on their next load.
-    library.store(lib);
+    // Keep the linked entry's id (update in place) or the fresh copy's own.
+    let new_origin = existing_lib.unwrap_or(published.id);
+    published.id = new_origin;
+    Arc::make_mut(library).add_subgraph(published);
     set_origin(document, target, local_id, new_origin);
     true
 }
@@ -73,15 +62,13 @@ pub(crate) fn publish_local_def(
 /// (no disk write — the caller persists on success). Returns `false`
 /// when nothing resolves. On success the source local def's `origin` is
 /// re-pointed at the new library entry, so it tracks its lineage.
-pub(crate) fn promote_to_library(document: &mut Document, library: &ArcSwap<Library>) -> bool {
-    let mut lib = library.load_full();
-    let Some(source) = promote_source(document, &lib) else {
+pub(crate) fn promote_to_library(document: &mut Document, library: &mut Arc<Library>) -> bool {
+    let Some(source) = promote_source(document, library) else {
         return false;
     };
     let published = source.def.fresh_copy();
     let lib_id = published.id;
-    Arc::make_mut(&mut lib).add_subgraph(published);
-    library.store(lib);
+    Arc::make_mut(library).add_subgraph(published);
     if let Some(relink) = source.relink {
         set_origin(document, relink.holder, relink.def_id, lib_id);
     }
@@ -233,7 +220,7 @@ mod tests {
         let lib_id = SubgraphId::unique();
         let mut library = Library::default();
         library.add_subgraph(SubgraphDef::new(lib_id, "Old"));
-        let library = ArcSwap::from_pointee(library);
+        let mut library = Arc::new(library);
 
         // Local copy linked to that library def, with diverged content.
         let mut doc = Document::default();
@@ -243,17 +230,17 @@ mod tests {
 
         assert!(publish_local_def(
             &mut doc,
-            &library,
+            &mut library,
             GraphRef::Main,
             node_id
         ));
         assert_eq!(
-            library.load().subgraphs.len(),
+            library.subgraphs.len(),
             1,
             "update in place — no new library entry"
         );
         assert_eq!(
-            library.load().subgraph_by_id(&lib_id).unwrap().name,
+            library.subgraph_by_id(&lib_id).unwrap().name,
             "New",
             "library def took the local def's content"
         );
@@ -266,7 +253,7 @@ mod tests {
 
     #[test]
     fn publish_without_origin_creates_entry_and_links_it() {
-        let library = ArcSwap::from_pointee(Library::default());
+        let mut library = Arc::new(Library::default());
         let mut doc = Document::default();
         let local = def("Standalone", None);
         let local_id = local.id;
@@ -274,15 +261,11 @@ mod tests {
 
         assert!(publish_local_def(
             &mut doc,
-            &library,
+            &mut library,
             GraphRef::Main,
             node_id
         ));
-        assert_eq!(
-            library.load().subgraphs.len(),
-            1,
-            "a new library entry was added"
-        );
+        assert_eq!(library.subgraphs.len(), 1, "a new library entry was added");
         let linked = doc
             .graph
             .subgraphs
@@ -291,14 +274,14 @@ mod tests {
             .origin
             .expect("local def linked to the new entry");
         assert!(
-            library.load().subgraph_by_id(&linked).is_some(),
+            library.subgraph_by_id(&linked).is_some(),
             "origin points at the freshly-created library def"
         );
     }
 
     #[test]
     fn promote_links_source_local_def_to_new_library_entry() {
-        let library = ArcSwap::from_pointee(Library::default());
+        let mut library = Arc::new(Library::default());
         let mut doc = Document::default();
         // A local subgraph instance (no library lineage yet), selected
         // so `promote_source` resolves it from the active graph.
@@ -307,12 +290,8 @@ mod tests {
         let node_id = add_local_instance(&mut doc, local);
         doc.main_view.selected_nodes.insert(node_id);
 
-        assert!(promote_to_library(&mut doc, &library));
-        assert_eq!(
-            library.load().subgraphs.len(),
-            1,
-            "a new library entry is added"
-        );
+        assert!(promote_to_library(&mut doc, &mut library));
+        assert_eq!(library.subgraphs.len(), 1, "a new library entry is added");
         let owner = doc
             .graph
             .subgraphs
@@ -321,23 +300,23 @@ mod tests {
             .origin
             .expect("source local def now carries an origin");
         assert!(
-            library.load().subgraph_by_id(&owner).is_some(),
+            library.subgraph_by_id(&owner).is_some(),
             "origin points at the freshly-promoted library entry"
         );
     }
 
     #[test]
     fn promote_with_nothing_selected_is_a_noop() {
-        let library = ArcSwap::from_pointee(Library::default());
+        let mut library = Arc::new(Library::default());
         let mut doc = Document::default();
-        assert!(!promote_to_library(&mut doc, &library));
-        assert_eq!(library.load().subgraphs.len(), 0);
+        assert!(!promote_to_library(&mut doc, &mut library));
+        assert_eq!(library.subgraphs.len(), 0);
     }
 
     #[test]
     fn publish_non_subgraph_node_is_a_noop() {
         use scenarium::node::function::FuncId;
-        let library = ArcSwap::from_pointee(Library::default());
+        let mut library = Arc::new(Library::default());
         let mut doc = Document::default();
         let node = Node::new(scenarium::graph::NodeKind::Func(FuncId::unique()));
         let node_id = node.id;
@@ -345,10 +324,10 @@ mod tests {
 
         assert!(!publish_local_def(
             &mut doc,
-            &library,
+            &mut library,
             GraphRef::Main,
             node_id
         ));
-        assert_eq!(library.load().subgraphs.len(), 0, "nothing published");
+        assert_eq!(library.subgraphs.len(), 0, "nothing published");
     }
 }

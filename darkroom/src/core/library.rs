@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use arc_swap::ArcSwap;
 use lens::{astro_library, image_library};
 use scenarium::elements::fs_watch_library::fs_watch_library;
 use scenarium::elements::math_library::math_library;
@@ -12,17 +11,13 @@ use scenarium::library::Library;
 
 use crate::core::io::library;
 
-/// The runtime library behind a swappable cell (see [`Engine::library`]).
-/// The `ArcSwap` lets promote/publish atomically swap in a grown copy that
-/// every holder picks up on its next `load`; the outer `Arc` shares the
-/// *same* slot with the script host rather than a frozen snapshot.
-pub(crate) type SharedLibrary = Arc<ArcSwap<Library>>;
-
 /// Assemble the runtime function library — builtins plus the on-disk
-/// subgraph library — into the shared swappable cell. Builtins carry no
-/// subgraph defs, so `library.subgraphs` *is* the shared subgraph library:
-/// loaded from the library file here at startup, grown by "promote".
-pub(crate) fn runtime_func_lib() -> SharedLibrary {
+/// subgraph library. Builtins carry no subgraph defs, so `library.subgraphs`
+/// *is* the shared subgraph library: loaded from the library file here at
+/// startup, grown by "promote" (`Arc::make_mut` on the engine's handle —
+/// see [`Engine::library`](crate::core::engine::Engine) for the sharing
+/// story).
+pub(crate) fn runtime_func_lib() -> Arc<Library> {
     let mut library = Library::default();
     library.merge(math_library());
     library.merge(system_library());
@@ -33,5 +28,5 @@ pub(crate) fn runtime_func_lib() -> SharedLibrary {
     for def in library::load_library() {
         library.add_subgraph(def);
     }
-    Arc::new(ArcSwap::from_pointee(library))
+    Arc::new(library)
 }

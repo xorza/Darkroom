@@ -34,8 +34,8 @@ use scenarium::node::function::FuncId;
 
 use crate::core::document::view_node::ViewNode;
 use crate::core::edit::intent::Intent;
-use crate::core::library::SharedLibrary;
 use crate::core::wake::Wake;
+use scenarium::library::Library;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -164,7 +164,7 @@ pub enum ScriptMessage {
     /// peer addr at the tracing layer).
     Print { msg: String },
     /// A batch of graph mutations issued by a script. Built on the
-    /// executor side (which has the shared `Library` cell and any other
+    /// executor side (which has its `Library` snapshot and any other
     /// inputs the actions need) and applied verbatim by the editor through the same
     /// intent/undo path the GUI uses — one batch is one undo entry. Keeps
     /// the script→graph boundary symmetric with the GUI→graph boundary,
@@ -260,7 +260,7 @@ impl ScriptExecutor {
     pub fn new(
         transport: tcp::TcpTransport,
         action_tx: mpsc::UnboundedSender<ScriptMessage>,
-        library: SharedLibrary,
+        library: Arc<Library>,
         notify: Wake,
     ) -> Self {
         let inbound = InboundSender {
@@ -287,7 +287,7 @@ async fn run_executor(
     mut rx: mpsc::Receiver<ScriptRequest>,
     cancel: CancellationToken,
     inbound: InboundSender,
-    library: SharedLibrary,
+    library: Arc<Library>,
 ) {
     let state: StdoutBuffer = Arc::new(Mutex::new(String::new()));
     let engine = build_engine(state.clone(), inbound, library);
@@ -317,7 +317,7 @@ async fn run_executor(
     }
 }
 
-fn build_engine(stdout: StdoutBuffer, inbound: InboundSender, library: SharedLibrary) -> Engine {
+fn build_engine(stdout: StdoutBuffer, inbound: InboundSender, library: Arc<Library>) -> Engine {
     let mut engine = Engine::new();
     configure_caps(&mut engine);
     wire_print_hook(&mut engine, stdout, inbound.clone());
@@ -428,13 +428,14 @@ fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
 /// derive (id, name, category, inputs, outputs, …; `lambda` is
 /// `#[serde(skip)]`). Lets scripts query the live Library without a
 /// separate registry on this side.
-fn register_introspection(engine: &mut Engine, library: SharedLibrary) {
+fn register_introspection(engine: &mut Engine, library: Arc<Library>) {
     engine.register_fn("list_funcs", move || -> Array {
-        // `load` per call so promote/publish growth is visible to scripts.
-        // Skip (don't panic on) any func that fails to serialize, so a bad
-        // entry can't take down the executor task mid-eval.
+        // The startup snapshot serves every call: the func table never
+        // changes after assembly (runtime library growth is subgraph defs,
+        // which aren't exposed here). Skip (don't panic on) any func that
+        // fails to serialize, so a bad entry can't take down the executor
+        // task mid-eval.
         library
-            .load()
             .funcs
             .iter()
             .filter_map(|f| rhai::serde::to_dynamic(f).ok())
@@ -460,7 +461,7 @@ fn register_introspection(engine: &mut Engine, library: SharedLibrary) {
 /// bare-name surface. Keep this module small: prefer script-side helpers
 /// in `prelude.rhai` when a thing can be expressed via `apply` + the
 /// already-shaped maps.
-fn register_host_helpers(engine: &mut Engine, library: SharedLibrary) {
+fn register_host_helpers(engine: &mut Engine, library: Arc<Library>) {
     let mut module = rhai::Module::new();
     module.set_native_fn(
         "make_add_node",
@@ -471,9 +472,9 @@ fn register_host_helpers(engine: &mut Engine, library: SharedLibrary) {
             let func_id: FuncId = id
                 .parse()
                 .map_err(|e| format!("invalid func id {id:?}: {e}"))?;
-            // `load` per call so a func added since startup still resolves.
-            let lib = library.load();
-            let func = lib
+            // The startup snapshot suffices: the func table never changes
+            // after assembly.
+            let func = library
                 .by_id(&func_id)
                 .ok_or_else(|| format!("unknown func id: {id}"))?;
             let node: Node = func.into();
@@ -628,7 +629,7 @@ impl ScriptHost {
     /// `library` is the shared swappable library cell; the executor `load`s
     /// it per call, so promote/publish growth from the GUI is reflected in
     /// running scripts on their next access.
-    pub fn start(cfg: &ScriptConfig, library: SharedLibrary, wake: Wake) -> Option<Self> {
+    pub fn start(cfg: &ScriptConfig, library: Arc<Library>, wake: Wake) -> Option<Self> {
         let tcp_cfg = cfg.tcp.as_ref()?;
         let (transport, report) = match tcp::start(tcp_cfg) {
             Ok(pair) => pair,

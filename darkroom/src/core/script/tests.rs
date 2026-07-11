@@ -1,5 +1,4 @@
 use super::*;
-use arc_swap::ArcSwap;
 use scenarium::graph::{Binding, NodeKind, OutputPort};
 use scenarium::library::Library;
 
@@ -35,7 +34,7 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
 
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, _rx) = test_inbound();
-    let engine = build_engine(state, tx, Arc::new(ArcSwap::from_pointee(lib)));
+    let engine = build_engine(state, tx, Arc::new(lib));
 
     // Each entry is a Rhai Map with fields mirroring `Func`. Verify
     // both insertion order and that the per-func subfields round-trip.
@@ -62,11 +61,7 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
 fn list_funcs_is_empty_when_func_lib_is_empty() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, _rx) = test_inbound();
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     let result: Array = engine.eval("list_funcs()").unwrap();
     assert!(result.is_empty());
@@ -79,11 +74,7 @@ fn create_node_malformed_id_returns_rhai_error_and_no_action() {
     // call chain propagates errors cleanly.
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     let err = engine
         .eval::<String>(r#"create_node("not-a-uuid", 0.0, 0.0)"#)
@@ -97,11 +88,7 @@ fn create_node_unknown_id_returns_rhai_error_and_no_action() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
     // Empty Library → any well-formed UUID is "unknown".
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     let err = engine
         .eval::<String>(r#"create_node("00000000-0000-0000-0000-000000000001", 0.0, 0.0)"#)
@@ -120,7 +107,7 @@ fn create_node_known_id_enqueues_add_node() {
 
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(state, tx, Arc::new(ArcSwap::from_pointee(lib)));
+    let engine = build_engine(state, tx, Arc::new(lib));
 
     let script = format!(r#"create_node("{alpha_id}", 12.5, -3.0)"#);
     let returned_id: String = engine.eval(&script).unwrap();
@@ -158,11 +145,7 @@ fn apply_decodes_arbitrary_intent_via_serde() {
     // `Intent` through `apply` without touching the executor.
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     engine
         .eval::<()>(r#"apply(#{ SetSelection: #{ to: [] } })"#)
@@ -180,11 +163,7 @@ fn apply_decodes_arbitrary_intent_via_serde() {
 fn apply_returns_rhai_error_on_unknown_variant() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     let err = engine
         .eval::<()>(r#"apply(#{ NotARealVariant: #{} })"#)
@@ -197,11 +176,7 @@ fn apply_returns_rhai_error_on_unknown_variant() {
 fn apply_all_batches_actions_into_one_inbound() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     // Two no-op selections. Verifies that a Rhai array round-trips into a
     // single `Apply(Vec<...>)` — the path that gives scripts atomic
@@ -227,11 +202,7 @@ fn prelude_connect_decodes_to_setinput_bind() {
     // `SetInput { to: Binding::Bind(OutputPort { node_id, port_idx }) }`.
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     let out = NodeId::unique();
     let inp = NodeId::unique();
@@ -265,11 +236,7 @@ fn prelude_connect_decodes_to_setinput_bind() {
 fn prelude_disconnect_decodes_to_setinput_none() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     let inp = NodeId::unique();
     engine
@@ -290,11 +257,7 @@ fn prelude_move_node_decodes_to_movenodes() {
     // `glam::Vec2` survives the round-trip intact.
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     let id = NodeId::unique();
     engine
@@ -317,11 +280,7 @@ fn prelude_move_node_decodes_to_movenodes() {
 fn prelude_select_node_decodes_to_setselection() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     let id = NodeId::unique();
     engine
@@ -342,11 +301,7 @@ fn prelude_select_node_decodes_to_setselection() {
 fn run_emits_run_once() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     engine.eval::<()>("run()").unwrap();
     assert!(matches!(rx.try_recv(), Ok(ScriptMessage::RunOnce)));
@@ -356,11 +311,7 @@ fn run_emits_run_once() {
 fn shutdown_emits_shutdown() {
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, mut rx) = test_inbound();
-    let engine = build_engine(
-        state,
-        tx,
-        Arc::new(ArcSwap::from_pointee(Library::default())),
-    );
+    let engine = build_engine(state, tx, Arc::new(Library::default()));
 
     engine.eval::<()>("shutdown()").unwrap();
     assert!(matches!(rx.try_recv(), Ok(ScriptMessage::Shutdown)));

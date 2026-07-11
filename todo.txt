@@ -9,3 +9,7 @@ save cahhce files by nodeid
 pub(crate) type SharedLibrary = Arc<ArcSwap<Library>>; - simplify?
 
 audit error traces - which should be results
+
+first draw clean simplify
+
+review funclib edititing and updating it in places like diskstore etc

@@ -11,9 +11,10 @@ use scenarium::execution::compile::{CompiledGraph, Compiler};
 use scenarium::execution::disk_store::DiskStore;
 use scenarium::execution::stats::FlattenMap;
 use scenarium::graph::{Graph, NodeId};
+use scenarium::library::Library;
 
 use crate::core::io::cache::prepare_document_cache_root;
-use crate::core::library::{SharedLibrary, runtime_func_lib};
+use crate::core::library::runtime_func_lib;
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
@@ -21,11 +22,12 @@ use crate::core::worker::{ValueRequest, WorkerBridge, WorkerEvent};
 
 #[derive(Debug)]
 pub(crate) struct Engine {
-    /// The shared runtime library. The GUI's promote/publish commands swap a
-    /// grown copy into the cell; the worker (re-snapshots each run) and any
-    /// running script executor observe it on their next `load`. See
-    /// [`SharedLibrary`].
-    pub(crate) library: SharedLibrary,
+    /// The runtime library (builtins + the on-disk subgraph library),
+    /// assembled once at startup. The GUI's promote/publish commands grow it
+    /// in place (`Arc::make_mut`); the script host keeps its startup `Arc` —
+    /// safe because scripts only read the func table, which never changes
+    /// after assembly (runtime growth is subgraph defs, not script-visible).
+    pub(crate) library: Arc<Library>,
     worker: WorkerBridge,
     /// Long-lived so the flatten scratch is reused across compiles instead of
     /// reallocated per run.
@@ -54,7 +56,7 @@ impl Engine {
         // Install the cache up front (memory-only until a document has a path);
         // its codecs come from the library snapshot, and `set_document_cache`
         // repoints the store root as documents open.
-        worker.set_disk_store(DiskStore::new(library.load_full(), None));
+        worker.set_disk_store(DiskStore::new(library.clone(), None));
         let script = ScriptHost::start(script_cfg, library.clone(), wake);
         Self {
             library,
@@ -73,7 +75,7 @@ impl Engine {
     /// and returns `None` (nothing sent, worker untouched); a success clears
     /// the sticky error.
     fn compile(&mut self, graph: &Graph) -> Option<CompiledGraph> {
-        match self.compiler.compile(graph, &self.library.load()) {
+        match self.compiler.compile(graph, &self.library) {
             Ok(compiled) => {
                 self.flatten_map = compiled.flatten_map.clone();
                 self.status.error = None;
@@ -93,7 +95,7 @@ impl Engine {
     pub(crate) fn set_document_cache(&self, doc_path: Option<&Path>) {
         let root = doc_path.map(prepare_document_cache_root);
         self.worker
-            .set_disk_store(DiskStore::new(self.library.load_full(), root));
+            .set_disk_store(DiskStore::new(self.library.clone(), root));
     }
 
     /// Compile `graph` against the current library and send it to the worker

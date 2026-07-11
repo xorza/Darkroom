@@ -102,7 +102,7 @@ impl Session {
             match event {
                 ScriptMessage::Print { msg } => self.engine.status.info(format!("script: {msg}")),
                 ScriptMessage::Apply(intents) => {
-                    let library = self.engine.library.load();
+                    let library = self.engine.library.clone();
                     self.needs_reconcile |= apply_intents(&mut self.document, intents, &library);
                 }
                 ScriptMessage::RunOnce => run = true,
@@ -135,8 +135,7 @@ impl Session {
 
     fn reconcile_if_needed(&mut self) {
         if self.needs_reconcile {
-            self.document
-                .reconcile_boundaries(&self.engine.library.load());
+            self.document.reconcile_boundaries(&self.engine.library);
             self.needs_reconcile = false;
         }
     }
