@@ -1,3 +1,4 @@
+pub mod dock;
 pub mod view_node;
 
 use anyhow::{Result, bail};
@@ -11,6 +12,7 @@ use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
+use crate::core::document::dock::DockLayout;
 use crate::core::document::view_node::ViewNode;
 use crate::core::edit::reconcile::reconcile_def;
 
@@ -278,7 +280,7 @@ impl EditScope<'_> {
 /// metadata for each graph the user has open — the root in `main_view`,
 /// every opened subgraph interior in `sub_views`. The `Library` it
 /// resolves against lives one level up on `App` (runtime-owned).
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Document {
     pub graph: CoreGraph,
     pub main_view: GraphView,
@@ -286,18 +288,11 @@ pub struct Document {
     /// subgraph is first opened in a tab. Keyed by `SubgraphId`.
     #[serde(default)]
     pub sub_views: HashMap<SubgraphId, GraphView>,
-    /// Open editor tabs, left to right. Always non-empty; `tabs[0]` is
-    /// `TabRef::Graph(GraphRef::Main)`. Persisted + undoable like the rest
-    /// of the view state (switching tabs is an undoable `Intent`).
-    #[serde(default = "default_tabs")]
-    pub tabs: Vec<TabRef>,
-    /// Index into `tabs` of the visible tab.
+    /// The pane arrangement: open tabs grouped into split panes, plus
+    /// the focused group. Persisted + undoable like the rest of the view
+    /// state (every layout mutation is an undoable `Intent::Dock`).
     #[serde(default)]
-    pub active: usize,
-}
-
-fn default_tabs() -> Vec<TabRef> {
-    vec![TabRef::Graph(GraphRef::Main)]
+    pub layout: DockLayout,
 }
 
 /// Index of the slot named `expected`: `idx_hint` when it still holds
@@ -315,18 +310,6 @@ fn resolve_named_slot<T>(
         return Some(idx_hint);
     }
     slots.iter().position(|s| name_of(s) == expected)
-}
-
-impl Default for Document {
-    fn default() -> Self {
-        Self {
-            graph: CoreGraph::default(),
-            main_view: GraphView::default(),
-            sub_views: HashMap::new(),
-            tabs: default_tabs(),
-            active: 0,
-        }
-    }
 }
 
 impl Document {
@@ -385,15 +368,13 @@ impl Document {
         })
     }
 
-    /// The active tab (graph pane or a non-graph app view).
-    pub fn active_tab(&self) -> TabRef {
-        self.tabs[self.active]
-    }
-
-    /// The graph the active tab points at, or `None` when the active tab
-    /// is a non-graph view (e.g. `Preferences`).
+    /// The graph on the canvas: the *primary* group's visible tab, when
+    /// it's a graph — `None` when that pane shows a non-graph view.
+    /// Independent of `layout.focused`: only the primary group hosts
+    /// canvases, and its graph stays visible (and editable) while focus
+    /// sits in another pane.
     pub fn active_target(&self) -> Option<GraphRef> {
-        match self.tabs[self.active] {
+        match self.layout.primary().active_tab() {
             TabRef::Graph(target) => Some(target),
             TabRef::Preferences | TabRef::ImageViewer(_) => None,
         }
@@ -418,35 +399,34 @@ impl Document {
         true
     }
 
-    /// Keep the tab list renderable: drop tabs whose graph vanished,
-    /// seed any `Local` tab that's missing its view metadata, and clamp
-    /// `active` into range — so the scene rebuild always resolves a live
-    /// graph *and* view. `Main` always survives (`graph_for(Main)` is
-    /// infallible and `main_view` always exists).
+    /// Keep the layout renderable: drop tabs whose graph vanished
+    /// (collapsing panes that empty) and seed any `Local` tab that's
+    /// missing its view metadata — so the scene rebuild always resolves
+    /// a live graph *and* view. `Main` always survives (`graph_for(Main)`
+    /// is infallible and `main_view` always exists).
     ///
-    /// The view-seeding covers a desync hazard: `tabs` and `sub_views`
-    /// are independent serialized fields, so a deserialized (or
-    /// hand-edited) document can carry a `Local` tab with no matching
+    /// The view-seeding covers a desync hazard: the layout and
+    /// `sub_views` are independent serialized fields, so a deserialized
+    /// (or hand-edited) document can carry a `Local` tab with no matching
     /// `sub_views` entry. Seeding it here recovers gracefully instead of
     /// panicking on a later `view(target).expect(..)`.
     pub fn ensure_valid_active(&mut self) {
         // Common case: every tab still resolves — touch nothing (no
-        // per-frame allocation). Only rebuild the list when a tab's
-        // graph actually vanished. Non-graph tabs (e.g. `Preferences`) always
-        // resolve.
-        if self.tabs.iter().any(|t| match t {
-            TabRef::Graph(g) => self.graph_for(*g).is_none(),
+        // per-frame allocation). Non-graph tabs other than viewers (e.g.
+        // `Preferences`) always resolve.
+        if self.layout.all_tabs().any(|t| match t {
+            TabRef::Graph(g) => self.graph_for(g).is_none(),
             TabRef::ImageViewer(port) => self
                 .graph
                 .find_node(&port.node_id, NodeSearch::Recursive)
                 .is_none(),
             TabRef::Preferences => false,
         }) {
-            // Split the borrow so `retain` (mut `tabs`) can read `graph`.
-            let Document { graph, tabs, .. } = self;
-            tabs.retain(|t| match t {
+            // Split the borrow so the layout retain can read `graph`.
+            let Document { graph, layout, .. } = self;
+            layout.retain_tabs(|t| match t {
                 TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
-                TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(id).is_some(),
+                TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(&id).is_some(),
                 // A viewer tab dies with its node (mirrors a subgraph tab
                 // whose def vanished).
                 TabRef::ImageViewer(port) => graph
@@ -456,15 +436,15 @@ impl Document {
         }
         // Seed views for any `Local` tab missing one. Guarded by `any`
         // so the common (all-seeded) case allocates nothing.
-        if self.tabs.iter().any(
-            |t| matches!(t, TabRef::Graph(GraphRef::Local(id)) if !self.sub_views.contains_key(id)),
+        if self.layout.all_tabs().any(
+            |t| matches!(t, TabRef::Graph(GraphRef::Local(id)) if !self.sub_views.contains_key(&id)),
         ) {
             let missing: Vec<SubgraphId> = self
-                .tabs
-                .iter()
+                .layout
+                .all_tabs()
                 .filter_map(|t| match t {
-                    TabRef::Graph(GraphRef::Local(id)) if !self.sub_views.contains_key(id) => {
-                        Some(*id)
+                    TabRef::Graph(GraphRef::Local(id)) if !self.sub_views.contains_key(&id) => {
+                        Some(id)
                     }
                     _ => None,
                 })
@@ -472,9 +452,6 @@ impl Document {
             for id in missing {
                 self.ensure_sub_view(id);
             }
-        }
-        if self.active >= self.tabs.len() {
-            self.active = self.tabs.len() - 1;
         }
     }
 
@@ -633,17 +610,11 @@ impl Document {
             view.validate(&def.graph);
         }
 
-        assert!(!self.tabs.is_empty(), "tab list must be non-empty");
-        assert_eq!(
-            self.tabs[0],
-            TabRef::Graph(GraphRef::Main),
-            "first tab must be Main"
-        );
-        assert!(self.active < self.tabs.len(), "active tab index in range");
-        for tab in &self.tabs {
+        self.layout.validate();
+        for tab in self.layout.all_tabs() {
             if let TabRef::Graph(g) = tab {
                 assert!(
-                    self.graph_for(*g).is_some(),
+                    self.graph_for(g).is_some(),
                     "open tab references a missing graph"
                 );
             }
@@ -676,8 +647,7 @@ impl From<CoreGraph> for Document {
             graph,
             main_view,
             sub_views: HashMap::new(),
-            tabs: default_tabs(),
-            active: 0,
+            layout: DockLayout::default(),
         }
     }
 }
@@ -1049,32 +1019,39 @@ mod tests {
         }
     }
 
+    /// All open tabs across the layout, for order-sensitive asserts.
+    fn all_tabs(doc: &Document) -> Vec<TabRef> {
+        doc.layout.all_tabs().collect()
+    }
+
     #[test]
     fn non_graph_tabs_have_no_target_and_survive_validation() {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
-        // A graph tab resolves to a target; the appended non-graph tabs do not.
+        let primary = doc.layout.primary().id;
+        // The canvas target follows the primary group's *visible* tab: a
+        // graph resolves, an activated non-graph tab means no canvas.
         assert_eq!(doc.active_target(), Some(GraphRef::Main));
-        doc.tabs
-            .extend([TabRef::Preferences, TabRef::ImageViewer(out_port(node_id))]);
+        doc.layout.insert_tab(primary, TabRef::Preferences);
+        doc.layout
+            .insert_tab(primary, TabRef::ImageViewer(out_port(node_id)));
         for active in [1, 2] {
-            doc.active = active;
-            assert_eq!(doc.active_tab(), doc.tabs[active]);
+            doc.layout.activate(primary, active);
             assert_eq!(doc.active_target(), None, "a non-graph tab has no target");
         }
 
         // Preferences always resolves; a viewer tab resolves while its
-        // node exists — neither is pruned and the active index holds.
+        // node exists — neither is pruned and the activation holds.
         doc.ensure_valid_active();
         assert_eq!(
-            doc.tabs,
+            all_tabs(&doc),
             vec![
                 TabRef::Graph(GraphRef::Main),
                 TabRef::Preferences,
                 TabRef::ImageViewer(out_port(node_id))
             ]
         );
-        assert_eq!(doc.active, 2);
+        assert_eq!(doc.layout.primary().active, 2);
         doc.validate();
     }
 
@@ -1083,59 +1060,78 @@ mod tests {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let id = doc.create_subgraph();
-        doc.tabs.extend([
-            TabRef::Graph(GraphRef::Local(id)),
-            TabRef::Preferences,
-            TabRef::ImageViewer(out_port(node_id)),
-        ]);
-        doc.active = 3; // viewing the image tab
+        let primary = doc.layout.primary().id;
+        doc.layout
+            .insert_tab(primary, TabRef::Graph(GraphRef::Local(id)));
+        doc.layout.insert_tab(primary, TabRef::Preferences);
+        doc.layout
+            .insert_tab(primary, TabRef::ImageViewer(out_port(node_id)));
+        doc.layout.activate(primary, 3); // viewing the image tab
         // Drop the subgraph out from under its open tab.
         doc.graph.subgraphs.remove_by_key(&id);
 
         doc.ensure_valid_active();
-        // The dead subgraph tab is pruned; Main + the non-graph tabs remain,
-        // and active follows its tab left one slot.
+        // The dead subgraph tab is pruned; Main + the non-graph tabs
+        // remain, and the clamped active still points at the image tab
+        // (it slid left one slot with the removal).
         assert_eq!(
-            doc.tabs,
+            all_tabs(&doc),
             vec![
                 TabRef::Graph(GraphRef::Main),
                 TabRef::Preferences,
                 TabRef::ImageViewer(out_port(node_id))
             ]
         );
-        assert_eq!(doc.active, 2);
+        assert_eq!(doc.layout.primary().active, 2);
     }
 
     #[test]
     fn ensure_valid_active_prunes_a_viewer_tab_whose_node_is_gone() {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
-        doc.tabs.push(TabRef::ImageViewer(out_port(node_id)));
+        let primary = doc.layout.primary().id;
+        doc.layout
+            .insert_tab(primary, TabRef::ImageViewer(out_port(node_id)));
         doc.ensure_valid_active();
-        assert_eq!(doc.tabs.len(), 2, "tab survives while the node exists");
+        assert_eq!(
+            all_tabs(&doc).len(),
+            2,
+            "tab survives while the node exists"
+        );
 
         // Delete the node: the viewer tab dies with it (like a subgraph
         // tab whose def vanished).
         doc.scope_mut(GraphRef::Main).unwrap().remove_node(&node_id);
         doc.ensure_valid_active();
-        assert_eq!(doc.tabs, vec![TabRef::Graph(GraphRef::Main)]);
-        assert_eq!(doc.active, 0);
+        assert_eq!(all_tabs(&doc), vec![TabRef::Graph(GraphRef::Main)]);
+        assert_eq!(doc.layout.primary().active, 0);
     }
 
     #[test]
-    fn non_graph_tabs_round_trip_in_every_format() {
+    fn dock_layout_round_trips_in_every_format() {
+        use crate::core::document::dock::{DockDrop, SplitSide};
+
         let mut doc: Document = core_test_graph().into();
         let node_id = doc.graph.iter().next().unwrap().id;
-        doc.tabs
-            .extend([TabRef::Preferences, TabRef::ImageViewer(out_port(node_id))]);
+        let primary = doc.layout.primary().id;
+        doc.layout.insert_tab(primary, TabRef::Preferences);
+        doc.layout
+            .insert_tab(primary, TabRef::ImageViewer(out_port(node_id)));
+        // A split pane too, so the whole tree shape round-trips — not
+        // just a flat strip.
+        doc.layout.move_tab(
+            TabRef::ImageViewer(out_port(node_id)),
+            DockDrop::Split {
+                group: primary,
+                side: SplitSide::Right,
+            },
+        );
         for format in SerdeFormat::all_formats_for_testing() {
-            let bytes = doc
-                .serialize(format)
-                .expect("serialize with non-graph tabs");
+            let bytes = doc.serialize(format).expect("serialize with dock layout");
             let back = Document::deserialize(format, &bytes).expect("deserialize");
             assert_eq!(
-                back.tabs, doc.tabs,
-                "tabs (including Preferences + ImageViewer) round-trip for {format:?}"
+                back.layout, doc.layout,
+                "the split tree (groups, focus, ratio) round-trips for {format:?}"
             );
         }
     }

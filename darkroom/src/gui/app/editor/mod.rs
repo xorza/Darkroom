@@ -17,10 +17,11 @@ use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphDef;
 use scenarium::library::Library;
 
+use crate::core::document::dock::{TabAddress, TabGroupId};
 use crate::core::document::{Document, GraphRef, PortKind, PortRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::{
-    Intent, NodeProperty, build_duplicate_intent_for, commit_intent_cascading,
+    DockIntent, Intent, NodeProperty, build_duplicate_intent_for, commit_intent_cascading,
 };
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
@@ -349,8 +350,8 @@ impl Editor {
 
     /// Settle which graph is active for this frame, from inputs all
     /// available before the record: keyboard undo/redo (which can replay
-    /// a `SwitchTab`) and tab/subgraph-open clicks read from *last*
-    /// frame's responses.
+    /// a dock-layout change) and tab/subgraph-open clicks read from
+    /// *last* frame's responses.
     ///
     /// Done up front so the edit pipeline runs against a fixed target and
     /// a switched-to graph records in the same present's Pass A.
@@ -361,10 +362,9 @@ impl Editor {
         // whose chips were clicked.
         self.main_window
             .scan_navigation(ui, &self.document, &self.scene, &mut self.actions);
-        // Open mutates the tab list directly; activate/close queue
-        // undoable `SwitchTab` / `CloseTab` intents — drain them (both
-        // steps are graph-agnostic, so the target passed here doesn't
-        // matter).
+        // Open mutates the layout directly; activate/close queue
+        // undoable `Intent::Dock` ops — drain them (dock steps are
+        // graph-agnostic, so the target passed here doesn't matter).
         self.apply_view_actions();
         // The queued intents (switch/close/rename) are graph-agnostic, so
         // a non-graph active tab drains against `Main` harmlessly.
@@ -464,20 +464,22 @@ impl Editor {
         std::mem::take(&mut self.caches_dirty)
     }
 
-    /// Apply the record pass's view-state requests. Adding a tab to the
+    /// Apply the record pass's view-state requests. Adding a tab to a
     /// strip is the only non-undoable part of opening; the focus change it
-    /// implies, plus activate and close, are queued as `Intent::SwitchTab` /
-    /// `Intent::CloseTab` so they join the undo history (their relayout is
-    /// decided later, when they drain).
+    /// implies, plus activate and close, are queued as `Intent::Dock` ops
+    /// so they join the undo history (their relayout is decided later,
+    /// when they drain).
     fn apply_view_actions(&mut self) {
         for action in std::mem::take(&mut self.actions) {
             match action {
                 UiAction::OpenGraph(target) => self.open_graph(target),
-                UiAction::ActivateTab(index) => {
-                    self.intents.push(Intent::SwitchTab { to: index });
+                UiAction::ActivateTab { group, index } => {
+                    self.intents
+                        .push(Intent::Dock(DockIntent::ActivateTab { group, index }));
                 }
-                UiAction::CloseTab(index) => {
-                    self.intents.push(Intent::CloseTab { index });
+                UiAction::CloseTab { group, index } => {
+                    self.intents
+                        .push(Intent::Dock(DockIntent::CloseTab { group, index }));
                 }
                 UiAction::NewSubgraph => {
                     // Creating the def + instance isn't undoable (no undo
@@ -499,7 +501,7 @@ impl Editor {
     /// panel ([`PortValueView::full`]); `None` (superseded run) still
     /// opens the tab, which fills itself after the next run. Mirrors
     /// [`Self::open_preferences`]: adding the tab is the non-undoable
-    /// part, focus routes through a recorded `SwitchTab`.
+    /// part, focus routes through a recorded activation.
     ///
     /// [`PortValueView::full`]: crate::gui::node_values::PortValueView::full
     fn open_image_viewer(&mut self, port: PortRef) {
@@ -509,8 +511,9 @@ impl Editor {
             value,
             self.run_state.run_id,
         );
-        let index = self.tab_index_or_push(TabRef::ImageViewer(port));
-        self.intents.push(Intent::SwitchTab { to: index });
+        let group = self.document.layout.focused;
+        let addr = self.tab_address_or_insert(TabRef::ImageViewer(port), group);
+        self.push_activate(addr);
     }
 
     /// Keep the viewer tabs in step with the document and the last run:
@@ -521,12 +524,12 @@ impl Editor {
     /// so every open viewer updates after a graph execution, keeping the
     /// user's framing (see [`refresh`](image_viewer::ImageViewer::refresh)).
     fn sync_image_viewers(&mut self) {
-        let tabs = &self.document.tabs;
+        let layout = &self.document.layout;
         self.main_window
             .image_viewers
-            .retain(|port, _| tabs.contains(&TabRef::ImageViewer(*port)));
-        for tab in &self.document.tabs {
-            let &TabRef::ImageViewer(port) = tab else {
+            .retain(|port, _| layout.all_tabs().any(|t| t == TabRef::ImageViewer(*port)));
+        for tab in self.document.layout.all_tabs() {
+            let TabRef::ImageViewer(port) = tab else {
                 continue;
             };
             self.run_state.watch(port.node_id);
@@ -543,25 +546,32 @@ impl Editor {
         }
     }
 
-    /// Index of `tab` in the strip, appending it if absent — the shared
-    /// non-undoable half of opening any tab. Callers focus it through a
-    /// recorded `SwitchTab`.
-    fn tab_index_or_push(&mut self, tab: TabRef) -> usize {
-        match self.document.tabs.iter().position(|t| *t == tab) {
-            Some(index) => index,
-            None => {
-                self.document.tabs.push(tab);
-                self.document.tabs.len() - 1
-            }
+    /// `tab`'s address in the layout, inserting it into `group`'s strip
+    /// if absent — the shared non-undoable half of opening any tab.
+    /// Callers focus it through a recorded activation.
+    fn tab_address_or_insert(&mut self, tab: TabRef, group: TabGroupId) -> TabAddress {
+        match self.document.layout.find_tab(tab) {
+            Some(addr) => addr,
+            None => self.document.layout.insert_tab(group, tab),
         }
     }
 
-    /// Open `target`'s tab and focus it. Adding the tab to the strip (lazily
-    /// seeding a `Local` interior's view) is the non-undoable part; focusing
-    /// it routes through a recorded `SwitchTab` like every other focus
+    /// Queue the recorded focus/activation half of an open.
+    fn push_activate(&mut self, addr: TabAddress) {
+        self.intents.push(Intent::Dock(DockIntent::ActivateTab {
+            group: addr.group,
+            index: addr.index,
+        }));
+    }
+
+    /// Open `target`'s tab in the primary group (graph tabs are pinned
+    /// there) and focus it. Adding the tab to the strip (lazily seeding a
+    /// `Local` interior's view) is the non-undoable part; focusing it
+    /// routes through a recorded activation like every other focus
     /// change — queued here, drained right after. Undo then faithfully
-    /// reverses focus (the opened tab stays open) and a fresh open discards
-    /// the redo tail, instead of leaving `active` mutated outside the record.
+    /// reverses focus (the opened tab stays open) and a fresh open
+    /// discards the redo tail, instead of mutating focus outside the
+    /// record.
     fn open_graph(&mut self, target: GraphRef) {
         // Idempotent view seeding, so it can run before the open-or-focus
         // dedupe rather than only inside the "new tab" arm.
@@ -570,18 +580,27 @@ impl Editor {
         {
             return; // subgraph vanished — nothing to open
         }
-        let index = self.tab_index_or_push(TabRef::Graph(target));
-        self.intents.push(Intent::SwitchTab { to: index });
+        let group = self.document.layout.primary().id;
+        let addr = self.tab_address_or_insert(TabRef::Graph(target), group);
+        self.push_activate(addr);
     }
 
-    /// Open the [`TabRef::Preferences`] settings tab and focus it (reusing the
-    /// existing tab if already open). Mirrors [`open_graph`]: adding the
-    /// tab is the non-undoable part; the focus routes through a recorded
-    /// `SwitchTab`. Called from the File ▸ Preferences menu via `App`, so it
-    /// records the switch and drains it immediately like every external edit.
+    /// Open the [`TabRef::Preferences`] settings tab in the focused group
+    /// and focus it (reusing the existing tab wherever it lives). Mirrors
+    /// [`open_graph`]: adding the tab is the non-undoable part; the focus
+    /// routes through a recorded activation. Called from the File ▸
+    /// Preferences menu via `App`, so it records the switch and drains it
+    /// immediately like every external edit.
     pub(crate) fn open_preferences(&mut self, library: &Library) {
-        let index = self.tab_index_or_push(TabRef::Preferences);
-        self.apply_edit(Intent::SwitchTab { to: index }, library);
+        let group = self.document.layout.focused;
+        let addr = self.tab_address_or_insert(TabRef::Preferences, group);
+        self.apply_edit(
+            Intent::Dock(DockIntent::ActivateTab {
+                group: addr.group,
+                index: addr.index,
+            }),
+            library,
+        );
     }
 }
 
@@ -702,22 +721,24 @@ mod tests {
             editor.apply_view_actions();
             editor.drain_intents(GraphRef::Main, &lib);
         };
+        let tabs = |editor: &Editor| editor.document.layout.all_tabs().collect::<Vec<_>>();
+        let active = |editor: &Editor| editor.document.layout.primary().active;
 
         // First open adds + focuses the port's tab.
         open(&mut editor, port(0));
         assert_eq!(
-            editor.document.tabs,
+            tabs(&editor),
             vec![TabRef::Graph(GraphRef::Main), TabRef::ImageViewer(port(0))]
         );
-        assert_eq!(editor.document.active, 1);
+        assert_eq!(active(&editor), 1);
 
         // Re-clicking the same port reuses its tab; a different port of
         // the same node gets its own.
         open(&mut editor, port(0));
-        assert_eq!(editor.document.tabs.len(), 2, "same port dedupes");
+        assert_eq!(tabs(&editor).len(), 2, "same port dedupes");
         open(&mut editor, port(1));
-        assert_eq!(editor.document.tabs.len(), 3, "distinct port adds a tab");
-        assert_eq!(editor.document.active, 2);
+        assert_eq!(tabs(&editor).len(), 3, "distinct port adds a tab");
+        assert_eq!(active(&editor), 2);
         assert!(editor.main_window.image_viewers.contains_key(&port(0)));
         assert!(editor.main_window.image_viewers.contains_key(&port(1)));
 
@@ -734,8 +755,8 @@ mod tests {
         // remaining port's state survives).
         editor
             .document
-            .tabs
-            .retain(|t| *t != TabRef::ImageViewer(port(1)));
+            .layout
+            .retain_tabs(|t| t != TabRef::ImageViewer(port(1)));
         editor.document.ensure_valid_active();
         editor.sync_image_viewers();
         assert!(editor.main_window.image_viewers.contains_key(&port(0)));
@@ -750,17 +771,20 @@ mod tests {
         let mut editor = Editor::new(Document::default());
         let a = editor.document.create_subgraph();
         let b = editor.document.create_subgraph();
+        let tabs = |editor: &Editor| editor.document.layout.all_tabs().collect::<Vec<_>>();
+        let active = |editor: &Editor| editor.document.layout.primary().active;
 
-        // Opening appends the tab and focuses it through a recorded switch.
+        // Opening appends the tab and focuses it through a recorded
+        // activation.
         open(&mut editor, GraphRef::Local(a));
         assert_eq!(
-            editor.document.tabs,
+            tabs(&editor),
             vec![
                 TabRef::Graph(GraphRef::Main),
                 TabRef::Graph(GraphRef::Local(a))
             ]
         );
-        assert_eq!(editor.document.active, 1);
+        assert_eq!(active(&editor), 1);
 
         // Undo reverses the focus only — the opened tab stays in the strip
         // (adding it isn't undoable), and `active` returns to its real prior

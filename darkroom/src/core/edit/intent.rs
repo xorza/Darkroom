@@ -38,6 +38,7 @@ use scenarium::graph::{
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
 
+use crate::core::document::dock::{DockDrop, DockLayout, NodeIdx, TabGroupId};
 use crate::core::document::view_node::ViewNode;
 use crate::core::document::{
     BoundarySide, Document, EditScope, EditScopeRef, GraphRef, TabRef, Viewport,
