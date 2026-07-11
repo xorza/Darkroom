@@ -8,7 +8,7 @@
 
 use aperture::{
     Align, Color, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, Rect, Sense, Shape,
-    Sizing, Spacing, Stroke, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
+    Sizing, Spacing, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use glam::Vec2;
 use scenarium::data::{DataType, FsPathMode};
@@ -428,14 +428,15 @@ fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: S
             // (`sdf - radius`), so the rounded result grows back out to the
             // port box instead of past it.
             let r = EVENT_TRIANGLE_RADIUS;
-            ui.add_shape(Shape::Triangle {
-                a: Vec2::new(inset + r, inset + r),
-                b: Vec2::new(inset + r, inset + port - r),
-                c: Vec2::new(inset + port - r, inset + port * 0.5),
-                radius: r,
-                fill: fill.into(),
-                stroke: Stroke::ZERO,
-            });
+            ui.add_shape(
+                Shape::triangle(
+                    Vec2::new(inset + r, inset + r),
+                    Vec2::new(inset + r, inset + port - r),
+                    Vec2::new(inset + port - r, inset + port * 0.5),
+                )
+                .radius(r)
+                .fill(fill),
+            );
         });
     if !tip.is_empty() {
         Tooltip::for_(&glyph.response.snapshot())

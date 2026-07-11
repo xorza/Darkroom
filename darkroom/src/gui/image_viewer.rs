@@ -270,23 +270,20 @@ impl ImageViewer {
                     (Some(shown), Some(pane)) => {
                         let img = shown.handle.size().as_vec2();
                         let v = self.effective_view(img, pane);
-                        ui.add_shape(Shape::Image {
-                            handle: shown.handle.clone(),
-                            local_rect: Some(draw_rect(img, v)),
-                            fit: ImageFit::Fill,
-                            filter: prefs.filter,
-                            tint: Color::WHITE,
-                        });
+                        ui.add_shape(
+                            Shape::image(shown.handle.clone())
+                                .at(draw_rect(img, v))
+                                .fit(ImageFit::Fill)
+                                .filter(prefs.filter),
+                        );
                     }
                     // Pane not measured yet (first frame): let aperture fit it.
                     (Some(shown), None) => {
-                        ui.add_shape(Shape::Image {
-                            handle: shown.handle.clone(),
-                            local_rect: None,
-                            fit: ImageFit::Contain,
-                            filter: prefs.filter,
-                            tint: Color::WHITE,
-                        });
+                        ui.add_shape(
+                            Shape::image(shown.handle.clone())
+                                .fit(ImageFit::Contain)
+                                .filter(prefs.filter),
+                        );
                     }
                     (None, _) => {
                         let hint = self
@@ -320,17 +317,15 @@ impl ImageViewer {
             .checker
             .get_or_insert_with(|| ui.register_image(checker_image()))
             .clone();
-        ui.add_shape(Shape::Image {
-            handle,
-            local_rect: None,
-            fit: ImageFit::Tile {
-                offset: Vec2::ZERO,
-                // The 2×2 tile is one checker period = 2 squares across.
-                scale: pane / (2.0 * CHECKER_SQUARE_PX),
-            },
-            filter: ImageFilter::Nearest,
-            tint: Color::WHITE,
-        });
+        ui.add_shape(
+            Shape::image(handle)
+                .fit(ImageFit::Tile {
+                    offset: Vec2::ZERO,
+                    // The 2×2 tile is one checker period = 2 squares across.
+                    scale: pane / (2.0 * CHECKER_SQUARE_PX),
+                })
+                .filter(ImageFilter::Nearest),
+        );
     }
 
     /// The top-left readout: source port, native dimensions and pixel

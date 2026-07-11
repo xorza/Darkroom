@@ -89,14 +89,15 @@ pub(crate) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hov
         .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
-            ui.add_shape(Shape::Triangle {
-                a: tf(Vec2::new(inset + port - r, inset + r)),
-                b: tf(Vec2::new(inset + port - r, inset + port - r)),
-                c: tf(Vec2::new(inset + r, inset + port * 0.5)),
-                radius: r,
-                fill: event_color(theme, hovered).into(),
-                stroke: Stroke::ZERO,
-            });
+            ui.add_shape(
+                Shape::triangle(
+                    tf(Vec2::new(inset + port - r, inset + r)),
+                    tf(Vec2::new(inset + port - r, inset + port - r)),
+                    tf(Vec2::new(inset + r, inset + port * 0.5)),
+                )
+                .radius(r)
+                .fill(event_color(theme, hovered)),
+            );
         });
     Tooltip::for_(&pin.response.snapshot())
         .text("Event subscription — drag to an emitter, or drop an event wire here")
@@ -372,14 +373,15 @@ fn draw_play_triangle(ui: &mut Ui, color: Color) {
     const HALF_H: f32 = 4.5;
     const NUDGE: f32 = 0.75;
     let c = Vec2::splat(BADGE_SIZE * 0.5);
-    ui.add_shape(Shape::Triangle {
-        a: c + Vec2::new(NUDGE - HALF_W + R, R - HALF_H),
-        b: c + Vec2::new(NUDGE - HALF_W + R, HALF_H - R),
-        c: c + Vec2::new(NUDGE + HALF_W - R, 0.0),
-        radius: R,
-        fill: color.into(),
-        stroke: Stroke::ZERO,
-    });
+    ui.add_shape(
+        Shape::triangle(
+            c + Vec2::new(NUDGE - HALF_W + R, R - HALF_H),
+            c + Vec2::new(NUDGE - HALF_W + R, HALF_H - R),
+            c + Vec2::new(NUDGE + HALF_W - R, 0.0),
+        )
+        .radius(R)
+        .fill(color),
+    );
 }
 
 /// The node title: an inline-renamable label. Double-click swaps it for

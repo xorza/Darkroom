@@ -484,13 +484,11 @@ fn draw_preview(
         .size((Sizing::Fixed(w), Sizing::Fixed(h)))
         .sense(Sense::CLICK)
         .show(ui, |ui| {
-            ui.add_shape(Shape::Image {
-                handle: handle.clone(),
-                local_rect: None,
-                fit: ImageFit::Contain,
-                filter: ImageFilter::Linear,
-                tint: Color::WHITE,
-            });
+            ui.add_shape(
+                Shape::image(handle.clone())
+                    .fit(ImageFit::Contain)
+                    .filter(ImageFilter::Linear),
+            );
             ui.add_shape(Shape::WindowedRect {
                 local_rect: None,
                 corners: Corners::all(4.0),

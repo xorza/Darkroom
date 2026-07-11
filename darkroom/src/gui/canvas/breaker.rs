@@ -286,13 +286,15 @@ impl BreakerUI {
         if b.points.len() < 2 {
             return;
         }
-        ui.add_shape(Shape::Polyline {
-            points: &b.points,
-            colors: PolylineColors::Single(ctx.theme.colors.breaker_stroke),
-            width: ctx.theme.breaker_stroke_width,
-            cap: LineCap::Round,
-            join: LineJoin::Round,
-        });
+        ui.add_shape(
+            Shape::polyline(
+                &b.points,
+                PolylineColors::Single(ctx.theme.colors.breaker_stroke),
+                ctx.theme.breaker_stroke_width,
+            )
+            .cap(LineCap::Round)
+            .join(LineJoin::Round),
+        );
     }
 }
 

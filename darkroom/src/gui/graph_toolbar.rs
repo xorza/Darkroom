@@ -8,8 +8,7 @@
 //! while the framing buttons emit an `Intent::SetViewport` directly.
 
 use aperture::{
-    Align, Color, Configure, HAlign, Panel, Rect, Shape, Sizing, Spacing, Stroke, Ui, VAlign,
-    WidgetId,
+    Align, Color, Configure, HAlign, Panel, Rect, Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
 };
 use glam::Vec2;
 
@@ -150,14 +149,14 @@ pub(crate) fn show(
 
 /// A right-pointing play triangle (run once), optically centered in the box.
 fn draw_play(ui: &mut Ui, s: f32, color: Color) {
-    ui.add_shape(Shape::Triangle {
-        a: Vec2::new(s * 0.38, s * 0.30),
-        b: Vec2::new(s * 0.38, s * 0.70),
-        c: Vec2::new(s * 0.70, s * 0.50),
-        radius: 0.0,
-        fill: color.into(),
-        stroke: Stroke::ZERO,
-    });
+    ui.add_shape(
+        Shape::triangle(
+            Vec2::new(s * 0.38, s * 0.30),
+            Vec2::new(s * 0.38, s * 0.70),
+            Vec2::new(s * 0.70, s * 0.50),
+        )
+        .fill(color),
+    );
 }
 
 /// `|>` — a vertical bar then a play triangle (start the event loop).
@@ -170,14 +169,14 @@ fn draw_play_bar(ui: &mut Ui, s: f32, color: Color) {
         color,
     );
     // The play triangle, just to its right.
-    ui.add_shape(Shape::Triangle {
-        a: Vec2::new(s * 0.46, s * 0.30),
-        b: Vec2::new(s * 0.46, s * 0.70),
-        c: Vec2::new(s * 0.74, s * 0.50),
-        radius: 0.0,
-        fill: color.into(),
-        stroke: Stroke::ZERO,
-    });
+    ui.add_shape(
+        Shape::triangle(
+            Vec2::new(s * 0.46, s * 0.30),
+            Vec2::new(s * 0.46, s * 0.70),
+            Vec2::new(s * 0.74, s * 0.50),
+        )
+        .fill(color),
+    );
 }
 
 /// Reset view: a target ring with a center dot (recenter to 1:1).

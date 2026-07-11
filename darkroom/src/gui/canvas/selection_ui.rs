@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use aperture::{Corners, PointerButton, Rect, Shape, Stroke, Ui};
+use aperture::{PointerButton, Rect, Shape, Stroke, Ui};
 use glam::Vec2;
 use scenarium::graph::NodeId;
 
@@ -154,11 +154,10 @@ impl SelectionUI {
             return;
         }
         let tint = ctx.theme.colors.selection_rect;
-        ui.add_shape(Shape::RoundedRect {
-            local_rect: Some(rect),
-            corners: Corners::all(0.0),
-            fill: tint.with_alpha(0.12).into(),
-            stroke: Stroke::solid(tint.with_alpha(0.85), 1.0),
-        });
+        ui.add_shape(
+            Shape::rect(rect)
+                .fill(tint.with_alpha(0.12))
+                .stroke(Stroke::solid(tint.with_alpha(0.85), 1.0)),
+        );
     }
 }

@@ -112,15 +112,11 @@ pub(crate) fn add_cubic_wire(
     width: f32,
     brush: Brush,
 ) {
-    ui.add_shape(Shape::CubicBezier {
-        p0,
-        p1: handles.p1,
-        p2: handles.p2,
-        p3,
-        width,
-        brush,
-        cap: LineCap::Round,
-    });
+    ui.add_shape(
+        Shape::cubic_bezier(p0, handles.p1, handles.p2, p3, width)
+            .brush(brush)
+            .cap(LineCap::Round),
+    );
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use aperture::{Color, ColorU8, Image, ImageFilter, ImageFit, ImageHandle, Shape, Ui};
+use aperture::{ColorU8, Image, ImageFilter, ImageFit, ImageHandle, Shape, Ui};
 use glam::Vec2;
 
 use crate::gui::app::AppContext;
@@ -78,16 +78,14 @@ impl CanvasBackground {
             return;
         }
         let handle = self.tile_handle(ui, ctx);
-        ui.add_shape(Shape::Image {
-            handle,
-            local_rect: None,
-            fit: ImageFit::Tile {
-                offset: -pan / tile_px,
-                scale: Vec2::new(size.w, size.h) / tile_px,
-            },
-            filter: ImageFilter::Linear,
-            tint: Color::WHITE,
-        });
+        ui.add_shape(
+            Shape::image(handle)
+                .fit(ImageFit::Tile {
+                    offset: -pan / tile_px,
+                    scale: Vec2::new(size.w, size.h) / tile_px,
+                })
+                .filter(ImageFilter::Linear),
+        );
     }
 
     fn tile_handle(&mut self, ui: &Ui, ctx: &AppContext<'_>) -> ImageHandle {
