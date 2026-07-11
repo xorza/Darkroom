@@ -37,6 +37,7 @@ use crate::gui::dock::drag::{DropTarget, TabDrag, classify_drop};
 use crate::gui::dock::strip::TabLabel;
 use crate::gui::image_viewer;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::support::sized_text;
 
 /// Smallest a dock pane can be squeezed on its split axis, in logical px.
 const MIN_PANE: f32 = 220.0;
@@ -302,10 +303,7 @@ fn draw_drag_feedback(ui: &mut Ui, theme: &Theme, doc: &Document, dragged: &TabD
     }
     if let Some(p) = ui.pointer_pos() {
         let text = dragged.text.clone();
-        let label_style = TextStyle {
-            font_size_px: 13.0,
-            ..ui.theme.text
-        };
+        let label_style = sized_text(ui, 13.0);
         ui.layer(Layer::Tooltip, p + Vec2::new(14.0, 18.0), None, |ui| {
             Panel::hstack()
                 .id(WidgetId::from_hash("dock.drag_ghost"))

@@ -27,6 +27,7 @@ use crate::gui::node::{RecordCtx, node_hovered, set_input};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::{StaticValueEditorTheme, Theme};
+use crate::gui::widgets::support::filled_rect;
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -488,12 +489,7 @@ fn circle_frame(
         .margin(hit_margin)
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
-            ui.add_shape(Shape::RoundedRect {
-                local_rect: Some(Rect::new(inset, inset, port, port)),
-                corners: Corners::all(radius),
-                fill: fill.into(),
-                stroke: Stroke::ZERO,
-            });
+            filled_rect(ui, Rect::new(inset, inset, port, port), radius, fill);
         });
     if !tip.is_empty() {
         Tooltip::for_(&circle.response.snapshot())

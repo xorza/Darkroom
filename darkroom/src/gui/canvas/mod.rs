@@ -296,10 +296,7 @@ impl GraphUI {
             .size((Sizing::FILL, Sizing::FILL))
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
-            .background(Background {
-                fill: ctx.theme.colors.canvas_bg.into(),
-                ..Default::default()
-            })
+            .background(Background::fill(ctx.theme.colors.canvas_bg))
             .show(ui, |ui| {
                 // Dotted backdrop in screen space, beneath the inner
                 // (transformed) canvas — so it paints under everything.

@@ -24,6 +24,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::{MlModelKind, PrefsCommand};
 use crate::gui::dialogs;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::support::{colored_text, muted_text, sized_text};
 
 /// Cap on the settings column, so the form reads as a column on a wide
 /// window instead of a handful of controls in the corner of a bare sheet.
@@ -46,10 +47,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
         .size((Sizing::FILL, Sizing::FILL))
         .padding(Spacing::new(20.0, 32.0, 20.0, 20.0))
         .child_align(Align::new(HAlign::Center, VAlign::Top))
-        .background(Background {
-            fill: theme.colors.canvas_bg.into(),
-            ..Default::default()
-        })
+        .background(Background::fill(theme.colors.canvas_bg))
         .show(ui, |ui| {
             Panel::vstack()
                 .id_salt("preferences_column")
@@ -139,14 +137,11 @@ fn section(ui: &mut Ui, theme: &Theme, title: &'static str, body: impl FnOnce(&m
         .size((Sizing::FILL, Sizing::Hug))
         .gap(SECTION_GAP)
         .show(ui, |ui| {
-            Text::new(title)
-                .style(TextStyle {
-                    color: theme.colors.text_muted,
-                    font_size_px: 13.0,
-                    weight: FontWeight::Bold,
-                    ..ui.theme.text
-                })
-                .show(ui);
+            let style = TextStyle {
+                weight: FontWeight::Bold,
+                ..muted_text(ui, theme, 13.0)
+            };
+            Text::new(title).style(style).show(ui);
             body(ui);
         });
 }
@@ -247,12 +242,7 @@ fn model_row(
                         .id_salt("label")
                         .size((Sizing::Fixed(ML_LABEL_WIDTH), Sizing::Hug))
                         .show(ui, |ui| {
-                            Text::new(label)
-                                .style(TextStyle {
-                                    font_size_px: 13.0,
-                                    ..ui.theme.text
-                                })
-                                .show(ui);
+                            Text::new(label).style(sized_text(ui, 13.0)).show(ui);
                         });
 
                     let mut edit = TextEdit::new(&mut draft)
@@ -302,11 +292,7 @@ fn model_row(
             if let Some(problem) = problem {
                 indented_line(ui, "problem", |ui| {
                     Text::new(problem)
-                        .style(TextStyle {
-                            color: theme.colors.exec_errored_glow,
-                            font_size_px: 12.0,
-                            ..ui.theme.text
-                        })
+                        .style(colored_text(ui, theme.colors.exec_errored_glow, 12.0))
                         .show(ui);
                 });
             }
@@ -354,11 +340,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
             .sense(Sense::CLICK)
             .show(ui, |ui| {
                 Text::new(link_label)
-                    .style(TextStyle {
-                        color: link_color,
-                        font_size_px: 12.0,
-                        ..ui.theme.text
-                    })
+                    .style(colored_text(ui, link_color, 12.0))
                     .show(ui);
             });
         let snapshot = link.response.snapshot();
@@ -369,11 +351,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
         // link goes before clicking — the URL isn't otherwise visible.
         Tooltip::for_(&snapshot).text(url).show(ui);
         Text::new(DOWNLOAD_HINT)
-            .style(TextStyle {
-                color: theme.colors.text_muted,
-                font_size_px: 12.0,
-                ..ui.theme.text
-            })
+            .style(muted_text(ui, theme, 12.0))
             .show(ui);
     });
 }

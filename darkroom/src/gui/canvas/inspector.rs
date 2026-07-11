@@ -43,6 +43,7 @@ use crate::gui::node_values::PortValueView;
 use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
+use crate::gui::widgets::support::{colored_text, sized_text};
 
 /// Open state of a single node's inspector. Absence from
 /// [`Inspectors::modes`] is the third, `Closed`, state.
@@ -500,28 +501,18 @@ fn draw_preview(
 }
 
 fn title_style(ui: &Ui) -> TextStyle {
-    TextStyle {
-        font_size_px: 14.0,
-        ..ui.theme.text
-    }
+    sized_text(ui, 14.0)
 }
 
 /// The panel's de-emphasized ink. `port_label`, not `text_muted`: the panel
 /// surface is the node fill, exactly the combination the light palette's
 /// `text_muted` is too faint for (see the `port_label` slot).
 fn muted_style(theme: &Theme, ui: &Ui) -> TextStyle {
-    TextStyle {
-        color: theme.colors.port_label,
-        font_size_px: 11.0,
-        ..ui.theme.text
-    }
+    colored_text(ui, theme.colors.port_label, 11.0)
 }
 
 fn body_style(ui: &Ui) -> TextStyle {
-    TextStyle {
-        font_size_px: 12.0,
-        ..ui.theme.text
-    }
+    sized_text(ui, 12.0)
 }
 
 fn value_str(b: &InputBindingView) -> String {

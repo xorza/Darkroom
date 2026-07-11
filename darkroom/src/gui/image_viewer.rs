@@ -24,9 +24,8 @@
 use std::fmt::Write as _;
 
 use aperture::{
-    Align, Background, Color, Configure, Corners, HAlign, ImageFilter, ImageFit, ImageHandle,
-    InternedStr, Panel, PointerButton, Rect, Sense, Shape, Size, Sizing, Spacing, Stroke, Text,
-    TextStyle, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, HAlign, ImageFilter, ImageFit, ImageHandle, InternedStr,
+    Panel, PointerButton, Rect, Sense, Shape, Size, Sizing, Spacing, Text, Ui, VAlign, WidgetId,
 };
 use glam::{UVec2, Vec2};
 use imaginarium::{ColorFormat, Preview, ProcessingContext};
@@ -39,6 +38,7 @@ use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
 use crate::core::worker::RunId;
 use crate::gui::canvas::pan_zoom::{scroll_to_zoom_factor, zoom_about};
 use crate::gui::theme::Theme;
+use crate::gui::widgets::support::{colored_text, filled_rect, muted_text, stroked_rect};
 use crate::gui::widgets::toolbar::{
     BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill, pill_background, pill_rule,
 };
@@ -265,10 +265,7 @@ impl ImageViewer {
             .size((Sizing::FILL, Sizing::FILL))
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
-            .background(Background {
-                fill: fill.into(),
-                ..Default::default()
-            })
+            .background(Background::fill(fill))
             .show(ui, |ui| {
                 if prefs.background == ViewerBackground::Checker
                     && let Some(pane) = pane
@@ -590,7 +587,7 @@ fn readout_pill(ui: &mut Ui, theme: &Theme, panel: Panel, text: impl Into<Intern
         .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
         .background(pill_background(theme))
         .show(ui, |ui| {
-            let style = muted_style(theme, ui);
+            let style = muted_text(ui, theme, 12.0);
             Text::new(text).style(style).show(ui);
         });
 }
@@ -671,22 +668,13 @@ fn draw_fit(ui: &mut Ui, s: f32, color: Color) {
         (far - t, far - len, t, len),
     ];
     for (x, y, w, h) in bars {
-        ui.add_shape(Shape::RoundedRect {
-            local_rect: Some(Rect::new(x, y, w, h)),
-            corners: Corners::all(t * 0.5),
-            fill: color.into(),
-            stroke: Stroke::ZERO,
-        });
+        filled_rect(ui, Rect::new(x, y, w, h), t * 0.5, color);
     }
 }
 
 /// "1:1" label — zoom to 100%.
 fn draw_100(ui: &mut Ui, _s: f32, color: Color) {
-    let style = TextStyle {
-        color,
-        font_size_px: 11.0,
-        ..ui.theme.text
-    };
+    let style = colored_text(ui, color, 11.0);
     Text::new("1:1").style(style).align(Align::CENTER).show(ui);
 }
 
@@ -699,12 +687,7 @@ fn draw_pixels(ui: &mut Ui, s: f32, color: Color) {
         for ix in 0..2 {
             let x = o + ix as f32 * (cell + gap);
             let y = o + iy as f32 * (cell + gap);
-            ui.add_shape(Shape::RoundedRect {
-                local_rect: Some(Rect::new(x, y, cell, cell)),
-                corners: Corners::all(1.0),
-                fill: color.into(),
-                stroke: Stroke::ZERO,
-            });
+            filled_rect(ui, Rect::new(x, y, cell, cell), 1.0, color);
         }
     }
 }
@@ -720,21 +703,11 @@ fn draw_swatch(ui: &mut Ui, s: f32, theme: &Theme, mode: ViewerBackground, selec
         ViewerBackground::Checker => {
             let light = Color::rgb_u8(CHECKER_LIGHT_U8, CHECKER_LIGHT_U8, CHECKER_LIGHT_U8);
             let dark = Color::rgb_u8(CHECKER_DARK_U8, CHECKER_DARK_U8, CHECKER_DARK_U8);
-            ui.add_shape(Shape::RoundedRect {
-                local_rect: Some(rect),
-                corners: Corners::all(2.0),
-                fill: dark.into(),
-                stroke: Stroke::ZERO,
-            });
+            filled_rect(ui, rect, 2.0, dark);
             // Two light quads on the diagonal make the 2×2 mini checker.
             let h = d * 0.5;
             for cell in [Rect::new(o, o, h, h), Rect::new(o + h, o + h, h, h)] {
-                ui.add_shape(Shape::RoundedRect {
-                    local_rect: Some(cell),
-                    corners: Corners::all(0.0),
-                    fill: light.into(),
-                    stroke: Stroke::ZERO,
-                });
+                filled_rect(ui, cell, 0.0, light);
             }
         }
         _ => {
@@ -744,26 +717,16 @@ fn draw_swatch(ui: &mut Ui, s: f32, theme: &Theme, mode: ViewerBackground, selec
                 ViewerBackground::White => Color::WHITE,
                 ViewerBackground::Checker => unreachable!(),
             };
-            ui.add_shape(Shape::RoundedRect {
-                local_rect: Some(rect),
-                corners: Corners::all(2.0),
-                fill: fill.into(),
-                stroke: Stroke::ZERO,
-            });
+            filled_rect(ui, rect, 2.0, fill);
         }
     }
     // Ring on top so the checker quads can't cover it.
-    let ring = if selected {
-        Stroke::solid(theme.colors.selection_rect, 2.0)
+    let (ring, width) = if selected {
+        (theme.colors.selection_rect, 2.0)
     } else {
-        Stroke::solid(theme.colors.text_muted.with_alpha(0.4), 1.0)
+        (theme.colors.text_muted.with_alpha(0.4), 1.0)
     };
-    ui.add_shape(Shape::RoundedRect {
-        local_rect: Some(rect),
-        corners: Corners::all(2.0),
-        fill: Color::TRANSPARENT.into(),
-        stroke: ring,
-    });
+    stroked_rect(ui, rect, 2.0, ring, width);
 }
 
 /// Whether two dynamic values share the same custom payload (`Arc`
@@ -838,15 +801,6 @@ fn render_full(value: &DynamicValue) -> Result<RenderedImage, String> {
         native_size,
         native_format,
     })
-}
-
-/// De-emphasized ink for the header/message, on the canvas fill.
-fn muted_style(theme: &Theme, ui: &Ui) -> TextStyle {
-    TextStyle {
-        color: theme.colors.text_muted,
-        font_size_px: 12.0,
-        ..ui.theme.text
-    }
 }
 
 #[cfg(test)]

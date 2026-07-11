@@ -18,6 +18,7 @@ use crate::core::document::{GraphRef, TabRef};
 use crate::core::edit::intent::Intent;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::inline_rename::InlineRename;
+use crate::gui::widgets::support::{colored_text, muted_text};
 
 /// Character cap for a subgraph name in the inline rename editor.
 const SUBGRAPH_NAME_MAX_CHARS: usize = 32;
@@ -101,15 +102,11 @@ const NEW_TAB_CHIP_SIDE: f32 = 13.0 * 1.2 + 8.0;
 #[allow(dead_code)]
 fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
     let r = theme.tab_corner_radius;
-    let hover_bg = if ui.response_for(tab_new_wid()).hovered {
-        Background {
-            fill: theme.colors.header_fill.into(),
-            corners: Corners::new(r, r, 0.0, 0.0),
-            ..Default::default()
-        }
-    } else {
-        Background::default()
-    };
+    let bg = hover_bg(
+        ui.response_for(tab_new_wid()).hovered,
+        theme,
+        Corners::new(r, r, 0.0, 0.0),
+    );
     Panel::zstack()
         .id(tab_new_wid())
         .size((
@@ -118,18 +115,27 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
         ))
         .sense(Sense::CLICK)
         .child_align(Align::CENTER)
-        .background(hover_bg)
+        .background(bg)
         .show(ui, |ui| {
+            let style = TextStyle {
+                line_height_mult: 1.0,
+                ..muted_text(ui, theme, 15.0)
+            };
             Text::new("+")
-                .style(TextStyle {
-                    color: theme.colors.text_muted,
-                    font_size_px: 15.0,
-                    line_height_mult: 1.0,
-                    ..ui.theme.text
-                })
+                .style(style)
                 .text_align(Align::CENTER)
                 .show(ui);
         });
+}
+
+/// Chrome lift behind a hoverable strip glyph: `header_fill` under the
+/// pointer, nothing otherwise.
+fn hover_bg(hovered: bool, theme: &Theme, corners: Corners) -> Background {
+    if hovered {
+        Background::rounded(theme.colors.header_fill, corners)
+    } else {
+        Background::default()
+    }
 }
 
 /// One strip's shared draw state, threaded through its chips (the
@@ -168,10 +174,7 @@ pub(crate) fn show(
         .padding(Spacing::new(6.0, 4.0, 6.0, 0.0))
         .gap(3.0)
         .child_align(Align::v(VAlign::Bottom))
-        .background(Background {
-            fill: theme.colors.chrome_fill.into(),
-            ..Default::default()
-        })
+        .background(Background::fill(theme.colors.chrome_fill))
         .show(ui, |ui| {
             for (i, label) in labels.iter().enumerate() {
                 tab_chip(ui, &mut strip, label, i, i == group.active);
@@ -198,11 +201,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
         } else {
             theme.colors.header_fill
         };
-        Background {
-            fill: cap.into(),
-            corners: Corners::new(r, r, 0.0, 0.0),
-            ..Default::default()
-        }
+        Background::rounded(cap, Corners::new(r, r, 0.0, 0.0))
     } else {
         Background::default()
     };
@@ -212,11 +211,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
     } else {
         theme.colors.tab_inactive
     };
-    let inner_bg = Background {
-        fill: inner_fill.into(),
-        corners: Corners::new(inner_r, inner_r, 0.0, 0.0),
-        ..Default::default()
-    };
+    let inner_bg = Background::rounded(inner_fill, Corners::new(inner_r, inner_r, 0.0, 0.0));
     // A closable tab trades right inset for the top-right close button (equal
     // 4px top/right gaps); Main stays symmetric so its label is centered. The
     // active tab lifts its inner top inset by `ACCENT`, so the cap adds no
@@ -229,15 +224,12 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
     };
     // Match the menu bar's smaller (13px) label scale on every tab; the
     // active tab carries full-strength ink, inactive tabs recede to muted.
-    let label_style = TextStyle {
-        font_size_px: 13.0,
-        color: if active {
-            ui.theme.text.color
-        } else {
-            theme.colors.text_muted
-        },
-        ..ui.theme.text
+    let ink = if active {
+        ui.theme.text.color
+    } else {
+        theme.colors.text_muted
     };
+    let label_style = colored_text(ui, ink, 13.0);
     // Outer carries the accent fill + click sense + the 2px top inset; the
     // inner carries the tab fill + content, nested `ACCENT` px lower so the
     // accent shows only as a top cap. Movable tabs also sense drags —
@@ -304,15 +296,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
 /// The chip's top-right `×`. Hover comes from last frame's response; the
 /// click is consumed in [`emit_tab_actions`].
 fn close_button(ui: &mut Ui, theme: &Theme, close_wid: WidgetId) {
-    let hover_bg = if ui.response_for(close_wid).hovered {
-        Background {
-            fill: theme.colors.header_fill.into(),
-            corners: Corners::all(3.0),
-            ..Default::default()
-        }
-    } else {
-        Background::default()
-    };
+    let bg = hover_bg(ui.response_for(close_wid).hovered, theme, Corners::all(3.0));
     Panel::zstack()
         .id(close_wid)
         .size((Sizing::Fixed(16.0), Sizing::Fixed(16.0)))
@@ -321,20 +305,18 @@ fn close_button(ui: &mut Ui, theme: &Theme, close_wid: WidgetId) {
         // close (it's already the rightmost item in the row).
         .align(Align::v(VAlign::Top))
         .child_align(Align::CENTER)
-        .background(hover_bg)
+        .background(bg)
         .show(ui, |ui| {
             // `×` at a size that fits the 16px box (the default 16px font
-            // overflows and rides high) and in a legible muted-light ink.
+            // overflows and rides high). `line_height_mult: 1.0` hugs the
+            // glyph (no 1.2× leading) so it centers in the 16px button
+            // instead of riding high.
+            let style = TextStyle {
+                line_height_mult: 1.0,
+                ..muted_text(ui, theme, 13.0)
+            };
             Text::new("\u{00d7}")
-                .style(TextStyle {
-                    color: theme.colors.text_muted,
-                    font_size_px: 13.0,
-                    // Hug the glyph (no 1.2× leading) so the line box ≈ the
-                    // glyph and it centers in the 16px button instead of
-                    // riding high.
-                    line_height_mult: 1.0,
-                    ..ui.theme.text
-                })
+                .style(style)
                 .text_align(Align::CENTER)
                 .show(ui);
         });

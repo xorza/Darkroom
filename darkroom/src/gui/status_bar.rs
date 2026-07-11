@@ -7,13 +7,12 @@
 //! is omitted when both are empty — an idle empty graph never grows a blank
 //! strip.
 
-use aperture::{
-    Align, Background, Configure, HAlign, Panel, Sizing, Spacing, Text, TextStyle, Ui, VAlign,
-};
+use aperture::{Align, Background, Configure, HAlign, Panel, Sizing, Spacing, Text, Ui, VAlign};
 use scenarium::data::RamUsage;
 
 use crate::gui::app::AppContext;
 use crate::gui::format::fmt_bytes;
+use crate::gui::widgets::support::{colored_text, hspacer, muted_text};
 
 const PAD_X: f32 = 8.0;
 const PAD_Y: f32 = 3.0;
@@ -33,34 +32,18 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) {
         .size((Sizing::FILL, Sizing::Hug))
         .child_align(Align::new(HAlign::Right, VAlign::Center))
         .padding(Spacing::xy(PAD_X, PAD_Y))
-        .background(Background {
-            fill: colors.chrome_fill.into(),
-            ..Default::default()
-        })
+        .background(Background::fill(colors.chrome_fill))
         .show(ui, |ui| {
             if let Some(msg) = ctx.status_error {
-                Text::new(msg.to_string())
-                    .style(TextStyle {
-                        color: colors.exec_errored_glow,
-                        font_size_px: FONT,
-                        ..ui.theme.text
-                    })
-                    .show(ui);
+                let style = colored_text(ui, colors.exec_errored_glow, FONT);
+                Text::new(msg.to_string()).style(style).show(ui);
             }
             // Spacer: pins the message to the left edge and the memory
             // readout to the right.
-            Panel::hstack()
-                .id_salt("status_spacer")
-                .size((Sizing::FILL, Sizing::Hug))
-                .show(ui, |_| {});
+            hspacer(ui, "status_spacer");
             if let Some(label) = ram {
-                Text::new(label)
-                    .style(TextStyle {
-                        color: colors.text_muted,
-                        font_size_px: FONT,
-                        ..ui.theme.text
-                    })
-                    .show(ui);
+                let style = muted_text(ui, ctx.theme, FONT);
+                Text::new(label).style(style).show(ui);
             }
         });
 }

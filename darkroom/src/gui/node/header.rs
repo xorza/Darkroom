@@ -23,6 +23,7 @@ use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::SceneNode;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::inline_rename::InlineRename;
+use crate::gui::widgets::support::hspacer;
 
 /// Character cap for a node title in the inline rename editor.
 const NODE_NAME_MAX_CHARS: usize = 32;
@@ -131,11 +132,10 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
         .padding(Spacing::xy(8.0, 7.0))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
-        .background(Background {
-            fill: theme.colors.header_fill.into(),
-            corners: Corners::new(r, r, 0.0, 0.0),
-            ..Default::default()
-        })
+        .background(Background::rounded(
+            theme.colors.header_fill,
+            Corners::new(r, r, 0.0, 0.0),
+        ))
         .show(ui, |ui| {
             // The run affordance leads the band, ahead of the title — the
             // one control that *does* something with the node's output
@@ -145,12 +145,9 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
                 play_chip(ui, theme, node);
             }
             title(ui, rcx, node, out);
-            // FILL spacer splits the title (left) from the descriptive cluster
+            // Splits the title (left) from the descriptive cluster
             // (right): the markers, then inspect.
-            Panel::hstack()
-                .id_salt("header_spacer")
-                .size((Sizing::FILL, Sizing::Hug))
-                .show(ui, |_| {});
+            hspacer(ui, "header_spacer");
             // Read-only markers — what the node *is* (flat tinted pills, not
             // interactive, so they read as labels). They ride here beside the
             // title; the interactive controls stay in `status_row` below.
@@ -237,12 +234,9 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     })
                     .show(ui);
             }
-            // FILL spacer pushes the controls to the right edge, keeping the
+            // Pushes the controls to the right edge, keeping the
             // run-time label pinned left.
-            Panel::hstack()
-                .id_salt("ctrl_spacer")
-                .size((Sizing::FILL, Sizing::Hug))
-                .show(ui, |_| {});
+            hspacer(ui, "ctrl_spacer");
             // Interactive controls: what you can *do* to the node. Bordered
             // chips that lift on hover.
             //
@@ -514,11 +508,10 @@ impl Badge {
         // a solid swatch — that weight belongs to live status, not config).
         let (background, width) = match kind {
             BadgeKind::Marker { .. } => (
-                Background {
-                    fill: color.with_alpha(CHIP_TINT_ALPHA).into(),
-                    corners: Corners::all(BADGE_SIZE * 0.5),
-                    ..Default::default()
-                },
+                Background::rounded(
+                    color.with_alpha(CHIP_TINT_ALPHA),
+                    Corners::all(BADGE_SIZE * 0.5),
+                ),
                 Sizing::Hug,
             ),
             BadgeKind::Control { wid, filled } => {

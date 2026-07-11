@@ -92,10 +92,7 @@ impl MainWindow {
                     .id_salt("chrome_row")
                     .size((Sizing::FILL, Sizing::Hug))
                     .child_align(Align::v(VAlign::Bottom))
-                    .background(Background {
-                        fill: chrome.into(),
-                        ..Default::default()
-                    })
+                    .background(Background::fill(chrome))
                     .show(ui, |ui| {
                         command = menu_bar::show(ui);
                     });

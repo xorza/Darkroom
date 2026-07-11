@@ -4,8 +4,8 @@
 //! own glyphs and toggle color policy.
 
 use aperture::{
-    Background, Color, Configure, Corners, Panel, Rect, Sense, Separator, Shape, Sizing, Spacing,
-    Stroke, Tooltip, Ui, WidgetId,
+    Background, Color, Configure, Corners, Panel, Sense, Separator, Sizing, Spacing, Tooltip, Ui,
+    WidgetId,
 };
 
 use crate::gui::theme::Theme;
@@ -33,11 +33,10 @@ const PILL_RADIUS: f32 = BUTTON_RADIUS + PILL_PADDING;
 
 /// The frosted chrome backdrop shared by toolbar group pills.
 pub(crate) fn pill_background(theme: &Theme) -> Background {
-    Background {
-        fill: theme.colors.chrome_fill.with_alpha(PILL_BG_ALPHA).into(),
-        corners: Corners::all(PILL_RADIUS),
-        ..Default::default()
-    }
+    Background::rounded(
+        theme.colors.chrome_fill.with_alpha(PILL_BG_ALPHA),
+        Corners::all(PILL_RADIUS),
+    )
 }
 
 /// One frosted group pill: `panel` (a caller-configured `Panel::hstack`
@@ -141,11 +140,7 @@ impl Chip {
             .id(self.wid)
             .size((Sizing::Fixed(s), Sizing::Fixed(s)))
             .sense(Sense::CLICK)
-            .background(Background {
-                fill: fill.into(),
-                corners: Corners::all(BUTTON_RADIUS),
-                ..Default::default()
-            })
+            .background(Background::rounded(fill, Corners::all(BUTTON_RADIUS)))
             .show(ui, |ui| draw_glyph(ui, s, glyph));
         // Take the owned snapshot + click result so the button's `ui`
         // borrow ends before the tooltip records into `ui`.
@@ -154,31 +149,4 @@ impl Chip {
         Tooltip::for_(&snapshot).text(self.tip).show(ui);
         clicked
     }
-}
-
-/// The shared rounded-rect outline glyphs frame their contents in.
-pub(crate) fn frame(ui: &mut Ui, s: f32, color: Color) {
-    let w = s * 0.62;
-    let o = (s - w) * 0.5;
-    stroked_rect(ui, Rect::new(o, o, w, w), s * 0.08, color, s * 0.06);
-}
-
-/// A rounded-rect outline (transparent fill, `color` stroke of `width`).
-pub(crate) fn stroked_rect(ui: &mut Ui, rect: Rect, radius: f32, color: Color, width: f32) {
-    ui.add_shape(Shape::RoundedRect {
-        local_rect: Some(rect),
-        corners: Corners::all(radius),
-        fill: Color::TRANSPARENT.into(),
-        stroke: Stroke::solid(color, width),
-    });
-}
-
-/// A small filled circle of radius `r` centered at `(cx, cy)`.
-pub(crate) fn dot(ui: &mut Ui, cx: f32, cy: f32, r: f32, color: Color) {
-    ui.add_shape(Shape::RoundedRect {
-        local_rect: Some(Rect::new(cx - r, cy - r, 2.0 * r, 2.0 * r)),
-        corners: Corners::all(r),
-        fill: color.into(),
-        stroke: Stroke::ZERO,
-    });
 }

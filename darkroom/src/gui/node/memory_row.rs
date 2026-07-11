@@ -7,6 +7,8 @@ use aperture::{
     Align, Background, Color, Configure, Corners, FontFamily, Panel, Sizing, Spacing, Text,
     TextStyle, Ui, VAlign,
 };
+
+use crate::gui::widgets::support::muted_text;
 use scenarium::data::RamUsage;
 
 use crate::gui::format::fmt_bytes;
@@ -36,13 +38,12 @@ pub(crate) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode) {
         .size((Sizing::FILL, Sizing::Hug))
         .padding(Spacing::xy(PAD_X, PAD_Y))
         .gap(5.0)
-        .background(Background {
-            fill: theme.colors.chrome_fill.into(),
-            // Round only the bottom corners so the strip seats into the node's
-            // rounded bottom — the header rounds the top the same way.
-            corners: Corners::new(0.0, 0.0, r, r),
-            ..Default::default()
-        })
+        // Round only the bottom corners so the strip seats into the node's
+        // rounded bottom — the header rounds the top the same way.
+        .background(Background::rounded(
+            theme.colors.chrome_fill,
+            Corners::new(0.0, 0.0, r, r),
+        ))
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("node_mem_meters")
@@ -72,11 +73,7 @@ fn meter(ui: &mut Ui, theme: &Theme, hue: Color, label: &'static str, bytes: usi
         .show(ui, |ui| {
             dot(ui, hue);
             Text::new(label)
-                .style(TextStyle {
-                    color: theme.colors.text_muted,
-                    font_size_px: LABEL_FONT,
-                    ..ui.theme.text
-                })
+                .style(muted_text(ui, theme, LABEL_FONT))
                 .show(ui);
             Text::new(fmt_bytes(bytes))
                 .style(TextStyle {
@@ -94,11 +91,7 @@ fn dot(ui: &mut Ui, hue: Color) {
     Panel::zstack()
         .id_salt("node_mem_dot")
         .size((Sizing::Fixed(DOT), Sizing::Fixed(DOT)))
-        .background(Background {
-            fill: hue.into(),
-            corners: Corners::all(DOT * 0.5),
-            ..Default::default()
-        })
+        .background(Background::rounded(hue, Corners::all(DOT * 0.5)))
         .show(ui, |_ui| {});
 }
 
@@ -124,10 +117,6 @@ fn bar_segment(ui: &mut Ui, salt: &'static str, hue: Color, weight: f32) {
     Panel::zstack()
         .id_salt(("node_mem_seg", salt))
         .size((Sizing::Fill(weight), Sizing::FILL))
-        .background(Background {
-            fill: hue.into(),
-            corners: Corners::all(BAR_H * 0.5),
-            ..Default::default()
-        })
+        .background(Background::rounded(hue, Corners::all(BAR_H * 0.5)))
         .show(ui, |_ui| {});
 }

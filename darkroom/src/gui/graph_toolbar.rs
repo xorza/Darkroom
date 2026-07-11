@@ -20,9 +20,8 @@ use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
 use crate::gui::scene::Scene;
-use crate::gui::widgets::toolbar::{
-    BUTTON_GAP, Chip, TOOLBAR_MARGIN, dot, frame, pill, stroked_rect,
-};
+use crate::gui::widgets::support::{dot, filled_rect, frame, stroked_rect};
+use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
 
 fn run_button_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.graph.run_button")
@@ -164,12 +163,12 @@ fn draw_play(ui: &mut Ui, s: f32, color: Color) {
 /// `|>` — a vertical bar then a play triangle (start the event loop).
 fn draw_play_bar(ui: &mut Ui, s: f32, color: Color) {
     // The bar.
-    ui.add_shape(Shape::RoundedRect {
-        local_rect: Some(Rect::new(s * 0.28, s * 0.30, s * 0.085, s * 0.40)),
-        corners: Corners::all(1.0),
-        fill: color.into(),
-        stroke: Stroke::ZERO,
-    });
+    filled_rect(
+        ui,
+        Rect::new(s * 0.28, s * 0.30, s * 0.085, s * 0.40),
+        1.0,
+        color,
+    );
     // The play triangle, just to its right.
     ui.add_shape(Shape::Triangle {
         a: Vec2::new(s * 0.46, s * 0.30),
@@ -207,10 +206,5 @@ fn draw_show_selected(ui: &mut Ui, s: f32, color: Color) {
     frame(ui, s, color);
     let inner = s * 0.24;
     let o = (s - inner) * 0.5;
-    ui.add_shape(Shape::RoundedRect {
-        local_rect: Some(Rect::new(o, o, inner, inner)),
-        corners: Corners::all(s * 0.04),
-        fill: color.into(),
-        stroke: Stroke::ZERO,
-    });
+    filled_rect(ui, Rect::new(o, o, inner, inner), s * 0.04, color);
 }
