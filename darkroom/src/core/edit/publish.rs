@@ -2,10 +2,10 @@
 //! document↔library resolution + mutation behind the GUI's
 //! export / promote / publish commands. Operates only on [`Document`] +
 //! [`Library`] (no GUI, dialogs, or persistence), so it's unit-testable
-//! against bare types; the thin orchestration (file dialogs, disk writes,
-//! marking the document dirty) stays in `gui::app::commands`.
-
-use std::sync::Arc;
+//! against bare types. The thin orchestration (file dialogs, marking the
+//! document dirty) stays in `gui::app::commands`, which runs the mutators
+//! through `Engine::edit_library` — the one place that persists the library
+//! file and propagates the grown library to its downstream copies.
 
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use scenarium::graph::{NodeId, NodeKind, NodeSearch};
@@ -26,14 +26,12 @@ use crate::core::document::{Document, GraphRef};
 /// deliberately *not* routed through undo.
 pub(crate) fn publish_local_def(
     document: &mut Document,
-    library: &mut Arc<Library>,
+    library: &mut Library,
     target: GraphRef,
     node_id: NodeId,
 ) -> bool {
-    // Resolve read-only first (so a non-subgraph node returns before the
-    // `Arc::make_mut` clone). `fresh_copy` already gives fresh interior ids +
-    // `origin: None` — the shape a library def wants; we keep or override its
-    // id below.
+    // `fresh_copy` already gives fresh interior ids + `origin: None` — the
+    // shape a library def wants; we keep or override its id below.
     let Some((local_id, mut published, existing_lib)) = (|| {
         let scope = document.scope(target)?;
         let NodeKind::Subgraph(SubgraphRef::Local(local_id)) =
@@ -53,7 +51,7 @@ pub(crate) fn publish_local_def(
     // Keep the linked entry's id (update in place) or the fresh copy's own.
     let new_origin = existing_lib.unwrap_or(published.id);
     published.id = new_origin;
-    Arc::make_mut(library).add_subgraph(published);
+    library.add_subgraph(published);
     set_origin(document, target, local_id, new_origin);
     true
 }
@@ -62,13 +60,13 @@ pub(crate) fn publish_local_def(
 /// (no disk write — the caller persists on success). Returns `false`
 /// when nothing resolves. On success the source local def's `origin` is
 /// re-pointed at the new library entry, so it tracks its lineage.
-pub(crate) fn promote_to_library(document: &mut Document, library: &mut Arc<Library>) -> bool {
+pub(crate) fn promote_to_library(document: &mut Document, library: &mut Library) -> bool {
     let Some(source) = promote_source(document, library) else {
         return false;
     };
     let published = source.def.fresh_copy();
     let lib_id = published.id;
-    Arc::make_mut(library).add_subgraph(published);
+    library.add_subgraph(published);
     if let Some(relink) = source.relink {
         set_origin(document, relink.holder, relink.def_id, lib_id);
     }
@@ -220,7 +218,6 @@ mod tests {
         let lib_id = SubgraphId::unique();
         let mut library = Library::default();
         library.add_subgraph(SubgraphDef::new(lib_id, "Old"));
-        let mut library = Arc::new(library);
 
         // Local copy linked to that library def, with diverged content.
         let mut doc = Document::default();
@@ -253,7 +250,7 @@ mod tests {
 
     #[test]
     fn publish_without_origin_creates_entry_and_links_it() {
-        let mut library = Arc::new(Library::default());
+        let mut library = Library::default();
         let mut doc = Document::default();
         let local = def("Standalone", None);
         let local_id = local.id;
@@ -281,7 +278,7 @@ mod tests {
 
     #[test]
     fn promote_links_source_local_def_to_new_library_entry() {
-        let mut library = Arc::new(Library::default());
+        let mut library = Library::default();
         let mut doc = Document::default();
         // A local subgraph instance (no library lineage yet), selected
         // so `promote_source` resolves it from the active graph.
@@ -307,7 +304,7 @@ mod tests {
 
     #[test]
     fn promote_with_nothing_selected_is_a_noop() {
-        let mut library = Arc::new(Library::default());
+        let mut library = Library::default();
         let mut doc = Document::default();
         assert!(!promote_to_library(&mut doc, &mut library));
         assert_eq!(library.subgraphs.len(), 0);
@@ -316,7 +313,7 @@ mod tests {
     #[test]
     fn publish_non_subgraph_node_is_a_noop() {
         use scenarium::node::function::FuncId;
-        let mut library = Arc::new(Library::default());
+        let mut library = Library::default();
         let mut doc = Document::default();
         let node = Node::new(scenarium::graph::NodeKind::Func(FuncId::unique()));
         let node_id = node.id;

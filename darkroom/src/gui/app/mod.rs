@@ -202,7 +202,7 @@ impl App {
             match event {
                 ScriptMessage::Print { msg } => self.engine.status.info(format!("script: {msg}")),
                 ScriptMessage::Apply(intents) => {
-                    let library = self.engine.library.clone();
+                    let library = self.engine.library().clone();
                     self.editor.apply_external_intents(intents, &library);
                 }
                 ScriptMessage::RunOnce => run = true,
@@ -335,7 +335,7 @@ impl aperture::App for App {
 
         // One consistent library snapshot for the whole frame (cheap atomic
         // load); a mid-frame promote/publish swap takes effect next frame.
-        let library = self.engine.library.clone();
+        let library = self.engine.library().clone();
         let command = self.editor.frame(
             ui,
             &library,

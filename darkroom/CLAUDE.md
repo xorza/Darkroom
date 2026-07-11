@@ -202,8 +202,13 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   `RenameNode`, tab-strip rename → `RenameSubgraph`, etc.). Promote/publish/
   export resolution (`subgraph_to_export` / `promote_to_library` /
   `publish_local_def`) is pure document↔library logic in
-  `core/edit/publish.rs` (unit-tested against bare types), not on `Document`;
-  `app/commands/subgraph.rs` is the thin GUI orchestration (dialogs + disk).
+  `core/edit/publish.rs` (unit-tested against bare types, `&mut Library` in /
+  `bool` changed out), not on `Document`; `app/commands/subgraph.rs` is the
+  thin GUI orchestration (dialogs + dirty flag), running the mutators through
+  `Engine::edit_library` — the **single** library-mutation path, which
+  persists the library file and re-pushes the worker's `DiskStore` (its codec
+  table rides a library snapshot) on every change. `Engine.library` is
+  private; read via `Engine::library()`.
 
 ### Reconciliation (`src/edit/reconcile/`)
 Derived state, like `Scene`. Runs in the pre-record drain when

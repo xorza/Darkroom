@@ -4,7 +4,7 @@
 //! orchestration on top — so the worker/script construction and the
 //! drain/run primitives live here once instead of in both shells.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use scenarium::execution::compile::{CompiledGraph, Compiler};
@@ -14,6 +14,7 @@ use scenarium::graph::{Graph, NodeId};
 use scenarium::library::Library;
 
 use crate::core::io::cache::prepare_document_cache_root;
+use crate::core::io::library::save_library;
 use crate::core::library::runtime_func_lib;
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::status::StatusLog;
@@ -23,12 +24,16 @@ use crate::core::worker::{ValueRequest, WorkerBridge, WorkerEvent};
 #[derive(Debug)]
 pub(crate) struct Engine {
     /// The runtime library (builtins + the on-disk subgraph library),
-    /// assembled once at startup. The GUI's promote/publish commands grow it
-    /// in place (`Arc::make_mut`); the script host keeps its startup `Arc` —
-    /// safe because scripts only read the func table, which never changes
-    /// after assembly (runtime growth is subgraph defs, not script-visible).
-    pub(crate) library: Arc<Library>,
+    /// assembled once at startup. Private so every edit goes through
+    /// [`Self::edit_library`] — the one place that propagates a change to
+    /// every copy that could otherwise go stale. Read via [`Self::library`].
+    library: Arc<Library>,
     worker: WorkerBridge,
+    /// The active content-addressed store root (`None` = memory-only),
+    /// remembered so [`Self::edit_library`] can re-push the worker's
+    /// [`DiskStore`] — which carries a library snapshot — without the caller
+    /// re-supplying the document path.
+    disk_root: Option<PathBuf>,
     /// Long-lived so the flatten scratch is reused across compiles instead of
     /// reallocated per run.
     compiler: Compiler,
@@ -53,19 +58,52 @@ impl Engine {
     pub(crate) fn new(script_cfg: &ScriptConfig, wake: Wake) -> Self {
         let library = runtime_func_lib();
         let worker = WorkerBridge::new(wake.clone());
-        // Install the cache up front (memory-only until a document has a path);
-        // its codecs come from the library snapshot, and `set_document_cache`
-        // repoints the store root as documents open.
-        worker.set_disk_store(DiskStore::new(library.clone(), None));
         let script = ScriptHost::start(script_cfg, library.clone(), wake);
-        Self {
+        let engine = Self {
             library,
             worker,
+            disk_root: None,
             compiler: Compiler::default(),
             flatten_map: Arc::default(),
             status: StatusLog::default(),
             script,
+        };
+        // Install the store up front (memory-only until a document has a
+        // path); `set_document_cache` repoints the root as documents open.
+        engine.refresh_disk_store();
+        engine
+    }
+
+    /// Read access to the runtime library. There is deliberately no mutable
+    /// counterpart — edits go through [`Self::edit_library`], which owns the
+    /// propagation a bare `&mut` would let callers forget.
+    pub(crate) fn library(&self) -> &Arc<Library> {
+        &self.library
+    }
+
+    /// The single mutation path for the runtime library. Applies `edit`
+    /// (copy-on-write when the script host still holds the startup `Arc`)
+    /// and, when it reports a change, propagates to every copy that could
+    /// otherwise go stale: the subgraph library file on disk and the
+    /// worker's [`DiskStore`] (which carries a library snapshot for its
+    /// codec table). The script host's frozen startup snapshot is exempt by
+    /// design — scripts only read the func table, which no edit touches
+    /// (edits grow subgraph defs).
+    pub(crate) fn edit_library(&mut self, edit: impl FnOnce(&mut Library) -> bool) -> bool {
+        let changed = edit(Arc::make_mut(&mut self.library));
+        if changed {
+            save_library(self.library.subgraphs.iter());
+            self.refresh_disk_store();
         }
+        changed
+    }
+
+    /// Push a fresh [`DiskStore`] (current library snapshot + current root)
+    /// to the worker. The one constructor of worker-side disk stores, so a
+    /// library edit or a root change can't leave the other half stale.
+    fn refresh_disk_store(&self) {
+        self.worker
+            .set_disk_store(DiskStore::new(self.library.clone(), self.disk_root.clone()));
     }
 
     /// Compile `graph` against the current library and record the artifact's
@@ -92,10 +130,9 @@ impl Engine {
     /// (`<stem>.darkroom-cache/` beside the file), so disk-backed (`Disk`/`Both`)
     /// nodes reload across sessions. `None` (an unsaved document) is memory-only. Explicit-path cache
     /// nodes are unaffected — they always use their own path.
-    pub(crate) fn set_document_cache(&self, doc_path: Option<&Path>) {
-        let root = doc_path.map(prepare_document_cache_root);
-        self.worker
-            .set_disk_store(DiskStore::new(self.library.clone(), root));
+    pub(crate) fn set_document_cache(&mut self, doc_path: Option<&Path>) {
+        self.disk_root = doc_path.map(prepare_document_cache_root);
+        self.refresh_disk_store();
     }
 
     /// Compile `graph` against the current library and send it to the worker

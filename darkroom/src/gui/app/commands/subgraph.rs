@@ -1,11 +1,14 @@
 //! Publishing subgraphs into the shared library: the thin orchestration
-//! (file dialogs, library disk writes, marking the document dirty) over the
-//! pure resolution + mutation in [`crate::core::edit::publish`].
+//! (file dialogs, marking the document dirty) over the pure resolution +
+//! mutation in [`crate::core::edit::publish`], routed through
+//! [`Engine::edit_library`](crate::core::engine::Engine::edit_library) —
+//! which owns persisting the library file and refreshing the worker's
+//! library snapshot.
 
 use scenarium::graph::NodeId;
 
 use crate::core::edit::publish;
-use crate::core::io::{library, persistence};
+use crate::core::io::persistence;
 use crate::gui::app::App;
 use crate::gui::dialogs;
 
@@ -41,7 +44,7 @@ impl App {
     /// wins; otherwise, when the active tab is itself a subgraph, that
     /// open subgraph is exported. No-op when neither resolves.
     fn export_active_subgraph(&mut self) {
-        let library = self.engine.library.clone();
+        let library = self.engine.library().clone();
         let Some(def) = publish::subgraph_to_export(&self.editor.document, &library) else {
             self.engine
                 .status
@@ -83,11 +86,14 @@ impl App {
     /// entry (see [`publish::promote_to_library`]). No-op when nothing
     /// resolves.
     fn promote_active_subgraph(&mut self) {
-        if publish::promote_to_library(&mut self.editor.document, &mut self.engine.library) {
+        let document = &mut self.editor.document;
+        if self
+            .engine
+            .edit_library(|lib| publish::promote_to_library(document, lib))
+        {
             // Re-points the local def's `origin` in the document — an
             // unsaved change (may over-flag when the link already existed).
             self.editor.dirty = true;
-            library::save_library(self.engine.library.subgraphs.iter());
             self.engine.status.error = None;
         } else {
             self.engine
@@ -106,17 +112,15 @@ impl App {
         let Some(target) = self.editor.document.active_target() else {
             return;
         };
-        if publish::publish_local_def(
-            &mut self.editor.document,
-            &mut self.engine.library,
-            target,
-            node_id,
-        ) {
+        let document = &mut self.editor.document;
+        if self
+            .engine
+            .edit_library(|lib| publish::publish_local_def(document, lib, target, node_id))
+        {
             // Publishing a fresh entry re-points the local def's `origin`
             // in the document — an unsaved change (an update-in-place
             // publish touches only the library, so this may over-flag).
             self.editor.dirty = true;
-            library::save_library(self.engine.library.subgraphs.iter());
             self.engine.status.error = None;
         } else {
             self.engine
