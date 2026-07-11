@@ -6,6 +6,4 @@ darkroom string interning
 
 save cahhce files by nodeid
 
-pub(crate) type SharedLibrary = Arc<ArcSwap<Library>>; - simplify?
-
 audit error traces - which should be results
