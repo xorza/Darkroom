@@ -373,7 +373,7 @@ impl Editor {
             library,
         );
         // A closed/deleted target can't be active; fall back to Main.
-        self.document.ensure_valid_active();
+        self.document.ensure_valid_layout();
     }
 
     /// Note a possible active-graph change: when `target` differs from
@@ -558,10 +558,7 @@ impl Editor {
 
     /// Queue the recorded focus/activation half of an open.
     fn push_activate(&mut self, addr: TabAddress) {
-        self.intents.push(Intent::Dock(DockIntent::ActivateTab {
-            group: addr.group,
-            index: addr.index,
-        }));
+        self.intents.push(activate_intent(addr));
     }
 
     /// Open `target`'s tab in the primary group (graph tabs are pinned
@@ -594,14 +591,16 @@ impl Editor {
     pub(crate) fn open_preferences(&mut self, library: &Library) {
         let group = self.document.layout.focused;
         let addr = self.tab_address_or_insert(TabRef::Preferences, group);
-        self.apply_edit(
-            Intent::Dock(DockIntent::ActivateTab {
-                group: addr.group,
-                index: addr.index,
-            }),
-            library,
-        );
+        self.apply_edit(activate_intent(addr), library);
     }
+}
+
+/// The recorded focus/activation half of opening a tab at `addr`.
+fn activate_intent(addr: TabAddress) -> Intent {
+    Intent::Dock(DockIntent::ActivateTab {
+        group: addr.group,
+        index: addr.index,
+    })
 }
 
 /// The full runtime value held for `port` in the last fetch, if any —
@@ -757,7 +756,7 @@ mod tests {
             .document
             .layout
             .retain_tabs(|t| t != TabRef::ImageViewer(port(1)));
-        editor.document.ensure_valid_active();
+        editor.document.ensure_valid_layout();
         editor.sync_image_viewers();
         assert!(editor.main_window.image_viewers.contains_key(&port(0)));
         assert!(

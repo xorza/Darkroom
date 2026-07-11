@@ -38,7 +38,7 @@ use scenarium::graph::{
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
 
-use crate::core::document::dock::{DockDrop, DockLayout, NodeIdx, TabGroupId};
+use crate::core::document::dock::{DockDrop, DockLayout, DockPath, TabGroupId};
 use crate::core::document::view_node::ViewNode;
 use crate::core::document::{
     BoundarySide, Document, EditScope, EditScopeRef, GraphRef, TabRef, Viewport,
@@ -208,10 +208,10 @@ pub enum DockIntent {
     CloseTab { group: TabGroupId, index: usize },
     /// Move `tab` to `to` — into another strip or splitting a pane.
     MoveTab { tab: TabRef, to: DockDrop },
-    /// Set the ratio of the split at `split` (a flat-tree index, stable
-    /// between structural changes — a stale one no-ops in the layout).
-    /// Emitted per frame by a divider drag; coalesces per split.
-    SetRatio { split: NodeIdx, ratio: f32 },
+    /// Set the ratio of the split at `split` (its packed root path,
+    /// stable between structural changes — a stale one no-ops in the
+    /// layout). Emitted per frame by a divider drag; coalesces per split.
+    SetRatio { split: DockPath, ratio: f32 },
 }
 
 /// Self-contained undo-stack entry. Each leaf variant carries both
@@ -1357,9 +1357,9 @@ pub enum GestureKey {
     Viewport,
     NodeDrag(NodeId),
     TabSwitch,
-    /// One divider's drag, keyed by the split's flat-tree index, so two
-    /// different dividers never coalesce.
-    DockResize(NodeIdx),
+    /// One divider's drag, keyed by the split's packed root path, so
+    /// two different dividers never coalesce.
+    DockResize(DockPath),
 }
 
 #[cfg(test)]

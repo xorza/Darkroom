@@ -410,7 +410,7 @@ impl Document {
     /// (or hand-edited) document can carry a `Local` tab with no matching
     /// `sub_views` entry. Seeding it here recovers gracefully instead of
     /// panicking on a later `view(target).expect(..)`.
-    pub fn ensure_valid_active(&mut self) {
+    pub fn ensure_valid_layout(&mut self) {
         // Common case: every tab still resolves — touch nothing (no
         // per-frame allocation). Non-graph tabs other than viewers (e.g.
         // `Preferences`) always resolve.
@@ -1042,7 +1042,7 @@ mod tests {
 
         // Preferences always resolves; a viewer tab resolves while its
         // node exists — neither is pruned and the activation holds.
-        doc.ensure_valid_active();
+        doc.ensure_valid_layout();
         assert_eq!(
             all_tabs(&doc),
             vec![
@@ -1056,7 +1056,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_valid_active_keeps_non_graph_tabs_when_a_subgraph_tab_vanishes() {
+    fn ensure_valid_layout_keeps_non_graph_tabs_when_a_subgraph_tab_vanishes() {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let id = doc.create_subgraph();
@@ -1070,7 +1070,7 @@ mod tests {
         // Drop the subgraph out from under its open tab.
         doc.graph.subgraphs.remove_by_key(&id);
 
-        doc.ensure_valid_active();
+        doc.ensure_valid_layout();
         // The dead subgraph tab is pruned; Main + the non-graph tabs
         // remain, and the clamped active still points at the image tab
         // (it slid left one slot with the removal).
@@ -1086,13 +1086,13 @@ mod tests {
     }
 
     #[test]
-    fn ensure_valid_active_prunes_a_viewer_tab_whose_node_is_gone() {
+    fn ensure_valid_layout_prunes_a_viewer_tab_whose_node_is_gone() {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let primary = doc.layout.primary().id;
         doc.layout
             .insert_tab(primary, TabRef::ImageViewer(out_port(node_id)));
-        doc.ensure_valid_active();
+        doc.ensure_valid_layout();
         assert_eq!(
             all_tabs(&doc).len(),
             2,
@@ -1102,7 +1102,7 @@ mod tests {
         // Delete the node: the viewer tab dies with it (like a subgraph
         // tab whose def vanished).
         doc.scope_mut(GraphRef::Main).unwrap().remove_node(&node_id);
-        doc.ensure_valid_active();
+        doc.ensure_valid_layout();
         assert_eq!(all_tabs(&doc), vec![TabRef::Graph(GraphRef::Main)]);
         assert_eq!(doc.layout.primary().active, 0);
     }
