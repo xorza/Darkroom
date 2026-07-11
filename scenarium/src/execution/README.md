@@ -5,7 +5,7 @@ design home that the module's `//!` docs point at. Two parts:
 
 - **A. Subgraphs** — how composite nodes are authored and flattened away
   (`flatten.rs`; authoring types in `subgraph.rs`/`graph.rs`).
-- **B. Disk cache** — the content-addressed output cache for disk-backed (`Disk`/`Both`) nodes
+- **B. Disk cache** — the node-keyed, digest-stamped output cache for disk-backed (`Disk`/`Both`) nodes
   (`digest.rs`, `cache.rs`, `disk_store.rs`, `blob.rs`, `codec.rs`). The `RuntimeCache`
   (`cache.rs`) owns the RAM slots *and* the `DiskStore` (`disk_store.rs`, pure blob I/O) and runs
   the caching policy — reuse, hydration, persistence, eviction — over both.
@@ -226,7 +226,7 @@ Disk and RAM caching then work across composite boundaries with no special handl
 
 ---
 
-# Part B — Disk (content-addressed output) cache
+# Part B — Disk (node-keyed output) cache
 
 How a disk-backed node's outputs survive a reload — staying correct (never serve
 a stale value) and lean (never hold bytes a run won't use).
@@ -312,11 +312,18 @@ live filesystem state and could drift mid-run), not `update`: only then are its 
 
 ## B.3 Storage (`blob.rs`)
 
-A node's blob lives at `<disk_root>/<hex(digest)>` — so identical computations
-**dedup** across nodes, documents, and machines, and any change re-keys to a new path
-(auto-invalidation; the stale blob is simply never read again). Writes are **atomic**
-(temp file + rename), so a reader never sees a half-written blob. A content-addressed
-blob already on disk is the same bytes, so the store skips re-serializing it.
+A node's blob lives at `<disk_root>/<hex(node id)>` — **one file per node** — with the
+content digest it was produced under as the file's first 32 bytes. The digest header is
+the validity check: a presence probe (`stored_digest`) and every read compare it against
+the node's current digest, so a blob stamped with a superseded digest is a miss, never a
+stale hit. Invalidation is an **overwrite**: when the node recomputes under a new digest
+its one blob is replaced in place, so a superseded configuration's bytes can't linger as
+an unreachable orphan (the failure mode of keying files by digest: every digest change
+stranded the old file forever). The trade: flipping inputs back to an earlier
+configuration recomputes (its blob was overwritten), and two nodes with identical
+computations store two blobs. Writes are **atomic** (temp file + rename), so a reader
+never sees a half-written blob. A blob already stamped with the current digest is the
+same bytes, so the store skips re-serializing it.
 
 ## B.4 Values ↔ bytes (`codec.rs`)
 
@@ -344,7 +351,7 @@ fresh blob) can't be built. The reuse test is **`is_resident_hit`** — the slot
 `Resident` *and* its `produced_under` equals the current digest — the true "bytes are
 here for this key" predicate the executor's input read and disk store rely on. A `None`
 `current_digest` (impure cone) never hits. `OnDisk` means "a decodable blob exists for
-this digest, not yet loaded": a cheap `stat` result, so a disk-cached value behind
+this digest, not yet loaded": a cheap header probe, so a disk-cached value behind
 another reused node is served without entering RAM (B.6).
 
 ## B.6 Execution-time lifecycle (`cache.rs` policy over `disk_store.rs` I/O)
@@ -360,12 +367,14 @@ it at reach time, serving the cache on a hit. Then, per surviving node, once its
 computed:
 
 1. **`is_resident_hit`?** — reuse the RAM value, done.
-2. **else `mark_on_disk_if_present`.** If a blob exists for the digest **and** the
-   outputs are decodable (every custom output type has a codec — predicted without
-   reading), flag the slot `OnDisk` and reuse it — a `stat` + codec check, **no bytes**.
-   The value loads only if a running consumer actually reads it.
-3. **else run**, then **`store_node`** writes the fresh blob (a content-addressed blob
-   already on disk is the same bytes → skipped).
+2. **else `mark_on_disk_if_present`.** If the node's blob carries the digest in its
+   header **and** the outputs are decodable (every custom output type has a codec —
+   predicted without reading), flag the slot `OnDisk` and reuse it — a 32-byte header
+   read + codec check, **no body bytes**. The value loads only if a running consumer
+   actually reads it.
+3. **else run**, then **`store_node`** writes the fresh blob (a blob already stamped
+   with the current digest is the same bytes → skipped; any other digest is superseded
+   → overwritten).
 4. **Lazy load — `hydrate_slot`.** When a *running* node reads a bound input whose
    producer is `OnDisk`, `collect_inputs` pulls that one blob into RAM. Producers behind
    a *reused* consumer are never read, so a disk-cached chain loads only its frontier — a

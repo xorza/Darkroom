@@ -101,8 +101,7 @@ pub(crate) async fn serialize_outputs(
 
 /// Decode outputs previously written by [`serialize_outputs`], rebuilding custom
 /// values through `registry`. Errors on malformed bytes or an unregistered type.
-/// Consumes `bytes` (the blob is moved into the deserializer, not borrowed).
-pub(crate) fn deserialize_outputs(bytes: Vec<u8>, library: &Library) -> Result<Vec<DynamicValue>> {
+pub(crate) fn deserialize_outputs(bytes: &[u8], library: &Library) -> Result<Vec<DynamicValue>> {
     if bytes.len() < 4 {
         return Err(Error::Frame(
             "cache blob too short for a version header".into(),
@@ -255,7 +254,7 @@ mod tests {
         )
         .await
         .expect("all serializable");
-        let back = deserialize_outputs(bytes, &Library::default()).unwrap();
+        let back = deserialize_outputs(&bytes, &Library::default()).unwrap();
 
         assert_eq!(back.len(), 3);
         assert!(matches!(back[0], DynamicValue::Unbound));
@@ -272,7 +271,7 @@ mod tests {
         let bytes = serialize_outputs(&outputs, &blob_func_lib(), &mut ContextManager::default())
             .await
             .expect("blob is cacheable");
-        let back = deserialize_outputs(bytes, &blob_func_lib()).unwrap();
+        let back = deserialize_outputs(&bytes, &blob_func_lib()).unwrap();
 
         assert_eq!(back.len(), 2);
         assert_eq!(back[0].as_bool(), Some(true));
@@ -317,7 +316,7 @@ mod tests {
             .await
             .unwrap();
         // Empty library — the type was written but has no codec here.
-        let result = deserialize_outputs(bytes, &Library::default());
+        let result = deserialize_outputs(&bytes, &Library::default());
         assert!(matches!(result, Err(Error::UnknownType(_))));
     }
 

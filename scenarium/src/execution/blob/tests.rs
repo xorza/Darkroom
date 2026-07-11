@@ -25,8 +25,9 @@ fn library() -> Arc<Library> {
 }
 
 #[tokio::test]
-async fn write_then_read_round_trips_outputs() {
+async fn write_then_read_round_trips_outputs_under_the_stamped_digest() {
     let file = temp_file("roundtrip");
+    let digest = Digest([7u8; 32]);
     let outputs = vec![
         DynamicValue::Unbound,
         DynamicValue::Static(StaticValue::Int(7)),
@@ -34,6 +35,7 @@ async fn write_then_read_round_trips_outputs() {
     ];
     let wrote = write(
         &file.0,
+        digest,
         &outputs,
         &library(),
         &mut ContextManager::default(),
@@ -42,17 +44,29 @@ async fn write_then_read_round_trips_outputs() {
     .unwrap();
     assert!(wrote, "plain values are written");
 
-    let back = read(&file.0, &library()).await.expect("hit");
+    // The stamped digest is readable off the file header without decoding.
+    assert_eq!(stored_digest(&file.0), Some(digest));
+
+    let back = read(&file.0, digest, &library()).await.expect("hit");
     assert_eq!(back.len(), 3);
     assert!(matches!(back[0], DynamicValue::Unbound));
     assert_eq!(back[1].as_i64(), Some(7));
     assert_eq!(back[2].as_string(), Some("x"));
+
+    // Reading under any *other* digest is a miss — the header check is what lets a
+    // node-keyed file be overwritten by a newer configuration without ever serving
+    // the old one's bytes as the new one's.
+    assert!(
+        read(&file.0, Digest([8u8; 32]), &library()).await.is_none(),
+        "a blob carrying a different digest is a miss"
+    );
 }
 
 #[tokio::test]
 async fn read_missing_is_none() {
     let file = temp_file("missing");
-    assert!(read(&file.0, &library()).await.is_none());
+    assert!(read(&file.0, Digest([1u8; 32]), &library()).await.is_none());
+    assert_eq!(stored_digest(&file.0), None, "no file, no stored digest");
 }
 
 /// A custom value with no registered codec — never cacheable.
@@ -84,6 +98,7 @@ async fn non_codecable_custom_is_skipped_not_written() {
     ];
     let wrote = write(
         &file.0,
+        Digest([1u8; 32]),
         &outputs,
         &library(),
         &mut ContextManager::default(),
@@ -100,22 +115,27 @@ async fn non_codecable_custom_is_skipped_not_written() {
 #[tokio::test]
 async fn read_rejects_an_unknown_format_version() {
     let file = temp_file("badversion");
+    let digest = Digest([2u8; 32]);
     let outputs = vec![DynamicValue::Static(StaticValue::Int(1))];
     write(
         &file.0,
+        digest,
         &outputs,
         &library(),
         &mut ContextManager::default(),
     )
     .await
     .unwrap();
-    // Corrupt the 4-byte little-endian version header at the front of the blob.
+    // Corrupt the 4-byte little-endian version header, which sits right after the
+    // 32-byte digest — the digest itself still matches, so the miss below is the
+    // codec frame's doing, not the digest check's.
     let mut bytes = std::fs::read(&file.0).unwrap();
-    bytes[0] ^= 0xff;
+    bytes[32] ^= 0xff;
     std::fs::write(&file.0, &bytes).unwrap();
 
+    assert_eq!(stored_digest(&file.0), Some(digest), "digest intact");
     assert!(
-        read(&file.0, &library()).await.is_none(),
+        read(&file.0, digest, &library()).await.is_none(),
         "a blob with an unknown format version is treated as a miss"
     );
 }

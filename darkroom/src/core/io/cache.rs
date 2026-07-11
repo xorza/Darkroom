@@ -1,5 +1,5 @@
 //! Per-document on-disk cache location. A node with a disk-backed `CacheMode`
-//! (`Disk`/`Both`) persists its output to a content-addressed store; darkroom roots that store
+//! (`Disk`/`Both`) persists its output to a blob store; darkroom roots that store
 //! beside the document file so the cache travels with the project rather than
 //! polluting a machine-global directory. An unsaved document has no path, so it
 //! stays memory-only until first save.
@@ -16,10 +16,10 @@ pub(crate) fn document_cache_root(doc_path: &Path) -> PathBuf {
     doc_path.with_file_name(name)
 }
 
-/// The document's content-addressed store root, ensuring the dir and a
-/// self-ignoring `.gitignore` exist. Save-As / moving the project does *not* carry
-/// the cache along — each location keeps its own store, content-addressed so the
-/// new one refills lazily.
+/// The document's blob-store root, ensuring the dir and a self-ignoring
+/// `.gitignore` exist. Save-As / moving the project does *not* carry the cache
+/// along — each location keeps its own store, which refills lazily as nodes
+/// recompute.
 pub(crate) fn prepare_document_cache_root(doc_path: &Path) -> PathBuf {
     let root = document_cache_root(doc_path);
     ensure_gitignore(&root);

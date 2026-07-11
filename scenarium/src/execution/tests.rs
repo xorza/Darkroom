@@ -82,7 +82,7 @@ mod cache_persistence {
         }
     }
 
-    /// A fresh engine backed by a content-addressed store rooted at `dir`
+    /// A fresh engine backed by a disk store rooted at `dir`
     /// (simulating a reopen when called twice against the same dir). The default
     /// empty library is fine — these tests cache plain values.
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
@@ -99,7 +99,8 @@ mod cache_persistence {
 
     /// A `persist` node's output survives a fresh engine (reopen), its sole-consumer
     /// upstream is pruned on the hit, and a digest change (a bumped func version,
-    /// standing in for any input change) invalidates it.
+    /// standing in for any input change) invalidates it — *overwriting* the node's
+    /// one blob rather than orphaning it beside a new one.
     #[tokio::test]
     async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
         let dir = TempDir::new("e2e");
@@ -177,6 +178,13 @@ mod cache_persistence {
         assert!(
             !stats.cached_nodes.contains(&mult_id),
             "mult should not be cached after a digest change"
+        );
+        // The blob is keyed by node id, so the recompute replaced the superseded
+        // bytes in place — the old digest's cache doesn't linger as an orphan.
+        assert_eq!(
+            blob_count(&dir),
+            1,
+            "a digest change overwrites the node's blob, not adds a second"
         );
     }
 
@@ -465,7 +473,7 @@ mod cache_persistence {
     fn cached(stats: &ExecutionStats, id: NodeId) -> bool {
         stats.cached_nodes.contains(&id)
     }
-    /// Count of content-addressed blobs in the store — one per persisted node.
+    /// Count of blobs in the store — one per persisted node.
     fn blob_count(dir: &TempDir) -> usize {
         std::fs::read_dir(&dir.0).unwrap().flatten().count()
     }
@@ -543,7 +551,7 @@ mod cache_persistence {
             ),
         }
 
-        // A content-addressed blob exists iff the mode persists to disk.
+        // A blob exists iff the mode persists to disk.
         assert_eq!(
             blob_count(&dir) > 0,
             mode.persists_to_disk(),
@@ -643,52 +651,53 @@ mod cache_persistence {
         assert!(!ran(&reopen, get_a_id), "get_a is cut behind A too");
     }
 
-    /// Flipping a `persist` node's inputs *back* to a previously-stored configuration
-    /// must serve that config's value from its disk blob — not the stale RAM value the
-    /// intervening run left resident under a now-superseded digest. The old
-    /// three-field slot let that stale RAM value mask the fresh blob at hydrate
-    /// (`hydrate_slot` short-circuited on "values present"); the `ValueState` enum drops
-    /// it when `mark_on_disk_if_present` flags the blob, so the reuse loads the correct
-    /// bytes.
+    /// A valid disk blob for a node's *current* digest must be served even when the
+    /// slot still holds a RAM value produced under a superseded digest — the stale
+    /// resident value must not mask the fresh blob. The old three-field slot had
+    /// exactly that bug (`hydrate_slot` short-circuited on "values present"); the
+    /// `ValueState` enum drops the stale value when `mark_on_disk_if_present` flags
+    /// the blob, so the reuse loads the correct bytes.
+    ///
+    /// The intervening run uses `Ram` mode so it can't overwrite the node's one
+    /// disk blob (a `Disk`-mode run would — the blob is keyed by node id).
     #[tokio::test(flavor = "multi_thread")]
-    async fn flip_back_to_stored_digest_serves_disk_blob_not_stale_ram() -> anyhow::Result<()> {
+    async fn stale_ram_value_does_not_mask_a_valid_disk_blob() -> anyhow::Result<()> {
         let dir = TempDir::new("flip_back");
         let lib = test_func_lib(default_hooks());
 
-        // mult(persist=Disk) read by print. Const binds detach mult from any upstream,
-        // so its digest is a pure function of the two consts. Fixed node ids so the
-        // slot (and its resident value) survives each `update`.
-        let mut graph = Graph::default();
-        let mut mult = node(&lib, "mult", NodeId::from_u128(1));
-        mult.cache = CacheMode::Disk;
-        graph.add(mult);
-        graph.add(node(&lib, "Print", NodeId::from_u128(2)));
-        let mult_id = graph.by_name("mult").unwrap().id;
-        bind(&mut graph, "Print", 0, (mult_id, 0).into());
-
-        let set = |graph: &mut Graph, a: i64, b: i64| {
-            bind(graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
-            bind(graph, "mult", 1, Binding::Const(StaticValue::Int(b)));
+        // mult read by print. Const binds detach mult from any upstream, so its
+        // digest is a pure function of the two consts. Fixed node ids so the slot
+        // (and its resident value) survives each `update`.
+        let build = |a: i64, b: i64, mode: CacheMode| {
+            let mut graph = Graph::default();
+            let mut mult = node(&lib, "mult", NodeId::from_u128(1));
+            mult.cache = mode;
+            graph.add(mult);
+            graph.add(node(&lib, "Print", NodeId::from_u128(2)));
+            let mult_id = graph.by_name("mult").unwrap().id;
+            bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
+            bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(b)));
+            bind(&mut graph, "Print", 0, (mult_id, 0).into());
+            graph
         };
+        let mult_id = NodeId::from_u128(1);
 
         let mut engine = disk_engine(&dir);
 
-        // Config A: mult = 2 * 3 = 6 → blob_A stored on disk.
-        set(&mut graph, 2, 3);
-        engine.update(&graph, &lib)?;
+        // Config A (Disk): mult = 2 * 3 = 6 → the blob (digest D_A) stored on disk.
+        engine.update(&build(2, 3, CacheMode::Disk), &lib)?;
         engine.execute_terminals().await?;
 
-        // Config B: mult = 5 * 7 = 35 → slot now resident with 35 under B's digest,
-        // and blob_B stored at a different (content-addressed) path.
-        set(&mut graph, 5, 7);
-        engine.update(&graph, &lib)?;
+        // Config B (Ram): mult = 5 * 7 = 35 → slot now resident with 35 under B's
+        // digest; the disk blob still carries D_A (Ram mode never writes).
+        engine.update(&build(5, 7, CacheMode::Ram), &lib)?;
         engine.execute_terminals().await?;
 
-        // Flip back to A: blob_A is still on disk, but the slot holds 35 in RAM under
-        // B's (now superseded) digest. mult is pruned (disk hit) and read as print's
-        // frontier — it must serve 6 from disk, not the stale 35.
-        set(&mut graph, 2, 3);
-        engine.update(&graph, &lib)?;
+        // Flip back to A (Disk): the blob matches the current digest again, but the
+        // slot holds 35 in RAM under B's (now superseded) digest. mult is pruned
+        // (disk hit) and read as print's frontier — it must serve 6 from disk, not
+        // the stale 35.
+        engine.update(&build(2, 3, CacheMode::Disk), &lib)?;
         let stats = engine.execute_terminals().await?;
 
         // mult is served from its disk blob, not recomputed — without this, a recompute
@@ -800,8 +809,8 @@ mod cache_persistence {
 
     /// `store_resident_caches` must not write a value under a digest it wasn't produced
     /// under. After an input change recompiles the program, a node's resident value is
-    /// stale w.r.t. its new digest; flushing it to the new digest's content-addressed
-    /// path would make a later run at that digest load stale bytes.
+    /// stale w.r.t. its new digest; flushing it stamped with D_B would overwrite the
+    /// node's blob with bytes a later run at D_B would load as a false hit.
     #[tokio::test]
     async fn flush_skips_a_value_stale_for_the_current_digest() {
         let dir = TempDir::new("stale_flush");
@@ -820,24 +829,31 @@ mod cache_persistence {
             bind(&mut graph, "Print", 0, (mult_id, 0).into());
             graph
         };
-        let blob_count = |dir: &TempDir| std::fs::read_dir(&dir.0).unwrap().count();
 
         let mut engine = disk_engine(&dir);
 
-        // Config A: mult runs and is stored under its digest D_A (one blob).
+        // Config A: mult runs and is stored, stamped with its digest D_A (one blob).
         engine.update(&build(2, 3), &lib).unwrap();
         engine.execute_terminals().await.unwrap();
         assert_eq!(blob_count(&dir), 1, "config A's blob is stored");
+        let blob_path = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .flatten()
+            .next()
+            .unwrap()
+            .path();
+        let blob_a = std::fs::read(&blob_path).unwrap();
 
         // Config B: mult's inputs change ⇒ its *current* digest is now D_B, but the
         // resident value (6) was produced under D_A. Recompile (update), no re-run, then
-        // flush — the stale value must not be written under D_B.
+        // flush — the stale value must not be re-stamped D_B (the blob is keyed by node
+        // id, so a bad flush would show as an overwrite, not a second file).
         engine.update(&build(5, 7), &lib).unwrap();
         engine.store_resident_caches().await;
         assert_eq!(
-            blob_count(&dir),
-            1,
-            "a value stale for the current digest is not flushed (no second, D_B blob)"
+            std::fs::read(&blob_path).unwrap(),
+            blob_a,
+            "a value stale for the current digest is not flushed (blob untouched)"
         );
     }
 
@@ -887,17 +903,24 @@ mod cache_persistence {
             assert!(ran(&stats, mult_id), "cold run computes mult");
         }
 
-        // Corrupt mult's blob (a torn write / an old, version-mismatched format).
+        // Corrupt mult's blob *body* (a torn write / an old, version-mismatched format)
+        // while keeping the leading 32-byte digest header intact — a garbled header
+        // would already fail the presence probe and never reach the on-demand load
+        // this test is about.
         let blob = std::fs::read_dir(&dir.0)
             .unwrap()
             .next()
             .unwrap()
             .unwrap()
             .path();
-        std::fs::write(&blob, b"garbage").unwrap();
+        let mut bytes = std::fs::read(&blob).unwrap();
+        bytes.truncate(32);
+        bytes.extend_from_slice(b"garbage");
+        std::fs::write(&blob, &bytes).unwrap();
 
-        // Reopen: the corrupt blob is stat-present, so mult is served from disk — but the
-        // read fails when `print` pulls it in on demand. `print` is dropped for the run
+        // Reopen: the corrupt blob still carries the current digest in its header, so
+        // mult is served from disk — but the read fails when `print` pulls it in on
+        // demand. `print` is dropped for the run
         // (a node error, not a panic) and the bad blob is deleted, so the next reopen
         // recomputes it fresh.
         {
@@ -1141,7 +1164,7 @@ mod cache_persistence {
         engine.update(&graph, &library).unwrap();
         engine.execute_terminals().await.unwrap();
 
-        // Reopen: mult must recompute — an impure cone can't be content-addressed.
+        // Reopen: mult must recompute — an impure cone has no digest, so it never caches to disk.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &library).unwrap();
         let stats = engine.execute_terminals().await.unwrap();

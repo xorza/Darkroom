@@ -29,7 +29,7 @@ pub(crate) struct Engine {
     /// every copy that could otherwise go stale. Read via [`Self::library`].
     library: Arc<Library>,
     worker: WorkerBridge,
-    /// The active content-addressed store root (`None` = memory-only),
+    /// The active disk-store root (`None` = memory-only),
     /// remembered so [`Self::edit_library`] can re-push the worker's
     /// [`DiskStore`] — which carries a library snapshot — without the caller
     /// re-supplying the document path.
@@ -149,7 +149,7 @@ impl Engine {
         }
     }
 
-    /// Point the content-addressed cache at `doc_path`'s project-local store
+    /// Point the disk cache at `doc_path`'s project-local store
     /// (`<stem>.darkroom-cache/` beside the file), so disk-backed (`Disk`/`Both`)
     /// nodes reload across sessions. `None` (an unsaved document) is memory-only. Explicit-path cache
     /// nodes are unaffected — they always use their own path.

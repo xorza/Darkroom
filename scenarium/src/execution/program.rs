@@ -127,7 +127,7 @@ pub(crate) struct ExecutionNode {
     /// [`CacheMode`](crate::graph::CacheMode) at flatten. Its two bits
     /// ([`caches_in_ram`](crate::graph::CacheMode::caches_in_ram) /
     /// [`persists_to_disk`](crate::graph::CacheMode::persists_to_disk)) gate RAM reuse and
-    /// the content-addressed disk load/store; disk is honored only when the node has a
+    /// the disk load/store; disk is honored only when the node has a
     /// content digest (a reproducible cone) and a disk root is configured — see `digest.rs`
     /// and `disk_store.rs`.
     #[serde(default)]

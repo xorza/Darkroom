@@ -248,7 +248,7 @@ impl ExecutionEngine {
 
     /// Swap the [`DiskStore`] — the library snapshot (its type table supplies
     /// the custom-value codecs) plus the optional
-    /// content-addressed store root. At the next `install`, `persist` outputs hydrate
+    /// store root. At the next `install`, `persist` outputs hydrate
     /// from their blobs on a hit (skipping recompute), and freshly-computed ones are
     /// stored after a run. The RAM cache is keyed by node id + digest, independent of the
     /// root, so swapping keeps any warm in-memory outputs.
@@ -337,15 +337,15 @@ impl ExecutionEngine {
         Ok(stats)
     }
 
-    /// Persist to disk any **content-addressed** (`persists_to_disk`, i.e. `Disk`/`Both`)
+    /// Persist to disk any **disk-backed** (`persists_to_disk`, i.e. `Disk`/`Both`)
     /// node that holds a resident value but isn't on disk yet — e.g. a node just toggled to
     /// a disk-backed [`CacheMode`](crate::graph::CacheMode) whose value is still in RAM from
     /// a prior run. The worker calls this on `SaveCaches`, since such a node is a cache hit
     /// and so never re-executes to store itself.
     ///
-    /// Never overwrites identical content: a content-addressed blob's path *is* its
-    /// content hash, so [`DiskStore::store`] skips it when it already exists. Also a
-    /// no-op for a node with no resident value.
+    /// Never rewrites identical content: a blob already stamped with the node's current
+    /// digest is the same bytes, so [`DiskStore::store`] skips it. Also a no-op for a
+    /// node with no resident value.
     pub(crate) async fn store_resident_caches(&mut self) {
         for idx in self.compiled.program.node_indices() {
             if !self.compiled.program.e_nodes[idx].cache.persists_to_disk() {

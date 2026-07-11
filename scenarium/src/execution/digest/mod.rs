@@ -1,5 +1,5 @@
-//! Content digests for node outputs — the cache key for the per-slot RAM cache and
-//! the content-addressed disk cache.
+//! Content digests for node outputs — the validity key for the per-slot RAM cache
+//! and the node-keyed disk cache.
 //!
 //! A node's output is a pure function of its function (identity + version), its
 //! resolved input values, the outputs of its upstream producers, and the content of

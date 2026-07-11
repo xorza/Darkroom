@@ -158,7 +158,7 @@ mod binding_map_serde {
 /// - `None` — cache nowhere: never reused across runs, recomputed whenever its value
 ///   is needed, and dropped after the run to free RAM.
 /// - `Ram` — resident in the live engine and reused across runs, but lost on reload.
-/// - `Disk` — persisted to the content-addressed store (survives reload); its RAM copy
+/// - `Disk` — persisted to the disk store (survives reload); its RAM copy
 ///   is demoted to disk-only after the run and reloaded lazily.
 /// - `Both` — resident in RAM *and* on disk: hot reuse this session plus survival across
 ///   reloads.
@@ -185,7 +185,7 @@ impl CacheMode {
         matches!(self, CacheMode::Ram | CacheMode::Both)
     }
 
-    /// Whether the node's value is persisted to the content-addressed disk store
+    /// Whether the node's value is persisted to the disk store
     /// (`Disk`/`Both`), so it survives a reload.
     pub fn persists_to_disk(self) -> bool {
         matches!(self, CacheMode::Disk | CacheMode::Both)

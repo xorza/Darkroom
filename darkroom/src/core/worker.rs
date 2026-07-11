@@ -77,7 +77,7 @@ impl std::fmt::Debug for WorkerBridge {
 
 impl WorkerBridge {
     /// Spin up the worker on a fresh multi-thread runtime. Starts memory-only; the
-    /// host installs the content-addressed output cache (codec registry + store
+    /// host installs the disk-backed output cache (codec registry + store
     /// root) via [`Self::set_disk_store`]. The callback runs on a worker thread:
     /// it forwards the result over `tx` and asks the host to paint, so the next
     /// frame drains it.
@@ -143,8 +143,8 @@ impl WorkerBridge {
         let _ = self.worker.send(WorkerMessage::SaveCaches { compiled });
     }
 
-    /// Swap the engine's output cache (codec registry + content-addressed store
-    /// root) — e.g. to repoint at the active document's store. Takes effect before
+    /// Swap the engine's output cache (codec registry + store root) — e.g. to
+    /// repoint at the active document's store. Takes effect before
     /// the next run's compile. A dropped send (worker exited) is a harmless no-op.
     pub(crate) fn set_disk_store(&self, cache: DiskStore) {
         let _ = self.worker.send(WorkerMessage::SetDiskStore(cache));

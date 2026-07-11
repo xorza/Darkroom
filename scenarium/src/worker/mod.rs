@@ -63,8 +63,8 @@ pub enum WorkerMessage {
         compiled: CompiledGraph,
     },
     Clear,
-    /// Swap the engine's output cache (codec registry + content-addressed store
-    /// root). Applied before any graph op in the same batch, so the next `Update`
+    /// Swap the engine's output cache (codec registry + store root). Applied
+    /// before any graph op in the same batch, so the next `Update`
     /// hydrates from the new config — e.g. repointing at a per-document store dir.
     SetDiskStore(DiskStore),
     ExecuteTerminals,
