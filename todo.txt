@@ -8,6 +8,4 @@ cleanup binary caches
 
 do not comoute stars in input unused
 
-why input values are cached
-
-image view control panel
+cache input values for image viewer
