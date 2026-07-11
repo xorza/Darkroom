@@ -527,6 +527,12 @@ fn aperture_theme_for(p: &AperturePalette) -> aperture::Theme {
     let mut theme = aperture::Theme::default();
     recolour_aperture(&mut theme, p);
 
+    // Dock splitter: no resting seam, just a wider gap between panes. The
+    // rule paints nothing at rest (hover/drag fill still marks the grab
+    // target); the reserved gap does the visual separation.
+    theme.splitter.rule = Color::TRANSPARENT;
+    theme.splitter.rule_thickness = 4.0;
+
     // Menu-bar triggers read as menus, not buttons: transparent at rest
     // (the `menu_button` preset already is — no chip overlay), the label
     // muted until hovered, and the whole thing at the smaller menu scale.
