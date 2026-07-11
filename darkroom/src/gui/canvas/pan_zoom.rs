@@ -4,7 +4,7 @@
 //! viewport algebra. The gesture emits `Intent::SetViewport`, so pan/zoom
 //! rides the same undo path as every other edit.
 
-use aperture::{PointerButton, Rect, Size, Ui};
+use aperture::{PointerButton, Rect, ResponseState, Size, Ui};
 use common::FloatExt;
 use glam::Vec2;
 
@@ -13,6 +13,80 @@ use crate::core::edit::intent::Intent;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
 use crate::gui::scene::Scene;
+
+/// Anchor-latched pan: the viewport pan captured at drag start, so the
+/// gesture applies `anchor + total_delta` each frame (immune to
+/// per-frame rounding drift). Shared by the canvas and image-viewer
+/// pans — each caller keeps its own latch policy (which buttons, which
+/// arbitration) and folds the live drag through [`Self::apply`].
+#[derive(Debug, Default)]
+pub(crate) struct PanAnchor(Option<Vec2>);
+
+impl PanAnchor {
+    /// Capture the gesture-start pan.
+    pub(crate) fn latch(&mut self, pan: Vec2) {
+        self.0 = Some(pan);
+    }
+
+    /// Fold the live drag into `pan`: `anchor + delta` while the drag is
+    /// held; a missing delta after a latch is the release edge and drops
+    /// the anchor.
+    pub(crate) fn apply(&mut self, delta: Option<Vec2>, pan: &mut Vec2) {
+        match (self.0, delta) {
+            (Some(anchor), Some(d)) => *pan = anchor + d,
+            (Some(_), None) => self.0 = None,
+            _ => {}
+        }
+    }
+
+    /// Drop the anchor (framing reset, gesture-state clear).
+    pub(crate) fn clear(&mut self) {
+        self.0 = None;
+    }
+}
+
+/// Fold one frame's scroll/pinch deltas from `resp` into `v` — the
+/// shared half of the canvas and image-viewer pan/zoom gestures (drag
+/// panning stays with each caller, whose button policy differs):
+/// two-finger `scroll_pixels` pan, wheel `scroll_lines` zoom-about-
+/// cursor, and pinch `zoom_factor` zoom-about-cursor, clamped to the
+/// caller's `[min_zoom, max_zoom]`.
+pub(crate) fn fold_scroll_zoom(
+    v: &mut Viewport,
+    ui: &Ui,
+    resp: &ResponseState,
+    min_zoom: f32,
+    max_zoom: f32,
+) {
+    if resp.scroll_pixels != Vec2::ZERO {
+        v.pan -= resp.scroll_pixels;
+    }
+    if resp.scroll_lines.y.abs() > f32::EPSILON
+        && let Some(pivot) = resp.pointer_local
+    {
+        let line_px = ui.theme.text.line_height_for(ui.theme.text.font_size_px);
+        zoom_about(
+            &mut v.pan,
+            &mut v.zoom,
+            pivot,
+            scroll_to_zoom_factor(resp.scroll_lines.y * line_px),
+            min_zoom,
+            max_zoom,
+        );
+    }
+    if (resp.zoom_factor - 1.0).abs() > f32::EPSILON
+        && let Some(pivot) = resp.pointer_local
+    {
+        zoom_about(
+            &mut v.pan,
+            &mut v.zoom,
+            pivot,
+            resp.zoom_factor,
+            min_zoom,
+            max_zoom,
+        );
+    }
+}
 
 /// Bounds on the canvas zoom factor. Pinch / scroll-zoom deltas
 /// multiply in; clamped each frame so pathological gestures can't
@@ -52,64 +126,30 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 /// - **Pinch** (`Sense::PINCH`): zoom-about-cursor using the
 ///   `Response::pointer_local` pivot.
 pub(crate) fn emit_pan_zoom(
-    pan_anchor: &mut Option<Vec2>,
+    pan_anchor: &mut PanAnchor,
     ui: &Ui,
     scene: &Scene,
     gesture: Option<CanvasGesture>,
     out: &mut Vec<Intent>,
 ) {
     let resp = ui.response_for(outer_canvas_widget_id());
-    let mut pan = scene.viewport.pan;
-    let mut zoom = scene.viewport.zoom;
+    let mut v = scene.viewport;
     // Pan latch comes from the central classification; continuation and
     // wheel/pinch zoom below read the response directly (not arbitration).
     if gesture == Some(CanvasGesture::Pan) {
-        *pan_anchor = Some(scene.viewport.pan);
+        pan_anchor.latch(scene.viewport.pan);
     }
-    match (*pan_anchor, resp.drag_delta_by(PointerButton::Middle)) {
-        (Some(anchor), Some(d)) => pan = anchor + d,
-        (Some(_), None) => *pan_anchor = None,
-        _ => {}
-    }
-    if resp.scroll_pixels != Vec2::ZERO {
-        pan -= resp.scroll_pixels;
-    }
-    if resp.scroll_lines.y.abs() > f32::EPSILON
-        && let Some(pivot) = resp.pointer_local
-    {
-        let line_px = ui.theme.text.line_height_for(ui.theme.text.font_size_px);
-        zoom_about(
-            &mut pan,
-            &mut zoom,
-            pivot,
-            scroll_to_zoom_factor(resp.scroll_lines.y * line_px),
-            MIN_ZOOM,
-            MAX_ZOOM,
-        );
-    }
-    if (resp.zoom_factor - 1.0).abs() > f32::EPSILON
-        && let Some(pivot) = resp.pointer_local
-    {
-        zoom_about(
-            &mut pan,
-            &mut zoom,
-            pivot,
-            resp.zoom_factor,
-            MIN_ZOOM,
-            MAX_ZOOM,
-        );
-    }
+    pan_anchor.apply(resp.drag_delta_by(PointerButton::Middle), &mut v.pan);
+    fold_scroll_zoom(&mut v, ui, &resp, MIN_ZOOM, MAX_ZOOM);
     // Only emit when the gesture actually moved the viewport
     // (approx compare — exact float `!=` would emit on sub-epsilon
     // jitter). The `SetViewport` undo step is also `is_noop`-
     // filtered in `drain_intents`; this just skips the build on
     // idle frames.
     let unchanged =
-        pan.approximately_eq(scene.viewport.pan) && zoom.approximately_eq(scene.viewport.zoom);
+        v.pan.approximately_eq(scene.viewport.pan) && v.zoom.approximately_eq(scene.viewport.zoom);
     if !unchanged {
-        out.push(Intent::SetViewport {
-            to: Viewport { pan, zoom },
-        });
+        out.push(Intent::SetViewport { to: v });
     }
 }
 

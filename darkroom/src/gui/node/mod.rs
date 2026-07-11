@@ -346,12 +346,7 @@ impl NodeUI {
         // `drag_delta` is in screen pixels; node positions live in the
         // canvas's pre-transform frame. Divide by zoom so cursor travel
         // matches node travel at every zoom level.
-        let zoom = if scene.viewport.zoom > 0.0 {
-            scene.viewport.zoom
-        } else {
-            1.0
-        };
-        let offset = delta / zoom;
+        let offset = delta / scene.viewport.safe_zoom();
         // Anchor still present (success path never cleared it); re-borrow
         // to read the start positions without cloning.
         let to = self

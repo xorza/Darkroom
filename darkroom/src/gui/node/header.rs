@@ -343,47 +343,43 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
 /// code never names `AppCommand`).
 fn play_chip(ui: &mut Ui, theme: &Theme, node: &SceneNode) {
     let wid = play_badge_wid(node.id);
+    // The whole chip — border, glyph, hover fill — swings to the "go"
+    // glow together, so the hover-dependent color is picked out here
+    // rather than by `Badge`'s fixed-color scheme.
     let hovered = ui.response_for(wid).hovered;
     let color = if hovered {
         theme.colors.exec_executed_glow
     } else {
         theme.colors.text_muted
     };
-    let mut background = Background {
-        stroke: Stroke::solid(color, 1.0),
-        corners: Corners::all(3.0),
-        ..Default::default()
-    };
-    if hovered {
-        background.fill = color.with_alpha(CHIP_TINT_ALPHA).into();
-    }
-    let chip = Panel::zstack()
-        .id(wid)
-        .size((Sizing::Fixed(BADGE_SIZE), Sizing::Fixed(BADGE_SIZE)))
-        .sense(Sense::CLICK)
-        .background(background)
-        .show(ui, |ui| {
-            // Play triangle about the chip center, nudged right — a play
-            // mark's visual center sits left of its bounding box's. Points
-            // are inset by the rounding radius: the SDF rounds by dilating,
-            // so the glyph grows back out to the intended extents.
-            const R: f32 = 1.5;
-            const HALF_W: f32 = 3.75;
-            const HALF_H: f32 = 4.5;
-            const NUDGE: f32 = 0.75;
-            let c = Vec2::splat(BADGE_SIZE * 0.5);
-            ui.add_shape(Shape::Triangle {
-                a: c + Vec2::new(NUDGE - HALF_W + R, R - HALF_H),
-                b: c + Vec2::new(NUDGE - HALF_W + R, HALF_H - R),
-                c: c + Vec2::new(NUDGE + HALF_W - R, 0.0),
-                radius: R,
-                fill: color.into(),
-                stroke: Stroke::ZERO,
-            });
-        });
-    Tooltip::for_(&chip.response.snapshot())
-        .text("Run to this node — execute its upstream cone and keep the output for preview")
-        .show(ui);
+    Badge::control_drawn(
+        draw_play_triangle,
+        color,
+        false,
+        wid,
+        "Run to this node — execute its upstream cone and keep the output for preview",
+    )
+    .show(ui);
+}
+
+/// Play triangle about the chip center, nudged right — a play mark's
+/// visual center sits left of its bounding box's. Points are inset by
+/// the rounding radius: the SDF rounds by dilating, so the glyph grows
+/// back out to the intended extents.
+fn draw_play_triangle(ui: &mut Ui, color: Color) {
+    const R: f32 = 1.5;
+    const HALF_W: f32 = 3.75;
+    const HALF_H: f32 = 4.5;
+    const NUDGE: f32 = 0.75;
+    let c = Vec2::splat(BADGE_SIZE * 0.5);
+    ui.add_shape(Shape::Triangle {
+        a: c + Vec2::new(NUDGE - HALF_W + R, R - HALF_H),
+        b: c + Vec2::new(NUDGE - HALF_W + R, HALF_H - R),
+        c: c + Vec2::new(NUDGE + HALF_W - R, 0.0),
+        radius: R,
+        fill: color.into(),
+        stroke: Stroke::ZERO,
+    });
 }
 
 /// The node title: an inline-renamable label. Double-click swaps it for
@@ -456,13 +452,24 @@ enum BadgeKind {
     Marker { salt: &'static str },
 }
 
+/// A chip's icon: a bold font character (the common case) or a caller-
+/// drawn vector glyph painted into the `BADGE_SIZE` box in the chip's
+/// ink (the play triangle). A plain `fn` pointer keeps `Badge`
+/// non-generic.
+#[derive(Debug, Clone, Copy)]
+enum BadgeGlyph {
+    Char(&'static str),
+    Drawn(fn(&mut Ui, Color)),
+}
+
 /// One header indicator chip; the two families render differently (see
-/// [`BadgeKind`]). Build one with [`Badge::control`] / [`Badge::marker`], then
+/// [`BadgeKind`]). Build one with [`Badge::control`] /
+/// [`Badge::control_drawn`] / [`Badge::marker`], then
 /// [`show`](Badge::show) — which returns whether a control was clicked this
 /// frame (always `false` for a marker).
 #[derive(Debug)]
 struct Badge {
-    glyph: &'static str,
+    glyph: BadgeGlyph,
     color: Color,
     tip: &'static str,
     kind: BadgeKind,
@@ -478,7 +485,23 @@ impl Badge {
         tip: &'static str,
     ) -> Self {
         Badge {
-            glyph,
+            glyph: BadgeGlyph::Char(glyph),
+            color,
+            tip,
+            kind: BadgeKind::Control { wid, filled },
+        }
+    }
+
+    /// [`Self::control`] with a vector glyph instead of a font character.
+    fn control_drawn(
+        draw: fn(&mut Ui, Color),
+        color: Color,
+        filled: bool,
+        wid: WidgetId,
+        tip: &'static str,
+    ) -> Self {
+        Badge {
+            glyph: BadgeGlyph::Drawn(draw),
             color,
             tip,
             kind: BadgeKind::Control { wid, filled },
@@ -488,7 +511,7 @@ impl Badge {
     /// A read-only descriptor pill. `salt` is its stable id for the tooltip.
     fn marker(salt: &'static str, glyph: &'static str, color: Color, tip: &'static str) -> Self {
         Badge {
-            glyph,
+            glyph: BadgeGlyph::Char(glyph),
             color,
             tip,
             kind: BadgeKind::Marker { salt },
@@ -549,15 +572,18 @@ impl Badge {
                 .padding(Spacing::xy(5.0, 0.0)),
             BadgeKind::Control { wid, .. } => panel.id(wid).sense(Sense::CLICK),
         };
-        let chip = panel.show(ui, |ui| {
-            Text::new(glyph)
-                .style(TextStyle {
-                    color,
-                    font_size_px: BADGE_FONT,
-                    weight: FontWeight::Bold,
-                    ..ui.theme.text
-                })
-                .show(ui);
+        let chip = panel.show(ui, |ui| match glyph {
+            BadgeGlyph::Char(glyph) => {
+                Text::new(glyph)
+                    .style(TextStyle {
+                        color,
+                        font_size_px: BADGE_FONT,
+                        weight: FontWeight::Bold,
+                        ..ui.theme.text
+                    })
+                    .show(ui);
+            }
+            BadgeGlyph::Drawn(draw) => draw(ui, color),
         });
         // Take the owned snapshot + click result so the chip's `ui` borrow
         // ends before the tooltip records into `ui`.

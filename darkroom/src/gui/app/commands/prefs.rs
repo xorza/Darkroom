@@ -56,7 +56,16 @@ impl App {
         self.theme = Theme::from_preset(self.preferences.theme.resolve());
         ui.theme = self.theme.aperture_theme.clone();
         self.preferences.apply_ml_model_paths();
-        self.preferences.save();
+        self.save_preferences();
+    }
+
+    /// Persist the preferences, surfacing a failed write in the status
+    /// bar — the one save path every caller routes through, so a broken
+    /// preferences file can't fail silently.
+    pub(crate) fn save_preferences(&mut self) {
+        if let Err(err) = self.preferences.save() {
+            self.engine.status.error(err);
+        }
     }
 
     /// Open an ONNX file dialog for one of the ML model paths and, on a
@@ -77,7 +86,7 @@ impl App {
             MlModelKind::Denoise => self.preferences.ml_models.denoise = path,
             MlModelKind::StarRemoval => self.preferences.ml_models.star_removal = path,
         }
-        self.preferences.save();
+        self.save_preferences();
         self.preferences.apply_ml_model_paths();
     }
 
@@ -86,6 +95,6 @@ impl App {
     /// dialog's "Don't ask again", which calls this directly.
     pub(crate) fn set_confirm_exit(&mut self, on: bool) {
         self.preferences.confirm_unsaved_on_exit = on;
-        self.preferences.save();
+        self.save_preferences();
     }
 }

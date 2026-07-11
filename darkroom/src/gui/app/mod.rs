@@ -131,7 +131,7 @@ impl App {
             && !app.load_document(&path)
         {
             app.preferences.document_path = None;
-            app.preferences.save();
+            app.save_preferences();
         }
         // Resolved theme (default, or whatever the preferences restored)
         // onto the Ui so aperture widgets paint correctly frame 1.
@@ -252,7 +252,7 @@ impl App {
     /// way out; the titlebar-X clean close — which never calls this —
     /// saves in [`Self::handle_exit`] instead.
     fn quit(&mut self) {
-        self.preferences.save();
+        self.save_preferences();
         self.host_handle.quit();
     }
 
@@ -268,7 +268,7 @@ impl App {
             // veto. A clean close never routes through `quit`, so persist
             // geometry here — `track_window_state` already mirrored the
             // current size / position into `preferences` this frame.
-            self.preferences.save();
+            self.save_preferences();
             // Unsaved changes raise the prompt and veto the close — unless
             // the user turned confirmation off, in which case it proceeds.
             if self.editor.dirty && self.preferences.confirm_unsaved_on_exit {

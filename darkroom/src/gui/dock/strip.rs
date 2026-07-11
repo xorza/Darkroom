@@ -95,10 +95,10 @@ const NEW_TAB_CHIP_SIDE: f32 = 13.0 * 1.2 + 8.0;
 
 /// The trailing "+" chip that creates and opens a fresh subgraph. A square,
 /// tab-shaped chip (top corners rounded like the tabs, bottom square) that
-/// reads as an inactive tab; the click is consumed in [`emit_tab_actions`].
+/// reads as an inactive tab; the click is consumed in [`DockUi::scan`](super::DockUi::scan).
 ///
 /// Hidden from the strip for now — kept intact (and its click still
-/// wired in `emit_tab_actions`) so it can be re-enabled without rebuilding it.
+/// wired in `DockUi::scan`) so it can be re-enabled without rebuilding it.
 #[allow(dead_code)]
 fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
     let r = theme.tab_corner_radius;
@@ -150,7 +150,7 @@ struct StripCtx<'a> {
 }
 
 /// Draw one group's strip. Tab activate / close clicks are handled in
-/// [`emit_tab_actions`] (prepass); subgraph-rename commits and split-menu
+/// [`DockUi::scan`](super::DockUi::scan) (prepass); subgraph-rename commits and split-menu
 /// picks push directly into `out` this frame.
 pub(crate) fn show(
     ui: &mut Ui,
@@ -259,10 +259,10 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
                     // to a `TextEdit`; Enter / blur commits. A single click on
                     // the label also switches tab (the label's own panel
                     // captures it, so the outer chip's click handler in
-                    // `emit_tab_actions` wouldn't see it).
+                    // `DockUi::scan` wouldn't see it).
                     if let Some(sub_id) = renamable_subgraph(label.tab) {
                         // `clicked` is *not* forwarded to an activation intent
-                        // here — `emit_tab_actions` polls the same response in
+                        // here — `DockUi::scan` polls the same response in
                         // the prepass and pushes the activation as a
                         // `UiAction`, so the switch settles before this frame's
                         // record. Push-on-click during record would defer the
@@ -279,7 +279,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
                         }
                     } else {
                         // Main / non-graph tab: plain label, activation handled
-                        // by the outer chip in `emit_tab_actions`.
+                        // by the outer chip in `DockUi::scan`.
                         Text::new(label.text.clone()).style(label_style).show(ui);
                     }
                     if closable(label.tab) {
@@ -294,7 +294,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
 }
 
 /// The chip's top-right `×`. Hover comes from last frame's response; the
-/// click is consumed in [`emit_tab_actions`].
+/// click is consumed in [`DockUi::scan`](super::DockUi::scan).
 fn close_button(ui: &mut Ui, theme: &Theme, close_wid: WidgetId) {
     let bg = hover_bg(ui.response_for(close_wid).hovered, theme, Corners::all(3.0));
     Panel::zstack()

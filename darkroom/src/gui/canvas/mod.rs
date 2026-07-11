@@ -34,6 +34,7 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
+use crate::gui::canvas::pan_zoom::PanAnchor;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
@@ -93,7 +94,7 @@ struct Gestures {
     /// latched. While the drag is active, `scene.pan = anchor +
     /// drag_delta`. Input bookkeeping (lifetime = one gesture), not
     /// viewport state.
-    pan_anchor: Option<Vec2>,
+    pan_anchor: PanAnchor,
 }
 
 impl GraphUI {
@@ -467,12 +468,7 @@ pub(crate) fn node_ports(node: &SceneNode, kind: PortKind) -> impl Iterator<Item
 /// coords. Inner canvas applies `TranslateScale::new(pan, zoom)`,
 /// so `outer = pan + zoom * world`.
 pub(crate) fn to_world(outer_local: Vec2, viewport: &Viewport) -> Vec2 {
-    let zoom = if viewport.zoom > 0.0 {
-        viewport.zoom
-    } else {
-        1.0
-    };
-    (outer_local - viewport.pan) / zoom
+    (outer_local - viewport.pan) / viewport.safe_zoom()
 }
 
 /// The pointer in inner-canvas world coords, or `None` when it's off-window.

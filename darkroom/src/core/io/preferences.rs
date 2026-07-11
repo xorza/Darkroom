@@ -176,19 +176,14 @@ impl Preferences {
         preferences
     }
 
-    /// Write the preferences to the working dir. Errors print to stderr —
-    /// a failed persist shouldn't interrupt the user's session.
-    pub fn save(&self) {
-        let bytes = match serialize(self, SerdeFormat::Toml) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                tracing::error!("preferences save failed: {err}");
-                return;
-            }
-        };
-        if let Err(err) = std::fs::write(Self::path(), &bytes) {
-            tracing::error!("preferences save failed: {err}");
-        }
+    /// Write the preferences to the working dir. `Err` carries the
+    /// display-ready reason — the caller surfaces it (status bar); a
+    /// failed persist shouldn't interrupt the user's session.
+    pub fn save(&self) -> Result<(), String> {
+        let bytes = serialize(self, SerdeFormat::Toml)
+            .map_err(|err| format!("preferences save failed: {err}"))?;
+        std::fs::write(Self::path(), &bytes)
+            .map_err(|err| format!("preferences save failed: {err}"))
     }
 }
 

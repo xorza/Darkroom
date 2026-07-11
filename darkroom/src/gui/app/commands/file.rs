@@ -103,6 +103,6 @@ impl App {
         self.current_path = path.clone();
         self.engine.set_document_cache(self.current_path.as_deref());
         self.preferences.document_path = path;
-        self.preferences.save();
+        self.save_preferences();
     }
 }

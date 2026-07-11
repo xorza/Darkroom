@@ -116,6 +116,14 @@ pub struct Viewport {
     pub zoom: f32,
 }
 
+impl Viewport {
+    /// Zoom guarded against the degenerate `0` (a viewport that was
+    /// never set), so inverse transforms can't divide by zero.
+    pub fn safe_zoom(&self) -> f32 {
+        if self.zoom > 0.0 { self.zoom } else { 1.0 }
+    }
+}
+
 impl Default for Viewport {
     /// Origin pan, 1:1 zoom.
     fn default() -> Self {

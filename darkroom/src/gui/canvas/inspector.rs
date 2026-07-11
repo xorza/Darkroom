@@ -519,19 +519,10 @@ fn value_str(b: &InputBindingView) -> String {
     match b {
         InputBindingView::None => "—".to_owned(),
         InputBindingView::Bind => "linked".to_owned(),
-        InputBindingView::Const(v) => static_value_str(v),
-    }
-}
-
-fn static_value_str(v: &StaticValue) -> String {
-    match v {
-        StaticValue::Null => "null".to_owned(),
-        StaticValue::Float(f) => format!("{f}"),
-        StaticValue::Int(i) => format!("{i}"),
-        StaticValue::Bool(b) => format!("{b}"),
-        StaticValue::String(s) => format!("\"{s}\""),
-        StaticValue::FsPath(path) => path.clone(),
-        StaticValue::Enum(variant) => variant.clone(),
+        // `StaticValue::Display` — the same formatter the runtime-value
+        // line gets via `DynamicValue::Display`, so a static binding and
+        // its fetched value can't render one float two ways.
+        InputBindingView::Const(v) => v.to_string(),
     }
 }
 

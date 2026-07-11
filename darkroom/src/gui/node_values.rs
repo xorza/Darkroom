@@ -73,24 +73,30 @@ fn port_view(ui: &Ui, value: &DynamicValue) -> PortValueView {
     }
 }
 
-/// Upload an `RGBA_U8` preview as an aperture texture. Repacks rows only if
-/// a padded stride ever shows up (the preview path produces a packed
-/// stride, so this is normally a straight move). `None` for an unexpected
-/// format or a degenerate buffer.
+/// Upload an `RGBA_U8` preview as an aperture texture. `None` for an
+/// unexpected format or a degenerate buffer.
 fn upload_preview(ui: &Ui, image: RawImage) -> Option<ImageHandle> {
+    Some(ui.register_image(rgba8_image(image)?))
+}
+
+/// Reinterpret a packed `RGBA_U8` imaginarium image as an uploadable
+/// aperture image — the shared tail of every image→texture path (the
+/// preview thumbnails here, the viewer's full-resolution render).
+/// `None` for another format or a padded stride; imaginarium images are
+/// tightly packed, so for RGBA_U8 input `Some` is the norm and the
+/// bytes move without a repack.
+pub(crate) fn rgba8_image(image: RawImage) -> Option<PalImage> {
     let desc = image.desc;
     if desc.color_format != ColorFormat::RGBA_U8 {
         return None;
     }
-    // imaginarium images are tightly packed, so the bytes are ready to upload.
     let pixels = image.into_bytes();
     if pixels.len() != desc.row_bytes() * desc.height {
         return None;
     }
-    let handle = ui.register_image(PalImage::from_rgba8(
+    Some(PalImage::from_rgba8(
         desc.width as u32,
         desc.height as u32,
         pixels,
-    ));
-    Some(handle)
+    ))
 }

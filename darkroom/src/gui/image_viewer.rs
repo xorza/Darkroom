@@ -33,10 +33,11 @@ use lens::Image as LensImage;
 use scenarium::data::DynamicValue;
 use scenarium::graph::NodeSearch;
 
-use crate::core::document::{Document, PortKind, PortRef};
+use crate::core::document::{Document, PortKind, PortRef, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
 use crate::core::worker::RunId;
-use crate::gui::canvas::pan_zoom::{scroll_to_zoom_factor, zoom_about};
+use crate::gui::canvas::pan_zoom::{PanAnchor, fold_scroll_zoom, zoom_about};
+use crate::gui::node_values::rgba8_image;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, filled_rect, muted_text, stroked_rect};
 use crate::gui::widgets::toolbar::{
@@ -86,25 +87,18 @@ pub(crate) struct ImageViewer {
     /// fills the pane (e.g. a tab restored from a saved document).
     content_epoch: Option<RunId>,
     /// Explicit viewport once the user pans/zooms; `None` = fit-to-pane
-    /// (recomputed each frame, so it tracks pane resizes).
-    view: Option<ViewerViewport>,
+    /// (recomputed each frame, so it tracks pane resizes). The image's
+    /// top-left offset in pane-local px plus the zoom (pane px per
+    /// texture texel) — the same `local = pan + zoom * texel` mapping as
+    /// the canvas, so the shared viewport algebra applies unchanged.
+    view: Option<Viewport>,
     /// Pan-drag bookkeeping: the viewport pan at drag start.
-    pan_anchor: Option<Vec2>,
+    pan_anchor: PanAnchor,
     /// Lazily registered checkerboard tile for the `Checker` backdrop.
     /// The backdrop *choice* (and the sampling filter) live in
     /// [`ViewerPreferences`] — one persisted setting shared by every
     /// viewer tab, threaded into [`Self::show`] each frame.
     checker: Option<ImageHandle>,
-}
-
-/// The viewer's viewport: the image's top-left offset in pane-local px
-/// plus the zoom factor (pane px per texture texel) — the same
-/// `local = pan + zoom * texel` mapping as the canvas viewport, so the
-/// shared zoom-about-cursor algebra applies unchanged.
-#[derive(Clone, Copy, Debug)]
-struct ViewerViewport {
-    pan: Vec2,
-    zoom: f32,
 }
 
 /// An RGBA8 render of a full image value, ready to register, plus the
@@ -139,7 +133,7 @@ impl ImageViewer {
             message: None,
             content_epoch: None,
             view: None,
-            pan_anchor: None,
+            pan_anchor: PanAnchor::default(),
             checker: None,
         }
     }
@@ -149,13 +143,13 @@ impl ImageViewer {
     /// dimensions-changed refresh.
     fn reset_framing(&mut self) {
         self.view = None;
-        self.pan_anchor = None;
+        self.pan_anchor.clear();
     }
 
     /// The framing to draw with: the user's explicit viewport, else the
     /// recomputed fit — the single source for the draw rect, the zoom
     /// readout, and the gesture/button math.
-    fn effective_view(&self, img: Vec2, pane: Vec2) -> ViewerViewport {
+    fn effective_view(&self, img: Vec2, pane: Vec2) -> Viewport {
         self.view.unwrap_or_else(|| fit_viewport(img, pane))
     }
 
@@ -463,44 +457,13 @@ impl ImageViewer {
 
         if resp.drag_started_by(PointerButton::Left) || resp.drag_started_by(PointerButton::Middle)
         {
-            self.pan_anchor = Some(v.pan);
+            self.pan_anchor.latch(v.pan);
         }
         let drag = resp
             .drag_delta_by(PointerButton::Left)
             .or_else(|| resp.drag_delta_by(PointerButton::Middle));
-        match (self.pan_anchor, drag) {
-            (Some(anchor), Some(d)) => v.pan = anchor + d,
-            (Some(_), None) => self.pan_anchor = None,
-            _ => {}
-        }
-        if resp.scroll_pixels != Vec2::ZERO {
-            v.pan -= resp.scroll_pixels;
-        }
-        if resp.scroll_lines.y.abs() > f32::EPSILON
-            && let Some(pivot) = resp.pointer_local
-        {
-            let line_px = ui.theme.text.line_height_for(ui.theme.text.font_size_px);
-            zoom_about(
-                &mut v.pan,
-                &mut v.zoom,
-                pivot,
-                scroll_to_zoom_factor(resp.scroll_lines.y * line_px),
-                MIN_ZOOM,
-                MAX_ZOOM,
-            );
-        }
-        if (resp.zoom_factor - 1.0).abs() > f32::EPSILON
-            && let Some(pivot) = resp.pointer_local
-        {
-            zoom_about(
-                &mut v.pan,
-                &mut v.zoom,
-                pivot,
-                resp.zoom_factor,
-                MIN_ZOOM,
-                MAX_ZOOM,
-            );
-        }
+        self.pan_anchor.apply(drag, &mut v.pan);
+        fold_scroll_zoom(&mut v, ui, &resp, MIN_ZOOM, MAX_ZOOM);
         self.view = Some(v);
     }
 }
@@ -637,7 +600,7 @@ fn checker_image() -> aperture::Image {
 
 /// The viewport at `zoom` that keeps the texel under the pane center
 /// fixed — the button sibling of the cursor-anchored wheel zoom.
-fn zoom_about_pane_center(mut v: ViewerViewport, zoom: f32, pane: Vec2) -> ViewerViewport {
+fn zoom_about_pane_center(mut v: Viewport, zoom: f32, pane: Vec2) -> Viewport {
     let factor = zoom / v.zoom;
     zoom_about(
         &mut v.pan,
@@ -740,7 +703,7 @@ fn same_custom_value(a: &DynamicValue, b: &DynamicValue) -> bool {
 }
 
 /// The pane-local rect a viewport paints the texture into.
-fn draw_rect(img: Vec2, v: ViewerViewport) -> Rect {
+fn draw_rect(img: Vec2, v: Viewport) -> Rect {
     Rect {
         min: v.pan,
         size: Size::new(img.x * v.zoom, img.y * v.zoom),
@@ -750,9 +713,9 @@ fn draw_rect(img: Vec2, v: ViewerViewport) -> Rect {
 /// Aspect-preserving fit of `img` (texture texels) centered in `pane`
 /// (`ImageFit::Contain` semantics, upscaling small images too), as an
 /// explicit viewport so the drawn fit and the gesture math can't drift.
-fn fit_viewport(img: Vec2, pane: Vec2) -> ViewerViewport {
+fn fit_viewport(img: Vec2, pane: Vec2) -> Viewport {
     let zoom = (pane.x / img.x).min(pane.y / img.y);
-    ViewerViewport {
+    Viewport {
         pan: (pane - img * zoom) * 0.5,
         zoom,
     }
@@ -791,13 +754,8 @@ fn render_full(value: &DynamicValue) -> Result<RenderedImage, String> {
     let target = capped_target(native_size);
     // 1:1 passes through as a plain RGBA8 convert (Preview never upscales).
     let rgba = Preview::new(target.x as usize, target.y as usize).to_rgba8(&cpu);
-    let desc = rgba.desc;
     Ok(RenderedImage {
-        image: aperture::Image::from_rgba8(
-            desc.width as u32,
-            desc.height as u32,
-            rgba.into_bytes(),
-        ),
+        image: rgba8_image(rgba).expect("Preview::to_rgba8 yields packed RGBA_U8"),
         native_size,
         native_format,
     })
@@ -919,7 +877,7 @@ mod tests {
         assert!(viewer.pending.is_none(), "identical Arc skips the render");
 
         // New epoch, new value: stages a render and keeps the framing.
-        viewer.view = Some(ViewerViewport {
+        viewer.view = Some(Viewport {
             pan: Vec2::new(5.0, 6.0),
             zoom: 2.0,
         });
@@ -932,7 +890,7 @@ mod tests {
     #[test]
     fn present_resets_framing_and_missing_value_stays_epochless() {
         let mut viewer = ImageViewer::new(port());
-        viewer.view = Some(ViewerViewport {
+        viewer.view = Some(Viewport {
             pan: Vec2::ZERO,
             zoom: 3.0,
         });
