@@ -290,10 +290,19 @@ impl ImageViewer {
                             .message
                             .as_deref()
                             .unwrap_or("the port's image appears here after the next graph run");
-                        Text::new(hint.to_owned())
-                            .style(muted_style(theme, ui))
+                        // On the frosted readout pill, so the hint stays
+                        // legible over the checker/white backdrops too.
+                        Panel::hstack()
+                            .id_salt("viewer_hint")
+                            .size((Sizing::Hug, Sizing::Hug))
                             .align(Align::CENTER)
-                            .show(ui);
+                            .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
+                            .background(pill_background(theme))
+                            .show(ui, |ui| {
+                                Text::new(hint.to_owned())
+                                    .style(muted_style(theme, ui))
+                                    .show(ui);
+                            });
                     }
                 }
                 self.header(ui, theme, pane);
