@@ -6,8 +6,12 @@
 > twice); `SetRatio` addresses splits by `DockPath` (turns packed into one
 > byte) instead of `Vec<bool>`; the tree is stored as a flat, canonically
 > pre-ordered `Vec<DockNode>` instead of boxed children; split depth is
-> capped at 4. Remaining: phase 2 (drag & drop + drop-zone highlight),
-> phase 3 (cursor icons, strip reorder), phase 4 (multi-canvas).
+> capped at 4. Phase 3's non-DnD half also shipped: aperture grew
+> `Ui::set_cursor(CursorIcon)` (per-record-pass reset, host applies on
+> change) and the `Splitter` requests resize cursors over its divider.
+> Remaining: phase 2 (drag & drop + drop-zone highlight + ghost chip),
+> the DnD-dependent phase-3 polish (grabbing cursor mid-drag, strip
+> insertion caret, highlight fade), phase 4 (multi-canvas).
 
 Drag a tab chip (image viewer, preferences) out of its strip and drop it onto
 another pane to split that pane horizontally or vertically — with a live
