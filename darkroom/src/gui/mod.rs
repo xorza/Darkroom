@@ -17,6 +17,7 @@ pub(crate) mod scene;
 pub(crate) mod status_bar;
 pub(crate) mod theme;
 
+use crate::core::document::dock::TabGroupId;
 use crate::core::document::{GraphRef, PortRef};
 use crate::gui::app::App;
 use aperture::WindowToken;
@@ -36,17 +37,17 @@ pub(crate) type HostHandle = aperture::HostHandle<App>;
 /// clicks) and applied by `App` in the navigation phase. Decoupled from
 /// `Intent` so the UI layer doesn't need to know which requests are
 /// undoable: `App` translates `ActivateTab`/`CloseTab` into the undoable
-/// `Intent::SwitchTab`/`CloseTab`. `OpenGraph` adds the tab to the strip
-/// directly (that part isn't undoable) but focuses it through the same
-/// recorded `SwitchTab`, so undo faithfully reverses focus.
+/// `Intent::Dock` ops. `OpenGraph` adds the tab to a strip directly
+/// (that part isn't undoable) but focuses it through the same recorded
+/// activation, so undo faithfully reverses focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum UiAction {
     /// Open `target` in a tab (or focus its existing tab).
     OpenGraph(GraphRef),
-    /// Make the tab at this index active.
-    ActivateTab(usize),
-    /// Close the tab at this index (the `Main` tab is never closable).
-    CloseTab(usize),
+    /// Make this group's tab at `index` active (and focus the group).
+    ActivateTab { group: TabGroupId, index: usize },
+    /// Close this group's tab at `index` (the `Main` tab never closes).
+    CloseTab { group: TabGroupId, index: usize },
     /// Create a fresh empty subgraph and open it in a new tab (the "+"
     /// chip at the end of the strip).
     NewSubgraph,
