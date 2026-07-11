@@ -14,4 +14,4 @@ tooltip near the edge of screen overflows
 
 special preview node
 
-spinner flacky visual test
+review primitives
