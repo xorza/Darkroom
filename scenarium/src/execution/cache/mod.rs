@@ -333,16 +333,16 @@ impl RuntimeCache {
         program: &ExecutionProgram,
         idx: NodeIdx,
     ) -> bool {
-        let Some(target) =
-            self.disk_store
-                .blob_target(program, idx, self.slots[idx].current_digest)
+        let Some(target) = self
+            .disk_store
+            .blob_target(&program.e_nodes[idx], self.slots[idx].current_digest)
         else {
             return false;
         };
         if self
             .disk_store
             .outputs_decodable(program.node_output_types(&program.e_nodes[idx]))
-            && self.disk_store.has_current_blob(&target)
+            && target.is_current()
         {
             self.flag_on_disk(idx);
             true
@@ -369,9 +369,9 @@ impl RuntimeCache {
             return false;
         }
         // The slot claimed an on-disk blob. Load it; on success it's resident.
-        if let Some(target) =
-            self.disk_store
-                .blob_target(program, idx, self.slots[idx].current_digest)
+        if let Some(target) = self
+            .disk_store
+            .blob_target(&program.e_nodes[idx], self.slots[idx].current_digest)
         {
             // A blob folds the output signature into its digest, so its count matches unless
             // the file is damaged. Reject a mismatch here as a miss rather than letting a
@@ -392,7 +392,7 @@ impl RuntimeCache {
                 }
                 None => {}
             }
-            self.disk_store.delete(&target.path);
+            target.delete();
         }
         self.slots[idx].clear_output();
         false
@@ -439,7 +439,7 @@ impl RuntimeCache {
     ) -> impl Future<Output = ()> + 'a {
         let target = self
             .disk_store
-            .blob_target(program, idx, self.slots[idx].current_digest);
+            .blob_target(&program.e_nodes[idx], self.slots[idx].current_digest);
         let outputs = self
             .is_resident_hit(idx)
             .then(|| self.slots[idx].output_values())
@@ -463,8 +463,8 @@ impl RuntimeCache {
     pub(crate) fn reclaim_slot(&mut self, program: &ExecutionProgram, idx: NodeIdx) {
         let reloadable = self
             .disk_store
-            .blob_target(program, idx, self.slots[idx].current_digest)
-            .is_some_and(|target| self.disk_store.has_current_blob(&target));
+            .blob_target(&program.e_nodes[idx], self.slots[idx].current_digest)
+            .is_some_and(|target| target.is_current());
         if reloadable {
             self.flag_on_disk(idx);
         } else if !program.e_nodes[idx].cache.caches_in_ram() {

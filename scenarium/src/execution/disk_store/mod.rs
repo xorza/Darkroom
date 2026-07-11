@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::data::{DataType, DynamicValue};
 use crate::execution::codec::{self, deserialize_outputs, serialize_outputs};
 use crate::execution::digest::Digest;
-use crate::execution::program::{ExecutionProgram, NodeIdx};
+use crate::execution::program::ExecutionNode;
 use crate::library::Library;
 use crate::runtime::context::ContextManager;
 
@@ -38,11 +38,29 @@ pub struct DiskStore {
 
 /// Where one node's outputs cache on disk, paired with the content digest the blob
 /// must carry to be valid — every store operation needs both halves together.
-/// Produced by [`DiskStore::blob_target`].
+/// Produced by [`DiskStore::blob_target`]. Carries the header/file-level operations
+/// that need no codec table; anything decoding or encoding a body lives on
+/// [`DiskStore`].
 #[derive(Debug)]
 pub(crate) struct BlobTarget {
     pub(crate) path: PathBuf,
     pub(crate) digest: Digest,
+}
+
+impl BlobTarget {
+    /// Whether a blob stamped with this target's digest sits at its path — the "would a
+    /// read hit?" probe, answered from the 32-byte header without touching the body. A
+    /// file carrying another digest is a superseded write, not a hit.
+    pub(crate) fn is_current(&self) -> bool {
+        stored_digest(&self.path) == Some(self.digest)
+    }
+
+    /// Delete the blob — used to clear a file that failed to decode, so the recompute
+    /// that follows writes a fresh one rather than [`DiskStore::store`] skipping the
+    /// broken file as "already current" forever. Best-effort.
+    pub(crate) fn delete(&self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 impl DiskStore {
@@ -52,18 +70,16 @@ impl DiskStore {
         Self { library, disk_root }
     }
 
-    /// The file node `idx` caches to — keyed by its **node id**, so the node has exactly one
+    /// The file `e_node` caches to — keyed by its **node id**, so the node has exactly one
     /// blob and a recompute under a new digest replaces the old one — plus the content
     /// `digest` a valid blob there must carry. `None` when the node doesn't cache to disk: not
     /// `persists_to_disk`, no disk root, or no digest (an impure cone). Takes the digest
     /// rather than reading it off the cache, so this layer stays free of `RuntimeCache`.
     pub(crate) fn blob_target(
         &self,
-        program: &ExecutionProgram,
-        idx: NodeIdx,
+        e_node: &ExecutionNode,
         digest: Option<Digest>,
     ) -> Option<BlobTarget> {
-        let e_node = &program.e_nodes[idx];
         if !e_node.cache.persists_to_disk() {
             return None;
         }
@@ -74,13 +90,6 @@ impl DiskStore {
             path: self.disk_root.as_ref()?.join(name),
             digest,
         })
-    }
-
-    /// Whether a blob stamped with `target.digest` sits at `target.path` — the "would a read
-    /// hit?" probe, answered from the 32-byte header without touching the body. A file
-    /// carrying another digest is a superseded write, not a hit.
-    pub(crate) fn has_current_blob(&self, target: &BlobTarget) -> bool {
-        stored_digest(&target.path) == Some(target.digest)
     }
 
     /// Whether every one of `types` could be decoded back from a blob: each `Custom` output
@@ -112,13 +121,6 @@ impl DiskStore {
             .expect("cache read task panicked")
     }
 
-    /// Delete a blob — used to clear a file that failed to decode, so the recompute that
-    /// follows writes a fresh one rather than [`store`](Self::store) skipping the broken file
-    /// as "already current" forever. Best-effort.
-    pub(crate) fn delete(&self, path: &Path) {
-        let _ = std::fs::remove_file(path);
-    }
-
     /// Serialize `outputs` to `target`, stamped with its digest. A blob already carrying that
     /// digest is the same bytes → skipped, avoiding a redundant, possibly costly serialize; a
     /// blob under any *other* digest is superseded and overwritten — this is where a stale
@@ -133,7 +135,7 @@ impl DiskStore {
         outputs: &[DynamicValue],
         ctx: &mut ContextManager,
     ) {
-        if self.has_current_blob(target) {
+        if target.is_current() {
             return;
         }
         let bytes = match serialize_outputs(outputs, &self.library, ctx).await {
@@ -149,7 +151,7 @@ impl DiskStore {
         // other event-loop tasks). `serialize_outputs` above already did the heavy encode.
         let path = target.path.clone();
         let digest = target.digest;
-        let result = tokio::task::spawn_blocking(move || atomic_write(&path, &digest.0, &bytes))
+        let result = tokio::task::spawn_blocking(move || atomic_write(&path, digest, &bytes))
             .await
             .expect("cache write task panicked");
         if let Err(e) = result {
@@ -160,7 +162,7 @@ impl DiskStore {
 
 /// The content digest stamped in a blob's leading 32 bytes, or `None` when the file
 /// is absent, unreadable, or too short to carry one. The cheap presence/validity
-/// probe behind [`DiskStore::has_current_blob`], answered without touching the body.
+/// probe behind [`BlobTarget::is_current`], answered without touching the body.
 fn stored_digest(path: &Path) -> Option<Digest> {
     let mut file = std::fs::File::open(path).ok()?;
     let mut buf = [0u8; 32];
@@ -192,29 +194,38 @@ fn read_blocking(path: &Path, digest: Digest, library: &Library) -> Option<Vec<D
     }
 }
 
-/// Write `header` then `body` to `path` via a sibling temp file + `rename` (atomic
-/// on one filesystem), creating the parent dir — so a reader never sees a
+/// Write the digest header then `body` to `path` via a sibling temp file + `rename`
+/// (atomic on one filesystem), creating the parent dir — so a reader never sees a
 /// half-written blob and a crash mid-write can't corrupt an existing one. The two
 /// slices are written back-to-back rather than concatenated, sparing a copy of a
-/// possibly huge body. A rename that fails because a concurrent writer already
-/// landed the target is tolerated (best-effort, last-writer-wins cache; the digest
-/// header keeps readers honest).
-fn atomic_write(path: &Path, header: &[u8], body: &[u8]) -> io::Result<()> {
+/// possibly huge body. No `sync_all` before the rename: a power loss may leave garbage
+/// at the final path, but the digest/format checks turn that into a miss that
+/// self-heals on the next run — cheaper than fsyncing every large blob. A rename lost
+/// to a concurrent writer is tolerated only when the survivor carries **our** digest
+/// (same bytes); a survivor under any other digest means this store failed and the
+/// caller must hear about it.
+fn atomic_write(path: &Path, digest: Digest, body: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
     let tmp = temp_path(path);
     let write_tmp = || -> io::Result<()> {
         let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(header)?;
+        file.write_all(&digest.0)?;
         file.write_all(body)
     };
-    write_tmp()?;
-    match std::fs::rename(&tmp, path) {
+    let result = write_tmp().and_then(|()| std::fs::rename(&tmp, path));
+    match result {
         Ok(()) => Ok(()),
         Err(e) => {
+            // Don't leave the temp file behind — a disk-full store would otherwise
+            // leak a fresh uniquely-named leftover on every failed attempt.
             let _ = std::fs::remove_file(&tmp);
-            if path.exists() { Ok(()) } else { Err(e) }
+            if stored_digest(path) == Some(digest) {
+                Ok(())
+            } else {
+                Err(e)
+            }
         }
     }
 }

@@ -54,14 +54,14 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
     // The stamped digest is probed off the header alone; any other digest — or a
     // missing file — is not a hit.
     assert_eq!(stored_digest(&file.0), Some(d_a));
-    assert!(store.has_current_blob(&target(&file.0, d_a)));
+    assert!(target(&file.0, d_a).is_current());
     assert!(
-        !store.has_current_blob(&target(&file.0, d_b)),
+        !target(&file.0, d_b).is_current(),
         "another digest means the blob is superseded, not present"
     );
     let absent = temp_file("absent");
     assert_eq!(stored_digest(&absent.0), None, "no file, no stored digest");
-    assert!(!store.has_current_blob(&target(&absent.0, d_a)));
+    assert!(!target(&absent.0, d_a).is_current());
     assert!(store.read(&target(&absent.0, d_a)).await.is_none());
 
     let back = store.read(&target(&file.0, d_a)).await.expect("hit");
