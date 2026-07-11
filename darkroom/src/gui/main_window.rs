@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use std::mem::take;
 
 use aperture::{
-    Align, Background, Configure, Panel, Sizing, SplitHalf, Splitter, Ui, VAlign, WidgetId,
+    Align, Background, Configure, Corners, CursorIcon, Layer, Panel, Rect, Sizing, SmolStr,
+    Spacing, SplitHalf, Splitter, Stroke, Text, TextStyle, Ui, VAlign, WidgetId,
 };
+use glam::Vec2;
 
 use crate::core::document::dock::{
     DockLayout, DockNode, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
@@ -15,6 +17,7 @@ use crate::gui::UiAction;
 use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::GraphUI;
+use crate::gui::dock_drag::{DropTarget, TabDrag, classify_drop};
 use crate::gui::graph_toolbar;
 use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
@@ -37,6 +40,11 @@ pub(crate) struct MainWindow {
     /// `Editor` (preview clicks + after-run refreshes), which also prunes
     /// entries whose tab closed — dropping one frees its texture.
     pub(crate) image_viewers: HashMap<PortRef, ImageViewer>,
+    /// The tab drag in flight, if any: armed by the navigation scan off
+    /// a movable chip's latched drag, resolved there into a
+    /// [`UiAction::MoveTab`] on release (or cancelled by Esc), and
+    /// painted by `frame` as the drop highlight + ghost chip.
+    tab_drag: Option<TabDrag>,
     first_frame: bool,
 }
 
@@ -71,8 +79,8 @@ impl MainWindow {
     /// the record — the switched-to graph records in Pass A and its
     /// connections draw in Pass B, no first-frame gap.
     pub(crate) fn scan_navigation(
-        &self,
-        ui: &Ui,
+        &mut self,
+        ui: &mut Ui,
         doc: &Document,
         scene: &Scene,
         actions: &mut Vec<UiAction>,
@@ -82,6 +90,88 @@ impl MainWindow {
         self.graph_ui
             .inspectors
             .emit_preview_opens(ui, scene, actions);
+        self.scan_tab_drag(ui, doc, actions);
+    }
+
+    /// Drive the tab drag from last frame's chip responses: arm on a
+    /// movable chip's latched drag, cancel on Esc (or the tab vanishing
+    /// under the drag), and on release resolve the pane under the
+    /// pointer into a [`UiAction::MoveTab`]. Runs in the navigation
+    /// phase so a committed drop settles before this frame's record —
+    /// the rearranged panes draw the same frame the mouse releases.
+    fn scan_tab_drag(&mut self, ui: &mut Ui, doc: &Document, actions: &mut Vec<UiAction>) {
+        let Some(drag) = &self.tab_drag else {
+            for group in doc.layout.groups() {
+                for (index, &tab) in group.tabs.iter().enumerate() {
+                    if tab_bar::movable(tab)
+                        && ui
+                            .response_for(tab_bar::tab_chip_wid(group.id, index))
+                            .drag_started()
+                    {
+                        self.tab_drag = Some(TabDrag {
+                            tab,
+                            source: (group.id, index),
+                            text: tab_text(doc, tab),
+                        });
+                        return;
+                    }
+                }
+            }
+            return;
+        };
+        let (tab, (src_group, src_index)) = (drag.tab, drag.source);
+        if ui.escape_pressed() || doc.layout.find_tab(tab).is_none() {
+            self.tab_drag = None;
+            return;
+        }
+        if ui
+            .response_for(tab_bar::tab_chip_wid(src_group, src_index))
+            .drag_stopped()
+        {
+            if let Some(target) = self.drop_target(ui, doc) {
+                actions.push(UiAction::MoveTab {
+                    tab,
+                    to: target.drop,
+                });
+            }
+            self.tab_drag = None;
+        }
+    }
+
+    /// The drop the pointer currently indicates: the pane whose rect
+    /// contains it (panes tile the dock area without overlapping, so
+    /// plain containment against last-frame rects is exact), classified
+    /// into a zone. Deliberately *not* `hover_within`: the hover
+    /// hit-test resolves only to sensed widgets, and a pane's content
+    /// can be entirely inert (the preferences form, a viewer's image) —
+    /// the pointer over it hovers nothing, and the drop would go dark.
+    /// `None` over a divider, the chrome rows, or off-window — a
+    /// release there cancels.
+    fn drop_target(&self, ui: &mut Ui, doc: &Document) -> Option<DropTarget> {
+        let p = ui.pointer_pos()?;
+        for group in doc.layout.groups() {
+            let Some(pane) = ui.response_for(pane_wid(group.id)).rect else {
+                continue;
+            };
+            if !pane.contains(p) {
+                continue;
+            }
+            let Some(strip) = ui.response_for(tab_bar::strip_wid(group.id)).rect else {
+                continue;
+            };
+            let chips: Vec<Rect> = (0..group.tabs.len())
+                .filter_map(|i| ui.response_for(tab_bar::tab_chip_wid(group.id, i)).rect)
+                .collect();
+            return Some(classify_drop(
+                group.id,
+                pane,
+                strip,
+                &chips,
+                doc.layout.can_split(group.id),
+                p,
+            ));
+        }
+        None
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the
@@ -132,10 +222,71 @@ impl MainWindow {
                 status_bar::show(ui, ctx);
             });
 
+        // A tab drag paints above everything: the drop-zone highlight
+        // and the ghost chip. Recorded after the main tree (layers must
+        // be pushed from the Main baseline).
+        if self.tab_drag.is_some() {
+            ui.set_cursor(CursorIcon::Grabbing);
+            self.draw_drag_overlay(ui, ctx, doc);
+        }
+
         if take(&mut self.first_frame) {
             ui.request_relayout();
         }
         command
+    }
+
+    /// The drag's tooltip-layer feedback: a translucent accent rect over
+    /// the region the drop would occupy (full pane for a join, half for
+    /// a split, a caret between chips for a strip insert) and a small
+    /// ghost chip trailing the pointer. `Sense::NONE` throughout, so the
+    /// overlay never intercepts the drag's own hit-testing.
+    fn draw_drag_overlay(&self, ui: &mut Ui, ctx: &AppContext<'_>, doc: &Document) {
+        let Some(drag) = &self.tab_drag else { return };
+        let accent = ctx.theme.colors.selection_rect;
+        if let Some(target) = self.drop_target(ui, doc) {
+            let r = target.highlight;
+            ui.layer(Layer::Tooltip, r.min, Some(r.size), |ui| {
+                Panel::zstack()
+                    .id(WidgetId::from_hash("dock.drag_highlight"))
+                    .size((Sizing::FILL, Sizing::FILL))
+                    .background(Background {
+                        fill: accent.with_alpha(0.18).into(),
+                        stroke: Stroke {
+                            brush: accent.into(),
+                            width: 1.5,
+                        },
+                        corners: Corners::all(2.0),
+                        ..Default::default()
+                    })
+                    .show(ui, |_| {});
+            });
+        }
+        if let Some(p) = ui.pointer_pos() {
+            let text = drag.text.clone();
+            let label_style = TextStyle {
+                font_size_px: 13.0,
+                ..ui.theme.text
+            };
+            ui.layer(Layer::Tooltip, p + Vec2::new(14.0, 18.0), None, |ui| {
+                Panel::hstack()
+                    .id(WidgetId::from_hash("dock.drag_ghost"))
+                    .size((Sizing::Hug, Sizing::Hug))
+                    .padding(Spacing::new(10.0, 4.0, 10.0, 4.0))
+                    .background(Background {
+                        fill: ctx.theme.colors.chrome_fill.into(),
+                        stroke: Stroke {
+                            brush: accent.into(),
+                            width: 1.0,
+                        },
+                        corners: Corners::all(4.0),
+                        ..Default::default()
+                    })
+                    .show(ui, |ui| {
+                        Text::new(text).style(label_style).show(ui);
+                    });
+            });
+        }
     }
 
     /// Recursive walk of the dock tree: a split renders as an aperture
@@ -250,22 +401,28 @@ fn tab_labels(doc: &Document, group: &TabGroup) -> Vec<TabLabel> {
     group
         .tabs
         .iter()
-        .map(|&tab| {
-            let text = match tab {
-                TabRef::Graph(GraphRef::Main) => "main".into(),
-                TabRef::Graph(GraphRef::Local(id)) => doc
-                    .graph
-                    .subgraphs
-                    .by_key(&id)
-                    .map(|d| d.name.as_str())
-                    .unwrap_or("subgraph")
-                    .into(),
-                TabRef::Preferences => "preferences".into(),
-                TabRef::ImageViewer(port) => image_viewer::port_label(doc, port).into(),
-            };
-            TabLabel { tab, text }
+        .map(|&tab| TabLabel {
+            tab,
+            text: tab_text(doc, tab),
         })
         .collect()
+}
+
+/// A tab's display text — shared by the strip labels and the drag's
+/// ghost chip.
+fn tab_text(doc: &Document, tab: TabRef) -> SmolStr {
+    match tab {
+        TabRef::Graph(GraphRef::Main) => "main".into(),
+        TabRef::Graph(GraphRef::Local(id)) => doc
+            .graph
+            .subgraphs
+            .by_key(&id)
+            .map(|d| d.name.as_str())
+            .unwrap_or("subgraph")
+            .into(),
+        TabRef::Preferences => "preferences".into(),
+        TabRef::ImageViewer(port) => image_viewer::port_label(doc, port).into(),
+    }
 }
 
 impl Default for MainWindow {
@@ -273,6 +430,7 @@ impl Default for MainWindow {
         Self {
             graph_ui: GraphUI::default(),
             image_viewers: HashMap::new(),
+            tab_drag: None,
             first_frame: true,
         }
     }
