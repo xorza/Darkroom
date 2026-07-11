@@ -898,6 +898,13 @@ knob = "#ffffff"
 knob_size = 18.0
 rail_thickness = 4.0
 
+[aperture_theme.splitter]
+thickness = 6.0
+rule = "#aaaaa82e"
+rule_thickness = 1.0
+hover = "#3e3e3e"
+drag = "#9adbfb99"
+
 [aperture_theme.text]
 font_size_px = 16.0
 color = "#e2dfd3"
