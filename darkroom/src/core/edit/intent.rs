@@ -319,12 +319,16 @@ pub enum DocStep {
     /// Whole-layout snapshot around one dock op (activate/close/move/
     /// resize) — the tree is a handful of nodes, so both halves ride the
     /// step and apply/revert are plain assignments. `key` is the gesture
-    /// this op coalesces under (a switch burst, one divider's drag),
-    /// derived from the intent at build time.
+    /// this op coalesces under (a switch burst, one divider's drag);
+    /// `structural` marks a [`DockOp::MoveTab`] (a split or a move —
+    /// invested arrangement work, so it dirties the document, unlike
+    /// activations/closes/ratio nudges). Both derived from the op at
+    /// build time.
     Dock {
         from: DockLayout,
         to: DockLayout,
         key: Option<GestureKey>,
+        structural: bool,
     },
     /// `sub_id` is resolved at build time so apply/revert are
     /// self-contained (don't need the drain target). Carries both names.
@@ -431,12 +435,18 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             DockOp::SetRatio { split, .. } => Some(GestureKey::DockResize(split)),
             DockOp::CloseTab { .. } | DockOp::MoveTab { .. } => None,
         };
+        let structural = matches!(op, DockOp::MoveTab { .. });
         let from = doc.layout.clone();
         let mut to = from.clone();
         to.apply(op);
         // Refused/degenerate ops leave `to == from`; the is_noop filter
         // drops the step.
-        return Some(UndoStep::Doc(DocStep::Dock { from, to, key }));
+        return Some(UndoStep::Doc(DocStep::Dock {
+            from,
+            to,
+            key,
+            structural,
+        }));
     }
     if let Intent::RenameSubgraph { id, to } = intent {
         let from = doc.graph.subgraphs.by_key(&id)?.name.clone();
@@ -1208,16 +1218,19 @@ impl UndoStep {
     /// silently defaulting.
     pub fn dirties_document(&self) -> bool {
         match self {
-            // Navigation only — panning, zooming, selecting, restacking, or
-            // rearranging tabs/panes is view state the user doesn't "save".
+            // A structural dock op (a tab moved or split into its own
+            // pane) is invested arrangement work worth the exit prompt;
+            // activations, closes, and ratio nudges stay navigation.
+            UndoStep::Doc(DocStep::Dock { structural, .. }) => *structural,
+            // Navigation only — panning, zooming, selecting, or
+            // restacking is view state the user doesn't "save".
             // Stacking order rides in `view_nodes` and still writes on any
             // save (like selection), but a bare restack shouldn't nag on exit.
             UndoStep::Graph(
                 GraphStep::SetSelection { .. }
                 | GraphStep::RaiseNode { .. }
                 | GraphStep::SetViewport { .. },
-            )
-            | UndoStep::Doc(DocStep::Dock { .. }) => false,
+            ) => false,
             // Graph data + node layout — real edits worth persisting.
             UndoStep::Graph(
                 GraphStep::AddNode { .. }
@@ -1312,12 +1325,20 @@ impl UndoStep {
                 }))
             }
             (
-                UndoStep::Doc(DocStep::Dock { from, key, .. }),
+                UndoStep::Doc(DocStep::Dock {
+                    from,
+                    key,
+                    structural,
+                    ..
+                }),
                 UndoStep::Doc(DocStep::Dock { to, .. }),
             ) => Some(UndoStep::Doc(DocStep::Dock {
                 from: from.clone(),
                 to: to.clone(),
                 key: *key,
+                // Only non-structural ops carry a gesture key, so a
+                // coalesced run can't smuggle a move past the flag.
+                structural: *structural,
             })),
             _ => None,
         }
@@ -1355,7 +1376,16 @@ mod tests {
     #[test]
     fn dirties_document_splits_edits_from_navigation() {
         use crate::core::document::TabRef;
+        use crate::core::document::dock::{DockDrop, SplitSide};
         use scenarium::graph::subgraph::SubgraphId;
+
+        // A doc with a movable Preferences tab, for the dock steps below
+        // (both built through the real `build_step` pipeline so the
+        // `structural` derivation is what's under test).
+        let mut dock_doc = Document::default();
+        let primary = dock_doc.layout.primary().id;
+        dock_doc.layout.find_or_insert(TabRef::Preferences, primary);
+        let dock_step = |op: DockOp| build_step(Intent::Dock(op), &dock_doc, GraphRef::Main);
 
         // Navigation-only steps: camera, selection, tab focus — the user
         // doesn't "save" these, so they must not flip the unsaved flag.
@@ -1374,16 +1404,12 @@ mod tests {
                     zoom: 2.0,
                 },
             }),
-            {
-                let from = DockLayout::default();
-                let mut to = from.clone();
-                to.find_or_insert(TabRef::Preferences, to.primary().id);
-                UndoStep::Doc(DocStep::Dock {
-                    from,
-                    to,
-                    key: None,
-                })
-            },
+            // Activating a tab is focus, not arrangement work.
+            dock_step(DockOp::ActivateTab {
+                group: primary,
+                index: 1,
+            })
+            .unwrap(),
         ];
         for step in &navigation {
             assert!(
@@ -1399,6 +1425,16 @@ mod tests {
                 from: "a".into(),
                 to: "b".into(),
             }),
+            // Splitting a tab into its own pane is invested arrangement
+            // work — the exit prompt should protect it.
+            dock_step(DockOp::MoveTab {
+                tab: TabRef::Preferences,
+                to: DockDrop::Split {
+                    group: primary,
+                    side: SplitSide::Right,
+                },
+            })
+            .unwrap(),
             UndoStep::Graph(GraphStep::MoveNodes {
                 grabbed: NodeId::unique(),
                 moves: vec![(NodeId::unique(), Vec2::ZERO, Vec2::new(5.0, 5.0))],
