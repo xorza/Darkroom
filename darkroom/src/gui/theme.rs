@@ -1,7 +1,9 @@
 use aperture::{
     Background, Brush, ButtonTheme, Color, Corners, DragValueTheme, Shadow, Spacing, Stroke,
-    TextEditTheme, WidgetLook,
+    TextEditTheme, TextStyle, WidgetLook,
 };
+
+use crate::core::theme_pref::ThemeChoice;
 
 // ── shared dimensions ────────────────────────────────────────────────
 // Layout dimensions don't change between dark and light — they're factored
@@ -187,6 +189,30 @@ pub(crate) mod light {
     pub(crate) const PAL_BORDER_FOCUSED: Color = Color::hex(0xc4daf6);
 }
 
+/// Declares a `Color` roster struct plus its two built-in instances
+/// (`DARK` / `LIGHT`, pulling `dark::CONST` / `light::CONST`) from one
+/// `field => CONST` list. One roster per struct, so a colour can't sit in
+/// the struct while a preset forgets it: the presets won't compile until
+/// every field is filled. Both the serialized [`PaletteColors`] chrome
+/// roster and the private `AperturePalette` are built this way.
+macro_rules! palette_struct {
+    (
+        $(#[$smeta:meta])*
+        $vis:vis struct $name:ident;
+        $($(#[$fmeta:meta])* $field:ident => $konst:ident),+ $(,)?
+    ) => {
+        $(#[$smeta])*
+        $vis struct $name {
+            $($(#[$fmeta])* $vis $field: Color,)+
+        }
+
+        impl $name {
+            const DARK: Self = Self { $($field: dark::$konst),+ };
+            const LIGHT: Self = Self { $($field: light::$konst),+ };
+        }
+    };
+}
+
 /// Which built-in palette built this [`Theme`] — the concrete palette
 /// a [`ThemeChoice`] resolves to. Carried on the theme itself and
 /// round-tripped through TOML so a loaded theme file restores its
@@ -212,8 +238,6 @@ impl ThemePreset {
         }
     }
 }
-
-use crate::core::theme_pref::ThemeChoice;
 
 impl ThemeChoice {
     /// Resolve to the concrete built-in preset to load. `System` queries
@@ -471,52 +495,26 @@ impl InlineRenameTheme {
     }
 }
 
-/// Palette aperture's widgets need to render correctly under a darkroom
-/// theme. Mirrors aperture's own (private) `palette::*` consts; we hand
-/// it in so swapping dark ⇄ light recolours every widget aperture paints,
-/// not just darkroom-owned chrome. Built from the matching palette mod's
-/// `PAL_*` block.
-struct AperturePalette {
-    text: Color,
-    text_muted: Color,
-    text_disabled: Color,
-    terminal_bg: Color,
-    elem: Color,
-    elem_hover: Color,
-    elem_active: Color,
-    border_focused: Color,
-    accent: Color,
-}
-
-impl AperturePalette {
-    const DARK: Self = Self {
-        text: dark::PAL_TEXT,
-        text_muted: dark::TEXT_MUTED,
-        text_disabled: dark::PAL_TEXT_DISABLED,
-        // Aperture's `window_clear` slot wants the editor / terminal
-        // surface — same swatch as the graph canvas in both themes.
-        terminal_bg: dark::CANVAS_BG,
-        // Aperture's `palette::ELEM` and our `NODE_FILL` are the same
-        // swatch by design: nodes and aperture surfaces sit on the
-        // same surface tier.
-        elem: dark::NODE_FILL,
-        elem_hover: dark::PAL_ELEM_HOVER,
-        elem_active: dark::PAL_ELEM_ACTIVE,
-        border_focused: dark::PAL_BORDER_FOCUSED,
-        accent: dark::SELECTION_RECT,
-    };
-
-    const LIGHT: Self = Self {
-        text: light::PAL_TEXT,
-        text_muted: light::TEXT_MUTED,
-        text_disabled: light::PAL_TEXT_DISABLED,
-        terminal_bg: light::CANVAS_BG,
-        elem: light::NODE_FILL,
-        elem_hover: light::PAL_ELEM_HOVER,
-        elem_active: light::PAL_ELEM_ACTIVE,
-        border_focused: light::PAL_BORDER_FOCUSED,
-        accent: light::SELECTION_RECT,
-    };
+palette_struct! {
+    /// Palette aperture's widgets need to render correctly under a darkroom
+    /// theme. Mirrors aperture's own (private) `palette::*` consts; we hand
+    /// it in so swapping dark ⇄ light recolours every widget aperture paints,
+    /// not just darkroom-owned chrome.
+    #[derive(Debug)]
+    struct AperturePalette;
+    text => PAL_TEXT,
+    text_muted => TEXT_MUTED,
+    text_disabled => PAL_TEXT_DISABLED,
+    /// Aperture's `window_clear` slot wants the editor / terminal surface —
+    /// the same swatch as the graph canvas in both themes.
+    terminal_bg => CANVAS_BG,
+    /// Aperture's `palette::ELEM` and our `NODE_FILL` are the same swatch by
+    /// design: nodes and aperture surfaces sit on the same surface tier.
+    elem => NODE_FILL,
+    elem_hover => PAL_ELEM_HOVER,
+    elem_active => PAL_ELEM_ACTIVE,
+    border_focused => PAL_BORDER_FOCUSED,
+    accent => SELECTION_RECT,
 }
 
 /// Aperture sub-theme for darkroom: start from aperture's defaults,
@@ -572,20 +570,24 @@ fn aperture_theme_for(p: &AperturePalette, chrome_fill: Color) -> aperture::Them
 /// paints — text, buttons, text-edits, toggles, scrollbars, menus,
 /// tooltips — not just the darkroom-owned chrome.
 fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
-    use aperture::TextStyle;
-
     let muted_edge = p.text_muted.with_alpha(0.18);
     let panel_edge = p.text_muted.with_alpha(0.22);
 
-    // Helpers cribbed from aperture's own theme defaults so the
-    // structural recipe (which fill / which stroke per state) stays in
-    // one shape — only the palette values diverge.
-    let solid_bg = |fill: Color, stroke: Color, stroke_w: f32| Background {
+    // Every recoloured surface is a rounded fill + optional stroke with no
+    // shadow (only the tooltip lifts — built inline below). `surface` is the
+    // base; `solid_bg` / `flat_round` are the two common shapes on top of it,
+    // so the corner radius and shadow default live in exactly one place. The
+    // recipe mirrors aperture's own theme defaults — only palette values differ.
+    let surface = |fill: Color, stroke: Stroke, corner: f32| Background {
         fill: fill.into(),
-        stroke: Stroke::solid(stroke, stroke_w),
-        corners: Corners::all(4.0),
+        stroke,
+        corners: Corners::all(corner),
         shadow: Shadow::NONE,
     };
+    let solid_bg = |fill: Color, stroke: Color, stroke_w: f32| {
+        surface(fill, Stroke::solid(stroke, stroke_w), 4.0)
+    };
+    let flat_round = |fill: Color| surface(fill, Stroke::ZERO, 4.0);
     let disabled_text = Some(TextStyle::default().with_color(p.text_disabled));
 
     // Top-level surfaces + text.
@@ -593,15 +595,9 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
     t.window_clear = p.terminal_bg;
 
     // Button — same recipe as `ButtonTheme::default`, recoloured.
-    let pressed_stroke = Stroke::solid(p.border_focused, 1.0);
     t.button.normal.background = Some(solid_bg(p.elem_hover, muted_edge, 1.0));
     t.button.hovered.background = Some(solid_bg(p.elem_active, muted_edge, 1.0));
-    t.button.pressed.background = Some(Background {
-        fill: p.elem_active.into(),
-        stroke: pressed_stroke,
-        corners: Corners::all(4.0),
-        shadow: Shadow::NONE,
-    });
+    t.button.pressed.background = Some(solid_bg(p.elem_active, p.border_focused, 1.0));
     t.button.disabled.background = Some(solid_bg(p.elem, muted_edge, 1.0));
     t.button.disabled.text = disabled_text;
 
@@ -610,12 +606,6 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
     // darkroom-side `aperture_theme_for` then overlays a semi-transparent
     // node-fill chip on the normal/disabled looks for legibility over
     // busy nodes; we only need to recolour the hover/pressed fills here.
-    let flat_round = |fill: Color| Background {
-        fill: fill.into(),
-        stroke: Stroke::ZERO,
-        corners: Corners::all(4.0),
-        shadow: Shadow::NONE,
-    };
     t.menu_button.hovered.background = Some(flat_round(p.elem_hover));
     t.menu_button.pressed.background = Some(flat_round(p.elem_active));
 
@@ -633,16 +623,8 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
     // `ToggleTheme::with_radius`, applied separately per toggle so the
     // corner radius (square checkbox vs pill radio) stays correct.
     let recolour_toggle = |toggle: &mut aperture::ToggleTheme, corner: f32| {
-        let radius = Corners::all(corner);
         let edge = p.text_muted.with_alpha(0.35);
-        let make = |fill: Color, stroke: Stroke| -> Option<Background> {
-            Some(Background {
-                fill: fill.into(),
-                stroke,
-                corners: radius,
-                shadow: Shadow::NONE,
-            })
-        };
+        let make = |fill: Color, stroke: Stroke| Some(surface(fill, stroke, corner));
         toggle.unchecked.normal.background = make(p.elem_hover, Stroke::solid(edge, 1.0));
         toggle.unchecked.hovered.background = make(p.elem_active, Stroke::solid(edge, 1.0));
         toggle.unchecked.pressed.background =
@@ -670,19 +652,9 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
 
     // Context menu — panel + item rows + shortcut + separator.
     // (`ContextMenuTheme::default` recipe.)
-    t.context_menu.panel = Background {
-        fill: p.elem.into(),
-        stroke: Stroke::solid(panel_edge, 1.0),
-        corners: Corners::all(6.0),
-        shadow: Shadow::NONE,
-    };
+    t.context_menu.panel = surface(p.elem, Stroke::solid(panel_edge, 1.0), 6.0);
     t.context_menu.item.normal.background = None;
-    t.context_menu.item.hovered.background = Some(Background {
-        fill: p.elem_hover.into(),
-        stroke: Stroke::ZERO,
-        corners: Corners::all(4.0),
-        shadow: Shadow::NONE,
-    });
+    t.context_menu.item.hovered.background = Some(flat_round(p.elem_hover));
     t.context_menu.item.disabled.background = None;
     t.context_menu.item.disabled.text = disabled_text;
     t.context_menu.item.shortcut = p.text_muted;
@@ -705,31 +677,13 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
     t.tooltip.text.color = p.text;
 }
 
-/// Declares [`PaletteColors`] — the chrome-colour roster a [`Theme`]
-/// carries — from one `field => CONST` list, expanding it into the struct
-/// (each field keeping its own doc) plus the two built-in instances
-/// (`DARK` / `LIGHT`, pulling `dark::CONST` / `light::CONST`). One roster,
-/// so a colour can't sit in the struct while a preset forgets it (or
-/// vice-versa) — the presets won't compile until every field is filled.
-macro_rules! palette_colors {
-    ($($(#[$meta:meta])* $field:ident => $konst:ident),+ $(,)?) => {
-        /// Every darkroom chrome colour — the palette half of a [`Theme`]
-        /// (the other half is layout dimensions). Serialized as the theme's
-        /// `[colors]` table. Deliberately not `Copy` (25 colours): moved,
-        /// not silently bit-copied.
-        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-        pub struct PaletteColors {
-            $($(#[$meta])* pub $field: Color,)+
-        }
-
-        impl PaletteColors {
-            const DARK: Self = Self { $($field: dark::$konst),+ };
-            const LIGHT: Self = Self { $($field: light::$konst),+ };
-        }
-    };
-}
-
-palette_colors! {
+palette_struct! {
+    /// Every darkroom chrome colour — the palette half of a [`Theme`]
+    /// (the other half is layout dimensions). Serialized as the theme's
+    /// `[colors]` table. Deliberately not `Copy` (25 colours): moved,
+    /// not silently bit-copied.
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub struct PaletteColors;
     canvas_bg => CANVAS_BG,
     /// The selection accent: the rubber-band rectangle (translucent fill +
     /// near-opaque 1px border, both derived from this) *and* the selected-
