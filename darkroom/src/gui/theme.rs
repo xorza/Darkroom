@@ -523,14 +523,15 @@ impl AperturePalette {
 /// recolour every widget using `p`, then apply darkroom-only tweaks
 /// (smaller menu/context-menu font; menu-bar triggers muted + transparent
 /// at rest so they read as menus, not buttons).
-fn aperture_theme_for(p: &AperturePalette) -> aperture::Theme {
+fn aperture_theme_for(p: &AperturePalette, chrome_fill: Color) -> aperture::Theme {
     let mut theme = aperture::Theme::default();
     recolour_aperture(&mut theme, p);
 
-    // Dock splitter: no resting seam, just a wider gap between panes. The
-    // rule paints nothing at rest (hover/drag fill still marks the grab
-    // target); the reserved gap does the visual separation.
-    theme.splitter.rule = Color::TRANSPARENT;
+    // Dock splitter: the resting seam paints the chrome band that frames
+    // the panes, so the gap reads as part of that surround rather than a
+    // dark line (hover/drag fill still marks the grab target); a wider
+    // seam does the visual separation.
+    theme.splitter.rule = chrome_fill;
     theme.splitter.rule_thickness = 4.0;
 
     // Menu-bar triggers read as menus, not buttons: transparent at rest
@@ -865,6 +866,7 @@ impl Theme {
         inline_rename: InlineRenameTheme,
     ) -> Self {
         let static_value_editor_revealed = sve.revealed();
+        let chrome_fill = colors.chrome_fill;
         Self {
             preset,
             canvas_dot_spacing: CANVAS_DOT_SPACING,
@@ -886,7 +888,7 @@ impl Theme {
             static_value_editor: sve,
             static_value_editor_revealed,
             inline_rename,
-            aperture_theme: aperture_theme_for(p),
+            aperture_theme: aperture_theme_for(p, chrome_fill),
         }
     }
 }

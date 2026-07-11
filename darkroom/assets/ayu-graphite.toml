@@ -900,8 +900,8 @@ rail_thickness = 4.0
 
 [aperture_theme.splitter]
 thickness = 6.0
-rule = "#aaaaa82e"
-rule_thickness = 1.0
+rule = "#252525"
+rule_thickness = 4.0
 hover = "#3e3e3e"
 drag = "#9adbfb99"
 
