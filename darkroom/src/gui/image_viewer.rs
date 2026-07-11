@@ -21,10 +21,12 @@
 //!
 //! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
 
+use std::fmt::Write as _;
+
 use aperture::{
     Align, Background, Color, Configure, Corners, HAlign, ImageFilter, ImageFit, ImageHandle,
-    Panel, PointerButton, Rect, Sense, Shape, Size, Sizing, Spacing, Stroke, Text, TextStyle, Ui,
-    VAlign, WidgetId,
+    InternedStr, Panel, PointerButton, Rect, Sense, Shape, Size, Sizing, Spacing, Stroke, Text,
+    TextStyle, Ui, VAlign, WidgetId,
 };
 use glam::{UVec2, Vec2};
 use imaginarium::{ColorFormat, Preview, ProcessingContext};
@@ -74,12 +76,9 @@ pub(crate) struct ImageViewer {
     /// the same `Arc` (node reused its cache across the run) can skip the
     /// re-render.
     shown: Option<DynamicValue>,
-    image: Option<ImageHandle>,
-    /// Source dimensions before the texture-cap downscale.
-    native_size: UVec2,
-    /// Source pixel format before the RGBA8 view conversion, for the
-    /// header readout; `None` while nothing is shown.
-    native_format: Option<ColorFormat>,
+    /// The uploaded texture plus the source facts the header reports —
+    /// present exactly while the pane shows an image.
+    image: Option<ShownImage>,
     /// Why the pane is empty, when it is.
     message: Option<String>,
     /// Run epoch of the current content (`shown`/message), `None` while
@@ -117,6 +116,17 @@ struct RenderedImage {
     native_format: ColorFormat,
 }
 
+/// [`RenderedImage`] after upload: the texture handle plus the source
+/// facts the header readout reports.
+#[derive(Debug)]
+struct ShownImage {
+    handle: ImageHandle,
+    /// Source dimensions before the texture-cap downscale.
+    native_size: UVec2,
+    /// Source pixel format before the RGBA8 view conversion.
+    native_format: ColorFormat,
+}
+
 impl ImageViewer {
     /// An empty viewer for `port` (shows the hint until content arrives).
     pub(crate) fn new(port: PortRef) -> Self {
@@ -126,8 +136,6 @@ impl ImageViewer {
             pending: None,
             shown: None,
             image: None,
-            native_size: UVec2::ZERO,
-            native_format: None,
             message: None,
             content_epoch: None,
             view: None,
@@ -142,6 +150,13 @@ impl ImageViewer {
     fn reset_framing(&mut self) {
         self.view = None;
         self.pan_anchor = None;
+    }
+
+    /// The framing to draw with: the user's explicit viewport, else the
+    /// recomputed fit — the single source for the draw rect, the zoom
+    /// readout, and the gesture/button math.
+    fn effective_view(&self, img: Vec2, pane: Vec2) -> ViewerViewport {
+        self.view.unwrap_or_else(|| fit_viewport(img, pane))
     }
 
     /// Show `value` as this viewer's content, resetting the framing to
@@ -194,8 +209,6 @@ impl ImageViewer {
             None => {
                 self.pending = None;
                 self.image = None;
-                self.native_size = UVec2::ZERO;
-                self.native_format = None;
                 self.message = Some("port has no image value".to_owned());
             }
         }
@@ -222,18 +235,18 @@ impl ImageViewer {
                     let dims_changed = self
                         .image
                         .as_ref()
-                        .is_none_or(|old| old.size() != rendered.image_size());
+                        .is_none_or(|old| old.handle.size() != rendered.image_size());
                     if dims_changed {
                         self.reset_framing();
                     }
-                    self.native_size = rendered.native_size;
-                    self.native_format = Some(rendered.native_format);
-                    self.image = Some(ui.register_image(rendered.image));
+                    self.image = Some(ShownImage {
+                        native_size: rendered.native_size,
+                        native_format: rendered.native_format,
+                        handle: ui.register_image(rendered.image),
+                    });
                 }
                 Err(message) => {
                     self.image = None;
-                    self.native_size = UVec2::ZERO;
-                    self.native_format = None;
                     self.message = Some(message);
                 }
             }
@@ -263,22 +276,21 @@ impl ImageViewer {
                     self.draw_checker(ui, pane);
                 }
                 match (&self.image, pane) {
-                    (Some(handle), Some(pane)) => {
-                        let v = self
-                            .view
-                            .unwrap_or_else(|| fit_viewport(handle.size().as_vec2(), pane));
+                    (Some(shown), Some(pane)) => {
+                        let img = shown.handle.size().as_vec2();
+                        let v = self.effective_view(img, pane);
                         ui.add_shape(Shape::Image {
-                            handle: handle.clone(),
-                            local_rect: Some(draw_rect(handle.size().as_vec2(), v)),
+                            handle: shown.handle.clone(),
+                            local_rect: Some(draw_rect(img, v)),
                             fit: ImageFit::Fill,
                             filter: prefs.filter,
                             tint: Color::WHITE,
                         });
                     }
                     // Pane not measured yet (first frame): let aperture fit it.
-                    (Some(handle), None) => {
+                    (Some(shown), None) => {
                         ui.add_shape(Shape::Image {
-                            handle: handle.clone(),
+                            handle: shown.handle.clone(),
                             local_rect: None,
                             fit: ImageFit::Contain,
                             filter: prefs.filter,
@@ -292,17 +304,13 @@ impl ImageViewer {
                             .unwrap_or("the port's image appears here after the next graph run");
                         // On the frosted readout pill, so the hint stays
                         // legible over the checker/white backdrops too.
-                        Panel::hstack()
-                            .id_salt("viewer_hint")
-                            .size((Sizing::Hug, Sizing::Hug))
-                            .align(Align::CENTER)
-                            .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
-                            .background(pill_background(theme))
-                            .show(ui, |ui| {
-                                Text::new(hint.to_owned())
-                                    .style(muted_style(theme, ui))
-                                    .show(ui);
-                            });
+                        let text = ui.intern(hint);
+                        readout_pill(
+                            ui,
+                            theme,
+                            Panel::hstack().id_salt("viewer_hint").align(Align::CENTER),
+                            text,
+                        );
                     }
                 }
                 self.header(ui, theme, pane);
@@ -334,48 +342,38 @@ impl ImageViewer {
         });
     }
 
-    /// The top-left readout: source port, native dimensions, whether the
-    /// view is texture-capped, and the current zoom.
+    /// The top-left readout: source port, native dimensions and pixel
+    /// format, whether the view is texture-capped, and the current zoom.
+    /// (`title` is never empty — `port_label` supplies the fallback.)
     fn header(&self, ui: &mut Ui, theme: &Theme, pane: Option<Vec2>) {
-        let Some(handle) = &self.image else {
+        let Some(shown) = &self.image else {
             return;
         };
         let mut text = format!(
-            "{} · {} × {}",
-            if self.title.is_empty() {
-                "image"
-            } else {
-                &self.title
-            },
-            self.native_size.x,
-            self.native_size.y,
+            "{} · {} × {} · {}",
+            self.title, shown.native_size.x, shown.native_size.y, shown.native_format,
         );
-        if let Some(format) = self.native_format {
-            text.push_str(&format!(" · {format}"));
-        }
-        if handle.size() != self.native_size {
+        if shown.handle.size() != shown.native_size {
             text.push_str(" · downscaled view");
         }
+        let img = shown.handle.size().as_vec2();
         let zoom = match (self.view, pane) {
             (Some(v), _) => Some(v.zoom),
-            (None, Some(pane)) => Some(fit_viewport(handle.size().as_vec2(), pane).zoom),
+            (None, Some(pane)) => Some(self.effective_view(img, pane).zoom),
+            // Pane not measured yet (first frame): no fit zoom to report.
             (None, None) => None,
         };
         if let Some(zoom) = zoom {
-            text.push_str(&format!(" · {:.0}%", zoom * 100.0));
+            let _ = write!(text, " · {:.0}%", zoom * 100.0);
         }
-        // A frosted readout pill — the text sibling of the toolbar chrome,
-        // floating inset from the corner like the control pills opposite,
-        // so the readout stays legible over bright image regions.
-        Panel::hstack()
-            .id_salt("viewer_header")
-            .size((Sizing::Hug, Sizing::Hug))
-            .margin(Spacing::new(TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0, 0.0))
-            .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
-            .background(pill_background(theme))
-            .show(ui, |ui| {
-                Text::new(text).style(muted_style(theme, ui)).show(ui);
-            });
+        readout_pill(
+            ui,
+            theme,
+            Panel::hstack()
+                .id_salt("viewer_header")
+                .margin(Spacing::new(TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0, 0.0)),
+            text,
+        );
     }
 
     /// The floating control panel in the pane's top-right corner — the
@@ -411,23 +409,19 @@ impl ImageViewer {
                         self.reset_framing();
                     }
                     if Chip::new(control_wid(port, "100"), "Zoom to 100%").show(ui, theme, draw_100)
-                        && let (Some(handle), Some(pane)) = (&self.image, pane)
+                        && let (Some(shown), Some(pane)) = (&self.image, pane)
                     {
-                        let img = handle.size().as_vec2();
-                        let v = self.view.unwrap_or_else(|| fit_viewport(img, pane));
+                        let img = shown.handle.size().as_vec2();
+                        let v = self.effective_view(img, pane);
                         self.view = Some(zoom_about_pane_center(v, 1.0, pane));
                     }
                 });
                 let appearance = Panel::vstack().id(control_wid(port, "pill_appearance"));
                 pill(ui, theme, appearance, |ui| {
-                    for (mode, tip) in [
-                        (ViewerBackground::Theme, "Theme background"),
-                        (ViewerBackground::Black, "Black background"),
-                        (ViewerBackground::White, "White background"),
-                        (ViewerBackground::Checker, "Checkerboard background"),
-                    ] {
+                    for (mode, key, tip) in BACKDROPS {
                         let selected = prefs.background == mode;
-                        if background_swatch(ui, theme, port, mode, selected, tip) && !selected {
+                        if background_swatch(ui, theme, port, mode, selected, key, tip) && !selected
+                        {
                             prefs.background = mode;
                             changed = true;
                         }
@@ -446,17 +440,16 @@ impl ImageViewer {
     /// double-click resets to fit. The fit viewport materializes into an
     /// explicit one on the first adjusting gesture.
     fn apply_gestures(&mut self, ui: &Ui) {
-        let Some(handle) = &self.image else {
+        let Some(shown) = &self.image else {
             return;
         };
+        // Registered images have non-zero dims by construction, so the
+        // texel size is always a valid divisor.
+        let img = shown.handle.size().as_vec2();
         let resp = ui.response_for(pane_wid(self.port));
         let Some(pane) = pane_size(ui, self.port) else {
             return;
         };
-        let img = handle.size().as_vec2();
-        if img.x <= 0.0 || img.y <= 0.0 {
-            return;
-        }
         if resp.double_clicked() {
             self.reset_framing();
             return;
@@ -469,7 +462,7 @@ impl ImageViewer {
         if self.view.is_none() && !adjusting {
             return;
         }
-        let mut v = self.view.unwrap_or_else(|| fit_viewport(img, pane));
+        let mut v = self.effective_view(img, pane);
 
         if resp.drag_started_by(PointerButton::Left) || resp.drag_started_by(PointerButton::Middle)
         {
@@ -556,6 +549,19 @@ fn control_wid(port: PortRef, key: &'static str) -> WidgetId {
     WidgetId::from_hash(("image_viewer.controls", port, key))
 }
 
+/// The backdrop radio roster — mode, widget-id key, tooltip — the one
+/// table behind the controls loop and the swatch ids.
+const BACKDROPS: [(ViewerBackground, &'static str, &'static str); 4] = [
+    (ViewerBackground::Theme, "bg_theme", "Theme background"),
+    (ViewerBackground::Black, "bg_black", "Black background"),
+    (ViewerBackground::White, "bg_white", "White background"),
+    (
+        ViewerBackground::Checker,
+        "bg_checker",
+        "Checkerboard background",
+    ),
+];
+
 /// One backdrop-mode chip: its glyph is a swatch of the mode itself,
 /// ringed with the selection accent when `selected`. Returns whether it
 /// was clicked.
@@ -565,17 +571,28 @@ fn background_swatch(
     port: PortRef,
     mode: ViewerBackground,
     selected: bool,
+    key: &'static str,
     tip: &'static str,
 ) -> bool {
-    let key = match mode {
-        ViewerBackground::Theme => "bg_theme",
-        ViewerBackground::Black => "bg_black",
-        ViewerBackground::White => "bg_white",
-        ViewerBackground::Checker => "bg_checker",
-    };
     Chip::new(control_wid(port, key), tip).show(ui, theme, |ui, s, _| {
         draw_swatch(ui, s, theme, mode, selected)
     })
+}
+
+/// A frosted readout chip — the text sibling of the toolbar pills —
+/// dressing `panel` (caller-configured id + placement) in the shared
+/// chrome around one line of muted text. Used by the header readout and
+/// the empty-pane hint.
+fn readout_pill(ui: &mut Ui, theme: &Theme, panel: Panel, text: impl Into<InternedStr>) {
+    let text = text.into();
+    panel
+        .size((Sizing::Hug, Sizing::Hug))
+        .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
+        .background(pill_background(theme))
+        .show(ui, |ui| {
+            let style = muted_style(theme, ui);
+            Text::new(text).style(style).show(ui);
+        });
 }
 
 /// The nearest/bilinear sampling toggle: accent-filled while nearest is
