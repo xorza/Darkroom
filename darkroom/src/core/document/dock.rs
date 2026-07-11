@@ -137,7 +137,7 @@ impl SplitSide {
     }
 }
 
-/// Where a moved tab lands — the payload of `DockIntent::MoveTab`.
+/// Where a moved tab lands — the payload of [`DockOp::MoveTab`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DockDrop {
     /// Join `group`'s strip at `index` (clamped to its length).
@@ -145,6 +145,26 @@ pub enum DockDrop {
     /// Split `group`'s pane; the tab becomes a fresh single-tab group on
     /// the given side.
     Split { group: TabGroupId, side: SplitSide },
+}
+
+/// One dock-layout mutation, executed by [`DockLayout::apply`]. The
+/// single op vocabulary the whole pipeline speaks: the dock UI
+/// constructs one, `UiAction::Dock` transports it, `Intent::Dock`
+/// records it as a before/after snapshot, and `apply` runs it. Ops fed
+/// stale addresses (a group or split that no longer exists) no-op, and
+/// the snapshot diff drops them.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DockOp {
+    /// Make `group`'s tab at `index` visible and focus the group.
+    ActivateTab { group: TabGroupId, index: usize },
+    /// Close `group`'s tab at `index`. The `Main` tab never closes —
+    /// the op refuses it.
+    CloseTab { group: TabGroupId, index: usize },
+    /// Move `tab` to `to` — into another strip or splitting a pane.
+    MoveTab { tab: TabRef, to: DockDrop },
+    /// Set the ratio of the split at `split` (its packed root path).
+    /// Emitted per frame by a divider drag; coalesces per split.
+    SetRatio { split: DockPath, ratio: f32 },
 }
 
 /// One pane's tab strip: the open tabs plus which one is visible.
@@ -275,6 +295,17 @@ impl DockLayout {
                 .position(|t| *t == tab)
                 .map(|index| TabAddress { group: g.id, index })
         })
+    }
+
+    /// Execute one [`DockOp`] — the dispatch behind every recorded
+    /// layout mutation.
+    pub fn apply(&mut self, op: DockOp) {
+        match op {
+            DockOp::ActivateTab { group, index } => self.activate(group, index),
+            DockOp::CloseTab { group, index } => self.close_tab(group, index),
+            DockOp::MoveTab { tab, to } => self.move_tab(tab, to),
+            DockOp::SetRatio { split, ratio } => self.set_ratio(split, ratio),
+        }
     }
 
     /// Focus `group` and make its `index` tab visible. Out-of-range

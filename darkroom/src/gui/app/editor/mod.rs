@@ -17,11 +17,11 @@ use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphDef;
 use scenarium::library::Library;
 
-use crate::core::document::dock::TabAddress;
+use crate::core::document::dock::{DockOp, TabAddress};
 use crate::core::document::{Document, GraphRef, PortKind, PortRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::{
-    DockIntent, Intent, NodeProperty, build_duplicate_intent_for, commit_intent_cascading,
+    Intent, NodeProperty, build_duplicate_intent_for, commit_intent_cascading,
 };
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
@@ -473,18 +473,7 @@ impl Editor {
         for action in std::mem::take(&mut self.actions) {
             match action {
                 UiAction::OpenGraph(target) => self.open_graph(target),
-                UiAction::ActivateTab { group, index } => {
-                    self.intents
-                        .push(Intent::Dock(DockIntent::ActivateTab { group, index }));
-                }
-                UiAction::CloseTab { group, index } => {
-                    self.intents
-                        .push(Intent::Dock(DockIntent::CloseTab { group, index }));
-                }
-                UiAction::MoveTab { tab, to } => {
-                    self.intents
-                        .push(Intent::Dock(DockIntent::MoveTab { tab, to }));
-                }
+                UiAction::Dock(op) => self.intents.push(Intent::Dock(op)),
                 UiAction::NewSubgraph => {
                     // Creating the def + instance isn't undoable (no undo
                     // history references the fresh def, so the stack stays
@@ -600,7 +589,7 @@ impl Editor {
 
 /// The recorded focus/activation half of opening a tab at `addr`.
 fn activate_intent(addr: TabAddress) -> Intent {
-    Intent::Dock(DockIntent::ActivateTab {
+    Intent::Dock(DockOp::ActivateTab {
         group: addr.group,
         index: addr.index,
     })

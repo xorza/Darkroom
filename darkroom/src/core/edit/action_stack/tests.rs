@@ -1,6 +1,7 @@
 use super::*;
+use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, TabRef};
-use crate::core::edit::intent::{DockIntent, Intent, apply_step, build_step};
+use crate::core::edit::intent::{Intent, apply_step, build_step};
 use scenarium::graph::NodeSearch;
 use scenarium::graph::subgraph::SubgraphId;
 use scenarium::testing::test_graph;
@@ -32,7 +33,7 @@ fn primary_active(doc: &Document) -> usize {
 /// Commit a dock op through the real intent path and push it. Mirrors
 /// the drain's no-op filter: a refused/degenerate op builds a
 /// `from == to` step, which is dropped — `false` back to the caller.
-fn dock(stack: &mut ActionStack, doc: &mut Document, op: DockIntent) -> bool {
+fn dock(stack: &mut ActionStack, doc: &mut Document, op: DockOp) -> bool {
     let step = build_step(Intent::Dock(op), doc, GraphRef::Main).unwrap();
     if step.is_noop() {
         return false;
@@ -44,12 +45,12 @@ fn dock(stack: &mut ActionStack, doc: &mut Document, op: DockIntent) -> bool {
 
 fn switch_to(stack: &mut ActionStack, doc: &mut Document, to: usize) {
     let group = doc.layout.primary().id;
-    dock(stack, doc, DockIntent::ActivateTab { group, index: to });
+    dock(stack, doc, DockOp::ActivateTab { group, index: to });
 }
 
 fn close_at(stack: &mut ActionStack, doc: &mut Document, index: usize) -> bool {
     let group = doc.layout.primary().id;
-    dock(stack, doc, DockIntent::CloseTab { group, index })
+    dock(stack, doc, DockOp::CloseTab { group, index })
 }
 
 #[test]

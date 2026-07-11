@@ -17,8 +17,8 @@ pub(crate) mod scene;
 pub(crate) mod status_bar;
 pub(crate) mod theme;
 
-use crate::core::document::dock::{DockDrop, TabGroupId};
-use crate::core::document::{GraphRef, PortRef, TabRef};
+use crate::core::document::dock::DockOp;
+use crate::core::document::{GraphRef, PortRef};
 use crate::gui::app::App;
 use aperture::WindowToken;
 
@@ -34,29 +34,25 @@ pub(crate) const MAIN_WINDOW: WindowToken = WindowToken(0);
 pub(crate) type HostHandle = aperture::HostHandle<App>;
 
 /// A navigation request surfaced from last frame's responses (tab/chip
-/// clicks) and applied by `App` in the navigation phase. Decoupled from
-/// `Intent` so the UI layer doesn't need to know which requests are
-/// undoable: `App` translates `ActivateTab`/`CloseTab` into the undoable
-/// `Intent::Dock` ops. `OpenGraph` adds the tab to a strip directly
+/// clicks, a released tab drag) and applied by `App` in the navigation
+/// phase. Decoupled from `Intent` so the UI layer doesn't need to know
+/// which requests are undoable: the editor wraps `Dock` ops into the
+/// undoable `Intent::Dock`. `OpenGraph` adds the tab to a strip directly
 /// (that part isn't undoable) but focuses it through the same recorded
 /// activation, so undo faithfully reverses focus.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum UiAction {
     /// Open `target` in a tab (or focus its existing tab).
     OpenGraph(GraphRef),
-    /// Make this group's tab at `index` active (and focus the group).
-    ActivateTab { group: TabGroupId, index: usize },
-    /// Close this group's tab at `index` (the `Main` tab never closes).
-    CloseTab { group: TabGroupId, index: usize },
+    /// Record a dock-layout mutation — a tab activation or close from a
+    /// strip, or a finished drag's move/split.
+    Dock(DockOp),
     /// Create a fresh empty subgraph and open it in a new tab (the "+"
     /// chip at the end of the strip).
     NewSubgraph,
     /// Show this port's cached runtime image at full resolution in the
     /// image-viewer tab (an inspector preview thumbnail was clicked).
     OpenImageViewer(PortRef),
-    /// Commit a finished tab drag: move `tab` to the drop the pointer
-    /// released over.
-    MoveTab { tab: TabRef, to: DockDrop },
 }
 
 /// One event (emitter) port's identity. Events are indexed independently

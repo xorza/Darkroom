@@ -13,7 +13,7 @@
 > 5-zone classification (strip insert with caret, center join, edge
 > splits — suppressed at the nesting cap) → accent highlight + ghost
 > chip on the tooltip layer, grabbing cursor, Esc cancels, release
-> commits through `DockIntent::MoveTab`. Strip reorder rides the same
+> commits through `DockOp::MoveTab`. Strip reorder rides the same
 > insert zones. Remaining: highlight fade polish, phase 4
 > (multi-canvas).
 
@@ -181,8 +181,8 @@ reversible step. `is_noop` = `from == to`; apply/revert assign the snapshot;
 `requires_relayout` = true. Intents stay semantic:
 
 ```rust
-Intent::Dock(DockIntent)
-enum DockIntent {
+Intent::Dock(DockOp)
+enum DockOp {
     ActivateTab { group: TabGroupId, index: usize },  // also focuses the group
     CloseTab    { group: TabGroupId, index: usize },  // Main tab: dropped in build_step, as today
     MoveTab     { tab: TabRef, to: DockDrop },
@@ -211,7 +211,7 @@ the panes), then a recursive walk of `layout.root`, then the status bar.
 - `Split` → `Panel::hstack`/`vstack` with children sized
   `Fill(ratio)` / `Fill(1 − ratio)` and a divider between them (aperture
   `Splitter` once it exists; an inline 5 px `Sense::DRAG` frame until then).
-  Divider drags emit `DockIntent::SetRatio` with delta-derived ratios.
+  Divider drags emit `DockOp::SetRatio` with delta-derived ratios.
 - `Group` → `Panel::vstack` with id `pane_wid(group.id)`: the group's tab
   strip on top, the active tab's content filling the rest.
 

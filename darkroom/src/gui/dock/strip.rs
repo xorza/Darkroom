@@ -1,10 +1,9 @@
 //! A pane's tab strip. Renders one chip per open tab in a [`TabGroup`]
 //! and highlights the active one (accent cap when the group is focused).
-//! Draw-only: clicks are read back in `emit_tab_actions` during prepass
-//! (from last frame's chip responses) so a tab switch applies *before*
-//! the record — letting the target view record a pass earlier and its
-//! connections draw with no first-frame gap. The right-click split menu
-//! is the one record-time emitter here (its picks are this-frame values,
+//! Draw-only: clicks and drags are read back by
+//! [`DockUi::scan`](super::DockUi::scan) during prepass through the
+//! deterministic widget ids exported here. The right-click split menu
+//! is the one record-time emitter (its picks are this-frame values,
 //! pushed as `Intent`s directly). Pure view state; never touches the
 //! document.
 
@@ -14,10 +13,9 @@ use aperture::{
 };
 use scenarium::graph::subgraph::SubgraphId;
 
-use crate::core::document::dock::{DockDrop, DockLayout, SplitSide, TabGroup, TabGroupId};
+use crate::core::document::dock::{DockDrop, DockOp, SplitSide, TabGroup, TabGroupId};
 use crate::core::document::{GraphRef, TabRef};
-use crate::core::edit::intent::{DockIntent, Intent};
-use crate::gui::UiAction;
+use crate::core::edit::intent::Intent;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::inline_rename::InlineRename;
 
@@ -34,7 +32,7 @@ pub(crate) struct TabLabel {
 }
 
 /// Every tab except the pinned `Main` graph carries a close button.
-fn closable(tab: TabRef) -> bool {
+pub(crate) fn closable(tab: TabRef) -> bool {
     tab != TabRef::Graph(GraphRef::Main)
 }
 
@@ -45,7 +43,7 @@ pub(crate) fn movable(tab: TabRef) -> bool {
 }
 
 /// The subgraph behind an inline-renamable tab (a `Local` graph tab).
-fn renamable_subgraph(tab: TabRef) -> Option<SubgraphId> {
+pub(crate) fn renamable_subgraph(tab: TabRef) -> Option<SubgraphId> {
     match tab {
         TabRef::Graph(GraphRef::Local(id)) => Some(id),
         _ => None,
@@ -66,7 +64,7 @@ pub(crate) fn strip_wid(group: TabGroupId) -> WidgetId {
 }
 
 /// Stable id for the close button of `group`'s tab at `index`.
-fn tab_close_wid(group: TabGroupId, index: usize) -> WidgetId {
+pub(crate) fn tab_close_wid(group: TabGroupId, index: usize) -> WidgetId {
     WidgetId::from_hash(("dock.tab_close", group, index))
 }
 
@@ -77,51 +75,16 @@ fn tab_menu_wid(group: TabGroupId, index: usize) -> WidgetId {
 
 /// Stable id for the rename editor on a subgraph tab. Keyed on the
 /// subgraph id (not group/index) so the editing state survives the tab
-/// moving or reordering.
-fn tab_rename_wid(sub_id: SubgraphId) -> WidgetId {
+/// moving or reordering. A click landing on the label is captured
+/// there, so the scan polls this id alongside the outer chip's.
+pub(crate) fn tab_rename_wid(sub_id: SubgraphId) -> WidgetId {
     WidgetId::from_hash(("dock.tab_rename", sub_id))
 }
 
 /// Stable id for the trailing "+" new-subgraph chip (currently hidden —
 /// see [`new_tab_chip`]).
-fn tab_new_wid() -> WidgetId {
+pub(crate) fn tab_new_wid() -> WidgetId {
     WidgetId::from_hash("dock.tab_new")
-}
-
-/// Prepass scan over every group's strip: surface tab activate/close
-/// requests from last frame's chip responses. Reads three click sources
-/// per subgraph tab (close button > rename-label > outer chip), since a
-/// click landing on the inner rename label is captured there and the
-/// outer chip's response stays `clicked: false`. Close wins over
-/// activate.
-///
-/// Reading these in the *prepass* (not as record-pass pushes) is
-/// load-bearing: it lets the navigation phase settle the new target
-/// *before* this frame's record, so Pass A records the new view and its
-/// cascades feed Pass B's `CanvasGeometry` cache.
-pub(crate) fn emit_tab_actions(ui: &Ui, layout: &DockLayout, actions: &mut Vec<UiAction>) {
-    for group in layout.groups() {
-        for (index, &tab) in group.tabs.iter().enumerate() {
-            if closable(tab) && ui.response_for(tab_close_wid(group.id, index)).clicked {
-                actions.push(UiAction::CloseTab {
-                    group: group.id,
-                    index,
-                });
-                continue;
-            }
-            let label_clicked = renamable_subgraph(tab)
-                .is_some_and(|id| ui.response_for(tab_rename_wid(id)).clicked);
-            if label_clicked || ui.response_for(tab_chip_wid(group.id, index)).clicked {
-                actions.push(UiAction::ActivateTab {
-                    group: group.id,
-                    index,
-                });
-            }
-        }
-    }
-    if ui.response_for(tab_new_wid()).clicked {
-        actions.push(UiAction::NewSubgraph);
-    }
 }
 
 /// Side of the square "+" chip. Matches the tab chips' content height —
@@ -400,7 +363,7 @@ fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef, index: usize) {
                 side = Some(SplitSide::Bottom);
             }
             if let Some(side) = side {
-                s.out.push(Intent::Dock(DockIntent::MoveTab {
+                s.out.push(Intent::Dock(DockOp::MoveTab {
                     tab,
                     to: DockDrop::Split {
                         group: s.group,

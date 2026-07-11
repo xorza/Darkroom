@@ -38,11 +38,9 @@ use scenarium::graph::{
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
 
-use crate::core::document::dock::{DockDrop, DockLayout, DockPath, TabGroupId};
+use crate::core::document::dock::{DockLayout, DockOp, DockPath};
 use crate::core::document::view_node::ViewNode;
-use crate::core::document::{
-    BoundarySide, Document, EditScope, EditScopeRef, GraphRef, TabRef, Viewport,
-};
+use crate::core::document::{BoundarySide, Document, EditScope, EditScopeRef, GraphRef, Viewport};
 
 /// One scalar node property an editor can toggle — the payload of
 /// [`Intent::SetNodeProperty`]. Both variants are geometry-neutral (changing
@@ -162,7 +160,7 @@ pub enum Intent {
     /// panes, resize a split). Document-global; `build_step` snapshots
     /// the whole layout before/after (it's tiny), so every dock op is
     /// one uniform, trivially reversible step.
-    Dock(DockIntent),
+    Dock(DockOp),
     /// Rename a subgraph interface port (`def.inputs[idx]` for
     /// `side = Input`, `def.outputs[idx]` for `Output`). Scoped to the
     /// active `Local` target — `build_step` reads the `SubgraphId` from
@@ -193,25 +191,6 @@ pub enum Intent {
         subscriber: NodeId,
         subscribe: bool,
     },
-}
-
-/// One dock-layout mutation — the payload of [`Intent::Dock`]. All
-/// variants lower to the same snapshot [`DocStep::Dock`]; they differ
-/// only in the op applied and the gesture key (a tab-switch burst and a
-/// divider drag each coalesce, a close or move never does).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DockIntent {
-    /// Make `group`'s tab at `index` visible and focus the group.
-    ActivateTab { group: TabGroupId, index: usize },
-    /// Close `group`'s tab at `index`. The `Main` tab never closes —
-    /// the layout op refuses it, yielding a no-op step that's dropped.
-    CloseTab { group: TabGroupId, index: usize },
-    /// Move `tab` to `to` — into another strip or splitting a pane.
-    MoveTab { tab: TabRef, to: DockDrop },
-    /// Set the ratio of the split at `split` (its packed root path,
-    /// stable between structural changes — a stale one no-ops in the
-    /// layout). Emitted per frame by a divider drag; coalesces per split.
-    SetRatio { split: DockPath, ratio: f32 },
 }
 
 /// Self-contained undo-stack entry. Each leaf variant carries both
@@ -446,20 +425,15 @@ impl DocStep {
 /// vanished nodes individually rather than dropping the whole batch.)
 pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<UndoStep> {
     // Document-global intents don't resolve a graph scope.
-    if let Intent::Dock(dock) = intent {
-        let key = match &dock {
-            DockIntent::ActivateTab { .. } => Some(GestureKey::TabSwitch),
-            DockIntent::SetRatio { split, .. } => Some(GestureKey::DockResize(*split)),
-            DockIntent::CloseTab { .. } | DockIntent::MoveTab { .. } => None,
+    if let Intent::Dock(op) = intent {
+        let key = match op {
+            DockOp::ActivateTab { .. } => Some(GestureKey::TabSwitch),
+            DockOp::SetRatio { split, .. } => Some(GestureKey::DockResize(split)),
+            DockOp::CloseTab { .. } | DockOp::MoveTab { .. } => None,
         };
         let from = doc.layout.clone();
         let mut to = from.clone();
-        match dock {
-            DockIntent::ActivateTab { group, index } => to.activate(group, index),
-            DockIntent::CloseTab { group, index } => to.close_tab(group, index),
-            DockIntent::MoveTab { tab, to: drop } => to.move_tab(tab, drop),
-            DockIntent::SetRatio { split, ratio } => to.set_ratio(split, ratio),
-        }
+        to.apply(op);
         // Refused/degenerate ops leave `to == from`; the is_noop filter
         // drops the step.
         return Some(UndoStep::Doc(DocStep::Dock { from, to, key }));
@@ -1380,6 +1354,7 @@ mod tests {
 
     #[test]
     fn dirties_document_splits_edits_from_navigation() {
+        use crate::core::document::TabRef;
         use scenarium::graph::subgraph::SubgraphId;
 
         // Navigation-only steps: camera, selection, tab focus — the user

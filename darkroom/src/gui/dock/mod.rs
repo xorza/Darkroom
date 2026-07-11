@@ -9,7 +9,7 @@
 //!   frame's responses, emitting `UiAction`s.
 //! - [`DockUi::render`] in the record — walks the split tree (splits as
 //!   aperture `Splitter`s whose ratio drags surface as
-//!   `DockIntent::SetRatio`, groups as strip-over-content panes) and,
+//!   `DockOp::SetRatio`, groups as strip-over-content panes) and,
 //!   mid-drag, paints the drop-zone highlight + ghost chip and holds
 //!   the grabbing cursor. The `content` closure renders the active
 //!   tab's view, so this module never learns what a canvas or a viewer
@@ -28,10 +28,10 @@ use aperture::{
 use glam::Vec2;
 
 use crate::core::document::dock::{
-    DockLayout, DockNode, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
+    DockLayout, DockNode, DockOp, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
 };
 use crate::core::document::{Document, GraphRef, TabRef};
-use crate::core::edit::intent::{DockIntent, Intent};
+use crate::core::edit::intent::Intent;
 use crate::gui::UiAction;
 use crate::gui::dock::drag::{DropTarget, TabDrag, classify_drop};
 use crate::gui::dock::strip::TabLabel;
@@ -57,40 +57,70 @@ fn splitter_wid(path: DockPath) -> WidgetId {
 #[derive(Debug, Default)]
 pub(crate) struct DockUi {
     /// Armed by [`Self::scan`] off a movable chip's latched drag,
-    /// resolved there into a [`UiAction::MoveTab`] on release (or
+    /// resolved there into a [`DockOp::MoveTab`] on release (or
     /// cancelled by Esc), painted by [`Self::render`].
     tab_drag: Option<TabDrag>,
 }
 
 impl DockUi {
-    /// Navigation-phase scan over last frame's responses: tab
-    /// activate/close clicks from every strip, then the drag
-    /// lifecycle — arm on a movable chip's latched drag, cancel on Esc
-    /// (or the tab vanishing under the drag), resolve the release into
-    /// a [`UiAction::MoveTab`] against the pane under the pointer.
-    /// Running here means a committed drop settles before this frame's
-    /// record — the rearranged panes draw the same frame the mouse
-    /// releases.
+    /// Navigation-phase scan over last frame's chip responses, one pass
+    /// over every strip: close clicks (which win over activation),
+    /// activation clicks (a subgraph tab's inner rename label captures
+    /// the click, so its response is polled too), drag arming on a
+    /// movable chip's latched drag — then the in-flight drag's
+    /// lifecycle: cancel on Esc (or the tab vanishing under it), and on
+    /// release resolve the pane under the pointer into a
+    /// [`DockOp::MoveTab`].
+    ///
+    /// Scanning in the *prepass* (not as record-time pushes) is
+    /// load-bearing: the navigation phase settles the new arrangement
+    /// before this frame's record, so a switch — or a committed drop —
+    /// draws the same frame it lands.
     pub(crate) fn scan(&mut self, ui: &mut Ui, doc: &Document, actions: &mut Vec<UiAction>) {
-        strip::emit_tab_actions(ui, &doc.layout, actions);
-
-        let Some(dragged) = &self.tab_drag else {
-            for group in doc.layout.groups() {
-                for (index, &tab) in group.tabs.iter().enumerate() {
-                    if strip::movable(tab)
-                        && ui
-                            .response_for(strip::tab_chip_wid(group.id, index))
-                            .drag_started()
-                    {
-                        self.tab_drag = Some(TabDrag {
-                            tab,
-                            source: (group.id, index),
-                            text: tab_text(doc, tab),
-                        });
-                        return;
-                    }
+        for group in doc.layout.groups() {
+            for (index, &tab) in group.tabs.iter().enumerate() {
+                if strip::closable(tab)
+                    && ui
+                        .response_for(strip::tab_close_wid(group.id, index))
+                        .clicked
+                {
+                    actions.push(UiAction::Dock(DockOp::CloseTab {
+                        group: group.id,
+                        index,
+                    }));
+                    continue;
+                }
+                let label_clicked = strip::renamable_subgraph(tab)
+                    .is_some_and(|id| ui.response_for(strip::tab_rename_wid(id)).clicked);
+                if label_clicked
+                    || ui
+                        .response_for(strip::tab_chip_wid(group.id, index))
+                        .clicked
+                {
+                    actions.push(UiAction::Dock(DockOp::ActivateTab {
+                        group: group.id,
+                        index,
+                    }));
+                }
+                if self.tab_drag.is_none()
+                    && strip::movable(tab)
+                    && ui
+                        .response_for(strip::tab_chip_wid(group.id, index))
+                        .drag_started()
+                {
+                    self.tab_drag = Some(TabDrag {
+                        tab,
+                        source: (group.id, index),
+                        text: tab_text(doc, tab),
+                    });
                 }
             }
+        }
+        if ui.response_for(strip::tab_new_wid()).clicked {
+            actions.push(UiAction::NewSubgraph);
+        }
+
+        let Some(dragged) = &self.tab_drag else {
             return;
         };
         let (tab, (src_group, src_index)) = (dragged.tab, dragged.source);
@@ -103,10 +133,10 @@ impl DockUi {
             .drag_stopped()
         {
             if let Some(target) = drop_target(ui, doc) {
-                actions.push(UiAction::MoveTab {
+                actions.push(UiAction::Dock(DockOp::MoveTab {
                     tab,
                     to: target.drop,
-                });
+                }));
             }
             self.tab_drag = None;
         }
@@ -142,7 +172,7 @@ impl DockUi {
 }
 
 /// Recursive walk of the dock tree: a split renders as an aperture
-/// `Splitter` (ratio changes surface as `DockIntent::SetRatio`), a
+/// `Splitter` (ratio changes surface as `DockOp::SetRatio`), a
 /// group as its strip + the active tab's view.
 fn render_node<F: FnMut(&mut Ui, TabRef, &mut Vec<Intent>)>(
     ui: &mut Ui,
@@ -181,7 +211,7 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Vec<Intent>)>(
             // layout itself only changes through the recorded intent
             // (drained post-record, coalescing per divider).
             if live_ratio != ratio {
-                out.push(Intent::Dock(DockIntent::SetRatio {
+                out.push(Intent::Dock(DockOp::SetRatio {
                     split: path,
                     ratio: live_ratio,
                 }));

@@ -194,7 +194,7 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   (a `NodeProperty::Disabled`/`Cache` — one intent backs both scalar toggles),
   `SetSubscription` (`subscribe: bool` — one intent backs subscribe + unsubscribe),
   `DetachSubgraph`, `SetViewport`, `RenameBoundaryPort`, `RenameSubgraph`,
-  plus document-global `Dock(DockIntent)` (`ActivateTab` / `CloseTab` /
+  plus document-global `Dock(DockOp)` (`ActivateTab` / `CloseTab` /
   `MoveTab` / `SetRatio` — activations coalesce as a switch burst, one
   divider's drag coalesces per `DockPath`).
 - `DuplicateNodes` is assembled from the current selection by
@@ -309,7 +309,7 @@ pane-shaped lives in `gui/dock/` behind `DockUi`, integrated in exactly
 two calls: `scan` in the navigation phase (tab activate/close clicks +
 the drag-docking lifecycle, off last frame's responses) and `render` in
 the record (the recursive dock-tree walk — splits as aperture `Splitter`s
-whose ratio drags surface as `DockIntent::SetRatio`, groups as
+whose ratio drags surface as `DockOp::SetRatio`, groups as
 strip-over-content panes — plus the drag's drop-zone highlight, ghost
 chip, and grabbing cursor). `dock/strip.rs` is the chip row (close
 buttons, inline subgraph rename, the right-click split menu; the focused
