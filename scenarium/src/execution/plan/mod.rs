@@ -12,7 +12,6 @@
 use crate::execution::compile::CompiledGraph;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram, NodeIdx};
 use crate::execution::query::resolve_node_idx;
-use crate::execution::stats::FlattenMap;
 use crate::execution::{Error, NodeColumn, Result, RunSeeds, validate};
 use crate::node::special::SpecialNode;
 
@@ -155,7 +154,7 @@ impl Planner {
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
-        collect_roots(program, &compiled.flatten_map, seeds, plan)?;
+        collect_roots(compiled, seeds, plan)?;
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
@@ -260,20 +259,19 @@ impl Planner {
 /// itself a root (it computes nothing); instead it promotes the run to include *every* terminal
 /// node — the "when this event fires, re-run the whole graph" trigger.
 fn collect_roots(
-    program: &ExecutionProgram,
-    flatten: &FlattenMap,
+    compiled: &CompiledGraph,
     seeds: &RunSeeds,
     plan: &mut ExecutionPlan,
 ) -> Result<()> {
+    let program = &compiled.program;
     // `plan.reset` already cleared `roots`/`pinned`; this only pushes into them.
 
     // Node seeds (on-demand preview): roots like any other, plus pinned so their outputs
     // are computed and retained (see `ExecutionPlan::pinned`). Seeds are batched with the
-    // graph they target, so an id that doesn't resolve (deleted, disabled, or stale) is
+    // program they target, so an id that doesn't resolve (deleted, disabled, or stale) is
     // inconsistent caller state — fail the run rather than silently skip the seed.
     for &id in &seeds.nodes {
-        let idx = resolve_node_idx(program, flatten, &id)
-            .ok_or(Error::NodeSeedNotFound { node_id: id })?;
+        let idx = resolve_node_idx(compiled, &id).ok_or(Error::NodeSeedNotFound { node_id: id })?;
         plan.roots.push(idx);
         plan.pinned.push(idx);
     }

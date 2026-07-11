@@ -7,7 +7,6 @@
 
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::execution::flatten::{Flattener, Pools};
@@ -22,7 +21,7 @@ use crate::library::Library;
 /// surfaces, not a logic bug. The compile-phase counterpart of the run-phase
 /// [`Error`](crate::execution::Error) — the two can't be confused at the type
 /// level, and only `compile` produces it.
-#[derive(Debug, Error, Clone, Serialize, Deserialize)]
+#[derive(Debug, Error)]
 #[error("invalid graph: {message}")]
 pub struct CompileError {
     pub message: String,

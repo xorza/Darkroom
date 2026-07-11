@@ -4,29 +4,27 @@
 //! they never schedule or run.
 
 use crate::data::DynamicValue;
+use crate::execution::compile::CompiledGraph;
 use crate::execution::event::{EventRef, EventTrigger};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx};
-use crate::execution::stats::{ExecutionStats, FlattenMap};
+use crate::execution::program::{ExecutionBinding, NodeIdx};
+use crate::execution::stats::ExecutionStats;
 use crate::execution::{ArgumentValues, ExecutionEngine};
 use crate::graph::NodeId;
 
 /// The flat execution node backing authoring id `node_id`. A top-level node keeps its
 /// authoring id; a subgraph-interior node's flat id is hashed from the descent path, so
-/// the authoring id misses the key lookup — resolve it through the flatten map's leaves
-/// instead. A def instanced more than once has several flat nodes per interior id; the
-/// first (lowest index) is returned, an arbitrary-but-stable representative for
+/// the authoring id misses the key lookup — resolve it through the artifact's flatten
+/// map instead. A def instanced more than once has several flat nodes per interior id;
+/// the first (lowest index) is returned, an arbitrary-but-stable representative for
 /// inspection and node seeding.
-pub(crate) fn resolve_node_idx(
-    program: &ExecutionProgram,
-    flatten: &FlattenMap,
-    node_id: &NodeId,
-) -> Option<NodeIdx> {
+pub(crate) fn resolve_node_idx(compiled: &CompiledGraph, node_id: &NodeId) -> Option<NodeIdx> {
+    let program = &compiled.program;
     if let Some(idx) = program.e_nodes.index_of_key(node_id) {
         return Some(idx.into());
     }
     program
         .node_indices()
-        .find(|&idx| flatten.interior(program.e_nodes[idx].id) == Some(*node_id))
+        .find(|&idx| compiled.flatten_map.interior(program.e_nodes[idx].id) == Some(*node_id))
 }
 
 impl ExecutionEngine {
@@ -36,7 +34,7 @@ impl ExecutionEngine {
     /// disk-only node reads back empty.
     #[cfg(test)]
     pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-        let idx = resolve_node_idx(&self.compiled.program, &self.compiled.flatten_map, node_id)?;
+        let idx = resolve_node_idx(&self.compiled, node_id)?;
         Some(self.argument_values_at(idx))
     }
 
@@ -71,7 +69,7 @@ impl ExecutionEngine {
         &mut self,
         node_id: &NodeId,
     ) -> Option<ArgumentValues> {
-        let idx = resolve_node_idx(&self.compiled.program, &self.compiled.flatten_map, node_id)?;
+        let idx = resolve_node_idx(&self.compiled, node_id)?;
         self.cache
             .hydrate_for_inspection(&self.compiled.program, idx)
             .await;

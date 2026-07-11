@@ -214,13 +214,13 @@ pub(crate) struct RunSeeds {
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
     /// The installed compile artifact: the program plus its flatten map
-    /// (authoring↔execution id map, handed to each run's `ExecutionStats` by
-    /// refcount bump). Replaced wholesale by [`Self::install`].
+    /// (authoring↔execution id map, resolving node seeds at plan time).
+    /// Replaced wholesale by [`Self::install`].
     pub(crate) compiled: CompiledGraph,
     /// Per-node cross-run cache (output values, digests, node state) plus the [`DiskStore`]
     /// backing it and the caching policy over both — reuse, hydration, persistence, eviction.
-    /// The RAM slots are reconciled to the node set at each `update`; the disk store is set via
-    /// [`Self::set_disk_store`] and kept across updates.
+    /// The RAM slots are reconciled to the node set at each `install`; the disk store is set
+    /// via [`Self::set_disk_store`] and kept across installs.
     cache: RuntimeCache,
     executor: Executor,
     planner: Planner,
@@ -248,7 +248,7 @@ impl ExecutionEngine {
 
     /// Swap the [`DiskStore`] — the library snapshot (its type table supplies
     /// the custom-value codecs) plus the optional
-    /// content-addressed store root. At the next `update`, `persist` outputs hydrate
+    /// content-addressed store root. At the next `install`, `persist` outputs hydrate
     /// from their blobs on a hit (skipping recompute), and freshly-computed ones are
     /// stored after a run. The RAM cache is keyed by node id + digest, independent of the
     /// root, so swapping keeps any warm in-memory outputs.
