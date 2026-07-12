@@ -98,12 +98,6 @@ impl Inspectors {
         self.modes.get(&id).copied()
     }
 
-    /// Nodes with an open panel (either mode), for the frame loop to fetch
-    /// runtime values for.
-    pub(crate) fn open_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.modes.keys().copied()
-    }
-
     /// Drop transient (`Open`) panels, keeping pinned ones. Called when
     /// an outside action fires and on a tab switch.
     pub(crate) fn close_unpinned(&mut self) {
@@ -195,6 +189,9 @@ impl Inspectors {
             if node.boundary {
                 continue;
             }
+            // Drawing this panel IS its value request: ask for the node's
+            // runtime values so the input/output lines fill in.
+            ctx.run_state.watch(node.id);
             // The cached body width places the panel just past the node's
             // right edge — cached (not last frame's response) so the
             // anchor holds when the viewport cull skips the node while its

@@ -29,7 +29,6 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::image_viewer;
 use crate::gui::main_window::MainWindow;
-use crate::gui::node::preview::preview_watch_nodes;
 use crate::gui::run_state::RunState;
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
@@ -227,21 +226,12 @@ impl Editor {
         // frame's `scene` to resolve tab/chip clicks, so it must run before
         // this frame's rebuild. After it, the active tab is fixed.
         self.navigate(ui, library);
-        // Register this frame's value watchers: every surface showing
-        // runtime values re-declares its nodes into the run state's watch
-        // registry, which `App` drains into worker requests after the
-        // frame. Open inspector panels register here; image-viewer tabs
-        // in `sync_image_viewers` (their sync loop).
-        for node_id in self.main_window.graph_ui.open_inspector_nodes() {
-            self.run_state.watch(node_id);
-        }
-        // Preview nodes need their output value fetched even with no inspector
-        // open. Collected first so the `scene` borrow ends before the mutable
-        // `run_state` borrow.
-        let preview_watch: Vec<NodeId> = preview_watch_nodes(&self.scene).collect();
-        for node_id in preview_watch {
-            self.run_state.watch(node_id);
-        }
+        // Value requests are no longer collected here: every value-showing
+        // surface (inspector panels, image-viewer panes, Preview nodes)
+        // registers its own node into the run state's request registry as it
+        // records, and `App` drains the batch after the frame. This keeps the
+        // "shows a value ⇒ asks for it" pairing in one place per surface.
+        //
         // Tabs are settled: drop viewer state for closed tabs and fold the
         // latest run's fetched values into the open viewers (values landed
         // in `App`'s pre-frame drain, so a finished run shows this frame).
@@ -536,7 +526,10 @@ impl Editor {
             let TabRef::ImageViewer(port) = tab else {
                 continue;
             };
-            self.run_state.watch(port.node_id);
+            // The value request is registered when the viewer pane records
+            // itself (see `MainWindow::frame`); here we only fold in whatever
+            // the last epoch already fetched.
+            //
             // Nothing fetched for this node yet this epoch — keep showing
             // the previous run's content rather than blanking mid-run.
             if self.run_state.values(port.node_id).is_none() {
@@ -694,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn image_viewer_tabs_dedupe_per_port_and_feed_value_requests() {
+    fn image_viewer_tabs_dedupe_per_port_and_prune_on_close() {
         use glam::Vec2;
         use scenarium::graph::{Node, NodeKind};
         use scenarium::node::function::FuncId;
@@ -741,14 +734,15 @@ mod tests {
         assert!(editor.main_window.image_viewers.contains_key(&port(0)));
         assert!(editor.main_window.image_viewers.contains_key(&port(1)));
 
-        // Viewer tabs register themselves in the run state's watch
-        // registry even with every inspector panel closed — this is what
-        // refreshes them after a run. One request per node per epoch
-        // (both tabs share the node).
+        // A viewer's value request is now registered when its pane records
+        // itself (in `MainWindow::frame`), not from `sync_image_viewers` — so
+        // syncing alone queues nothing. The registry mechanism (per-epoch
+        // dedup) is covered by `run_state`'s own tests.
         editor.sync_image_viewers();
-        let requests = editor.run_state.take_requests();
-        assert_eq!(requests.len(), 1, "one request per node per epoch");
-        assert_eq!(requests[0].node_id, id);
+        assert!(
+            editor.run_state.take_requests().is_empty(),
+            "sync no longer feeds requests; registration moved to the record"
+        );
 
         // Closing a tab drops its viewer state on the next sync (the
         // remaining port's state survives).

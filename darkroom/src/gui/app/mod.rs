@@ -180,11 +180,11 @@ impl App {
         }
     }
 
-    /// Forward the frame's pending value requests to the worker: the
-    /// editor's frame registered every value-showing surface (inspector
-    /// panels, image-viewer tabs) into the run state's watch registry;
-    /// drain it here, after the record. The reply arrives on a later
-    /// frame's drain.
+    /// Forward the frame's pending value requests to the worker. Every
+    /// value-showing surface (inspector panels, image-viewer panes, Preview
+    /// nodes) registered its node into the run state's request registry as it
+    /// recorded; drain the batch here, after the record. The reply arrives on a
+    /// later frame's drain.
     fn request_watched_values(&mut self) {
         for req in self.editor.run_state.take_requests() {
             self.engine.request_argument_values(req);

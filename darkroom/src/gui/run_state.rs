@@ -23,6 +23,7 @@
 //!
 //! [`Editor`]: crate::gui::app::editor::Editor
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -116,13 +117,15 @@ pub(crate) struct RunState {
     /// per node per run — a reply, including a `None` one, doesn't reopen
     /// the node for re-request.
     requested: HashSet<NodeId>,
-    /// Per-frame watch registry: every surface showing runtime values
-    /// (open inspector panels, image-viewer tabs) re-registers its nodes
-    /// each frame via [`Self::watch`]; `App` drains it once per frame
-    /// through [`Self::take_requests`]. Re-registration beats a retained
-    /// subscription — nothing needs an unregister path when a panel
-    /// closes, a tab dies with its node, or undo reshuffles the strip.
-    watched: Vec<NodeId>,
+    /// Per-frame value-request registry: every surface showing runtime values
+    /// (inspector panels, image-viewer tabs, Preview nodes) calls
+    /// [`Self::watch`] **as it is recorded**, declaring its node's value need;
+    /// `App` drains the batch once through [`Self::take_requests`] at frame end.
+    /// `RefCell` so a widget can register through the shared `&RunState` the
+    /// record threads (no `&mut` reaches the record). Re-registration each frame
+    /// beats a retained subscription — nothing needs an unregister path when a
+    /// panel closes, a tab dies with its node, or a node scrolls off-screen.
+    watched: RefCell<Vec<NodeId>>,
     /// RAM held by the worker's runtime cache after the last finished run
     /// (system RAM vs GPU VRAM), mirrored from its `ExecutionStats`. Drives the
     /// status bar's memory readout.
@@ -274,7 +277,7 @@ impl RunState {
         self.running = false;
         self.nodes.clear();
         self.requested.clear();
-        self.watched.clear();
+        self.watched.get_mut().clear();
     }
 
     /// Open a new value-fetch epoch: a re-run invalidates last run's
@@ -311,20 +314,22 @@ impl RunState {
         self.nodes.entry(request.node_id).or_default().values = Some(build_view(ui, values));
     }
 
-    /// Register interest in `node_id`'s runtime values for this frame.
-    /// Called by every surface that shows them; duplicates are dropped at
-    /// [`Self::take_requests`] time (per-epoch dedup).
-    pub(crate) fn watch(&mut self, node_id: NodeId) {
-        self.watched.push(node_id);
+    /// Register interest in `node_id`'s runtime values for this frame. Called
+    /// by every value-showing widget as it records itself (through the shared
+    /// `&RunState`); duplicates — the same node watched by several surfaces, or
+    /// re-watched across frames — are dropped at [`Self::take_requests`] time
+    /// (per-epoch dedup).
+    pub(crate) fn watch(&self, node_id: NodeId) {
+        self.watched.borrow_mut().push(node_id);
     }
 
-    /// Drain the frame's watch registry into pending value requests: each
+    /// Drain the frame's request registry into pending value requests: each
     /// watched node not yet asked about this epoch, marked asked here and
     /// returned (tagged with the current epoch) for `App` to forward to
     /// the worker. Keeps all request bookkeeping on the projection.
     pub(crate) fn take_requests(&mut self) -> Vec<ValueRequest> {
         let run_id = self.run_id;
-        std::mem::take(&mut self.watched)
+        std::mem::take(self.watched.get_mut())
             .into_iter()
             .filter(|&node_id| self.requested.insert(node_id))
             .map(|node_id| ValueRequest { node_id, run_id })

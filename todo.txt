@@ -12,4 +12,4 @@ cache input values for image viewer
 
 tooltip near the edge of screen overflows
 
-special preview node
+special preview node square preview
