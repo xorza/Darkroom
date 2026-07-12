@@ -76,8 +76,7 @@ pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image
     let ys = tile_starts(h, config.stride);
     for &ty in &ys {
         for &tx in &xs {
-            let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
-            fill_tile_input(&planes, tx, ty, &mut input);
+            let input = fill_tile_input(&planes, tx, ty);
             let tensor =
                 Tensor::from_array(([1usize, WINDOW, WINDOW, 3], input)).map_err(model_err)?;
             let outputs = session.run(ort::inputs![tensor]).map_err(model_err)?;
@@ -110,9 +109,10 @@ fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
     v
 }
 
-/// Fill the NHWC `[1,512,512,3]` model input from the tile at `(tx, ty)`, clamped to `[0,1]`.
-/// Grayscale replicates its single channel to R=G=B.
-fn fill_tile_input(planes: &[Buffer2<f32>], tx: usize, ty: usize, input: &mut [f32]) {
+/// Build the NHWC `[1,512,512,3]` model input for the tile at `(tx, ty)`, clamped to `[0,1]`.
+/// Grayscale replicates its single channel to R=G=B. Built via `push` into a `with_capacity`
+/// buffer (no zero-init pass) since every element is written exactly once, in order.
+fn fill_tile_input(planes: &[Buffer2<f32>], tx: usize, ty: usize) -> Vec<f32> {
     let w = planes[0].width();
     let chans: [&[f32]; 3] = if planes.len() == 3 {
         [planes[0].pixels(), planes[1].pixels(), planes[2].pixels()]
@@ -120,23 +120,41 @@ fn fill_tile_input(planes: &[Buffer2<f32>], tx: usize, ty: usize, input: &mut [f
         let c = planes[0].pixels();
         [c, c, c]
     };
+    let mut input = Vec::with_capacity(WINDOW * WINDOW * 3);
     for hh in 0..WINDOW {
         let row = (ty + hh) * w + tx;
         for ww in 0..WINDOW {
             let src = row + ww;
-            let dst = (hh * WINDOW + ww) * 3;
-            for c in 0..3 {
-                input[dst + c] = chans[c][src].clamp(0.0, 1.0);
+            for c in chans {
+                input.push(c[src].clamp(0.0, 1.0));
             }
         }
     }
+    input
 }
 
-/// Feather weight in `[FEATHER_MIN, 1]` — ramps up over `FEATHER_RAMP` px from each tile edge.
+/// Per-axis feather weight in `[FEATHER_MIN, 1]` for each of the `WINDOW` tile positions,
+/// precomputed once at compile time — it only depends on distance from the tile edge, not on
+/// which tile, so recomputing the ramp/clamp per pixel of every tile (as `accumulate` does,
+/// once per axis) was pure waste.
+const FEATHER_LUT: [f32; WINDOW] = {
+    let mut lut = [0.0f32; WINDOW];
+    let mut i = 0;
+    while i < WINDOW {
+        let d = if i < WINDOW - 1 - i {
+            i
+        } else {
+            WINDOW - 1 - i
+        } as f32;
+        lut[i] = (d / FEATHER_RAMP).clamp(FEATHER_MIN, 1.0);
+        i += 1;
+    }
+    lut
+};
+
 #[inline]
-fn feather(i: usize) -> f32 {
-    let d = i.min(WINDOW - 1 - i) as f32;
-    (d / FEATHER_RAMP).clamp(FEATHER_MIN, 1.0)
+const fn feather(i: usize) -> f32 {
+    FEATHER_LUT[i]
 }
 
 fn accumulate(

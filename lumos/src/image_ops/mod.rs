@@ -35,7 +35,7 @@ use rayon::prelude::*;
 /// Pixels per rayon work item. Parallelizing per pixel (`par_chunks_mut(3)`) drowns a cheap
 /// per-pixel op in rayon's recursive split/join overhead (it dominated SCNR); a coarse block
 /// amortizes that while staying load-balanced and letting the inner loop auto-vectorize.
-const PIXELS_PER_BLOCK: usize = 8192;
+pub(crate) const PIXELS_PER_BLOCK: usize = 8192;
 
 /// Per-pixel parallel in-place map over an f32 master: `mono` for L, `rgb` for RGB. Parallel over
 /// blocks of [`PIXELS_PER_BLOCK`] pixels, each block mapped serially.
