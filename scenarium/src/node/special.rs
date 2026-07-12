@@ -27,7 +27,7 @@ pub enum SpecialNode {
     RunSinks,
 
     /// A review sink: one input, one wildcard passthrough output. It snapshots
-    /// its input into its own (disk-cached by default) output so the editor can
+    /// its input into its own (RAM-cached by default) output so the editor can
     /// preview the value on demand, independent of the upstream node's cache.
     /// Being a sink, a run always reaches it; being a passthrough, it can also
     /// sit inline on a wire as a caching tap. Interface in

@@ -367,8 +367,8 @@ mod cache_persistence {
 
     /// A `Preview` sink snapshots its input into its own output: the wildcard
     /// passthrough mirrors the const input exactly, and — being a sink — it runs
-    /// with nothing wired downstream. `Node::new` seeds it with the func's `Disk`
-    /// default so the snapshot is persistable.
+    /// with nothing wired downstream. `Node::new` seeds it with the func's `Ram`
+    /// default so the snapshot is immediately resident for preview.
     #[tokio::test(flavor = "multi_thread")]
     async fn preview_sink_snapshots_const_input() -> anyhow::Result<()> {
         use crate::graph::NodeKind;
@@ -381,7 +381,7 @@ mod cache_persistence {
         let preview_id = preview.id;
         preview.name = "preview".to_string();
         // Node::new copies the Preview func's default cache mode.
-        assert_eq!(preview.cache, CacheMode::Disk);
+        assert_eq!(preview.cache, CacheMode::Ram);
         graph.add(preview);
         graph.set_input_binding(
             InputPort::new(preview_id, 0),
@@ -417,10 +417,11 @@ mod cache_persistence {
     }
 
     /// The Preview node *owns* its snapshot: an uncached (`CacheMode::None`)
-    /// source feeding a `Disk` Preview still survives a reopen from the Preview's
-    /// own blob — reused from disk without re-running, and without the source
-    /// (which persisted nothing) recomputing. Also pins down that a sink's
-    /// zero-consumer output is genuinely written to disk.
+    /// source feeding a `Disk`-mode Preview (dialed up from its RAM-only
+    /// default) still survives a reopen from the Preview's own blob — reused
+    /// from disk without re-running, and without the source (which persisted
+    /// nothing) recomputing. Also pins down that a sink's zero-consumer output
+    /// is genuinely written to disk.
     #[tokio::test(flavor = "multi_thread")]
     async fn preview_snapshot_survives_reopen_when_source_uncached() -> anyhow::Result<()> {
         use crate::graph::NodeKind;
@@ -444,7 +445,7 @@ mod cache_persistence {
             lib
         };
 
-        // src (pure, CacheMode::None) → preview (Disk).
+        // src (pure, CacheMode::None) → preview (dialed up to Disk).
         let lib = make_lib();
         let mut graph = Graph::default();
         let mut src = node(&lib, "src", NodeId::unique());
@@ -454,6 +455,7 @@ mod cache_persistence {
         let mut preview = Node::new(NodeKind::Special(SpecialNode::Preview));
         let preview_id = preview.id;
         preview.name = "preview".to_string();
+        preview.cache = CacheMode::Disk;
         graph.add(preview);
         graph.set_input_binding(InputPort::new(preview_id, 0), (src_id, 0).into());
 

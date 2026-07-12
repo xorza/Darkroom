@@ -1,5 +1,5 @@
 //! The [`Preview`](crate::node::special::SpecialNode::Preview) special node: a
-//! sink that snapshots its input into its own (disk-cached by default) output,
+//! sink that snapshots its input into its own (RAM-cached by default) output,
 //! so the editor can preview the value on demand — independent of what the
 //! upstream producer's cache is set to.
 //!
@@ -8,8 +8,10 @@
 //! output is a wildcard passthrough mirroring the input, so the node can *also*
 //! be spliced onto a wire as an inline tap (input from upstream, output
 //! continuing downstream) while still caching + previewing what flows through.
-//! Its default [`CacheMode::Disk`] makes the snapshot survive a reopen; the
-//! editor's cache chips can dial it down to RAM-only or off.
+//! Its default [`CacheMode::Ram`] keeps the snapshot resident right after every
+//! run — a sink's output is otherwise unretained and would be reclaimed the
+//! instant it's stored; the editor's cache chips can dial it up to also persist
+//! to disk (surviving a reopen), or down to off.
 
 use std::mem::take;
 use std::sync::OnceLock;
@@ -23,9 +25,9 @@ use crate::node::function::{Func, FuncInput};
 const PREVIEW_FUNC_ID: &str = "f0e10336-3978-4021-a7f9-1575bbd7a0d9";
 
 /// The hardcoded interface for `Preview`: one `Any` input, one wildcard output
-/// mirroring it, a passthrough lambda, and Disk caching by default. `sink` so a
-/// run always reaches it; `pure` so its output is content-cacheable — the cached
-/// snapshot is exactly what the editor previews.
+/// mirroring it, a passthrough lambda, and RAM caching by default. `sink` so a
+/// run always reaches it; `pure` so its output is content-cacheable — the
+/// cached snapshot is exactly what the editor previews.
 pub(crate) fn preview_func() -> &'static Func {
     static F: OnceLock<Func> = OnceLock::new();
     F.get_or_init(build_func)
@@ -36,9 +38,9 @@ fn build_func() -> Func {
         .category("System")
         .sink()
         .pure()
-        .default_cache_mode(CacheMode::Disk)
+        .default_cache_mode(CacheMode::Ram)
         .description(
-            "Snapshots its input into an own disk-cached output for on-demand \
+            "Snapshots its input into an own cached output for on-demand \
              preview in the editor — a review sink whose stored value is \
              independent of the upstream node's cache. The output is a \
              passthrough, so it can also sit inline on a wire as a caching tap.",
@@ -74,8 +76,10 @@ mod tests {
         // previews, so — unlike RunSinks — it is NOT `uncacheable`.
         assert!(!func.uncacheable);
         assert_eq!(func.behavior, FuncBehavior::Pure);
-        // Persists by default so a captured snapshot survives a reopen.
-        assert_eq!(func.default_cache_mode, CacheMode::Disk);
+        // RAM by default so the snapshot is immediately previewable after a run
+        // (a sink's output is otherwise unretained and reclaimed the instant
+        // it's stored) — disk persistence is opt-in via the cache chip.
+        assert_eq!(func.default_cache_mode, CacheMode::Ram);
         assert!(!func.lambda.is_none());
     }
 }
