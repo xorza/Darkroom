@@ -14,12 +14,14 @@ use glam::Vec2;
 use scenarium::data::{DataType, FsPathMode};
 use scenarium::graph::Binding;
 use scenarium::graph::NodeId;
+use scenarium::graph::OutputPort;
 use scenarium::library::Library;
 
 use crate::core::document::BoundarySide;
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::Intent;
 use crate::gui::EventRef;
+use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
@@ -48,7 +50,13 @@ const COL_OUTPUT: u16 = 3;
 /// field, `line_height + chip padding ≈ 1.9em` — so nothing overflows.
 const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 
-pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+pub(crate) fn ports_row(
+    ui: &mut Ui,
+    rcx: RecordCtx<'_>,
+    node: &SceneNode,
+    probe: &mut BreakerProbe<'_>,
+    out: &mut Vec<Intent>,
+) {
     let theme = rcx.theme;
     // Events list under the outputs in the same column, so the output side
     // needs a row per output *and* per event.
@@ -88,7 +96,7 @@ pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
         ))
         .show(ui, |ui| {
             input_cells(ui, rcx, node, sve, out);
-            output_cells(ui, rcx, node, out);
+            output_cells(ui, rcx, node, probe, out);
         });
 }
 
@@ -119,7 +127,13 @@ fn input_cells(
     }
 }
 
-fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
+fn output_cells(
+    ui: &mut Ui,
+    rcx: RecordCtx<'_>,
+    node: &SceneNode,
+    probe: &mut BreakerProbe<'_>,
+    out: &mut Vec<Intent>,
+) {
     let outputs = rcx.scene.outputs(node.outputs);
     for (i, output) in outputs.iter().enumerate() {
         let port = PortRef {
@@ -130,7 +144,7 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
         // A `SubgraphInput` boundary node's output ports are the subgraph's
         // *inputs* — renameable, except the trailing "+" placeholder.
         let rename = (node.boundary && i + 1 < outputs.len()).then_some(BoundarySide::Input);
-        output_cell(ui, rcx, port, output, rename, out);
+        output_cell(ui, rcx, port, output, rename, probe, out);
     }
     // Events emit from the same (right) side; list them in the rows directly
     // below the data outputs.
@@ -319,12 +333,14 @@ fn value_cell(
 
 /// Column 2: the output label + circle, right-aligned (the fill column
 /// pins it to the node's right edge); the circle overhangs that edge.
+#[allow(clippy::too_many_arguments)]
 fn output_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     port: PortRef,
     output: &SceneOutput,
     rename: Option<BoundarySide>,
+    probe: &mut BreakerProbe<'_>,
     out: &mut Vec<Intent>,
 ) {
     let theme = rcx.theme;
@@ -340,6 +356,24 @@ fn output_cell(
     );
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
+    // The pin glyph's hit-test needs the port's *world*-space center (the
+    // same frame the breaker polyline and every wire hit-test use), not the
+    // owner-local frame `circle_frame` paints in.
+    let targeted = output.pinned
+        && rcx
+            .geometry
+            .ports
+            .center(port)
+            .is_some_and(|c| pin_targeted(probe, c, theme.port_size * 0.5));
+    if targeted {
+        // unwrap: `targeted == true` implies a live breaker gesture, so `state` is `Some`.
+        probe
+            .state
+            .as_deref_mut()
+            .unwrap()
+            .broken_pins
+            .push(OutputPort::new(port.node_id, port.port_idx));
+    }
     let cell = Panel::hstack()
         .id_salt(("out", port.port_idx))
         .grid_cell((port.port_idx as u16, COL_OUTPUT))
@@ -351,7 +385,11 @@ fn output_cell(
         .show(ui, |ui| {
             port_label(ui, rcx, port, output.name.clone(), &tip, rename, out);
             let decoration = if output.pinned {
-                PortDecoration::Pinned
+                PortDecoration::Pinned(if targeted {
+                    theme.colors.connection_broken
+                } else {
+                    fill
+                })
             } else {
                 PortDecoration::None
             };
@@ -541,15 +579,20 @@ const PIN_RISE: f32 = 12.0;
 /// Stroke width of the bezier connecting a pinned output to its satellite.
 const PIN_STROKE_WIDTH: f32 = 1.5;
 
-/// A pinned output's visual: a small bezier leading out from the port
-/// circle, up and to the right, to a smaller satellite circle of
-/// `PIN_SATELLITE_SCALE`× the port's own radius. Both paint in `fill` — the
-/// port's own data-type color — so the glyph reads as an extension of the
-/// port rather than a separate accent. `inset`/`radius` are the same
-/// owner-local frame the fill circle itself paints in (see
-/// [`circle_frame`]).
-fn pin_glyph(ui: &mut Ui, inset: f32, radius: f32, fill: Color) {
-    let port_center = Vec2::new(inset + radius, inset + radius);
+/// A pinned output's bezier + satellite geometry, anchored at `port_center`.
+/// Pure so both the paint (owner-local `port_center`) and the breaker
+/// hit-test (world-space `port_center`, via `CanvasGeometry::ports::center`)
+/// derive the identical shape from the same two numbers.
+struct PinGeometry {
+    p0: Vec2,
+    p1: Vec2,
+    p2: Vec2,
+    p3: Vec2,
+    satellite_center: Vec2,
+    satellite_radius: f32,
+}
+
+fn pin_geometry(port_center: Vec2, radius: f32) -> PinGeometry {
     let satellite_radius = radius * PIN_SATELLITE_SCALE;
     let satellite_center =
         port_center + Vec2::new(radius + PIN_REACH + satellite_radius, -PIN_RISE);
@@ -557,27 +600,69 @@ fn pin_glyph(ui: &mut Ui, inset: f32, radius: f32, fill: Color) {
     let p3 = satellite_center;
     let p1 = p0 + Vec2::new(15.0, 0.0);
     let p2 = p3 + Vec2::new(-10.0, 10.0);
+    PinGeometry {
+        p0,
+        p1,
+        p2,
+        p3,
+        satellite_center,
+        satellite_radius,
+    }
+}
+
+/// A pinned output's visual: a small bezier leading out from the port
+/// circle, up and to the right, to a smaller satellite circle of
+/// `PIN_SATELLITE_SCALE`× the port's own radius. Both paint in `color` — the
+/// port's own data-type color, or the breaker-alarm color while a breaker
+/// gesture targets this pin — so the glyph reads as an extension of the
+/// port rather than a separate accent. `inset`/`radius` are the same
+/// owner-local frame the fill circle itself paints in (see
+/// [`circle_frame`]).
+fn pin_glyph(ui: &mut Ui, inset: f32, radius: f32, color: Color) {
+    let port_center = Vec2::new(inset + radius, inset + radius);
+    let g = pin_geometry(port_center, radius);
     ui.add_shape(
-        Shape::cubic_bezier(p0, p1, p2, p3, PIN_STROKE_WIDTH)
-            .brush(fill)
+        Shape::cubic_bezier(g.p0, g.p1, g.p2, g.p3, PIN_STROKE_WIDTH)
+            .brush(color)
             .cap(LineCap::Round),
     );
     dot(
         ui,
-        satellite_center.x,
-        satellite_center.y,
-        satellite_radius,
-        fill,
+        g.satellite_center.x,
+        g.satellite_center.y,
+        g.satellite_radius,
+        color,
     );
 }
 
+/// True if the active breaker gesture crosses `port`'s pin glyph — either
+/// the connecting bezier or the satellite circle's bounding box (matching
+/// how a node body's breaker hit-test uses its rect rather than an exact
+/// shape). `port_center` is world-space (`CanvasGeometry::ports::center`),
+/// the same frame the breaker polyline and every other wire hit-test use.
+fn pin_targeted(probe: &BreakerProbe<'_>, port_center: Vec2, radius: f32) -> bool {
+    let g = pin_geometry(port_center, radius);
+    if probe.crosses_cubic(g.p0, g.p1, g.p2, g.p3) {
+        return true;
+    }
+    let d = g.satellite_radius * 2.0;
+    let satellite_rect = Rect::new(
+        g.satellite_center.x - g.satellite_radius,
+        g.satellite_center.y - g.satellite_radius,
+        d,
+        d,
+    );
+    probe.crosses_rect(satellite_rect)
+}
+
 /// A port circle's extra decoration — an input's muted ring, or an output's
-/// pinned satellite glyph. Mutually exclusive (never both on one port), so
-/// [`circle_frame`] takes one flag instead of two.
+/// pinned satellite glyph (in the given color — its own data-type color, or
+/// the breaker-alarm color while targeted). Mutually exclusive (never both
+/// on one port), so [`circle_frame`] takes one flag instead of two.
 enum PortDecoration {
     None,
     Outline(Color),
-    Pinned,
+    Pinned(Color),
 }
 
 fn circle_frame(
@@ -630,7 +715,7 @@ fn circle_frame(
                         PORT_OUTLINE_WIDTH,
                     );
                 }
-                PortDecoration::Pinned => pin_glyph(ui, inset, radius, fill),
+                PortDecoration::Pinned(color) => pin_glyph(ui, inset, radius, color),
             }
         });
     if !tip.is_empty() {
@@ -676,6 +761,8 @@ fn type_label(library: &Library, ty: &DataType) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gui::canvas::breaker::{BreakerState, cubic_point};
+    use aperture::PointerButton;
 
     #[test]
     fn port_diameter_enlarges_by_the_outline_width_on_each_side() {
@@ -686,5 +773,56 @@ mod tests {
             base + 2.0 * PORT_OUTLINE_WIDTH,
             "enlarged port matches an optional input's circle-plus-ring footprint"
         );
+    }
+
+    #[test]
+    fn pin_targeted_hits_the_satellite_circle_but_not_empty_space() {
+        let port_center = Vec2::ZERO;
+        let radius = 5.0;
+        let g = pin_geometry(port_center, radius);
+
+        let mut hit = BreakerState::start(g.satellite_center, PointerButton::Right);
+        let probe = BreakerProbe {
+            origin: Vec2::ZERO,
+            state: Some(&mut hit),
+        };
+        assert!(
+            pin_targeted(&probe, port_center, radius),
+            "a breaker sample landing dead-center in the satellite must register"
+        );
+
+        let mut miss = BreakerState::start(Vec2::new(1000.0, 1000.0), PointerButton::Right);
+        let probe = BreakerProbe {
+            origin: Vec2::ZERO,
+            state: Some(&mut miss),
+        };
+        assert!(
+            !pin_targeted(&probe, port_center, radius),
+            "a breaker far from the glyph must not register"
+        );
+    }
+
+    #[test]
+    fn pin_targeted_hits_the_connecting_bezier() {
+        let port_center = Vec2::ZERO;
+        let radius = 5.0;
+        let g = pin_geometry(port_center, radius);
+        // `t = 0.53`, not `0.5`: `intersects_cubic` samples the curve at 16
+        // evenly-spaced points, and `t = 0.5` lands exactly on one of them —
+        // a vertical probe through that exact vertex is the degenerate
+        // "touch, don't cross" case the strict crossing test intentionally
+        // rejects (see `intersects_cubic_diagonal_through_straight_wire`).
+        let mid = cubic_point(g.p0, g.p1, g.p2, g.p3, 0.53);
+
+        // A long vertical scribble through that point, clear of the
+        // satellite circle, so this exercises the bezier crossing — not the
+        // satellite rect — path.
+        let mut state = BreakerState::start(mid + Vec2::new(0.0, -50.0), PointerButton::Right);
+        state.add_point(mid + Vec2::new(0.0, 50.0));
+        let probe = BreakerProbe {
+            origin: Vec2::ZERO,
+            state: Some(&mut state),
+        };
+        assert!(pin_targeted(&probe, port_center, radius));
     }
 }

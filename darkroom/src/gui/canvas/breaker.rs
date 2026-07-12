@@ -1,7 +1,7 @@
 use aperture::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui};
 use glam::Vec2;
 use scenarium::graph::NodeId;
-use scenarium::graph::{Binding, InputPort, Subscription};
+use scenarium::graph::{Binding, InputPort, OutputPort, Subscription};
 
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
@@ -28,6 +28,14 @@ impl BreakerProbe<'_> {
         self.state
             .as_deref()
             .is_some_and(|b| b.intersects_cubic(p0, p1, p2, p3))
+    }
+
+    /// True if the active breaker polyline crosses `rect`. A no-op (false)
+    /// when no breaker gesture is live.
+    pub(crate) fn crosses_rect(&self, rect: Rect) -> bool {
+        self.state
+            .as_deref()
+            .is_some_and(|b| b.intersects_rect(rect))
     }
 }
 
@@ -70,6 +78,11 @@ pub(crate) struct BreakerState {
     /// Filled by `SubscriptionUI::draw`, drained on release into a
     /// `SetSubscription { subscribe: false }`. Same one-visit-per-edge guarantee as `broken`.
     pub(crate) broken_subscriptions: Vec<Subscription>,
+    /// Pinned outputs whose satellite glyph (or its connecting bezier) the
+    /// breaker intersects this frame. Filled by `output_cell`, drained on
+    /// release into `Intent::SetOutputPinned { pinned: false }`. Same
+    /// one-visit-per-port guarantee as `broken`.
+    pub(crate) broken_pins: Vec<OutputPort>,
 }
 
 impl BreakerState {
@@ -81,6 +94,7 @@ impl BreakerState {
             broken: Vec::new(),
             broken_nodes: Vec::new(),
             broken_subscriptions: Vec::new(),
+            broken_pins: Vec::new(),
         }
     }
 
@@ -259,6 +273,18 @@ impl BreakerUI {
                         event_idx: s.event_idx,
                         subscriber: s.subscriber,
                         subscribe: false,
+                    });
+                }
+                // A removed node already drops its own pin state, so skip any
+                // pinned output on a doomed node.
+                for port in b.broken_pins.drain(..) {
+                    if doomed_nodes.contains(&port.node_id) {
+                        continue;
+                    }
+                    out.push(Intent::SetOutputPinned {
+                        node_id: port.node_id,
+                        port_idx: port.port_idx,
+                        pinned: false,
                     });
                 }
                 self.state = None;
