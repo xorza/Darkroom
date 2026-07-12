@@ -17,3 +17,5 @@ optional inputs smaller than required
 doubleclick on output to enable preview
 
 threadsafe fastaccessible shared cache
+
+file name as argument
