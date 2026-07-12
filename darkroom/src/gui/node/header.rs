@@ -282,11 +282,10 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // monochrome and only an active cache carries color — the type-colored
             // ports and the status glow keep the stage.
             //
-            // Both suppressed where caching can't apply: boundary nodes (pure
-            // routing), self-caching nodes (`uncacheable`), sinks (no downstream consumer to serve a
-            // cached output to), and impure nodes (no content digest, so no mode is
-            // honored — the `~` marker shows why instead).
-            if !node.uncacheable && !node.sink && !node.impure {
+            // Shown only where caching can apply — see `SceneNode::cacheable`,
+            // which folds out boundary/self-caching/output-less/impure nodes.
+            // (An impure node still paints the `~` marker below to say why.)
+            if node.cacheable {
                 let ram = node.cache.caches_in_ram();
                 let disk = node.cache.persists_to_disk();
                 let ram_color = if ram {

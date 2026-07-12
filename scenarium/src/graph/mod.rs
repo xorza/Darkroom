@@ -232,10 +232,10 @@ pub struct Node {
     pub name: String,
 
     /// Where this node's output is cached. See [`CacheMode`]. A fresh func node
-    /// copies its func's `default_cache_mode`; the func-less constructors seed
-    /// `None`. `#[serde(default)]` → `None` (the [`CacheMode`] default) for a
-    /// pre-field (or pre-rename) document, so a legacy node caches nowhere until
-    /// re-toggled.
+    /// (`From<&Func>`) or special node (`Node::new`) copies its func's
+    /// `default_cache_mode`; the remaining func-less constructors seed `None`.
+    /// `#[serde(default)]` → `None` (the [`CacheMode`] default) for a pre-field
+    /// (or pre-rename) document, so a legacy node caches nowhere until re-toggled.
     #[serde(default)]
     pub cache: CacheMode,
 
@@ -798,13 +798,19 @@ impl Node {
     /// A fresh node of the given kind with a unique id and no inputs/events.
     /// The id is minted here (the one RNG-touching constructor); callers fill
     /// in wiring, or use `From<&Func>` / `subgraph_instance` for a node whose
-    /// ports are pre-shaped from its definition.
+    /// ports are pre-shaped from its definition. A `Special` node copies its
+    /// hardcoded func's `default_cache_mode` (so a Preview node defaults to
+    /// Disk); every other kind seeds `None`.
     pub fn new(kind: NodeKind) -> Self {
+        let cache = match &kind {
+            NodeKind::Special(s) => s.func().default_cache_mode,
+            _ => CacheMode::None,
+        };
         Node {
             id: NodeId::unique(),
             kind,
             name: String::new(),
-            cache: CacheMode::None,
+            cache,
             disabled: false,
         }
     }

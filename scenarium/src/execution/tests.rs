@@ -365,6 +365,137 @@ mod cache_persistence {
         );
     }
 
+    /// A `Preview` sink snapshots its input into its own output: the wildcard
+    /// passthrough mirrors the const input exactly, and — being a sink — it runs
+    /// with nothing wired downstream. `Node::new` seeds it with the func's `Disk`
+    /// default so the snapshot is persistable.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn preview_sink_snapshots_const_input() -> anyhow::Result<()> {
+        use crate::graph::NodeKind;
+        use crate::node::special::SpecialNode;
+
+        let dir = TempDir::new("preview-const");
+
+        let mut graph = Graph::default();
+        let mut preview = Node::new(NodeKind::Special(SpecialNode::Preview));
+        let preview_id = preview.id;
+        preview.name = "preview".to_string();
+        // Node::new copies the Preview func's default cache mode.
+        assert_eq!(preview.cache, CacheMode::Disk);
+        graph.add(preview);
+        graph.set_input_binding(
+            InputPort::new(preview_id, 0),
+            Binding::Const(StaticValue::Int(42)),
+        );
+
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &Library::default())?;
+        let stats = engine.execute_sinks().await?;
+
+        // It runs as a sink with nothing downstream...
+        assert!(
+            stats.executed_nodes.iter().any(|n| n.node_id == preview_id),
+            "the Preview sink runs on its own"
+        );
+        // ...and its output mirrors the input exactly (42 in → 42 out).
+        let vals = engine
+            .get_argument_values_with_previews(&preview_id)
+            .await
+            .unwrap();
+        assert!(matches!(
+            vals.inputs[0],
+            Some(DynamicValue::Static(StaticValue::Int(42)))
+        ));
+        assert_eq!(vals.outputs.len(), 1);
+        assert!(
+            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Int(42))),
+            "passthrough output mirrors the input: {:?}",
+            vals.outputs
+        );
+
+        Ok(())
+    }
+
+    /// The Preview node *owns* its snapshot: an uncached (`CacheMode::None`)
+    /// source feeding a `Disk` Preview still survives a reopen from the Preview's
+    /// own blob — reused from disk without re-running, and without the source
+    /// (which persisted nothing) recomputing. Also pins down that a sink's
+    /// zero-consumer output is genuinely written to disk.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn preview_snapshot_survives_reopen_when_source_uncached() -> anyhow::Result<()> {
+        use crate::graph::NodeKind;
+        use crate::node::function::{Func, FuncId, FuncOutput};
+        use crate::node::special::SpecialNode;
+
+        let dir = TempDir::new("preview-reopen");
+
+        let src_func: FuncId = FuncId::from_u128(0x9704E);
+        let make_lib = || {
+            let mut lib = Library::default();
+            lib.add(
+                Func::new(src_func, "src")
+                    .pure()
+                    .output(FuncOutput::new("out", DataType::Int))
+                    .lambda(crate::async_lambda!(|_, _, _, _, _, outputs| {
+                        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+                        Ok(())
+                    })),
+            );
+            lib
+        };
+
+        // src (pure, CacheMode::None) → preview (Disk).
+        let lib = make_lib();
+        let mut graph = Graph::default();
+        let mut src = node(&lib, "src", NodeId::unique());
+        src.cache = CacheMode::None;
+        let src_id = src.id;
+        graph.add(src);
+        let mut preview = Node::new(NodeKind::Special(SpecialNode::Preview));
+        let preview_id = preview.id;
+        preview.name = "preview".to_string();
+        graph.add(preview);
+        graph.set_input_binding(InputPort::new(preview_id, 0), (src_id, 0).into());
+
+        // First session: run so the Preview node writes its snapshot to disk.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib())?;
+        engine.execute_sinks().await?;
+
+        // Reopen with fresh RAM over the same store, then run.
+        let mut engine = disk_engine(&dir);
+        engine.update(&graph, &make_lib())?;
+        let stats = engine.execute_sinks().await?;
+
+        // The Preview snapshot is reused from its own disk blob — the node is
+        // `cached`, not recomputed...
+        assert!(
+            stats.cached_nodes.contains(&preview_id),
+            "preview reuses its disk snapshot on reopen"
+        );
+        // ...and the uncached source that feeds only that hit is pruned (never
+        // recomputed) — so the surviving value is the Preview's own, not the
+        // source's (which persisted nothing).
+        assert!(
+            !stats.executed_nodes.iter().any(|n| n.node_id == src_id),
+            "the CacheMode::None source is pruned behind the disk hit"
+        );
+
+        // Inspecting the reused node reads the stored value.
+        let vals = engine
+            .get_argument_values_with_previews(&preview_id)
+            .await
+            .unwrap();
+        assert_eq!(vals.outputs.len(), 1);
+        assert!(
+            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Int(7))),
+            "preview loads its own disk snapshot: {:?}",
+            vals.outputs
+        );
+
+        Ok(())
+    }
+
     /// Eviction reclaims carried-over RAM: a value a prior run computed and left
     /// resident, that a later run neither executes nor reads as a frontier input, is
     /// dropped from RAM once the disk store can serve it again. In one engine across

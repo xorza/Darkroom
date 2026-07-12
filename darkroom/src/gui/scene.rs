@@ -154,12 +154,17 @@ pub struct SceneNode {
     /// Where this node's output is cached ([`CacheMode`]). The header's two cache
     /// chips (RAM + disk) toggle its bits via `Intent::SetCacheMode`.
     pub cache: CacheMode,
-    /// Suppresses the header's cache chips. `true` for self-caching nodes
-    /// and boundary/stub nodes that have no output to cache.
-    pub uncacheable: bool,
+    /// The header shows its cache chips (RAM + disk toggles) for this node: it
+    /// has an output worth persisting and honors a content digest. Folds the
+    /// func-derived reasons caching can't apply — self-caching (`uncacheable`),
+    /// no outputs (most sinks / boundary stubs), or [`impure`](Self::impure) (no
+    /// digest, so no mode is honored). A sink *with* an output (a Preview/tap)
+    /// stays `cacheable` — its stored value is the point.
+    pub cacheable: bool,
     /// The node's func is `Impure`. An impure node has no content digest, so no
-    /// cache mode is ever honored — the header hides both cache chips, like
-    /// `uncacheable`. `false` for composites and boundary nodes.
+    /// cache mode is ever honored (folded into `cacheable`); the header also
+    /// paints the `~` marker off this flag to say *why* it has no cache chips.
+    /// `false` for composites and boundary nodes.
     pub impure: bool,
     /// A `SubgraphInput`/`SubgraphOutput` interface boundary node. Its
     /// ports route the subgraph interface rather than carry literal
@@ -444,7 +449,9 @@ impl Scene {
                 sink: interface.sink,
                 disabled: node.disabled,
                 cache: node.cache,
-                uncacheable: interface.uncacheable,
+                cacheable: !interface.uncacheable
+                    && !interface.outputs.is_empty()
+                    && !interface.impure,
                 impure: interface.impure,
                 boundary: matches!(
                     node.kind,
@@ -600,7 +607,7 @@ pub(crate) mod test_support {
             sink: false,
             disabled: false,
             cache: CacheMode::None,
-            uncacheable: false,
+            cacheable: false,
             impure: false,
             boundary: false,
             exec_status: ExecStatus::None,
@@ -939,8 +946,43 @@ mod tests {
 
         assert!(!pure.impure, "a Pure func keeps its cache chips");
         assert!(impure.impure, "an Impure func hides its cache chips");
-        // Isolate `impure` as the cause: neither is self-caching or a sink.
-        assert!(!pure.uncacheable && !pure.sink);
-        assert!(!impure.uncacheable && !impure.sink);
+        // The header's cache-chip gate is `cacheable`. Both have an output and
+        // aren't sinks, so `impure` is the sole differentiator.
+        assert!(
+            pure.cacheable,
+            "a Pure func with an output shows cache chips"
+        );
+        assert!(!impure.cacheable, "an Impure func hides cache chips");
+        assert!(!pure.sink && !impure.sink);
+    }
+
+    #[test]
+    fn preview_sink_stays_cacheable() {
+        use scenarium::node::special::SpecialNode;
+
+        // A Preview node is a sink (nothing downstream) yet has an output to
+        // persist, so — unlike an output-less sink (Print/RunSinks) — it keeps
+        // its cache chips.
+        let mut graph = Graph::default();
+        let preview = Node::new(NodeKind::Special(SpecialNode::Preview));
+        let preview_id = preview.id;
+        graph.add(preview);
+
+        let view = GraphView::for_graph(&graph);
+        let mut scene = Scene::default();
+        scene.rebuild(
+            &graph,
+            &view,
+            &Library::default(),
+            None,
+            &RunState::default(),
+        );
+
+        let node = scene.nodes.iter().find(|n| n.id == preview_id).unwrap();
+        assert!(node.sink, "Preview is a sink");
+        assert!(
+            node.cacheable,
+            "a sink with an output stays cacheable — its snapshot is the point"
+        );
     }
 }
