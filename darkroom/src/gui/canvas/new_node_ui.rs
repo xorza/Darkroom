@@ -309,7 +309,7 @@ fn func_entry(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> Option<ChosenNod
     let resp = MenuItem::new(func.name.clone()).show(ui, popup);
     let clicked = resp.clicked();
     if let Some(desc) = &func.description {
-        Tooltip::for_(&resp.snapshot()).text(desc.clone()).show(ui);
+        Tooltip::on(&resp.snapshot()).text(desc.clone()).show(ui);
     }
     clicked.then(|| {
         let node: Node = func.into();
@@ -349,7 +349,7 @@ fn special_entry(ui: &mut Ui, popup: &PopupHandle, special: SpecialNode) -> Opti
     let resp = MenuItem::new(func.name.clone()).show(ui, popup);
     let clicked = resp.clicked();
     if let Some(desc) = &func.description {
-        Tooltip::for_(&resp.snapshot()).text(desc.clone()).show(ui);
+        Tooltip::on(&resp.snapshot()).text(desc.clone()).show(ui);
     }
     if !clicked {
         return None;

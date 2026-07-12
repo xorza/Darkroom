@@ -349,7 +349,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
         }
         // Surface the destination on hover so the user sees where the
         // link goes before clicking — the URL isn't otherwise visible.
-        Tooltip::for_(&snapshot).text(url).show(ui);
+        Tooltip::on(&snapshot).text(url).show(ui);
         Text::new(DOWNLOAD_HINT)
             .style(muted_text(ui, theme, 12.0))
             .show(ui);

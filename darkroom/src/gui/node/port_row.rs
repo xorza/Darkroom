@@ -744,7 +744,7 @@ fn grown_hit_box(base: f32, margin: Spacing) -> (f32, f32, Spacing) {
 /// itself. Shared by [`circle_frame`] and [`event_glyph`].
 fn show_port_tip(ui: &mut Ui, snapshot: ResponseSnapshot, tip: &str) {
     if !tip.is_empty() {
-        Tooltip::for_(&snapshot).text(tip.to_owned()).show(ui);
+        Tooltip::on(&snapshot).text(tip.to_owned()).show(ui);
     }
 }
 

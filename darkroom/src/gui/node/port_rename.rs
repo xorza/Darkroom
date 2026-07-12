@@ -57,7 +57,7 @@ pub(crate) fn port_label(
             .show(ui)
             .snapshot();
         if !tip.is_empty() {
-            Tooltip::for_(&snapshot).text(tip.to_owned()).show(ui);
+            Tooltip::on(&snapshot).text(tip.to_owned()).show(ui);
         }
         return;
     };

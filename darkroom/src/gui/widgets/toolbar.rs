@@ -146,7 +146,7 @@ impl Chip {
         // borrow ends before the tooltip records into `ui`.
         let snapshot = button.response.snapshot();
         let clicked = button.response.clicked();
-        Tooltip::for_(&snapshot).text(self.tip).show(ui);
+        Tooltip::on(&snapshot).text(self.tip).show(ui);
         clicked
     }
 }

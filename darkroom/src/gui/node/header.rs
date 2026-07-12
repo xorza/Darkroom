@@ -99,7 +99,7 @@ pub(crate) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hov
                 .fill(event_color(theme, hovered)),
             );
         });
-    Tooltip::for_(&pin.response.snapshot())
+    Tooltip::on(&pin.response.snapshot())
         .text("Event subscription — drag to an emitter, or drop an event wire here")
         .show(ui);
 }
@@ -593,7 +593,7 @@ impl Badge {
         if !tip.is_empty() {
             // `tip` is `&'static str`, so it rides into the tooltip as a
             // borrowed `Cow` — no per-frame allocation.
-            Tooltip::for_(&snapshot).text(tip).show(ui);
+            Tooltip::on(&snapshot).text(tip).show(ui);
         }
         clicked
     }
