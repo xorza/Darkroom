@@ -8,7 +8,7 @@ pub(crate) mod inspector;
 pub(crate) mod new_node_ui;
 pub(crate) mod node_menu;
 pub(crate) mod pan_zoom;
-pub(crate) mod pin_drag_ui;
+pub(crate) mod pin_ui;
 pub(crate) mod selection_ui;
 pub(crate) mod subgraph_menu;
 pub(crate) mod subscription_ui;
@@ -35,7 +35,7 @@ use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
 use crate::gui::canvas::pan_zoom::PanAnchor;
-use crate::gui::canvas::pin_drag_ui::PinDragUi;
+use crate::gui::canvas::pin_ui::PinUi;
 use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
@@ -86,7 +86,7 @@ struct Gestures {
     node_ui: NodeUI,
     breaker_ui: BreakerUI,
     connection_ui: ConnectionUI,
-    pin_drag_ui: PinDragUi,
+    pin_ui: PinUi,
     subscription_ui: SubscriptionUI,
     new_node_ui: NewNodeUi,
     subgraph_menu: SubgraphMenuUi,
@@ -152,9 +152,7 @@ impl GraphUI {
             .apply(ui, scene, &self.geometry, resume, out);
         // Cmd+drag from an output port pins it — same pre-record timing as
         // the connection/subscription gestures above, for the same reasons.
-        self.gestures
-            .pin_drag_ui
-            .apply(ui, scene, &self.geometry, out);
+        self.gestures.pin_ui.apply(ui, scene, &self.geometry, out);
         // Subscription wires (emitter → subscriber) latch/commit here too,
         // for the same pre-record reasons; an emitter glyph and a data port
         // can't both latch (different widget-id spaces).
@@ -258,7 +256,7 @@ impl GraphUI {
                     node_ui,
                     breaker_ui,
                     connection_ui,
-                    pin_drag_ui,
+                    pin_ui,
                     subscription_ui,
                     new_node_ui: _,
                     subgraph_menu: _,
@@ -345,7 +343,7 @@ impl GraphUI {
                             // active breaker scribble — fades the standing set.
                             let fading = connection_ui.dragging()
                                 || subscription_ui.dragging()
-                                || pin_drag_ui.dragging()
+                                || pin_ui.dragging()
                                 || probe.is_active();
                             let emphasis =
                                 WireEmphasis::resolve(ctx.theme.colors.canvas_bg, fading);
@@ -356,6 +354,10 @@ impl GraphUI {
                             // share the breaker probe so they're cuttable too.
                             subscription_ui
                                 .draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
+                            // Pins too — a satellite can end up anywhere on
+                            // the canvas once dragged, so it draws here
+                            // rather than nested in its node's own body.
+                            pin_ui.draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,
@@ -381,7 +383,7 @@ impl GraphUI {
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, geometry, canvas_origin);
                         subscription_ui.draw_in_flight(ui, ctx, scene, geometry, canvas_origin);
-                        pin_drag_ui.draw_in_flight(ui, ctx, scene, geometry, canvas_origin);
+                        pin_ui.draw_in_flight(ui, ctx, scene, geometry, canvas_origin);
                     });
             });
     }
@@ -492,7 +494,9 @@ pub(crate) const fn outer_canvas_widget_id() -> WidgetId {
 
 /// Stable id for the inner (transformed) canvas. Used as the widget
 /// seed and for resolving the canvas's pre-transform origin in
-/// connection draws.
-const fn inner_canvas_widget_id() -> WidgetId {
+/// connection draws — and, in `PinUi::apply`, to convert a pin drag's
+/// release point into canvas-world coordinates during prepass (before
+/// `frame` computes its own copy for painting).
+pub(crate) const fn inner_canvas_widget_id() -> WidgetId {
     WidgetId::auto_stable()
 }

@@ -6,11 +6,11 @@ use common::{KeyIndexVec, SerdeFormat, is_debug};
 use glam::Vec2;
 use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
-use scenarium::graph::{Graph as CoreGraph, NodeId, NodeSearch};
+use scenarium::graph::{Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
 use scenarium::graph::{Node, NodeKind};
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::core::document::dock::DockLayout;
 use crate::core::document::view_node::ViewNode;
@@ -151,6 +151,38 @@ pub struct GraphView {
     /// `BTreeSet` so equality and serialization are order-independent
     /// (no spurious undo entries from reordering).
     pub selected_nodes: BTreeSet<NodeId>,
+    /// A pinned output's satellite position, as a canvas-local offset from
+    /// its port center — sparse, present only once a user has dragged that
+    /// pin at least once (see `crate::gui::node::port_row::pin_geometry`'s
+    /// fixed formula for the default a missing entry falls back to).
+    /// Outlives an unpin: re-pinning the same port remembers where its
+    /// satellite last sat. Pruned only when the node itself is removed (see
+    /// [`EditScope::remove_node`]). Serialized as a `(port, offset)`
+    /// sequence — struct keys aren't valid map keys in string-keyed formats
+    /// (JSON/TOML/Rhai), same reasoning as `scenarium::graph`'s
+    /// `binding_map_serde`.
+    #[serde(default, with = "pin_offset_serde")]
+    pub pin_offsets: BTreeMap<OutputPort, Vec2>,
+}
+
+mod pin_offset_serde {
+    use super::{BTreeMap, OutputPort, Vec2};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(crate) fn serialize<S: Serializer>(
+        map: &BTreeMap<OutputPort, Vec2>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        map.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<OutputPort, Vec2>, D::Error> {
+        Ok(Vec::<(OutputPort, Vec2)>::deserialize(deserializer)?
+            .into_iter()
+            .collect())
+    }
 }
 
 impl Eq for GraphView {}
@@ -254,6 +286,17 @@ impl GraphView {
                 "graph view missing node position"
             );
         }
+
+        for (port, offset) in &self.pin_offsets {
+            assert!(
+                offset.x.is_finite() && offset.y.is_finite(),
+                "pin offset must be finite"
+            );
+            assert!(
+                graph_nodes.contains_key(&port.node_id),
+                "pin offset references a node absent from the graph"
+            );
+        }
     }
 }
 
@@ -275,11 +318,15 @@ pub struct EditScopeRef<'a> {
 
 impl EditScope<'_> {
     /// Drop a node from both the graph and its view (positions +
-    /// selection). Mirrors the old `Document::remove_node`.
+    /// selection + any pinned outputs' custom satellite offsets). Mirrors
+    /// the old `Document::remove_node`.
     pub fn remove_node(&mut self, node_id: &NodeId) {
         self.view.view_nodes.retain(|node| node.id != *node_id);
         self.graph.remove_by_id(*node_id);
         self.view.selected_nodes.remove(node_id);
+        self.view
+            .pin_offsets
+            .retain(|port, _| port.node_id != *node_id);
     }
 }
 

@@ -233,7 +233,7 @@ impl NodeUI {
             .show(ui, |ui| {
                 header(ui, rcx, node, out);
                 status_row(ui, rcx, node, out);
-                ports_row(ui, rcx, node, probe, out);
+                ports_row(ui, rcx, node, out);
                 memory_row(ui, rcx, node);
             });
         // Pull the body response's flags into locals so its `&mut ui`

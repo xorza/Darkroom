@@ -120,6 +120,11 @@ pub struct SceneOutput {
     /// [`scenarium::graph::Graph::is_output_pinned`]. Drives the port
     /// circle's outline.
     pub pinned: bool,
+    /// This pinned output's custom satellite offset (canvas-local, from the
+    /// port center), if the user has dragged it at least once — see
+    /// [`GraphView::pin_offsets`]. `None` (including when `pinned` is
+    /// false) falls back to `port_row::pin_geometry`'s default formula.
+    pub pin_offset: Option<Vec2>,
 }
 
 /// One event (emitter) port in the per-frame projection. Events carry no data
@@ -426,6 +431,7 @@ impl Scene {
                             OutputType::Fixed(dt) => dt.clone(),
                         },
                         pinned: graph.is_output_pinned(OutputPort::new(node.id, i)),
+                        pin_offset: view.pin_offsets.get(&OutputPort::new(node.id, i)).copied(),
                     }),
             );
             let events = extend_pool(

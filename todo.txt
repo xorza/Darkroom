@@ -6,14 +6,14 @@ darkroom string interning
 
 cleanup binary caches
 
-do not comoute stars in input unused
-
 tooltip near the edge of screen overflows
 
 file name as argument clap
 
-gui update on worker callback
-
 curve gpu tesselation
 
 review scenarium worker
+
+load broken document
+
+(nodeidx, prtnuber) - to struct

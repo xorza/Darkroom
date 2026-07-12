@@ -3,11 +3,12 @@ use std::hash::Hash;
 
 use aperture::{Rect, ResponseState, Size, Ui};
 use glam::Vec2;
-use scenarium::graph::NodeId;
+use scenarium::graph::{NodeId, OutputPort};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::EventRef;
 use crate::gui::canvas::node_ports;
+use crate::gui::canvas::pin_ui::pin_satellite_wid;
 use crate::gui::node::header::subscription_glyph_wid;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::{event_glyph_wid, port_circle_wid};
@@ -49,6 +50,18 @@ pub(crate) struct CanvasGeometry {
     /// content edit applied while hidden and self-heals on next record.
     /// Read through [`Self::node_world_rect`].
     node_sizes: HashMap<NodeId, Size>,
+    /// A pinned output's satellite drag state, keyed by port — cleared and
+    /// rebuilt every frame like `PortLayer::live`, but without its
+    /// node-relative offset cache: a satellite's position is computed fresh
+    /// each frame (port center + resolved offset, see `pin_ui.rs`), never
+    /// derived from this response's own rect.
+    pin_satellites: HashMap<OutputPort, SatelliteInfo>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SatelliteInfo {
+    drag_started: bool,
+    dragging: bool,
 }
 
 /// One key-domain's port snapshot, split into two tiers by lifetime:
@@ -164,10 +177,24 @@ impl CanvasGeometry {
         })
     }
 
+    /// `true` on the one-frame edge of a drag-start on `port`'s satellite —
+    /// only present for a currently pinned output.
+    pub(crate) fn satellite_drag_started(&self, port: OutputPort) -> bool {
+        self.pin_satellites
+            .get(&port)
+            .is_some_and(|s| s.drag_started)
+    }
+
+    /// `true` while a drag started on `port`'s satellite is still live.
+    pub(crate) fn satellite_dragging(&self, port: OutputPort) -> bool {
+        self.pin_satellites.get(&port).is_some_and(|s| s.dragging)
+    }
+
     pub(crate) fn rebuild(&mut self, ui: &Ui, scene: &Scene) {
         self.ports.live.clear();
         self.events.live.clear();
         self.subs.live.clear();
+        self.pin_satellites.clear();
         for n in &scene.nodes {
             // Port offsets within a node are stable; the node's
             // canvas-local position changes when the user drags. Take
@@ -201,6 +228,22 @@ impl CanvasGeometry {
             if n.sink {
                 let r = ui.response_for(subscription_glyph_wid(n.id));
                 self.subs.record(n.id, r, node_min, n.pos);
+            }
+            // Pinned outputs' satellites — only present for a pinned port,
+            // no node-relative offset to cache (see `pin_satellites`'s doc).
+            for (i, output) in scene.outputs(n.outputs).iter().enumerate() {
+                if !output.pinned {
+                    continue;
+                }
+                let port = OutputPort::new(n.id, i);
+                let r = ui.response_for(pin_satellite_wid(port));
+                self.pin_satellites.insert(
+                    port,
+                    SatelliteInfo {
+                        drag_started: r.drag_started(),
+                        dragging: r.drag_started() || r.drag_delta().is_some(),
+                    },
+                );
             }
         }
     }
