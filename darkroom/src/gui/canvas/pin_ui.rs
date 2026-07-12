@@ -197,7 +197,7 @@ impl PinUi {
                 && let Some(port) = scan_port_drag_start(geometry, scene)
             {
                 self.start = Some(port);
-            } else if let Some(port) = scan_satellite_drag_start(geometry, scene) {
+            } else if let Some(port) = scan_satellite_drag_start(ui, scene) {
                 self.start = Some(port);
             }
         }
@@ -212,8 +212,10 @@ impl PinUi {
         // Whichever widget the drag actually latched on (the port circle
         // for a fresh pin, the satellite for a reposition) reports the
         // live drag; the other stays permanently idle, so this OR
-        // correctly detects the release edge either way.
-        if geometry.ports.dragging(port) || geometry.satellite_dragging(out_port) {
+        // correctly detects the release edge either way. Only one pin
+        // drag is ever in flight, so this polls the satellite response
+        // directly rather than caching drag state for every pinned port.
+        if geometry.ports.dragging(port) || satellite_dragging(ui, out_port) {
             return;
         }
         let canvas_origin = ui
@@ -345,14 +347,14 @@ fn scan_port_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<Port
 
 /// First pinned output whose satellite's drag started this frame, or
 /// `None`. Only a pinned output has a satellite widget at all.
-fn scan_satellite_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<PortRef> {
+fn scan_satellite_drag_start(ui: &Ui, scene: &Scene) -> Option<PortRef> {
     for n in &scene.nodes {
         for (i, output) in scene.outputs(n.outputs).iter().enumerate() {
             if !output.pinned {
                 continue;
             }
             let port = OutputPort::new(n.id, i);
-            if geometry.satellite_drag_started(port) {
+            if ui.response_for(pin_satellite_wid(port)).drag_started() {
                 return Some(PortRef {
                     node_id: n.id,
                     kind: PortKind::Output,
@@ -362,6 +364,16 @@ fn scan_satellite_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option
         }
     }
     None
+}
+
+/// `true` while a drag started on `port`'s satellite is still live. Only
+/// one pin drag is ever in flight (unlike ports/events/subs, which can
+/// each have many simultaneously-relevant widgets), so this polls the
+/// widget's response directly rather than through a `CanvasGeometry`
+/// domain caching state for every pinned port.
+fn satellite_dragging(ui: &Ui, port: OutputPort) -> bool {
+    let r = ui.response_for(pin_satellite_wid(port));
+    r.drag_started() || r.drag_delta().is_some()
 }
 
 #[cfg(test)]
