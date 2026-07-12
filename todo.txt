@@ -12,4 +12,6 @@ cache input values for image viewer
 
 tooltip near the edge of screen overflows
 
-special preview node square preview
+optional inputs smaller than required
+
+doubleclick on output to enable preview
