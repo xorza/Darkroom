@@ -2,7 +2,7 @@
 //! visual families so a toggle can't be mistaken for a fact. **Controls** are
 //! bordered, hover-lifting chips you act on — `S` subgraph-open, `D` disable,
 //! `R`/`↓` cache, and the `i` inspect chip. **Markers** are flat tinted pills
-//! that only describe the node — `T` terminal and `~` impure. The markers ride
+//! that only describe the node — `■` sink and `~` impure. The markers ride
 //! in the [`header`] band beside the title; the run-time label (left) and the
 //! interactive controls (right) share the [`status_row`] below it. Drawn as
 //! the top children of each node body by [`crate::gui::node::NodeUI`].
@@ -113,9 +113,9 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 }
 
 /// The header bar: the node title (left) and the descriptive cluster (right) —
-/// the markers (`T`/`~`), then the inspect chip. A `FILL` spacer between them
+/// the markers (`■`/`~`), then the inspect chip. A `FILL` spacer between them
 /// pins the cluster to the right edge (the run-time label and the interactive
-/// controls ride in [`status_row`] below). The terminal nodes' event-
+/// controls ride in [`status_row`] below). The sink nodes' event-
 /// subscription pin is *not* drawn here — it records at canvas level, before the
 /// node bodies, so it peeks out from behind the node's corner.
 pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
@@ -152,12 +152,12 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
             // Read-only markers — what the node *is* (flat tinted pills, not
             // interactive, so they read as labels). They ride here beside the
             // title; the interactive controls stay in `status_row` below.
-            if node.terminal {
+            if node.sink {
                 Badge::marker(
-                    "badge_t",
-                    "T",
-                    theme.colors.badge_terminal,
-                    "Terminal — output sink",
+                    "badge_sink",
+                    "■",
+                    theme.colors.badge_sink,
+                    "Sink — no downstream consumers",
                 )
                 .show(ui);
             }
@@ -283,10 +283,10 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // ports and the status glow keep the stage.
             //
             // Both suppressed where caching can't apply: boundary nodes (pure
-            // routing), self-caching nodes (`uncacheable`), terminal sinks (no downstream consumer to serve a
+            // routing), self-caching nodes (`uncacheable`), sinks (no downstream consumer to serve a
             // cached output to), and impure nodes (no content digest, so no mode is
             // honored — the `~` marker shows why instead).
-            if !node.uncacheable && !node.terminal && !node.impure {
+            if !node.uncacheable && !node.sink && !node.impure {
                 let ram = node.cache.caches_in_ram();
                 let disk = node.cache.persists_to_disk();
                 let ram_color = if ram {
@@ -450,7 +450,7 @@ enum BadgeKind {
     Control { wid: WidgetId, filled: bool },
     /// Read-only descriptor: a borderless, tinted pill with its glyph inked in
     /// its own color. Never clickable — `salt` just gives it a stable id for the
-    /// tooltip. Markers (`T` terminal, `~` impure).
+    /// tooltip. Markers (`■` sink, `~` impure).
     Marker { salt: &'static str },
 }
 

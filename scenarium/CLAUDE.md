@@ -30,7 +30,7 @@ to the other:
 | `func_lambda.rs` | `FuncLambda`: the async node-function signature + `InvokeInput`/`InvokeResult`/`InvokeError`. |
 | `event_lambda.rs` | `EventLambda`: async event-handler signature. |
 | `macros.rs` | `async_lambda!` — ergonomic `FuncLambda` construction. |
-| `elements/` | Built-in node libraries: `math_library.rs` (Math), `system_library.rs` (System: print / to-string / concat), `worker_events_library.rs` (System: frame/fps events), `fs_watch_library.rs` (System: dir watch), `run_terminals.rs` (System: "Run on Event" — a portless terminal sink that re-runs all terminals when a subscribed event fires). |
+| `elements/` | Built-in node libraries: `math_library.rs` (Math), `system_library.rs` (System: print / to-string / concat), `worker_events_library.rs` (System: frame/fps events), `fs_watch_library.rs` (System: dir watch), `run_sinks.rs` (System: "Run on Event" — a portless sink that re-runs all sinks when a subscribed event fires). |
 | `execution/` | The compile→plan→execute pipeline (see below). |
 | `execution_stats.rs` | `ExecutionStats` per-run summary + `FlattenMap` (flat id → authoring attribution), `LogEntry`. |
 | `common/` | `AnyState` (per-node mutable state), `SharedAnyState` (concurrent event state). |
@@ -90,11 +90,11 @@ span-only. `ExecutionBinding` (`program.rs:26`) is `None`/`Const`/`Bind(address)
 
 **2. Plan — `Planner::plan()` → `ExecutionPlan`** (`plan.rs`).
 Reusable `Planner` (`plan.rs`) is **purely structural** — no cache/digest state.
-One backward DFS: collect terminals (terminal nodes, event subscribers, triggerable
+One backward DFS: collect sinks (sink nodes, event subscribers, triggerable
 events) → post-order `process_order` (deps first) — the single schedule, every reachable
-node, producer-first. A fired event whose subscriber is a `RunTerminals` special node
-(`SpecialNode::RunTerminals`) is promoted to a full terminal run — that node has no cone of
-its own; its effect is "when this event fires, re-run every terminal" (`collect_roots`). Whether a node *reuses* a cache or recomputes, and whether it's
+node, producer-first. A fired event whose subscriber is a `RunSinks` special node
+(`SpecialNode::RunSinks`) is promoted to a full sink run — that node has no cone of
+its own; its effect is "when this event fires, re-run every sink" (`collect_roots`). Whether a node *reuses* a cache or recomputes, and whether it's
 skipped (`MissingInputs`), is decided at execution, not here. `NodeVerdict` (`plan.rs`)
 is just `Execute`/`MissingInputs`. `ExecutionPlan` holds `process_order` + `verdicts` +
 `output_usage` (per-output consumer counts; 0 = skip) + `roots` (the walk roots, handed to
@@ -164,7 +164,7 @@ node libraries.
 A `Vec<WorkerMessage>` is **one atomic commit unit** — no partial batches.
 `WorkerMessage` covers `Update{compiled}` (a host-compiled `CompiledGraph` —
 compile errors never reach the worker; install is infallible), `SaveCaches{compiled}`,
-`Clear`, `ExecuteTerminals`, `ExecuteNodes`,
+`Clear`, `ExecuteSinks`, `ExecuteNodes`,
 `InjectEvents`, `Start/StopEventLoop`, `Sync`, `RequestArgumentValues`,
 `SetDiskStore(DiskStore)` (swap the engine's disk store — applied before
 any same-batch graph op so the next `Update` hydrates from the new store, e.g.

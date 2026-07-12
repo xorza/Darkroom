@@ -60,7 +60,7 @@ impl Prog {
 /// A `straight_plan` with an explicit per-output consumer count (indexed by output-pool
 /// index, so its length is `n_outputs`), instead of the all-`1` default. Lets a test claim
 /// more consumers than actually read (to prove the release waits for the full count) or none
-/// (a terminal sink, released the instant it runs).
+/// (a sink, released the instant it runs).
 fn plan_with_usage(program: &ExecutionProgram, output_usage: Vec<u32>) -> ExecutionPlan {
     assert_eq!(output_usage.len(), program.n_outputs());
     ExecutionPlan {
@@ -334,7 +334,7 @@ async fn holds_output_until_every_counted_consumer_reads() {
     );
 }
 
-/// A node no one consumes (a terminal sink, usage 0) is released the instant it finishes,
+/// A node no one consumes (a sink, usage 0) is released the instant it finishes,
 /// not held to end-of-run: a `None` output is dropped, a `Ram` output kept hot.
 #[tokio::test]
 async fn frees_zero_consumer_output_right_after_it_runs() {

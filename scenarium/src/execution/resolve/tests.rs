@@ -6,7 +6,7 @@ use crate::graph::NodeId;
 use crate::node::function::FuncId;
 use common::Span;
 
-/// Hand-built program for cut tests: each node is `(terminal, &[producer_idx])` — an edge
+/// Hand-built program for cut tests: each node is `(sink, &[producer_idx])` — an edge
 /// per listed producer, on its own input port. `compute_disposition` reads only the bindings and
 /// the roots, so no digests/lambdas are needed. Node `idx` gets id `from_u128(idx + 1)`.
 #[derive(Default)]

@@ -61,7 +61,7 @@ impl SubgraphRef {
 }
 
 /// A reusable composite definition: an interior `Graph` plus the interface it
-/// exposes. Behavior and terminal-ness are *derived* from the interior at
+/// exposes. Behavior and sink-ness are *derived* from the interior at
 /// flatten time, never stored here (so they can't drift).
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SubgraphDef {
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn zero_output_subgraph_omits_output_boundary() {
-        // in(msg) -> print (terminal). No SubgraphOutput node.
+        // in(msg) -> print (sink). No SubgraphOutput node.
         let library = test_func_lib(TestFuncHooks::default());
         let print_id = library.by_name("Print").unwrap().id;
 
@@ -378,7 +378,7 @@ mod tests {
         lib.add(
             Func::new(id, "ticker")
                 .category("Test")
-                .terminal()
+                .sink()
                 .event("tick", EventLambda::default()),
         );
         (lib, id)

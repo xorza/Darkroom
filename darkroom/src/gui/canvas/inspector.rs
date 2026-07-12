@@ -289,8 +289,8 @@ impl Inspectors {
                         },
                     );
                 }
-                if node.terminal {
-                    line(ui, "terminal", muted_style(theme, ui));
+                if node.sink {
+                    line(ui, "sink", muted_style(theme, ui));
                 }
                 let description = node.description.as_str();
                 if !description.is_empty() {

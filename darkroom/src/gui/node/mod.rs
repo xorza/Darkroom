@@ -227,7 +227,7 @@ impl NodeUI {
         // The subscription pin records just before the body so it peeks out
         // from behind this node's corner while riding the same cull decision
         // and stack position as the node itself.
-        if node.terminal {
+        if node.sink {
             subscription_pin(ui, theme, node, rcx.geometry.subs.is_hovered(node.id));
         }
 

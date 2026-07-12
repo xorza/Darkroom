@@ -118,7 +118,7 @@ mod cache_persistence {
             })
         };
 
-        // get_a (pure source) → mult (pure, persist Disk) → print (terminal).
+        // get_a (pure source) → mult (pure, persist Disk) → print (sink).
         let lib = make_lib();
         let mut graph = Graph::default();
         graph.add(node(&lib, "get_a", NodeId::unique()));
@@ -135,7 +135,7 @@ mod cache_persistence {
         // First run: everything computes; `mult` is stored to disk.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
 
         // Reopen: a fresh engine over the same store. `mult` loads from disk (reused). Its
@@ -144,7 +144,7 @@ mod cache_persistence {
         // recomputed on reopen (the win the removed plan-time pass used to give).
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             get_a_calls.load(Ordering::SeqCst),
             1,
@@ -169,7 +169,7 @@ mod cache_persistence {
         bumped.by_name_mut("mult").unwrap().version = 1;
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &bumped).unwrap();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             get_a_calls.load(Ordering::SeqCst),
             2,
@@ -229,14 +229,14 @@ mod cache_persistence {
         // Cold run: everything computes; mult is stored to disk.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
 
         // Reopen: mult reuses from disk, so the get_a→mult edge is cut — but print_direct
         // still reads get_a, so the union keeps get_a alive and it recomputes.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             get_a_calls.load(Ordering::SeqCst),
             2,
@@ -252,7 +252,7 @@ mod cache_persistence {
         );
     }
 
-    /// Two disk-cached nodes chained (`sum` → `mult`) under an executing terminal
+    /// Two disk-cached nodes chained (`sum` → `mult`) under an executing sink
     /// (`print`). On reopen only the frontier `mult` — the cached value `print`
     /// actually reads — is deserialized into RAM; the deeper `sum`, whose sole
     /// consumer `mult` is itself reused-from-disk (so never reads it), stays
@@ -299,13 +299,13 @@ mod cache_persistence {
         // First run: everything computes; sum (14) and mult (98) stored to disk.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
 
         // Reopen over the same store with fresh RAM, then run.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
 
         // The persist'd sum + mult reuse from disk. `get_a` feeds only the reused `sum` and
         // `mult` (neither reads it), so the pre-run cut prunes it — the `Memory` source is
@@ -402,7 +402,7 @@ mod cache_persistence {
 
         // Run 1 (cold): everything computes and stays resident; nothing evicted yet
         // (all of it is this run's own output).
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert!(
             engine
                 .runtime_slot(engine.by_name("sum").unwrap())
@@ -413,7 +413,7 @@ mod cache_persistence {
 
         // Run 2: only `print` runs, reading cached `mult` (frontier). `sum` is now
         // an untouched, reloadable leftover.
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             stats.executed_nodes.len(),
             1,
@@ -479,7 +479,7 @@ mod cache_persistence {
     }
 
     /// One row of the cache-mode matrix. Over a fresh store, build `get_a → mult(mode) →
-    /// print` (an impure terminal, so `mult` is needed every run), run twice on one engine,
+    /// print` (an impure sink, so `mult` is needed every run), run twice on one engine,
     /// then reopen with empty RAM. Asserts the four modes' *distinct* outcomes on the axes
     /// they differ on: cross-run reuse, RAM retention after the run, and disk persistence.
     async fn assert_mode_behavior(mode: CacheMode) {
@@ -502,13 +502,13 @@ mod cache_persistence {
         // Two runs on one engine: run 1 is cold; run 2 reveals cross-run reuse.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &lib).unwrap();
-        let run1 = engine.execute_terminals().await.unwrap();
+        let run1 = engine.execute_sinks().await.unwrap();
         assert!(
             ran(&run1, mult_id),
             "{mode:?}: mult computes on the cold run"
         );
 
-        let run2 = engine.execute_terminals().await.unwrap();
+        let run2 = engine.execute_sinks().await.unwrap();
         if mode == CacheMode::None {
             assert!(
                 ran(&run2, mult_id),
@@ -561,7 +561,7 @@ mod cache_persistence {
         // Reopen with empty RAM over the same store: only a disk-backed mode survives.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &lib).unwrap();
-        let reopen = engine.execute_terminals().await.unwrap();
+        let reopen = engine.execute_sinks().await.unwrap();
         if mode.persists_to_disk() {
             assert!(
                 cached(&reopen, mult_id),
@@ -628,7 +628,7 @@ mod cache_persistence {
         // Cold run computes A and B; B(Disk) persists — proving A(None) left B a digest.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &lib).unwrap();
-        let cold = engine.execute_terminals().await.unwrap();
+        let cold = engine.execute_sinks().await.unwrap();
         assert!(
             ran(&cold, a_id) && ran(&cold, b_id),
             "cold run computes A and B"
@@ -642,7 +642,7 @@ mod cache_persistence {
         // recomputed. Setting A to None disabled neither B's cache nor A's own reuse-cut.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &lib).unwrap();
-        let reopen = engine.execute_terminals().await.unwrap();
+        let reopen = engine.execute_sinks().await.unwrap();
         assert!(cached(&reopen, b_id), "B reloads from disk on reopen");
         assert!(
             !ran(&reopen, a_id),
@@ -686,19 +686,19 @@ mod cache_persistence {
 
         // Config A (Disk): mult = 2 * 3 = 6 → the blob (digest D_A) stored on disk.
         engine.update(&build(2, 3, CacheMode::Disk), &lib)?;
-        engine.execute_terminals().await?;
+        engine.execute_sinks().await?;
 
         // Config B (Ram): mult = 5 * 7 = 35 → slot now resident with 35 under B's
         // digest; the disk blob still carries D_A (Ram mode never writes).
         engine.update(&build(5, 7, CacheMode::Ram), &lib)?;
-        engine.execute_terminals().await?;
+        engine.execute_sinks().await?;
 
         // Flip back to A (Disk): the blob matches the current digest again, but the
         // slot holds 35 in RAM under B's (now superseded) digest. mult is pruned
         // (disk hit) and read as print's frontier — it must serve 6 from disk, not
         // the stale 35.
         engine.update(&build(2, 3, CacheMode::Disk), &lib)?;
-        let stats = engine.execute_terminals().await?;
+        let stats = engine.execute_sinks().await?;
 
         // mult is served from its disk blob, not recomputed — without this, a recompute
         // would yield 6 regardless and the stale-RAM path would go untested.
@@ -722,7 +722,7 @@ mod cache_persistence {
 
     /// A `persist` node is written to disk the moment *it* finishes, not in a batch at
     /// the end of the run — so its blob is already on disk by the time a downstream
-    /// node executes. The terminal `print` hook checks the store dir is non-empty when
+    /// node executes. The sink `print` hook checks the store dir is non-empty when
     /// it runs; that holds only because `mult` was persisted right after it finished,
     /// before `print` started. (Batched-at-the-end storing would leave the dir empty
     /// here.)
@@ -756,7 +756,7 @@ mod cache_persistence {
 
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &lib).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
 
         assert!(
             blob_present_when_print_ran.load(Ordering::SeqCst),
@@ -791,7 +791,7 @@ mod cache_persistence {
 
         // Run with Memory caching: mult computes (6) and stays resident, nothing on disk.
         engine.update(&build(CacheMode::Ram), &lib).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert!(
             std::fs::read_dir(&dir.0).unwrap().next().is_none(),
             "Memory caching writes nothing to disk"
@@ -834,7 +834,7 @@ mod cache_persistence {
 
         // Config A: mult runs and is stored, stamped with its digest D_A (one blob).
         engine.update(&build(2, 3), &lib).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(blob_count(&dir), 1, "config A's blob is stored");
         let blob_path = std::fs::read_dir(&dir.0)
             .unwrap()
@@ -899,7 +899,7 @@ mod cache_persistence {
         {
             let mut engine = disk_engine(&dir);
             engine.update(&graph, &lib).unwrap();
-            let stats = engine.execute_terminals().await.unwrap();
+            let stats = engine.execute_sinks().await.unwrap();
             assert!(ran(&stats, mult_id), "cold run computes mult");
         }
 
@@ -926,7 +926,7 @@ mod cache_persistence {
         {
             let mut engine = disk_engine(&dir);
             engine.update(&graph, &lib).unwrap();
-            let stats = engine.execute_terminals().await.unwrap();
+            let stats = engine.execute_sinks().await.unwrap();
             // The consumer reports the real reason — a failed cache load on its input,
             // not "an upstream dependency errored" (no upstream node holds an error).
             let print_id = graph.by_name("Print").unwrap().id;
@@ -947,7 +947,7 @@ mod cache_persistence {
         {
             let mut engine = disk_engine(&dir);
             engine.update(&graph, &lib).unwrap();
-            let stats = engine.execute_terminals().await.unwrap();
+            let stats = engine.execute_sinks().await.unwrap();
             assert!(
                 ran(&stats, mult_id),
                 "mult recomputes once its bad blob is gone"
@@ -959,7 +959,7 @@ mod cache_persistence {
         {
             let mut engine = disk_engine(&dir);
             engine.update(&graph, &lib).unwrap();
-            let stats = engine.execute_terminals().await.unwrap();
+            let stats = engine.execute_sinks().await.unwrap();
             assert!(!ran(&stats, mult_id), "the replaced blob is a clean hit");
         }
     }
@@ -983,7 +983,7 @@ mod cache_persistence {
             })
         };
 
-        // get_a → sum(persist) → print(terminal). print reads sum, so sum is the
+        // get_a → sum(persist) → print(sink). print reads sum, so sum is the
         // frontier the run must load.
         let lib = make_lib();
         let mut graph = Graph::default();
@@ -1001,7 +1001,7 @@ mod cache_persistence {
         // Run 1: writes sum's blob to disk.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         let after_run1 = recompute.load(Ordering::SeqCst);
 
         // Reopen, then remove sum's blob before the run reaches it.
@@ -1010,7 +1010,7 @@ mod cache_persistence {
         for entry in std::fs::read_dir(&dir.0).unwrap() {
             std::fs::remove_file(entry.unwrap().path()).unwrap();
         }
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
 
         // The run completes (no panic): the missing blob just misses, so sum recomputes.
         assert!(
@@ -1050,7 +1050,7 @@ mod cache_persistence {
         // `produce` is a pure, Disk-persisted source; its declared output type and
         // value are `Int` when `as_float` is false, `Float` when true — same func id
         // and version, so its digest (which folds neither) is identical either way.
-        // `consume` (terminal) reads it and records the value as f64.
+        // `consume` (sink) reads it and records the value as f64.
         let build_lib =
             |as_float: bool| -> Library {
                 let mut lib = Library::default();
@@ -1088,7 +1088,7 @@ mod cache_persistence {
                 lib.add(
                 Func::new(CONSUME, "consume")
                     .category("Test")
-                    .terminal()
+                    .sink()
                     .input(FuncInput::required("in", DataType::Any))
                     .lambda(async_lambda!(move |_, _, _, inputs, _, _| { recv = recv.clone() } => {
                         *recv.lock().unwrap() = inputs[0].value.as_f64().unwrap_or(f64::NAN);
@@ -1104,7 +1104,7 @@ mod cache_persistence {
             eg
         };
 
-        // produce(persist) → consume(terminal).
+        // produce(persist) → consume(sink).
         let int_lib = build_lib(false);
         let mut graph = Graph::default();
         let mut produce_node = node(&int_lib, "produce", NodeId::unique());
@@ -1117,7 +1117,7 @@ mod cache_persistence {
         // Run 1 (Int): produce runs, stores its Int blob; consume sees 7.
         let mut engine = engine_with(build_lib(false));
         engine.update(&graph, &int_lib).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(produce_runs.load(Ordering::SeqCst), 1);
         assert_eq!(*received.lock().unwrap(), 7.0);
 
@@ -1126,7 +1126,7 @@ mod cache_persistence {
         let float_lib = build_lib(true);
         let mut engine = engine_with(build_lib(true));
         engine.update(&graph, &float_lib).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(
             produce_runs.load(Ordering::SeqCst),
             2,
@@ -1162,12 +1162,12 @@ mod cache_persistence {
 
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &library).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
 
         // Reopen: mult must recompute — an impure cone has no digest, so it never caches to disk.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &library).unwrap();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert!(
             !stats.cached_nodes.contains(&mult_id),
             "impure-cone node must not be disk-cached"
@@ -1198,12 +1198,12 @@ mod cache_persistence {
 
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &library).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
 
         // Reopen: fresh RAM, nothing on disk for mult ⇒ it recomputes.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &library).unwrap();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert!(
             !stats.cached_nodes.contains(&mult_id),
             "a Memory-persistence node must not be disk-cached"
@@ -1275,7 +1275,7 @@ mod cache_persistence {
             }
         }
 
-        // A pure, terminal, disk-persisted func emitting a custom `Blob`. The type's
+        // A pure, sink, disk-persisted func emitting a custom `Blob`. The type's
         // codec is present only when `with_codec`.
         let blob_lib = |with_codec: bool, recompute: Arc<AtomicUsize>| -> Library {
             let mut library = Library::default();
@@ -1291,7 +1291,7 @@ mod cache_persistence {
                 Func::new(FUNC_ID, "make_blob")
                     .category("Test")
                     .pure()
-                    .terminal()
+                    .sink()
                     .output(FuncOutput::new("out", DataType::Custom(BLOB_TYPE.into())))
                     .lambda(async_lambda!(
                         move |_, _, _, _, _, outputs| { counter = recompute.clone() } => {
@@ -1329,7 +1329,7 @@ mod cache_persistence {
         engine
             .update(&graph, &blob_lib(true, recompute.clone()))
             .unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(recompute.load(Ordering::SeqCst), 1, "cold run computes");
 
         // Reopen with codec: served from disk (no recompute); inspection decodes it.
@@ -1337,7 +1337,7 @@ mod cache_persistence {
         engine
             .update(&graph, &blob_lib(true, recompute.clone()))
             .unwrap();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             recompute.load(Ordering::SeqCst),
             1,
@@ -1363,7 +1363,7 @@ mod cache_persistence {
         engine
             .update(&graph, &blob_lib(false, recompute.clone()))
             .unwrap();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             recompute.load(Ordering::SeqCst),
             2,
@@ -1448,11 +1448,11 @@ mod resource_binds {
         engine
     }
 
-    /// The terminal sink both fixtures share: records the received value's text.
+    /// The sink both fixtures share: records the received value's text.
     fn capture_func(captured: Arc<StdMutex<String>>) -> Func {
         Func::new(CAPTURE, "capture")
             .category("Test")
-            .terminal()
+            .sink()
             .input(FuncInput::required("Value", DataType::Any))
             .lambda(async_lambda!(
                 move |_, _, _, inputs, _, _| { captured = captured.clone() } => {
@@ -1594,7 +1594,7 @@ mod resource_binds {
 
         // Cold run: everything computes (the loader's pre-run digest is None — the
         // delivered value doesn't exist yet — so it re-stamps at reach time and runs).
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(loads.load(Ordering::SeqCst), 1);
         assert_eq!(annotates.load(Ordering::SeqCst), 1);
         assert_eq!(*captured.lock().unwrap(), "[v1]");
@@ -1602,7 +1602,7 @@ mod resource_binds {
         // Unchanged file: the loader reuses its RAM value under the full digest (producer
         // port + live file identity), and its *downstream* — whose digest folds the
         // loader's — skips too.
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             loads.load(Ordering::SeqCst),
             1,
@@ -1620,7 +1620,7 @@ mod resource_binds {
         // re-keys off the delivered value's file identity and the change propagates to its
         // downstream — while the structural upstream (make_path) stays a RAM hit.
         std::fs::write(&data.0, "v2-longer").unwrap();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             loads.load(Ordering::SeqCst),
             2,
@@ -1664,7 +1664,7 @@ mod resource_binds {
         // Cold run: computes and stores the blobs.
         let mut engine = disk_engine(&dir);
         engine.update(&fx.graph, &lib).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(loads.load(Ordering::SeqCst), 1);
         assert_eq!(annotates.load(Ordering::SeqCst), 1);
 
@@ -1672,7 +1672,7 @@ mod resource_binds {
         // and so is its downstream — each re-stamped at reach time, producer-first.
         let mut engine = disk_engine(&dir);
         engine.update(&fx.graph, &lib).unwrap();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             loads.load(Ordering::SeqCst),
             1,
@@ -1689,7 +1689,7 @@ mod resource_binds {
         assert_eq!(
             *captured.lock().unwrap(),
             "[v1]",
-            "the terminal reads the hydrated disk value"
+            "the sink reads the hydrated disk value"
         );
 
         // Reopen after an edit: the loader's key moved ⇒ recompute, propagating to its
@@ -1698,7 +1698,7 @@ mod resource_binds {
         std::fs::write(&data.0, "v2-longer").unwrap();
         let mut engine = disk_engine(&dir);
         engine.update(&fx.graph, &lib).unwrap();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             loads.load(Ordering::SeqCst),
             2,
@@ -1830,10 +1830,10 @@ mod resource_binds {
         engine.update(&graph, &lib).unwrap();
 
         // Cold run computes; a second run with the referent unchanged is a cache hit.
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(reads.load(Ordering::SeqCst), 1);
         assert_eq!(*captured.lock().unwrap(), "v1");
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             reads.load(Ordering::SeqCst),
             1,
@@ -1846,7 +1846,7 @@ mod resource_binds {
         // stays a RAM hit.
         store.version.store(2, Ordering::SeqCst);
         *store.content.lock().unwrap() = "v2".into();
-        let stats = engine.execute_terminals().await.unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             reads.load(Ordering::SeqCst),
             2,
@@ -1906,7 +1906,7 @@ mod graph_structure {
         assert_eq!(execution_graph.node_output_usage(sum)[0], 1);
         assert_eq!(execution_graph.node_output_usage(mult)[0], 1);
 
-        assert!(print.terminal);
+        assert!(print.sink);
 
         Ok(())
     }
@@ -2146,7 +2146,7 @@ mod missing_inputs {
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
         // Pre-fix, this panicked the worker; now the chain is gated and nothing runs.
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         // The run completes (no panic reading sum's absent output); the gated `mult`
         // never runs, so it never reads that value.
@@ -2253,7 +2253,7 @@ mod const_bindings {
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         // Only mult and print execute — the const binds detach mult from its
         // upstream, so get_a/get_b/sum are pruned.
@@ -2267,9 +2267,9 @@ mod const_bindings {
         let ran = |stats: &ExecutionStats, id| stats.executed_nodes.iter().any(|n| n.node_id == id);
 
         // Re-run with the same bindings: mult's digest is unchanged, so it's reused
-        // (cache hit); only print (impure terminal) actually recomputes.
+        // (cache hit); only print (impure sink) actually recomputes.
         execution_graph.update(&graph, &library).unwrap();
-        let stats = execution_graph.execute_terminals().await?;
+        let stats = execution_graph.execute_sinks().await?;
         assert!(stats.cached_nodes.contains(&mult_id), "mult reused");
         assert!(!ran(&stats, mult_id), "mult did not recompute");
         assert!(ran(&stats, print_id), "print recomputes");
@@ -2277,7 +2277,7 @@ mod const_bindings {
         // Change one const: mult's digest changes ⇒ cache miss ⇒ it re-executes.
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
         execution_graph.update(&graph, &library).unwrap();
-        let stats = execution_graph.execute_terminals().await?;
+        let stats = execution_graph.execute_sinks().await?;
         assert!(ran(&stats, mult_id), "a const change recomputes mult");
         assert!(ran(&stats, print_id));
 
@@ -2299,7 +2299,7 @@ mod const_bindings {
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -2309,14 +2309,14 @@ mod const_bindings {
         // Same const value: no re-execution of mult
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
 
         // Different const value: mult re-executes
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -2325,7 +2325,7 @@ mod const_bindings {
 
         // Stable again
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
 
@@ -2343,7 +2343,7 @@ mod const_bindings {
         bind(&mut graph, "sum", 0, Binding::Const(33.into()));
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -2354,7 +2354,7 @@ mod const_bindings {
         bind(&mut graph, "sum", 1, Binding::None);
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -2375,7 +2375,7 @@ mod const_bindings {
         bind(&mut graph, "sum", 0, Binding::Const(33.into()));
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -2386,7 +2386,7 @@ mod const_bindings {
         bind(&mut graph, "sum", 0, (get_b_id, 0).into());
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -2404,14 +2404,14 @@ mod const_bindings {
         let mut execution_graph = ExecutionEngine::default();
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         // Switch mult inputs to const/none
         bind(&mut graph, "mult", 0, Binding::Const(2.into()));
         bind(&mut graph, "mult", 1, Binding::None);
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -2420,7 +2420,7 @@ mod const_bindings {
 
         // Stable on rerun
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
 
@@ -2444,11 +2444,11 @@ mod behavior {
         execution_graph.update(&graph, &library).unwrap();
 
         // First run: get_b (pure source) executes.
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
         assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
         // Re-run: get_b's digest is unchanged, so it reuses its RAM output — skipped.
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
         assert!(!execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
         Ok(())
@@ -2461,15 +2461,15 @@ mod behavior {
         let mut execution_graph = ExecutionEngine::default();
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
             ["sum", "mult", "Print"]
         );
 
-        // Second run: only print (impure terminal) re-executes, others cached
-        let exe_stats = execution_graph.execute_terminals().await?;
+        // Second run: only print (impure sink) re-executes, others cached
+        let exe_stats = execution_graph.execute_sinks().await?;
         assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
         assert_eq!(exe_stats.cached_nodes.len(), 4);
 
@@ -2499,7 +2499,7 @@ mod behavior {
         let stats = eg
             .execute(
                 RunSeeds {
-                    terminals: true,
+                    sinks: true,
                     ..Default::default()
                 },
                 Some(&tx),
@@ -2564,7 +2564,7 @@ mod behavior {
         let stats = eg
             .execute(
                 RunSeeds {
-                    terminals: true,
+                    sinks: true,
                     ..Default::default()
                 },
                 None,
@@ -2582,7 +2582,7 @@ mod behavior {
         let stats = eg
             .execute(
                 RunSeeds {
-                    terminals: true,
+                    sinks: true,
                     ..Default::default()
                 },
                 None,
@@ -2621,7 +2621,7 @@ mod behavior {
         let library: Library = [Func::new("8400cb3a-a5d2-4fcd-a9d8-0ab4880c710f", "self_cancel")
             .category("Debug")
             .pure()
-            .terminal()
+            .sink()
             .output(FuncOutput::new("out", DataType::Int))
             .lambda(async_lambda!(
                 move |ctx, _, _, _, _, outputs| { cancel_first = Arc::clone(&cancel_first) } => {
@@ -2650,7 +2650,7 @@ mod behavior {
         let stats = eg
             .execute(
                 RunSeeds {
-                    terminals: true,
+                    sinks: true,
                     ..Default::default()
                 },
                 None,
@@ -2676,7 +2676,7 @@ mod behavior {
         let stats = eg
             .execute(
                 RunSeeds {
-                    terminals: true,
+                    sinks: true,
                     ..Default::default()
                 },
                 None,
@@ -2715,7 +2715,7 @@ mod behavior {
             Func::new("8003e30b-0417-474d-a77f-1d3ea71ac6b3", "always_cancel")
                 .category("Debug")
                 .pure()
-                .terminal()
+                .sink()
                 .output(FuncOutput::new("out", DataType::Int))
                 .lambda(async_lambda!(move |_, _, _, _, _, _| {
                     Err(InvokeError::Cancelled)
@@ -2735,7 +2735,7 @@ mod behavior {
         let stats = eg
             .execute(
                 RunSeeds {
-                    terminals: true,
+                    sinks: true,
                     ..Default::default()
                 },
                 None,
@@ -2793,7 +2793,7 @@ mod behavior {
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         let slot = execution_graph.runtime_slot(execution_graph.by_name("get_b").unwrap());
         let outputs = slot
@@ -2844,7 +2844,7 @@ mod composite_behavior {
             .output(int_output("Out"))
     }
 
-    /// Main graph: one instance of `def` whose output feeds a terminal `print`.
+    /// Main graph: one instance of `def` whose output feeds a sink `print`.
     fn main_with(library: &Library, def: SubgraphDef) -> Graph {
         let def_id = def.id;
         let mut graph = Graph::default();
@@ -2949,7 +2949,7 @@ mod composite_behavior {
     /// A node seed can target a *subgraph-interior* node by its authoring id: the seed
     /// resolves through the flatten map (interior flat ids are hashed from the descent
     /// path), runs just that node, and its value reads back under the same authoring id.
-    /// The terminal `print` (panicking hook) never fires.
+    /// The sink `print` (panicking hook) never fires.
     #[tokio::test]
     async fn seeding_a_subgraph_interior_node_runs_only_it() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -3035,7 +3035,7 @@ mod invalidation {
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert!(!execution_graph.compiled.program.e_nodes.is_empty());
 
@@ -3087,7 +3087,7 @@ mod execution {
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
         // sum = get_a + get_b = 2 + 5 = 7, mult = sum * get_b = 7 * 5 = 35
         assert_eq!(test_values.try_lock()?.result, 35);
 
@@ -3096,7 +3096,7 @@ mod execution {
         test_values.try_lock()?.b = 7;
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
         // Make get_b Impure: now it re-reads the value
@@ -3104,7 +3104,7 @@ mod execution {
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
         // sum = 2 + 7 = 9, mult = 9 * 7 = 63
         assert_eq!(test_values.try_lock()?.result, 63);
 
@@ -3123,10 +3123,10 @@ mod execution {
 
         execution_graph.update(&graph, &library).unwrap();
 
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
         let order1 = execution_graph.plan.process_order.clone();
 
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
         let order2 = execution_graph.plan.process_order.clone();
 
         // The schedule is deterministic — stable across runs (what actually *runs* can
@@ -3147,11 +3147,11 @@ mod execution {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
         let run1 = execution_node_names_in_order(&eg);
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
         let run2 = execution_node_names_in_order(&eg);
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
         let run3 = execution_node_names_in_order(&eg);
 
         // First run executes everything; once the pure upstream is cached, runs 2
@@ -3180,14 +3180,14 @@ mod execution {
         let mut execution_graph = ExecutionEngine::default();
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         // Switch mult to const inputs
         bind(&mut graph, "mult", 0, Binding::Const(2.into()));
         bind(&mut graph, "mult", 1, Binding::Const(21.into()));
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -3199,7 +3199,7 @@ mod execution {
         bind(&mut graph, "mult", 0, (get_b_id, 0).into());
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -3231,7 +3231,7 @@ mod execution {
             "partial_writer",
         )
         .category("Debug")
-        .terminal()
+        .sink()
         .output(FuncOutput::new("a", DataType::Int))
         .output(FuncOutput::new("b", DataType::Int))
         .lambda(async_lambda!(
@@ -3260,7 +3260,7 @@ mod execution {
         eg.update(&graph, &library).unwrap();
 
         // Run 1: both ports written.
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
         let outputs = eg
             .runtime_slot(eg.by_name("partial_writer").unwrap())
             .output_values()
@@ -3274,7 +3274,7 @@ mod execution {
 
         // Run 2: only port 0 is written. With no pre-run wipe the lambda reuses the
         // slot's buffer in place, so port 1 keeps run 1's `20`.
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
         let outputs = eg
             .runtime_slot(eg.by_name("partial_writer").unwrap())
             .output_values()
@@ -3401,12 +3401,12 @@ mod node_seeds {
         );
     }
 
-    /// Node seeds combine with a terminal run: one run drives the terminals (`Print`
+    /// Node seeds combine with a sink run: one run drives the sinks (`Print`
     /// fires with 132 = (1+11)*11) *and* pins `sum` — whose value survives its real
     /// consumer's read via the extra virtual consumer — while the unpinned `mult` is
     /// drained by `Print` as usual.
     #[tokio::test]
-    async fn node_seed_combines_with_a_terminal_run_and_still_retains() {
+    async fn node_seed_combines_with_a_sink_run_and_still_retains() {
         let printed: Arc<StdMutex<Vec<i64>>> = Arc::new(StdMutex::new(Vec::new()));
         let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(|| Ok(1)),
@@ -3423,7 +3423,7 @@ mod node_seeds {
         let sum_id = graph.by_name("sum").unwrap().id;
         eg.execute(
             RunSeeds {
-                terminals: true,
+                sinks: true,
                 nodes: vec![sum_id],
                 ..Default::default()
             },
@@ -3500,7 +3500,7 @@ mod argument_values {
         let mult_id = graph.by_name("mult").unwrap().id;
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         let values = execution_graph.get_argument_values(&mult_id).unwrap();
 
@@ -3536,7 +3536,7 @@ mod argument_values {
         let mut execution_graph = ExecutionEngine::default();
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         // sum: inputs are get_a(2.0) and get_b(5.0), output is 2+5=7
         let sum_id = graph.by_name("sum").unwrap().id;
@@ -3599,7 +3599,7 @@ mod argument_values {
         let mult_id = graph.by_name("mult").unwrap().id;
 
         execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_terminals().await?;
+        execution_graph.execute_sinks().await?;
 
         let values = execution_graph.get_argument_values(&mult_id).unwrap();
 
@@ -3649,7 +3649,7 @@ mod error_propagation {
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
 
-        let stats = execution_graph.execute_terminals().await?;
+        let stats = execution_graph.execute_sinks().await?;
 
         // Errors are reported through the run stats (the per-run channel), not the
         // cross-run cache; the cache only reflects which outputs survived.
@@ -3718,7 +3718,7 @@ mod stats {
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
-        let stats = execution_graph.execute_terminals().await?;
+        let stats = execution_graph.execute_sinks().await?;
 
         // sum[0] should appear in missing_inputs
         let sum_id = graph.by_name("sum").unwrap().id;
@@ -3741,7 +3741,7 @@ mod stats {
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
-        let stats = execution_graph.execute_terminals().await?;
+        let stats = execution_graph.execute_sinks().await?;
 
         // All 5 nodes should be reported as executed
         assert_eq!(stats.executed_nodes.len(), 5);
@@ -3791,14 +3791,14 @@ mod events {
 
     // `emit`: impure source with output 0 and one event ("tick") subscribed to
     // by `recv`. `recv`: impure sink bound to emit's output. Neither is a
-    // terminal, so only event-driven execution reaches them.
+    // sink, so only event-driven execution reaches them.
     fn build() -> EventFixture {
         let emit_calls = Arc::new(Mutex::new(0));
         let recv_values = Arc::new(Mutex::new(Vec::new()));
         let emit_calls_l = emit_calls.clone();
         let recv_values_l = recv_values.clone();
 
-        // Both funcs are Impure non-terminals (the `Func::new` default).
+        // Both funcs are Impure non-sinks (the `Func::new` default).
         let mut library = Library::default();
         library.add(
             Func::new(EMIT_FUNC, "emit")
@@ -3875,7 +3875,7 @@ mod events {
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
 
-        // terminals=false, event_triggers=true → emit (owns a subscribed event)
+        // sinks=false, event_triggers=true → emit (owns a subscribed event)
         // becomes a root; recv is downstream of emit, not a root.
         eg.execute(
             RunSeeds {
@@ -3924,15 +3924,15 @@ mod events {
     #[tokio::test(flavor = "multi_thread")]
     async fn active_event_triggers_empty_without_subscribers() -> anyhow::Result<()> {
         let mut f = build();
-        // Drop the subscriber but keep emit reachable by making it a terminal.
+        // Drop the subscriber but keep emit reachable by making it a sink.
         let emit_id = f.emit_id;
         let recv_id = f.graph.by_name("recv").unwrap().id;
         f.graph.unsubscribe(emit_id, 0, recv_id);
-        f.library.by_name_mut("emit").unwrap().terminal = true;
+        f.library.by_name_mut("emit").unwrap().sink = true;
 
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
-        let stats = eg.execute_terminals().await?;
+        let stats = eg.execute_sinks().await?;
 
         // emit ran, but its event has no subscribers → no live triggers.
         assert!(stats.executed_nodes.iter().any(|n| n.node_id == f.emit_id));
@@ -3944,13 +3944,13 @@ mod events {
     const SOURCE_FUNC: FuncId = FuncId::from_u128(0xE401);
     const SINK_FUNC: FuncId = FuncId::from_u128(0xE402);
 
-    /// A `RunTerminals` special node subscribed to an event fires no cone of its own
-    /// (it has no ports) — instead firing that event runs *every* terminal, exactly as
-    /// pressing "Run" would. Here `emit`'s tick reaches only the `RunTerminals` sink, yet
-    /// the independent `source → sink` terminal cone runs, while `emit` (not a terminal,
+    /// A `RunSinks` special node subscribed to an event fires no cone of its own
+    /// (it has no ports) — instead firing that event runs *every* sink, exactly as
+    /// pressing "Run" would. Here `emit`'s tick reaches only the `RunSinks` sink, yet
+    /// the independent `source → sink` cone runs, while `emit` (not a sink,
     /// not in that cone) does not.
     #[tokio::test(flavor = "multi_thread")]
-    async fn run_terminals_sink_runs_all_terminals_on_event() -> anyhow::Result<()> {
+    async fn run_sinks_node_runs_all_sinks_on_event() -> anyhow::Result<()> {
         use crate::graph::NodeKind;
         use crate::node::special::SpecialNode;
 
@@ -3970,7 +3970,7 @@ mod events {
                     Ok(())
                 })),
         );
-        // An impure source feeding the terminal — proves the terminal's whole cone runs.
+        // An impure source feeding the sink — proves the sink's whole cone runs.
         library.add(
             Func::new(SOURCE_FUNC, "source")
                 .output(FuncOutput::new("out", DataType::Int))
@@ -3983,10 +3983,10 @@ mod events {
                     }
                 )),
         );
-        // An impure terminal sink recording each value it receives.
+        // An impure sink recording each value it receives.
         library.add(
             Func::new(SINK_FUNC, "sink")
-                .terminal()
+                .sink()
                 .input(FuncInput::required("in", DataType::Int))
                 .lambda(async_lambda!(
                     move |_, _, _, inputs, _, _| { values = sink_l.clone() } => {
@@ -4005,8 +4005,8 @@ mod events {
         graph.add(node(&library, "emit", emit_id));
         graph.add(node(&library, "source", source_id));
         graph.add(node(&library, "sink", sink_id));
-        // The RunTerminals sink — no ports; subscribes to emit's tick.
-        let mut trigger = Node::new(NodeKind::Special(SpecialNode::RunTerminals));
+        // The RunSinks sink — no ports; subscribes to emit's tick.
+        let mut trigger = Node::new(NodeKind::Special(SpecialNode::RunSinks));
         trigger.id = trigger_id;
         trigger.name = "trigger".to_string();
         graph.add(trigger);
@@ -4026,7 +4026,7 @@ mod events {
             }])
             .await?;
 
-        // The terminal cone ran; emit (neither a terminal nor in that cone) did not.
+        // The sink cone ran; emit (neither a sink nor in that cone) did not.
         let ran = execution_node_names_in_order(&eg);
         assert!(ran.contains(&"source".to_string()), "ran = {ran:?}");
         assert!(ran.contains(&"sink".to_string()), "ran = {ran:?}");
@@ -4035,8 +4035,8 @@ mod events {
         assert_eq!(*sink_values.lock().await, vec![1]);
         assert_eq!(stats.triggered_events.len(), 1);
 
-        // The RunTerminals sink is itself a terminal, so it runs (its no-op lambda)
-        // alongside the promoted terminals — never seeded as a plain subscriber cone.
+        // The RunSinks sink is itself a sink, so it runs (its no-op lambda)
+        // alongside the promoted sinks — never seeded as a plain subscriber cone.
         assert!(ran.contains(&"trigger".to_string()), "ran = {ran:?}");
         let trigger_idx = eg
             .compiled
@@ -4046,16 +4046,16 @@ mod events {
             .unwrap();
         assert!(
             eg.plan.process_order.iter().any(|i| i.idx() == trigger_idx),
-            "the RunTerminals sink runs as a terminal"
+            "the RunSinks sink runs as a sink"
         );
 
         Ok(())
     }
 
-    /// Without the `RunTerminals` sink, firing `emit`'s tick reaches no subscriber, so
-    /// the same terminal cone is left untouched — isolating the sink as the cause.
+    /// Without the `RunSinks` sink, firing `emit`'s tick reaches no subscriber, so
+    /// the same sink cone is left untouched — isolating the sink as the cause.
     #[tokio::test(flavor = "multi_thread")]
-    async fn event_without_run_terminals_sink_runs_nothing() -> anyhow::Result<()> {
+    async fn event_without_run_sinks_sink_runs_nothing() -> anyhow::Result<()> {
         let source_calls = Arc::new(Mutex::new(0i64));
         let source_l = source_calls.clone();
 
@@ -4078,7 +4078,7 @@ mod events {
         );
         library.add(
             Func::new(SINK_FUNC, "sink")
-                .terminal()
+                .sink()
                 .input(FuncInput::required("in", DataType::Int))
                 .lambda(async_lambda!(move |_, _, _, _, _, _| { Ok(()) })),
         );
@@ -4141,7 +4141,7 @@ mod output_usage {
         );
         library.add(
             Func::new(SINK_FUNC, "sink")
-                .terminal()
+                .sink()
                 .input(FuncInput::required("in", DataType::Int))
                 .lambda(async_lambda!(|_, _, _, _, _, _| { Ok(()) })),
         );
@@ -4157,7 +4157,7 @@ mod output_usage {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
 
         let split = eg.by_name("split").unwrap();
         assert_eq!(eg.node_output_usage(split)[0], 1);
@@ -4204,7 +4204,7 @@ mod topology {
         assert_eq!(eg.compiled.program.e_nodes.len(), 4);
         assert!(eg.by_name("get_b").is_none());
 
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
 
         // sum = get_a(2) + none(0) = 2; mult = sum(2) * none(default 1) = 2
         assert_eq!(*printed.lock().await, 2);
@@ -4234,7 +4234,7 @@ mod topology {
 
         assert!(eg.is_empty());
 
-        let stats = eg.execute_terminals().await?;
+        let stats = eg.execute_sinks().await?;
         assert!(stats.executed_nodes.is_empty());
         assert!(stats.node_errors.is_empty());
         assert!(stats.missing_inputs.is_empty());
@@ -4243,7 +4243,7 @@ mod topology {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn multiple_terminals_all_execute() -> anyhow::Result<()> {
+    async fn multiple_sinks_all_execute() -> anyhow::Result<()> {
         let printed = Arc::new(Mutex::new(Vec::<i64>::new()));
         let printed_l = printed.clone();
         let library = test_func_lib(TestFuncHooks {
@@ -4252,7 +4252,7 @@ mod topology {
             print: Arc::new(move |v| printed_l.try_lock().unwrap().push(v)),
         });
 
-        // Two independent terminal chains: get_a→print1, get_b→print2.
+        // Two independent sink chains: get_a→print1, get_b→print2.
         let get_a_id = NodeId::unique();
         let get_b_id = NodeId::unique();
         let print1_id = NodeId::unique();
@@ -4269,9 +4269,9 @@ mod topology {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        let stats = eg.execute_terminals().await?;
+        let stats = eg.execute_sinks().await?;
 
-        // Both terminals plus both sources execute exactly once.
+        // Both sinks plus both sources execute exactly once.
         assert_eq!(stats.executed_nodes.len(), 4);
         let mut got = printed.lock().await.clone();
         got.sort();
@@ -4316,7 +4316,7 @@ mod topology {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
         assert_eq!(*calls_a.lock().await, 1); // get_a ran once
         let idx_before = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
 
@@ -4329,7 +4329,7 @@ mod topology {
         let idx_after = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
         assert_ne!(idx_before, idx_after, "get_a should have been reordered");
 
-        let stats = eg.execute_terminals().await?;
+        let stats = eg.execute_sinks().await?;
 
         // get_a (Pure) stays cached, not re-executed, despite the reorder…
         assert_eq!(*calls_a.lock().await, 1, "get_a recomputed after reorder");
@@ -4366,7 +4366,7 @@ mod topology {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
 
         for round in 0..3 {
             // Add a get_b → print chain.
@@ -4379,7 +4379,7 @@ mod topology {
             eg.update(&graph, &library).unwrap();
             assert_eq!(eg.compiled.program.e_nodes.len(), 4, "round {round} grow");
             printed.lock().await.clear();
-            eg.execute_terminals().await?;
+            eg.execute_sinks().await?;
             let mut got = printed.lock().await.clone();
             got.sort();
             assert_eq!(got, vec![2, 5], "round {round} grow values");
@@ -4391,7 +4391,7 @@ mod topology {
             eg.update(&graph, &library).unwrap();
             assert_eq!(eg.compiled.program.e_nodes.len(), 2, "round {round} shrink");
             printed.lock().await.clear();
-            eg.execute_terminals().await?;
+            eg.execute_sinks().await?;
             assert_eq!(
                 *printed.lock().await,
                 vec![2],
@@ -4419,7 +4419,7 @@ mod previews {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
 
         // For non-Custom values gen_preview is a no-op, so the preview variant
         // must return exactly the same values as the plain accessor.
@@ -4524,7 +4524,7 @@ mod subgraph {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
 
         assert_eq!(*captured.lock().unwrap(), vec![6]); // 2 + 4
         Ok(())
@@ -4576,7 +4576,7 @@ mod subgraph {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
 
         assert_eq!(*captured.lock().unwrap(), vec![7]); // get_a only; get_b pruned
         Ok(())
@@ -4590,7 +4590,7 @@ mod subgraph {
         let def = wrap_sum_def(&library);
 
         // C.in0 <- C.out0 (self-cycle through the composite); print <- C.out0
-        // so the cyclic node is reachable from a terminal.
+        // so the cyclic node is reachable from a sink.
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let c_id = c.id;
         let print = fnode(&library, "Print");
@@ -4605,7 +4605,7 @@ mod subgraph {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        let result = eg.execute_terminals().await;
+        let result = eg.execute_sinks().await;
 
         assert!(
             matches!(result, Err(Error::CycleDetected { .. })),
@@ -4751,7 +4751,7 @@ mod subgraph {
         library.add(
             Func::new(FuncId::unique(), "ticker")
                 .category("Test")
-                .terminal()
+                .sink()
                 .event("tick", EventLambda::default()),
         );
     }
@@ -4892,7 +4892,7 @@ mod subgraph {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
 
         let mut got = captured.lock().unwrap().clone();
         got.sort();
@@ -4936,7 +4936,7 @@ mod subgraph {
         }
 
         eg.update(&graph, &library).unwrap();
-        eg.execute_terminals().await?;
+        eg.execute_sinks().await?;
 
         let mut got = captured.lock().unwrap().clone();
         got.sort();
@@ -5076,7 +5076,7 @@ mod mid_run_release {
         }
     }
 
-    /// A `relay` (pure, custom→custom, emits a fresh `Tracked`) + a terminal `sink` that
+    /// A `relay` (pure, custom→custom, emits a fresh `Tracked`) + a `sink` that
     /// consumes one, over the shared `tracker`.
     fn relay_library(tracker: Arc<StdMutex<LiveTracker>>) -> Library {
         let mut library = Library::default();
@@ -5104,7 +5104,7 @@ mod mid_run_release {
         library.add(
             Func::new(SINK_FUNC, "sink")
                 .category("Test")
-                .terminal()
+                .sink()
                 .input(FuncInput::required(
                     "in",
                     DataType::Custom(TRACKED_TYPE.into()),
@@ -5137,7 +5137,7 @@ mod mid_run_release {
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
 
         tracker.lock().unwrap().peak
     }
@@ -5162,7 +5162,7 @@ mod mid_run_release {
 
     const PROBE_FUNC: &str = "a19f251a-465c-4a05-b9e3-f4a4c2389733";
 
-    /// [`relay_library`] plus a `probe` terminal that takes its input value out of the
+    /// [`relay_library`] plus a `probe` sink that takes its input value out of the
     /// invoke buffer and records whether it was uniquely owned (`into_custom` succeeded)
     /// — the observable contract of the executor's move-on-last-use.
     fn probe_library(
@@ -5173,7 +5173,7 @@ mod mid_run_release {
         library.add(
             Func::new(PROBE_FUNC, "probe")
                 .category("Test")
-                .terminal()
+                .sink()
                 .input(FuncInput::required(
                     "in",
                     DataType::Custom(TRACKED_TYPE.into()),
@@ -5218,7 +5218,7 @@ mod mid_run_release {
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
 
         ProbeRun {
             unique_reads: unique_reads.lock().unwrap().clone(),
@@ -5293,7 +5293,7 @@ mod compile_regressions {
                 })),
             Func::new("001fccec-5732-41c6-b448-379d4cf40dc3", "sink")
                 .category("Test")
-                .terminal()
+                .sink()
                 .input(FuncInput::required("In", DataType::Any))
                 .lambda(async_lambda!(|_, _, _, _, _, _| { Ok(()) })),
         ]
@@ -5368,7 +5368,7 @@ mod compile_regressions {
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &lib_v1).unwrap();
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(*printed.lock().unwrap(), vec![1], "v1 lambda ran");
 
         // v2: same FuncId, one more input, bumped version, different lambda.
@@ -5381,7 +5381,7 @@ mod compile_regressions {
             1,
             "the reused flat node picked up the grown input list"
         );
-        engine.execute_terminals().await.unwrap();
+        engine.execute_sinks().await.unwrap();
         assert_eq!(
             *printed.lock().unwrap(),
             vec![1, 2],
@@ -5441,7 +5441,7 @@ mod compile_regressions {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        eg.execute_terminals().await.unwrap();
+        eg.execute_sinks().await.unwrap();
 
         assert!(
             eg.by_id(&sum_interior_id).is_none(),

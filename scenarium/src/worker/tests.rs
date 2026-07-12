@@ -25,7 +25,7 @@ fn messages(stats: &ExecutionStats) -> Vec<String> {
 }
 
 /// End-to-end fixture for Worker tests that run a graph with a
-/// `frame event` source and a terminal `print`. Builds the func lib,
+/// `frame event` source and a sink `print`. Builds the func lib,
 /// the standard 3-node graph, and a worker whose callback forwards
 /// results into an mpsc; exposes helpers for the two messages used
 /// most often (`Update` with the fixture graph; a frame-event
@@ -382,12 +382,12 @@ async fn events_are_deduplicated() {
 }
 
 #[tokio::test]
-async fn execute_terminals_triggers_terminal_nodes() {
+async fn execute_sinks_triggers_sink_nodes() {
     use crate::data::StaticValue;
 
     let library = system_library();
 
-    // Simple single-terminal graph — doesn't use FrameHarness' frame-event setup.
+    // Simple single-sink graph — doesn't use FrameHarness' frame-event setup.
     let mut graph = Graph::default();
     let print_func = library.by_name("Print").unwrap();
 
@@ -412,7 +412,7 @@ async fn execute_terminals_triggers_terminal_nodes() {
             WorkerMessage::Update {
                 compiled: Compiler::default().compile(&graph, &library).unwrap(),
             },
-            WorkerMessage::ExecuteTerminals,
+            WorkerMessage::ExecuteSinks,
         ])
         .unwrap();
 
@@ -452,12 +452,12 @@ async fn worker_streams_node_progress_before_finished() {
             WorkerMessage::Update {
                 compiled: Compiler::default().compile(&graph, &library).unwrap(),
             },
-            WorkerMessage::ExecuteTerminals,
+            WorkerMessage::ExecuteSinks,
         ])
         .unwrap();
 
     // The single node's Started + Finished progress both arrive (mapped to its
-    // authoring id) ahead of the terminal `Finished` report.
+    // authoring id) ahead of the sink `Finished` report.
     let mut started = 0;
     let mut node_finished = 0;
     loop {
@@ -517,7 +517,7 @@ async fn stale_cancel_is_cleared_at_run_start() {
             WorkerMessage::Update {
                 compiled: Compiler::default().compile(&graph, &library).unwrap(),
             },
-            WorkerMessage::ExecuteTerminals,
+            WorkerMessage::ExecuteSinks,
         ])
         .unwrap();
 
@@ -573,7 +573,7 @@ async fn request_argument_values_invokes_callback() {
 }
 
 /// `ExecuteNodes` end-to-end: an `Update` + `ExecuteNodes` batch runs only the seeded
-/// node's cone (3 of the fixture's 5 nodes; the terminal `Print` panics if reached),
+/// node's cone (3 of the fixture's 5 nodes; the sink `Print` panics if reached),
 /// and the pinned output — every node forced to `CacheMode::None` — is then served by
 /// `RequestArgumentValues`.
 #[tokio::test]
@@ -921,9 +921,9 @@ fn empty_worker() -> (Worker, mpsc::Receiver<ExecResult<ExecutionStats>>) {
 }
 
 #[tokio::test]
-async fn execute_terminals_on_empty_graph_is_silent_noop() {
+async fn execute_sinks_on_empty_graph_is_silent_noop() {
     let (worker, mut rx) = empty_worker();
-    worker.send(WorkerMessage::ExecuteTerminals).unwrap();
+    worker.send(WorkerMessage::ExecuteSinks).unwrap();
     assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
 }
 
@@ -953,14 +953,14 @@ async fn start_event_loop_on_empty_graph_is_silent_noop() {
 }
 
 // F4 regression: when a batch triggers both an execution
-// (ExecuteTerminals or InjectEvents) and StartEventLoop, the commit
+// (ExecuteSinks or InjectEvents) and StartEventLoop, the commit
 // phase must run execute() once and fire the callback once — not twice.
 
 #[tokio::test]
-async fn execute_terminals_with_start_event_loop_fires_callback_once() {
+async fn execute_sinks_with_start_event_loop_fires_callback_once() {
     use crate::data::StaticValue;
 
-    // Terminal-only graph: active_event_triggers() returns empty, so
+    // Sink-only graph: active_event_triggers() returns empty, so
     // the loop never actually spawns. This removes lambda-driven
     // callbacks as a confounding factor while still exercising the
     // should_start_event_loop branch.
@@ -989,7 +989,7 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
             WorkerMessage::Update {
                 compiled: Compiler::default().compile(&graph, &library).unwrap(),
             },
-            WorkerMessage::ExecuteTerminals,
+            WorkerMessage::ExecuteSinks,
             WorkerMessage::StartEventLoop,
         ])
         .unwrap();
@@ -1003,11 +1003,11 @@ async fn execute_terminals_with_start_event_loop_fires_callback_once() {
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
         compute_finish_rx.try_recv().is_err(),
-        "ExecuteTerminals+StartEventLoop must fire callback exactly once"
+        "ExecuteSinks+StartEventLoop must fire callback exactly once"
     );
     assert!(
         !worker.is_event_loop_started(),
-        "terminal-only graph yields no triggers; loop should not have started"
+        "sink-only graph yields no triggers; loop should not have started"
     );
     assert_eq!(messages(first.as_ref().unwrap()), ["hi"]);
 }
@@ -1024,7 +1024,7 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
 
     let library = system_library();
 
-    // Terminal-only graph — one execute produces one line of output.
+    // Sink-only graph — one execute produces one line of output.
     let mut graph = Graph::default();
     let print_func = library.by_name("Print").unwrap();
     let mut print_node: Node = print_func.into();
@@ -1050,13 +1050,10 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
             compiled: Compiler::default().compile(&graph, &library).unwrap(),
         }])
         .unwrap();
-    worker.send_many([WorkerMessage::ExecuteTerminals]).unwrap();
+    worker.send_many([WorkerMessage::ExecuteSinks]).unwrap();
     let (reply, sync_rx) = oneshot::channel();
     worker
-        .send_many([
-            WorkerMessage::ExecuteTerminals,
-            WorkerMessage::Sync { reply },
-        ])
+        .send_many([WorkerMessage::ExecuteSinks, WorkerMessage::Sync { reply }])
         .unwrap();
 
     // Sync barrier: fires after the commit covering everything above.
@@ -1065,7 +1062,7 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
         .expect("Sync timeout")
         .expect("Sync sender dropped");
 
-    // Two ExecuteTerminals across the drained batch reduce to one
+    // Two ExecuteSinks across the drained batch reduce to one
     // idempotent flag → one execute → one callback.
     let first = compute_finish_rx
         .try_recv()
@@ -1073,22 +1070,19 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
     assert!(first.is_ok(), "{first:?}");
     assert!(
         compute_finish_rx.try_recv().is_err(),
-        "two ExecuteTerminals across batches must reduce to one callback"
+        "two ExecuteSinks across batches must reduce to one callback"
     );
     assert_eq!(messages(first.as_ref().unwrap()), ["once"]);
 }
 
 #[tokio::test]
-async fn execute_terminals_with_start_event_loop_on_empty_graph_is_silent_noop() {
-    // F5 + F4: a batch with ExecuteTerminals + StartEventLoop on an
+async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
+    // F5 + F4: a batch with ExecuteSinks + StartEventLoop on an
     // empty graph must fire no callback at all.
     let (worker, mut rx) = empty_worker();
 
     worker
-        .send_many([
-            WorkerMessage::ExecuteTerminals,
-            WorkerMessage::StartEventLoop,
-        ])
+        .send_many([WorkerMessage::ExecuteSinks, WorkerMessage::StartEventLoop])
         .unwrap();
     assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
     assert!(!worker.is_event_loop_started());
@@ -1109,7 +1103,7 @@ fn scan_accumulates_simple_flags() {
     let intent = scan(vec![
         WorkerMessage::Clear,
         WorkerMessage::StartEventLoop,
-        WorkerMessage::ExecuteTerminals,
+        WorkerMessage::ExecuteSinks,
         WorkerMessage::InjectEvents {
             events: vec![event],
         },
@@ -1134,7 +1128,7 @@ fn scan_accumulates_simple_flags() {
         intent.loop_request,
         Some(crate::worker::LoopCommand::Start)
     ));
-    assert!(intent.execute_terminals);
+    assert!(intent.execute_sinks);
     assert!(!intent.exit);
     assert_eq!(intent.events.len(), 1);
     assert!(intent.events.contains(&event));
@@ -1190,7 +1184,7 @@ fn scan_exit_dominates_entire_batch() {
     // in the batch is discarded, whether sent before or after.
     let intent = scan(vec![
         WorkerMessage::Clear,
-        WorkerMessage::ExecuteTerminals,
+        WorkerMessage::ExecuteSinks,
         WorkerMessage::Exit,
         WorkerMessage::StartEventLoop, // post-Exit: dropped
         WorkerMessage::Update {
@@ -1208,8 +1202,8 @@ fn scan_exit_dominates_entire_batch() {
         "post-Exit loop ops must be discarded"
     );
     assert!(
-        !intent.execute_terminals,
-        "pre-Exit execute_terminals must be discarded"
+        !intent.execute_sinks,
+        "pre-Exit execute_sinks must be discarded"
     );
     assert!(intent.events.is_empty());
     assert!(intent.syncs.is_empty());
@@ -1622,7 +1616,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
         })
     };
 
-    // get_a (pure source) → mult (pure, persist Disk) → print (terminal).
+    // get_a (pure source) → mult (pure, persist Disk) → print (sink).
     let lib = make_lib();
     let mut graph = Graph::default();
     for name in ["get_a", "mult", "Print"] {
@@ -1656,7 +1650,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
                 WorkerMessage::Update {
                     compiled: Compiler::default().compile(&graph, &library).unwrap(),
                 },
-                WorkerMessage::ExecuteTerminals,
+                WorkerMessage::ExecuteSinks,
             ])
             .unwrap();
         rx.recv()
@@ -1760,7 +1754,7 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
             WorkerMessage::Update {
                 compiled: Compiler::default().compile(&graph, &lib).unwrap(),
             },
-            WorkerMessage::ExecuteTerminals,
+            WorkerMessage::ExecuteSinks,
         ])
         .unwrap();
     rx.recv().await.unwrap().unwrap();

@@ -38,7 +38,7 @@ pub(crate) struct CanvasGeometry {
     /// Emitter event glyphs (the white triangles under a node's outputs),
     /// keyed by [`EventRef`]. The drag source for subscription wires.
     pub(crate) events: PortLayer<EventRef>,
-    /// Subscription pins (the top-left triangle on terminal nodes), keyed
+    /// Subscription pins (the top-left triangle on sink nodes), keyed
     /// by node — a subscription is whole-node, so one pin per node. The
     /// drop target for subscription wires.
     pub(crate) subs: PortLayer<NodeId>,
@@ -196,9 +196,9 @@ impl CanvasGeometry {
                 let r = ui.response_for(event_glyph_wid(n.id, event_idx));
                 self.events.record(ev, r, node_min, n.pos);
             }
-            // The subscription pin only exists on terminal nodes (only they
+            // The subscription pin only exists on sink nodes (only they
             // render one — see `header::subscription_glyph`).
-            if n.terminal {
+            if n.sink {
                 let r = ui.response_for(subscription_glyph_wid(n.id));
                 self.subs.record(n.id, r, node_min, n.pos);
             }

@@ -118,7 +118,7 @@ pub(crate) struct ExecutionEvent {
 pub(crate) struct ExecutionNode {
     pub id: NodeId,
 
-    pub terminal: bool,
+    pub sink: bool,
     /// Copied from the node's func at flatten. Only `Pure` is content-cacheable;
     /// the digest of an `Impure` node (or any node downstream of one) is `None`.
     pub behavior: FuncBehavior,

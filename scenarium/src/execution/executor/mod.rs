@@ -358,7 +358,7 @@ impl Executor {
                 cache
                     .store_node(program, e_node_idx, &mut self.ctx_manager)
                     .await;
-                // A node no consumer reads (a terminal sink, or every output already `Skip`) is
+                // A node no consumer reads (a sink, or every output already `Skip`) is
                 // spent the instant it's stored — reclaim its non-retained slot now rather
                 // than holding it to end-of-run eviction. A node that still owes reads is
                 // reclaimed later, in `collect_inputs`, when its last consumer lands.

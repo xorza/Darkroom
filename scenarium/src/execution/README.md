@@ -65,7 +65,7 @@ outputs are `FuncOutput` (name / type). An output carries no `required`/`default
 which is exactly the func distinction — reusing the types keeps that asymmetry and
 lets an instance node be shaped from a def like a func node is shaped from a `Func`.
 
-Behavior (`Pure`/`Impure`) and terminal-ness are **derived from the interior at
+Behavior (`Pure`/`Impure`) and sink-ness are **derived from the interior at
 flatten time, never stored on the def** — so they can't drift from the interior.
 
 ### §4.2 Boundary nodes
@@ -388,7 +388,7 @@ computed:
    the instant its last consumer reads it — `reclaim_slot` demotes it to `OnDisk` if a blob
    serves it (a `Disk` value), else drops it (`None`). A `Ram`/`Both` node is left resident
    (kept hot for reuse). This bounds a chain's peak RAM to its active frontier instead of every
-   intermediate at once. A node no consumer reads (a terminal sink, or all its consumers cut) is
+   intermediate at once. A node no consumer reads (a sink, or all its consumers cut) is
    reclaimed the moment it finishes.
 6. **after the run → `evict_unused`.** The same `reclaim_slot` decision, swept over the
    leftovers step 5 didn't reach — a prior run's untouched value, or a non-RAM value a consumer
@@ -409,8 +409,8 @@ produced under it (B.0).
 
 ### Worked example
 
-`A → B → terminal`, `A` and `B` both disk-backed (`Disk`/`Both`), after a cold run that
-stored both. On reopen the pre-run cut resolves `A` and `B` as disk hits; the terminal runs
+`A → B → sink`, `A` and `B` both disk-backed (`Disk`/`Both`), after a cold run that
+stored both. On reopen the pre-run cut resolves `A` and `B` as disk hits; the sink runs
 and reads `B`, so `B`'s blob is pulled into RAM by `hydrate_slot` while `A` — read only by
 the reused `B` — is pruned (flagged `OnDisk`, still reported cached, its bytes never enter
 RAM). A `Ram` (memory-only) node feeding *only* `A` is cut too: it has no cross-session

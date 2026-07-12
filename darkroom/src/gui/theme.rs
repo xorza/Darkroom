@@ -85,7 +85,7 @@ pub(crate) mod dark {
 
     // header badges
     pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x9adbfb);
-    pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xff5e44);
+    pub(crate) const BADGE_SINK: Color = Color::hex(0xff5e44);
     // cache (persist-to-disk) chip — palette `warning` yellow.
     pub(crate) const BADGE_CACHE: Color = Color::hex(0xffd44a);
     // impure marker — a saturated violet (the "volatile / recomputes every run"
@@ -106,7 +106,7 @@ pub(crate) mod dark {
     pub(crate) const INPUT_PORT_HOVER: Color = Color::hex(0xe9ff8e);
     pub(crate) const OUTPUT_PORT_HOVER: Color = Color::hex(0xffc878);
     // Events wear the palette's `error` red — the same swatch as the
-    // terminal `T` badge the subscription pin sits beside, so the trigger
+    // sink `T` badge the subscription pin sits beside, so the trigger
     // machinery reads as one family. Shape (triangle vs. circle) keeps
     // events apart from data ports; hover lifts toward white like the
     // typed port hovers.
@@ -156,7 +156,7 @@ pub(crate) mod light {
     // header badges — accent / error / a deeper amber than the palette's
     // warning yellow (#f1ad49 was barely visible on a light surface).
     pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x3b9ee5);
-    pub(crate) const BADGE_TERMINAL: Color = Color::hex(0xef7271);
+    pub(crate) const BADGE_SINK: Color = Color::hex(0xef7271);
     // cache (persist-to-disk) chip — palette `warning` yellow.
     pub(crate) const BADGE_CACHE: Color = Color::hex(0xf1ad49);
     // impure marker — a saturated violet, punchier than the running-glow purple
@@ -716,8 +716,8 @@ palette_struct! {
     tab_inactive => TAB_INACTIVE,
     /// Subgraph (composite instance) chip — accent cyan.
     badge_subgraph => BADGE_SUBGRAPH,
-    /// Terminal (sink) chip — error red.
-    badge_terminal => BADGE_TERMINAL,
+    /// Sink chip — error red.
+    badge_sink => BADGE_SINK,
     /// RuntimeCache (persist-to-disk) chip — warning yellow.
     badge_cache => BADGE_CACHE,
     /// Impure marker — `constant` purple. A read-only descriptor (the node

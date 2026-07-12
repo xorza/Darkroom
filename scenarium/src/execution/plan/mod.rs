@@ -1,7 +1,7 @@
 //! Scheduling: the per-run schedule ([`ExecutionPlan`]) and the [`Planner`] that builds
-//! it. The planner runs one backward post-order DFS from the run's roots (terminals,
-//! event subscribers, event-trigger owners — plus every terminal when a fired event
-//! reaches a [`RunTerminals`](crate::node::special::SpecialNode::RunTerminals) sink),
+//! it. The planner runs one backward post-order DFS from the run's roots (sinks,
+//! event subscribers, event-trigger owners — plus every sink when a fired event
+//! reaches a [`RunSinks`](crate::node::special::SpecialNode::RunSinks) sink),
 //! producing `process_order` (deps before consumers), per-output usage counts, and each
 //! node's [`NodeVerdict`] (runnable vs blocked on inputs) — purely structural, no
 //! cache/digest state. The
@@ -56,7 +56,7 @@ pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeColumn<NodeVe
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionPlan {
     /// The schedule: post-order DFS over the dependency graph (deps before consumers),
-    /// seeded from the terminals — every reachable node, producer-first. The executor
+    /// seeded from the sinks — every reachable node, producer-first. The executor
     /// walks this and skips `MissingInputs` nodes (and reuses cached ones) inline.
     pub(crate) process_order: Vec<NodeIdx>,
     /// Per-node verdict (execute / missing-inputs), indexed by node position.
@@ -66,7 +66,7 @@ pub(crate) struct ExecutionPlan {
     /// each lambda as [`OutputUsage`](crate::node::func_lambda::OutputUsage) so a node can
     /// skip computing outputs nobody reads.
     pub(crate) output_usage: Vec<u32>,
-    /// The nodes the backward walk started from — terminals, event subscribers,
+    /// The nodes the backward walk started from — sinks, event subscribers,
     /// event-trigger owners, and node seeds (a node seeding via several categories may
     /// repeat; harmless). The schedule's "must be available" set: the executor's pre-run
     /// cut seeds its `needed` mask from these and prunes any cone reachable only through
@@ -250,13 +250,13 @@ impl Planner {
 
 /// Collect the run's walk roots into `plan.roots` — the seeds for both the backward walk and
 /// the executor's cut: the node seeds (authoring ids resolved to flat nodes here), every
-/// event subscriber, every terminal node, and (for the event loop) every node owning a
+/// event subscriber, every sink node, and (for the event loop) every node owning a
 /// subscribed event. Not deduped: a node seeding via several categories appears more than
 /// once, which is harmless — the walk's `Color` check skips a revisited root and the cut's
 /// `needed[root] = true` seeding is idempotent, so neither cares about repeats.
 ///
-/// A [`RunTerminals`](SpecialNode::RunTerminals) node among a fired event's subscribers is not
-/// itself a root (it computes nothing); instead it promotes the run to include *every* terminal
+/// A [`RunSinks`](SpecialNode::RunSinks) node among a fired event's subscribers is not
+/// itself a root (it computes nothing); instead it promotes the run to include *every* sink
 /// node — the "when this event fires, re-run the whole graph" trigger.
 fn collect_roots(
     compiled: &CompiledGraph,
@@ -276,29 +276,29 @@ fn collect_roots(
         plan.pinned.push(idx);
     }
 
-    // Event subscribers. A `RunTerminals` sink among them fires no cone of its own — it
-    // promotes this run to run all terminals (below), so it's skipped as a root here.
-    let mut run_terminals = seeds.terminals;
+    // Event subscribers. A `RunSinks` sink among them fires no cone of its own — it
+    // promotes this run to run all sinks (below), so it's skipped as a root here.
+    let mut run_sinks = seeds.sinks;
     for event in &seeds.events {
         let e_node = program.e_nodes.by_key(&event.node_id).unwrap();
         let subs = &program.events[e_node.events.range()][event.event_idx].subscribers;
         for &sub in subs {
-            if program.e_nodes[sub].special == Some(SpecialNode::RunTerminals) {
-                run_terminals = true;
+            if program.e_nodes[sub].special == Some(SpecialNode::RunSinks) {
+                run_sinks = true;
             } else {
                 plan.roots.push(sub);
             }
         }
     }
 
-    if !run_terminals && !seeds.event_triggers {
+    if !run_sinks && !seeds.event_triggers {
         return Ok(());
     }
-    // One sweep for both whole-graph seed kinds: terminal nodes (requested directly, or
-    // promoted by a fired event reaching a `RunTerminals` sink) and — for the event
+    // One sweep for both whole-graph seed kinds: sink nodes (requested directly, or
+    // promoted by a fired event reaching a `RunSinks` sink) and — for the event
     // loop — nodes owning a subscribed event.
     for (idx, e_node) in program.e_nodes.iter().enumerate() {
-        if (run_terminals && e_node.terminal)
+        if (run_sinks && e_node.sink)
             || (seeds.event_triggers
                 && program.events[e_node.events.range()]
                     .iter()

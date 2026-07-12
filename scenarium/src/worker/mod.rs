@@ -67,11 +67,11 @@ pub enum WorkerMessage {
     /// before any graph op in the same batch, so the next `Update`
     /// hydrates from the new config — e.g. repointing at a per-document store dir.
     SetDiskStore(DiskStore),
-    ExecuteTerminals,
+    ExecuteSinks,
     /// Execute the cones of these specific nodes (authoring ids), retaining their
     /// outputs in RAM for read-back via [`WorkerMessage::RequestArgumentValues`] —
     /// the editor's "run to this node" / preview trigger. Combines with a same-batch
-    /// `ExecuteTerminals` into one run.
+    /// `ExecuteSinks` into one run.
     ExecuteNodes {
         nodes: Vec<NodeId>,
     },
@@ -282,7 +282,7 @@ enum LoopCommand {
 /// | `disk_store`        | SetDiskStore              | last-write-wins, applied pre-graph-op |
 /// | `save_caches`         | SaveCaches                  | idempotent flag (persist, no run) |
 /// | `loop_request`        | StartEventLoop, StopEventLoop | last-write-wins |
-/// | `execute_terminals`   | ExecuteTerminals            | idempotent flag |
+/// | `execute_sinks`       | ExecuteSinks                | idempotent flag |
 /// | `execute_nodes`       | ExecuteNodes                | set union (dedup) |
 /// | `events`              | InjectEvents                | set union (dedup) |
 /// | `syncs`               | Sync                        | all fire      |
@@ -298,7 +298,7 @@ struct BatchIntent {
     /// values to disk without running the graph.
     save_caches: bool,
     loop_request: Option<LoopCommand>,
-    execute_terminals: bool,
+    execute_sinks: bool,
     execute_nodes: HashSet<NodeId>,
     exit: bool,
     events: HashSet<EventRef>,
@@ -332,7 +332,7 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
             }
             WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
             WorkerMessage::SetDiskStore(cache) => intent.disk_store = Some(cache),
-            WorkerMessage::ExecuteTerminals => intent.execute_terminals = true,
+            WorkerMessage::ExecuteSinks => intent.execute_sinks = true,
             WorkerMessage::ExecuteNodes { nodes } => intent.execute_nodes.extend(nodes),
             WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
             WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
@@ -456,13 +456,13 @@ async fn worker_loop<ExecutionCallback>(
             None => loop_was_running_before_stop,
         };
 
-        let needs_execute = intent.execute_terminals
+        let needs_execute = intent.execute_sinks
             || !intent.execute_nodes.is_empty()
             || !intent.events.is_empty()
             || should_start_event_loop;
 
         // Empty graph is a normal state, not a failure: skip execute
-        // silently. Events/terminals/StartEventLoop are no-ops until
+        // silently. Events/sinks/StartEventLoop are no-ops until
         // a graph is loaded.
         if needs_execute && !execution_engine.is_empty() {
             // Quiesce the event loop around execute(): closing the gate
@@ -491,7 +491,7 @@ async fn worker_loop<ExecutionCallback>(
             let result = {
                 let run = execution_engine.execute(
                     RunSeeds {
-                        terminals: intent.execute_terminals,
+                        sinks: intent.execute_sinks,
                         event_triggers: in_loop,
                         events: intent.events.drain().collect(),
                         nodes: intent.execute_nodes.drain().collect(),

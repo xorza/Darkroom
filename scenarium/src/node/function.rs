@@ -189,7 +189,7 @@ pub struct Func {
     pub id: FuncId,
     pub name: String,
     pub category: String,
-    pub terminal: bool,
+    pub sink: bool,
 
     /// Node manages its own output caching, so the editor's disk-cache (persist)
     /// toggle is meaningless on it and hidden.
@@ -236,7 +236,7 @@ impl KeyIndexKey<FuncId> for Func {
 }
 
 impl Func {
-    /// Start a func definition. Defaults: `Impure`, non-terminal, empty
+    /// Start a func definition. Defaults: `Impure`, non-sink, empty
     /// category/inputs/outputs/events and a `None` lambda — set the rest with the
     /// chained builders below.
     pub fn new(id: impl Into<FuncId>, name: impl Into<String>) -> Self {
@@ -271,8 +271,8 @@ impl Func {
         self
     }
 
-    pub fn terminal(mut self) -> Self {
-        self.terminal = true;
+    pub fn sink(mut self) -> Self {
+        self.sink = true;
         self
     }
 
@@ -360,7 +360,7 @@ mod tests {
         // A document authored before `version` existed carries no such field;
         // `#[serde(default)]` must fill it with 0 rather than fail to parse.
         let legacy = r#"{ "id": "00000000-0000-0000-0000-000000000001", "name": "legacy",
-            "category": "", "terminal": false, "behavior": "Impure" }"#;
+            "category": "", "sink": false, "behavior": "Impure" }"#;
         let func: Func = deserialize(legacy.as_bytes(), SerdeFormat::Json)?;
         assert_eq!(func.version, 0);
         assert_eq!(Func::default().version, 0);

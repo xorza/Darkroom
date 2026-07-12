@@ -36,7 +36,7 @@ fn event_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
 /// A sibling of [`crate::gui::canvas::connection_ui::ConnectionUI`] rather
 /// than a mode of it: an event wire carries no data type, runs no cycle /
 /// const checks, and links an emitter event glyph to a whole-node
-/// subscription pin (which only terminal nodes expose — that's what makes
+/// subscription pin (which only sink nodes expose — that's what makes
 /// "events connect only to subscribers" structural). The drag can start from
 /// either end (mirroring a data wire's start-from-input-or-output): pull from
 /// an emitter and drop on a pin, or pull from a pin and drop on an emitter.
@@ -298,10 +298,10 @@ fn scan_event_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<Eve
 }
 
 /// First subscription pin whose drag started this frame, or `None`. Only
-/// terminal nodes render a pin, so only they can start a reverse event drag.
+/// sink nodes render a pin, so only they can start a reverse event drag.
 fn scan_sub_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<NodeId> {
     for n in &scene.nodes {
-        if n.terminal && geometry.subs.drag_started(n.id) {
+        if n.sink && geometry.subs.drag_started(n.id) {
             return Some(n.id);
         }
     }
@@ -309,7 +309,7 @@ fn scan_sub_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<NodeI
 }
 
 /// Subscription pin under the pointer that's a valid drop for `emitter`: a
-/// terminal node (the only kind that renders a pin) other than the emitter's
+/// sink node (the only kind that renders a pin) other than the emitter's
 /// own node. The pin-only target enforces "events connect only to
 /// subscribers"; the self-node skip rejects a node subscribing to itself.
 fn scan_sub_target(
@@ -320,7 +320,7 @@ fn scan_sub_target(
 ) -> Option<NodeId> {
     let pointer = ui.pointer_pos()?;
     for n in &scene.nodes {
-        if n.id == emitter.node_id || !n.terminal {
+        if n.id == emitter.node_id || !n.sink {
             continue;
         }
         if geometry.subs.contains_pointer(n.id, pointer) {

@@ -252,7 +252,7 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 - `App::run_graph` compiles the active graph against the library **on the UI
   thread** (`Engine::run_once` → the engine-owned long-lived
   `scenarium::execution::compile::Compiler`) and sends the
-  `CompiledGraph` in an `[Update, ExecuteTerminals]` batch to the worker. A
+  `CompiledGraph` in an `[Update, ExecuteSinks]` batch to the worker. A
   compile error surfaces synchronously — no run starts, `begin_run` is skipped,
   and the worker's prior program is untouched. The worker evaluates on its
   runtime and replies via callback with a `scenarium::WorkerReport`: a live
@@ -343,7 +343,7 @@ gesture state + the pure pointer→drop-zone classification. The rest:
 - **`gui/node/`** — the node-body widget: `mod.rs` is `NodeUI` (node bodies +
   drag; emits `MoveNodes`, subgraph-open requests, port-disconnect
   double-clicks), with sub-widgets `header` (play chip + title +
-  `S`/`T`/`D`/`R`/`↓`/`i` badges: run-to-node / subgraph / terminal / disable /
+  `S`/`■`/`D`/`R`/`↓`/`i` badges: run-to-node / subgraph / sink / disable /
   RAM-cache / disk-cache / inspect; the
   `R` and `↓` chips flip the two bits of `Node::cache` (`CacheMode`
   `None`/`Ram`/`Disk`/`Both`) via `SetCacheMode`), `port_row` (the two port

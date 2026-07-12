@@ -105,7 +105,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
             .description("Outputs an integer value via the test print hook")
             .category("Debug")
             .default_cache_mode(CacheMode::Ram)
-            .terminal()
+            .sink()
             .input(FuncInput::required("message", DataType::Int))
             .lambda(async_lambda!(
                 move |_, _, _, inputs, _, _| { print = Arc::clone(&print) } => {

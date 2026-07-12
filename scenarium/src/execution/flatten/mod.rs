@@ -321,14 +321,14 @@ impl<'a> Run<'a> {
             e_node.inputs = Span::new(inputs_start, input_count as u32);
             e_node.outputs = Span::new(outputs_start, func.outputs.len() as u32);
             e_node.events = Span::new(events_start, func.events.len() as u32);
-            e_node.terminal = func.terminal;
+            e_node.sink = func.sink;
             e_node.behavior = func.behavior;
             // Copy the cache mode; whether its disk bit is actually honored is decided
             // by the content digest (a node with an impure cone has no digest and
             // so can't be disk-cached) — see `digest.rs`.
             e_node.cache = node.cache;
             // Special-node identity, recognized by the engine (the planner's
-            // run-terminals promotion).
+            // run-sinks promotion).
             e_node.special = special;
             e_node.name.clear();
             e_node.name.push_str(&node.name);
@@ -427,7 +427,7 @@ impl<'a> Run<'a> {
             .map(|n| &n.kind)
         {
             // A special node subscribes like a func: it flattens to one leaf and
-            // becomes the flat subscriber. `RunTerminals` in particular relies on
+            // becomes the flat subscriber. `RunSinks` in particular relies on
             // this edge so the planner sees it among a fired event's subscribers.
             Some(NodeKind::Func(_) | NodeKind::Special(_)) => {
                 let flat = flatten_id(self.path.as_slice(), node_id);

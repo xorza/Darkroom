@@ -146,8 +146,8 @@ pub struct SceneNode {
     /// the ref so the header's open-in-tab action knows which def to
     /// target. `None` for a plain func node.
     pub subgraph: Option<SubgraphRef>,
-    /// Sink node (its func is `terminal` — no outputs feed downstream).
-    pub terminal: bool,
+    /// Sink node (its func is `sink` — no outputs feed downstream).
+    pub sink: bool,
     /// Excluded from execution (`Node::disabled`). The header badge
     /// toggles this via `Intent::SetDisabled`; the body paints dimmed.
     pub disabled: bool,
@@ -254,7 +254,7 @@ impl Scene {
                     outputs: Cow::Borrowed(&f.outputs),
                     events: f.events.iter().map(|e| e.name.clone().into()).collect(),
                     subgraph: None,
-                    terminal: f.terminal,
+                    sink: f.sink,
                     uncacheable: f.uncacheable,
                     impure: f.behavior == FuncBehavior::Impure,
                 }),
@@ -265,10 +265,10 @@ impl Scene {
                     outputs: Cow::Borrowed(&d.outputs),
                     events: d.events.iter().map(|e| e.name.clone().into()).collect(),
                     subgraph: Some(*r),
-                    // A composite's terminal-ness is derived at flatten
+                    // A composite's sink-ness is derived at flatten
                     // time, not stored on the def; treat "no exposed
                     // outputs" as the visible sink signal.
-                    terminal: d.outputs.is_empty(),
+                    sink: d.outputs.is_empty(),
                     uncacheable: false,
                     // Aggregate purity of a composite isn't known here, so the
                     // cache chips stay available for it (unlike a func).
@@ -286,7 +286,7 @@ impl Scene {
                         outputs: Cow::Borrowed(&f.outputs),
                         events: f.events.iter().map(|e| e.name.clone().into()).collect(),
                         subgraph: None,
-                        terminal: f.terminal,
+                        sink: f.sink,
                         uncacheable: f.uncacheable,
                         impure: f.behavior == FuncBehavior::Impure,
                     })
@@ -307,7 +307,7 @@ impl Scene {
                         outputs: Cow::Owned(outputs),
                         events: Vec::new(),
                         subgraph: None,
-                        terminal: false,
+                        sink: false,
                         uncacheable: true,
                         impure: false,
                     }
@@ -326,7 +326,7 @@ impl Scene {
                         outputs: Cow::Borrowed(&[]),
                         events: Vec::new(),
                         subgraph: None,
-                        terminal: false,
+                        sink: false,
                         uncacheable: true,
                         impure: false,
                     }
@@ -362,7 +362,7 @@ impl Scene {
                         outputs: Cow::Borrowed(&[]),
                         events: Vec::new(),
                         subgraph: None,
-                        terminal: false,
+                        sink: false,
                         uncacheable: true,
                         impure: false,
                     }
@@ -441,7 +441,7 @@ impl Scene {
                 outputs,
                 events,
                 subgraph: interface.subgraph,
-                terminal: interface.terminal,
+                sink: interface.sink,
                 disabled: node.disabled,
                 cache: node.cache,
                 uncacheable: interface.uncacheable,
@@ -511,7 +511,7 @@ struct NodeInterface<'a> {
     /// names rather than threading a third `Cow<[_]>` of incompatible types.
     events: Vec<SmolStr>,
     subgraph: Option<SubgraphRef>,
-    terminal: bool,
+    sink: bool,
     /// Node manages its own caching (or has no output to cache), so the editor's
     /// cache chips are hidden — see [`SceneNode::uncacheable`].
     uncacheable: bool,
@@ -597,7 +597,7 @@ pub(crate) mod test_support {
             outputs: Span::default(),
             events: Span::default(),
             subgraph: None,
-            terminal: false,
+            sink: false,
             disabled: false,
             cache: CacheMode::None,
             uncacheable: false,
@@ -690,7 +690,7 @@ mod tests {
             .map(|o| o.name.as_str())
             .collect();
         assert_eq!(in_out_names, ["A", "B", "+"]);
-        assert!(input_node.subgraph.is_none() && !input_node.terminal);
+        assert!(input_node.subgraph.is_none() && !input_node.sink);
         assert!(
             input_node.boundary && output_node.boundary,
             "boundary nodes are flagged so const affordances are suppressed"
@@ -913,7 +913,7 @@ mod tests {
 
         // Two funcs identical but for behavior: a `Pure` one (offers the disk-cache
         // toggle) and an `Impure` one (has no content digest, so the toggle is hidden).
-        // Both have an output and are non-terminal/cacheable, so `impure` is the sole
+        // Both have an output and are non-sink/cacheable, so `impure` is the sole
         // differentiator the header gate reads.
         let mut library = Library::default();
         library.add(
@@ -939,8 +939,8 @@ mod tests {
 
         assert!(!pure.impure, "a Pure func keeps its cache chips");
         assert!(impure.impure, "an Impure func hides its cache chips");
-        // Isolate `impure` as the cause: neither is self-caching or a terminal sink.
-        assert!(!pure.uncacheable && !pure.terminal);
-        assert!(!impure.uncacheable && !impure.terminal);
+        // Isolate `impure` as the cause: neither is self-caching or a sink.
+        assert!(!pure.uncacheable && !pure.sink);
+        assert!(!impure.uncacheable && !impure.sink);
     }
 }

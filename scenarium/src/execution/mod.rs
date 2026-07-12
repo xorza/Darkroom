@@ -183,12 +183,12 @@ pub struct ArgumentValues {
 }
 
 /// What seeds a run's schedule — the roots the planner walks back from. The four
-/// are independent and combine: a run can target terminal nodes, the event loop's
+/// are independent and combine: a run can target sink nodes, the event loop's
 /// triggerable events, a set of injected events, and/or specific nodes, all at once.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct RunSeeds {
-    /// Include all terminal nodes — the ordinary "produce the outputs" trigger.
-    pub terminals: bool,
+    /// Include all sink nodes — the ordinary "produce the outputs" trigger.
+    pub sinks: bool,
     /// Include every node owning a subscribed event — drives the event loop.
     pub event_triggers: bool,
     /// Run the subscribers of these specific fired events.
@@ -374,10 +374,10 @@ impl ExecutionEngine {
         Ok(())
     }
 
-    pub(crate) async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
+    pub(crate) async fn execute_sinks(&mut self) -> Result<ExecutionStats> {
         self.execute(
             RunSeeds {
-                terminals: true,
+                sinks: true,
                 ..Default::default()
             },
             None,
@@ -420,12 +420,12 @@ impl ExecutionEngine {
     /// `self.plan` for inspection.
     pub(crate) fn prepare_execution(
         &mut self,
-        terminals: bool,
+        sinks: bool,
         event_triggers: bool,
         events: &[EventRef],
     ) -> Result<()> {
         let seeds = RunSeeds {
-            terminals,
+            sinks,
             event_triggers,
             events: events.to_vec(),
             nodes: Vec::new(),

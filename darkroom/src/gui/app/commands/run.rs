@@ -34,7 +34,7 @@ impl App {
         }
     }
 
-    /// Compile the document graph and execute its terminals once on the
+    /// Compile the document graph and execute its sinks once on the
     /// worker. A compile error is reported to the engine's status log
     /// synchronously — no run starts, so the prior run's values/status stay
     /// untouched. On success, opens a fresh value-cache epoch — a re-run

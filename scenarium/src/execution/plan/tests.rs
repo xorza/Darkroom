@@ -14,12 +14,7 @@ struct Fix {
 }
 
 impl Fix {
-    fn node(
-        &mut self,
-        terminal: bool,
-        inputs: &[(bool, ExecutionBinding)],
-        outputs: u32,
-    ) -> NodeIdx {
+    fn node(&mut self, sink: bool, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> NodeIdx {
         let program = &mut self.compiled.program;
         let inputs_start = program.inputs.len() as u32;
         for (required, binding) in inputs {
@@ -36,7 +31,7 @@ impl Fix {
         let idx = program.e_nodes.len();
         program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),
-            terminal,
+            sink,
             func_id: FuncId::from_u128(idx as u128 + 1),
             inputs: Span::new(inputs_start, inputs.len() as u32),
             outputs: Span::new(outputs_start, outputs),
@@ -53,13 +48,13 @@ fn bind(idx: NodeIdx, port: usize) -> ExecutionBinding {
     })
 }
 
-/// Plan `terminals` over `fix`. Purely structural — no cache state; the executor
+/// Plan `sinks` over `fix`. Purely structural — no cache state; the executor
 /// decides cached-vs-recompute at run time.
 fn plan(fix: &Fix) -> ExecutionPlan {
     let mut planner = Planner::default();
     let mut plan = ExecutionPlan::default();
     let seeds = RunSeeds {
-        terminals: true,
+        sinks: true,
         ..Default::default()
     };
     planner
@@ -70,7 +65,7 @@ fn plan(fix: &Fix) -> ExecutionPlan {
 
 #[test]
 fn chain_orders_deps_before_consumers_and_schedules_all() {
-    // A → B → C (C terminal). Every reachable node is scheduled — the planner is
+    // A → B → C (C sink). Every reachable node is scheduled — the planner is
     // structural, so nothing is pruned as "cached" here (that's the executor's call).
     let mut f = Fix::default();
     let a = f.node(false, &[], 1);
@@ -119,7 +114,7 @@ fn optional_unbound_input_does_not_block() {
 
 #[test]
 fn fan_out_counts_each_executing_consumer() {
-    // A feeds both B and C (both terminal) ⇒ A's output is needed twice.
+    // A feeds both B and C (both sink) ⇒ A's output is needed twice.
     let mut f = Fix::default();
     let a = f.node(false, &[], 1);
     f.node(true, &[(false, bind(a, 0))], 1);
@@ -131,7 +126,7 @@ fn fan_out_counts_each_executing_consumer() {
 
 #[test]
 fn dependency_cycle_is_rejected() {
-    // A binds B, B binds A (A terminal) — the planner must error, not loop.
+    // A binds B, B binds A (A sink) — the planner must error, not loop.
     let mut f = Fix::default();
     f.node(true, &[(false, bind(NodeIdx(1), 0))], 1); // A (idx 0) binds B
     f.node(false, &[(false, bind(NodeIdx(0), 0))], 1); // B (idx 1) binds A
@@ -139,7 +134,7 @@ fn dependency_cycle_is_rejected() {
     let mut planner = Planner::default();
     let mut plan = ExecutionPlan::default();
     let seeds = RunSeeds {
-        terminals: true,
+        sinks: true,
         ..Default::default()
     };
     let result = planner.plan(&f.compiled, &seeds, &mut plan);
@@ -148,7 +143,7 @@ fn dependency_cycle_is_rejected() {
 
 #[test]
 fn node_seed_schedules_only_its_cone_and_pins_it() {
-    // A → B → C (C terminal). Seeding node B (by authoring id — top-level ids resolve
+    // A → B → C (C sink). Seeding node B (by authoring id — top-level ids resolve
     // straight against the program) schedules only [A, B] — C is upstream of nothing
     // seeded — and records B as both a root and a pinned node. B's output has no
     // scheduled consumer, so its plan-level usage stays 0; the *executor* floors a
@@ -176,10 +171,10 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert_eq!(p.output_usage[0], 1, "A.0 read by B");
     assert_eq!(p.output_usage[1], 0, "B.0 unconsumed at plan level");
 
-    // Node seeds combine with terminals: the same seed plus `terminals` schedules
+    // Node seeds combine with sinks: the same seed plus `sinks` schedules
     // everything, and B stays pinned.
     let seeds = RunSeeds {
-        terminals: true,
+        sinks: true,
         nodes: vec![f.compiled.program.e_nodes[b].id],
         ..Default::default()
     };

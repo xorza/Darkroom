@@ -113,13 +113,13 @@ impl WorkerBridge {
     }
 
     /// Run the compiled program once: install it on the worker, then
-    /// execute its terminals. One batched send so the worker commits
+    /// execute its sinks. One batched send so the worker commits
     /// both as a unit. A dropped send (worker already exited) is a
     /// harmless shutdown no-op.
     pub(crate) fn run_once(&self, compiled: CompiledGraph) {
         let _ = self.worker.send_many([
             WorkerMessage::Update { compiled },
-            WorkerMessage::ExecuteTerminals,
+            WorkerMessage::ExecuteSinks,
         ]);
     }
 

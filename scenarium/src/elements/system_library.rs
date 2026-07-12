@@ -13,7 +13,7 @@ pub fn system_library() -> Library {
         Func::new("01896910-0790-AD1B-AA12-3F1437196789", "Print")
             .description("Logs any value to the node log.")
             .category("System")
-            .terminal()
+            .sink()
             .input(
                 FuncInput::required("Value", DataType::Any)
                     .description("Value of any type to write to the node's log (info level)."),

@@ -101,7 +101,7 @@ pub fn image_library() -> Library {
         Func::new("0c17bcbe-d757-43be-b184-27b429e8b434", "Save Image")
             .description("Writes an image to a file on disk.")
             .category("Image")
-            .terminal()
+            .sink()
             .input(
                 FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to save."),
             )
