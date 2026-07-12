@@ -100,11 +100,10 @@ impl ExecutionPlan {
 
     /// Clear the order and reset every per-node verdict to default at the given pool
     /// sizes. Called at the start of each planning pass.
-    pub(crate) fn reset(&mut self, n_nodes: usize, n_outputs: usize) {
+    pub(crate) fn reset(&mut self, n_nodes: usize) {
         self.process_order.clear();
         self.verdicts.reset(n_nodes, NodeVerdict::default());
         self.output_usage.clear();
-        self.output_usage.resize(n_outputs, 0);
         self.roots.clear();
         self.pinned.clear();
     }
@@ -128,29 +127,27 @@ impl ExecutionPlan {
     /// then adds on top, so a port that's both pinned and externally bound correctly
     /// lands at `2`.
     pub(crate) fn seed_extra_usage(&mut self, program: &ExecutionProgram) {
+        // `output_usage`'s length comes from the `extend` below, not a separate resize
+        // in `reset` — so what actually needs checking isn't "these two already agree"
+        // (they can't yet: nothing has sized `output_usage` before this runs), it's that
+        // the compiled program's own pool has exactly one entry per pooled output port.
+        // `Flattener::build` asserts this for a real compile; `Fix::node` keeps it true
+        // for this module's hand-built tests.
         assert_eq!(
-            self.output_usage.len(),
             program.output_external_bindings.len(),
-            "output_usage and output_external_bindings are both indexed by \
-             output-pool position and must be the same length"
+            program.n_outputs(),
+            "output_external_bindings must have exactly one entry per pooled output port"
         );
-        // `+=` below only makes sense against a freshly `reset` (all-zero) column — it's
-        // additive so an out-of-order call (e.g. after the backward walk) wouldn't erase
-        // real per-edge counts, but a double call would silently double-count instead.
-        // Neither hazard fails loudly on its own, so assert the one contract both this
-        // fn and `Planner::plan`'s call site actually rely on, rather than leaving a
-        // future reordering or duplicate call to produce quietly-wrong numbers.
+        // `+=` below (in the pinned loop) only makes sense against a freshly `reset`
+        // (empty) column — a double call would silently double-count rather than fail
+        // loudly, so assert the contract this fn and `Planner::plan`'s call site rely on.
         assert!(
-            self.output_usage.iter().all(|&u| u == 0),
+            self.output_usage.is_empty(),
             "seed_extra_usage must run on a freshly reset output_usage column"
         );
-        for (usage, &external) in self
-            .output_usage
-            .iter_mut()
-            .zip(&program.output_external_bindings)
-        {
-            *usage += external as u32;
-        }
+        self.output_usage
+            .extend(program.output_external_bindings.iter().map(|&b| b as u32));
+
         for &idx in &self.pinned {
             for usage in &mut self.output_usage[program.e_nodes[idx].outputs.range()] {
                 *usage += 1;
@@ -206,10 +203,12 @@ impl Planner {
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
         let program = &compiled.program;
-        plan.reset(program.e_nodes.len(), program.n_outputs());
+        plan.reset(program.e_nodes.len());
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
+        // Must run *before* `seed_extra_usage`: that's what populates `plan.pinned`, which
+        // `seed_extra_usage`'s pinned fold reads.
         collect_roots(compiled, seeds, plan)?;
 
         // Both non-schedule usage sources (external bindings, pinned roots) are folded
