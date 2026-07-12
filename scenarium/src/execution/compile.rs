@@ -81,6 +81,7 @@ impl Compiler {
             Pools {
                 inputs: &mut program.inputs,
                 events: &mut program.events,
+                output_external_bindings: &mut program.output_external_bindings,
             },
             graph,
             library,

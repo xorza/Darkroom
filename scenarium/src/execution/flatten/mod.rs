@@ -25,7 +25,9 @@ use crate::execution::program::{
 };
 use crate::execution::stats::FlattenMap;
 use crate::graph::subgraph::SubgraphId;
-use crate::graph::{Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, Subscription};
+use crate::graph::{
+    Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
+};
 use crate::library::Library;
 use crate::node::function::Func;
 use crate::node::special::SpecialNode;
@@ -59,12 +61,15 @@ pub(crate) struct Flattener {
     inputs_scratch: Vec<ExecutionInput>,
 }
 
-/// The graph's SoA pools, rebuilt each `build`. Outputs carry no static per-node
-/// data, so there is no output pool — each node's output span is assigned from
-/// a running counter local to the build.
+/// The graph's SoA pools, rebuilt each `build`. Each node's output span is
+/// assigned from a running counter local to the build; `output_external_bindings`
+/// is the one output-indexed pool filled *during* that build (a plain lookup
+/// against the authoring graph, unlike `output_types`, which needs a second
+/// pass to follow wildcard mirrors).
 pub(crate) struct Pools<'a> {
     pub inputs: &'a mut Vec<ExecutionInput>,
     pub events: &'a mut Vec<ExecutionEvent>,
+    pub output_external_bindings: &'a mut Vec<bool>,
 }
 
 impl Flattener {
@@ -92,6 +97,7 @@ impl Flattener {
         let mut new_inputs = std::mem::take(&mut self.inputs_scratch);
         new_inputs.clear();
         pools.events.clear();
+        pools.output_external_bindings.clear();
         {
             let mut run = Run {
                 root,
@@ -106,6 +112,7 @@ impl Flattener {
                 new_inputs: &mut new_inputs,
                 n_outputs: 0,
                 events: pools.events,
+                output_external_bindings: pools.output_external_bindings,
             };
             run.emit();
             // `compact` finalizes on drop, trimming nodes that disappeared.
@@ -217,6 +224,9 @@ struct Run<'a> {
     /// Running total of outputs emitted so far; also the next output span start.
     n_outputs: u32,
     events: &'a mut Vec<ExecutionEvent>,
+    /// Parallel to the output pool (indexed the same way, built alongside it):
+    /// whether each pooled output port is externally bound in the authoring graph.
+    output_external_bindings: &'a mut Vec<bool>,
 }
 
 impl<'a> Run<'a> {
@@ -291,6 +301,10 @@ impl<'a> Run<'a> {
 
             let outputs_start = self.n_outputs;
             self.n_outputs += func.outputs.len() as u32;
+            for port_idx in 0..func.outputs.len() {
+                self.output_external_bindings
+                    .push(graph.is_externally_bound(OutputPort::new(node.id, port_idx)));
+            }
             let events_start = self.events.len() as u32;
             for func_event in &func.events {
                 self.events.push(ExecutionEvent {

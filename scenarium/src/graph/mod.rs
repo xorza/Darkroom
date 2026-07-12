@@ -303,6 +303,13 @@ pub struct Graph {
     #[serde(default)]
     subscriptions: BTreeSet<Subscription>,
 
+    /// Output ports read by a consumer outside the graph (e.g. a GUI
+    /// inspector), flagged so the plan counts them as used even with no
+    /// in-graph binding. Presence, not a richer value, is the flag — same
+    /// sparse-side-table shape as `subscriptions`.
+    #[serde(default)]
+    external_bindings: BTreeSet<OutputPort>,
+
     /// Local (per-instance) subgraph definitions referenced by this graph's
     /// `NodeKind::Subgraph(SubgraphRef::Local(_))` nodes. Editing one of
     /// these affects only this graph. Shared definitions live in
@@ -347,6 +354,7 @@ impl Graph {
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Node> {
         self.nodes.iter_mut()
     }
+
     pub fn remove_by_id(&mut self, id: NodeId) {
         assert!(!id.is_nil());
 
@@ -358,6 +366,9 @@ impl Graph {
 
         // Drop subscriptions where it is either the emitter or a subscriber.
         self.subscriptions.retain(|s| !subscription_touches(s, id));
+
+        // Drop external bindings on any of its own output ports.
+        self.external_bindings.retain(|port| port.node_id != id);
     }
 
     // === Data bindings ===
@@ -429,10 +440,16 @@ impl Graph {
                 subscriber: remap(s.subscriber),
             })
             .collect();
+        let external_bindings = self
+            .external_bindings
+            .iter()
+            .map(|port| OutputPort::new(remap(port.node_id), port.port_idx))
+            .collect();
         let graph = Graph {
             nodes,
             bindings,
             subscriptions,
+            external_bindings,
             subgraphs: self.subgraphs.clone(),
         };
         FreshGraph { graph, id_map }
@@ -500,6 +517,24 @@ impl Graph {
     /// Every subscription edge in this graph (deterministic order).
     pub fn subscriptions(&self) -> impl Iterator<Item = Subscription> + '_ {
         self.subscriptions.iter().copied()
+    }
+
+    // === External bindings ===
+
+    /// Mark (or clear) `port` as read by a consumer outside the graph. An
+    /// externally-bound port is compiled as used even with no in-graph
+    /// binding, so its value is still computed — see
+    /// `ExecutionPlan::output_usage`.
+    pub fn set_external_binding(&mut self, port: OutputPort, bound: bool) {
+        if bound {
+            self.external_bindings.insert(port);
+        } else {
+            self.external_bindings.remove(&port);
+        }
+    }
+
+    pub fn is_externally_bound(&self, port: OutputPort) -> bool {
+        self.external_bindings.contains(&port)
     }
 
     /// Drop data bindings left dangling when a node's func/def shrank its
@@ -733,6 +768,14 @@ impl Graph {
                 s.emitter,
                 s.event_idx,
                 s.subscriber
+            );
+        }
+
+        for port in &self.external_bindings {
+            ensure!(
+                self.nodes.by_key(&port.node_id).is_some(),
+                "external binding on missing node {:?}",
+                port.node_id
             );
         }
 

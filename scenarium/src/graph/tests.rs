@@ -35,6 +35,22 @@ fn roundtrip_serialization() -> anyhow::Result<()> {
 }
 
 #[test]
+fn external_bindings_roundtrip_serialization() -> anyhow::Result<()> {
+    let mut graph = test_graph();
+    let sum_id = graph.by_name("sum").unwrap().id;
+    graph.set_external_binding(OutputPort::new(sum_id, 0), true);
+
+    for format in SerdeFormat::all_formats_for_testing() {
+        let serialized = graph.serialize(format)?;
+        let deserialized = Graph::deserialize(&serialized, format)?;
+        assert!(deserialized.is_externally_bound(OutputPort::new(sum_id, 0)));
+        assert_eq!(graph, deserialized);
+    }
+
+    Ok(())
+}
+
+#[test]
 fn check_passes_for_valid_graph() {
     assert!(test_graph().check().is_ok());
 }
@@ -262,6 +278,27 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
         g.check_with(&library).is_ok(),
         "a numeric constant satisfies a numeric input"
     );
+}
+
+#[test]
+fn check_with_rejects_out_of_range_external_binding() {
+    use crate::library::Library;
+
+    let func = Func::new(FuncId::unique(), "one_out").output(FuncOutput::new("o", DataType::Int));
+    let mut library = Library::default();
+    library.funcs.add(func.clone());
+
+    let mut graph = Graph::default();
+    let id = graph.add_func_node(&func);
+
+    graph.set_external_binding(OutputPort::new(id, 0), true);
+    assert!(graph.check_with(&library).is_ok());
+
+    graph.set_external_binding(OutputPort::new(id, 1), true);
+    let err = graph
+        .check_with(&library)
+        .expect_err("output 1 doesn't exist on a one-output func");
+    assert!(err.to_string().contains("out of range"), "{err}");
 }
 
 #[test]
@@ -531,6 +568,7 @@ fn node_remove_test() -> anyhow::Result<()> {
     let mut graph = test_graph();
 
     let node_id = graph.by_name("sum").unwrap().id;
+    graph.set_external_binding(OutputPort::new(node_id, 0), true);
     graph.remove_by_id(node_id);
 
     assert!(graph.by_name("sum").is_none());
@@ -541,6 +579,9 @@ fn node_remove_test() -> anyhow::Result<()> {
         assert_ne!(dst.node_id, node_id);
         assert_ne!(src.node_id, node_id);
     }
+
+    // Nor does an external binding on one of its own output ports.
+    assert!(!graph.is_externally_bound(OutputPort::new(node_id, 0)));
 
     Ok(())
 }
@@ -673,6 +714,45 @@ fn subscribers_ranges_one_emitter_event() {
         vec![other]
     );
     assert_eq!(graph.subscribers(emitter, 2).count(), 0);
+}
+
+// === External bindings ===
+
+#[test]
+fn set_external_binding_and_is_externally_bound() {
+    let mut graph = test_graph();
+    let sum_id = graph.by_name("sum").unwrap().id;
+    let port = OutputPort::new(sum_id, 0);
+
+    assert!(!graph.is_externally_bound(port));
+    graph.set_external_binding(port, true);
+    assert!(graph.is_externally_bound(port));
+
+    // A distinct port on the same node is a distinct flag.
+    assert!(!graph.is_externally_bound(OutputPort::new(sum_id, 1)));
+
+    // Re-marking is idempotent (BTreeSet dedups).
+    graph.set_external_binding(port, true);
+
+    graph.set_external_binding(port, false);
+    assert!(!graph.is_externally_bound(port));
+}
+
+#[test]
+fn with_fresh_node_ids_remaps_external_bindings() {
+    let mut graph = test_graph();
+    let sum_id = graph.by_name("sum").unwrap().id;
+    graph.set_external_binding(OutputPort::new(sum_id, 0), true);
+
+    let fresh = graph.with_fresh_node_ids();
+    let new_sum_id = fresh.id_map[&sum_id];
+
+    assert!(!fresh.graph.is_externally_bound(OutputPort::new(sum_id, 0)));
+    assert!(
+        fresh
+            .graph
+            .is_externally_bound(OutputPort::new(new_sum_id, 0))
+    );
 }
 
 // === Snapshot / restore (editor undo) ===

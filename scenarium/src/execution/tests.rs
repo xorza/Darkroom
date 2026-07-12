@@ -4,7 +4,7 @@ use super::*;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::execution::compile::CompileError;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeSearch};
+use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::function::FuncBehavior;
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
@@ -4122,6 +4122,67 @@ mod output_usage {
         assert_eq!(
             *seen_usage.lock().await,
             vec![OutputUsage::Needed(1), OutputUsage::Skip]
+        );
+
+        Ok(())
+    }
+
+    /// An external binding (e.g. a GUI inspector reading a port live) makes an
+    /// otherwise-unconsumed output `Needed` too — same "split" fixture as
+    /// `unused_output_marked_skip`, output 1 still has no in-graph consumer, but
+    /// is now flagged externally bound.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn externally_bound_output_is_needed_with_no_consumer() -> anyhow::Result<()> {
+        let seen_usage: Arc<Mutex<Vec<OutputUsage>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_usage_l = seen_usage.clone();
+
+        let mut library = Library::default();
+        library.add(
+            Func::new(SPLIT_FUNC, "split")
+                .output(FuncOutput::new("a", DataType::Int))
+                .output(FuncOutput::new("b", DataType::Int))
+                .lambda(async_lambda!(
+                    move |_, _, _, _, usage, outputs| { seen = seen_usage_l.clone() } => {
+                        seen.lock().await.extend_from_slice(usage);
+                        outputs[0] = DynamicValue::Static(StaticValue::Int(1));
+                        outputs[1] = DynamicValue::Static(StaticValue::Int(2));
+                        Ok(())
+                    }
+                )),
+        );
+        library.add(
+            Func::new(SINK_FUNC, "sink")
+                .sink()
+                .input(FuncInput::required("in", DataType::Int))
+                .lambda(async_lambda!(|_, _, _, _, _, _| { Ok(()) })),
+        );
+
+        let split_id = NodeId::unique();
+        let sink_id = NodeId::unique();
+        let mut graph = Graph::default();
+        graph.add(node(&library, "split", split_id));
+        graph.add(node(&library, "sink", sink_id));
+        // Output 0 has a real consumer; output 1 has none, but is externally bound.
+        graph.set_input_binding(InputPort::new(sink_id, 0), (split_id, 0).into());
+        graph.set_external_binding(OutputPort::new(split_id, 1), true);
+        graph.validate();
+
+        let mut eg = ExecutionEngine::default();
+        eg.update(&graph, &library).unwrap();
+        eg.execute_sinks().await?;
+
+        let split = eg.by_name("split").unwrap();
+        assert_eq!(eg.node_output_usage(split)[0], 1);
+        assert_eq!(
+            eg.node_output_usage(split)[1],
+            1,
+            "external binding alone floors usage to 1 with no in-graph consumer"
+        );
+
+        // The lambda computes both outputs instead of skipping the unconsumed one.
+        assert_eq!(
+            *seen_usage.lock().await,
+            vec![OutputUsage::Needed(1), OutputUsage::Needed(1)]
         );
 
         Ok(())

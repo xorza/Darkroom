@@ -152,6 +152,20 @@ impl Planner {
         let program = &compiled.program;
         plan.reset(program.e_nodes.len(), program.n_outputs());
 
+        // An externally-bound port (e.g. a GUI inspector reading it live) counts as a
+        // consumer even with no in-graph binding, so its producer computes it rather
+        // than skipping it as unused. Seeded before the backward walk below, whose
+        // per-edge counts add on top.
+        for (usage, &external) in plan
+            .output_usage
+            .iter_mut()
+            .zip(&program.output_external_bindings)
+        {
+            if external {
+                *usage += 1;
+            }
+        }
+
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
         collect_roots(compiled, seeds, plan)?;
