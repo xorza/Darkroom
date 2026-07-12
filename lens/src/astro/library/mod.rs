@@ -685,7 +685,7 @@ pub fn astro_library() -> Library {
             Box::pin(async move {
                 let model = ml_model_paths().denoise;
                 let out = run_ml(std::mem::take(&mut inputs[0].value), move |img| {
-                    ml_denoise(img, &TiledOnnxConfig::new(model))
+                    ml_denoise(&img, &TiledOnnxConfig::new(model))
                 })
                 .await?;
                 outputs[0] = DynamicValue::from_custom(Image::from(out));
@@ -728,7 +728,7 @@ pub fn astro_library() -> Library {
                         } else {
                             let starless =
                                 run_ml(std::mem::take(&mut inputs[0].value), move |img| {
-                                    remove_stars_starless_only(img, &TiledOnnxConfig::new(model))
+                                    remove_stars_starless_only(&img, &TiledOnnxConfig::new(model))
                                 })
                                 .await?;
                             outputs[0] = DynamicValue::from_custom(Image::from(starless));
@@ -835,14 +835,17 @@ where
 
 /// Run a caller-supplied ONNX op (`ml_denoise` / `remove_stars`) off the worker: pull the input
 /// `Image` to CPU, run `op` on a blocking thread (ONNX inference), and surface an [`MlError`]
-/// (missing model file, image smaller than the model window) as the node's error.
+/// (missing model file, image smaller than the model window) as the node's error. Hands `op`
+/// the CPU image by value — this input isn't read again afterward, so `remove_stars` can
+/// repurpose its buffer for the `stars` output instead of allocating a fresh one; `op`s that
+/// only need a borrow (`ml_denoise`, `remove_stars_starless_only`) just reborrow it.
 async fn run_ml<R, F>(value: DynamicValue, op: F) -> anyhow::Result<R>
 where
-    F: FnOnce(&RawImage) -> Result<R, MlError> + Send + 'static,
+    F: FnOnce(RawImage) -> Result<R, MlError> + Send + 'static,
     R: Send + 'static,
 {
     let cpu = image_to_cpu(value)?;
-    tokio::task::spawn_blocking(move || op(&cpu))
+    tokio::task::spawn_blocking(move || op(cpu))
         .await
         .map_err(anyhow::Error::from)? // join error
         .map_err(anyhow::Error::from) // model load / inference failure

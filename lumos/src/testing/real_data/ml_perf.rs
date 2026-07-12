@@ -35,7 +35,7 @@ fn ml_full_image_timing() {
     let tiles = tiles_1d(w, stride) * tiles_1d(h, stride);
 
     let t = Instant::now();
-    remove_stars(&img, &TiledOnnxConfig::new(weights)).expect("star removal");
+    remove_stars(img, &TiledOnnxConfig::new(weights)).expect("star removal");
     let dt = t.elapsed().as_secs_f64();
     eprintln!(
         "FULL {w}x{h}: {tiles} tiles @ stride {stride} — {dt:.1}s ({:.0}ms/tile)",
