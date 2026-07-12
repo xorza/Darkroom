@@ -98,4 +98,6 @@ pub use image_ops::ml::backend::{MlError, TiledOnnxConfig};
 #[cfg(feature = "ml")]
 pub use image_ops::ml::denoise::ml_denoise;
 #[cfg(feature = "ml")]
-pub use image_ops::ml::star_removal::{StarRemovalResult, remove_stars};
+pub use image_ops::ml::star_removal::{
+    StarRemovalResult, remove_stars, remove_stars_starless_only,
+};

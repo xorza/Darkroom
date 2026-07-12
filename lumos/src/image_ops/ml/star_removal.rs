@@ -20,9 +20,20 @@ pub struct StarRemovalResult {
 /// Remove stars from a *stretched* (display-domain, `[0, 1]`) image using a caller-supplied
 /// StarNet-style ONNX model. Returns the starless image and the stars layer.
 pub fn remove_stars(image: &Image, config: &TiledOnnxConfig) -> Result<StarRemovalResult, MlError> {
-    let starless = run_tiled(image, config)?;
+    let starless = remove_stars_starless_only(image, config)?;
     let stars = build_stars(image, &starless);
     Ok(StarRemovalResult { starless, stars })
+}
+
+/// Like [`remove_stars`], but skips the `stars` unscreen derivation entirely.
+/// Use when only the starless image is needed — the ONNX inference is the
+/// expensive part regardless, but this still saves the whole-image unscreen
+/// pass over every pixel.
+pub fn remove_stars_starless_only(
+    image: &Image,
+    config: &TiledOnnxConfig,
+) -> Result<Image, MlError> {
+    run_tiled(image, config)
 }
 
 /// `stars = unscreen(original, starless)` — the screen-blend inverse `1 − (1−orig)/(1−starless)`,

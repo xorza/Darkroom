@@ -16,11 +16,11 @@ use lumos::{
     AlignStackConfig, AstroImage, CalibrationImages, CalibrationMasters, CfaImage,
     DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, ImageDimensions, LocalContrast,
     MlError, NeutralizeBackground, OpError, Reference, StackConfig, TiledOnnxConfig,
-    calibrate_align_stack, ml_denoise, remove_stars, stack_cfa_master,
+    calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only, stack_cfa_master,
 };
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::library::{Library, TypeEntry};
-use scenarium::node::func_lambda::{FuncLambda, InvokeError, InvokeResult};
+use scenarium::node::func_lambda::{FuncLambda, InvokeError, InvokeResult, OutputUsage};
 use scenarium::node::function::{Func, FuncInput, FuncOutput, ValueVariant};
 
 use crate::astro::configs::{
@@ -711,18 +711,32 @@ pub fn astro_library() -> Library {
                 FuncOutput::new("Stars", IMAGE_DATA_TYPE.clone())
                     .description("The recovered star layer."),
             )
-            .lambda(FuncLambda::new(move |_, _, _, inputs, _, outputs| {
-                Box::pin(async move {
-                    let model = ml_model_paths().star_removal;
-                    let result = run_ml(std::mem::take(&mut inputs[0].value), move |img| {
-                        remove_stars(img, &TiledOnnxConfig::new(model))
+            .lambda(FuncLambda::new(
+                move |_, _, _, inputs, output_usage, outputs| {
+                    // The unscreen pass that recovers "Stars" is a whole-image pixel loop on
+                    // top of the ONNX inference — skip it when nothing reads that output.
+                    let need_stars = !matches!(output_usage[1], OutputUsage::Skip);
+                    Box::pin(async move {
+                        let model = ml_model_paths().star_removal;
+                        if need_stars {
+                            let result = run_ml(std::mem::take(&mut inputs[0].value), move |img| {
+                                remove_stars(img, &TiledOnnxConfig::new(model))
+                            })
+                            .await?;
+                            outputs[0] = DynamicValue::from_custom(Image::from(result.starless));
+                            outputs[1] = DynamicValue::from_custom(Image::from(result.stars));
+                        } else {
+                            let starless =
+                                run_ml(std::mem::take(&mut inputs[0].value), move |img| {
+                                    remove_stars_starless_only(img, &TiledOnnxConfig::new(model))
+                                })
+                                .await?;
+                            outputs[0] = DynamicValue::from_custom(Image::from(starless));
+                        }
+                        Ok(())
                     })
-                    .await?;
-                    outputs[0] = DynamicValue::from_custom(Image::from(result.starless));
-                    outputs[1] = DynamicValue::from_custom(Image::from(result.stars));
-                    Ok(())
-                })
-            })),
+                },
+            )),
     );
 
     library

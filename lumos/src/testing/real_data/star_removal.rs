@@ -1,7 +1,7 @@
 use super::ml_support::{onnx_weights, stretched_master};
 use crate::image_ops::intensity_plane;
 use crate::image_ops::ml::backend::TiledOnnxConfig;
-use crate::image_ops::ml::star_removal::remove_stars;
+use crate::image_ops::ml::star_removal::{remove_stars, remove_stars_starless_only};
 use crate::testing::{init_tracing, save_png};
 
 fn max_of(p: &[f32]) -> f32 {
@@ -25,7 +25,8 @@ fn starnet_removes_stars() {
     let img = stretched_master();
     save_png(&img, "star_removal/input.png");
 
-    let result = remove_stars(&img, &TiledOnnxConfig::new(weights)).expect("star removal succeeds");
+    let config = TiledOnnxConfig::new(weights);
+    let result = remove_stars(&img, &config).expect("star removal succeeds");
     save_png(&result.starless, "star_removal/starless.png");
     save_png(&result.stars, "star_removal/stars.png");
 
@@ -45,4 +46,11 @@ fn starnet_removes_stars() {
     eprintln!("in_max {in_max:.3}  starless_max {sl_max:.3}  mean removed {removed:.4}");
     assert!(sl_max <= in_max + 1e-3, "starless not brighter than input");
     assert!(removed > 1e-4, "star signal was removed (mean {removed})");
+
+    // The starless-only path (used when a caller doesn't need the `stars`
+    // layer) must reproduce `remove_stars`'s `starless` output exactly —
+    // it's the same underlying `run_tiled` inference either way.
+    let starless_only =
+        remove_stars_starless_only(&img, &config).expect("starless-only star removal succeeds");
+    assert_eq!(starless_only.bytes(), result.starless.bytes());
 }
