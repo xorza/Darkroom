@@ -29,6 +29,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::image_viewer;
 use crate::gui::main_window::MainWindow;
+use crate::gui::node::preview::preview_watch_nodes;
 use crate::gui::run_state::RunState;
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
@@ -232,6 +233,13 @@ impl Editor {
         // frame. Open inspector panels register here; image-viewer tabs
         // in `sync_image_viewers` (their sync loop).
         for node_id in self.main_window.graph_ui.open_inspector_nodes() {
+            self.run_state.watch(node_id);
+        }
+        // Preview nodes need their output value fetched even with no inspector
+        // open. Collected first so the `scene` borrow ends before the mutable
+        // `run_state` borrow.
+        let preview_watch: Vec<NodeId> = preview_watch_nodes(&self.scene).collect();
+        for node_id in preview_watch {
             self.run_state.watch(node_id);
         }
         // Tabs are settled: drop viewer state for closed tabs and fold the

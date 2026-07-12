@@ -8,11 +8,16 @@
 //! at full resolution on demand. The owning per-node store + fetch
 //! coordination lives in [`crate::gui::run_state::RunState`].
 
-use aperture::{Image as PalImage, ImageHandle, Ui};
+use aperture::{
+    Background, Configure, Corners, Image as PalImage, ImageFilter, ImageFit, ImageHandle, Panel,
+    Sense, Shape, Sizing, Spacing, Stroke, Ui, WidgetId,
+};
 use imaginarium::{ColorFormat, Image as RawImage};
 use lens::Image as LensImage;
 use scenarium::data::DynamicValue;
 use scenarium::execution::ArgumentValues;
+
+use crate::gui::theme::Theme;
 
 /// One port's runtime value, ready to render: a formatted text cell plus
 /// an optional preview thumbnail (already uploaded as a texture).
@@ -77,6 +82,109 @@ fn port_view(ui: &Ui, value: &DynamicValue) -> PortValueView {
 /// unexpected format or a degenerate buffer.
 fn upload_preview(ui: &Ui, image: RawImage) -> Option<ImageHandle> {
     Some(ui.register_image(rgba8_image(image)?))
+}
+
+/// Draw an image `handle` as a framed, aspect-preserving thumbnail capped at
+/// `max_width` (never upscaled past the image's own width). A dark image on a
+/// dark surface needs the hairline edge to read as a framed object; the frame
+/// brightens on hover as a click affordance. The panel senses clicks so a
+/// caller can poll `wid` from last frame's responses to open the full-resolution
+/// viewer. Shared by the inspector panel and the Preview node's inline view.
+///
+/// The rounded corners come from a `Shape::WindowedRect` over the image (wedges
+/// filled with the surface, stroke on the boundary), not `clip_rounded` — same
+/// look without the stencil-mask pass. No-op for a degenerate (zero-dimension)
+/// handle. `margin` insets the thumbnail from its neighbors (the inspector
+/// passes none; the Preview node's inline view gives it breathing room).
+pub(crate) fn image_preview(
+    ui: &mut Ui,
+    theme: &Theme,
+    wid: WidgetId,
+    handle: &ImageHandle,
+    max_width: f32,
+    margin: Spacing,
+) {
+    let size = handle.size();
+    if size.x == 0 || size.y == 0 {
+        return;
+    }
+    let aspect = size.x as f32 / size.y as f32;
+    let w = max_width.min(size.x as f32);
+    let h = w / aspect;
+    let stroke_alpha = if ui.response_for(wid).hovered {
+        0.6
+    } else {
+        0.18
+    };
+    Panel::vstack()
+        .id(wid)
+        .size((Sizing::Fixed(w), Sizing::Fixed(h)))
+        .margin(margin)
+        .sense(Sense::CLICK)
+        .show(ui, |ui| {
+            ui.add_shape(
+                Shape::image(handle.clone())
+                    .fit(ImageFit::Contain)
+                    .filter(ImageFilter::Linear),
+            );
+            ui.add_shape(Shape::WindowedRect {
+                local_rect: None,
+                corners: Corners::all(4.0),
+                fill: theme.colors.node_fill.into(),
+                stroke: Stroke::solid(theme.colors.text_muted.with_alpha(stroke_alpha), 1.0),
+            });
+        });
+}
+
+/// Draw the Preview node's **fixed-size** image slot: a `w`×`h` recessed box
+/// (the canvas backdrop, hairline border) that stays the same size whether or
+/// not it holds an image — so the node doesn't reflow when its output arrives.
+/// A present `handle` is drawn `Contain`ed (aspect-preserving, letterboxed on the
+/// recessed backdrop); absent, the slot is empty. Clickable, and brightens its
+/// border on hover, like [`image_preview`]. Unlike that aspect-sized inspector
+/// thumbnail, this is a constant box.
+pub(crate) fn preview_slot(
+    ui: &mut Ui,
+    theme: &Theme,
+    wid: WidgetId,
+    handle: Option<&ImageHandle>,
+    w: f32,
+    h: f32,
+    margin: Spacing,
+) {
+    let stroke_alpha = if ui.response_for(wid).hovered {
+        0.6
+    } else {
+        0.18
+    };
+    Panel::vstack()
+        .id(wid)
+        .size((Sizing::Fixed(w), Sizing::Fixed(h)))
+        .margin(margin)
+        .sense(Sense::CLICK)
+        // Recessed fill so the (possibly letterboxed / empty) slot reads as an
+        // inset image area, distinct from the node body.
+        .background(Background::rounded(
+            theme.colors.canvas_bg,
+            Corners::all(4.0),
+        ))
+        .show(ui, |ui| {
+            if let Some(handle) = handle {
+                ui.add_shape(
+                    Shape::image(handle.clone())
+                        .fit(ImageFit::Contain)
+                        .filter(ImageFilter::Linear),
+                );
+            }
+            // Rounds the (square) image corners into the recessed backdrop and
+            // draws the border; wedge fill matches the backdrop so it blends.
+            ui.add_shape(Shape::WindowedRect {
+                local_rect: None,
+                corners: Corners::all(4.0),
+                fill: theme.colors.canvas_bg.into(),
+                stroke: Stroke::solid(theme.colors.text_muted.with_alpha(stroke_alpha), 1.0),
+            });
+        });
 }
 
 /// Reinterpret a packed `RGBA_U8` imaginarium image as an uploadable

@@ -360,6 +360,7 @@ impl GraphUI {
                                 selected,
                                 geometry,
                                 inspectors,
+                                run_state: ctx.run_state,
                             };
                             node_ui.draw_all(ui, rcx, visible, &mut probe, out);
                         }

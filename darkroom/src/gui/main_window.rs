@@ -16,6 +16,7 @@ use crate::gui::graph_toolbar;
 use crate::gui::image_viewer::ImageViewer;
 use crate::gui::menu_bar;
 use crate::gui::node::emit_subgraph_opens;
+use crate::gui::node::preview::emit_preview_node_opens;
 use crate::gui::preferences_view;
 use crate::gui::scene::Scene;
 use crate::gui::status_bar;
@@ -57,6 +58,8 @@ impl MainWindow {
         self.graph_ui
             .inspectors
             .emit_preview_opens(ui, scene, actions);
+        // Preview-node inline thumbnails open the same full-resolution viewer.
+        emit_preview_node_opens(ui, scene, actions);
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the

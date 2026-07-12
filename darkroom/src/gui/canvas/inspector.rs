@@ -24,8 +24,8 @@
 use std::collections::HashMap;
 
 use aperture::{
-    Background, Color, Configure, Corners, FontWeight, ImageFilter, ImageFit, Panel, Sense, Shadow,
-    Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
+    Background, Color, Configure, Corners, FontWeight, Panel, Sense, Shadow, Sizing, Spacing,
+    Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
 };
 use glam::Vec2;
 use scenarium::data::DataType;
@@ -39,7 +39,7 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::node::header::fmt_elapsed;
 use crate::gui::node::{exec_color, node_widget_id};
-use crate::gui::node_values::PortValueView;
+use crate::gui::node_values::{PortValueView, image_preview};
 use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
@@ -442,19 +442,11 @@ fn port_label_text(library: &Library, name: &str, ty: &DataType) -> String {
     }
 }
 
-/// Draw a port's preview thumbnail beneath its value line: a fixed-size
-/// panel (aspect-preserving, capped at [`PREVIEW_MAX_WIDTH`]) painting the
-/// registered texture inside a hairline rounded frame — a dark image on
-/// the dark panel needs an edge to read as a framed object. No-op when
-/// the port has no preview.
-///
-/// The rounded corners come from a `Shape::WindowedRect` over the image
-/// (wedges filled with the panel surface, stroke on the boundary), not
-/// `clip_rounded` — same look without the stencil-mask pass.
-///
-/// The thumbnail is a click target: [`Inspectors::emit_preview_opens`]
-/// reads it in the prepass to open the full-resolution viewer tab. The
-/// frame brightens on hover as the affordance.
+/// Draw a port's preview thumbnail beneath its value line, capped at
+/// [`PREVIEW_MAX_WIDTH`], via the shared [`image_preview`] renderer. The
+/// thumbnail is a click target: [`Inspectors::emit_preview_opens`] reads it in
+/// the prepass to open the full-resolution viewer tab. No-op when the port has
+/// no preview.
 fn draw_preview(
     ui: &mut Ui,
     theme: &Theme,
@@ -466,36 +458,14 @@ fn draw_preview(
     let Some(handle) = &pv.preview else {
         return;
     };
-    let size = handle.size();
-    if size.x == 0 || size.y == 0 {
-        return;
-    }
-    let aspect = size.x as f32 / size.y as f32;
-    let w = PREVIEW_MAX_WIDTH.min(size.x as f32);
-    let h = w / aspect;
-    let wid = preview_wid(node_id, kind, idx);
-    let stroke_alpha = if ui.response_for(wid).hovered {
-        0.6
-    } else {
-        0.18
-    };
-    Panel::vstack()
-        .id(wid)
-        .size((Sizing::Fixed(w), Sizing::Fixed(h)))
-        .sense(Sense::CLICK)
-        .show(ui, |ui| {
-            ui.add_shape(
-                Shape::image(handle.clone())
-                    .fit(ImageFit::Contain)
-                    .filter(ImageFilter::Linear),
-            );
-            ui.add_shape(Shape::WindowedRect {
-                local_rect: None,
-                corners: Corners::all(4.0),
-                fill: theme.colors.node_fill.into(),
-                stroke: Stroke::solid(theme.colors.text_muted.with_alpha(stroke_alpha), 1.0),
-            });
-        });
+    image_preview(
+        ui,
+        theme,
+        preview_wid(node_id, kind, idx),
+        handle,
+        PREVIEW_MAX_WIDTH,
+        Spacing::ZERO,
+    );
 }
 
 fn title_style(ui: &Ui) -> TextStyle {
