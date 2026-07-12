@@ -33,7 +33,8 @@ use glam::Vec2;
 use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
 use scenarium::graph::{
-    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, Subscription,
+    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
+    Subscription,
 };
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
@@ -191,6 +192,15 @@ pub enum Intent {
         subscriber: NodeId,
         subscribe: bool,
     },
+    /// Mark (`bound = true`) or clear (`false`) an output port as read by a
+    /// consumer outside the graph (a GUI inspector). Idempotent — a no-op
+    /// when the flag already matches. Alt+click on an output port circle, or
+    /// its context-menu toggle.
+    SetExternalBinding {
+        node_id: NodeId,
+        port_idx: usize,
+        bound: bool,
+    },
 }
 
 /// Self-contained undo-stack entry. Each leaf variant carries both
@@ -309,6 +319,14 @@ pub enum GraphStep {
         from: bool,
         to: bool,
     },
+    /// Mark or clear an output port's external binding. `from`/`to` are the
+    /// bound-state booleans — exact inverses, one step type backs the toggle.
+    SetExternalBinding {
+        node_id: NodeId,
+        port_idx: usize,
+        from: bool,
+        to: bool,
+    },
 }
 
 /// Document-global steps — they mutate fields that aren't scoped to a
@@ -399,6 +417,7 @@ impl GraphStep {
                 ..
             } => from_index == to_index,
             GraphStep::SetNodeProperty { from, to, .. } => from == to,
+            GraphStep::SetExternalBinding { from, to, .. } => from == to,
             GraphStep::SetViewport { from, to } => {
                 (from.pan - to.pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
                     && (from.zoom - to.zoom).abs() < VIEWPORT_EPS
@@ -603,6 +622,19 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
                 emitter,
                 event_idx,
                 subscriber,
+            }
+        }
+        Intent::SetExternalBinding {
+            node_id,
+            port_idx,
+            bound,
+        } => {
+            let port = OutputPort::new(node_id, port_idx);
+            GraphStep::SetExternalBinding {
+                node_id,
+                port_idx,
+                from: graph.is_externally_bound(port),
+                to: bound,
             }
         }
     };
@@ -955,6 +987,12 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             to,
             ..
         } => set_subscription(scope, *emitter, *event_idx, *subscriber, *to),
+        GraphStep::SetExternalBinding {
+            node_id,
+            port_idx,
+            to,
+            ..
+        } => set_external_binding(scope, *node_id, *port_idx, *to),
     }
 }
 
@@ -985,6 +1023,14 @@ fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProp
         NodeProperty::Disabled(v) => node.disabled = v,
         NodeProperty::RuntimeCache(v) => node.cache = v,
     }
+}
+
+/// Mark or clear one output port's external binding. Shared by `apply_graph`
+/// (writes `to`) and `revert_graph` (writes `from`).
+fn set_external_binding(scope: &mut EditScope<'_>, node_id: NodeId, port_idx: usize, bound: bool) {
+    scope
+        .graph
+        .set_external_binding(OutputPort::new(node_id, port_idx), bound);
 }
 
 /// Backward apply: write the step's "from" half to `doc`. Pairs
@@ -1119,6 +1165,12 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             from,
             ..
         } => set_subscription(scope, *emitter, *event_idx, *subscriber, *from),
+        GraphStep::SetExternalBinding {
+            node_id,
+            port_idx,
+            from,
+            ..
+        } => set_external_binding(scope, *node_id, *port_idx, *from),
     }
 }
 
@@ -1173,7 +1225,9 @@ impl UndoStep {
             | GraphStep::SetNodeProperty { .. }
             // Event wiring paints a wire between existing glyphs — no
             // node remeasure.
-            | GraphStep::SetSubscription { .. } => false,
+            | GraphStep::SetSubscription { .. }
+            // Flips a port's outline paint only — no remeasure.
+            | GraphStep::SetExternalBinding { .. } => false,
         },
     }
     }
@@ -1204,7 +1258,9 @@ impl UndoStep {
                 | GraphStep::SetNodeProperty { .. }
                 | GraphStep::SetViewport { .. }
                 // Subscriptions don't feed a subgraph's derived interface.
-                | GraphStep::SetSubscription { .. },
+                | GraphStep::SetSubscription { .. }
+                // Nor does an external binding — it's not wiring at all.
+                | GraphStep::SetExternalBinding { .. },
             )
             | UndoStep::Doc(_) => false,
         }
@@ -1241,7 +1297,8 @@ impl UndoStep {
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetNodeProperty { .. }
                 | GraphStep::DetachSubgraph { .. }
-                | GraphStep::SetSubscription { .. },
+                | GraphStep::SetSubscription { .. }
+                | GraphStep::SetExternalBinding { .. },
             )
             | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameSubgraph { .. }) => {
                 true
@@ -1274,7 +1331,8 @@ impl UndoStep {
                 | GraphStep::RaiseNode { .. }
                 | GraphStep::SetNodeProperty { .. }
                 | GraphStep::DetachSubgraph { .. }
-                | GraphStep::SetSubscription { .. },
+                | GraphStep::SetSubscription { .. }
+                | GraphStep::SetExternalBinding { .. },
             )
             | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameSubgraph { .. }) => {
                 None
@@ -1716,6 +1774,74 @@ mod tests {
                 "{to:?} equals the current value → writes nothing"
             );
         }
+    }
+
+    #[test]
+    fn set_external_binding_commits_reverts_and_no_ops() {
+        let mut doc = Document::default();
+        let id = add_node_at(&mut doc, Vec2::ZERO);
+        let port = OutputPort::new(id, 0);
+        assert!(!doc.graph.is_externally_bound(port));
+
+        let step = commit_intent(
+            Intent::SetExternalBinding {
+                node_id: id,
+                port_idx: 0,
+                bound: true,
+            },
+            &mut doc,
+            GraphRef::Main,
+        )
+        .expect("marking an unbound port is a real change");
+        assert!(doc.graph.is_externally_bound(port));
+        assert!(
+            !step.requires_relayout() && !step.requires_reconcile(),
+            "an external-binding toggle neither remeasures nor reshapes the interface"
+        );
+        assert!(step.dirties_document(), "a real graph edit worth saving");
+        assert!(
+            step.gesture_key().is_none(),
+            "each toggle is its own undo entry"
+        );
+
+        revert_step(&step, &mut doc, GraphRef::Main);
+        assert!(!doc.graph.is_externally_bound(port), "revert clears it");
+        apply_step(&step, &mut doc, GraphRef::Main);
+        assert!(doc.graph.is_externally_bound(port), "redo re-marks it");
+
+        // Setting to the value it already holds is a no-op (no undo entry).
+        assert!(
+            commit_intent(
+                Intent::SetExternalBinding {
+                    node_id: id,
+                    port_idx: 0,
+                    bound: true,
+                },
+                &mut doc,
+                GraphRef::Main,
+            )
+            .is_none(),
+            "already bound → writes nothing"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "SetExternalBinding targets a node")]
+    fn set_external_binding_on_missing_node_asserts() {
+        // Unlike a subscription drag, this intent only ever comes from a port
+        // rendered in the current frame's Scene — a missing node means the
+        // GUI and graph desynced, a real bug worth crashing loudly on rather
+        // than silently dropping.
+        let mut doc = Document::default();
+        commit_intent(
+            Intent::SetExternalBinding {
+                node_id: NodeId::unique(),
+                port_idx: 0,
+                bound: true,
+            },
+            &mut doc,
+            GraphRef::Main,
+        );
     }
 
     #[test]

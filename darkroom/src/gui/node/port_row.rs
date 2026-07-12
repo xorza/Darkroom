@@ -23,11 +23,11 @@ use crate::gui::EventRef;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
-use crate::gui::node::{RecordCtx, node_hovered, set_input};
+use crate::gui::node::{RecordCtx, node_hovered, set_external_binding, set_input};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::{StaticValueEditorTheme, Theme};
-use crate::gui::widgets::support::filled_rect;
+use crate::gui::widgets::support::filled_rect_with_outline;
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -218,7 +218,7 @@ fn input_label_cell(
             // A const-only input can't be wired, so it has no connection anchor
             // — render just the label (+ its inline const editor).
             if !input.const_only {
-                circle_frame(ui, theme, wid, fill, margin, &tip);
+                circle_frame(ui, theme, wid, fill, None, margin, &tip);
             }
             port_label(ui, rcx, port, input.name.clone(), &tip, rename, out);
         });
@@ -320,17 +320,24 @@ fn output_cell(
         PortKind::Output,
         rcx.geometry.ports.is_hovered(port),
     );
+    // The external-binding ring reuses the "pinned" accent (the inspector's
+    // pinned outline / its header chip) — one color means "held open" across
+    // both.
+    let outline = output
+        .external_binding
+        .then_some(theme.colors.badge_subgraph);
     let tip = port_tip(
         output.description.as_str(),
         type_label(rcx.library, &output.ty),
     );
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
-    Panel::hstack()
+    let cell = Panel::hstack()
         .id_salt(("out", port.port_idx))
         .grid_cell((port.port_idx as u16, COL_OUTPUT))
         .align(Align::new(HAlign::Right, VAlign::Center))
         .size((Sizing::Hug, Sizing::Hug))
+        .sense(Sense::CLICK)
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
@@ -340,12 +347,41 @@ fn output_cell(
                 theme,
                 wid,
                 fill,
+                outline,
                 Spacing::new(0.0, 0.0, -overhang, 0.0),
                 &tip,
             );
         });
     // Double-click to disconnect every consumer is handled in
     // `emit_port_dblclicks` (prepass) alongside the input-side gesture.
+
+    // Right-click anywhere on the cell (circle or label) opens the same
+    // toggle as a menu item — mirrors the input side's binding menu.
+    let menu_id = cell.response.widget_id();
+    let cell_secondary = cell.response.secondary_clicked();
+    let circle_state = ui.response_for(wid);
+    // Alt+click the circle toggles the external binding — a distinct chord
+    // from the plain double-click above, so the two never race.
+    if circle_state.clicked && ui.modifiers().alt {
+        out.push(set_external_binding(port, !output.external_binding));
+    }
+    if (cell_secondary || circle_state.secondary_clicked)
+        && let Some(p) = ui.pointer_pos()
+    {
+        ContextMenu::open(ui, menu_id, p);
+    }
+    ContextMenu::for_id(menu_id)
+        .size((Sizing::Hug, Sizing::Hug))
+        .show(ui, |ui, popup| {
+            let label = if output.external_binding {
+                "Stop watching externally"
+            } else {
+                "Watch externally"
+            };
+            if MenuItem::new(label).show(ui, popup).clicked() {
+                out.push(set_external_binding(port, !output.external_binding));
+            }
+        });
 }
 
 /// One event (emitter) port row: the event name plus an event-colored triangle
@@ -458,11 +494,16 @@ pub(crate) const PORT_HIT_SCALE: f32 = 1.8;
 /// pin), matching the soft corners of the rest of the chrome.
 pub(crate) const EVENT_TRIANGLE_RADIUS: f32 = 2.0;
 
+/// Stroke width of the accent ring drawn around an externally-bound
+/// output's port circle (see `circle_frame`'s `outline` param).
+const EXTERNAL_BINDING_OUTLINE_WIDTH: f32 = 1.5;
+
 fn circle_frame(
     ui: &mut Ui,
     theme: &Theme,
     wid: WidgetId,
     fill: Color,
+    outline: Option<Color>,
     margin: Spacing,
     tip: &str,
 ) {
@@ -490,7 +531,13 @@ fn circle_frame(
         .margin(hit_margin)
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
-            filled_rect(ui, Rect::new(inset, inset, port, port), radius, fill);
+            filled_rect_with_outline(
+                ui,
+                Rect::new(inset, inset, port, port),
+                radius,
+                fill,
+                outline.map(|c| (c, EXTERNAL_BINDING_OUTLINE_WIDTH)),
+            );
         });
     if !tip.is_empty() {
         Tooltip::for_(&circle.response.snapshot())

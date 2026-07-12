@@ -115,6 +115,10 @@ pub struct SceneOutput {
     /// port declares none.
     pub description: SmolStr,
     pub ty: DataType,
+    /// Whether a consumer outside the graph (a GUI inspector) reads this port
+    /// live — see [`scenarium::graph::Graph::is_externally_bound`]. Drives the
+    /// port circle's outline.
+    pub external_binding: bool,
 }
 
 /// One event (emitter) port in the per-frame projection. Events carry no data
@@ -420,6 +424,7 @@ impl Scene {
                             }
                             OutputType::Fixed(dt) => dt.clone(),
                         },
+                        external_binding: graph.is_externally_bound(OutputPort::new(node.id, i)),
                     }),
             );
             let events = extend_pool(
@@ -852,6 +857,35 @@ mod tests {
             ["Delta", "Frame #"],
             "data outputs are unaffected by events"
         );
+    }
+
+    #[test]
+    fn external_binding_projects_per_output_port() {
+        use scenarium::elements::worker_events_library::{
+            FRAME_EVENT_FUNC_ID, worker_events_library,
+        };
+
+        // "frame event" has two data outputs (Delta, Frame #); mark only the
+        // second externally bound and confirm the flag lands on the right
+        // pooled entry, not both or neither.
+        let library = worker_events_library();
+        let mut graph = Graph::default();
+        let node: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
+        let node_id = node.id;
+        graph.add(node);
+        graph.set_external_binding(OutputPort::new(node_id, 1), true);
+
+        let view = GraphView::for_graph(&graph);
+        let mut scene = Scene::default();
+        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+
+        let n = scene.nodes.iter().find(|n| n.id == node_id).unwrap();
+        let bindings: Vec<bool> = scene
+            .outputs(n.outputs)
+            .iter()
+            .map(|o| o.external_binding)
+            .collect();
+        assert_eq!(bindings, [false, true]);
     }
 
     #[test]

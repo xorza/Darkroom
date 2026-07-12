@@ -559,6 +559,15 @@ pub(crate) fn set_input(port: PortRef, to: Binding) -> Intent {
     }
 }
 
+/// Toggle (or set) an output port's external binding.
+pub(crate) fn set_external_binding(port: PortRef, bound: bool) -> Intent {
+    Intent::SetExternalBinding {
+        node_id: port.node_id,
+        port_idx: port.port_idx,
+        bound,
+    }
+}
+
 /// The intents a click on `node_id` produces: the selection change plus a
 /// lift to the top of the paint stack, so clicking a node brings it to the
 /// front. The raise is skipped only when a Shift-click *removes* the node
