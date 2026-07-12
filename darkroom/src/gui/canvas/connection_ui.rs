@@ -11,50 +11,11 @@ use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::wire_visible;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, WireEmphasis, add_cubic_wire};
+use crate::gui::canvas::wire::{WireEmphasis, add_cubic_wire, cubic_handles};
 use crate::gui::canvas::{node_ports, outer_canvas_widget_id, pointer_world};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::{node_widget_id, set_input};
 use crate::gui::scene::{InputBindingView, Scene};
-
-/// Upper bound on the *vertical-gap* term of the handle length, so a tall
-/// forward span bows into a gentle S rather than a huge loop.
-const MAX_HANDLE: f32 = 120.0;
-
-/// Gain on the *backward-reach* term: `reach = BACKREACH_GAIN * sqrt(distance)`.
-/// A square-root law (not linear, not a fixed cap) so the loop keeps growing as
-/// the input moves further left — a flat cap reads short across a big gap — yet
-/// grows ever more slowly, so it never sprawls out to the sides the way a
-/// linear reach does. Tuned so a node-width backlink (~180px) reaches ~135px.
-const BACKREACH_GAIN: f32 = 10.0;
-
-/// Control points for a left-to-right cubic between port centers `p0`
-/// (output side) and `p3` (input side): both handles run horizontally so the
-/// curve leaves the output rightward and arrives at the input leftward.
-/// Shared by the permanent and in-flight draws so the preview matches the
-/// committed curve exactly.
-///
-/// The handle length is the larger of two terms:
-/// - **Forward** — half the *vertical* gap (clamped to `[MIN_HANDLE,
-///   MAX_HANDLE]`): near-level ports stay taut, stacked ones bow into a gentle
-///   S without over-looping on a tall span.
-/// - **Backward** — when the input sits *left* of the output the wire must
-///   double back on itself. A short handle whips it straight across the node
-///   bodies (the "hidden under the node" look); reaching out by
-///   `BACKREACH_GAIN * sqrt(distance)` instead bows both ends into one wide,
-///   smooth loop that leaves the output rightward, arcs around, and re-enters
-///   the input leftward. The `sqrt` keeps the loop scaling with the backlink
-///   distance (so far-apart nodes still get a proper loop, not a stub) while
-///   growing slowly enough that it never sprawls out to the sides.
-fn cubic_handles(p0: Vec2, p3: Vec2) -> CubicHandles {
-    let vertical = ((p3.y - p0.y).abs() * 0.5).clamp(MIN_HANDLE, MAX_HANDLE);
-    let backreach = BACKREACH_GAIN * (p0.x - p3.x).max(0.0).sqrt();
-    let len = vertical.max(backreach);
-    CubicHandles {
-        p1: p0 + Vec2::new(len, 0.0),
-        p2: p3 - Vec2::new(len, 0.0),
-    }
-}
 
 /// Owns the in-flight new-connection wire (a held drag or a free-floating
 /// wire — see [`InFlight`]) plus the existing-connection renderer.
@@ -135,7 +96,7 @@ impl ConnectionUI {
         }
         // Latch a fresh port drag only when idle.
         if self.state.is_none()
-            && let Some(start) = scan_drag_start(geometry, scene)
+            && let Some(start) = scan_drag_start(geometry, scene, ui)
         {
             self.state = Some(InFlight {
                 start,
@@ -425,10 +386,16 @@ fn port_gradient(start: Color, end: Color) -> Brush {
 
 /// First port whose response shows `drag_started` this frame, or `None`.
 /// Iterates inputs first then outputs per node so the topmost recorded
-/// port wins ties (matches paint order).
-fn scan_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<PortRef> {
+/// port wins ties (matches paint order). Skips output ports while Cmd is
+/// held — that chord is reserved for `PinDragUi`'s pin-creation drag (see
+/// `pin_drag_ui.rs`), so the two controllers never both latch the same press.
+fn scan_drag_start(geometry: &CanvasGeometry, scene: &Scene, ui: &Ui) -> Option<PortRef> {
+    let cmd_reserved_for_pin = ui.modifiers().ctrl;
     for n in &scene.nodes {
         for kind in [PortKind::Input, PortKind::Output] {
+            if kind == PortKind::Output && cmd_reserved_for_pin {
+                continue;
+            }
             for port in node_ports(n, kind) {
                 if geometry.ports.drag_started(port) {
                     return Some(port);
@@ -545,8 +512,9 @@ fn dropped_on_empty_canvas(ui: &mut Ui, scene: &Scene) -> bool {
 }
 
 /// The declared [`DataType`] of `port` in the current scene, or `None`
-/// if the port isn't present (e.g. mid-rebuild).
-fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
+/// if the port isn't present (e.g. mid-rebuild). `pub(crate)`: also used by
+/// `PinDragUi` to tint its pin-creation drag preview.
+pub(crate) fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
     let node = scene.nodes.iter().find(|n| n.id == port.node_id)?;
     let ty = match port.kind {
         PortKind::Input => scene.inputs(node.inputs).get(port.port_idx)?.ty.clone(),

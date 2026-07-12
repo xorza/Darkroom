@@ -7,7 +7,7 @@
 //! affordance lives in [`crate::gui::node::port_rename`].
 
 use aperture::{
-    Align, Color, Configure, ContextMenu, Grid, HAlign, LineCap, MenuItem, Panel, Rect,
+    Align, Brush, Color, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, Rect,
     ResponseSnapshot, Sense, Shape, Sizing, Spacing, Text, TextStyle, Tooltip, Track, Ui, VAlign,
     WidgetId,
 };
@@ -23,6 +23,7 @@ use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::Intent;
 use crate::gui::EventRef;
 use crate::gui::canvas::breaker::BreakerProbe;
+use crate::gui::canvas::wire::{CubicHandles, add_cubic_wire, cubic_handles};
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
@@ -422,11 +423,8 @@ fn output_cell(
     let menu_id = cell.response.widget_id();
     let cell_secondary = cell.response.secondary_clicked();
     let circle_state = ui.response_for(wid);
-    // Cmd(/Ctrl)+click the circle toggles the pin — a distinct chord from the
-    // plain double-click above, so the two never race.
-    if circle_state.clicked && ui.modifiers().ctrl {
-        out.push(set_output_pinned(port, !output.pinned));
-    }
+    // Creating a pin is a Cmd+drag from the circle (see `PinDragUi`), not a
+    // click — the menu item below and the drag are the only ways to pin.
     open_port_context_menu(ui, menu_id, cell_secondary, circle_state.secondary_clicked);
     ContextMenu::for_id(menu_id)
         .size((Sizing::Hug, Sizing::Hug))
@@ -577,14 +575,6 @@ const PIN_REACH: f32 = 10.0;
 /// How far above the port's own center the satellite circle sits.
 const PIN_RISE: f32 = 12.0;
 
-/// Control-point offset from `p0` (the port's own center) — bows the
-/// curve's start outward before it climbs to the satellite.
-const PIN_HANDLE_OUT: Vec2 = Vec2::new(20.0, 0.0);
-
-/// Control-point offset from `p3` (the satellite's center) — bows the
-/// curve's arrival so it eases into the satellite from below.
-const PIN_HANDLE_IN: Vec2 = Vec2::new(-20.0, 0.0);
-
 /// A pinned output's bezier + satellite geometry, anchored at `port_center`.
 /// Pure so both the paint (owner-local `port_center`) and the breaker
 /// hit-test (world-space `port_center`, via `CanvasGeometry::ports::center`)
@@ -598,22 +588,55 @@ struct PinGeometry {
     satellite_radius: f32,
 }
 
+/// Bezier + satellite shape between `port_center` and `satellite_center` —
+/// shared by a committed pin's fixed offset ([`pin_geometry`]) and an
+/// in-flight pin-creation drag's live cursor position ([`pin_drag_preview`]).
+/// The control handles are [`cubic_handles`], the same forward/backward-reach
+/// shape the data wire uses (a pin's port and satellite are just another
+/// output-ish-anchor-to-far-end pair) — so a pin dragged in any direction
+/// bows exactly like a wire pulled the same way, instead of the old fixed
+/// small horizontal nub, which only ever looked right for the committed
+/// pin's own short, always-rightward offset.
+fn pin_curve(port_center: Vec2, satellite_center: Vec2, satellite_radius: f32) -> PinGeometry {
+    let handles = cubic_handles(port_center, satellite_center);
+    PinGeometry {
+        p0: port_center,
+        p1: handles.p1,
+        p2: handles.p2,
+        p3: satellite_center,
+        satellite_center,
+        satellite_radius,
+    }
+}
+
 fn pin_geometry(port_center: Vec2, radius: f32) -> PinGeometry {
     let satellite_radius = radius * PIN_SATELLITE_SCALE;
     let satellite_center =
         port_center + Vec2::new(radius + PIN_REACH + satellite_radius, -PIN_RISE);
-    let p0 = port_center;
-    let p3 = satellite_center;
-    let p1 = p0 + PIN_HANDLE_OUT;
-    let p2 = p3 + PIN_HANDLE_IN;
-    PinGeometry {
-        p0,
-        p1,
-        p2,
-        p3,
-        satellite_center,
-        satellite_radius,
-    }
+    pin_curve(port_center, satellite_center, satellite_radius)
+}
+
+/// Paint one pin bezier + satellite in `color`, shared by a committed pin
+/// ([`pin_glyph`]) and the in-flight drag preview ([`pin_drag_preview`]).
+/// The bezier itself draws through [`add_cubic_wire`], the same primitive
+/// every data/event/subscription wire uses, so a pin reads as one more wire
+/// rather than a bespoke shape.
+fn paint_pin_curve(ui: &mut Ui, theme: &Theme, g: &PinGeometry, color: Color) {
+    add_cubic_wire(
+        ui,
+        g.p0,
+        g.p3,
+        CubicHandles { p1: g.p1, p2: g.p2 },
+        theme.connection_width,
+        Brush::Solid(color),
+    );
+    dot(
+        ui,
+        g.satellite_center.x,
+        g.satellite_center.y,
+        g.satellite_radius,
+        color,
+    );
 }
 
 /// A pinned output's visual: a small bezier leading out from the port
@@ -628,19 +651,26 @@ fn pin_geometry(port_center: Vec2, radius: f32) -> PinGeometry {
 /// itself paints in (see [`circle_frame`]).
 fn pin_glyph(ui: &mut Ui, theme: &Theme, inset: f32, radius: f32, color: Color) {
     let port_center = Vec2::new(inset + radius, inset + radius);
-    let g = pin_geometry(port_center, radius);
-    ui.add_shape(
-        Shape::cubic_bezier(g.p0, g.p1, g.p2, g.p3, theme.connection_width)
-            .brush(color)
-            .cap(LineCap::Round),
-    );
-    dot(
-        ui,
-        g.satellite_center.x,
-        g.satellite_center.y,
-        g.satellite_radius,
-        color,
-    );
+    paint_pin_curve(ui, theme, &pin_geometry(port_center, radius), color);
+}
+
+/// Paint a Cmd+drag-from-output-port pin-creation gesture's live preview:
+/// the same bezier+satellite shape as a committed pin, but the satellite
+/// follows the live cursor (`satellite_center`) instead of the fixed offset —
+/// driven by `PinDragUi` while the drag is held. Unlike [`pin_glyph`]'s
+/// owner-local frame, both points here are world-space, matching the frame
+/// `ConnectionUI::draw_in_flight` paints in — there's no owner panel to be
+/// local to while the satellite is following the pointer freely.
+pub(crate) fn pin_drag_preview(
+    ui: &mut Ui,
+    theme: &Theme,
+    radius: f32,
+    port_center: Vec2,
+    satellite_center: Vec2,
+    color: Color,
+) {
+    let g = pin_curve(port_center, satellite_center, radius * PIN_SATELLITE_SCALE);
+    paint_pin_curve(ui, theme, &g, color);
 }
 
 /// True if the active breaker gesture crosses `port`'s pin glyph — either
