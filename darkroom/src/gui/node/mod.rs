@@ -559,12 +559,12 @@ pub(crate) fn set_input(port: PortRef, to: Binding) -> Intent {
     }
 }
 
-/// Toggle (or set) an output port's external binding.
-pub(crate) fn set_external_binding(port: PortRef, bound: bool) -> Intent {
-    Intent::SetExternalBinding {
+/// Toggle (or set) whether an output port is pinned.
+pub(crate) fn set_output_pinned(port: PortRef, pinned: bool) -> Intent {
+    Intent::SetOutputPinned {
         node_id: port.node_id,
         port_idx: port.port_idx,
-        bound,
+        pinned,
     }
 }
 

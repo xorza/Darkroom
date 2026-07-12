@@ -63,10 +63,10 @@ pub(crate) struct ExecutionPlan {
     pub(crate) verdicts: NodeColumn<NodeVerdict>,
     /// Per-output usage, indexed by output-pool index: in-graph consumer counts from
     /// the backward walk, plus one extra unit for a port with a reader outside the
-    /// schedule — a port the compiled program flags externally bound (a GUI inspector
-    /// reading it live), or one belonging to a pinned root (the preview fetch reads it
-    /// after the run) — folded in here (see [`Planner::plan`]) so this is the single,
-    /// complete source of truth: the executor maps it straight to
+    /// schedule — a port the compiled program flags pinned (a GUI inspector reading it
+    /// live), or one belonging to a pinned *root* (`self.pinned` below — the preview
+    /// fetch reads it after the run) — folded in here (see [`Planner::plan`]) so this
+    /// is the single, complete source of truth: the executor maps it straight to
     /// [`OutputUsage`](crate::node::func_lambda::OutputUsage), never touching the
     /// compiled program's or plan's own pools again. Both are `+= 1`, not a floor to
     /// `1`: a port with `n` real consumers must land at `n + 1`, or the executor's
@@ -80,12 +80,15 @@ pub(crate) struct ExecutionPlan {
     /// cut seeds its `needed` mask from these and prunes any cone reachable only through
     /// cache-hit consumers (see [`Executor`](crate::execution::executor::Executor)).
     pub(crate) roots: Vec<NodeIdx>,
-    /// The node-seeded roots (on-demand preview targets), a subset of `roots`. Drives two
-    /// things: `plan.output_usage` gets a `+= 1` for each pinned node's outputs (above),
-    /// and the executor's per-run retention policy (`Executor::retain`) keeps the node's
-    /// outputs resident through every release/eviction site whatever its cache mode.
-    /// Retention is all it takes for a repeated run to be a RAM hit: the reuse check
-    /// serves any resident digest-valid value.
+    /// The node-seeded roots (on-demand preview targets) — a *pinned root*, a subset of
+    /// `roots`. Distinct from a pinned *output port* (a graph-authored, persisted flag —
+    /// see [`Graph::pinned_outputs`](crate::graph::Graph)): this is a per-run seed with
+    /// no persisted counterpart. Drives two things: `plan.output_usage` gets a `+= 1`
+    /// for each pinned root's outputs (above), and the executor's per-run retention
+    /// policy (`Executor::retain`) keeps the node's outputs resident through every
+    /// release/eviction site whatever its cache mode. Retention is all it takes for a
+    /// repeated run to be a RAM hit: the reuse check serves any resident digest-valid
+    /// value.
     pub(crate) pinned: Vec<NodeIdx>,
 }
 
@@ -110,22 +113,22 @@ impl ExecutionPlan {
 
     /// Seed `output_usage` with every unit of usage that comes from outside the
     /// schedule itself, before [`Planner::plan`]'s backward walk adds each in-graph
-    /// consumer's own count on top: one unit for a port the compiled program flags
-    /// externally bound (a GUI inspector reading it live), and one for each output of a
-    /// pinned root (`self.pinned`, already populated by `collect_roots` by the time
-    /// this runs) — its value is read by the preview fetch after the run. Both are
-    /// `+= 1`, never a floor: a port with `n` real consumers must land at `n + 1`, or
-    /// the executor's move-on-last-use optimization (`collect_inputs`) would take the
-    /// value out of its slot on the last *real* read (it only fires when a read leaves
-    /// the usage at exactly zero). Folding both in here, once, makes `output_usage` the
-    /// single, complete source of truth — the executor maps it straight to
-    /// `OutputUsage` and never cross-references the compiled program's pool or
-    /// `self.pinned` again for this.
+    /// consumer's own count on top: one unit for a pinned output port (the compiled
+    /// program's `output_pinned` flag — a GUI inspector reading it live), and one for
+    /// each output of a pinned *root* (`self.pinned`, already populated by
+    /// `collect_roots` by the time this runs) — its value is read by the preview fetch
+    /// after the run. Both are `+= 1`, never a floor: a port with `n` real consumers
+    /// must land at `n + 1`, or the executor's move-on-last-use optimization
+    /// (`collect_inputs`) would take the value out of its slot on the last *real* read
+    /// (it only fires when a read leaves the usage at exactly zero). Folding both in
+    /// here, once, makes `output_usage` the single, complete source of truth — the
+    /// executor maps it straight to `OutputUsage` and never cross-references the
+    /// compiled program's pool or `self.pinned` again for this.
     ///
     /// Called right after `reset` zero-filled `output_usage` (nothing has run the
-    /// backward walk yet), so the external-binding half is a plain assignment; pinning
-    /// then adds on top, so a port that's both pinned and externally bound correctly
-    /// lands at `2`.
+    /// backward walk yet), so the pinned-output half is a plain assignment; pinned
+    /// roots then add on top, so a port that's both a pinned root's output and itself
+    /// individually pinned correctly lands at `2`.
     pub(crate) fn seed_extra_usage(&mut self, program: &ExecutionProgram) {
         // `output_usage`'s length comes from the `extend` below, not a separate resize
         // in `reset` — so what actually needs checking isn't "these two already agree"
@@ -134,9 +137,9 @@ impl ExecutionPlan {
         // `Flattener::build` asserts this for a real compile; `Fix::node` keeps it true
         // for this module's hand-built tests.
         assert_eq!(
-            program.output_external_bindings.len(),
+            program.output_pinned.len(),
             program.n_outputs(),
-            "output_external_bindings must have exactly one entry per pooled output port"
+            "output_pinned must have exactly one entry per pooled output port"
         );
         // `+=` below (in the pinned loop) only makes sense against a freshly `reset`
         // (empty) column — a double call would silently double-count rather than fail
@@ -146,7 +149,7 @@ impl ExecutionPlan {
             "seed_extra_usage must run on a freshly reset output_usage column"
         );
         self.output_usage
-            .extend(program.output_external_bindings.iter().map(|&b| b as u32));
+            .extend(program.output_pinned.iter().map(|&b| b as u32));
 
         for &idx in &self.pinned {
             for usage in &mut self.output_usage[program.e_nodes[idx].outputs.range()] {
@@ -211,9 +214,9 @@ impl Planner {
         // `seed_extra_usage`'s pinned fold reads.
         collect_roots(compiled, seeds, plan)?;
 
-        // Both non-schedule usage sources (external bindings, pinned roots) are folded
-        // in together here, before the walk below adds each in-graph consumer's own
-        // count on top.
+        // Both non-schedule usage sources (pinned output ports, pinned roots) are
+        // folded in together here, before the walk below adds each in-graph
+        // consumer's own count on top.
         plan.seed_extra_usage(program);
 
         let result = self.walk_backward_collect_order(program, plan);

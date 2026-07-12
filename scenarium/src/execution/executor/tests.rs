@@ -227,8 +227,8 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
     );
 }
 
-/// A port with both a real consumer and an extra usage unit (standing in for an
-/// externally-bound port — `Planner::plan` folds that in as `+= 1` on top of the real
+/// A port with both a real consumer and an extra usage unit (standing in for a
+/// pinned port — `Planner::plan` folds that in as `+= 1` on top of the real
 /// consumer count, not a floor, precisely so this case is handled) must NOT free its
 /// value on the real consumer's read: the last real read has to decrement to
 /// `Needed(1)`, not `Skip`, or the move-on-last-use optimization in `collect_inputs`

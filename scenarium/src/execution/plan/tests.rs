@@ -29,11 +29,11 @@ impl Fix {
             .output_types
             .resize(outputs_start as usize + outputs as usize, DataType::Any);
         // Kept in lockstep with `output_types` (same index space) so
-        // `output_external_bindings.len() == n_outputs` holds here exactly as
+        // `output_pinned.len() == n_outputs` holds here exactly as
         // `Flattener::build` guarantees for a real compile — the planner's fold
         // over both pools relies on this, not just a defensive fallback.
         program
-            .output_external_bindings
+            .output_pinned
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = program.e_nodes.len();
         program.e_nodes.add(ExecutionNode {
@@ -132,13 +132,13 @@ fn fan_out_counts_each_executing_consumer() {
 }
 
 #[test]
-fn externally_bound_port_floors_plan_level_usage() {
+fn pinned_port_floors_plan_level_usage() {
     // A has two outputs, neither structurally consumed by anything. Only port 1
-    // is flagged externally bound (e.g. a GUI inspector reading it live) — the
-    // planner's fold must floor exactly that one to 1, leaving the other alone.
+    // is flagged pinned (e.g. a GUI inspector reading it live) — the planner's
+    // fold must floor exactly that one to 1, leaving the other alone.
     let mut f = Fix::default();
     f.node(true, &[], 2);
-    f.compiled.program.output_external_bindings[1] = true;
+    f.compiled.program.output_pinned[1] = true;
 
     let p = plan(&f);
     assert_eq!(
@@ -147,7 +147,7 @@ fn externally_bound_port_floors_plan_level_usage() {
     );
     assert_eq!(
         p.output_usage[1], 1,
-        "port 1 floors to 1 from the external binding alone"
+        "port 1 floors to 1 from being pinned alone"
     );
 }
 

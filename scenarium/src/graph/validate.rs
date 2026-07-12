@@ -198,14 +198,14 @@ impl Graph {
             );
         }
 
-        // Every external binding addresses an output port that actually exists.
-        for port in self.external_bindings.iter() {
+        // Every pinned output addresses a port that actually exists.
+        for port in self.pinned_outputs.iter() {
             let node = self
                 .find_node(&port.node_id, NodeSearch::TopLevel)
-                .with_context(|| format!("external binding on missing node {:?}", port.node_id))?;
+                .with_context(|| format!("pinned output on missing node {:?}", port.node_id))?;
             ensure!(
                 port.port_idx < self.output_count(node, library, ctx_def),
-                "external binding on node {:?} output {} is out of range",
+                "pinned output on node {:?} output {} is out of range",
                 port.node_id,
                 port.port_idx
             );

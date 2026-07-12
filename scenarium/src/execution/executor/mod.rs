@@ -114,7 +114,7 @@ impl Executor {
 
     /// Seed the run's live per-output usage straight from the plan's usage count —
     /// already the complete single source of truth, in-graph consumers plus a unit for
-    /// a pinned root or an externally-bound port (see [`ExecutionPlan::output_usage`],
+    /// a pinned root or a pinned output port (see [`ExecutionPlan::output_usage`],
     /// folded in once by [`Planner::plan`](crate::execution::plan::Planner::plan)) —
     /// mapped to the lambda-facing enum (`0` ⇒ `Skip`, `> 0` ⇒ `Needed(c)`). This same
     /// column is counted *down* as consumers read, marking each spent output (see

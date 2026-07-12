@@ -23,7 +23,7 @@ use crate::gui::EventRef;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
-use crate::gui::node::{RecordCtx, node_hovered, set_external_binding, set_input};
+use crate::gui::node::{RecordCtx, node_hovered, set_input, set_output_pinned};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::{StaticValueEditorTheme, Theme};
@@ -330,12 +330,10 @@ fn output_cell(
         PortKind::Output,
         rcx.geometry.ports.is_hovered(port),
     );
-    // The external-binding ring reuses the "pinned" accent (the inspector's
+    // The pinned-output ring reuses the "pinned" accent (the inspector's
     // pinned outline / its header chip) — one color means "held open" across
     // both.
-    let outline = output
-        .external_binding
-        .then_some(theme.colors.badge_subgraph);
+    let outline = output.pinned.then_some(theme.colors.badge_subgraph);
     let tip = port_tip(
         output.description.as_str(),
         type_label(rcx.library, &output.ty),
@@ -370,10 +368,10 @@ fn output_cell(
     let menu_id = cell.response.widget_id();
     let cell_secondary = cell.response.secondary_clicked();
     let circle_state = ui.response_for(wid);
-    // Cmd(/Ctrl)+click the circle toggles the external binding — a distinct
-    // chord from the plain double-click above, so the two never race.
+    // Cmd(/Ctrl)+click the circle toggles the pin — a distinct chord from the
+    // plain double-click above, so the two never race.
     if circle_state.clicked && ui.modifiers().ctrl {
-        out.push(set_external_binding(port, !output.external_binding));
+        out.push(set_output_pinned(port, !output.pinned));
     }
     if (cell_secondary || circle_state.secondary_clicked)
         && let Some(p) = ui.pointer_pos()
@@ -383,13 +381,13 @@ fn output_cell(
     ContextMenu::for_id(menu_id)
         .size((Sizing::Hug, Sizing::Hug))
         .show(ui, |ui, popup| {
-            let label = if output.external_binding {
-                "Stop watching externally"
+            let label = if output.pinned {
+                "Unpin output"
             } else {
-                "Watch externally"
+                "Pin output"
             };
             if MenuItem::new(label).show(ui, popup).clicked() {
-                out.push(set_external_binding(port, !output.external_binding));
+                out.push(set_output_pinned(port, !output.pinned));
             }
         });
 }
@@ -504,21 +502,21 @@ pub(crate) const PORT_HIT_SCALE: f32 = 1.8;
 /// pin), matching the soft corners of the rest of the chrome.
 pub(crate) const EVENT_TRIANGLE_RADIUS: f32 = 2.0;
 
-/// Stroke width of the accent ring drawn around an externally-bound
-/// output's port circle (see `circle_frame`'s `outline` param). Also the
-/// amount a required input's plain circle grows by (on each side), so a
-/// required input's total footprint matches a bound output's circle +
-/// ring — "important port" reads as one consistent size regardless of
-/// which visual (ring vs. bigger fill) carries it.
-const EXTERNAL_BINDING_OUTLINE_WIDTH: f32 = 2.5;
+/// Stroke width of the accent ring drawn around a pinned output's port
+/// circle (see `circle_frame`'s `outline` param). Also the amount a
+/// required input's plain circle grows by (on each side), so a required
+/// input's total footprint matches a pinned output's circle + ring —
+/// "important port" reads as one consistent size regardless of which
+/// visual (ring vs. bigger fill) carries it.
+const PINNED_OUTLINE_WIDTH: f32 = 2.5;
 
 /// A port circle's diameter — `base` for a plain port, or `base` grown by
-/// [`EXTERNAL_BINDING_OUTLINE_WIDTH`] on each side to match an
-/// externally-bound output's circle-plus-ring footprint (a required input,
-/// via [`circle_frame`]'s `diameter`).
+/// [`PINNED_OUTLINE_WIDTH`] on each side to match a pinned output's
+/// circle-plus-ring footprint (a required input, via [`circle_frame`]'s
+/// `diameter`).
 fn port_diameter(base: f32, enlarged: bool) -> f32 {
     if enlarged {
-        base + 2.0 * EXTERNAL_BINDING_OUTLINE_WIDTH
+        base + 2.0 * PINNED_OUTLINE_WIDTH
     } else {
         base
     }
@@ -566,10 +564,10 @@ fn circle_frame(
                 // fill's outer edge instead of inside it.
                 stroked_rect(
                     ui,
-                    rect.inflated(EXTERNAL_BINDING_OUTLINE_WIDTH),
-                    radius + EXTERNAL_BINDING_OUTLINE_WIDTH,
+                    rect.inflated(PINNED_OUTLINE_WIDTH),
+                    radius + PINNED_OUTLINE_WIDTH,
                     color,
-                    EXTERNAL_BINDING_OUTLINE_WIDTH,
+                    PINNED_OUTLINE_WIDTH,
                 );
             }
         });
@@ -623,7 +621,7 @@ mod tests {
         assert_eq!(port_diameter(base, false), base, "plain port is unchanged");
         assert_eq!(
             port_diameter(base, true),
-            base + 2.0 * EXTERNAL_BINDING_OUTLINE_WIDTH,
+            base + 2.0 * PINNED_OUTLINE_WIDTH,
             "enlarged port matches a bound output's circle-plus-ring footprint"
         );
     }

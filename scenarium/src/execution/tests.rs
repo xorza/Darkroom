@@ -4127,12 +4127,12 @@ mod output_usage {
         Ok(())
     }
 
-    /// An external binding (e.g. a GUI inspector reading a port live) makes an
+    /// A pinned output (e.g. a GUI inspector reading a port live) makes an
     /// otherwise-unconsumed output `Needed` too — same "split" fixture as
     /// `unused_output_marked_skip`, output 1 still has no in-graph consumer, but
-    /// is now flagged externally bound.
+    /// is now flagged pinned.
     #[tokio::test(flavor = "multi_thread")]
-    async fn externally_bound_output_is_needed_with_no_consumer() -> anyhow::Result<()> {
+    async fn pinned_output_is_needed_with_no_consumer() -> anyhow::Result<()> {
         let seen_usage: Arc<Mutex<Vec<OutputUsage>>> = Arc::new(Mutex::new(Vec::new()));
         let seen_usage_l = seen_usage.clone();
 
@@ -4162,9 +4162,9 @@ mod output_usage {
         let mut graph = Graph::default();
         graph.add(node(&library, "split", split_id));
         graph.add(node(&library, "sink", sink_id));
-        // Output 0 has a real consumer; output 1 has none, but is externally bound.
+        // Output 0 has a real consumer; output 1 has none, but is pinned.
         graph.set_input_binding(InputPort::new(sink_id, 0), (split_id, 0).into());
-        graph.set_external_binding(OutputPort::new(split_id, 1), true);
+        graph.set_output_pinned(OutputPort::new(split_id, 1), true);
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
@@ -4176,8 +4176,8 @@ mod output_usage {
         assert_eq!(
             eg.node_output_usage(split)[1],
             1,
-            "the planner floors an externally-bound port's usage even with no \
-             in-graph consumer — plan.output_usage is the complete usage tally"
+            "the planner floors a pinned port's usage even with no in-graph \
+             consumer — plan.output_usage is the complete usage tally"
         );
 
         // The lambda computes both outputs instead of skipping the unconsumed one.

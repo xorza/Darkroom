@@ -8,15 +8,7 @@ cleanup binary caches
 
 do not comoute stars in input unused
 
-cache input values for image viewer
-
 tooltip near the edge of screen overflows
-
-optional inputs smaller than required
-
-doubleclick on output to enable preview
-
-threadsafe fastaccessible shared cache
 
 file name as argument clap
 

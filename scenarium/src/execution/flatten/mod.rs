@@ -62,14 +62,14 @@ pub(crate) struct Flattener {
 }
 
 /// The graph's SoA pools, rebuilt each `build`. Each node's output span is
-/// assigned from a running counter local to the build; `output_external_bindings`
+/// assigned from a running counter local to the build; `output_pinned`
 /// is the one output-indexed pool filled *during* that build (a plain lookup
 /// against the authoring graph, unlike `output_types`, which needs a second
 /// pass to follow wildcard mirrors).
 pub(crate) struct Pools<'a> {
     pub inputs: &'a mut Vec<ExecutionInput>,
     pub events: &'a mut Vec<ExecutionEvent>,
-    pub output_external_bindings: &'a mut Vec<bool>,
+    pub output_pinned: &'a mut Vec<bool>,
 }
 
 impl Flattener {
@@ -97,7 +97,7 @@ impl Flattener {
         let mut new_inputs = std::mem::take(&mut self.inputs_scratch);
         new_inputs.clear();
         pools.events.clear();
-        pools.output_external_bindings.clear();
+        pools.output_pinned.clear();
         {
             let mut run = Run {
                 root,
@@ -112,19 +112,19 @@ impl Flattener {
                 new_inputs: &mut new_inputs,
                 n_outputs: 0,
                 events: pools.events,
-                output_external_bindings: pools.output_external_bindings,
+                output_pinned: pools.output_pinned,
             };
             run.emit();
             // One entry pushed per pooled output port, in lockstep with `n_outputs`
             // (see `emit`'s per-node loop) — this is the invariant `seed_output_usage`
-            // relies on to index `output_external_bindings` by the same output-pool
+            // relies on to index `output_pinned` by the same output-pool
             // index as `plan.output_usage`. A hand-built `ExecutionProgram` (as in the
             // executor's low-level tests, which never call `Flattener::build`) doesn't
             // get this guarantee — that's a separate, already-tolerant read path.
             assert_eq!(
-                run.output_external_bindings.len(),
+                run.output_pinned.len(),
                 run.n_outputs as usize,
-                "output_external_bindings must have exactly one entry per pooled output port"
+                "output_pinned must have exactly one entry per pooled output port"
             );
             // `compact` finalizes on drop, trimming nodes that disappeared.
         }
@@ -236,8 +236,8 @@ struct Run<'a> {
     n_outputs: u32,
     events: &'a mut Vec<ExecutionEvent>,
     /// Parallel to the output pool (indexed the same way, built alongside it):
-    /// whether each pooled output port is externally bound in the authoring graph.
-    output_external_bindings: &'a mut Vec<bool>,
+    /// whether each pooled output port is pinned in the authoring graph.
+    output_pinned: &'a mut Vec<bool>,
 }
 
 impl<'a> Run<'a> {
@@ -313,8 +313,8 @@ impl<'a> Run<'a> {
             let outputs_start = self.n_outputs;
             self.n_outputs += func.outputs.len() as u32;
             for port_idx in 0..func.outputs.len() {
-                self.output_external_bindings
-                    .push(graph.is_externally_bound(OutputPort::new(node.id, port_idx)));
+                self.output_pinned
+                    .push(graph.is_output_pinned(OutputPort::new(node.id, port_idx)));
             }
             let events_start = self.events.len() as u32;
             for func_event in &func.events {

@@ -192,14 +192,15 @@ pub enum Intent {
         subscriber: NodeId,
         subscribe: bool,
     },
-    /// Mark (`bound = true`) or clear (`false`) an output port as read by a
-    /// consumer outside the graph (a GUI inspector). Idempotent — a no-op
-    /// when the flag already matches. Cmd(/Ctrl)+click on an output port
-    /// circle, or its context-menu toggle.
-    SetExternalBinding {
+    /// Pin (`pinned = true`) or unpin (`false`) an output port, keeping it
+    /// computed and read even with no in-graph consumer (e.g. a GUI
+    /// inspector reading it live). Idempotent — a no-op when the flag
+    /// already matches. Cmd(/Ctrl)+click on an output port circle, or its
+    /// context-menu toggle.
+    SetOutputPinned {
         node_id: NodeId,
         port_idx: usize,
-        bound: bool,
+        pinned: bool,
     },
 }
 
@@ -319,9 +320,9 @@ pub enum GraphStep {
         from: bool,
         to: bool,
     },
-    /// Mark or clear an output port's external binding. `from`/`to` are the
-    /// bound-state booleans — exact inverses, one step type backs the toggle.
-    SetExternalBinding {
+    /// Mark or clear whether an output port is pinned. `from`/`to` are the
+    /// pinned-state booleans — exact inverses, one step type backs the toggle.
+    SetOutputPinned {
         node_id: NodeId,
         port_idx: usize,
         from: bool,
@@ -417,7 +418,7 @@ impl GraphStep {
                 ..
             } => from_index == to_index,
             GraphStep::SetNodeProperty { from, to, .. } => from == to,
-            GraphStep::SetExternalBinding { from, to, .. } => from == to,
+            GraphStep::SetOutputPinned { from, to, .. } => from == to,
             GraphStep::SetViewport { from, to } => {
                 (from.pan - to.pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
                     && (from.zoom - to.zoom).abs() < VIEWPORT_EPS
@@ -624,10 +625,10 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
                 subscriber,
             }
         }
-        Intent::SetExternalBinding {
+        Intent::SetOutputPinned {
             node_id,
             port_idx,
-            bound,
+            pinned,
         } => {
             // Unlike a drag-sourced intent (which can span frames and outlive
             // its anchor), this only ever comes from a port rendered in this
@@ -636,13 +637,13 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             // than silently dropping the intent.
             graph
                 .find_node(&node_id, NodeSearch::TopLevel)
-                .expect("SetExternalBinding targets a node rendered in the current frame's Scene");
+                .expect("SetOutputPinned targets a node rendered in the current frame's Scene");
             let port = OutputPort::new(node_id, port_idx);
-            GraphStep::SetExternalBinding {
+            GraphStep::SetOutputPinned {
                 node_id,
                 port_idx,
-                from: graph.is_externally_bound(port),
-                to: bound,
+                from: graph.is_output_pinned(port),
+                to: pinned,
             }
         }
     };
@@ -995,12 +996,12 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             to,
             ..
         } => set_subscription(scope, *emitter, *event_idx, *subscriber, *to),
-        GraphStep::SetExternalBinding {
+        GraphStep::SetOutputPinned {
             node_id,
             port_idx,
             to,
             ..
-        } => set_external_binding(scope, *node_id, *port_idx, *to),
+        } => set_output_pinned(scope, *node_id, *port_idx, *to),
     }
 }
 
@@ -1033,12 +1034,12 @@ fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProp
     }
 }
 
-/// Mark or clear one output port's external binding. Shared by `apply_graph`
+/// Mark or clear whether one output port is pinned. Shared by `apply_graph`
 /// (writes `to`) and `revert_graph` (writes `from`).
-fn set_external_binding(scope: &mut EditScope<'_>, node_id: NodeId, port_idx: usize, bound: bool) {
+fn set_output_pinned(scope: &mut EditScope<'_>, node_id: NodeId, port_idx: usize, pinned: bool) {
     scope
         .graph
-        .set_external_binding(OutputPort::new(node_id, port_idx), bound);
+        .set_output_pinned(OutputPort::new(node_id, port_idx), pinned);
 }
 
 /// Backward apply: write the step's "from" half to `doc`. Pairs
@@ -1173,12 +1174,12 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             from,
             ..
         } => set_subscription(scope, *emitter, *event_idx, *subscriber, *from),
-        GraphStep::SetExternalBinding {
+        GraphStep::SetOutputPinned {
             node_id,
             port_idx,
             from,
             ..
-        } => set_external_binding(scope, *node_id, *port_idx, *from),
+        } => set_output_pinned(scope, *node_id, *port_idx, *from),
     }
 }
 
@@ -1235,7 +1236,7 @@ impl UndoStep {
             // node remeasure.
             | GraphStep::SetSubscription { .. }
             // Flips a port's outline paint only — no remeasure.
-            | GraphStep::SetExternalBinding { .. } => false,
+            | GraphStep::SetOutputPinned { .. } => false,
         },
     }
     }
@@ -1267,8 +1268,8 @@ impl UndoStep {
                 | GraphStep::SetViewport { .. }
                 // Subscriptions don't feed a subgraph's derived interface.
                 | GraphStep::SetSubscription { .. }
-                // Nor does an external binding — it's not wiring at all.
-                | GraphStep::SetExternalBinding { .. },
+                // Nor does pinning an output — it's not wiring at all.
+                | GraphStep::SetOutputPinned { .. },
             )
             | UndoStep::Doc(_) => false,
         }
@@ -1306,7 +1307,7 @@ impl UndoStep {
                 | GraphStep::SetNodeProperty { .. }
                 | GraphStep::DetachSubgraph { .. }
                 | GraphStep::SetSubscription { .. }
-                | GraphStep::SetExternalBinding { .. },
+                | GraphStep::SetOutputPinned { .. },
             )
             | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameSubgraph { .. }) => {
                 true
@@ -1340,7 +1341,7 @@ impl UndoStep {
                 | GraphStep::SetNodeProperty { .. }
                 | GraphStep::DetachSubgraph { .. }
                 | GraphStep::SetSubscription { .. }
-                | GraphStep::SetExternalBinding { .. },
+                | GraphStep::SetOutputPinned { .. },
             )
             | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameSubgraph { .. }) => {
                 None
@@ -1785,26 +1786,26 @@ mod tests {
     }
 
     #[test]
-    fn set_external_binding_commits_reverts_and_no_ops() {
+    fn set_output_pinned_commits_reverts_and_no_ops() {
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
         let port = OutputPort::new(id, 0);
-        assert!(!doc.graph.is_externally_bound(port));
+        assert!(!doc.graph.is_output_pinned(port));
 
         let step = commit_intent(
-            Intent::SetExternalBinding {
+            Intent::SetOutputPinned {
                 node_id: id,
                 port_idx: 0,
-                bound: true,
+                pinned: true,
             },
             &mut doc,
             GraphRef::Main,
         )
         .expect("marking an unbound port is a real change");
-        assert!(doc.graph.is_externally_bound(port));
+        assert!(doc.graph.is_output_pinned(port));
         assert!(
             !step.requires_relayout() && !step.requires_reconcile(),
-            "an external-binding toggle neither remeasures nor reshapes the interface"
+            "a pin toggle neither remeasures nor reshapes the interface"
         );
         assert!(step.dirties_document(), "a real graph edit worth saving");
         assert!(
@@ -1813,17 +1814,17 @@ mod tests {
         );
 
         revert_step(&step, &mut doc, GraphRef::Main);
-        assert!(!doc.graph.is_externally_bound(port), "revert clears it");
+        assert!(!doc.graph.is_output_pinned(port), "revert clears it");
         apply_step(&step, &mut doc, GraphRef::Main);
-        assert!(doc.graph.is_externally_bound(port), "redo re-marks it");
+        assert!(doc.graph.is_output_pinned(port), "redo re-marks it");
 
         // Setting to the value it already holds is a no-op (no undo entry).
         assert!(
             commit_intent(
-                Intent::SetExternalBinding {
+                Intent::SetOutputPinned {
                     node_id: id,
                     port_idx: 0,
-                    bound: true,
+                    pinned: true,
                 },
                 &mut doc,
                 GraphRef::Main,
@@ -1834,18 +1835,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "SetExternalBinding targets a node")]
-    fn set_external_binding_on_missing_node_asserts() {
+    #[should_panic(expected = "SetOutputPinned targets a node")]
+    fn set_output_pinned_on_missing_node_asserts() {
         // Unlike a subscription drag, this intent only ever comes from a port
         // rendered in the current frame's Scene — a missing node means the
         // GUI and graph desynced, a real bug worth crashing loudly on rather
         // than silently dropping.
         let mut doc = Document::default();
         commit_intent(
-            Intent::SetExternalBinding {
+            Intent::SetOutputPinned {
                 node_id: NodeId::unique(),
                 port_idx: 0,
-                bound: true,
+                pinned: true,
             },
             &mut doc,
             GraphRef::Main,

@@ -308,7 +308,7 @@ pub struct Graph {
     /// in-graph binding. Presence, not a richer value, is the flag — same
     /// sparse-side-table shape as `subscriptions`.
     #[serde(default)]
-    external_bindings: BTreeSet<OutputPort>,
+    pinned_outputs: BTreeSet<OutputPort>,
 
     /// Local (per-instance) subgraph definitions referenced by this graph's
     /// `NodeKind::Subgraph(SubgraphRef::Local(_))` nodes. Editing one of
@@ -367,8 +367,8 @@ impl Graph {
         // Drop subscriptions where it is either the emitter or a subscriber.
         self.subscriptions.retain(|s| !subscription_touches(s, id));
 
-        // Drop external bindings on any of its own output ports.
-        self.external_bindings.retain(|port| port.node_id != id);
+        // Drop pins on any of its own output ports.
+        self.pinned_outputs.retain(|port| port.node_id != id);
     }
 
     // === Data bindings ===
@@ -440,8 +440,8 @@ impl Graph {
                 subscriber: remap(s.subscriber),
             })
             .collect();
-        let external_bindings = self
-            .external_bindings
+        let pinned_outputs = self
+            .pinned_outputs
             .iter()
             .map(|port| OutputPort::new(remap(port.node_id), port.port_idx))
             .collect();
@@ -449,7 +449,7 @@ impl Graph {
             nodes,
             bindings,
             subscriptions,
-            external_bindings,
+            pinned_outputs,
             subgraphs: self.subgraphs.clone(),
         };
         FreshGraph { graph, id_map }
@@ -519,22 +519,21 @@ impl Graph {
         self.subscriptions.iter().copied()
     }
 
-    // === External bindings ===
+    // === Pinned outputs ===
 
-    /// Mark (or clear) `port` as read by a consumer outside the graph. An
-    /// externally-bound port is compiled as used even with no in-graph
-    /// binding, so its value is still computed — see
-    /// `ExecutionPlan::output_usage`.
-    pub fn set_external_binding(&mut self, port: OutputPort, bound: bool) {
-        if bound {
-            self.external_bindings.insert(port);
+    /// Mark (or clear) `port` as read by a consumer outside the graph. A
+    /// pinned port is compiled as used even with no in-graph binding, so its
+    /// value is still computed — see `ExecutionPlan::output_usage`.
+    pub fn set_output_pinned(&mut self, port: OutputPort, pinned: bool) {
+        if pinned {
+            self.pinned_outputs.insert(port);
         } else {
-            self.external_bindings.remove(&port);
+            self.pinned_outputs.remove(&port);
         }
     }
 
-    pub fn is_externally_bound(&self, port: OutputPort) -> bool {
-        self.external_bindings.contains(&port)
+    pub fn is_output_pinned(&self, port: OutputPort) -> bool {
+        self.pinned_outputs.contains(&port)
     }
 
     /// Drop data bindings left dangling when a node's func/def shrank its
@@ -771,10 +770,10 @@ impl Graph {
             );
         }
 
-        for port in &self.external_bindings {
+        for port in &self.pinned_outputs {
             ensure!(
                 self.nodes.by_key(&port.node_id).is_some(),
-                "external binding on missing node {:?}",
+                "pinned output on missing node {:?}",
                 port.node_id
             );
         }

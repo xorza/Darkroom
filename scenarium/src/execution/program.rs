@@ -183,12 +183,12 @@ pub(crate) struct ExecutionProgram {
     /// ([`Self::n_outputs`]).
     #[serde(default)]
     pub(crate) output_types: Vec<DataType>,
-    /// Whether each pooled output port has an external binding — copied from
-    /// [`Graph::external_bindings`](crate::graph::Graph) at flatten, same
-    /// indexing as `output_types`. The planner reads this to count an
-    /// externally-bound port as used even with no in-graph binding.
+    /// Whether each pooled output port is pinned — copied from
+    /// [`Graph::pinned_outputs`](crate::graph::Graph) at flatten, same
+    /// indexing as `output_types`. The planner reads this to count a
+    /// pinned port as used even with no in-graph binding.
     #[serde(default)]
-    pub(crate) output_external_bindings: Vec<bool>,
+    pub(crate) output_pinned: Vec<bool>,
 }
 
 impl ExecutionProgram {
