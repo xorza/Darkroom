@@ -203,8 +203,13 @@ fn input_label_cell(
     };
     // A required input's port reads as bigger — its total footprint matches
     // a bound output's circle-plus-ring, so "important port" carries the
-    // same visual weight on either side.
+    // same visual weight on either side. An optional input instead gets a
+    // muted outline, so "not required" reads at a glance without needing
+    // the bigger required-input footprint.
     let diameter = port_diameter(theme.port_size, input.required);
+    // Matches the node body itself — the ring reads as the node's own surface
+    // wrapping around the port, rather than a separate accent.
+    let outline = (!input.required).then_some(theme.colors.node_fill);
     let radius = diameter * 0.5;
     let overhang = radius + theme.port_col_pad_x + theme.node_border_width * 2.0;
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
@@ -223,7 +228,7 @@ fn input_label_cell(
             // A const-only input can't be wired, so it has no connection anchor
             // — render just the label (+ its inline const editor).
             if !input.const_only {
-                circle_frame(ui, wid, diameter, fill, None, margin, &tip);
+                circle_frame(ui, wid, diameter, fill, outline, margin, &tip);
             }
             port_label(ui, rcx, port, input.name.clone(), &tip, rename, out);
         });
