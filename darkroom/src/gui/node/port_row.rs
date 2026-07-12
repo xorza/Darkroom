@@ -265,7 +265,7 @@ fn input_label_cell(
             // A const-only input can't be wired, so it has no connection anchor
             // — render just the label (+ its inline const editor).
             if !input.const_only {
-                circle_frame(ui, wid, diameter, fill, decoration, margin, &tip);
+                circle_frame(ui, theme, wid, diameter, fill, decoration, margin, &tip);
             }
             port_label(ui, rcx, port, input.name.clone(), &tip, rename, out);
         });
@@ -405,6 +405,7 @@ fn output_cell(
             port_label(ui, rcx, port, output.name.clone(), &tip, rename, out);
             circle_frame(
                 ui,
+                theme,
                 wid,
                 theme.port_size,
                 fill,
@@ -576,9 +577,6 @@ const PIN_REACH: f32 = 10.0;
 /// How far above the port's own center the satellite circle sits.
 const PIN_RISE: f32 = 12.0;
 
-/// Stroke width of the bezier connecting a pinned output to its satellite.
-const PIN_STROKE_WIDTH: f32 = 1.5;
-
 /// Control-point offset from `p0` (the port's own center) — bows the
 /// curve's start outward before it climbs to the satellite.
 const PIN_HANDLE_OUT: Vec2 = Vec2::new(20.0, 0.0);
@@ -623,14 +621,16 @@ fn pin_geometry(port_center: Vec2, radius: f32) -> PinGeometry {
 /// `PIN_SATELLITE_SCALE`× the port's own radius. Both paint in `color` — the
 /// port's own data-type color, or the breaker-alarm color while a breaker
 /// gesture targets this pin — so the glyph reads as an extension of the
-/// port rather than a separate accent. `inset`/`radius` are the same
-/// owner-local frame the fill circle itself paints in (see
-/// [`circle_frame`]).
-fn pin_glyph(ui: &mut Ui, inset: f32, radius: f32, color: Color) {
+/// port rather than a separate accent. The bezier's stroke matches
+/// `theme.connection_width`, the same width every data/subscription wire
+/// uses, so the pin glyph reads as one more wire rather than a distinct
+/// accent. `inset`/`radius` are the same owner-local frame the fill circle
+/// itself paints in (see [`circle_frame`]).
+fn pin_glyph(ui: &mut Ui, theme: &Theme, inset: f32, radius: f32, color: Color) {
     let port_center = Vec2::new(inset + radius, inset + radius);
     let g = pin_geometry(port_center, radius);
     ui.add_shape(
-        Shape::cubic_bezier(g.p0, g.p1, g.p2, g.p3, PIN_STROKE_WIDTH)
+        Shape::cubic_bezier(g.p0, g.p1, g.p2, g.p3, theme.connection_width)
             .brush(color)
             .cap(LineCap::Round),
     );
@@ -673,8 +673,10 @@ enum PortDecoration {
     Pinned(Color),
 }
 
+#[allow(clippy::too_many_arguments)]
 fn circle_frame(
     ui: &mut Ui,
+    theme: &Theme,
     wid: WidgetId,
     diameter: f32,
     fill: Color,
@@ -720,7 +722,7 @@ fn circle_frame(
                         PORT_OUTLINE_WIDTH,
                     );
                 }
-                PortDecoration::Pinned(color) => pin_glyph(ui, inset, radius, color),
+                PortDecoration::Pinned(color) => pin_glyph(ui, theme, inset, radius, color),
             }
             filled_rect(ui, rect, radius, fill);
         });
