@@ -16,4 +16,4 @@ gui update on worker callback
 
 curve gpu tesselation
 
-review scenarium workder
+review scenarium worker
