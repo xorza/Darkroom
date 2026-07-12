@@ -473,6 +473,7 @@ async fn worker_streams_node_progress_before_finished() {
                     RunPhase::Finished { .. } => node_finished += 1,
                 }
             }
+            WorkerReport::PinnedOutputs(_) => {}
             WorkerReport::Finished(result) => {
                 assert_eq!(result.expect("compute ok").executed_nodes.len(), 1);
                 break;

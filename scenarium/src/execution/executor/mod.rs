@@ -24,7 +24,8 @@ use common::CancelToken;
 
 use crate::data::{DynamicValue, RamUsage};
 use crate::execution::stats::{
-    ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, RunPhase, RunProgress,
+    ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, PinnedOutputs, RunEvent, RunPhase,
+    RunProgress,
 };
 use crate::graph::InputPort;
 use crate::node::func_lambda::{InvokeError, InvokeInput, OutputUsage};
@@ -143,7 +144,7 @@ impl Executor {
         disposition: &NodeColumn<Disposition>,
         cache: &mut RuntimeCache,
         flatten: &FlattenMap,
-        progress: Option<&UnboundedSender<RunProgress>>,
+        events: Option<&UnboundedSender<RunEvent>>,
         cancel: CancelToken,
     ) -> ExecutionStats {
         let start = Instant::now();
@@ -271,11 +272,11 @@ impl Executor {
             let flat_id = e_node.id;
             self.ctx_manager.current_node = Some(flat_id);
             let invoke_start = Instant::now();
-            if let Some(progress) = progress {
-                let _ = progress.send(RunProgress {
+            if let Some(events) = events {
+                let _ = events.send(RunEvent::Progress(RunProgress {
                     nodes: flatten.attribution(flat_id).collect(),
                     phase: RunPhase::Started { at: invoke_start },
-                });
+                }));
             }
             // The node's own outputs are still at their seeded counts (producers run before
             // consumers), so this slice is the `OutputUsage` the lambda reads to skip
@@ -339,13 +340,42 @@ impl Executor {
             };
             // No `Finished` for the cancelled node — it didn't complete; the
             // consumer would otherwise paint it executed live.
-            if !cancelled && let Some(progress) = progress {
-                let _ = progress.send(RunProgress {
+            if !cancelled && let Some(events) = events {
+                let _ = events.send(RunEvent::Progress(RunProgress {
                     nodes: flatten.attribution(flat_id).collect(),
                     phase: RunPhase::Finished {
                         elapsed_secs: run_time,
                     },
-                });
+                }));
+            }
+            // Push this node's pinned output values to the host right after it
+            // finished — before any real consumer's read (later in this same walk)
+            // can decrement its usage count or trigger eviction, so the value is
+            // guaranteed still resident. A reused/cut/failed node never reaches
+            // here (only a fresh `Ran` success pushes), matching `RunPhase::Finished`
+            // just above.
+            if succeeded
+                && let Some(events) = events
+                && let Some(payload) =
+                    collect_pinned_values(program, plan, cache, flatten, e_node_idx)
+            {
+                // The callback just cloned every pushed port's value, so its
+                // pinned-floor usage unit (`ExecutionPlan::seed_extra_usage`) is
+                // now spent — the same accounting a real consumer's read gets.
+                // A port with no real consumers left now reads `Skip`, so the
+                // drained check right below can reclaim it immediately instead
+                // of holding it to end-of-run eviction.
+                for &(local_port, _) in &payload.values {
+                    let out_idx = e_node.outputs.start as usize + local_port;
+                    self.output_usage[out_idx] = match self.output_usage[out_idx] {
+                        OutputUsage::Needed(1) => OutputUsage::Skip,
+                        OutputUsage::Needed(n) => OutputUsage::Needed(n - 1),
+                        OutputUsage::Skip => panic!(
+                            "pinned-output push decremented output {out_idx} the plan already marked unused"
+                        ),
+                    };
+                }
+                events.send(RunEvent::PinnedOutputs(payload)).expect("todo");
             }
             // Persist this node's cache the moment it finishes (durable as the run
             // progresses), not at the end of the whole run. The snapshot is taken
@@ -392,6 +422,42 @@ async fn hydrate_resource_producers(
             cache.hydrate_slot(program, addr.target_idx).await;
         }
     }
+}
+
+/// Clone the just-finished node `e_node_idx`'s pinned output values for the live push
+/// to the host: individually pinned ports (`program.output_pinned`), plus *every*
+/// output when the node itself is a pinned root (`plan.pinned` — a node-seeded
+/// on-demand preview target). `None` when nothing on this node qualifies, so a run
+/// with no pinned output/root never allocates a send. Reads via `read_output_port`
+/// with `take = false` — a plain clone, so the value stays resident for the
+/// executor's own usage bookkeeping; a real consumer later in this walk still reads
+/// it (and decrements its usage) normally.
+fn collect_pinned_values(
+    program: &ExecutionProgram,
+    plan: &ExecutionPlan,
+    cache: &mut RuntimeCache,
+    flatten: &FlattenMap,
+    e_node_idx: NodeIdx,
+) -> Option<PinnedOutputs> {
+    let e_node = &program.e_nodes[e_node_idx];
+    let pinned_root = plan.pinned.contains(&e_node_idx);
+    let mut values = Vec::new();
+    for local_port in 0..e_node.outputs.len as usize {
+        let out_idx = e_node.outputs.start as usize + local_port;
+        if pinned_root || program.output_pinned[out_idx] {
+            let value = cache
+                .read_output_port(program, e_node_idx, local_port, false)
+                .expect("a node's output is resident immediately after it succeeds");
+            values.push((local_port, value));
+        }
+    }
+    if values.is_empty() {
+        return None;
+    }
+    let node_id = flatten
+        .interior(e_node.id)
+        .expect("a node that just ran must have an interior authoring id");
+    Some(PinnedOutputs { node_id, values })
 }
 
 /// Drop node `idx` from this run: clear any stale cached output so it isn't served as

@@ -152,6 +152,29 @@ fn pinned_port_floors_plan_level_usage() {
 }
 
 #[test]
+fn overlapping_pin_sources_still_floor_to_one() {
+    // A's only output is BOTH a pinned root (node-seeded) and individually
+    // pinned, with no real consumer — the two sources must not stack into 2.
+    let mut f = Fix::default();
+    let a = f.node(false, &[], 1);
+    f.compiled.program.output_pinned[0] = true;
+
+    let mut planner = Planner::default();
+    let mut p = ExecutionPlan::default();
+    let seeds = RunSeeds {
+        nodes: vec![f.compiled.program.e_nodes[a].id],
+        ..Default::default()
+    };
+    planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
+
+    assert_eq!(p.pinned, vec![a]);
+    assert_eq!(
+        p.output_usage[0], 1,
+        "pinned root + individually pinned on the same port still floors to 1, not 2"
+    );
+}
+
+#[test]
 fn dependency_cycle_is_rejected() {
     // A binds B, B binds A (A sink) — the planner must error, not loop.
     let mut f = Fix::default();

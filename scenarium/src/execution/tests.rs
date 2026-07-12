@@ -2452,7 +2452,7 @@ mod behavior {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_emits_started_then_finished_progress_per_node() -> anyhow::Result<()> {
-        use crate::execution::stats::{RunPhase, RunProgress};
+        use crate::execution::stats::{RunEvent, RunPhase};
         use tokio::sync::mpsc::unbounded_channel;
 
         let graph = test_graph();
@@ -2460,7 +2460,7 @@ mod behavior {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let (tx, mut rx) = unbounded_channel::<RunProgress>();
+        let (tx, mut rx) = unbounded_channel::<RunEvent>();
         let stats = eg
             .execute(
                 RunSeeds {
@@ -2474,7 +2474,10 @@ mod behavior {
         drop(tx);
 
         let mut events: Vec<(NodeId, RunPhase)> = Vec::new();
-        while let Ok(p) = rx.try_recv() {
+        while let Ok(e) = rx.try_recv() {
+            let RunEvent::Progress(p) = e else {
+                continue;
+            };
             // No subgraphs in `test_graph` → each event maps to exactly one node.
             assert_eq!(p.nodes.len(), 1);
             events.push((p.nodes[0], p.phase));

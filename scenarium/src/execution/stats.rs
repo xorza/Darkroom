@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use hashbrown::HashMap;
 
-use crate::data::RamUsage;
+use crate::data::{DynamicValue, RamUsage};
 use crate::execution::RunError;
 use crate::execution::event::EventRef;
 use crate::graph::{InputPort, NodeId};
@@ -146,6 +146,35 @@ pub enum RunPhase {
 pub struct RunProgress {
     pub nodes: Vec<NodeId>,
     pub phase: RunPhase,
+}
+
+/// A just-finished node's pinned output values, sent right after its lambda
+/// completes successfully — before any real consumer's read can decrement its
+/// usage count or trigger eviction, so the value is guaranteed still resident.
+/// Only ports that are individually pinned
+/// ([`Graph::pinned_outputs`](crate::graph::Graph::pinned_outputs)), or that
+/// belong to a pinned-root node (a node-seeded on-demand preview target —
+/// every output counts), are included; a run with no pinned output/root on the
+/// node sends nothing. `node_id` is the authoring node the pin was actually
+/// set on — already projected through the compile-phase `FlattenMap`, like
+/// [`RunProgress::nodes`] — *not* also folded onto enclosing composite
+/// instances, since a pin lives on one specific node's port, unlike a status
+/// that reasonably summarizes a whole subtree.
+#[derive(Debug, Clone)]
+pub struct PinnedOutputs {
+    pub node_id: NodeId,
+    /// `(port_idx, value)` pairs, one per qualifying output — a node-local
+    /// port index, not the compiled program's flat output-pool index.
+    pub values: Vec<(usize, DynamicValue)>,
+}
+
+/// One live event streamed during a run — [`RunProgress`] and [`PinnedOutputs`]
+/// share this single channel/type rather than each threading its own
+/// `Option<&UnboundedSender<_>>` through `Executor::run`/`ExecutionEngine::execute`.
+#[derive(Debug, Clone)]
+pub enum RunEvent {
+    Progress(RunProgress),
+    PinnedOutputs(PinnedOutputs),
 }
 
 #[derive(Debug, Clone)]

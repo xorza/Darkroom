@@ -35,6 +35,9 @@ impl Prog {
         self.program
             .output_types
             .resize(outputs_start as usize + outputs as usize, DataType::Any);
+        self.program
+            .output_pinned
+            .resize(outputs_start as usize + outputs as usize, false);
         let idx = self.program.e_nodes.len();
         self.program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),
@@ -55,6 +58,31 @@ impl Prog {
     fn set_cache(&mut self, idx: usize, cache: CacheMode) {
         self.program.e_nodes[idx].cache = cache;
     }
+
+    /// Flip node `idx`'s output `port`'s pinned flag (both default `false`).
+    fn set_output_pinned(&mut self, idx: usize, port: usize, pinned: bool) {
+        let start = self.program.e_nodes[idx].outputs.start as usize;
+        self.program.output_pinned[start + port] = pinned;
+    }
+}
+
+/// A `FlattenMap` where every node in `program` maps to itself as a top-level
+/// leaf — mirrors how the real flattener leaves top-level ids unchanged, so
+/// `flatten.interior(id) == Some(id)` for every node. `Prog` fixtures bypass
+/// the flattener entirely; this is the minimal stand-in the pinned-output
+/// push needs (it looks up `interior` only, never the composite-instance
+/// attribution chain `RunProgress` uses).
+fn self_mapped_flatten(program: &ExecutionProgram) -> FlattenMap {
+    let mut flatten = FlattenMap::default();
+    // `reset` seeds the root scope (index 0) that every leaf below points at —
+    // without it `scopes` stays empty and `attribution`'s walk (used for the
+    // `RunProgress` Started/Finished sends, not just the pinned-output push)
+    // indexes out of bounds.
+    flatten.reset();
+    for e_node in program.e_nodes.iter() {
+        flatten.set_leaf(e_node.id, 0, e_node.id);
+    }
+    flatten
 }
 
 /// A `straight_plan` with an explicit per-output consumer count (indexed by output-pool
@@ -121,6 +149,43 @@ async fn run_with(
             CancelToken::never(),
         )
         .await
+}
+
+/// Like [`run`] but wires a live [`RunEvent`] channel through the executor
+/// (with a [`self_mapped_flatten`] map, since this fixture bypasses the real
+/// flattener) and drains every `PinnedOutputs` it sent, for tests asserting
+/// exactly what the pinned-output push sends (and, via the returned cache,
+/// what it leaves resident afterward).
+async fn run_with_pinned(
+    program: &ExecutionProgram,
+    plan: &ExecutionPlan,
+) -> (RuntimeCache, ExecutionStats, Vec<PinnedOutputs>) {
+    let mut cache = RuntimeCache::default();
+    cache.reconcile(&program.e_nodes);
+    let mut executor = Executor::default();
+    let mut resolver = Resolver::default();
+    resolver.resolve(program, plan, &mut cache);
+    let flatten = self_mapped_flatten(program);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<RunEvent>();
+    let stats = executor
+        .run(
+            program,
+            plan,
+            &resolver.disposition,
+            &mut cache,
+            &flatten,
+            Some(&tx),
+            CancelToken::never(),
+        )
+        .await;
+    drop(tx);
+    let mut pushes = Vec::new();
+    while let Some(event) = rx.recv().await {
+        if let RunEvent::PinnedOutputs(p) = event {
+            pushes.push(p);
+        }
+    }
+    (cache, stats, pushes)
 }
 
 #[tokio::test]
@@ -321,6 +386,127 @@ async fn pinned_root_sees_needed_usage_and_survives_drain() {
         cache.slots[a].output_values().unwrap()[0].as_i64(),
         Some(7),
         "pinned root's value survives the run"
+    );
+}
+
+/// An individually pinned output pushes its fresh value the instant its node
+/// finishes running.
+#[tokio::test]
+async fn pinned_output_pushes_right_after_it_runs() {
+    let mut p = Prog::default();
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+        Ok(())
+    });
+    let a = p.node(&[], 1, producer);
+    p.set_output_pinned(a, 0, true);
+
+    let plan = straight_plan(&p.program);
+    let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
+
+    assert_eq!(pushes.len(), 1, "one push for the one finished node");
+    assert_eq!(pushes[0].node_id, NodeId::from_u128(a as u128 + 1));
+    assert_eq!(pushes[0].values.len(), 1);
+    assert_eq!(pushes[0].values[0].0, 0);
+    assert_eq!(pushes[0].values[0].1.as_i64(), Some(7));
+}
+
+/// A pinned output with zero real consumers and a non-RAM cache mode is
+/// reclaimed the instant the push has cloned it — not held to end-of-run
+/// eviction. Proves the usage floor's "give the unit back after the push"
+/// half (see `Executor::run`'s pinned-push block and
+/// `ExecutionPlan::seed_extra_usage`'s doc).
+#[tokio::test]
+async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
+    let mut p = Prog::default();
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+        Ok(())
+    });
+    let a = p.node(&[], 1, producer);
+    p.set_cache(a, CacheMode::None); // not Ram — retain[] must not be why it survives
+    p.set_output_pinned(a, 0, true);
+
+    // Real `Planner::plan` output for "zero real consumers, individually
+    // pinned": the seed floors straight to 1 (see `seed_extra_usage`), not
+    // `straight_plan`'s blanket "everyone reads once" default.
+    let plan = plan_with_usage(&p.program, vec![1]);
+    let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
+
+    assert_eq!(pushes.len(), 1, "the value was still pushed");
+    assert!(
+        matches!(cache.slots[a].value, ValueState::Empty),
+        "reclaimed right after the push, not left resident to end-of-run eviction: {:?}",
+        cache.slots[a].value
+    );
+}
+
+/// A pinned-root node (a node-seeded on-demand preview target) pushes *every*
+/// output, not just an individually-pinned one — `plan.pinned` alone is
+/// enough to qualify the whole node.
+#[tokio::test]
+async fn pinned_root_pushes_every_output() {
+    let mut p = Prog::default();
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(1));
+        outputs[1] = DynamicValue::Static(StaticValue::Int(2));
+        Ok(())
+    });
+    let a = p.node(&[], 2, producer);
+
+    let plan = ExecutionPlan {
+        pinned: vec![a.into()],
+        ..straight_plan(&p.program)
+    };
+    let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
+
+    assert_eq!(pushes.len(), 1);
+    assert_eq!(pushes[0].node_id, NodeId::from_u128(a as u128 + 1));
+    assert_eq!(pushes[0].values.len(), 2);
+    assert_eq!(pushes[0].values[0].0, 0);
+    assert_eq!(pushes[0].values[0].1.as_i64(), Some(1));
+    assert_eq!(pushes[0].values[1].0, 1);
+    assert_eq!(pushes[0].values[1].1.as_i64(), Some(2));
+}
+
+/// Neither an individually-pinned port nor a pinned root: no push at all,
+/// even though the node ran successfully.
+#[tokio::test]
+async fn non_pinned_node_pushes_nothing() {
+    let mut p = Prog::default();
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+        Ok(())
+    });
+    p.node(&[], 1, producer);
+
+    let plan = straight_plan(&p.program);
+    let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
+
+    assert!(
+        pushes.is_empty(),
+        "no pinned output or pinned root ⇒ no push"
+    );
+}
+
+/// A pinned output on a node whose lambda *fails* pushes nothing — only a
+/// fresh, successful `Ran` outcome triggers the push (mirrors
+/// `RunPhase::Finished`'s own cancelled/failed suppression).
+#[tokio::test]
+async fn failed_pinned_node_pushes_nothing() {
+    let mut p = Prog::default();
+    let failing = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, _outputs| {
+        Err(anyhow::anyhow!("boom").into())
+    });
+    let a = p.node(&[], 1, failing);
+    p.set_output_pinned(a, 0, true);
+
+    let plan = straight_plan(&p.program);
+    let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
+
+    assert!(
+        pushes.is_empty(),
+        "a failed node's pinned output never pushes"
     );
 }
 
