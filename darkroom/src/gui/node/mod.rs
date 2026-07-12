@@ -114,9 +114,6 @@ impl NodeUI {
         probe: &mut BreakerProbe<'_>,
         out: &mut Vec<Intent>,
     ) {
-        if let Some(b) = probe.state.as_deref_mut() {
-            b.broken_nodes.clear();
-        }
         // Paint in `view_nodes` order (mirrored into `scene.nodes`) — later
         // draws sit on top, so the last node in the list is frontmost. The
         // order is persisted view state, so a raised node stays raised across
@@ -180,22 +177,10 @@ impl NodeUI {
         let body_rect = ui
             .response_for(node_widget_id(node.id))
             .layout_rect
-            .map(|r| Rect {
-                min: r.min - probe.origin,
-                size: r.size,
-            });
-        let broken = match (probe.state.as_deref(), body_rect) {
-            (Some(b), Some(r)) => b.intersects_rect(r),
-            _ => false,
-        };
+            .map(|r| probe.to_world(r));
+        let broken = body_rect.is_some_and(|r| probe.crosses_rect(r));
         if broken {
-            // unwrap: `broken == true` implies `state` is `Some`.
-            probe
-                .state
-                .as_deref_mut()
-                .unwrap()
-                .broken_nodes
-                .push(node.id);
+            probe.mark_broken_node(node.id);
         }
         let selected = rcx.selected.contains(&node.id);
         // The border width is *always* the selection width so selecting a

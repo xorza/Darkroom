@@ -170,11 +170,10 @@ impl SubscriptionUI {
     }
 
     /// Paint every committed subscription wire on the current scene that
-    /// can intersect `visible`, marking those the active breaker
-    /// (`probe.state`) crosses as broken — pushed onto
-    /// `probe.state.broken_subscriptions` for the release-frame drain. A
-    /// culled wire skips the breaker probe too — the scribble is always
-    /// on-screen, so it can't cross an off-screen curve.
+    /// can intersect `visible`, marking those the active breaker crosses as
+    /// broken via `probe.mark_broken_subscription` for the breaker's
+    /// release-frame drain. A culled wire skips the breaker probe too — the
+    /// scribble is always on-screen, so it can't cross an off-screen curve.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &self,
@@ -204,13 +203,7 @@ impl SubscriptionUI {
             }
             let broken = probe.crosses_cubic(p0, handles.p1, handles.p2, p3);
             if broken {
-                // unwrap: `broken == true` implies `state` is `Some`.
-                probe
-                    .state
-                    .as_deref_mut()
-                    .unwrap()
-                    .broken_subscriptions
-                    .push(*s);
+                probe.mark_broken_subscription(*s);
             }
             // Emphasis tiers resolve through the shared `WireEmphasis` (see
             // wire.rs). Event wires share the breaker-alarm hue, so the

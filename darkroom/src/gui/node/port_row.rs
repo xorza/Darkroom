@@ -366,13 +366,7 @@ fn output_cell(
             .center(port)
             .is_some_and(|c| pin_targeted(probe, c, theme.port_size * 0.5));
     if targeted {
-        // unwrap: `targeted == true` implies a live breaker gesture, so `state` is `Some`.
-        probe
-            .state
-            .as_deref_mut()
-            .unwrap()
-            .broken_pins
-            .push(OutputPort::new(port.node_id, port.port_idx));
+        probe.mark_broken_pin(OutputPort::new(port.node_id, port.port_idx));
     }
     let cell = Panel::hstack()
         .id_salt(("out", port.port_idx))

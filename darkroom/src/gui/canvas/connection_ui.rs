@@ -290,11 +290,11 @@ impl ConnectionUI {
     }
 
     /// Paint every permanent connection on the current scene that can
-    /// intersect `visible`, marking those the active breaker
-    /// (`probe.state`) crosses as broken. Hits get pushed onto
-    /// `probe.state.broken` for the breaker's release-frame drain. A
-    /// culled wire skips the breaker probe too — the scribble is always
-    /// on-screen, so it can't cross an off-screen curve.
+    /// intersect `visible`, marking those the active breaker crosses as
+    /// broken via `probe.mark_broken_input` for the breaker's
+    /// release-frame drain. A culled wire skips the breaker probe too —
+    /// the scribble is always on-screen, so it can't cross an off-screen
+    /// curve.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &self,
@@ -307,9 +307,6 @@ impl ConnectionUI {
         emphasis: &WireEmphasis,
     ) {
         let width = ctx.theme.connection_width;
-        if let Some(b) = probe.state.as_deref_mut() {
-            b.broken.clear();
-        }
         for c in &scene.connections {
             let src_port = PortRef {
                 node_id: c.src_node,
@@ -333,13 +330,7 @@ impl ConnectionUI {
             }
             let broken = probe.crosses_cubic(p0, handles.p1, handles.p2, p3);
             if broken {
-                // unwrap: `broken == true` implies `state` is `Some`.
-                probe
-                    .state
-                    .as_deref_mut()
-                    .unwrap()
-                    .broken
-                    .push(InputPort::new(c.tgt_node, c.tgt_port));
+                probe.mark_broken_input(InputPort::new(c.tgt_node, c.tgt_port));
             }
             // Gradient from output (p0) → input (p3) port color so each
             // end of a connection visually matches the port it touches —

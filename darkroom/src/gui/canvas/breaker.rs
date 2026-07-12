@@ -21,6 +21,25 @@ pub(crate) struct BreakerProbe<'a> {
 }
 
 impl BreakerProbe<'_> {
+    /// True if a breaker gesture is live this frame. Wire-fade emphasis and
+    /// similar ambient state read this instead of reaching into `state`
+    /// directly.
+    pub(crate) fn is_active(&self) -> bool {
+        self.state.is_some()
+    }
+
+    /// Convert a widget's screen-space rect into the breaker's own
+    /// pre-transform world frame (see [`BreakerState`]'s doc), by
+    /// subtracting the probe's origin. Only a raw `Ui::response_for` rect
+    /// needs this — wire/pin endpoints instead read straight out of
+    /// `CanvasGeometry`, which already resolves to this frame.
+    pub(crate) fn to_world(&self, rect: Rect) -> Rect {
+        Rect {
+            min: rect.min - self.origin,
+            size: rect.size,
+        }
+    }
+
     /// True if the active breaker polyline crosses the cubic `p0..p3`. A
     /// no-op (false) when no breaker gesture is live, so wire renderers can
     /// call it unconditionally before deciding whether to record a cut.
@@ -36,6 +55,36 @@ impl BreakerProbe<'_> {
         self.state
             .as_deref()
             .is_some_and(|b| b.intersects_rect(rect))
+    }
+
+    /// Record `addr`'s input binding as targeted by the breaker this frame.
+    /// Call only after a `crosses_*` check returned true for it — asserts a
+    /// gesture is live, so the four `mark_broken_*` siblings are the one
+    /// place that invariant is spelled out, instead of a copy-pasted
+    /// `unwrap` at each of the four call sites.
+    pub(crate) fn mark_broken_input(&mut self, addr: InputPort) {
+        self.live_state().broken.push(addr);
+    }
+
+    /// Record `id`'s node body as targeted by the breaker this frame.
+    pub(crate) fn mark_broken_node(&mut self, id: NodeId) {
+        self.live_state().broken_nodes.push(id);
+    }
+
+    /// Record `s`'s event wire as targeted by the breaker this frame.
+    pub(crate) fn mark_broken_subscription(&mut self, s: Subscription) {
+        self.live_state().broken_subscriptions.push(s);
+    }
+
+    /// Record `port`'s pin glyph as targeted by the breaker this frame.
+    pub(crate) fn mark_broken_pin(&mut self, port: OutputPort) {
+        self.live_state().broken_pins.push(port);
+    }
+
+    fn live_state(&mut self) -> &mut BreakerState {
+        self.state
+            .as_deref_mut()
+            .expect("mark_broken_* called with no live breaker gesture")
     }
 }
 
@@ -56,6 +105,15 @@ const BEZIER_SAMPLES: usize = 16;
 /// (pre-transform) coords so render inside the inner canvas can use
 /// the points verbatim and intersection tests share the same frame
 /// as the cubic bezier endpoints.
+///
+/// The four `broken_*` collections below are each filled by one render
+/// pass's hit-test (via `BreakerProbe::mark_broken_*`) and drained by
+/// `BreakerUI::apply` on release into the matching severing `Intent`. All
+/// four are cleared together at the start of every frame's probing
+/// (`begin_frame`, called from `BreakerUI::probe`) rather than each
+/// renderer clearing its own — every render pass visits its own targets at
+/// most once per frame, so within-frame duplicates aren't possible either
+/// way.
 #[derive(Debug)]
 pub(crate) struct BreakerState {
     pub(crate) points: Vec<Vec2>,
@@ -64,24 +122,18 @@ pub(crate) struct BreakerState {
     /// check polls `drag_delta_by(button)`, so a Cmd+LMB-launched
     /// breaker must keep reading the Left button, not Right.
     pub(crate) button: PointerButton,
-    /// Target input ports whose data binding the breaker intersects
-    /// this frame. Filled by `draw_connections`, drained on release
-    /// into `Intent::SetInput { to: Binding::None }`. A `Vec` is
-    /// enough — each connection is visited exactly once per frame,
-    /// so within-frame duplicates aren't possible.
+    /// Target input ports whose data binding the breaker intersects this
+    /// frame, drained on release into `Intent::SetInput { to: Binding::None }`.
     pub(crate) broken: Vec<InputPort>,
-    /// Nodes whose body rect the breaker crosses this frame. Filled
-    /// by `NodeUI::draw_all`, drained on release into
-    /// `Intent::RemoveNode`. Same one-visit-per-node guarantee.
+    /// Nodes whose body rect the breaker crosses this frame, drained on
+    /// release into `Intent::RemoveNode`.
     pub(crate) broken_nodes: Vec<NodeId>,
-    /// Event subscriptions whose wire the breaker intersects this frame.
-    /// Filled by `SubscriptionUI::draw`, drained on release into a
-    /// `SetSubscription { subscribe: false }`. Same one-visit-per-edge guarantee as `broken`.
+    /// Event subscriptions whose wire the breaker intersects this frame,
+    /// drained on release into `SetSubscription { subscribe: false }`.
     pub(crate) broken_subscriptions: Vec<Subscription>,
     /// Pinned outputs whose satellite glyph (or its connecting bezier) the
-    /// breaker intersects this frame. Filled by `output_cell`, drained on
-    /// release into `Intent::SetOutputPinned { pinned: false }`. Same
-    /// one-visit-per-port guarantee as `broken`.
+    /// breaker intersects this frame, drained on release into
+    /// `Intent::SetOutputPinned { pinned: false }`.
     pub(crate) broken_pins: Vec<OutputPort>,
 }
 
@@ -96,6 +148,18 @@ impl BreakerState {
             broken_subscriptions: Vec::new(),
             broken_pins: Vec::new(),
         }
+    }
+
+    /// Clear every `broken_*` collection at the start of a frame's probing.
+    /// The single point where this happens — called once from
+    /// [`BreakerUI::probe`] — rather than each renderer clearing its own
+    /// field, which is easy to forget (and had been forgotten for two of
+    /// the four).
+    fn begin_frame(&mut self) {
+        self.broken.clear();
+        self.broken_nodes.clear();
+        self.broken_subscriptions.clear();
+        self.broken_pins.clear();
     }
 
     pub(crate) fn add_point(&mut self, p: Vec2) {
@@ -210,11 +274,13 @@ pub(crate) struct BreakerUI {
 
 impl BreakerUI {
     /// Drive the gesture from the outer canvas response: start, extend,
-    /// release. On release, drain `broken` / `broken_nodes` into
-    /// `RemoveNode` + `SetInput { to: None }` intents. `RemoveNode`
-    /// supersedes any per-input unbind on the same target — the undo
-    /// step already detaches incoming edges, so emitting both would
-    /// log a redundant history entry. Esc cancels without emitting.
+    /// release. On release, drains all four `broken_*` collections into
+    /// their matching severing `Intent` (`RemoveNode`, `SetInput { to: None
+    /// }`, `SetSubscription { subscribe: false }`, `SetOutputPinned {
+    /// pinned: false }`). `RemoveNode` supersedes any per-edge severing on
+    /// the same target — the undo step already detaches every incoming
+    /// edge and pin, so emitting both would log a redundant history entry.
+    /// Esc cancels without emitting.
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
@@ -293,10 +359,15 @@ impl BreakerUI {
         }
     }
 
-    /// Hand the active state to inline intersection consumers (node
-    /// body hit-test + connection draw). Borrow lives until the
+    /// Hand the active state to inline intersection consumers (node body,
+    /// connection, subscription, and pin-glyph hit-tests). Clears every
+    /// `broken_*` collection first — the one call site for that, since
+    /// this is called exactly once per frame — then borrows live until the
     /// returned `BreakerProbe` is dropped.
     pub(crate) fn probe(&mut self, origin: Vec2) -> BreakerProbe<'_> {
+        if let Some(state) = self.state.as_mut() {
+            state.begin_frame();
+        }
         BreakerProbe {
             origin,
             state: self.state.as_mut(),
@@ -327,6 +398,50 @@ impl BreakerUI {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn begin_frame_clears_every_broken_collection() {
+        // Regression: `broken_subscriptions`/`broken_pins` used to have no
+        // per-frame clear at all (each renderer was responsible for its own
+        // field, and two of the four forgot), so a port/wire crossed once
+        // mid-drag stayed marked even after the scribble moved away —
+        // over-committing severs on release. `begin_frame` is now the one
+        // place that clears all four.
+        let mut b = BreakerState::start(Vec2::ZERO, PointerButton::Right);
+        let node = NodeId::from_u128(1);
+        b.broken.push(InputPort::new(node, 0));
+        b.broken_nodes.push(node);
+        b.broken_subscriptions.push(Subscription {
+            emitter: node,
+            event_idx: 0,
+            subscriber: node,
+        });
+        b.broken_pins.push(OutputPort::new(node, 0));
+
+        b.begin_frame();
+
+        assert!(b.broken.is_empty());
+        assert!(b.broken_nodes.is_empty());
+        assert!(b.broken_subscriptions.is_empty());
+        assert!(b.broken_pins.is_empty());
+    }
+
+    #[test]
+    fn probe_clears_stale_hits_from_a_prior_frame() {
+        // `BreakerUI::probe` is the one call site `begin_frame` is driven
+        // from — exercise it through that entry point too, not just the
+        // underlying `BreakerState` method.
+        let mut ui = BreakerUI {
+            state: Some(BreakerState::start(Vec2::ZERO, PointerButton::Right)),
+        };
+        ui.state
+            .as_mut()
+            .unwrap()
+            .broken_pins
+            .push(OutputPort::new(NodeId::from_u128(1), 0));
+        let probe = ui.probe(Vec2::ZERO);
+        assert!(probe.state.unwrap().broken_pins.is_empty());
+    }
 
     #[test]
     fn add_point_skips_short_segments() {
