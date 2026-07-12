@@ -13,17 +13,17 @@
 //! subtree. Logs attribute the same way.
 //!
 //! Values arrive separately and asynchronously: each surface showing them
-//! (open inspector panels, image-viewer tabs) registers its nodes in the
-//! per-frame watch registry ([`RunState::watch`]), `App` drains it into
-//! worker requests ([`RunState::take_requests`]) and feeds replies in via
-//! [`RunState::ingest_values`]. A [`RunId`] epoch tags each request/reply
-//! so a value computed against a superseded run is dropped; status/logs
-//! linger across a re-run (so the glow doesn't blank during compute) while
-//! values invalidate immediately.
+//! (open inspector panels, image-viewer tabs) registers its nodes in
+//! [`ValueRequests`](crate::gui::value_requests::ValueRequests), which `App`
+//! drains into worker requests; replies feed back in via
+//! [`RunState::ingest_values`]. A [`RunId`] epoch (tracked here) tags each
+//! request/reply so a value computed against a superseded run is dropped;
+//! status/logs linger across a re-run (so the glow doesn't blank during
+//! compute) while values invalidate immediately.
 //!
 //! [`Editor`]: crate::gui::app::editor::Editor
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Instant;
 
 use aperture::Ui;
@@ -100,8 +100,7 @@ pub(crate) struct NodeRunState {
     pub(crate) ram: RamUsage,
 }
 
-/// The last run's per-node state plus value-fetch coordination. Off the
-/// serialized state; rebuilt each run.
+/// The last run's per-node state. Off the serialized state; rebuilt each run.
 #[derive(Default, Debug)]
 pub(crate) struct RunState {
     nodes: HashMap<NodeId, NodeRunState>,
@@ -109,20 +108,10 @@ pub(crate) struct RunState {
     /// live repaint tick and whether the Cancel affordance shows.
     running: bool,
     /// Current run epoch (tags value requests/replies). Read by the
-    /// image-viewer refresh to tell which run its content came from.
+    /// image-viewer refresh to tell which run its content came from, and
+    /// handed to [`ValueRequests::take_requests`](crate::gui::value_requests::ValueRequests::take_requests)
+    /// to tag pending requests.
     pub(crate) run_id: RunId,
-    /// Nodes already asked about this epoch (insert-only; cleared only on
-    /// a new epoch / `clear`). Dedups so the frame loop sends one request
-    /// per node per run — a reply, including a `None` one, doesn't reopen
-    /// the node for re-request.
-    requested: HashSet<NodeId>,
-    /// Per-frame watch registry: every surface showing runtime values
-    /// (open inspector panels, image-viewer tabs) re-registers its nodes
-    /// each frame via [`Self::watch`]; `App` drains it once per frame
-    /// through [`Self::take_requests`]. Re-registration beats a retained
-    /// subscription — nothing needs an unregister path when a panel
-    /// closes, a tab dies with its node, or undo reshuffles the strip.
-    watched: Vec<NodeId>,
     /// RAM held by the worker's runtime cache after the last finished run
     /// (system RAM vs GPU VRAM), mirrored from its `ExecutionStats`. Drives the
     /// status bar's memory readout.
@@ -269,22 +258,21 @@ impl RunState {
     }
 
     /// Drop everything (a failed run paints no glow and shows no logs /
-    /// values).
+    /// values). Pair with a `ValueRequests::reset` (see `Editor::clear_run_state`)
+    /// so pending request bookkeeping doesn't outlive this epoch.
     pub(crate) fn clear(&mut self) {
         self.running = false;
         self.nodes.clear();
-        self.requested.clear();
-        self.watched.clear();
     }
 
     /// Open a new value-fetch epoch: a re-run invalidates last run's
     /// values immediately, but keeps status/logs so the glow doesn't blank
-    /// during compute (the new run's stats replace them). Pending request
-    /// markers reset so open panels re-request under the new epoch.
+    /// during compute (the new run's stats replace them). Pair with a
+    /// `ValueRequests::reset` (see `Editor::begin_run`) so pending request
+    /// markers reset for open panels to re-request under the new epoch.
     pub(crate) fn begin_run(&mut self) {
         self.running = true;
         self.run_id = self.run_id.wrapping_add(1);
-        self.requested.clear();
         for node in self.nodes.values_mut() {
             node.values = None;
         }
@@ -309,26 +297,6 @@ impl RunState {
             return;
         };
         self.nodes.entry(request.node_id).or_default().values = Some(build_view(ui, values));
-    }
-
-    /// Register interest in `node_id`'s runtime values for this frame.
-    /// Called by every surface that shows them; duplicates are dropped at
-    /// [`Self::take_requests`] time (per-epoch dedup).
-    pub(crate) fn watch(&mut self, node_id: NodeId) {
-        self.watched.push(node_id);
-    }
-
-    /// Drain the frame's watch registry into pending value requests: each
-    /// watched node not yet asked about this epoch, marked asked here and
-    /// returned (tagged with the current epoch) for `App` to forward to
-    /// the worker. Keeps all request bookkeeping on the projection.
-    pub(crate) fn take_requests(&mut self) -> Vec<ValueRequest> {
-        let run_id = self.run_id;
-        std::mem::take(&mut self.watched)
-            .into_iter()
-            .filter(|&node_id| self.requested.insert(node_id))
-            .map(|node_id| ValueRequest { node_id, run_id })
-            .collect()
     }
 }
 
@@ -549,7 +517,7 @@ mod tests {
     }
 
     /// A new epoch bumps the id and drops values, but keeps status/logs so
-    /// the glow survives a recompute; pending markers reset.
+    /// the glow survives a recompute.
     #[test]
     fn begin_run_bumps_id_drops_values_keeps_status() {
         let node = nid(1);
@@ -560,7 +528,6 @@ mod tests {
         let mut rs = RunState::default();
         rs.set_results(&stats(&[(node, 1.0)], &[]), &map);
         rs.nodes.get_mut(&node).unwrap().values = Some(NodeValueView::default());
-        rs.requested.insert(node);
 
         assert!(!rs.is_running(), "not running after a finished run");
         rs.begin_run();
@@ -569,44 +536,9 @@ mod tests {
         assert_eq!(rs.run_id, 1);
         assert_eq!(rs.status(node), ExecStatus::Executed(1.0), "status lingers");
         assert!(rs.values(node).is_none(), "values invalidated");
-        assert!(rs.requested.is_empty(), "pending markers reset");
 
         // The finishing run clears the in-flight flag.
         rs.set_results(&stats(&[], &[]), &FlattenMap::default());
         assert!(!rs.is_running(), "not running after results land");
-    }
-
-    /// `take_requests` asks for each watched node once per epoch, then
-    /// nothing more — a node already asked is not re-requested even if no
-    /// value landed (a `None` reply must not reopen it). A new epoch
-    /// re-asks; watching is per-frame, so each pass re-registers.
-    #[test]
-    fn take_requests_asks_each_watched_node_once_per_epoch() {
-        let (a, b) = (nid(1), nid(2));
-        let req = |node_id, run_id| ValueRequest { node_id, run_id };
-        let watch_both = |rs: &mut RunState| {
-            rs.watch(a);
-            rs.watch(b);
-        };
-        let mut rs = RunState::default();
-
-        // Nothing watched → nothing requested.
-        assert!(rs.take_requests().is_empty());
-
-        // First pass: both asked; a same-frame duplicate watch is deduped.
-        watch_both(&mut rs);
-        rs.watch(a);
-        assert_eq!(rs.take_requests(), vec![req(a, 0), req(b, 0)]);
-        // Re-watched but already asked this epoch → nothing, regardless of
-        // whether values arrived. `a` got a value, `b` got nothing (a
-        // `None` reply); both stay asked, so neither is re-requested.
-        rs.nodes.entry(a).or_default().values = Some(NodeValueView::default());
-        watch_both(&mut rs);
-        assert!(rs.take_requests().is_empty());
-
-        // A new epoch resets the asked set → both re-asked under run 1.
-        rs.begin_run();
-        watch_both(&mut rs);
-        assert_eq!(rs.take_requests(), vec![req(a, 1), req(b, 1)]);
     }
 }

@@ -17,7 +17,6 @@ use aperture::{
     Background, Configure, Panel, PointerButton, Rect, Sense, Sizing, TranslateScale, Ui, WidgetId,
 };
 use glam::Vec2;
-use scenarium::graph::NodeId;
 use std::collections::BTreeSet;
 
 use crate::core::document::Viewport;
@@ -107,12 +106,6 @@ impl GraphUI {
         // Transient inspection panels are tab-local; drop them on a
         // switch. Pinned ones persist and reappear with their nodes.
         self.inspectors.close_unpinned();
-    }
-
-    /// The nodes with an open inspection panel, for the frame loop to
-    /// request runtime values for.
-    pub(crate) fn open_inspector_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.inspectors.open_nodes()
     }
 
     /// Take the node context-menu action picked this frame, if any. The
@@ -361,6 +354,7 @@ impl GraphUI {
                                 geometry,
                                 inspectors,
                                 run_state: ctx.run_state,
+                                value_requests: ctx.value_requests,
                             };
                             node_ui.draw_all(ui, rcx, visible, &mut probe, out);
                         }
@@ -375,6 +369,7 @@ impl GraphUI {
                             scene,
                             geometry,
                             ctx.run_state,
+                            ctx.value_requests,
                         );
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, geometry, canvas_origin);

@@ -24,6 +24,7 @@ use crate::gui::node::preview::preview_section;
 use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
+use crate::gui::value_requests::ValueRequests;
 use aperture::{
     Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };
@@ -62,6 +63,9 @@ pub(crate) struct RecordCtx<'a> {
     /// Last run's per-node runtime values + status — read by the Preview
     /// node's inline image view (its fetched output thumbnail).
     pub(crate) run_state: &'a RunState,
+    /// This frame's value-watch registry — the Preview node's inline image
+    /// view registers here as it records, so its output value is fetched.
+    pub(crate) value_requests: &'a ValueRequests,
 }
 
 /// Owns rendering of every graph node plus the single active drag

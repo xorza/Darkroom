@@ -45,7 +45,7 @@ impl App {
         if !self.engine.run_once(&self.editor.document.graph) {
             return;
         }
-        self.editor.run_state.begin_run();
+        self.editor.begin_run();
         self.events_running = false;
     }
 
@@ -57,7 +57,7 @@ impl App {
         if !self.engine.run_node(&self.editor.document.graph, node_id) {
             return;
         }
-        self.editor.run_state.begin_run();
+        self.editor.begin_run();
         self.events_running = false;
     }
 

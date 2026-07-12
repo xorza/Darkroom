@@ -16,6 +16,7 @@ use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::run_state::RunState;
 use crate::gui::theme::Theme;
+use crate::gui::value_requests::ValueRequests;
 
 pub(crate) mod commands;
 pub(crate) mod editor;
@@ -35,6 +36,9 @@ pub(crate) struct AppContext<'a> {
     /// keyed by authoring `NodeId`. Read by the inspection panel's Log and
     /// Inputs/Outputs sections.
     pub(crate) run_state: &'a RunState,
+    /// This frame's value-watch registry. Every value-showing surface calls
+    /// `ValueRequests::watch` as it records itself.
+    pub(crate) value_requests: &'a ValueRequests,
     /// Whether the worker's event loop is running — drives the events
     /// toggle's on/off look. App-side intent rather than the worker's atomic,
     /// so the button can't lag a frame behind (and `Update` from a one-shot
@@ -151,7 +155,6 @@ impl App {
         // (both live on `self.engine`).
         let events: Vec<WorkerEvent> = self.engine.drain_worker().collect();
         for event in events {
-            let run_state = &mut self.editor.run_state;
             match event {
                 WorkerEvent::ExecutionFinished(Ok(stats)) => {
                     if stats.cancelled {
@@ -162,31 +165,36 @@ impl App {
                     }
                     // The stats' flat ids project through the compile-phase
                     // flatten map the engine kept when it sent this run.
-                    run_state.set_results(&stats, &self.engine.flatten_map);
+                    self.editor
+                        .run_state
+                        .set_results(&stats, &self.engine.flatten_map);
                     // A finished run supersedes any lingering failure message
                     // (e.g. an earlier event-loop tick's), so the loop
                     // self-heals in the status bar too.
                     self.engine.status.error = None;
                 }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
-                    run_state.clear();
+                    self.editor.clear_run_state();
                     self.engine.status.error(format!("run failed: {err}"));
                 }
-                WorkerEvent::NodeProgress(progress) => run_state.apply_progress(&progress),
+                WorkerEvent::NodeProgress(progress) => {
+                    self.editor.run_state.apply_progress(&progress)
+                }
                 WorkerEvent::ArgumentValues { request, values } => {
-                    run_state.ingest_values(ui, request, values)
+                    self.editor.run_state.ingest_values(ui, request, values)
                 }
             }
         }
     }
 
-    /// Forward the frame's pending value requests to the worker: the
-    /// editor's frame registered every value-showing surface (inspector
-    /// panels, image-viewer tabs) into the run state's watch registry;
-    /// drain it here, after the record. The reply arrives on a later
-    /// frame's drain.
+    /// Forward the frame's pending value requests to the worker. Every
+    /// value-showing surface (inspector panels, image-viewer panes, Preview
+    /// nodes) registered its node into the run state's request registry as it
+    /// recorded; drain the batch here, after the record. The reply arrives on a
+    /// later frame's drain.
     fn request_watched_values(&mut self) {
-        for req in self.editor.run_state.take_requests() {
+        let run_id = self.editor.run_state.run_id;
+        for req in self.editor.value_requests.take_requests(run_id) {
             self.engine.request_argument_values(req);
         }
     }

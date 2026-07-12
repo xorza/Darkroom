@@ -29,10 +29,10 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::image_viewer;
 use crate::gui::main_window::MainWindow;
-use crate::gui::node::preview::preview_watch_nodes;
 use crate::gui::run_state::RunState;
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
+use crate::gui::value_requests::ValueRequests;
 
 use crate::gui::app::AppContext;
 
@@ -106,13 +106,18 @@ pub(crate) struct Editor {
     /// The last completed run's per-node state, keyed by the document's
     /// `NodeId`s so it resolves against any tab (root or subgraph
     /// interior): execution status (the glow + header time, projected into
-    /// each `SceneNode::exec_status` at rebuild), log lines, and the
-    /// runtime values fetched on demand for the watching surfaces (open
-    /// inspection panels, image-viewer tabs — each registers per frame
-    /// via `RunState::watch`). `App` drives it as it drains the worker
-    /// (`RunState::set_results` / `ingest_values` / `clear`) and forwards
-    /// its `take_requests`. Off the serialized state.
+    /// each `SceneNode::exec_status` at rebuild) and log lines. `App` drives
+    /// it as it drains the worker (`RunState::set_results` / `ingest_values`
+    /// / `clear`). Off the serialized state.
     pub(crate) run_state: RunState,
+    /// Per-frame registry of which nodes' runtime values are needed this run
+    /// epoch: the watching surfaces (open inspection panels, image-viewer
+    /// tabs, Preview nodes) each register via `ValueRequests::watch` as they
+    /// record. `App` forwards `take_requests` to the worker. Kept off
+    /// `RunState` — that's the backward-looking projection of the last
+    /// finished run; this is the forward-looking ask for the next one. Reset
+    /// alongside `run_state`'s epoch by `Self::begin_run` / `Self::clear_run_state`.
+    pub(crate) value_requests: ValueRequests,
 }
 
 impl Editor {
@@ -134,7 +139,24 @@ impl Editor {
             intents: Vec::new(),
             actions: Vec::new(),
             run_state: RunState::default(),
+            value_requests: ValueRequests::default(),
         }
+    }
+
+    /// Open a new run epoch across both run-tracking objects: `RunState`'s
+    /// status/log/value projection and the `ValueRequests` registry that
+    /// dedups against its epoch. Call in lockstep — a run epoch bump means
+    /// nothing already asked-for should count against the new one.
+    pub(crate) fn begin_run(&mut self) {
+        self.run_state.begin_run();
+        self.value_requests.reset();
+    }
+
+    /// Drop the last run's state across both objects (a failed run). See
+    /// [`Self::begin_run`] for why the two are always touched together.
+    pub(crate) fn clear_run_state(&mut self) {
+        self.run_state.clear();
+        self.value_requests.reset();
     }
 
     /// Apply a single `intent` against the active target and record it as
@@ -227,21 +249,7 @@ impl Editor {
         // frame's `scene` to resolve tab/chip clicks, so it must run before
         // this frame's rebuild. After it, the active tab is fixed.
         self.navigate(ui, library);
-        // Register this frame's value watchers: every surface showing
-        // runtime values re-declares its nodes into the run state's watch
-        // registry, which `App` drains into worker requests after the
-        // frame. Open inspector panels register here; image-viewer tabs
-        // in `sync_image_viewers` (their sync loop).
-        for node_id in self.main_window.graph_ui.open_inspector_nodes() {
-            self.run_state.watch(node_id);
-        }
-        // Preview nodes need their output value fetched even with no inspector
-        // open. Collected first so the `scene` borrow ends before the mutable
-        // `run_state` borrow.
-        let preview_watch: Vec<NodeId> = preview_watch_nodes(&self.scene).collect();
-        for node_id in preview_watch {
-            self.run_state.watch(node_id);
-        }
+
         // Tabs are settled: drop viewer state for closed tabs and fold the
         // latest run's fetched values into the open viewers (values landed
         // in `App`'s pre-frame drain, so a finished run shows this frame).
@@ -286,6 +294,7 @@ impl Editor {
             theme,
             library,
             run_state: &self.run_state,
+            value_requests: &self.value_requests,
             events_running,
             status_error,
         };
@@ -536,7 +545,10 @@ impl Editor {
             let TabRef::ImageViewer(port) = tab else {
                 continue;
             };
-            self.run_state.watch(port.node_id);
+            // The value request is registered when the viewer pane records
+            // itself (see `MainWindow::frame`); here we only fold in whatever
+            // the last epoch already fetched.
+            //
             // Nothing fetched for this node yet this epoch — keep showing
             // the previous run's content rather than blanking mid-run.
             if self.run_state.values(port.node_id).is_none() {
@@ -694,7 +706,7 @@ mod tests {
     }
 
     #[test]
-    fn image_viewer_tabs_dedupe_per_port_and_feed_value_requests() {
+    fn image_viewer_tabs_dedupe_per_port_and_prune_on_close() {
         use glam::Vec2;
         use scenarium::graph::{Node, NodeKind};
         use scenarium::node::function::FuncId;
@@ -741,14 +753,18 @@ mod tests {
         assert!(editor.main_window.image_viewers.contains_key(&port(0)));
         assert!(editor.main_window.image_viewers.contains_key(&port(1)));
 
-        // Viewer tabs register themselves in the run state's watch
-        // registry even with every inspector panel closed — this is what
-        // refreshes them after a run. One request per node per epoch
-        // (both tabs share the node).
+        // A viewer's value request is now registered when its pane records
+        // itself (in `MainWindow::frame`), not from `sync_image_viewers` — so
+        // syncing alone queues nothing. The registry mechanism (per-epoch
+        // dedup) is covered by `value_requests`'s own tests.
         editor.sync_image_viewers();
-        let requests = editor.run_state.take_requests();
-        assert_eq!(requests.len(), 1, "one request per node per epoch");
-        assert_eq!(requests[0].node_id, id);
+        assert!(
+            editor
+                .value_requests
+                .take_requests(editor.run_state.run_id)
+                .is_empty(),
+            "sync no longer feeds requests; registration moved to the record"
+        );
 
         // Closing a tab drops its viewer state on the next sync (the
         // remaining port's state survives).

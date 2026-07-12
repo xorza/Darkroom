@@ -43,6 +43,7 @@ use crate::gui::node_values::{PortValueView, image_preview};
 use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
+use crate::gui::value_requests::ValueRequests;
 use crate::gui::widgets::support::{colored_text, sized_text};
 
 /// Open state of a single node's inspector. Absence from
@@ -70,6 +71,7 @@ struct PanelDraw<'a> {
     library: &'a Library,
     scene: &'a Scene,
     run_state: &'a RunState,
+    value_requests: &'a ValueRequests,
 }
 
 /// Fixed panel width in canvas (pre-transform) units.
@@ -96,12 +98,6 @@ impl Inspectors {
     /// The mode for a node, for the header chip to style itself.
     pub(crate) fn mode(&self, id: NodeId) -> Option<InspectMode> {
         self.modes.get(&id).copied()
-    }
-
-    /// Nodes with an open panel (either mode), for the frame loop to fetch
-    /// runtime values for.
-    pub(crate) fn open_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.modes.keys().copied()
     }
 
     /// Drop transient (`Open`) panels, keeping pinned ones. Called when
@@ -170,6 +166,7 @@ impl Inspectors {
     /// its node in canvas-world coords. Call inside the inner-canvas
     /// closure, after the node bodies, so panels paint on top and win
     /// hit-tests over the nodes beneath.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_panels(
         &self,
         ui: &mut Ui,
@@ -178,12 +175,14 @@ impl Inspectors {
         scene: &Scene,
         geometry: &CanvasGeometry,
         run_state: &RunState,
+        value_requests: &ValueRequests,
     ) {
         let ctx = PanelDraw {
             theme,
             library,
             scene,
             run_state,
+            value_requests,
         };
         for (&id, &mode) in &self.modes {
             let Some(node) = scene.nodes.iter().find(|n| n.id == id) else {
@@ -195,6 +194,9 @@ impl Inspectors {
             if node.boundary {
                 continue;
             }
+            // Drawing this panel IS its value request: ask for the node's
+            // runtime values so the input/output lines fill in.
+            ctx.value_requests.watch(node.id);
             // The cached body width places the panel just past the node's
             // right edge — cached (not last frame's response) so the
             // anchor holds when the viewport cull skips the node while its

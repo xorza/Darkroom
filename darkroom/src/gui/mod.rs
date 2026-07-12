@@ -16,6 +16,7 @@ pub(crate) mod run_state;
 pub(crate) mod scene;
 pub(crate) mod status_bar;
 pub(crate) mod theme;
+pub(crate) mod value_requests;
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::{GraphRef, PortRef};
