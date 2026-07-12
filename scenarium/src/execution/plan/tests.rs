@@ -128,7 +128,11 @@ fn fan_out_counts_each_executing_consumer() {
     f.node(true, &[(false, bind(a, 0))], 1);
 
     let p = plan(&f);
-    assert_eq!(p.output_usage[0], 2, "A.0 read by two consumers");
+    assert_eq!(
+        p.output_usage[0],
+        OutputUsage::Needed(2),
+        "A.0 read by two consumers"
+    );
 }
 
 #[test]
@@ -142,12 +146,38 @@ fn pinned_port_floors_plan_level_usage() {
 
     let p = plan(&f);
     assert_eq!(
-        p.output_usage[0], 0,
+        p.output_usage[0],
+        OutputUsage::Skip,
         "port 0 has no consumer and no binding"
     );
     assert_eq!(
-        p.output_usage[1], 1,
+        p.output_usage[1],
+        OutputUsage::Needed(1),
         "port 1 floors to 1 from being pinned alone"
+    );
+}
+
+#[test]
+fn overlapping_pin_sources_still_floor_to_one() {
+    // A's only output is BOTH a pinned root (node-seeded) and individually
+    // pinned, with no real consumer — the two sources must not stack into 2.
+    let mut f = Fix::default();
+    let a = f.node(false, &[], 1);
+    f.compiled.program.output_pinned[0] = true;
+
+    let mut planner = Planner::default();
+    let mut p = ExecutionPlan::default();
+    let seeds = RunSeeds {
+        nodes: vec![f.compiled.program.e_nodes[a].id],
+        ..Default::default()
+    };
+    planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
+
+    assert_eq!(p.pinned, vec![a]);
+    assert_eq!(
+        p.output_usage[0],
+        OutputUsage::Needed(1),
+        "pinned root + individually pinned on the same port still floors to 1, not 2"
     );
 }
 
@@ -196,9 +226,10 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert!(!p.verdicts[c].wants_execute(), "C never verdicted");
     // A.0 is read by B (usage 1); B.0 has no in-graph consumer, but floors to 1 from
     // being pinned.
-    assert_eq!(p.output_usage[0], 1, "A.0 read by B");
+    assert_eq!(p.output_usage[0], OutputUsage::Needed(1), "A.0 read by B");
     assert_eq!(
-        p.output_usage[1], 1,
+        p.output_usage[1],
+        OutputUsage::Needed(1),
         "B.0 unconsumed, but pinned floors it to 1"
     );
 
@@ -215,7 +246,8 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // B.0 now has a real consumer (C) too — pinning adds a unit on top rather than
     // just flooring, so B lands at 2, not 1.
     assert_eq!(
-        p.output_usage[1], 2,
+        p.output_usage[1],
+        OutputUsage::Needed(2),
         "B.0 read by C, plus pinning's extra unit"
     );
 

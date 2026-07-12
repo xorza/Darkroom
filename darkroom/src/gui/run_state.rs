@@ -16,9 +16,11 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use scenarium::data::RamUsage;
+use scenarium::data::{DynamicValue, RamUsage};
 use scenarium::execution::RunError;
-use scenarium::execution::stats::{ExecutionStats, FlattenMap, LogEntry, RunPhase, RunProgress};
+use scenarium::execution::stats::{
+    ExecutionStats, FlattenMap, LogEntry, PinnedOutputs, RunPhase, RunProgress,
+};
 use scenarium::graph::NodeId;
 
 use crate::core::worker::RunId;
@@ -84,6 +86,12 @@ pub(crate) struct NodeRunState {
     /// its interior. Zero unless the node retains a value; drives the node body's
     /// memory readout.
     pub(crate) ram: RamUsage,
+    /// This node's pinned outputs' latest values, keyed by node-local port
+    /// index — populated by [`RunState::set_pinned_values`] as pushes arrive
+    /// mid-run, independent of [`RunState::set_results`]'s reprojection. A
+    /// value isn't reset each run; it simply sits until a fresh push for
+    /// that port replaces it, or the whole run state is [`cleared`](RunState::clear).
+    pub(crate) pinned_values: HashMap<usize, DynamicValue>,
 }
 
 /// The last run's per-node state. Off the serialized state; rebuilt each run.
@@ -138,6 +146,28 @@ impl RunState {
         self.nodes.get(&id).map(|n| n.ram).unwrap_or_default()
     }
 
+    /// A pinned output's latest pushed value, or `None` if it's never arrived
+    /// (not pinned, or pinned but not yet run). No GUI reader yet — a preview
+    /// panel is the natural next consumer; kept (and unit-tested) as the
+    /// query surface `set_pinned_values` populates.
+    #[allow(dead_code)]
+    pub(crate) fn pinned_value(&self, id: NodeId, port_idx: usize) -> Option<&DynamicValue> {
+        self.nodes.get(&id)?.pinned_values.get(&port_idx)
+    }
+
+    /// Fold a just-arrived pinned-output push onto its node: each pushed
+    /// port's value replaces whatever this node held for that port before (a
+    /// stale value from an earlier run, or nothing). A port not included in
+    /// `pinned` is left untouched — e.g. a port unpinned mid-session still
+    /// shows its last value until a whole-run failure [`clear`](Self::clear)s
+    /// it.
+    pub(crate) fn set_pinned_values(&mut self, pinned: PinnedOutputs) {
+        let slot = self.nodes.entry(pinned.node_id).or_default();
+        for (port_idx, value) in pinned.values {
+            slot.pinned_values.insert(port_idx, value);
+        }
+    }
+
     /// Reproject a finished run's status + logs onto the per-node map.
     /// Status/logs are reset and rebuilt. Entries left carrying nothing are
     /// dropped. `flatten` is the compile-phase map of the program the stats
@@ -188,8 +218,12 @@ impl RunState {
                 self.nodes.entry(node_id).or_default().ram += *usage;
             }
         }
-        self.nodes
-            .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty() || n.ram.total() > 0);
+        self.nodes.retain(|_, n| {
+            n.status != ExecStatus::None
+                || !n.logs.is_empty()
+                || n.ram.total() > 0
+                || !n.pinned_values.is_empty()
+        });
     }
 
     /// Fold one flattened stat's `status` onto the node itself and every
@@ -219,15 +253,19 @@ impl RunState {
     /// Apply one live [`RunProgress`] event: mark the node(s) `Running` on
     /// `Started`, `Executed` on `Finished`. Overwrites the prior status (the
     /// final [`set_results`](Self::set_results) reconciles, e.g. summing an
-    /// instance subtree's times). `nodes` is already the authoring
-    /// attribution, so no flatten projection is needed here.
-    pub(crate) fn apply_progress(&mut self, progress: &RunProgress) {
+    /// instance subtree's times) — deliberately *not* folded through
+    /// `record_status`'s `merged`, since `Running` is live-only and must
+    /// always win over a stale `Errored`/`MissingInputs` from the last run.
+    /// `flatten` is the compile-phase map of the program the event came
+    /// from (like [`set_results`](Self::set_results)) — `progress.node_id`
+    /// is a flattened id, projected onto authoring nodes here.
+    pub(crate) fn apply_progress(&mut self, progress: &RunProgress, flatten: &FlattenMap) {
         let status = match progress.phase {
             RunPhase::Started { at } => ExecStatus::Running(at),
             RunPhase::Finished { elapsed_secs } => ExecStatus::Executed(elapsed_secs),
         };
-        for &id in &progress.nodes {
-            self.nodes.entry(id).or_default().status = status;
+        for node_id in flatten.attribution(progress.node_id) {
+            self.nodes.entry(node_id).or_default().status = status;
         }
     }
 
@@ -240,14 +278,15 @@ impl RunState {
     }
 
     /// Open a new run epoch: bumps `run_id` (so image-viewer content tagged
-    /// with a superseded run can be told apart) while keeping status/logs so
-    /// the glow doesn't blank during compute (the new run's stats replace
-    /// them).
+    /// with a superseded run can be told apart) while keeping status/logs/
+    /// pinned values so the glow (and a pinned preview) doesn't blank during
+    /// compute (the new run's stats/pushes replace them).
     pub(crate) fn begin_run(&mut self) {
         self.running = true;
         self.run_id = self.run_id.wrapping_add(1);
-        self.nodes
-            .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty());
+        self.nodes.retain(|_, n| {
+            n.status != ExecStatus::None || !n.logs.is_empty() || !n.pinned_values.is_empty()
+        });
     }
 }
 
@@ -297,25 +336,36 @@ mod tests {
 
     #[test]
     fn apply_progress_marks_all_attributed_nodes_running_then_executed() {
-        let mut rs = RunState::default();
         let (interior, instance) = (nid(1), nid(2));
-        let nodes = vec![interior, instance];
+        let flat = nid(100);
+        let mut map = FlattenMap::default();
+        map.reset();
+        let scope = map.push_scope(instance, 0);
+        map.set_leaf(flat, scope, interior);
+
+        let mut rs = RunState::default();
 
         // Started → every attributed node turns Running.
-        rs.apply_progress(&RunProgress {
-            nodes: nodes.clone(),
-            phase: RunPhase::Started {
-                at: std::time::Instant::now(),
+        rs.apply_progress(
+            &RunProgress {
+                node_id: flat,
+                phase: RunPhase::Started {
+                    at: std::time::Instant::now(),
+                },
             },
-        });
+            &map,
+        );
         assert!(matches!(rs.status(interior), ExecStatus::Running(_)));
         assert!(matches!(rs.status(instance), ExecStatus::Running(_)));
 
         // Finished → Executed with the reported time (overwrites Running).
-        rs.apply_progress(&RunProgress {
-            nodes,
-            phase: RunPhase::Finished { elapsed_secs: 0.5 },
-        });
+        rs.apply_progress(
+            &RunProgress {
+                node_id: flat,
+                phase: RunPhase::Finished { elapsed_secs: 0.5 },
+            },
+            &map,
+        );
         assert_eq!(rs.status(interior), ExecStatus::Executed(0.5));
         assert_eq!(rs.status(instance), ExecStatus::Executed(0.5));
 
@@ -489,5 +539,101 @@ mod tests {
         // The finishing run clears the in-flight flag.
         rs.set_results(&stats(&[], &[]), &FlattenMap::default());
         assert!(!rs.is_running(), "not running after results land");
+    }
+
+    /// A pinned-output push is retrievable by node + port, and a second push
+    /// for the same port replaces the first rather than appending.
+    #[test]
+    fn set_pinned_values_stores_and_replaces_per_port() {
+        use scenarium::data::StaticValue;
+
+        let node = nid(1);
+        let mut rs = RunState::default();
+        assert!(rs.pinned_value(node, 0).is_none(), "nothing pushed yet");
+
+        rs.set_pinned_values(PinnedOutputs {
+            node_id: node,
+            values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
+        });
+        assert_eq!(
+            rs.pinned_value(node, 0).unwrap().as_i64(),
+            Some(7),
+            "first push is stored"
+        );
+
+        rs.set_pinned_values(PinnedOutputs {
+            node_id: node,
+            values: vec![(0, DynamicValue::Static(StaticValue::Int(8)))],
+        });
+        assert_eq!(
+            rs.pinned_value(node, 0).unwrap().as_i64(),
+            Some(8),
+            "a fresh push for the same port replaces it, not appends"
+        );
+    }
+
+    /// `clear` (a whole-run failure) drops pinned values along with
+    /// everything else.
+    #[test]
+    fn clear_drops_pinned_values() {
+        use scenarium::data::StaticValue;
+
+        let node = nid(1);
+        let mut rs = RunState::default();
+        rs.set_pinned_values(PinnedOutputs {
+            node_id: node,
+            values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
+        });
+        rs.clear();
+        assert!(rs.pinned_value(node, 0).is_none());
+    }
+
+    /// A new epoch keeps a pinned value alive even when its node carries no
+    /// status/logs — the same "don't blank during compute" guarantee
+    /// `begin_run` already gives status/logs.
+    #[test]
+    fn begin_run_keeps_pinned_values_with_no_other_state() {
+        use scenarium::data::StaticValue;
+
+        let node = nid(1);
+        let mut rs = RunState::default();
+        rs.set_pinned_values(PinnedOutputs {
+            node_id: node,
+            values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
+        });
+        assert_eq!(rs.status(node), ExecStatus::None, "no status ever set");
+
+        rs.begin_run();
+
+        assert_eq!(
+            rs.pinned_value(node, 0).unwrap().as_i64(),
+            Some(7),
+            "pinned value survives an epoch bump with nothing else to anchor it"
+        );
+    }
+
+    /// `set_results`'s reprojection doesn't prune a node whose only surviving
+    /// fact is a pinned value (e.g. it was cut/pruned this run and
+    /// contributes to none of the run's stat lists).
+    #[test]
+    fn set_results_keeps_a_node_holding_only_a_pinned_value() {
+        use scenarium::data::StaticValue;
+
+        let node = nid(1);
+        let mut rs = RunState::default();
+        rs.set_pinned_values(PinnedOutputs {
+            node_id: node,
+            values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
+        });
+
+        // A run that says nothing at all about `node` (no executed/cached/
+        // errored entry) would otherwise reset it to a prunable `None`.
+        rs.set_results(&stats(&[], &[]), &FlattenMap::default());
+
+        assert_eq!(
+            rs.pinned_value(node, 0).unwrap().as_i64(),
+            Some(7),
+            "pinned value isn't dropped just because this run didn't mention the node"
+        );
     }
 }

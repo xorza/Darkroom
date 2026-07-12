@@ -19,6 +19,51 @@ pub enum OutputUsage {
     Needed(u32),
 }
 
+impl OutputUsage {
+    pub fn is_skip(self) -> bool {
+        matches!(self, OutputUsage::Skip)
+    }
+
+    /// Whether this is the *last* remaining read — the one read that, once
+    /// counted, leaves nothing else owed. `Skip` (already spent) is never last.
+    pub(crate) fn is_last_read(self) -> bool {
+        matches!(self, OutputUsage::Needed(1))
+    }
+
+    /// Count one more reader against this usage, in place: `Skip` becomes the
+    /// first reader (`Needed(1)`), `Needed(n)` steps up to `Needed(n + 1)`. The
+    /// planner's backward walk uses this to fold in each consumer edge.
+    pub(crate) fn inc(&mut self) {
+        *self = match *self {
+            OutputUsage::Skip => OutputUsage::Needed(1),
+            OutputUsage::Needed(n) => OutputUsage::Needed(n + 1),
+        };
+    }
+
+    /// Count one read against this usage, in place: `Needed(n)` steps down to
+    /// `Needed(n - 1)` or `Skip`. Decrementing a `Skip` output is a planner
+    /// bug — nothing should ever read more than the plan counted.
+    pub(crate) fn dec(&mut self) {
+        *self = match *self {
+            OutputUsage::Needed(1) => OutputUsage::Skip,
+            OutputUsage::Needed(n) => OutputUsage::Needed(n - 1),
+            OutputUsage::Skip => panic!("decremented an OutputUsage the plan already marked Skip"),
+        };
+    }
+}
+
+impl From<usize> for OutputUsage {
+    /// `Skip` for a zero count, `Needed(count)` otherwise — the seed for a raw
+    /// reader count (a `bool` pinned flag as `0`/`1`, or a plan-level count).
+    fn from(count: usize) -> Self {
+        if count == 0 {
+            OutputUsage::Skip
+        } else {
+            OutputUsage::Needed(count as u32)
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum InvokeError {
     #[error("{0}")]

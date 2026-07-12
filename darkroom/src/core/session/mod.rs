@@ -163,8 +163,9 @@ impl Session {
                     self.engine.status.error(format!("run failed: {err}"));
                 }
                 // Headless/TUI surfaces only the final summary, not live
-                // per-node progress.
+                // per-node progress or pinned-output pushes.
                 WorkerEvent::NodeProgress(_) => {}
+                WorkerEvent::PinnedOutputs(_) => {}
             }
         }
     }

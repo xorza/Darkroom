@@ -27,7 +27,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::data::DynamicValue;
 use crate::execution::compile::CompiledGraph;
-use crate::execution::stats::{ExecutionStats, RunProgress};
+use crate::execution::stats::{ExecutionStats, RunEvent};
 use crate::graph::NodeId;
 use crate::node::function::FuncId;
 
@@ -276,14 +276,17 @@ impl ExecutionEngine {
 
     // === Phases 2–3: plan then execute ===
 
-    /// When `progress` is `Some`, a [`RunProgress`] is sent before and after
-    /// each node's lambda runs, for live per-node feedback ahead of the final
-    /// stats. When `cancel` is `Some` and gets set mid-run, scheduling stops
-    /// after the in-flight node and the returned stats are marked `cancelled`.
+    /// When `events` is `Some`, a [`RunEvent`] is sent for live per-node
+    /// feedback ahead of the final stats: a `RunEvent::Progress` before and
+    /// after each node's lambda runs, and a `RunEvent::PinnedOutputs` right
+    /// after a node with a pinned output (or that is itself a pinned root)
+    /// finishes running, so a GUI preview updates without polling. When
+    /// `cancel` is `Some` and gets set mid-run, scheduling stops after the
+    /// in-flight node and the returned stats are marked `cancelled`.
     pub(crate) async fn execute(
         &mut self,
         seeds: RunSeeds,
-        progress: Option<&UnboundedSender<RunProgress>>,
+        events: Option<&UnboundedSender<RunEvent>>,
         cancel: CancelToken,
     ) -> Result<ExecutionStats> {
         // Phase 2: schedule into the reusable plan buffer. Purely structural —
@@ -311,7 +314,7 @@ impl ExecutionEngine {
                 &self.resolver.disposition,
                 &mut self.cache,
                 &self.compiled.flatten_map,
-                progress,
+                events,
                 cancel,
             )
             .await;
@@ -463,7 +466,10 @@ impl ExecutionEngine {
         self.plan.verdicts[idx.into()]
     }
 
-    pub(crate) fn node_output_usage(&self, e_node: &ExecutionNode) -> &[u32] {
+    pub(crate) fn node_output_usage(
+        &self,
+        e_node: &ExecutionNode,
+    ) -> &[crate::node::func_lambda::OutputUsage] {
         &self.plan.output_usage[e_node.outputs.range()]
     }
 

@@ -14,7 +14,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use scenarium::execution::Error as ExecError;
 use scenarium::execution::compile::CompiledGraph;
 use scenarium::execution::disk_store::DiskStore;
-use scenarium::execution::stats::{ExecutionStats, RunProgress};
+use scenarium::execution::stats::{ExecutionStats, PinnedOutputs, RunProgress};
 use scenarium::graph::NodeId;
 use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
 use tokio::runtime::Runtime;
@@ -32,6 +32,10 @@ pub(crate) enum WorkerEvent {
     ExecutionFinished(Result<ExecutionStats, ExecError>),
     /// Live per-node progress during a run, ahead of `ExecutionFinished`.
     NodeProgress(RunProgress),
+    /// A pinned output (or pinned-root node) just produced a fresh value,
+    /// pushed right after its node finished running — ahead of
+    /// `ExecutionFinished`, like `NodeProgress`.
+    PinnedOutputs(PinnedOutputs),
 }
 
 pub(crate) struct WorkerBridge {
@@ -76,6 +80,7 @@ impl WorkerBridge {
     fn deliver(tx: &Sender<WorkerEvent>, wake: &Wake, report: WorkerReport) {
         let event = match report {
             WorkerReport::Progress(progress) => WorkerEvent::NodeProgress(progress),
+            WorkerReport::PinnedOutputs(pinned) => WorkerEvent::PinnedOutputs(pinned),
             WorkerReport::Finished(result) => WorkerEvent::ExecutionFinished(result),
         };
         let _ = tx.send(event);
