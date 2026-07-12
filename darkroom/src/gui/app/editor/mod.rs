@@ -12,13 +12,12 @@
 //! [`App`]: crate::gui::app::App
 
 use aperture::Ui;
-use scenarium::data::DynamicValue;
 use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphDef;
 use scenarium::library::Library;
 
 use crate::core::document::dock::{DockOp, TabAddress};
-use crate::core::document::{Document, GraphRef, PortKind, PortRef, TabRef};
+use crate::core::document::{Document, GraphRef, PortRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::{
     Intent, NodeProperty, build_duplicate_intent_for, commit_intent_cascading,
@@ -32,7 +31,6 @@ use crate::gui::main_window::MainWindow;
 use crate::gui::run_state::RunState;
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
-use crate::gui::value_requests::ValueRequests;
 
 use crate::gui::app::AppContext;
 
@@ -107,17 +105,9 @@ pub(crate) struct Editor {
     /// `NodeId`s so it resolves against any tab (root or subgraph
     /// interior): execution status (the glow + header time, projected into
     /// each `SceneNode::exec_status` at rebuild) and log lines. `App` drives
-    /// it as it drains the worker (`RunState::set_results` / `ingest_values`
+    /// it as it drains the worker (`RunState::set_results` / `apply_progress`
     /// / `clear`). Off the serialized state.
     pub(crate) run_state: RunState,
-    /// Per-frame registry of which nodes' runtime values are needed this run
-    /// epoch: the watching surfaces (open inspection panels, image-viewer
-    /// tabs) each register via `ValueRequests::watch` as they record. `App`
-    /// forwards `take_requests` to the worker. Kept off
-    /// `RunState` — that's the backward-looking projection of the last
-    /// finished run; this is the forward-looking ask for the next one. Reset
-    /// alongside `run_state`'s epoch by `Self::begin_run` / `Self::clear_run_state`.
-    pub(crate) value_requests: ValueRequests,
 }
 
 impl Editor {
@@ -139,24 +129,7 @@ impl Editor {
             intents: Vec::new(),
             actions: Vec::new(),
             run_state: RunState::default(),
-            value_requests: ValueRequests::default(),
         }
-    }
-
-    /// Open a new run epoch across both run-tracking objects: `RunState`'s
-    /// status/log/value projection and the `ValueRequests` registry that
-    /// dedups against its epoch. Call in lockstep — a run epoch bump means
-    /// nothing already asked-for should count against the new one.
-    pub(crate) fn begin_run(&mut self) {
-        self.run_state.begin_run();
-        self.value_requests.set_epoch(self.run_state.run_id);
-    }
-
-    /// Drop the last run's state across both objects (a failed run). See
-    /// [`Self::begin_run`] for why the two are always touched together.
-    pub(crate) fn clear_run_state(&mut self) {
-        self.run_state.clear();
-        self.value_requests.set_epoch(self.run_state.run_id);
     }
 
     /// Apply a single `intent` against the active target and record it as
@@ -294,7 +267,6 @@ impl Editor {
             theme,
             library,
             run_state: &self.run_state,
-            value_requests: &self.value_requests,
             events_running,
             status_error,
         };
@@ -505,20 +477,18 @@ impl Editor {
         }
     }
 
-    /// Show `port`'s held runtime value in its own image-viewer tab and
-    /// focus it — one tab per port, deduped. The value is the full
-    /// `DynamicValue` the worker delivered for the port's open inspector
-    /// panel ([`PortValueView::full`]); `None` (superseded run) still
-    /// opens the tab, which fills itself after the next run. Mirrors
-    /// [`Self::open_preferences`]: adding the tab is the non-undoable
-    /// part, focus routes through a recorded activation.
+    /// Open `port`'s image-viewer tab and focus it — one tab per port,
+    /// deduped. Mirrors [`Self::open_preferences`]: adding the tab is the
+    /// non-undoable part, focus routes through a recorded activation.
     ///
-    /// [`PortValueView::full`]: crate::gui::node_values::PortValueView::full
+    /// The viewer has no value source right now (the on-demand runtime-value
+    /// fetch pipeline was removed pending a redesign) — it opens empty and
+    /// stays that way until [`sync_image_viewers`](Self::sync_image_viewers)
+    /// grows a new way to feed it.
     fn open_image_viewer(&mut self, port: PortRef) {
-        let value = port_full_value(&self.run_state, port);
         self.main_window.viewer_mut(port).present(
             image_viewer::port_label(&self.document, port),
-            value,
+            None,
             self.run_state.run_id,
         );
         let group = self.document.layout.focused;
@@ -529,37 +499,13 @@ impl Editor {
         self.push_activate(addr);
     }
 
-    /// Keep the viewer tabs in step with the document and the last run:
-    /// drop viewer state whose tab closed (freeing its texture), register
-    /// each remaining tab's node in the run state's watch registry (a
-    /// viewer must fetch values even when its node's panel is closed),
-    /// and re-present its port from the current epoch's fetched values —
-    /// so every open viewer updates after a graph execution, keeping the
-    /// user's framing (see [`refresh`](image_viewer::ImageViewer::refresh)).
+    /// Keep the viewer tabs in step with the document: drop viewer state
+    /// whose tab closed, freeing its texture.
     fn sync_image_viewers(&mut self) {
         let layout = &self.document.layout;
         self.main_window
             .image_viewers
             .retain(|port, _| layout.all_tabs().any(|t| t == TabRef::ImageViewer(*port)));
-        for tab in self.document.layout.all_tabs() {
-            let TabRef::ImageViewer(port) = tab else {
-                continue;
-            };
-            // The value request is registered when the viewer pane records
-            // itself (see `MainWindow::frame`); here we only fold in whatever
-            // the last epoch already fetched.
-            //
-            // Nothing fetched for this node yet this epoch — keep showing
-            // the previous run's content rather than blanking mid-run.
-            if self.run_state.values(port.node_id).is_none() {
-                continue;
-            }
-            self.main_window.viewer_mut(port).refresh(
-                image_viewer::port_label(&self.document, port),
-                port_full_value(&self.run_state, port),
-                self.run_state.run_id,
-            );
-        }
     }
 
     /// Queue the recorded focus/activation half of an open.
@@ -613,19 +559,6 @@ fn activate_intent(addr: TabAddress) -> Intent {
         group: addr.group,
         index: addr.index,
     })
-}
-
-/// The full runtime value held for `port` in the last fetch, if any —
-/// `RunState`'s per-node view indexed by the port's side + slot. Free fn
-/// (not on `Editor`) so `open_image_viewer` / `sync_image_viewers` can
-/// call it while `self.main_window` is mutably borrowed.
-fn port_full_value(run_state: &RunState, port: PortRef) -> Option<DynamicValue> {
-    let values = run_state.values(port.node_id)?;
-    let ports = match port.kind {
-        PortKind::Input => &values.inputs,
-        PortKind::Output => &values.outputs,
-    };
-    ports.get(port.port_idx).and_then(|pv| pv.full.clone())
 }
 
 #[cfg(test)]
@@ -711,6 +644,7 @@ mod tests {
         use scenarium::graph::{Node, NodeKind};
         use scenarium::node::function::FuncId;
 
+        use crate::core::document::PortKind;
         use crate::core::document::view_node::ViewNode;
 
         let lib = Library::default();
@@ -753,15 +687,7 @@ mod tests {
         assert!(editor.main_window.image_viewers.contains_key(&port(0)));
         assert!(editor.main_window.image_viewers.contains_key(&port(1)));
 
-        // A viewer's value request is now registered when its pane records
-        // itself (in `MainWindow::frame`), not from `sync_image_viewers` — so
-        // syncing alone queues nothing. The registry mechanism (per-epoch
-        // dedup) is covered by `value_requests`'s own tests.
         editor.sync_image_viewers();
-        assert!(
-            editor.value_requests.take_requests().is_empty(),
-            "sync no longer feeds requests; registration moved to the record"
-        );
 
         // Closing a tab drops its viewer state on the next sync (the
         // remaining port's state survives).

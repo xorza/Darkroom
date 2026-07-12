@@ -24,11 +24,12 @@
 use std::fmt::Write as _;
 
 use aperture::{
-    Align, Background, Color, Configure, HAlign, ImageFilter, ImageFit, ImageHandle, InternedStr,
-    Panel, PointerButton, Rect, Sense, Shape, Size, Sizing, Spacing, Text, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, HAlign, Image as AptImage, ImageFilter, ImageFit,
+    ImageHandle, InternedStr, Panel, PointerButton, Rect, Sense, Shape, Size, Sizing, Spacing,
+    Text, Ui, VAlign, WidgetId,
 };
 use glam::{UVec2, Vec2};
-use imaginarium::{ColorFormat, Preview, ProcessingContext};
+use imaginarium::{ColorFormat, Image as RawImage, Preview, ProcessingContext};
 use lens::Image as LensImage;
 use scenarium::data::DynamicValue;
 use scenarium::graph::NodeSearch;
@@ -37,7 +38,6 @@ use crate::core::document::{Document, PortKind, PortRef, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
 use crate::core::worker::RunId;
 use crate::gui::canvas::pan_zoom::{PanAnchor, fold_scroll_zoom, zoom_about};
-use crate::gui::node_values::rgba8_image;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, filled_rect, muted_text, stroked_rect};
 use crate::gui::widgets::toolbar::{
@@ -176,6 +176,12 @@ impl ImageViewer {
     /// shown; a value that is the same `Arc` as the current one (the node
     /// reused its cache) just adopts the epoch without re-rendering.
     /// `value` is `None` when the port has no image value this run.
+    ///
+    /// Currently unreachable — its only caller (`Editor::sync_image_viewers`,
+    /// which fed it from the removed on-demand value-fetch pipeline) was
+    /// simplified to just pruning closed tabs. Kept (with its tests) for
+    /// whatever feeds the viewer next.
+    #[allow(dead_code)]
     pub(crate) fn refresh(&mut self, title: String, value: Option<DynamicValue>, epoch: RunId) {
         if self.content_epoch == Some(epoch) {
             return;
@@ -754,6 +760,26 @@ fn render_full(value: &DynamicValue) -> Result<RenderedImage, String> {
         native_size,
         native_format,
     })
+}
+
+/// Reinterpret a packed `RGBA_U8` imaginarium image as an uploadable
+/// aperture image. `None` for another format or a padded stride;
+/// imaginarium images are tightly packed, so for RGBA_U8 input `Some` is
+/// the norm and the bytes move without a repack.
+fn rgba8_image(image: RawImage) -> Option<AptImage> {
+    let desc = image.desc;
+    if desc.color_format != ColorFormat::RGBA_U8 {
+        return None;
+    }
+    let pixels = image.into_bytes();
+    if pixels.len() != desc.row_bytes() * desc.height {
+        return None;
+    }
+    Some(AptImage::from_rgba8(
+        desc.width as u32,
+        desc.height as u32,
+        pixels,
+    ))
 }
 
 #[cfg(test)]

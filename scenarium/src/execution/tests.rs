@@ -256,8 +256,7 @@ mod cache_persistence {
     /// (`print`). On reopen only the frontier `mult` — the cached value `print`
     /// actually reads — is deserialized into RAM; the deeper `sum`, whose sole
     /// consumer `mult` is itself reused-from-disk (so never reads it), stays
-    /// `ValueState::OnDisk` with no resident bytes. That is the RAM win. Inspecting
-    /// `sum` then pulls it in on demand.
+    /// `ValueState::OnDisk` with no resident bytes. That is the RAM win.
     #[tokio::test]
     async fn chained_disk_cache_loads_only_the_frontier() {
         let dir = TempDir::new("chain-frontier");
@@ -342,26 +341,6 @@ mod cache_persistence {
         assert!(
             sum_on_disk,
             "the deeper cache is still flagged available on disk"
-        );
-
-        // Inspecting `sum` pulls it in on demand: value correct, now resident (it stays
-        // warm until a later run's eviction demotes it — its content digest attests it,
-        // so the reuse check serving the leftover is sound).
-        let vals = engine
-            .get_argument_values_with_previews(&sum_id)
-            .await
-            .unwrap();
-        assert!(
-            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Int(14))),
-            "inspection reads sum's stored value: {:?}",
-            vals.outputs
-        );
-        assert!(
-            engine
-                .runtime_slot(engine.by_name("sum").unwrap())
-                .output_values()
-                .is_some(),
-            "inspection hydrated sum into RAM"
         );
     }
 
@@ -451,17 +430,6 @@ mod cache_persistence {
         assert!(
             get_a_resident,
             "a non-reloadable (Memory) value is kept, never force-recomputed"
-        );
-
-        // Lossless: inspecting `sum` reloads it with the correct value (1 + 1 = 2).
-        let vals = engine
-            .get_argument_values_with_previews(&sum_id)
-            .await
-            .unwrap();
-        assert!(
-            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Int(2))),
-            "evicted value reloads from disk on inspection: {:?}",
-            vals.outputs
         );
     }
 
@@ -708,10 +676,16 @@ mod cache_persistence {
             stats.executed_nodes
         );
 
-        let vals = engine
-            .get_argument_values_with_previews(&mult_id)
-            .await
-            .unwrap();
+        // `mult` isn't RAM-caching (`Disk` mode) and nothing pins it, so it was
+        // reclaimed to its on-disk blob once `Print` finished reading it this
+        // run — hydrate it back to inspect the served bytes.
+        use crate::execution::query::resolve_node_idx;
+        let idx = resolve_node_idx(&engine.compiled, &mult_id).unwrap();
+        engine
+            .cache
+            .hydrate_slot(&engine.compiled.program, idx)
+            .await;
+        let vals = engine.get_argument_values(&mult_id).unwrap();
         assert!(
             matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Int(6))),
             "flip-back serves the disk blob (6), not the stale RAM value (35): {:?}",
@@ -1218,7 +1192,7 @@ mod cache_persistence {
     /// disk but whose custom output type has *no registered codec* (a value written by a
     /// build that had the codec, reopened by one that doesn't) is not reused from disk —
     /// it recomputes, rather than being served and then panicking on a failed load. With
-    /// the codec it's served and decodes on inspection.
+    /// the codec it's served from disk instead.
     #[tokio::test]
     async fn missing_codec_skips_disk_cache_instead_of_panicking() {
         use std::any::Any;
@@ -1346,15 +1320,6 @@ mod cache_persistence {
         assert!(
             stats.cached_nodes.contains(&blob_id),
             "blob node disk-cached"
-        );
-        let vals = engine
-            .get_argument_values_with_previews(&blob_id)
-            .await
-            .unwrap();
-        assert!(
-            matches!(&vals.outputs[0], DynamicValue::Custom(_)),
-            "inspection decodes the blob from disk: {:?}",
-            vals.outputs
         );
 
         // Reopen WITHOUT codec: blob present but undecodable ⇒ not flagged available
@@ -3344,16 +3309,6 @@ mod node_seeds {
                 .is_empty(),
             "unpinned None-cache upstream is drained as usual"
         );
-
-        // The production inspection path leaves the pinned value resident (no blob backs
-        // it — hydration has nothing to do and touches nothing).
-        let inspected = eg.get_argument_values_with_previews(&sum_id).await.unwrap();
-        assert_eq!(inspected.outputs[0].as_i64(), Some(12));
-        assert_eq!(
-            eg.get_argument_values(&sum_id).unwrap().outputs[0].as_i64(),
-            Some(12),
-            "still resident after inspection"
-        );
     }
 
     /// A second seeded run of an unchanged graph recomputes nothing: the pinned value
@@ -4398,49 +4353,6 @@ mod topology {
                 "round {round} shrink values"
             );
         }
-
-        Ok(())
-    }
-}
-
-// === Previews ===
-
-mod previews {
-    use super::*;
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn previews_match_plain_argument_values() -> anyhow::Result<()> {
-        let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(|| Ok(2)),
-            get_b: Arc::new(|| 5),
-            print: Arc::new(|_| {}),
-        });
-        let graph = test_graph();
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        eg.execute_sinks().await?;
-
-        // For non-Custom values gen_preview is a no-op, so the preview variant
-        // must return exactly the same values as the plain accessor.
-        let mult_id = graph.by_name("mult").unwrap().id;
-        let plain = eg.get_argument_values(&mult_id).unwrap();
-        let with_previews = eg
-            .get_argument_values_with_previews(&mult_id)
-            .await
-            .unwrap();
-
-        // mult = sum(2+5=7) * get_b(5) = 35
-        assert!(matches!(
-            with_previews.outputs[0],
-            DynamicValue::Static(StaticValue::Int(35))
-        ));
-        assert_eq!(plain.inputs.len(), with_previews.inputs.len());
-        assert_eq!(plain.outputs.len(), with_previews.outputs.len());
-        assert!(matches!(
-            with_previews.inputs[0],
-            Some(DynamicValue::Static(StaticValue::Int(7)))
-        ));
 
         Ok(())
     }

@@ -6,7 +6,6 @@ use tokio::time::{Duration, timeout};
 
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
-use crate::execution::ArgumentValues;
 use crate::execution::Result as ExecResult;
 use crate::execution::compile::Compiler;
 use crate::execution::stats::{ExecutionStats, RunPhase};
@@ -23,14 +22,6 @@ use crate::worker::{
 /// `ContextManager::info`, surfaced in `ExecutionStats.logs`.
 fn messages(stats: &ExecutionStats) -> Vec<String> {
     stats.logs.iter().map(|e| e.message.clone()).collect()
-}
-
-/// Unwrap a single-node `RequestArgumentValues` reply — every test here
-/// that inspects a value requested exactly one node, so the batched reply
-/// always holds one entry.
-fn single_value(mut values: Vec<(NodeId, Option<ArgumentValues>)>) -> Option<ArgumentValues> {
-    let (_, value) = values.pop().expect("exactly one node requested");
-    value
 }
 
 /// End-to-end fixture for Worker tests that run a graph with a
@@ -556,37 +547,10 @@ async fn start_stop_event_loop() {
     assert!(!h.worker.is_event_loop_started());
 }
 
-#[tokio::test]
-async fn request_argument_values_invokes_callback() {
-    let mut h = FrameHarness::new().await;
-
-    h.worker
-        .send_many([h.update_msg(), h.inject_frame_event()])
-        .unwrap();
-    let _ = h.compute_rx.recv().await;
-
-    let (reply, rx) = oneshot::channel();
-    h.worker
-        .send(WorkerMessage::RequestArgumentValues {
-            node_ids: vec![h.frame_event_node_id],
-            reply,
-        })
-        .unwrap();
-
-    let values = timeout(Duration::from_millis(200), rx)
-        .await
-        .expect("Reply timeout")
-        .expect("Reply sender dropped");
-
-    assert!(single_value(values).is_some());
-}
-
 /// `ExecuteNodes` end-to-end: an `Update` + `ExecuteNodes` batch runs only the seeded
-/// node's cone (3 of the fixture's 5 nodes; the sink `Print` panics if reached),
-/// and the pinned output — every node forced to `CacheMode::None` — is then served by
-/// `RequestArgumentValues`.
+/// node's cone (3 of the fixture's 5 nodes; the sink `Print` panics if reached).
 #[tokio::test]
-async fn execute_nodes_runs_cone_and_serves_pinned_value() {
+async fn execute_nodes_runs_only_the_seeded_cone() {
     use crate::graph::CacheMode;
     use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 
@@ -624,20 +588,6 @@ async fn execute_nodes_runs_cone_and_serves_pinned_value() {
         .expect("worker channel closed")
         .expect("run ok");
     assert_eq!(stats.executed_nodes.len(), 3, "only sum's cone ran");
-
-    let (reply, reply_rx) = oneshot::channel();
-    worker
-        .send(WorkerMessage::RequestArgumentValues {
-            node_ids: vec![sum_id],
-            reply,
-        })
-        .unwrap();
-    let values = timeout(Duration::from_millis(500), reply_rx)
-        .await
-        .expect("Reply timeout")
-        .expect("Reply sender dropped");
-    let values = single_value(values).expect("sum resolves");
-    assert_eq!(values.outputs[0].as_i64(), Some(12), "1 + 11, retained");
 }
 
 #[tokio::test]
@@ -753,31 +703,6 @@ async fn stop_event_loop_when_not_running_is_noop() {
 }
 
 #[tokio::test]
-async fn request_argument_values_for_unknown_node_returns_none() {
-    let h = FrameHarness::new().await;
-
-    h.worker.send(h.update_msg()).unwrap();
-
-    let (reply, rx) = oneshot::channel();
-    h.worker
-        .send(WorkerMessage::RequestArgumentValues {
-            node_ids: vec![NodeId::unique()],
-            reply,
-        })
-        .unwrap();
-
-    let values = timeout(Duration::from_millis(500), rx)
-        .await
-        .expect("Reply timeout")
-        .expect("Reply sender dropped");
-
-    assert!(
-        single_value(values).is_none(),
-        "unknown node should yield None"
-    );
-}
-
-#[tokio::test]
 async fn multiple_syncs_in_batch_all_run() {
     let worker = Worker::new(|_| {});
 
@@ -821,90 +746,6 @@ async fn clear_then_update_in_same_batch_applies_update() {
 
     assert_eq!(executed.executed_nodes.len(), 3);
     assert_eq!(messages(&executed), ["1"]);
-}
-
-// F3: RequestArgumentValues batched with Update must observe the
-// post-Update graph. Before the fix this ran inline during the scan
-// phase and returned `None` because the Update was still pending in
-// `BatchIntent`; after the fix it runs in commit phase and returns
-// `Some`.
-#[tokio::test]
-async fn request_argument_values_batched_with_update_sees_new_graph() {
-    let h = FrameHarness::new().await;
-
-    // Worker starts with an empty ExecutionGraph. Batch Update +
-    // RequestArgumentValues together: only works if the scan phase
-    // defers the request until after Update commits.
-    let (reply, rx) = oneshot::channel();
-    h.worker
-        .send_many([
-            h.update_msg(),
-            WorkerMessage::RequestArgumentValues {
-                node_ids: vec![h.frame_event_node_id],
-                reply,
-            },
-        ])
-        .unwrap();
-
-    let values = timeout(Duration::from_millis(500), rx)
-        .await
-        .expect("Reply timeout")
-        .expect("Reply sender dropped");
-
-    assert!(
-        single_value(values).is_some(),
-        "request batched with Update must see the newly-loaded graph"
-    );
-}
-
-// F3: Clear batched after an Update+Execute must clear the graph
-// before a same-batch RequestArgumentValues runs → request returns
-// None.
-#[tokio::test]
-async fn request_argument_values_batched_with_clear_sees_empty_graph() {
-    let mut h = FrameHarness::new().await;
-
-    // Populate, then confirm the request sees values.
-    h.worker.send(h.update_msg()).unwrap();
-    let (reply_before, rx_before) = oneshot::channel();
-    h.worker
-        .send(WorkerMessage::RequestArgumentValues {
-            node_ids: vec![h.frame_event_node_id],
-            reply: reply_before,
-        })
-        .unwrap();
-    assert!(
-        single_value(
-            timeout(Duration::from_millis(500), rx_before)
-                .await
-                .expect("pre-clear reply timeout")
-                .expect("pre-clear sender dropped")
-        )
-        .is_some()
-    );
-
-    // Batch Clear + RequestArgumentValues. Request must see the
-    // post-clear state (None), not the pre-clear state (Some).
-    let (reply_after, rx_after) = oneshot::channel();
-    h.worker
-        .send_many([
-            WorkerMessage::Clear,
-            WorkerMessage::RequestArgumentValues {
-                node_ids: vec![h.frame_event_node_id],
-                reply: reply_after,
-            },
-        ])
-        .unwrap();
-    let values = timeout(Duration::from_millis(500), rx_after)
-        .await
-        .expect("post-clear reply timeout")
-        .expect("post-clear sender dropped");
-    assert!(
-        single_value(values).is_none(),
-        "request batched after Clear must observe empty graph"
-    );
-
-    while h.compute_rx.try_recv().is_ok() {}
 }
 
 // F5: running execution on an empty graph is a normal state, not a
@@ -1107,7 +948,6 @@ async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
 #[test]
 fn scan_accumulates_simple_flags() {
     let (reply_ack, _ack_rx) = oneshot::channel();
-    let (reply_args, _args_rx) = oneshot::channel();
     let node_id = NodeId::unique();
     let event = EventRef {
         node_id,
@@ -1128,10 +968,6 @@ fn scan_accumulates_simple_flags() {
             nodes: vec![node_id],
         },
         WorkerMessage::Sync { reply: reply_ack },
-        WorkerMessage::RequestArgumentValues {
-            node_ids: vec![node_id],
-            reply: reply_args,
-        },
     ]);
 
     assert!(matches!(
@@ -1153,8 +989,6 @@ fn scan_accumulates_simple_flags() {
     );
     assert!(intent.execute_nodes.contains(&node_id));
     assert_eq!(intent.syncs.len(), 1);
-    assert_eq!(intent.argument_requests.len(), 1);
-    assert_eq!(intent.argument_requests[0].0, vec![node_id]);
 }
 
 #[test]
@@ -1221,7 +1055,6 @@ fn scan_exit_dominates_entire_batch() {
     );
     assert!(intent.events.is_empty());
     assert!(intent.syncs.is_empty());
-    assert!(intent.argument_requests.is_empty());
 }
 
 #[test]
@@ -1400,70 +1233,6 @@ async fn exit_in_batch_closes_pending_sync() {
     assert!(
         result.is_err(),
         "Sync batched with Exit must drop the reply sender, got {result:?}"
-    );
-}
-
-#[tokio::test]
-async fn exit_in_batch_closes_pending_argument_request() {
-    let (worker, _rx) = empty_worker();
-
-    let (reply, rx) = oneshot::channel();
-    worker
-        .send_many([
-            WorkerMessage::RequestArgumentValues {
-                node_ids: vec![NodeId::unique()],
-                reply,
-            },
-            WorkerMessage::Exit,
-        ])
-        .unwrap();
-
-    let result = timeout(Duration::from_millis(500), rx)
-        .await
-        .expect("rx must resolve once the dropped reply sender is observed");
-    assert!(
-        result.is_err(),
-        "RequestArgumentValues batched with Exit must drop the sender, got {result:?}"
-    );
-}
-
-// F5: RequestArgumentValues must resolve cleanly while an event
-// loop is running — the commit phase runs replies post-execute, so
-// a live loop must neither deadlock against the pause gate nor
-// starve the reply.
-#[tokio::test]
-async fn request_argument_values_during_running_event_loop() {
-    let mut h = FrameHarness::with_callback_capacity(32).await;
-
-    h.worker
-        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
-        .unwrap();
-
-    // Wait until the loop has fired at least once.
-    let _ = timeout(Duration::from_millis(500), h.compute_rx.recv())
-        .await
-        .expect("initial execute callback");
-    let _ = timeout(Duration::from_millis(500), h.compute_rx.recv())
-        .await
-        .expect("lambda-driven execute callback");
-
-    assert!(h.worker.is_event_loop_started());
-
-    let (reply, rx) = oneshot::channel();
-    h.worker
-        .send(WorkerMessage::RequestArgumentValues {
-            node_ids: vec![h.frame_event_node_id],
-            reply,
-        })
-        .unwrap();
-
-    let values = timeout(Duration::from_millis(500), rx)
-        .await
-        .expect("reply must arrive while loop is running")
-        .expect("reply sender must not drop");
-    assert!(
-        single_value(values).is_some(),
-        "argument values must be available for a node in the live graph"
     );
 }
 

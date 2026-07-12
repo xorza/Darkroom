@@ -18,7 +18,7 @@ use crate::data::{DynamicValue, RamUsage};
 use crate::execution::NodeColumn;
 use crate::execution::digest::{Digest, node_digest};
 use crate::execution::disk_store::DiskStore;
-use crate::execution::program::{ExecutionBinding, ExecutionNode, ExecutionProgram, NodeIdx};
+use crate::execution::program::{ExecutionNode, ExecutionProgram, NodeIdx};
 use crate::execution::resolve::Disposition;
 use crate::graph::NodeId;
 use crate::runtime::any_state::AnyState;
@@ -396,28 +396,6 @@ impl RuntimeCache {
         }
         self.slots[idx].clear_output();
         false
-    }
-
-    /// Materialize node `idx` plus the producers feeding its inputs — the values an inspection
-    /// of `idx` reads (its own outputs and its inputs' resolved values). Lets a disk-cached node
-    /// no run touched still show its value when the editor selects it, without the run having
-    /// eagerly loaded every blob.
-    ///
-    /// Hydrated values simply stay resident (until a later run's eviction demotes them):
-    /// a content digest attests the value produced under it, so the reuse check serving a
-    /// hydrated leftover is correct.
-    pub(crate) async fn hydrate_for_inspection(
-        &mut self,
-        program: &ExecutionProgram,
-        idx: NodeIdx,
-    ) {
-        self.hydrate_slot(program, idx).await;
-        let span = program.e_nodes[idx].inputs;
-        for pool_idx in span.range() {
-            if let ExecutionBinding::Bind(addr) = &program.inputs[pool_idx].binding {
-                self.hydrate_slot(program, addr.target_idx).await;
-            }
-        }
     }
 
     /// Write node `idx`'s freshly-computed outputs to disk the moment it finishes (the executor

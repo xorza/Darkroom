@@ -11,14 +11,13 @@
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use scenarium::execution::Error as ExecError;
 use scenarium::execution::compile::CompiledGraph;
 use scenarium::execution::disk_store::DiskStore;
 use scenarium::execution::stats::{ExecutionStats, RunProgress};
-use scenarium::execution::{ArgumentValues, Error as ExecError};
 use scenarium::graph::NodeId;
 use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
 use tokio::runtime::Runtime;
-use tokio::sync::oneshot;
 
 use crate::core::wake::Wake;
 
@@ -26,47 +25,22 @@ use crate::core::wake::Wake;
 /// a superseded run can be dropped on arrival.
 pub(crate) type RunId = u64;
 
-/// One node's pending value fetch: which node, tagged with the run epoch
-/// it was requested under (echoed back on the reply so a stale-run reply
-/// can be dropped). The worker's request/reply currency, so it lives here
-/// rather than in the GUI's `run_state`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct ValueRequest {
-    pub(crate) node_id: NodeId,
-    pub(crate) run_id: RunId,
-}
-
 /// A result delivered from the worker thread back to the frame loop.
-/// Mirrors the worker's callback surface; richer variants (per-node
-/// argument values) land here as the value/status surface grows.
+/// Mirrors the worker's callback surface.
 #[derive(Debug)]
 pub(crate) enum WorkerEvent {
     ExecutionFinished(Result<ExecutionStats, ExecError>),
     /// Live per-node progress during a run, ahead of `ExecutionFinished`.
     NodeProgress(RunProgress),
-    /// Reply to a [`WorkerBridge::request_argument_values`] call. The
-    /// `request` echoes back the node + run epoch it was tagged with so a
-    /// reply from a superseded run can be dropped. `values` is `None` when
-    /// the worker couldn't resolve the node (e.g. it isn't in the executed
-    /// program).
-    ArgumentValues {
-        request: ValueRequest,
-        values: Option<ArgumentValues>,
-    },
 }
 
 pub(crate) struct WorkerBridge {
     /// Kept alive so the worker's spawned tasks keep running; dropping it
-    /// shuts the runtime down. Also used to spawn the forwarder that turns
-    /// an argument-value oneshot reply into a [`WorkerEvent`].
+    /// shuts the runtime down. Never read — its lifetime is the point.
+    #[allow(dead_code)]
     runtime: Runtime,
     worker: Worker,
     rx: Receiver<WorkerEvent>,
-    /// Cloned into each forwarder task (and the execution callback) so
-    /// replies reach the frame loop on the same channel.
-    tx: Sender<WorkerEvent>,
-    /// Cloned into forwarders to wake the host loop when a reply lands.
-    wake: Wake,
 }
 
 impl std::fmt::Debug for WorkerBridge {
@@ -90,16 +64,12 @@ impl WorkerBridge {
         // `Worker`'s `tokio::spawn` needs an ambient runtime.
         let worker = {
             let _guard = runtime.enter();
-            let tx = tx.clone();
-            let wake = wake.clone();
             Worker::new(move |report| Self::deliver(&tx, &wake, report))
         };
         Self {
             runtime,
             worker,
             rx,
-            tx,
-            wake,
         }
     }
 
@@ -124,9 +94,9 @@ impl WorkerBridge {
     }
 
     /// Run one node's upstream cone: install the compiled program, then
-    /// execute with the node as seed — its outputs stay resident for
-    /// the preview value fetch. One batched send so the seed always
-    /// targets the program it was compiled against.
+    /// execute with the node as seed, keeping its outputs resident. One
+    /// batched send so the seed always targets the program it was compiled
+    /// against.
     pub(crate) fn run_node(&self, compiled: CompiledGraph, node_id: NodeId) {
         let _ = self.worker.send_many([
             WorkerMessage::Update { compiled },
@@ -171,49 +141,6 @@ impl WorkerBridge {
     /// (worker already exited) is a harmless shutdown no-op.
     pub(crate) fn stop_event_loop(&self) {
         let _ = self.worker.send(WorkerMessage::StopEventLoop);
-    }
-
-    /// Ask the worker for several nodes' computed input/output values in
-    /// one round trip: a single `RequestArgumentValues` message carries every
-    /// node id, and the worker answers with one reply for the whole batch
-    /// (rather than one oneshot + one forwarder task per node). One forwarder
-    /// task splits that reply back into a [`WorkerEvent::ArgumentValues`] per
-    /// node on the frame channel (echoing each `request` so a stale-epoch
-    /// reply can be dropped) and pokes a single repaint. A dropped send
-    /// (worker exited) just drops the forwarder — no reply ever arrives,
-    /// which is the right shutdown behavior.
-    pub(crate) fn request_argument_values(&self, requests: impl IntoIterator<Item = ValueRequest>) {
-        let requests: Vec<ValueRequest> = requests.into_iter().collect();
-        if requests.is_empty() {
-            return;
-        }
-        let node_ids = requests.iter().map(|r| r.node_id).collect();
-        let (reply_tx, reply_rx) = oneshot::channel();
-        if self
-            .worker
-            .send(WorkerMessage::RequestArgumentValues {
-                node_ids,
-                reply: reply_tx,
-            })
-            .is_err()
-        {
-            return;
-        }
-        let tx = self.tx.clone();
-        let wake = self.wake.clone();
-        self.runtime.spawn(async move {
-            // `Err` means the worker dropped the reply end (shutdown /
-            // graph cleared mid-flight); nothing to forward.
-            if let Ok(values) = reply_rx.await {
-                // The worker answers in `node_ids` order, so this zips back
-                // onto the original requests positionally.
-                for (request, (echoed_id, values)) in requests.into_iter().zip(values) {
-                    assert_eq!(request.node_id, echoed_id, "worker echoes request order");
-                    let _ = tx.send(WorkerEvent::ArgumentValues { request, values });
-                }
-                (wake)();
-            }
-        });
     }
 
     /// Non-blocking drain of everything the worker has posted since the

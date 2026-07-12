@@ -367,7 +367,6 @@ impl GraphUI {
                             scene,
                             geometry,
                             ctx.run_state,
-                            ctx.value_requests,
                         );
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, geometry, canvas_origin);

@@ -118,9 +118,6 @@ impl MainWindow {
                         }
                     }
                     TabRef::ImageViewer(port) => {
-                        // Recording this pane IS its value request — only a
-                        // visible viewer fetches (a background tab isn't shown).
-                        ctx.value_requests.watch(port.node_id);
                         let viewer = image_viewers
                             .entry(port)
                             .or_insert_with(|| ImageViewer::new(port));

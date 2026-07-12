@@ -16,7 +16,6 @@ use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::run_state::RunState;
 use crate::gui::theme::Theme;
-use crate::gui::value_requests::ValueRequests;
 
 pub(crate) mod commands;
 pub(crate) mod editor;
@@ -32,13 +31,9 @@ use exit_dialog::ExitChoice;
 pub(crate) struct AppContext<'a> {
     pub(crate) theme: &'a Theme,
     pub(crate) library: &'a Library,
-    /// Last run's per-node state (status, logs, fetched runtime values),
-    /// keyed by authoring `NodeId`. Read by the inspection panel's Log and
-    /// Inputs/Outputs sections.
+    /// Last run's per-node state (status, logs), keyed by authoring `NodeId`.
+    /// Read by the inspection panel's Log section.
     pub(crate) run_state: &'a RunState,
-    /// This frame's value-watch registry. Every value-showing surface calls
-    /// `ValueRequests::watch` as it records itself.
-    pub(crate) value_requests: &'a ValueRequests,
     /// Whether the worker's event loop is running — drives the events
     /// toggle's on/off look. App-side intent rather than the worker's atomic,
     /// so the button can't lag a frame behind (and `Update` from a one-shot
@@ -147,9 +142,8 @@ impl App {
     /// Consume worker results posted since the last frame. A finished run
     /// reprojects per-node `ExecStatus` (the status glow) and per-node
     /// logs (the inspector's Log section); a failed run clears both and
-    /// surfaces in the status bar. An argument-value reply lands in the run
-    /// state. Drained before the editor's scene rebuild so they reflect the
-    /// latest run.
+    /// surfaces in the status bar. Drained before the editor's scene rebuild
+    /// so they reflect the latest run.
     fn drain_worker_events(&mut self) {
         // Collect to drop the channel borrow before the status writes below
         // (both live on `self.engine`).
@@ -174,27 +168,14 @@ impl App {
                     self.engine.status.error = None;
                 }
                 WorkerEvent::ExecutionFinished(Err(err)) => {
-                    self.editor.clear_run_state();
+                    self.editor.run_state.clear();
                     self.engine.status.error(format!("run failed: {err}"));
                 }
                 WorkerEvent::NodeProgress(progress) => {
                     self.editor.run_state.apply_progress(&progress)
                 }
-                WorkerEvent::ArgumentValues { request, values } => {
-                    self.editor.run_state.ingest_values(request, values)
-                }
             }
         }
-    }
-
-    /// Forward the frame's pending value requests to the worker. Every
-    /// value-showing surface (inspector panels, image-viewer panes)
-    /// registered its node into the run state's request registry as it
-    /// recorded; drain the batch here, after the record. The reply arrives on a
-    /// later frame's drain.
-    fn request_watched_values(&mut self) {
-        self.engine
-            .request_argument_values(self.editor.value_requests.take_requests());
     }
 
     /// Drain the script executor's inbound queue and act on each message:
@@ -358,10 +339,6 @@ impl aperture::App for App {
         if self.editor.take_caches_dirty() {
             self.engine.save_caches(&self.editor.document.graph);
         }
-
-        // The frame registered everything watching runtime values; request
-        // any that still need fetching this epoch.
-        self.request_watched_values();
 
         // Menu side effects run last so the blocking file dialog opens
         // after the frame's record + drain. Loading replaces the

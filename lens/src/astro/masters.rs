@@ -1,9 +1,7 @@
 //! `Masters` — a [`lumos::CalibrationMasters`] bundle (master dark / flat /
 //! bias / flat-dark + defect map) wrapped as a scenarium [`CustomValue`] so
 //! a "build masters" node can hand it to a "stack lights" node on a wire.
-//!
-//! No preview (the default `gen_preview` returns `None`); `Display` reports
-//! which masters the bundle carries.
+//! `Display` reports which masters the bundle carries.
 
 use std::any::Any;
 use std::sync::{Arc, LazyLock};

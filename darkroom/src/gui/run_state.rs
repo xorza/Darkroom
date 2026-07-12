@@ -1,7 +1,6 @@
 //! Last graph run's per-node state, keyed by authoring `NodeId`: the
-//! execution outcome (status glow + header time), the run's log lines, and
-//! — fetched on demand for open inspection panels — the computed runtime
-//! input/output values. One [`RunState`] per [`Editor`], rebuilt each run.
+//! execution outcome (status glow + header time) and the run's log lines.
+//! One [`RunState`] per [`Editor`], rebuilt each run.
 //!
 //! Execution dissolves subgraphs and remaps interior node ids, so a run's
 //! raw `ExecutionStats` are keyed by *flattened* ids. [`RunState::set_results`]
@@ -12,27 +11,17 @@
 //! ancestor composite instance, so an instance node reflects its whole
 //! subtree. Logs attribute the same way.
 //!
-//! Values arrive separately and asynchronously: each surface showing them
-//! (open inspector panels, image-viewer tabs) registers its nodes in
-//! [`ValueRequests`](crate::gui::value_requests::ValueRequests), which `App`
-//! drains into worker requests; replies feed back in via
-//! [`RunState::ingest_values`]. A [`RunId`] epoch (tracked here) tags each
-//! request/reply so a value computed against a superseded run is dropped;
-//! status/logs linger across a re-run (so the glow doesn't blank during
-//! compute) while values invalidate immediately.
-//!
 //! [`Editor`]: crate::gui::app::editor::Editor
 
 use std::collections::HashMap;
 use std::time::Instant;
 
 use scenarium::data::RamUsage;
+use scenarium::execution::RunError;
 use scenarium::execution::stats::{ExecutionStats, FlattenMap, LogEntry, RunPhase, RunProgress};
-use scenarium::execution::{ArgumentValues, RunError};
 use scenarium::graph::NodeId;
 
-use crate::core::worker::{RunId, ValueRequest};
-use crate::gui::node_values::{NodeValueView, build_view};
+use crate::core::worker::RunId;
 
 /// Per-node execution outcome of the last run. Ordered low→high so a
 /// higher-severity status wins when several fold onto one node
@@ -80,8 +69,7 @@ impl ExecStatus {
     }
 }
 
-/// Everything the editor knows about one node from the last run. `values`
-/// is `None` until fetched (and only for nodes whose panel is open).
+/// Everything the editor knows about one node from the last run.
 #[derive(Default, Debug)]
 pub(crate) struct NodeRunState {
     pub(crate) status: ExecStatus,
@@ -91,7 +79,6 @@ pub(crate) struct NodeRunState {
     /// Empty unless the node errored; drives the inspector's error detail so
     /// a failed node reads e.g. "no light frames provided", not just "errored".
     pub(crate) errors: Vec<String>,
-    pub(crate) values: Option<NodeValueView>,
     /// RAM this node's cached output holds after the last run (system vs GPU),
     /// summed across its flattened contributors — a subgraph instance aggregates
     /// its interior. Zero unless the node retains a value; drives the node body's
@@ -106,10 +93,8 @@ pub(crate) struct RunState {
     /// A run is in flight (`begin_run` → its `ExecutionFinished`). Drives the
     /// live repaint tick and whether the Cancel affordance shows.
     running: bool,
-    /// Current run epoch (tags value requests/replies). Read by the
-    /// image-viewer refresh to tell which run its content came from, and by
-    /// `Editor` to sync [`ValueRequests`](crate::gui::value_requests::ValueRequests)
-    /// onto the same epoch via `ValueRequests::set_epoch`.
+    /// Current run epoch, bumped by [`Self::begin_run`]. Read by the
+    /// image-viewer refresh to tell which run its content came from.
     pub(crate) run_id: RunId,
     /// RAM held by the worker's runtime cache after the last finished run
     /// (system RAM vs GPU VRAM), mirrored from its `ExecutionStats`. Drives the
@@ -146,10 +131,6 @@ impl RunState {
             .unwrap_or(&[])
     }
 
-    pub(crate) fn values(&self, id: NodeId) -> Option<&NodeValueView> {
-        self.nodes.get(&id).and_then(|n| n.values.as_ref())
-    }
-
     /// RAM this node's cached output holds after the last run (zero if it holds
     /// nothing). Read into the scene each rebuild to drive the node body's
     /// memory readout.
@@ -158,12 +139,10 @@ impl RunState {
     }
 
     /// Reproject a finished run's status + logs onto the per-node map.
-    /// Status/logs are reset and rebuilt; already-fetched values are kept
-    /// (they belong to this epoch — a value reply can land before its
-    /// stats). Entries left carrying nothing are dropped. `flatten` is the
-    /// compile-phase map of the program the stats came from (the host
-    /// compiled, so the worker doesn't echo it back) — it projects the
-    /// stats' flattened ids onto authoring nodes.
+    /// Status/logs are reset and rebuilt. Entries left carrying nothing are
+    /// dropped. `flatten` is the compile-phase map of the program the stats
+    /// came from (the host compiled, so the worker doesn't echo it back) —
+    /// it projects the stats' flattened ids onto authoring nodes.
     pub(crate) fn set_results(&mut self, stats: &ExecutionStats, flatten: &FlattenMap) {
         self.running = false;
         self.cache_ram = stats.cache_ram;
@@ -209,12 +188,8 @@ impl RunState {
                 self.nodes.entry(node_id).or_default().ram += *usage;
             }
         }
-        self.nodes.retain(|_, n| {
-            n.status != ExecStatus::None
-                || !n.logs.is_empty()
-                || n.values.is_some()
-                || n.ram.total() > 0
-        });
+        self.nodes
+            .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty() || n.ram.total() > 0);
     }
 
     /// Fold one flattened stat's `status` onto the node itself and every
@@ -264,33 +239,15 @@ impl RunState {
         self.nodes.clear();
     }
 
-    /// Open a new value-fetch epoch: a re-run invalidates last run's
-    /// values immediately, but keeps status/logs so the glow doesn't blank
-    /// during compute (the new run's stats replace them). Pair with a
-    /// `ValueRequests::reset` (see `Editor::begin_run`) so pending request
-    /// markers reset for open panels to re-request under the new epoch.
+    /// Open a new run epoch: bumps `run_id` (so image-viewer content tagged
+    /// with a superseded run can be told apart) while keeping status/logs so
+    /// the glow doesn't blank during compute (the new run's stats replace
+    /// them).
     pub(crate) fn begin_run(&mut self) {
         self.running = true;
         self.run_id = self.run_id.wrapping_add(1);
-        for node in self.nodes.values_mut() {
-            node.values = None;
-        }
         self.nodes
             .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty());
-    }
-
-    /// Deposit a worker value reply. A reply tagged with a stale epoch, or
-    /// for a node the worker couldn't resolve (`None`), stores nothing — the
-    /// node stays "asked" either way, so it isn't re-requested until the next
-    /// epoch.
-    pub(crate) fn ingest_values(&mut self, request: ValueRequest, values: Option<ArgumentValues>) {
-        if request.run_id != self.run_id {
-            return;
-        }
-        let Some(values) = values else {
-            return;
-        };
-        self.nodes.entry(request.node_id).or_default().values = Some(build_view(values));
     }
 }
 
@@ -510,10 +467,10 @@ mod tests {
         assert_eq!(n[0].node_id, inst, "re-keyed to the instance");
     }
 
-    /// A new epoch bumps the id and drops values, but keeps status/logs so
-    /// the glow survives a recompute.
+    /// A new epoch bumps the id but keeps status/logs so the glow survives
+    /// a recompute.
     #[test]
-    fn begin_run_bumps_id_drops_values_keeps_status() {
+    fn begin_run_bumps_id_keeps_status() {
         let node = nid(1);
         let mut map = FlattenMap::default();
         map.reset();
@@ -521,7 +478,6 @@ mod tests {
 
         let mut rs = RunState::default();
         rs.set_results(&stats(&[(node, 1.0)], &[]), &map);
-        rs.nodes.get_mut(&node).unwrap().values = Some(NodeValueView::default());
 
         assert!(!rs.is_running(), "not running after a finished run");
         rs.begin_run();
@@ -529,7 +485,6 @@ mod tests {
         assert!(rs.is_running(), "running once a run is kicked");
         assert_eq!(rs.run_id, 1);
         assert_eq!(rs.status(node), ExecStatus::Executed(1.0), "status lingers");
-        assert!(rs.values(node).is_none(), "values invalidated");
 
         // The finishing run clears the in-flight flag.
         rs.set_results(&stats(&[], &[]), &FlattenMap::default());

@@ -19,7 +19,7 @@ use crate::core::library::runtime_func_lib;
 use crate::core::script::{ScriptConfig, ScriptHost, ScriptMessage};
 use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
-use crate::core::worker::{ValueRequest, WorkerBridge, WorkerEvent};
+use crate::core::worker::{WorkerBridge, WorkerEvent};
 
 #[derive(Debug)]
 pub(crate) struct Engine {
@@ -228,12 +228,5 @@ impl Engine {
             Some(script) => script.drain(),
             None => Vec::new(),
         }
-    }
-
-    /// Ask the worker for several nodes' computed input/output values (GUI
-    /// inspector panels, image viewers). Replies land on later
-    /// [`Self::drain_worker`] calls.
-    pub(crate) fn request_argument_values(&self, requests: impl IntoIterator<Item = ValueRequest>) {
-        self.worker.request_argument_values(requests);
     }
 }

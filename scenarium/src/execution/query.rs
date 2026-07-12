@@ -1,14 +1,12 @@
 //! Read-only projections off a compiled [`ExecutionEngine`]: per-node argument
-//! values (optionally with awaited previews) and the live event triggers the
-//! worker spawns to drive the event loop. These read the program and cache only;
-//! they never schedule or run.
+//! values and the live event triggers the worker spawns to drive the event
+//! loop. These read the program and cache only; they never schedule or run.
 
-use crate::data::DynamicValue;
+use crate::execution::ExecutionEngine;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::event::{EventRef, EventTrigger};
-use crate::execution::program::{ExecutionBinding, NodeIdx};
+use crate::execution::program::NodeIdx;
 use crate::execution::stats::ExecutionStats;
-use crate::execution::{ArgumentValues, ExecutionEngine};
 use crate::graph::NodeId;
 
 /// The flat execution node backing authoring id `node_id`. A top-level node keeps its
@@ -28,69 +26,6 @@ pub(crate) fn resolve_node_idx(compiled: &CompiledGraph, node_id: &NodeId) -> Op
 }
 
 impl ExecutionEngine {
-    /// Resident-only argument values, test inspection only. The production entry
-    /// point is [`Self::get_argument_values_with_previews`], which hydrates
-    /// disk-cached values first; this bare accessor reads whatever is in RAM, so a
-    /// disk-only node reads back empty.
-    #[cfg(test)]
-    pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-        let idx = resolve_node_idx(&self.compiled, node_id)?;
-        Some(self.argument_values_at(idx))
-    }
-
-    fn argument_values_at(&self, idx: NodeIdx) -> ArgumentValues {
-        let e_node = &self.compiled.program.e_nodes[idx];
-
-        let inputs = self.compiled.program.inputs[e_node.inputs.range()]
-            .iter()
-            .map(|input| match &input.binding {
-                ExecutionBinding::None => None,
-                ExecutionBinding::Const(v) => Some(DynamicValue::from(v)),
-                ExecutionBinding::Bind(addr) => self.cache.slots[addr.target_idx]
-                    .output_values()
-                    .and_then(|o| o.get(addr.port_idx))
-                    .cloned(),
-            })
-            .collect();
-
-        let outputs = self.cache.slots[idx]
-            .output_values()
-            .map(|o| o.to_vec())
-            .unwrap_or_default();
-
-        ArgumentValues { inputs, outputs }
-    }
-
-    /// `get_argument_values` plus awaited preview resolution. Reads any disk-cached
-    /// value this node shows (its own outputs and its inputs' producers) into RAM first
-    /// via [`hydrate_for_inspection`](crate::execution::cache::RuntimeCache::hydrate_for_inspection),
-    /// so an inspected node the run reused-from-disk (or never touched) still resolves.
-    pub(crate) async fn get_argument_values_with_previews(
-        &mut self,
-        node_id: &NodeId,
-    ) -> Option<ArgumentValues> {
-        let idx = resolve_node_idx(&self.compiled, node_id)?;
-        self.cache
-            .hydrate_for_inspection(&self.compiled.program, idx)
-            .await;
-        let mut values = self.argument_values_at(idx);
-        let mut pending_previews = Vec::new();
-        for value in values
-            .inputs
-            .iter_mut()
-            .flatten()
-            .chain(values.outputs.iter_mut())
-        {
-            if let Some(pending) = value.gen_preview(&mut self.executor.ctx_manager) {
-                pending_previews.push(pending);
-            }
-        }
-        for pending in pending_previews {
-            pending.wait(&mut self.executor.ctx_manager).await;
-        }
-        Some(values)
-    }
-
     /// Collect every (event → lambda → state) triple that is currently "live" —
     /// node was executed or cached this run, the event has at least one
     /// subscriber, and its lambda is populated. Used by the worker to spawn the
@@ -126,5 +61,45 @@ impl ExecutionEngine {
                     })
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use crate::data::DynamicValue;
+    use crate::execution::ArgumentValues;
+    use crate::execution::program::ExecutionBinding;
+
+    impl ExecutionEngine {
+        /// Resident-only argument values, test inspection only: reads whatever is
+        /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
+        pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
+            let idx = resolve_node_idx(&self.compiled, node_id)?;
+            Some(self.argument_values_at(idx))
+        }
+
+        fn argument_values_at(&self, idx: NodeIdx) -> ArgumentValues {
+            let e_node = &self.compiled.program.e_nodes[idx];
+
+            let inputs = self.compiled.program.inputs[e_node.inputs.range()]
+                .iter()
+                .map(|input| match &input.binding {
+                    ExecutionBinding::None => None,
+                    ExecutionBinding::Const(v) => Some(DynamicValue::from(v)),
+                    ExecutionBinding::Bind(addr) => self.cache.slots[addr.target_idx]
+                        .output_values()
+                        .and_then(|o| o.get(addr.port_idx))
+                        .cloned(),
+                })
+                .collect();
+
+            let outputs = self.cache.slots[idx]
+                .output_values()
+                .map(|o| o.to_vec())
+                .unwrap_or_default();
+
+            ArgumentValues { inputs, outputs }
+        }
     }
 }

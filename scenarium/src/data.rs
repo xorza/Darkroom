@@ -36,13 +36,6 @@ impl TypeId {
     }
 }
 
-/// Trait for pending preview generation that requires polling to complete.
-#[async_trait::async_trait]
-pub trait PendingPreview: Send {
-    /// Awaits until the preview generation completes.
-    async fn wait(self: Box<Self>, ctx_manager: &mut ContextManager);
-}
-
 /// A resident memory footprint split by where the bytes live: `cpu` system RAM
 /// vs `gpu` VRAM. Per-value footprints ([`CustomValue::ram_bytes`]) fold into a
 /// cache-wide total ([`RuntimeCache::resident_ram_usage`](crate::execution::cache::RuntimeCache::resident_ram_usage))
@@ -87,9 +80,6 @@ impl std::ops::AddAssign for RamUsage {
 /// [`as_any`](CustomValue::as_any).
 pub trait CustomValue: Send + Sync + Display + 'static {
     fn type_id(&self) -> TypeId;
-    fn gen_preview(&self, _ctx_manager: &mut ContextManager) -> Option<Box<dyn PendingPreview>> {
-        None
-    }
     fn as_any(&self) -> &dyn Any;
 
     /// Owning counterpart of [`as_any`](Self::as_any), backing
@@ -114,10 +104,10 @@ pub(crate) type CodecError = Box<dyn std::error::Error + Send + Sync>;
 /// Bidirectional disk codec for one custom-value type, registered once on a type
 /// entry in the [`Library`](crate::library::Library) type table — the disk-cache
 /// counterpart of a [`CustomValue`]. Encode takes `&dyn CustomValue` (downcast to the
-/// codec's concrete type) and is async + context-aware like [`CustomValue::gen_preview`],
-/// so a GPU-resident value can read back through the [`ContextManager`]. Decode has only
-/// bytes — there is no value on reload, which is why dispatch goes through the library
-/// rather than a method on the value. The blob framing that calls this lives in
+/// codec's concrete type) and is async + context-aware, so a GPU-resident value can
+/// read back through the [`ContextManager`]. Decode has only bytes — there is no
+/// value on reload, which is why dispatch goes through the library rather than a
+/// method on the value. The blob framing that calls this lives in
 /// [`execution::codec`](crate::execution::codec).
 #[async_trait::async_trait]
 pub trait CustomValueCodec: Send + Sync + std::fmt::Debug {
@@ -463,16 +453,6 @@ impl DynamicValue {
             DynamicValue::Unbound => String::new(),
             DynamicValue::Static(value) => value.to_value_string(),
             DynamicValue::Custom(data) => data.to_string(),
-        }
-    }
-
-    pub fn gen_preview(
-        &mut self,
-        ctx_manager: &mut ContextManager,
-    ) -> Option<Box<dyn PendingPreview>> {
-        match self {
-            DynamicValue::Custom(data) => data.gen_preview(ctx_manager),
-            _ => None,
         }
     }
 

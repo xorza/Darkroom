@@ -2,9 +2,9 @@
 //! (identity, inputs, outputs, run status, log) toggled by the `i` chip
 //! in the node header.
 //!
-//! Input/output lines show the last run's computed runtime value when one
-//! is available (pulled on demand into [`crate::gui::run_state::RunState`] for
-//! open panels), falling back to the static binding otherwise.
+//! Input lines show the static binding; outputs show only their label —
+//! neither reads a runtime value (that on-demand fetch pipeline was
+//! removed pending a redesign).
 //!
 //! Panels are **not** aperture `Popup`s — those record into the
 //! screen-space `Layer::Popup` and wouldn't track the canvas. Instead
@@ -39,7 +39,6 @@ use crate::gui::node::{exec_color, node_widget_id};
 use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
-use crate::gui::value_requests::ValueRequests;
 use crate::gui::widgets::support::{colored_text, sized_text};
 
 /// Open state of a single node's inspector. Absence from
@@ -67,7 +66,6 @@ struct PanelDraw<'a> {
     library: &'a Library,
     scene: &'a Scene,
     run_state: &'a RunState,
-    value_requests: &'a ValueRequests,
 }
 
 /// Fixed panel width in canvas (pre-transform) units.
@@ -128,7 +126,6 @@ impl Inspectors {
     /// its node in canvas-world coords. Call inside the inner-canvas
     /// closure, after the node bodies, so panels paint on top and win
     /// hit-tests over the nodes beneath.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_panels(
         &self,
         ui: &mut Ui,
@@ -137,14 +134,12 @@ impl Inspectors {
         scene: &Scene,
         geometry: &CanvasGeometry,
         run_state: &RunState,
-        value_requests: &ValueRequests,
     ) {
         let ctx = PanelDraw {
             theme,
             library,
             scene,
             run_state,
-            value_requests,
         };
         for (&id, &mode) in &self.modes {
             let Some(node) = scene.nodes.iter().find(|n| n.id == id) else {
@@ -156,9 +151,6 @@ impl Inspectors {
             if node.boundary {
                 continue;
             }
-            // Drawing this panel IS its value request: ask for the node's
-            // runtime values so the input/output lines fill in.
-            ctx.value_requests.watch(node.id);
             // The cached body width places the panel just past the node's
             // right edge — cached (not last frame's response) so the
             // anchor holds when the viewport cull skips the node while its
@@ -185,7 +177,6 @@ impl Inspectors {
         let scene = ctx.scene;
         let logs = ctx.run_state.logs(node.id);
         let errors = ctx.run_state.errors(node.id);
-        let values = ctx.run_state.values(node.id);
         // The outline is the *pinned* signal, in the same accent the header's
         // `i` chip uses for its open/pinned states — one color means
         // "inspector held open" on both ends. A transient panel rides on its
@@ -263,40 +254,31 @@ impl Inspectors {
                 let inputs = scene.inputs(node.inputs);
                 if !inputs.is_empty() {
                     section(ui, theme, "Inputs");
-                    for (i, input) in inputs.iter().enumerate() {
-                        let name = input.name.as_str();
-                        // Runtime value when this run computed one; else
-                        // fall back to the static binding.
-                        match values.and_then(|v| v.inputs.get(i)) {
-                            Some(pv) => {
-                                port_row(ui, theme, ctx.library, name, &input.ty, Some(&pv.text));
-                            }
-                            None => {
-                                let val = value_str(&input.binding);
-                                port_row(
-                                    ui,
-                                    theme,
-                                    ctx.library,
-                                    name,
-                                    &input.ty,
-                                    Some(val.as_str()),
-                                );
-                            }
-                        }
+                    for input in inputs {
+                        let val = value_str(&input.binding);
+                        port_row(
+                            ui,
+                            theme,
+                            ctx.library,
+                            input.name.as_str(),
+                            &input.ty,
+                            Some(val.as_str()),
+                        );
                     }
                 }
 
                 let outputs = scene.outputs(node.outputs);
                 if !outputs.is_empty() {
                     section(ui, theme, "Outputs");
-                    for (i, output) in outputs.iter().enumerate() {
-                        let name = output.name.as_str();
-                        match values.and_then(|v| v.outputs.get(i)) {
-                            Some(pv) => {
-                                port_row(ui, theme, ctx.library, name, &output.ty, Some(&pv.text));
-                            }
-                            None => port_row(ui, theme, ctx.library, name, &output.ty, None),
-                        }
+                    for output in outputs {
+                        port_row(
+                            ui,
+                            theme,
+                            ctx.library,
+                            output.name.as_str(),
+                            &output.ty,
+                            None,
+                        );
                     }
                 }
 
