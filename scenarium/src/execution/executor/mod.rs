@@ -72,6 +72,17 @@ impl NodeOutcome {
     }
 }
 
+/// Why every `events.send(..)` in this module is `.expect`-asserted rather than
+/// silently ignored: `send` only fails once every receiver is dropped, and the
+/// worker's `event_rx` (see `worker::worker_loop`) isn't dropped until *after*
+/// the `execute` future this `run` lives inside resolves — `send` isn't an
+/// await point, so an abort mid-run can only land at an earlier `.await` and
+/// drop this whole future before a send is ever reached, never selectively
+/// close just the receiver. A failed send here means that lifetime invariant
+/// broke — a real bug, not an expected failure to shrug off.
+const EVENTS_OUTLIVE_RUN: &str =
+    "the events receiver outlives this future — worker_loop only drops it after `execute` resolves";
+
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
     pub(crate) ctx_manager: ContextManager,
@@ -337,12 +348,14 @@ impl Executor {
             // No `Finished` for the cancelled node — it didn't complete; the
             // consumer would otherwise paint it executed live.
             if !cancelled && let Some(events) = events {
-                let _ = events.send(RunEvent::Progress(RunProgress {
-                    nodes: flatten.attribution(flat_id).collect(),
-                    phase: RunPhase::Finished {
-                        elapsed_secs: run_time,
-                    },
-                }));
+                events
+                    .send(RunEvent::Progress(RunProgress {
+                        nodes: flatten.attribution(flat_id).collect(),
+                        phase: RunPhase::Finished {
+                            elapsed_secs: run_time,
+                        },
+                    }))
+                    .expect(EVENTS_OUTLIVE_RUN);
             }
             // Push this node's pinned output values to the host right after it
             // finished — before any real consumer's read (later in this same walk)
@@ -365,10 +378,9 @@ impl Executor {
                     let out_idx = e_node.outputs.start as usize + local_port;
                     self.output_usage[out_idx].dec();
                 }
-                events.send(RunEvent::PinnedOutputs(payload)).expect(
-                    "the events receiver outlives this future — worker_loop only drops it \
-                     after `execute` (and so this `run`) resolves",
-                );
+                events
+                    .send(RunEvent::PinnedOutputs(payload))
+                    .expect(EVENTS_OUTLIVE_RUN);
             }
             // Persist this node's cache the moment it finishes (durable as the run
             // progresses), not at the end of the whole run. The snapshot is taken

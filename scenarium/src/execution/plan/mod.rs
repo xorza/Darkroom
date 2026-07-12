@@ -161,8 +161,12 @@ impl ExecutionPlan {
             self.output_usage.is_empty(),
             "seed_extra_usage must run on a freshly reset output_usage column"
         );
-        self.output_usage
-            .extend(program.output_pinned.iter().map(|&b| OutputUsage::from(b as usize)));
+        self.output_usage.extend(
+            program
+                .output_pinned
+                .iter()
+                .map(|&b| OutputUsage::from(b as usize)),
+        );
 
         for &idx in &self.pinned {
             for usage in &mut self.output_usage[program.e_nodes[idx].outputs.range()] {

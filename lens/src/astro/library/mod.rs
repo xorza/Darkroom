@@ -20,7 +20,7 @@ use lumos::{
 };
 use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::library::{Library, TypeEntry};
-use scenarium::node::func_lambda::{FuncLambda, InvokeError, InvokeResult, OutputUsage};
+use scenarium::node::func_lambda::{FuncLambda, InvokeError, InvokeResult};
 use scenarium::node::function::{Func, FuncInput, FuncOutput, ValueVariant};
 
 use crate::astro::configs::{
@@ -715,7 +715,7 @@ pub fn astro_library() -> Library {
                 move |_, _, _, inputs, output_usage, outputs| {
                     // The unscreen pass that recovers "Stars" is a whole-image pixel loop on
                     // top of the ONNX inference — skip it when nothing reads that output.
-                    let need_stars = !matches!(output_usage[1], OutputUsage::Skip);
+                    let need_stars = !output_usage[1].is_skip();
                     Box::pin(async move {
                         let model = ml_model_paths().star_removal;
                         if need_stars {

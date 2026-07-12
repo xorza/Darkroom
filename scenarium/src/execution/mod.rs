@@ -29,7 +29,6 @@ use crate::data::DynamicValue;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::stats::{ExecutionStats, RunEvent};
 use crate::graph::NodeId;
-use crate::node::func_lambda::OutputUsage;
 use crate::node::function::FuncId;
 
 pub(crate) mod cache;
@@ -467,7 +466,10 @@ impl ExecutionEngine {
         self.plan.verdicts[idx.into()]
     }
 
-    pub(crate) fn node_output_usage(&self, e_node: &ExecutionNode) -> &[OutputUsage] {
+    pub(crate) fn node_output_usage(
+        &self,
+        e_node: &ExecutionNode,
+    ) -> &[crate::node::func_lambda::OutputUsage] {
         &self.plan.output_usage[e_node.outputs.range()]
     }
 

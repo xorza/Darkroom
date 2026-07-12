@@ -20,7 +20,7 @@ pub enum OutputUsage {
 }
 
 impl OutputUsage {
-    pub(crate) fn is_skip(self) -> bool {
+    pub fn is_skip(self) -> bool {
         matches!(self, OutputUsage::Skip)
     }
 
