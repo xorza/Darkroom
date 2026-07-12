@@ -10,7 +10,7 @@
 
 use aperture::{
     Background, Configure, Corners, Image as PalImage, ImageFilter, ImageFit, ImageHandle, Panel,
-    Sense, Shape, Sizing, Spacing, Stroke, Ui, WidgetId,
+    Sense, Shape, Sizing, Spacing, Stroke, Text, TextWrap, Ui, WidgetId,
 };
 use imaginarium::{ColorFormat, Image as RawImage};
 use lens::Image as LensImage;
@@ -18,6 +18,7 @@ use scenarium::data::DynamicValue;
 use scenarium::execution::ArgumentValues;
 
 use crate::gui::theme::Theme;
+use crate::gui::widgets::support::sized_text;
 
 /// One port's runtime value, ready to render: a formatted text cell plus
 /// an optional preview thumbnail (already uploaded as a texture).
@@ -136,22 +137,27 @@ pub(crate) fn image_preview(
         });
 }
 
-/// Draw the Preview node's **fixed-size** image slot: a `w`×`h` recessed box
-/// (the canvas backdrop, hairline border) that stays the same size whether or
-/// not it holds an image — so the node doesn't reflow when its output arrives.
-/// A present `handle` is drawn `Contain`ed (aspect-preserving, letterboxed on the
-/// recessed backdrop); absent, the slot is empty. Clickable, and brightens its
-/// border on hover, like [`image_preview`]. Unlike that aspect-sized inspector
-/// thumbnail, this is a constant box.
+/// Draw the Preview node's image slot: fixed width `w`, height derived from
+/// the held image's aspect ratio and capped at `max_h` — a landscape image
+/// renders near its natural shape, a tall one is capped rather than growing
+/// the node without bound. Absent a `handle` (nothing fetched yet), the slot
+/// is an empty `w`×`max_h` placeholder. A present `handle` is drawn
+/// `Contain`ed (aspect-preserving, letterboxed on the recessed backdrop) —
+/// only pillarboxes once its natural height would exceed `max_h`. Clickable,
+/// and brightens its border on hover, like [`image_preview`].
 pub(crate) fn preview_slot(
     ui: &mut Ui,
     theme: &Theme,
     wid: WidgetId,
     handle: Option<&ImageHandle>,
     w: f32,
-    h: f32,
+    max_h: f32,
     margin: Spacing,
 ) {
+    let h = match handle.map(|h| h.size()) {
+        Some(size) if size.x > 0 && size.y > 0 => (w * size.y as f32 / size.x as f32).min(max_h),
+        _ => max_h,
+    };
     let stroke_alpha = if ui.response_for(wid).hovered {
         0.6
     } else {
@@ -184,6 +190,37 @@ pub(crate) fn preview_slot(
                 fill: theme.colors.canvas_bg.into(),
                 stroke: Stroke::solid(theme.colors.text_muted.with_alpha(stroke_alpha), 1.0),
             });
+        });
+}
+
+/// Draw the Preview node's fallback for a fetched value that isn't an image:
+/// its formatted text in the same recessed-panel family as [`preview_slot`],
+/// but sized to content (`Sizing::Hug` height) rather than the image box's
+/// fixed footprint — a scalar/string value shouldn't reserve unused
+/// image-sized space. Not a click target: there's no full-resolution view to
+/// open for a non-image value.
+pub(crate) fn preview_text(
+    ui: &mut Ui,
+    theme: &Theme,
+    wid: WidgetId,
+    text: &str,
+    w: f32,
+    margin: Spacing,
+) {
+    Panel::vstack()
+        .id(wid)
+        .size((Sizing::Fixed(w), Sizing::Hug))
+        .margin(margin)
+        .padding(Spacing::all(6.0))
+        .background(Background::rounded(
+            theme.colors.canvas_bg,
+            Corners::all(4.0),
+        ))
+        .show(ui, |ui| {
+            Text::new(text.to_owned())
+                .style(sized_text(ui, 12.0))
+                .text_wrap(TextWrap::Wrap)
+                .show(ui);
         });
 }
 
