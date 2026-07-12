@@ -230,9 +230,10 @@ impl Engine {
         }
     }
 
-    /// Ask the worker for one node's computed input/output values (GUI
-    /// inspector panels). The reply lands on a later [`Self::drain_worker`].
-    pub(crate) fn request_argument_values(&self, request: ValueRequest) {
-        self.worker.request_argument_values(request);
+    /// Ask the worker for several nodes' computed input/output values (GUI
+    /// inspector panels, image viewers, Preview nodes). Replies land on
+    /// later [`Self::drain_worker`] calls.
+    pub(crate) fn request_argument_values(&self, requests: impl IntoIterator<Item = ValueRequest>) {
+        self.worker.request_argument_values(requests);
     }
 }

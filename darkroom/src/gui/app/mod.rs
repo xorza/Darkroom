@@ -193,9 +193,8 @@ impl App {
     /// recorded; drain the batch here, after the record. The reply arrives on a
     /// later frame's drain.
     fn request_watched_values(&mut self) {
-        for req in self.editor.value_requests.take_requests() {
-            self.engine.request_argument_values(req);
-        }
+        self.engine
+            .request_argument_values(self.editor.value_requests.take_requests());
     }
 
     /// Drain the script executor's inbound queue and act on each message:

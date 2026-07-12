@@ -173,35 +173,44 @@ impl WorkerBridge {
         let _ = self.worker.send(WorkerMessage::StopEventLoop);
     }
 
-    /// Ask the worker for one node's computed input/output values. The
-    /// worker answers on a oneshot against its live executor slots; a
-    /// forwarder task on our runtime turns that into a
+    /// Ask the worker for several nodes' computed input/output values —
+    /// one batched send so they commit against the same executor snapshot
+    /// (rather than one `send` per node racing separate worker-loop ticks).
+    /// Each still answers on its own oneshot against the worker's live
+    /// executor slots; a forwarder task per request turns its reply into a
     /// [`WorkerEvent::ArgumentValues`] on the frame channel (echoing the
     /// `request` so a stale-epoch reply can be dropped) and pokes a
-    /// repaint. A dropped send (worker exited) just drops the forwarder —
+    /// repaint. A dropped send (worker exited) just drops the forwarders —
     /// no reply ever arrives, which is the right shutdown behavior.
-    pub(crate) fn request_argument_values(&self, request: ValueRequest) {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        if self
-            .worker
-            .send(WorkerMessage::RequestArgumentValues {
-                node_id: request.node_id,
-                reply: reply_tx,
+    pub(crate) fn request_argument_values(&self, requests: impl IntoIterator<Item = ValueRequest>) {
+        let (msgs, replies): (Vec<_>, Vec<_>) = requests
+            .into_iter()
+            .map(|request| {
+                let (reply_tx, reply_rx) = oneshot::channel();
+                (
+                    WorkerMessage::RequestArgumentValues {
+                        node_id: request.node_id,
+                        reply: reply_tx,
+                    },
+                    (request, reply_rx),
+                )
             })
-            .is_err()
-        {
+            .unzip();
+        if replies.is_empty() || self.worker.send_many(msgs).is_err() {
             return;
         }
-        let tx = self.tx.clone();
-        let wake = self.wake.clone();
-        self.runtime.spawn(async move {
-            // `Err` means the worker dropped the reply end (shutdown /
-            // graph cleared mid-flight); nothing to forward.
-            if let Ok(values) = reply_rx.await {
-                let _ = tx.send(WorkerEvent::ArgumentValues { request, values });
-                (wake)();
-            }
-        });
+        for (request, reply_rx) in replies {
+            let tx = self.tx.clone();
+            let wake = self.wake.clone();
+            self.runtime.spawn(async move {
+                // `Err` means the worker dropped the reply end (shutdown /
+                // graph cleared mid-flight); nothing to forward.
+                if let Ok(values) = reply_rx.await {
+                    let _ = tx.send(WorkerEvent::ArgumentValues { request, values });
+                    (wake)();
+                }
+            });
+        }
     }
 
     /// Non-blocking drain of everything the worker has posted since the
