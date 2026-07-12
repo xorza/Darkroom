@@ -31,6 +31,10 @@ pub enum WorkerReport {
 /// lambdas when it can't keep up.
 const EVENT_LOOP_BACKPRESSURE: usize = 10;
 
+/// Reply payload for [`WorkerMessage::RequestArgumentValues`]: one entry per
+/// requested node, in the same order as `node_ids`.
+pub type ArgumentValuesReply = Vec<(NodeId, Option<ArgumentValues>)>;
+
 /// Command enum sent into the worker loop.
 ///
 /// Cancel-safety: `Update`, `Clear`, `StopEventLoop`, and `Exit` tear
@@ -83,9 +87,12 @@ pub enum WorkerMessage {
     Sync {
         reply: oneshot::Sender<()>,
     },
+    /// Ask for several nodes' computed input/output values in one round
+    /// trip: a single reply carries every node's result (in `node_ids`
+    /// order), rather than one oneshot per node.
     RequestArgumentValues {
-        node_id: NodeId,
-        reply: oneshot::Sender<Option<ArgumentValues>>,
+        node_ids: Vec<NodeId>,
+        reply: oneshot::Sender<ArgumentValuesReply>,
     },
 }
 
@@ -303,7 +310,7 @@ struct BatchIntent {
     exit: bool,
     events: HashSet<EventRef>,
     syncs: Vec<oneshot::Sender<()>>,
-    argument_requests: Vec<(NodeId, oneshot::Sender<Option<ArgumentValues>>)>,
+    argument_requests: Vec<(Vec<NodeId>, oneshot::Sender<ArgumentValuesReply>)>,
 }
 
 /// Pure scan: folds a command batch into a `BatchIntent`. Exit
@@ -339,8 +346,8 @@ fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
             WorkerMessage::Sync { reply } => {
                 intent.syncs.push(reply);
             }
-            WorkerMessage::RequestArgumentValues { node_id, reply } => {
-                intent.argument_requests.push((node_id, reply));
+            WorkerMessage::RequestArgumentValues { node_ids, reply } => {
+                intent.argument_requests.push((node_ids, reply));
             }
         }
     }
@@ -533,10 +540,14 @@ async fn worker_loop<ExecutionCallback>(
             (execution_callback)(WorkerReport::Finished(result));
         }
 
-        for (node_id, reply) in intent.argument_requests.drain(..) {
-            let values = execution_engine
-                .get_argument_values_with_previews(&node_id)
-                .await;
+        for (node_ids, reply) in intent.argument_requests.drain(..) {
+            let mut values = Vec::with_capacity(node_ids.len());
+            for node_id in node_ids {
+                let v = execution_engine
+                    .get_argument_values_with_previews(&node_id)
+                    .await;
+                values.push((node_id, v));
+            }
             let _ = reply.send(values);
         }
 
