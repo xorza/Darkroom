@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 
 use ort::session::Session;
-use ort::value::Tensor;
+use ort::value::TensorRef;
 
 use crate::image_ops::{deinterleave_f32, interleave_f32};
 use imaginarium::{Buffer2, Image};
@@ -71,14 +71,19 @@ pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image
 
     let mut acc = [vec![0.0f32; w * h], vec![0.0; w * h], vec![0.0; w * h]];
     let mut weight = vec![0.0f32; w * h];
+    // Reused across every tile: `TensorRef::from_array_view` borrows this buffer for the
+    // duration of `session.run` instead of taking ownership, so one allocation serves the
+    // whole tile loop instead of one per tile (up to ~345 for a full 24 MP frame).
+    let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
 
     let xs = tile_starts(w, config.stride);
     let ys = tile_starts(h, config.stride);
     for &ty in &ys {
         for &tx in &xs {
-            let input = fill_tile_input(&planes, tx, ty);
+            fill_tile_input(&planes, tx, ty, &mut input);
             let tensor =
-                Tensor::from_array(([1usize, WINDOW, WINDOW, 3], input)).map_err(model_err)?;
+                TensorRef::from_array_view(([1usize, WINDOW, WINDOW, 3], input.as_slice()))
+                    .map_err(model_err)?;
             let outputs = session.run(ort::inputs![tensor]).map_err(model_err)?;
             let (_shape, tile) = outputs[0].try_extract_tensor::<f32>().map_err(model_err)?;
             let expected = WINDOW * WINDOW * 3;
@@ -109,10 +114,10 @@ fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
     v
 }
 
-/// Build the NHWC `[1,512,512,3]` model input for the tile at `(tx, ty)`, clamped to `[0,1]`.
-/// Grayscale replicates its single channel to R=G=B. Built via `push` into a `with_capacity`
-/// buffer (no zero-init pass) since every element is written exactly once, in order.
-fn fill_tile_input(planes: &[Buffer2<f32>], tx: usize, ty: usize) -> Vec<f32> {
+/// Fill the reused NHWC `[1,512,512,3]` `input` buffer from the tile at `(tx, ty)`, clamped to
+/// `[0,1]`. Grayscale replicates its single channel to R=G=B. `input` is the caller's
+/// tile-loop-lifetime scratch buffer (see `run_tiled`), overwritten in full every call.
+fn fill_tile_input(planes: &[Buffer2<f32>], tx: usize, ty: usize, input: &mut [f32]) {
     let w = planes[0].width();
     let chans: [&[f32]; 3] = if planes.len() == 3 {
         [planes[0].pixels(), planes[1].pixels(), planes[2].pixels()]
@@ -120,17 +125,16 @@ fn fill_tile_input(planes: &[Buffer2<f32>], tx: usize, ty: usize) -> Vec<f32> {
         let c = planes[0].pixels();
         [c, c, c]
     };
-    let mut input = Vec::with_capacity(WINDOW * WINDOW * 3);
     for hh in 0..WINDOW {
         let row = (ty + hh) * w + tx;
         for ww in 0..WINDOW {
             let src = row + ww;
-            for c in chans {
-                input.push(c[src].clamp(0.0, 1.0));
+            let dst = (hh * WINDOW + ww) * 3;
+            for c in 0..3 {
+                input[dst + c] = chans[c][src].clamp(0.0, 1.0);
             }
         }
     }
-    input
 }
 
 /// Per-axis feather weight in `[FEATHER_MIN, 1]` for each of the `WINDOW` tile positions,
