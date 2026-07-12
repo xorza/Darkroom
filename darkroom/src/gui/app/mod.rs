@@ -193,8 +193,7 @@ impl App {
     /// recorded; drain the batch here, after the record. The reply arrives on a
     /// later frame's drain.
     fn request_watched_values(&mut self) {
-        let run_id = self.editor.run_state.run_id;
-        for req in self.editor.value_requests.take_requests(run_id) {
+        for req in self.editor.value_requests.take_requests() {
             self.engine.request_argument_values(req);
         }
     }

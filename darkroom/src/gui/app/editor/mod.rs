@@ -149,14 +149,14 @@ impl Editor {
     /// nothing already asked-for should count against the new one.
     pub(crate) fn begin_run(&mut self) {
         self.run_state.begin_run();
-        self.value_requests.reset();
+        self.value_requests.set_epoch(self.run_state.run_id);
     }
 
     /// Drop the last run's state across both objects (a failed run). See
     /// [`Self::begin_run`] for why the two are always touched together.
     pub(crate) fn clear_run_state(&mut self) {
         self.run_state.clear();
-        self.value_requests.reset();
+        self.value_requests.set_epoch(self.run_state.run_id);
     }
 
     /// Apply a single `intent` against the active target and record it as
@@ -759,10 +759,7 @@ mod tests {
         // dedup) is covered by `value_requests`'s own tests.
         editor.sync_image_viewers();
         assert!(
-            editor
-                .value_requests
-                .take_requests(editor.run_state.run_id)
-                .is_empty(),
+            editor.value_requests.take_requests().is_empty(),
             "sync no longer feeds requests; registration moved to the record"
         );
 

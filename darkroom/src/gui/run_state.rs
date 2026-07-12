@@ -108,9 +108,9 @@ pub(crate) struct RunState {
     /// live repaint tick and whether the Cancel affordance shows.
     running: bool,
     /// Current run epoch (tags value requests/replies). Read by the
-    /// image-viewer refresh to tell which run its content came from, and
-    /// handed to [`ValueRequests::take_requests`](crate::gui::value_requests::ValueRequests::take_requests)
-    /// to tag pending requests.
+    /// image-viewer refresh to tell which run its content came from, and by
+    /// `Editor` to sync [`ValueRequests`](crate::gui::value_requests::ValueRequests)
+    /// onto the same epoch via `ValueRequests::set_epoch`.
     pub(crate) run_id: RunId,
     /// RAM held by the worker's runtime cache after the last finished run
     /// (system RAM vs GPU VRAM), mirrored from its `ExecutionStats`. Drives the
