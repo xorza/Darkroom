@@ -699,7 +699,12 @@ fn circle_frame(
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
             let rect = Rect::new(inset, inset, port, port);
-            filled_rect(ui, rect, radius, fill);
+            // Decoration paints *before* the fill: the ring (an annulus
+            // strictly outside the fill's radius) doesn't overlap it either
+            // way, but the pin glyph's bezier starts at the port's own
+            // center — painting it first lets the fill cover that inner
+            // stretch, so the curve reads as emerging from the circle's
+            // edge instead of cutting across its face.
             match decoration {
                 PortDecoration::None => {}
                 PortDecoration::Outline(color) => {
@@ -717,6 +722,7 @@ fn circle_frame(
                 }
                 PortDecoration::Pinned(color) => pin_glyph(ui, inset, radius, color),
             }
+            filled_rect(ui, rect, radius, fill);
         });
     let snapshot = circle.response.snapshot();
     show_port_tip(ui, snapshot, tip);
