@@ -72,6 +72,12 @@ screen the stars back.
   scales only ~1.9×). Running tiles concurrently with one `Session` per worker was measured **~2×
   slower** (≈125 s, 10 workers) and **exhausted RAM** — each Session holds its own model copy plus a
   non-shrinking activation arena. So: do **not** wrap the tile loop in rayon. (`ml_perf.rs` times it.)
+- **Model load is a rounding error next to inference** — `run_tiled` calls `Session::builder()?.commit_from_file(&weights)?`
+  fresh on every invocation (no session cache across calls). Measured: StarNet2 (~131 MB) **~25–55 ms**,
+  DeepSNR (~117 MB, the pricier `If`/`GatherND`/`ScatterND` graph) **~120–150 ms** — both with the OS
+  page cache warm, which is the realistic case once a model file's been read once. Against a ~60 s full-frame
+  run that's ~0.1–0.3% of total time, so it isn't worth caching the `Session` across calls. (`ml_perf.rs`'s
+  `ml_model_load_timing` isolates it.)
 - **Preprocessing is the risk** — these nets were trained on a particular normalization. We feed
   stretched `[0,1]`, matching how the CLIs are used (stretched 8/16-bit TIFF/PNG). Validate visually.
 - **Native dep** — ort downloads onnxruntime at build time (needs network once).

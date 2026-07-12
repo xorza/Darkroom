@@ -42,3 +42,47 @@ fn ml_full_image_timing() {
         dt * 1000.0 / tiles as f64
     );
 }
+
+#[test]
+#[ignore = "perf probe: isolates ONNX session/model load time from tile inference; run manually"]
+fn ml_model_load_timing() {
+    use ort::session::Session;
+
+    init_tracing();
+    let Some(weights) = onnx_weights("STARNET2_ONNX", "StarNet2_weights.onnx") else {
+        return;
+    };
+
+    // Cold: first load in this process.
+    let t = Instant::now();
+    let _session = Session::builder()
+        .expect("session builder")
+        .commit_from_file(&weights)
+        .expect("commit_from_file (model load)");
+    let cold = t.elapsed().as_secs_f64();
+
+    // Warm: file bytes are now in the OS page cache; a fresh Session still re-parses/re-plans
+    // the graph from scratch (no cross-call session caching in `run_tiled`).
+    let t = Instant::now();
+    let _session2 = Session::builder()
+        .expect("session builder")
+        .commit_from_file(&weights)
+        .expect("commit_from_file (model load)");
+    let warm = t.elapsed().as_secs_f64();
+
+    eprintln!(
+        "model load {}: cold {cold:.3}s, warm (same process, page-cache hit) {warm:.3}s",
+        weights.display()
+    );
+
+    let Some(denoise_weights) = onnx_weights("DEEPSNR_ONNX", "DeepSNR_weights_v2.onnx") else {
+        return;
+    };
+    let t = Instant::now();
+    let _session3 = Session::builder()
+        .expect("session builder")
+        .commit_from_file(&denoise_weights)
+        .expect("commit_from_file (model load)");
+    let deepsnr = t.elapsed().as_secs_f64();
+    eprintln!("model load {}: {deepsnr:.3}s", denoise_weights.display());
+}
