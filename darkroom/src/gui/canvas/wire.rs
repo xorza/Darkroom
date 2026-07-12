@@ -1,6 +1,6 @@
 //! Shared connection-curve primitives. The data-wire renderer
 //! ([`super::connection_ui`]) and the pinned-output bezier
-//! ([`super::super::node::port_row`]) both grow rightward from an output-ish
+//! ([`super::pin_ui`]) both grow rightward from an output-ish
 //! anchor, so they share [`cubic_handles`] itself; the event/subscription-wire
 //! renderer ([`super::subscription_ui`]) has its own up-left arrival shape
 //! ([`super::subscription_ui::event_handles`]) but all three draw through the

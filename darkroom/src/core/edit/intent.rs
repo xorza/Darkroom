@@ -206,7 +206,7 @@ pub enum Intent {
     },
     /// Move a pinned output's satellite to a new canvas-local offset from
     /// its port (see `GraphView::pin_offsets`). Emitted every frame of a
-    /// satellite drag ([`crate::gui::canvas::pin_drag_ui::PinDragUi`]);
+    /// satellite drag ([`crate::gui::canvas::pin_ui::PinUi`]);
     /// `port_idx` keys the drag gesture so consecutive frames coalesce.
     SetPinOffset {
         node_id: NodeId,

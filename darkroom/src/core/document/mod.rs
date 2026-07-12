@@ -153,8 +153,8 @@ pub struct GraphView {
     pub selected_nodes: BTreeSet<NodeId>,
     /// A pinned output's satellite position, as a canvas-local offset from
     /// its port center — sparse, present only once a user has dragged that
-    /// pin at least once (see `crate::gui::node::port_row::pin_geometry`'s
-    /// fixed formula for the default a missing entry falls back to).
+    /// pin at least once (see `crate::gui::canvas::pin_ui::default_pin_offset`
+    /// for the default a missing entry falls back to).
     /// Outlives an unpin: re-pinning the same port remembers where its
     /// satellite last sat. Pruned only when the node itself is removed (see
     /// [`EditScope::remove_node`]). Serialized as a `(port, offset)`

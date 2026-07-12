@@ -387,8 +387,8 @@ fn port_gradient(start: Color, end: Color) -> Brush {
 /// First port whose response shows `drag_started` this frame, or `None`.
 /// Iterates inputs first then outputs per node so the topmost recorded
 /// port wins ties (matches paint order). Skips output ports while Cmd is
-/// held — that chord is reserved for `PinDragUi`'s pin-creation drag (see
-/// `pin_drag_ui.rs`), so the two controllers never both latch the same press.
+/// held — that chord is reserved for `PinUi`'s pin-creation drag (see
+/// `pin_ui.rs`), so the two controllers never both latch the same press.
 fn scan_drag_start(geometry: &CanvasGeometry, scene: &Scene, ui: &Ui) -> Option<PortRef> {
     let cmd_reserved_for_pin = ui.modifiers().ctrl;
     for n in &scene.nodes {
@@ -513,7 +513,7 @@ fn dropped_on_empty_canvas(ui: &mut Ui, scene: &Scene) -> bool {
 
 /// The declared [`DataType`] of `port` in the current scene, or `None`
 /// if the port isn't present (e.g. mid-rebuild). `pub(crate)`: also used by
-/// `PinDragUi` to tint its pin-creation drag preview.
+/// `PinUi` to tint its pin-creation drag preview.
 pub(crate) fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
     let node = scene.nodes.iter().find(|n| n.id == port.node_id)?;
     let ty = match port.kind {

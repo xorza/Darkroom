@@ -166,8 +166,10 @@ pub(crate) fn pin_satellite_wid(port: OutputPort) -> WidgetId {
 
 /// The output port a drag latched onto, if any — either a Cmd+drag off its
 /// circle (creating a fresh pin) or a plain drag off its existing satellite
-/// (repositioning one). Identity-only — the port's center and the
-/// satellite's drag state both resolve every frame from `CanvasGeometry`.
+/// (repositioning one). Identity-only — the port's center resolves every
+/// frame from `CanvasGeometry`, and the satellite's drag state is polled
+/// directly (see `satellite_dragging`), since only one pin drag is ever in
+/// flight at once.
 #[derive(Default, Debug)]
 pub(crate) struct PinUi {
     start: Option<PortRef>,

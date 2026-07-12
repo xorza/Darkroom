@@ -123,7 +123,7 @@ pub struct SceneOutput {
     /// This pinned output's custom satellite offset (canvas-local, from the
     /// port center), if the user has dragged it at least once — see
     /// [`GraphView::pin_offsets`]. `None` (including when `pinned` is
-    /// false) falls back to `port_row::pin_geometry`'s default formula.
+    /// false) falls back to `pin_ui::default_pin_offset`.
     pub pin_offset: Option<Vec2>,
 }
 
