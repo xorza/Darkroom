@@ -7,8 +7,9 @@
 //! affordance lives in [`crate::gui::node::port_rename`].
 
 use aperture::{
-    Align, Color, Configure, ContextMenu, Grid, HAlign, LineCap, MenuItem, Panel, Rect, Sense,
-    Shape, Sizing, Spacing, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
+    Align, Color, Configure, ContextMenu, Grid, HAlign, LineCap, MenuItem, Panel, Rect,
+    ResponseSnapshot, Sense, Shape, Sizing, Spacing, Text, TextStyle, Tooltip, Track, Ui, VAlign,
+    WidgetId,
 };
 use glam::Vec2;
 use scenarium::data::{DataType, FsPathMode};
@@ -180,6 +181,24 @@ pub(crate) fn input_cell_wid(port: PortRef) -> WidgetId {
     WidgetId::from_hash(("graph.node.input_cell", port.node_id, port.port_idx))
 }
 
+/// Opens `menu_id`'s context menu when either the cell or its port circle
+/// was secondary-clicked this frame — shared by the input and output
+/// cells. The circle senses its own `Sense::CLICK` and consumes hits over
+/// its rect, so the cell's own click alone misses a right-click landed on
+/// the circle (no bubbling); checking both closes that gap.
+fn open_port_context_menu(
+    ui: &mut Ui,
+    menu_id: WidgetId,
+    cell_secondary: bool,
+    circle_secondary: bool,
+) {
+    if (cell_secondary || circle_secondary)
+        && let Some(p) = ui.pointer_pos()
+    {
+        ContextMenu::open(ui, menu_id, p);
+    }
+}
+
 /// Column 0: the input port circle + label, plus the right-click binding
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
@@ -229,7 +248,7 @@ fn input_label_cell(
         PortDecoration::Outline(theme.colors.node_fill)
     };
     let radius = diameter * 0.5;
-    let overhang = radius + theme.port_col_pad_x + theme.node_border_width * 2.0;
+    let overhang = theme.port_overhang_for(radius);
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
     // Stable cell id so the prepass can poll a label-area double-click (the
@@ -250,17 +269,11 @@ fn input_label_cell(
             }
             port_label(ui, rcx, port, input.name.clone(), &tip, rename, out);
         });
-    // Open on right-click anywhere on the cell — circle or label. The
-    // circle has its own `Sense::CLICK` and consumes hits over its rect, so
-    // the cell snapshot alone misses clicks on the circle (no bubbling).
+    // Open on right-click anywhere on the cell — circle or label.
     let menu_id = cell.response.widget_id();
     let cell_secondary = cell.response.secondary_clicked();
     let circle_state = ui.response_for(wid);
-    if (cell_secondary || circle_state.secondary_clicked)
-        && let Some(p) = ui.pointer_pos()
-    {
-        ContextMenu::open(ui, menu_id, p);
-    }
+    open_port_context_menu(ui, menu_id, cell_secondary, circle_state.secondary_clicked);
     // Double-click on the circle or label toggles the binding (clear, or seed
     // the default const when unbound) — handled in `emit_port_dblclicks`
     // (prepass), since adding/removing a `Const` resizes the node and the
@@ -331,7 +344,7 @@ fn value_cell(
     }
 }
 
-/// Column 2: the output label + circle, right-aligned (the fill column
+/// Column 3: the output label + circle, right-aligned (the fill column
 /// pins it to the node's right edge); the circle overhangs that edge.
 #[allow(clippy::too_many_arguments)]
 fn output_cell(
@@ -368,6 +381,18 @@ fn output_cell(
     if targeted {
         probe.mark_broken_pin(OutputPort::new(port.node_id, port.port_idx));
     }
+    // The alarm color only ever replaces the pin glyph's own paint, never
+    // the port's fill — matches `input_label_cell`'s decoration, resolved
+    // once here rather than inside the closure.
+    let decoration = if output.pinned {
+        PortDecoration::Pinned(if targeted {
+            theme.colors.connection_broken
+        } else {
+            fill
+        })
+    } else {
+        PortDecoration::None
+    };
     let cell = Panel::hstack()
         .id_salt(("out", port.port_idx))
         .grid_cell((port.port_idx as u16, COL_OUTPUT))
@@ -378,15 +403,6 @@ fn output_cell(
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             port_label(ui, rcx, port, output.name.clone(), &tip, rename, out);
-            let decoration = if output.pinned {
-                PortDecoration::Pinned(if targeted {
-                    theme.colors.connection_broken
-                } else {
-                    fill
-                })
-            } else {
-                PortDecoration::None
-            };
             circle_frame(
                 ui,
                 wid,
@@ -410,11 +426,7 @@ fn output_cell(
     if circle_state.clicked && ui.modifiers().ctrl {
         out.push(set_output_pinned(port, !output.pinned));
     }
-    if (cell_secondary || circle_state.secondary_clicked)
-        && let Some(p) = ui.pointer_pos()
-    {
-        ContextMenu::open(ui, menu_id, p);
-    }
+    open_port_context_menu(ui, menu_id, cell_secondary, circle_state.secondary_clicked);
     ContextMenu::for_id(menu_id)
         .size((Sizing::Hug, Sizing::Hug))
         .show(ui, |ui, popup| {
@@ -491,10 +503,7 @@ pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
 /// wire hover-highlight zone) get generous.
 fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: Spacing, tip: &str) {
     let port = theme.port_size;
-    let hit = port * PORT_HIT_SCALE;
-    let inset = (hit - port) * 0.5;
-    let [l, t, r_m, b] = margin.as_array();
-    let hit_margin = Spacing::new(l - inset, t - inset, r_m - inset, b - inset);
+    let (hit, inset, hit_margin) = grown_hit_box(port, margin);
     let glyph = Panel::zstack()
         .id(wid)
         .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
@@ -519,11 +528,8 @@ fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: S
                 .fill(fill),
             );
         });
-    if !tip.is_empty() {
-        Tooltip::for_(&glyph.response.snapshot())
-            .text(tip.to_owned())
-            .show(ui);
-    }
+    let snapshot = glyph.response.snapshot();
+    show_port_tip(ui, snapshot, tip);
 }
 
 /// Hover / grab box scaled past the painted glyph so ports, event
@@ -573,6 +579,14 @@ const PIN_RISE: f32 = 12.0;
 /// Stroke width of the bezier connecting a pinned output to its satellite.
 const PIN_STROKE_WIDTH: f32 = 1.5;
 
+/// Control-point offset from `p0` (the port's own center) — bows the
+/// curve's start outward before it climbs to the satellite.
+const PIN_HANDLE_OUT: Vec2 = Vec2::new(20.0, 0.0);
+
+/// Control-point offset from `p3` (the satellite's center) — bows the
+/// curve's arrival so it eases into the satellite from below.
+const PIN_HANDLE_IN: Vec2 = Vec2::new(-20.0, 0.0);
+
 /// A pinned output's bezier + satellite geometry, anchored at `port_center`.
 /// Pure so both the paint (owner-local `port_center`) and the breaker
 /// hit-test (world-space `port_center`, via `CanvasGeometry::ports::center`)
@@ -592,8 +606,8 @@ fn pin_geometry(port_center: Vec2, radius: f32) -> PinGeometry {
         port_center + Vec2::new(radius + PIN_REACH + satellite_radius, -PIN_RISE);
     let p0 = port_center;
     let p3 = satellite_center;
-    let p1 = p0 + Vec2::new(15.0, 0.0);
-    let p2 = p3 + Vec2::new(-10.0, 10.0);
+    let p1 = p0 + PIN_HANDLE_OUT;
+    let p2 = p3 + PIN_HANDLE_IN;
     PinGeometry {
         p0,
         p1,
@@ -669,15 +683,7 @@ fn circle_frame(
     tip: &str,
 ) {
     let port = diameter;
-    let hit = port * PORT_HIT_SCALE;
-    let inset = (hit - port) * 0.5;
-
-    // The sensing element is `hit`-sized, but the extra (`inset` on each
-    // side) is pulled back out of the layout with negative margin, so
-    // node layout and the dot's position are unchanged — only the
-    // hover/grab area grows. The dot itself paints as a centered shape.
-    let [l, t, r, b] = margin.as_array();
-    let hit_margin = Spacing::new(l - inset, t - inset, r - inset, b - inset);
+    let (hit, inset, hit_margin) = grown_hit_box(port, margin);
     let radius = port * 0.5;
 
     // Explicit `id(wid)` so the cross-frame id stays stable: prepass
@@ -712,10 +718,33 @@ fn circle_frame(
                 PortDecoration::Pinned(color) => pin_glyph(ui, inset, radius, color),
             }
         });
+    let snapshot = circle.response.snapshot();
+    show_port_tip(ui, snapshot, tip);
+}
+
+/// Grows `base` into a `PORT_HIT_SCALE`-larger sensing box and folds that
+/// growth back out of `margin` (as a negative adjustment) so the extra hit
+/// area doesn't displace the painted glyph — node layout and the glyph's
+/// own position are unchanged, only the hover/grab area grows. Shared by
+/// port circles ([`circle_frame`]) and event triangles ([`event_glyph`]).
+/// Returns `(hit, inset, hit_margin)`: the grown box side, half the growth
+/// (the glyph's paint offset within that box), and the adjusted margin.
+fn grown_hit_box(base: f32, margin: Spacing) -> (f32, f32, Spacing) {
+    let hit = base * PORT_HIT_SCALE;
+    let inset = (hit - base) * 0.5;
+    let [l, t, r, b] = margin.as_array();
+    let hit_margin = Spacing::new(l - inset, t - inset, r - inset, b - inset);
+    (hit, inset, hit_margin)
+}
+
+/// Shows `tip` as a hover tooltip anchored to `snapshot`, unless empty.
+/// Takes an already-snapshotted response (rather than `&Response<'_>`)
+/// because the snapshot ends the response's borrow of `ui` before this is
+/// called — `ui` is needed mutably right after, to show the tooltip
+/// itself. Shared by [`circle_frame`] and [`event_glyph`].
+fn show_port_tip(ui: &mut Ui, snapshot: ResponseSnapshot, tip: &str) {
     if !tip.is_empty() {
-        Tooltip::for_(&circle.response.snapshot())
-            .text(tip.to_owned())
-            .show(ui);
+        Tooltip::for_(&snapshot).text(tip.to_owned()).show(ui);
     }
 }
 
@@ -758,6 +787,15 @@ mod tests {
     use crate::gui::canvas::breaker::{BreakerState, cubic_point};
     use aperture::PointerButton;
 
+    /// A `BreakerProbe` wrapping `state`, at the origin — every test here
+    /// works in a local frame with no canvas offset to convert.
+    fn probe_for(state: &mut BreakerState) -> BreakerProbe<'_> {
+        BreakerProbe {
+            origin: Vec2::ZERO,
+            state: Some(state),
+        }
+    }
+
     #[test]
     fn port_diameter_enlarges_by_the_outline_width_on_each_side() {
         let base = 10.0;
@@ -776,22 +814,14 @@ mod tests {
         let g = pin_geometry(port_center, radius);
 
         let mut hit = BreakerState::start(g.satellite_center, PointerButton::Right);
-        let probe = BreakerProbe {
-            origin: Vec2::ZERO,
-            state: Some(&mut hit),
-        };
         assert!(
-            pin_targeted(&probe, port_center, radius),
+            pin_targeted(&probe_for(&mut hit), port_center, radius),
             "a breaker sample landing dead-center in the satellite must register"
         );
 
         let mut miss = BreakerState::start(Vec2::new(1000.0, 1000.0), PointerButton::Right);
-        let probe = BreakerProbe {
-            origin: Vec2::ZERO,
-            state: Some(&mut miss),
-        };
         assert!(
-            !pin_targeted(&probe, port_center, radius),
+            !pin_targeted(&probe_for(&mut miss), port_center, radius),
             "a breaker far from the glyph must not register"
         );
     }
@@ -813,10 +843,6 @@ mod tests {
         // satellite rect — path.
         let mut state = BreakerState::start(mid + Vec2::new(0.0, -50.0), PointerButton::Right);
         state.add_point(mid + Vec2::new(0.0, 50.0));
-        let probe = BreakerProbe {
-            origin: Vec2::ZERO,
-            state: Some(&mut state),
-        };
-        assert!(pin_targeted(&probe, port_center, radius));
+        assert!(pin_targeted(&probe_for(&mut state), port_center, radius));
     }
 }

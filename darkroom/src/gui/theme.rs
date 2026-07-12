@@ -753,15 +753,25 @@ impl Theme {
         self.port_size * 0.5
     }
 
-    /// How far a port circle is pulled out of its column so its **center**
-    /// lands on the node body's outer edge: clear the column inset
-    /// (`port_col_pad_x`) and the body border (`node_border_width * 2`, which
-    /// "folds into" the body's content padding), then push out by `port_radius`
-    /// so the dot straddles the edge evenly. Independent of `port_size` — bigger
-    /// circles keep their center on the edge.
+    /// How far a port circle of the given `radius` is pulled out of its
+    /// column so its **center** lands on the node body's outer edge: clear
+    /// the column inset (`port_col_pad_x`) and the body border
+    /// (`node_border_width * 2`, which "folds into" the body's content
+    /// padding), then push out by `radius` so the dot straddles the edge
+    /// evenly. Parameterized rather than always `port_radius()` so an
+    /// enlarged port (e.g. a required input's bigger circle) still
+    /// straddles the edge correctly — see [`Self::port_overhang`] for the
+    /// common (plain-radius) case.
+    #[inline]
+    pub fn port_overhang_for(&self, radius: f32) -> f32 {
+        radius + self.port_col_pad_x + self.node_border_width * 2.0
+    }
+
+    /// [`Self::port_overhang_for`] at the plain port radius. Independent of
+    /// `port_size` — bigger circles keep their center on the edge.
     #[inline]
     pub fn port_overhang(&self) -> f32 {
-        self.port_radius() + self.port_col_pad_x + self.node_border_width * 2.0
+        self.port_overhang_for(self.port_radius())
     }
 
     /// Assemble the full theme for a built-in preset. One place so
