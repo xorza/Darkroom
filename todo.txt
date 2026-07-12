@@ -13,3 +13,5 @@ tooltip near the edge of screen overflows
 file name as argument clap
 
 gui update on worker callback
+
+curve gpu tesselation
