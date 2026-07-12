@@ -7,8 +7,8 @@
 //! affordance lives in [`crate::gui::node::port_rename`].
 
 use aperture::{
-    Align, Color, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, Rect, Sense, Shape,
-    Sizing, Spacing, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
+    Align, Color, Configure, ContextMenu, Grid, HAlign, LineCap, MenuItem, Panel, Rect, Sense,
+    Shape, Sizing, Spacing, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use glam::Vec2;
 use scenarium::data::{DataType, FsPathMode};
@@ -27,7 +27,7 @@ use crate::gui::node::{RecordCtx, node_hovered, set_input, set_output_pinned};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::{StaticValueEditorTheme, Theme};
-use crate::gui::widgets::support::{filled_rect, stroked_rect};
+use crate::gui::widgets::support::{dot, filled_rect, stroked_rect};
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -209,7 +209,11 @@ fn input_label_cell(
     let diameter = port_diameter(theme.port_size, input.required);
     // Matches the node body itself — the ring reads as the node's own surface
     // wrapping around the port, rather than a separate accent.
-    let outline = (!input.required).then_some(theme.colors.node_fill);
+    let decoration = if input.required {
+        PortDecoration::None
+    } else {
+        PortDecoration::Outline(theme.colors.node_fill)
+    };
     let radius = diameter * 0.5;
     let overhang = radius + theme.port_col_pad_x + theme.node_border_width * 2.0;
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
@@ -228,7 +232,7 @@ fn input_label_cell(
             // A const-only input can't be wired, so it has no connection anchor
             // — render just the label (+ its inline const editor).
             if !input.const_only {
-                circle_frame(ui, wid, diameter, fill, outline, margin, &tip);
+                circle_frame(ui, wid, diameter, fill, decoration, margin, &tip);
             }
             port_label(ui, rcx, port, input.name.clone(), &tip, rename, out);
         });
@@ -330,10 +334,6 @@ fn output_cell(
         PortKind::Output,
         rcx.geometry.ports.is_hovered(port),
     );
-    // The pinned-output ring reuses the "pinned" accent (the inspector's
-    // pinned outline / its header chip) — one color means "held open" across
-    // both.
-    let outline = output.pinned.then_some(theme.colors.badge_subgraph);
     let tip = port_tip(
         output.description.as_str(),
         type_label(rcx.library, &output.ty),
@@ -350,12 +350,17 @@ fn output_cell(
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             port_label(ui, rcx, port, output.name.clone(), &tip, rename, out);
+            let decoration = if output.pinned {
+                PortDecoration::Pinned
+            } else {
+                PortDecoration::None
+            };
             circle_frame(
                 ui,
                 wid,
                 theme.port_size,
                 fill,
-                outline,
+                decoration,
                 Spacing::new(0.0, 0.0, -overhang, 0.0),
                 &tip,
             );
@@ -502,24 +507,77 @@ pub(crate) const PORT_HIT_SCALE: f32 = 1.8;
 /// pin), matching the soft corners of the rest of the chrome.
 pub(crate) const EVENT_TRIANGLE_RADIUS: f32 = 2.0;
 
-/// Stroke width of the accent ring drawn around a pinned output's port
+/// Stroke width of the muted ring drawn around a non-required input's port
 /// circle (see `circle_frame`'s `outline` param). Also the amount a
 /// required input's plain circle grows by (on each side), so a required
-/// input's total footprint matches a pinned output's circle + ring —
-/// "important port" reads as one consistent size regardless of which
-/// visual (ring vs. bigger fill) carries it.
-const PINNED_OUTLINE_WIDTH: f32 = 2.5;
+/// input's total footprint matches that ring — "important port" reads as
+/// one consistent size regardless of which visual (ring vs. bigger fill)
+/// carries it.
+const PORT_OUTLINE_WIDTH: f32 = 2.5;
 
 /// A port circle's diameter — `base` for a plain port, or `base` grown by
-/// [`PINNED_OUTLINE_WIDTH`] on each side to match a pinned output's
+/// [`PORT_OUTLINE_WIDTH`] on each side to match a non-required input's
 /// circle-plus-ring footprint (a required input, via [`circle_frame`]'s
 /// `diameter`).
 fn port_diameter(base: f32, enlarged: bool) -> f32 {
     if enlarged {
-        base + 2.0 * PINNED_OUTLINE_WIDTH
+        base + 2.0 * PORT_OUTLINE_WIDTH
     } else {
         base
     }
+}
+
+/// Radius of a pinned output's satellite circle, as a multiple of the
+/// port's own radius.
+const PIN_SATELLITE_SCALE: f32 = 1.4;
+
+/// Rightward offset from the port circle's edge to the satellite circle's
+/// center, before the satellite's own radius.
+const PIN_REACH: f32 = 10.0;
+
+/// How far above the port's own center the satellite circle sits.
+const PIN_RISE: f32 = 12.0;
+
+/// Stroke width of the bezier connecting a pinned output to its satellite.
+const PIN_STROKE_WIDTH: f32 = 1.5;
+
+/// A pinned output's visual: a small bezier leading out from the port
+/// circle, up and to the right, to a smaller satellite circle of
+/// `PIN_SATELLITE_SCALE`× the port's own radius. Both paint in `fill` — the
+/// port's own data-type color — so the glyph reads as an extension of the
+/// port rather than a separate accent. `inset`/`radius` are the same
+/// owner-local frame the fill circle itself paints in (see
+/// [`circle_frame`]).
+fn pin_glyph(ui: &mut Ui, inset: f32, radius: f32, fill: Color) {
+    let port_center = Vec2::new(inset + radius, inset + radius);
+    let satellite_radius = radius * PIN_SATELLITE_SCALE;
+    let satellite_center =
+        port_center + Vec2::new(radius + PIN_REACH + satellite_radius, -PIN_RISE);
+    let p0 = port_center;
+    let p3 = satellite_center;
+    let p1 = p0 + Vec2::new(15.0, 0.0);
+    let p2 = p3 + Vec2::new(-10.0, 10.0);
+    ui.add_shape(
+        Shape::cubic_bezier(p0, p1, p2, p3, PIN_STROKE_WIDTH)
+            .brush(fill)
+            .cap(LineCap::Round),
+    );
+    dot(
+        ui,
+        satellite_center.x,
+        satellite_center.y,
+        satellite_radius,
+        fill,
+    );
+}
+
+/// A port circle's extra decoration — an input's muted ring, or an output's
+/// pinned satellite glyph. Mutually exclusive (never both on one port), so
+/// [`circle_frame`] takes one flag instead of two.
+enum PortDecoration {
+    None,
+    Outline(Color),
+    Pinned,
 }
 
 fn circle_frame(
@@ -527,7 +585,7 @@ fn circle_frame(
     wid: WidgetId,
     diameter: f32,
     fill: Color,
-    outline: Option<Color>,
+    decoration: PortDecoration,
     margin: Spacing,
     tip: &str,
 ) {
@@ -557,18 +615,22 @@ fn circle_frame(
         .show(ui, |ui| {
             let rect = Rect::new(inset, inset, port, port);
             filled_rect(ui, rect, radius, fill);
-            if let Some(color) = outline {
-                // A stroke paints its own rect's *inner*-edge annulus, so
-                // drawing it on `rect` itself would eat into the fill. Inflate
-                // first: the ring's inner edge then lands exactly on the
-                // fill's outer edge instead of inside it.
-                stroked_rect(
-                    ui,
-                    rect.inflated(PINNED_OUTLINE_WIDTH),
-                    radius + PINNED_OUTLINE_WIDTH,
-                    color,
-                    PINNED_OUTLINE_WIDTH,
-                );
+            match decoration {
+                PortDecoration::None => {}
+                PortDecoration::Outline(color) => {
+                    // A stroke paints its own rect's *inner*-edge annulus, so
+                    // drawing it on `rect` itself would eat into the fill.
+                    // Inflate first: the ring's inner edge then lands exactly
+                    // on the fill's outer edge instead of inside it.
+                    stroked_rect(
+                        ui,
+                        rect.inflated(PORT_OUTLINE_WIDTH),
+                        radius + PORT_OUTLINE_WIDTH,
+                        color,
+                        PORT_OUTLINE_WIDTH,
+                    );
+                }
+                PortDecoration::Pinned => pin_glyph(ui, inset, radius, fill),
             }
         });
     if !tip.is_empty() {
@@ -621,8 +683,8 @@ mod tests {
         assert_eq!(port_diameter(base, false), base, "plain port is unchanged");
         assert_eq!(
             port_diameter(base, true),
-            base + 2.0 * PINNED_OUTLINE_WIDTH,
-            "enlarged port matches a bound output's circle-plus-ring footprint"
+            base + 2.0 * PORT_OUTLINE_WIDTH,
+            "enlarged port matches an optional input's circle-plus-ring footprint"
         );
     }
 }
