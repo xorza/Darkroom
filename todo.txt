@@ -18,6 +18,6 @@ doubleclick on output to enable preview
 
 threadsafe fastaccessible shared cache
 
-file name as argument
+file name as argument clap
 
 gui update on worker callback

@@ -115,6 +115,17 @@ impl Flattener {
                 output_external_bindings: pools.output_external_bindings,
             };
             run.emit();
+            // One entry pushed per pooled output port, in lockstep with `n_outputs`
+            // (see `emit`'s per-node loop) — this is the invariant `seed_output_usage`
+            // relies on to index `output_external_bindings` by the same output-pool
+            // index as `plan.output_usage`. A hand-built `ExecutionProgram` (as in the
+            // executor's low-level tests, which never call `Flattener::build`) doesn't
+            // get this guarantee — that's a separate, already-tolerant read path.
+            assert_eq!(
+                run.output_external_bindings.len(),
+                run.n_outputs as usize,
+                "output_external_bindings must have exactly one entry per pooled output port"
+            );
             // `compact` finalizes on drop, trimming nodes that disappeared.
         }
         // Swap the freshly built pools in; recycle the old ones as scratch.

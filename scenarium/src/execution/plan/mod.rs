@@ -61,10 +61,18 @@ pub(crate) struct ExecutionPlan {
     pub(crate) process_order: Vec<NodeIdx>,
     /// Per-node verdict (execute / missing-inputs), indexed by node position.
     pub(crate) verdicts: NodeColumn<NodeVerdict>,
-    /// Per-output consumer counts, indexed by output-pool index. `> 0` ⇒ the output
-    /// is `Needed` this run; `0` ⇒ `Skip`. The executor passes the count through to
-    /// each lambda as [`OutputUsage`](crate::node::func_lambda::OutputUsage) so a node can
-    /// skip computing outputs nobody reads.
+    /// Per-output usage, indexed by output-pool index: in-graph consumer counts from
+    /// the backward walk, plus one extra unit for a port with a reader outside the
+    /// schedule — a port the compiled program flags externally bound (a GUI inspector
+    /// reading it live), or one belonging to a pinned root (the preview fetch reads it
+    /// after the run) — folded in here (see [`Planner::plan`]) so this is the single,
+    /// complete source of truth: the executor maps it straight to
+    /// [`OutputUsage`](crate::node::func_lambda::OutputUsage), never touching the
+    /// compiled program's or plan's own pools again. Both are `+= 1`, not a floor to
+    /// `1`: a port with `n` real consumers must land at `n + 1`, or the executor's
+    /// move-on-last-use optimization would take the value out from under the extra
+    /// reader on the last *real* read (it only fires when a read leaves the count at
+    /// exactly zero). `> 0` ⇒ the output is `Needed` this run; `0` ⇒ `Skip`.
     pub(crate) output_usage: Vec<u32>,
     /// The nodes the backward walk started from — sinks, event subscribers,
     /// event-trigger owners, and node seeds (a node seeding via several categories may
@@ -72,13 +80,12 @@ pub(crate) struct ExecutionPlan {
     /// cut seeds its `needed` mask from these and prunes any cone reachable only through
     /// cache-hit consumers (see [`Executor`](crate::execution::executor::Executor)).
     pub(crate) roots: Vec<NodeIdx>,
-    /// The node-seeded roots (on-demand preview targets), a subset of `roots`. Pinning
-    /// feeds the executor's per-run retention policy (`Executor::retain`): the node's
-    /// outputs stay resident through every release/eviction site whatever its cache
-    /// mode, and an output with zero in-run consumers is still computed (its usage
-    /// floors at `Needed(1)` — the preview fetch reads it after the run). Retention is
-    /// all it takes for a repeated run to be a RAM hit: the reuse check serves any
-    /// resident digest-valid value.
+    /// The node-seeded roots (on-demand preview targets), a subset of `roots`. Drives two
+    /// things: `plan.output_usage` gets a `+= 1` for each pinned node's outputs (above),
+    /// and the executor's per-run retention policy (`Executor::retain`) keeps the node's
+    /// outputs resident through every release/eviction site whatever its cache mode.
+    /// Retention is all it takes for a repeated run to be a RAM hit: the reuse check
+    /// serves any resident digest-valid value.
     pub(crate) pinned: Vec<NodeIdx>,
 }
 
@@ -100,6 +107,55 @@ impl ExecutionPlan {
         self.output_usage.resize(n_outputs, 0);
         self.roots.clear();
         self.pinned.clear();
+    }
+
+    /// Seed `output_usage` with every unit of usage that comes from outside the
+    /// schedule itself, before [`Planner::plan`]'s backward walk adds each in-graph
+    /// consumer's own count on top: one unit for a port the compiled program flags
+    /// externally bound (a GUI inspector reading it live), and one for each output of a
+    /// pinned root (`self.pinned`, already populated by `collect_roots` by the time
+    /// this runs) — its value is read by the preview fetch after the run. Both are
+    /// `+= 1`, never a floor: a port with `n` real consumers must land at `n + 1`, or
+    /// the executor's move-on-last-use optimization (`collect_inputs`) would take the
+    /// value out of its slot on the last *real* read (it only fires when a read leaves
+    /// the usage at exactly zero). Folding both in here, once, makes `output_usage` the
+    /// single, complete source of truth — the executor maps it straight to
+    /// `OutputUsage` and never cross-references the compiled program's pool or
+    /// `self.pinned` again for this.
+    ///
+    /// Called right after `reset` zero-filled `output_usage` (nothing has run the
+    /// backward walk yet), so the external-binding half is a plain assignment; pinning
+    /// then adds on top, so a port that's both pinned and externally bound correctly
+    /// lands at `2`.
+    pub(crate) fn seed_extra_usage(&mut self, program: &ExecutionProgram) {
+        assert_eq!(
+            self.output_usage.len(),
+            program.output_external_bindings.len(),
+            "output_usage and output_external_bindings are both indexed by \
+             output-pool position and must be the same length"
+        );
+        // `+=` below only makes sense against a freshly `reset` (all-zero) column — it's
+        // additive so an out-of-order call (e.g. after the backward walk) wouldn't erase
+        // real per-edge counts, but a double call would silently double-count instead.
+        // Neither hazard fails loudly on its own, so assert the one contract both this
+        // fn and `Planner::plan`'s call site actually rely on, rather than leaving a
+        // future reordering or duplicate call to produce quietly-wrong numbers.
+        assert!(
+            self.output_usage.iter().all(|&u| u == 0),
+            "seed_extra_usage must run on a freshly reset output_usage column"
+        );
+        for (usage, &external) in self
+            .output_usage
+            .iter_mut()
+            .zip(&program.output_external_bindings)
+        {
+            *usage += external as u32;
+        }
+        for &idx in &self.pinned {
+            for usage in &mut self.output_usage[program.e_nodes[idx].outputs.range()] {
+                *usage += 1;
+            }
+        }
     }
 }
 
@@ -152,23 +208,14 @@ impl Planner {
         let program = &compiled.program;
         plan.reset(program.e_nodes.len(), program.n_outputs());
 
-        // An externally-bound port (e.g. a GUI inspector reading it live) counts as a
-        // consumer even with no in-graph binding, so its producer computes it rather
-        // than skipping it as unused. Seeded before the backward walk below, whose
-        // per-edge counts add on top.
-        for (usage, &external) in plan
-            .output_usage
-            .iter_mut()
-            .zip(&program.output_external_bindings)
-        {
-            if external {
-                *usage += 1;
-            }
-        }
-
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
         collect_roots(compiled, seeds, plan)?;
+
+        // Both non-schedule usage sources (external bindings, pinned roots) are folded
+        // in together here, before the walk below adds each in-graph consumer's own
+        // count on top.
+        plan.seed_extra_usage(program);
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {

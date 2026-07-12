@@ -4176,7 +4176,8 @@ mod output_usage {
         assert_eq!(
             eg.node_output_usage(split)[1],
             1,
-            "external binding alone floors usage to 1 with no in-graph consumer"
+            "the planner floors an externally-bound port's usage even with no \
+             in-graph consumer — plan.output_usage is the complete usage tally"
         );
 
         // The lambda computes both outputs instead of skipping the unconsumed one.

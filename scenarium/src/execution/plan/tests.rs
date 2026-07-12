@@ -28,6 +28,13 @@ impl Fix {
         program
             .output_types
             .resize(outputs_start as usize + outputs as usize, DataType::Any);
+        // Kept in lockstep with `output_types` (same index space) so
+        // `output_external_bindings.len() == n_outputs` holds here exactly as
+        // `Flattener::build` guarantees for a real compile — the planner's fold
+        // over both pools relies on this, not just a defensive fallback.
+        program
+            .output_external_bindings
+            .resize(outputs_start as usize + outputs as usize, false);
         let idx = program.e_nodes.len();
         program.e_nodes.add(ExecutionNode {
             id: NodeId::from_u128(idx as u128 + 1),
@@ -125,6 +132,26 @@ fn fan_out_counts_each_executing_consumer() {
 }
 
 #[test]
+fn externally_bound_port_floors_plan_level_usage() {
+    // A has two outputs, neither structurally consumed by anything. Only port 1
+    // is flagged externally bound (e.g. a GUI inspector reading it live) — the
+    // planner's fold must floor exactly that one to 1, leaving the other alone.
+    let mut f = Fix::default();
+    f.node(true, &[], 2);
+    f.compiled.program.output_external_bindings[1] = true;
+
+    let p = plan(&f);
+    assert_eq!(
+        p.output_usage[0], 0,
+        "port 0 has no consumer and no binding"
+    );
+    assert_eq!(
+        p.output_usage[1], 1,
+        "port 1 floors to 1 from the external binding alone"
+    );
+}
+
+#[test]
 fn dependency_cycle_is_rejected() {
     // A binds B, B binds A (A sink) — the planner must error, not loop.
     let mut f = Fix::default();
@@ -146,8 +173,8 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // A → B → C (C sink). Seeding node B (by authoring id — top-level ids resolve
     // straight against the program) schedules only [A, B] — C is upstream of nothing
     // seeded — and records B as both a root and a pinned node. B's output has no
-    // scheduled consumer, so its plan-level usage stays 0; the *executor* floors a
-    // pinned node's usage, keeping the plan purely structural.
+    // scheduled consumer, so its plan-level usage floors to 1 from pinning alone (the
+    // planner folds this in directly now — see `ExecutionPlan::output_usage`).
     let mut f = Fix::default();
     let a = f.node(false, &[], 1);
     let b = f.node(false, &[(false, bind(a, 0))], 1);
@@ -167,9 +194,13 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert!(p.verdicts[a].wants_execute());
     assert!(p.verdicts[b].wants_execute());
     assert!(!p.verdicts[c].wants_execute(), "C never verdicted");
-    // A.0 is read by B (usage 1); B.0 has no consumer in this plan.
+    // A.0 is read by B (usage 1); B.0 has no in-graph consumer, but floors to 1 from
+    // being pinned.
     assert_eq!(p.output_usage[0], 1, "A.0 read by B");
-    assert_eq!(p.output_usage[1], 0, "B.0 unconsumed at plan level");
+    assert_eq!(
+        p.output_usage[1], 1,
+        "B.0 unconsumed, but pinned floors it to 1"
+    );
 
     // Node seeds combine with sinks: the same seed plus `sinks` schedules
     // everything, and B stays pinned.
@@ -181,7 +212,12 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
     assert_eq!(p.process_order, vec![a, b, c]);
     assert_eq!(p.pinned, vec![b]);
-    assert_eq!(p.output_usage[1], 1, "B.0 now read by C");
+    // B.0 now has a real consumer (C) too — pinning adds a unit on top rather than
+    // just flooring, so B lands at 2, not 1.
+    assert_eq!(
+        p.output_usage[1], 2,
+        "B.0 read by C, plus pinning's extra unit"
+    );
 
     // A seed id absent from the program is inconsistent caller state — a hard failure,
     // not a silent skip.

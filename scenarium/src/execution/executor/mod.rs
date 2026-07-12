@@ -112,6 +112,24 @@ impl Executor {
             )
     }
 
+    /// Seed the run's live per-output usage straight from the plan's usage count —
+    /// already the complete single source of truth, in-graph consumers plus a unit for
+    /// a pinned root or an externally-bound port (see [`ExecutionPlan::output_usage`],
+    /// folded in once by [`Planner::plan`](crate::execution::plan::Planner::plan)) —
+    /// mapped to the lambda-facing enum (`0` ⇒ `Skip`, `> 0` ⇒ `Needed(c)`). This same
+    /// column is counted *down* as consumers read, marking each spent output (see
+    /// `collect_inputs` and the post-invoke release below).
+    fn seed_output_usage(&mut self, plan: &ExecutionPlan) {
+        self.output_usage.clear();
+        self.output_usage.extend(plan.output_usage.iter().map(|&c| {
+            if c == 0 {
+                OutputUsage::Skip
+            } else {
+                OutputUsage::Needed(c)
+            }
+        }));
+    }
+
     /// Walk `plan.process_order` (producer-first). For each node: skip it as
     /// [`NodeOutcome::Cut`] if the resolver pruned its cone, serve it from RAM/disk on
     /// [`Disposition::Reuse`], else invoke its lambda and persist the result to disk right
@@ -146,28 +164,7 @@ impl Executor {
             self.retain[idx] = true;
         }
 
-        // Seed the run's live per-output consumer counts from the plan (`0` ⇒ `Skip`, the
-        // lambda-facing "nobody reads this output"; `> 0` ⇒ `Needed`). This same column is
-        // counted down as consumers read, marking each spent output (see `collect_inputs` and
-        // the post-invoke release below).
-        self.output_usage.clear();
-        self.output_usage.extend(plan.output_usage.iter().map(|&c| {
-            if c == 0 {
-                OutputUsage::Skip
-            } else {
-                OutputUsage::Needed(c)
-            }
-        }));
-        // A pinned root's outputs have a real reader *after* the run — the preview fetch —
-        // so an output with zero in-run consumers still seeds `Needed(1)`: a usage-honoring
-        // lambda must compute it. Keeping the value is `retain`'s concern, not the count's.
-        for &idx in &plan.pinned {
-            for usage in &mut self.output_usage[program.e_nodes[idx].outputs.range()] {
-                if *usage == OutputUsage::Skip {
-                    *usage = OutputUsage::Needed(1);
-                }
-            }
-        }
+        self.seed_output_usage(plan);
 
         // The schedule is `process_order` (all reachable, producer-first). A
         // `MissingInputs` node can't run, so it's skipped here rather than pruned by a

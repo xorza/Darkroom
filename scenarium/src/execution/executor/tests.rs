@@ -227,10 +227,58 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
     );
 }
 
-/// A pinned (node-seeded preview) root gets one virtual consumer per output: the lambda
-/// sees `Needed(1)` instead of `Skip`, and the `None`-cache slot survives the post-store
-/// drain reclaim. The unpinned control on the same program reads `Skip` and is reclaimed
-/// the moment it's stored.
+/// A port with both a real consumer and an extra usage unit (standing in for an
+/// externally-bound port — `Planner::plan` folds that in as `+= 1` on top of the real
+/// consumer count, not a floor, precisely so this case is handled) must NOT free its
+/// value on the real consumer's read: the last real read has to decrement to
+/// `Needed(1)`, not `Skip`, or the move-on-last-use optimization in `collect_inputs`
+/// would take the value out from under the extra reader. Same fixture as
+/// `frees_none_cache_output_once_last_consumer_reads` above, but A's usage is `2`
+/// instead of `1` — A survives B's read instead of being freed.
+#[tokio::test]
+async fn extra_usage_unit_survives_the_last_real_consumer_read() {
+    let mut p = Prog::default();
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+        Ok(())
+    });
+    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _usage, outputs| {
+        let v = inputs[0].value.as_i64().unwrap();
+        outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
+        Ok(())
+    });
+    let a = p.node(&[], 1, producer);
+    let b = p.node(&[bind(a, 0)], 1, consumer);
+    p.set_cache(a, CacheMode::None);
+    p.set_cache(b, CacheMode::Ram);
+
+    // A's one output has one real consumer (B) plus one extra unit; B's output has a
+    // phantom consumer, so B never drains.
+    let plan = plan_with_usage(&p.program, vec![2, 1]);
+    let (cache, _stats) = run(&p.program, &plan).await;
+
+    assert!(
+        matches!(cache.slots[a].value, ValueState::Resident { .. }),
+        "A (None) survives B's read when a usage unit is still left over: {:?}",
+        cache.slots[a].value
+    );
+    assert_eq!(
+        cache.slots[a].output_values().unwrap()[0].as_i64(),
+        Some(7),
+        "A keeps its own value, not just B's derived one"
+    );
+}
+
+/// A pinned (node-seeded preview) root's output survives even in `CacheMode::None`,
+/// unlike an unpinned `Skip` root on the same program. The usage count itself
+/// (`vec![1]`, as `Planner::plan` would produce for a pinned zero-consumer port — see
+/// `execution::plan::tests::node_seed_schedules_only_its_cone_and_pins_it`) only decides
+/// whether the lambda bothers computing the value at all (`Skip` vs `Needed`); survival
+/// itself is `retain`'s doing — `collect_inputs`'s move-on-last-use check and
+/// `release_spent_output` both gate on `!retain[target]` directly, so a pinned node
+/// (`retain` always `true`) never has its value taken or reclaimed regardless of the
+/// exact count. `plan.pinned` is set here purely for that `retain` effect; the count
+/// itself is no longer the executor's concern (see `ExecutionPlan::output_usage`).
 #[tokio::test]
 async fn pinned_root_sees_needed_usage_and_survives_drain() {
     use crate::node::func_lambda::OutputUsage;
@@ -260,11 +308,12 @@ async fn pinned_root_sees_needed_usage_and_survives_drain() {
         cache.slots[a].value
     );
 
-    // Pinned: same program, same zero consumers — the virtual consumer flips the
-    // lambda-visible usage to `Needed(1)` and the value stays resident.
+    // Pinned: same program, but the usage the planner would have produced for a
+    // pinned zero-consumer port (`1`, not `0`) — the lambda sees `Needed(1)` and the
+    // value stays resident, `pinned` here driving `retain` rather than the count.
     let plan = ExecutionPlan {
         pinned: vec![a.into()],
-        ..plan_with_usage(&p.program, vec![0])
+        ..plan_with_usage(&p.program, vec![1])
     };
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputUsage::Needed(1)));
