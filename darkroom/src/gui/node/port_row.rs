@@ -27,7 +27,7 @@ use crate::gui::node::{RecordCtx, node_hovered, set_external_binding, set_input}
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::{StaticValueEditorTheme, Theme};
-use crate::gui::widgets::support::filled_rect_with_outline;
+use crate::gui::widgets::support::{filled_rect, stroked_rect};
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -201,7 +201,12 @@ fn input_label_cell(
             rcx.geometry.ports.is_hovered(port),
         )
     };
-    let overhang = theme.port_overhang();
+    // A required input's port reads as bigger — its total footprint matches
+    // a bound output's circle-plus-ring, so "important port" carries the
+    // same visual weight on either side.
+    let diameter = port_diameter(theme.port_size, input.required);
+    let radius = diameter * 0.5;
+    let overhang = radius + theme.port_col_pad_x + theme.node_border_width * 2.0;
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
     // Stable cell id so the prepass can poll a label-area double-click (the
@@ -218,7 +223,7 @@ fn input_label_cell(
             // A const-only input can't be wired, so it has no connection anchor
             // — render just the label (+ its inline const editor).
             if !input.const_only {
-                circle_frame(ui, theme, wid, fill, None, margin, &tip);
+                circle_frame(ui, wid, diameter, fill, None, margin, &tip);
             }
             port_label(ui, rcx, port, input.name.clone(), &tip, rename, out);
         });
@@ -344,8 +349,8 @@ fn output_cell(
             port_label(ui, rcx, port, output.name.clone(), &tip, rename, out);
             circle_frame(
                 ui,
-                theme,
                 wid,
+                theme.port_size,
                 fill,
                 outline,
                 Spacing::new(0.0, 0.0, -overhang, 0.0),
@@ -360,9 +365,9 @@ fn output_cell(
     let menu_id = cell.response.widget_id();
     let cell_secondary = cell.response.secondary_clicked();
     let circle_state = ui.response_for(wid);
-    // Alt+click the circle toggles the external binding — a distinct chord
-    // from the plain double-click above, so the two never race.
-    if circle_state.clicked && ui.modifiers().alt {
+    // Cmd(/Ctrl)+click the circle toggles the external binding — a distinct
+    // chord from the plain double-click above, so the two never race.
+    if circle_state.clicked && ui.modifiers().ctrl {
         out.push(set_external_binding(port, !output.external_binding));
     }
     if (cell_secondary || circle_state.secondary_clicked)
@@ -495,19 +500,35 @@ pub(crate) const PORT_HIT_SCALE: f32 = 1.8;
 pub(crate) const EVENT_TRIANGLE_RADIUS: f32 = 2.0;
 
 /// Stroke width of the accent ring drawn around an externally-bound
-/// output's port circle (see `circle_frame`'s `outline` param).
-const EXTERNAL_BINDING_OUTLINE_WIDTH: f32 = 1.5;
+/// output's port circle (see `circle_frame`'s `outline` param). Also the
+/// amount a required input's plain circle grows by (on each side), so a
+/// required input's total footprint matches a bound output's circle +
+/// ring — "important port" reads as one consistent size regardless of
+/// which visual (ring vs. bigger fill) carries it.
+const EXTERNAL_BINDING_OUTLINE_WIDTH: f32 = 2.5;
+
+/// A port circle's diameter — `base` for a plain port, or `base` grown by
+/// [`EXTERNAL_BINDING_OUTLINE_WIDTH`] on each side to match an
+/// externally-bound output's circle-plus-ring footprint (a required input,
+/// via [`circle_frame`]'s `diameter`).
+fn port_diameter(base: f32, enlarged: bool) -> f32 {
+    if enlarged {
+        base + 2.0 * EXTERNAL_BINDING_OUTLINE_WIDTH
+    } else {
+        base
+    }
+}
 
 fn circle_frame(
     ui: &mut Ui,
-    theme: &Theme,
     wid: WidgetId,
+    diameter: f32,
     fill: Color,
     outline: Option<Color>,
     margin: Spacing,
     tip: &str,
 ) {
-    let port = theme.port_size;
+    let port = diameter;
     let hit = port * PORT_HIT_SCALE;
     let inset = (hit - port) * 0.5;
 
@@ -517,7 +538,7 @@ fn circle_frame(
     // hover/grab area grows. The dot itself paints as a centered shape.
     let [l, t, r, b] = margin.as_array();
     let hit_margin = Spacing::new(l - inset, t - inset, r - inset, b - inset);
-    let radius = theme.port_radius();
+    let radius = port * 0.5;
 
     // Explicit `id(wid)` so the cross-frame id stays stable: prepass
     // computes the same `port_circle_wid` and reads its response,
@@ -531,13 +552,21 @@ fn circle_frame(
         .margin(hit_margin)
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
-            filled_rect_with_outline(
-                ui,
-                Rect::new(inset, inset, port, port),
-                radius,
-                fill,
-                outline.map(|c| (c, EXTERNAL_BINDING_OUTLINE_WIDTH)),
-            );
+            let rect = Rect::new(inset, inset, port, port);
+            filled_rect(ui, rect, radius, fill);
+            if let Some(color) = outline {
+                // A stroke paints its own rect's *inner*-edge annulus, so
+                // drawing it on `rect` itself would eat into the fill. Inflate
+                // first: the ring's inner edge then lands exactly on the
+                // fill's outer edge instead of inside it.
+                stroked_rect(
+                    ui,
+                    rect.inflated(EXTERNAL_BINDING_OUTLINE_WIDTH),
+                    radius + EXTERNAL_BINDING_OUTLINE_WIDTH,
+                    color,
+                    EXTERNAL_BINDING_OUTLINE_WIDTH,
+                );
+            }
         });
     if !tip.is_empty() {
         Tooltip::for_(&circle.response.snapshot())
@@ -576,5 +605,21 @@ fn type_label(library: &Library, ty: &DataType) -> String {
             }
         }
         _ => library.type_name(ty).into_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn port_diameter_enlarges_by_the_outline_width_on_each_side() {
+        let base = 10.0;
+        assert_eq!(port_diameter(base, false), base, "plain port is unchanged");
+        assert_eq!(
+            port_diameter(base, true),
+            base + 2.0 * EXTERNAL_BINDING_OUTLINE_WIDTH,
+            "enlarged port matches a bound output's circle-plus-ring footprint"
+        );
     }
 }

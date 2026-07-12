@@ -194,8 +194,8 @@ pub enum Intent {
     },
     /// Mark (`bound = true`) or clear (`false`) an output port as read by a
     /// consumer outside the graph (a GUI inspector). Idempotent — a no-op
-    /// when the flag already matches. Alt+click on an output port circle, or
-    /// its context-menu toggle.
+    /// when the flag already matches. Cmd(/Ctrl)+click on an output port
+    /// circle, or its context-menu toggle.
     SetExternalBinding {
         node_id: NodeId,
         port_idx: usize,
@@ -629,6 +629,14 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             port_idx,
             bound,
         } => {
+            // Unlike a drag-sourced intent (which can span frames and outlive
+            // its anchor), this only ever comes from a port rendered in this
+            // exact frame's Scene, built from this same graph — a missing
+            // node here is a real bug, not a stale race, so it asserts rather
+            // than silently dropping the intent.
+            graph
+                .find_node(&node_id, NodeSearch::TopLevel)
+                .expect("SetExternalBinding targets a node rendered in the current frame's Scene");
             let port = OutputPort::new(node_id, port_idx);
             GraphStep::SetExternalBinding {
                 node_id,

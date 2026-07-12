@@ -43,24 +43,6 @@ pub(crate) fn stroked_rect(ui: &mut Ui, rect: Rect, radius: f32, color: Color, w
     );
 }
 
-/// A filled rounded rect with an optional accent ring drawn over the same
-/// fill — the combined sibling of [`filled_rect`]/[`stroked_rect`] for a
-/// state that layers an outline onto an already-colored shape (e.g. a port
-/// marked externally bound) rather than replacing the fill with one.
-pub(crate) fn filled_rect_with_outline(
-    ui: &mut Ui,
-    rect: Rect,
-    radius: f32,
-    fill: Color,
-    outline: Option<(Color, f32)>,
-) {
-    let mut shape = Shape::rect(rect).corners(Corners::all(radius)).fill(fill);
-    if let Some((color, width)) = outline {
-        shape = shape.stroke(Stroke::solid(color, width));
-    }
-    ui.add_shape(shape);
-}
-
 /// A small filled circle of radius `r` centered at `(cx, cy)`.
 pub(crate) fn dot(ui: &mut Ui, cx: f32, cy: f32, r: f32, color: Color) {
     filled_rect(ui, Rect::new(cx - r, cy - r, 2.0 * r, 2.0 * r), r, color);
