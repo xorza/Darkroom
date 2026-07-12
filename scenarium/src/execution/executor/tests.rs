@@ -92,7 +92,10 @@ fn self_mapped_flatten(program: &ExecutionProgram) -> FlattenMap {
 fn plan_with_usage(program: &ExecutionProgram, output_usage: Vec<u32>) -> ExecutionPlan {
     assert_eq!(output_usage.len(), program.n_outputs());
     ExecutionPlan {
-        output_usage,
+        output_usage: output_usage
+            .into_iter()
+            .map(|c| OutputUsage::from(c as usize))
+            .collect(),
         ..straight_plan(program)
     }
 }
@@ -112,7 +115,7 @@ fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
     ExecutionPlan {
         process_order: (0..n).map(NodeIdx::from).collect(),
         verdicts: vec![NodeVerdict::Execute; n].into(),
-        output_usage: vec![1; program.n_outputs()],
+        output_usage: vec![OutputUsage::Needed(1); program.n_outputs()],
         roots: (0..n).map(NodeIdx::from).collect(),
         pinned: Vec::new(),
     }

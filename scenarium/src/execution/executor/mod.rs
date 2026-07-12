@@ -113,22 +113,16 @@ impl Executor {
             )
     }
 
-    /// Seed the run's live per-output usage straight from the plan's usage count —
+    /// Seed the run's live per-output usage straight from the plan's usage column —
     /// already the complete single source of truth, in-graph consumers plus a unit for
     /// a pinned root or a pinned output port (see [`ExecutionPlan::output_usage`],
-    /// folded in once by [`Planner::plan`](crate::execution::plan::Planner::plan)) —
-    /// mapped to the lambda-facing enum (`0` ⇒ `Skip`, `> 0` ⇒ `Needed(c)`). This same
-    /// column is counted *down* as consumers read, marking each spent output (see
-    /// `collect_inputs` and the post-invoke release below).
+    /// folded in once by [`Planner::plan`](crate::execution::plan::Planner::plan)). A
+    /// plain copy: the executor's own column is a per-run working copy, counted *down*
+    /// as consumers read and marking each spent output (see `collect_inputs` and the
+    /// post-invoke release below), while the plan's stays the reusable template.
     fn seed_output_usage(&mut self, plan: &ExecutionPlan) {
         self.output_usage.clear();
-        self.output_usage.extend(plan.output_usage.iter().map(|&c| {
-            if c == 0 {
-                OutputUsage::Skip
-            } else {
-                OutputUsage::Needed(c)
-            }
-        }));
+        self.output_usage.extend(plan.output_usage.iter().copied());
     }
 
     /// Walk `plan.process_order` (producer-first). For each node: skip it as
@@ -273,10 +267,12 @@ impl Executor {
             self.ctx_manager.current_node = Some(flat_id);
             let invoke_start = Instant::now();
             if let Some(events) = events {
-                let _ = events.send(RunEvent::Progress(RunProgress {
-                    nodes: flatten.attribution(flat_id).collect(),
-                    phase: RunPhase::Started { at: invoke_start },
-                }));
+                events
+                    .send(RunEvent::Progress(RunProgress {
+                        nodes: flatten.attribution(flat_id).collect(),
+                        phase: RunPhase::Started { at: invoke_start },
+                    }))
+                    .expect(EVENTS_OUTLIVE_RUN);
             }
             // The node's own outputs are still at their seeded counts (producers run before
             // consumers), so this slice is the `OutputUsage` the lambda reads to skip
@@ -367,15 +363,12 @@ impl Executor {
                 // of holding it to end-of-run eviction.
                 for &(local_port, _) in &payload.values {
                     let out_idx = e_node.outputs.start as usize + local_port;
-                    self.output_usage[out_idx] = match self.output_usage[out_idx] {
-                        OutputUsage::Needed(1) => OutputUsage::Skip,
-                        OutputUsage::Needed(n) => OutputUsage::Needed(n - 1),
-                        OutputUsage::Skip => panic!(
-                            "pinned-output push decremented output {out_idx} the plan already marked unused"
-                        ),
-                    };
+                    self.output_usage[out_idx].dec();
                 }
-                events.send(RunEvent::PinnedOutputs(payload)).expect("todo");
+                events.send(RunEvent::PinnedOutputs(payload)).expect(
+                    "the events receiver outlives this future — worker_loop only drops it \
+                     after `execute` (and so this `run`) resolves",
+                );
             }
             // Persist this node's cache the moment it finishes (durable as the run
             // progresses), not at the end of the whole run. The snapshot is taken
@@ -517,8 +510,7 @@ async fn collect_inputs(
                 // itself — it becomes the sole `Arc` holder and `into_custom` can
                 // reuse the allocation in place. A retained or still-owed output
                 // is cloned as before.
-                let take =
-                    matches!(output_usage[out_idx], OutputUsage::Needed(1)) && !retain[target];
+                let take = output_usage[out_idx].is_last_read() && !retain[target];
                 let Some(value) = cache.read_output_port(program, target, port, take) else {
                     return Err(RunError::InputLoadFailed {
                         func_id: program.e_nodes[e_node_idx].func_id,
@@ -528,15 +520,9 @@ async fn collect_inputs(
                 // Count this read against the producer's output. Each `Bind` edge was counted
                 // once in the plan's usage, so when this output's count reaches `Skip` every
                 // in-run consumer has read it and it's spent — freed one output at a time here.
-                match output_usage[out_idx] {
-                    OutputUsage::Needed(1) => {
-                        output_usage[out_idx] = OutputUsage::Skip;
-                        release_spent_output(program, cache, output_usage, retain, target, port);
-                    }
-                    OutputUsage::Needed(n) => output_usage[out_idx] = OutputUsage::Needed(n - 1),
-                    OutputUsage::Skip => {
-                        panic!("consumer read output {out_idx} the plan marked as unused (Skip)")
-                    }
+                output_usage[out_idx].dec();
+                if output_usage[out_idx].is_skip() {
+                    release_spent_output(program, cache, output_usage, retain, target, port);
                 }
                 value
             }
@@ -573,9 +559,7 @@ fn release_spent_output(
 /// (each output is `Skip`, either seeded that way with zero consumers or counted down to it).
 fn node_drained(program: &ExecutionProgram, output_usage: &[OutputUsage], idx: NodeIdx) -> bool {
     let outputs = program.e_nodes[idx].outputs;
-    output_usage[outputs.range()]
-        .iter()
-        .all(|u| matches!(u, OutputUsage::Skip))
+    output_usage[outputs.range()].iter().all(|u| u.is_skip())
 }
 
 fn collect_execution_stats(

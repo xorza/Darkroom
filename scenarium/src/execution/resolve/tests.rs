@@ -3,6 +3,7 @@ use crate::data::DataType;
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
 use crate::graph::NodeId;
+use crate::node::func_lambda::OutputUsage;
 use crate::node::function::FuncId;
 use common::Span;
 
@@ -49,7 +50,7 @@ fn dispositions_of(fix: &Fix, roots: &[NodeIdx], resolved: &[Resolved]) -> Vec<D
         // added before its consumer), matching the planner's post-order.
         process_order: (0..fix.program.e_nodes.len()).map(NodeIdx::from).collect(),
         verdicts: vec![NodeVerdict::Execute; fix.program.e_nodes.len()].into(),
-        output_usage: vec![0; fix.program.n_outputs()],
+        output_usage: vec![OutputUsage::Skip; fix.program.n_outputs()],
         roots: roots.to_vec(),
         pinned: Vec::new(),
     };

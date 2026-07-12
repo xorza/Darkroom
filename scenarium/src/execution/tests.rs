@@ -6,6 +6,7 @@ use crate::execution::compile::CompileError;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeSearch, OutputPort};
 use crate::library::Library;
+use crate::node::func_lambda::OutputUsage;
 use crate::node::function::FuncBehavior;
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use common::{FloatExt, SerdeFormat};
@@ -1866,10 +1867,22 @@ mod graph_structure {
         let print = execution_graph.by_name("Print").unwrap();
 
         // usage_count: get_a→sum[0], get_b→sum[1]+mult[1], sum→mult[0], mult→print[0]
-        assert_eq!(execution_graph.node_output_usage(get_a)[0], 1);
-        assert_eq!(execution_graph.node_output_usage(get_b)[0], 2);
-        assert_eq!(execution_graph.node_output_usage(sum)[0], 1);
-        assert_eq!(execution_graph.node_output_usage(mult)[0], 1);
+        assert_eq!(
+            execution_graph.node_output_usage(get_a)[0],
+            OutputUsage::Needed(1)
+        );
+        assert_eq!(
+            execution_graph.node_output_usage(get_b)[0],
+            OutputUsage::Needed(2)
+        );
+        assert_eq!(
+            execution_graph.node_output_usage(sum)[0],
+            OutputUsage::Needed(1)
+        );
+        assert_eq!(
+            execution_graph.node_output_usage(mult)[0],
+            OutputUsage::Needed(1)
+        );
 
         assert!(print.sink);
 
@@ -1903,9 +1916,18 @@ mod graph_structure {
         assert_eq!(execution_graph.node_output_usage(mult).len(), 1);
         assert!(execution_graph.node_output_usage(print).is_empty());
         // Now each source has exactly 1 consumer (sum is no longer in the path)
-        assert_eq!(execution_graph.node_output_usage(get_a)[0], 1);
-        assert_eq!(execution_graph.node_output_usage(get_b)[0], 1);
-        assert_eq!(execution_graph.node_output_usage(mult)[0], 1);
+        assert_eq!(
+            execution_graph.node_output_usage(get_a)[0],
+            OutputUsage::Needed(1)
+        );
+        assert_eq!(
+            execution_graph.node_output_usage(get_b)[0],
+            OutputUsage::Needed(1)
+        );
+        assert_eq!(
+            execution_graph.node_output_usage(mult)[0],
+            OutputUsage::Needed(1)
+        );
 
         Ok(())
     }
@@ -4118,8 +4140,8 @@ mod output_usage {
         eg.execute_sinks().await?;
 
         let split = eg.by_name("split").unwrap();
-        assert_eq!(eg.node_output_usage(split)[0], 1);
-        assert_eq!(eg.node_output_usage(split)[1], 0);
+        assert_eq!(eg.node_output_usage(split)[0], OutputUsage::Needed(1));
+        assert_eq!(eg.node_output_usage(split)[1], OutputUsage::Skip);
 
         // The lambda observed Needed for the consumed output, Skip for the other.
         assert_eq!(
@@ -4175,10 +4197,10 @@ mod output_usage {
         eg.execute_sinks().await?;
 
         let split = eg.by_name("split").unwrap();
-        assert_eq!(eg.node_output_usage(split)[0], 1);
+        assert_eq!(eg.node_output_usage(split)[0], OutputUsage::Needed(1));
         assert_eq!(
             eg.node_output_usage(split)[1],
-            1,
+            OutputUsage::Needed(1),
             "the planner floors a pinned port's usage even with no in-graph \
              consumer — plan.output_usage is the complete usage tally"
         );

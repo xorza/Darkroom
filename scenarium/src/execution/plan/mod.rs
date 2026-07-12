@@ -13,6 +13,7 @@ use crate::execution::compile::CompiledGraph;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram, NodeIdx};
 use crate::execution::query::resolve_node_idx;
 use crate::execution::{Error, NodeColumn, Result, RunSeeds, validate};
+use crate::node::func_lambda::OutputUsage;
 use crate::node::special::SpecialNode;
 
 /// The planner's structural verdict for one node this run, indexed by `e_node_idx`.
@@ -67,18 +68,17 @@ pub(crate) struct ExecutionPlan {
     /// the host right after the node runs — see `Executor::run`), or one belonging
     /// to a pinned *root* (`self.pinned` below — same push, but for every output) —
     /// folded in here (see [`Planner::plan`]) so this is the single, complete source
-    /// of truth: the executor maps it straight to
-    /// [`OutputUsage`](crate::node::func_lambda::OutputUsage), never touching the
-    /// compiled program's or plan's own pools again. The extra unit is exactly one
-    /// regardless of *why* a port qualifies (individually pinned, a pinned root's
-    /// output, or both at once) — a port with `n` real consumers lands at `n + 1`,
-    /// never `n + 2`, so the executor's move-on-last-use optimization doesn't take
-    /// the value out from under the pinned push on the last *real* read (it only
-    /// fires when a read leaves the count at exactly zero). The push itself gives
-    /// its unit back the instant it's cloned the value, so a port with zero real
-    /// consumers is reclaimable right away rather than lingering to end-of-run
-    /// eviction. `> 0` ⇒ the output is `Needed` this run; `0` ⇒ `Skip`.
-    pub(crate) output_usage: Vec<u32>,
+    /// of truth: the executor copies it verbatim as its own live per-run counter,
+    /// never touching the compiled program's or plan's own pools again. The extra
+    /// unit is exactly one regardless of *why* a port qualifies (individually
+    /// pinned, a pinned root's output, or both at once) — a port with `n` real
+    /// consumers lands at `Needed(n + 1)`, never `n + 2`, so the executor's
+    /// move-on-last-use optimization doesn't take the value out from under the
+    /// pinned push on the last *real* read (it only fires when a read leaves the
+    /// count at exactly zero). The push itself gives its unit back the instant it's
+    /// cloned the value (`OutputUsage::dec`), so a port with zero real consumers is
+    /// reclaimable right away rather than lingering to end-of-run eviction.
+    pub(crate) output_usage: Vec<OutputUsage>,
     /// The nodes the backward walk started from — sinks, event subscribers,
     /// event-trigger owners, and node seeds (a node seeding via several categories may
     /// repeat; harmless). The schedule's "must be available" set: the executor's pre-run
@@ -162,11 +162,11 @@ impl ExecutionPlan {
             "seed_extra_usage must run on a freshly reset output_usage column"
         );
         self.output_usage
-            .extend(program.output_pinned.iter().map(|&b| b as u32));
+            .extend(program.output_pinned.iter().map(|&b| OutputUsage::from(b as usize)));
 
         for &idx in &self.pinned {
             for usage in &mut self.output_usage[program.e_nodes[idx].outputs.range()] {
-                *usage = 1;
+                *usage = OutputUsage::Needed(1);
             }
         }
     }
@@ -311,7 +311,8 @@ impl Planner {
                     // executor's per-output Skip/Needed); once per consumer edge,
                     // counted at push so the visit cause needs no payload.
                     let outputs = program.e_nodes[addr.target_idx].outputs;
-                    plan.output_usage[outputs.start as usize + addr.port_idx] += 1;
+                    let out_idx = outputs.start as usize + addr.port_idx;
+                    plan.output_usage[out_idx].inc();
                     self.stack.push(Visit {
                         e_node_idx: addr.target_idx,
                         cause: VisitCause::Discover,
