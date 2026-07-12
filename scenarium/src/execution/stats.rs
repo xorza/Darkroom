@@ -139,12 +139,12 @@ pub enum RunPhase {
     Finished { elapsed_secs: f64 },
 }
 
-/// One live progress event for a node. `nodes` is the authoring node(s) the
-/// flattened node attributes to (interior id + enclosing composite instances),
-/// already resolved via the [`FlattenMap`] so the consumer needn't be.
+/// One live progress event for a node. `node_id` is the flattened execution
+/// id; project it onto authoring node(s) via [`FlattenMap::attribution`], like
+/// the other stat lists.
 #[derive(Debug, Clone)]
 pub struct RunProgress {
-    pub nodes: Vec<NodeId>,
+    pub node_id: NodeId,
     pub phase: RunPhase,
 }
 
@@ -155,9 +155,9 @@ pub struct RunProgress {
 /// ([`Graph::pinned_outputs`](crate::graph::Graph::pinned_outputs)), or that
 /// belong to a pinned-root node (a node-seeded on-demand preview target —
 /// every output counts), are included; a run with no pinned output/root on the
-/// node sends nothing. `node_id` is the authoring node the pin was actually
-/// set on — already projected through the compile-phase `FlattenMap`, like
-/// [`RunProgress::nodes`] — *not* also folded onto enclosing composite
+/// node sends nothing. Unlike [`RunProgress::node_id`] and the other stat
+/// lists, `node_id` here is *already* projected onto the authoring node the
+/// pin was actually set on — it is *not* also folded onto enclosing composite
 /// instances, since a pin lives on one specific node's port, unlike a status
 /// that reasonably summarizes a whole subtree.
 #[derive(Debug, Clone)]

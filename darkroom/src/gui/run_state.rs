@@ -253,15 +253,19 @@ impl RunState {
     /// Apply one live [`RunProgress`] event: mark the node(s) `Running` on
     /// `Started`, `Executed` on `Finished`. Overwrites the prior status (the
     /// final [`set_results`](Self::set_results) reconciles, e.g. summing an
-    /// instance subtree's times). `nodes` is already the authoring
-    /// attribution, so no flatten projection is needed here.
-    pub(crate) fn apply_progress(&mut self, progress: &RunProgress) {
+    /// instance subtree's times) — deliberately *not* folded through
+    /// `record_status`'s `merged`, since `Running` is live-only and must
+    /// always win over a stale `Errored`/`MissingInputs` from the last run.
+    /// `flatten` is the compile-phase map of the program the event came
+    /// from (like [`set_results`](Self::set_results)) — `progress.node_id`
+    /// is a flattened id, projected onto authoring nodes here.
+    pub(crate) fn apply_progress(&mut self, progress: &RunProgress, flatten: &FlattenMap) {
         let status = match progress.phase {
             RunPhase::Started { at } => ExecStatus::Running(at),
             RunPhase::Finished { elapsed_secs } => ExecStatus::Executed(elapsed_secs),
         };
-        for &id in &progress.nodes {
-            self.nodes.entry(id).or_default().status = status;
+        for node_id in flatten.attribution(progress.node_id) {
+            self.nodes.entry(node_id).or_default().status = status;
         }
     }
 
@@ -332,25 +336,36 @@ mod tests {
 
     #[test]
     fn apply_progress_marks_all_attributed_nodes_running_then_executed() {
-        let mut rs = RunState::default();
         let (interior, instance) = (nid(1), nid(2));
-        let nodes = vec![interior, instance];
+        let flat = nid(100);
+        let mut map = FlattenMap::default();
+        map.reset();
+        let scope = map.push_scope(instance, 0);
+        map.set_leaf(flat, scope, interior);
+
+        let mut rs = RunState::default();
 
         // Started → every attributed node turns Running.
-        rs.apply_progress(&RunProgress {
-            nodes: nodes.clone(),
-            phase: RunPhase::Started {
-                at: std::time::Instant::now(),
+        rs.apply_progress(
+            &RunProgress {
+                node_id: flat,
+                phase: RunPhase::Started {
+                    at: std::time::Instant::now(),
+                },
             },
-        });
+            &map,
+        );
         assert!(matches!(rs.status(interior), ExecStatus::Running(_)));
         assert!(matches!(rs.status(instance), ExecStatus::Running(_)));
 
         // Finished → Executed with the reported time (overwrites Running).
-        rs.apply_progress(&RunProgress {
-            nodes,
-            phase: RunPhase::Finished { elapsed_secs: 0.5 },
-        });
+        rs.apply_progress(
+            &RunProgress {
+                node_id: flat,
+                phase: RunPhase::Finished { elapsed_secs: 0.5 },
+            },
+            &map,
+        );
         assert_eq!(rs.status(interior), ExecStatus::Executed(0.5));
         assert_eq!(rs.status(instance), ExecStatus::Executed(0.5));
 

@@ -2500,9 +2500,7 @@ mod behavior {
             let RunEvent::Progress(p) = e else {
                 continue;
             };
-            // No subgraphs in `test_graph` → each event maps to exactly one node.
-            assert_eq!(p.nodes.len(), 1);
-            events.push((p.nodes[0], p.phase));
+            events.push((p.node_id, p.phase));
         }
 
         let name_of: std::collections::HashMap<NodeId, String> =

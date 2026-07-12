@@ -467,7 +467,7 @@ async fn worker_streams_node_progress_before_finished() {
             .expect("worker channel closed");
         match report {
             WorkerReport::Progress(p) => {
-                assert_eq!(p.nodes, vec![print_node_id], "progress maps to the node");
+                assert_eq!(p.node_id, print_node_id, "progress maps to the node");
                 match p.phase {
                     RunPhase::Started { .. } => started += 1,
                     RunPhase::Finished { .. } => node_finished += 1,

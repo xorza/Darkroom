@@ -172,9 +172,10 @@ impl App {
                     self.editor.run_state.clear();
                     self.engine.status.error(format!("run failed: {err}"));
                 }
-                WorkerEvent::NodeProgress(progress) => {
-                    self.editor.run_state.apply_progress(&progress)
-                }
+                WorkerEvent::NodeProgress(progress) => self
+                    .editor
+                    .run_state
+                    .apply_progress(&progress, &self.engine.flatten_map),
                 WorkerEvent::PinnedOutputs(pinned) => {
                     self.editor.run_state.set_pinned_values(pinned)
                 }

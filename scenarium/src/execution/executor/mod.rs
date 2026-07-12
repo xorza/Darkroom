@@ -280,7 +280,7 @@ impl Executor {
             if let Some(events) = events {
                 events
                     .send(RunEvent::Progress(RunProgress {
-                        nodes: flatten.attribution(flat_id).collect(),
+                        node_id: flat_id,
                         phase: RunPhase::Started { at: invoke_start },
                     }))
                     .expect(EVENTS_OUTLIVE_RUN);
@@ -350,7 +350,7 @@ impl Executor {
             if !cancelled && let Some(events) = events {
                 events
                     .send(RunEvent::Progress(RunProgress {
-                        nodes: flatten.attribution(flat_id).collect(),
+                        node_id: flat_id,
                         phase: RunPhase::Finished {
                             elapsed_secs: run_time,
                         },
