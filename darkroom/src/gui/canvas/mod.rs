@@ -354,10 +354,6 @@ impl GraphUI {
                             // share the breaker probe so they're cuttable too.
                             subscription_ui
                                 .draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
-                            // Pins too — a satellite can end up anywhere on
-                            // the canvas once dragged, so it draws here
-                            // rather than nested in its node's own body.
-                            pin_ui.draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,
@@ -367,6 +363,12 @@ impl GraphUI {
                                 inspectors,
                             };
                             node_ui.draw_all(ui, rcx, visible, &mut probe, out);
+                            // Pins paint after the node bodies, like the
+                            // inspection panels below — a preview widget can
+                            // end up anywhere on the canvas once dragged, and
+                            // should read as floating above everything, not
+                            // nested in (or hidden under) its node's body.
+                            pin_ui.draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
                         }
                         // Inspection panels paint after the node bodies so
                         // they sit on top and win clicks over the nodes
@@ -383,7 +385,6 @@ impl GraphUI {
                         breaker_ui.draw(ui, ctx);
                         connection_ui.draw_in_flight(ui, ctx, scene, geometry, canvas_origin);
                         subscription_ui.draw_in_flight(ui, ctx, scene, geometry, canvas_origin);
-                        pin_ui.draw_in_flight(ui, ctx, scene, geometry, canvas_origin);
                     });
             });
     }

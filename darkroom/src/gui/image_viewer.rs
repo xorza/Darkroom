@@ -722,23 +722,29 @@ fn fit_viewport(img: Vec2, pane: Vec2) -> Viewport {
     }
 }
 
-/// Longest-side cap of `native` to [`MAX_TEXTURE_DIM`], aspect-preserving,
-/// never upscaling, at least 1×1.
-fn capped_target(native: UVec2) -> UVec2 {
-    let scale = (MAX_TEXTURE_DIM as f32 / native.x.max(native.y) as f32).min(1.0);
+/// Longest-side cap of `native` to `max_dim`, aspect-preserving, never
+/// upscaling, at least 1×1.
+fn capped_target(native: UVec2, max_dim: u32) -> UVec2 {
+    let scale = (max_dim as f32 / native.x.max(native.y) as f32).min(1.0);
     UVec2::new(
         (native.x as f32 * scale).round().max(1.0) as u32,
         (native.y as f32 * scale).round().max(1.0) as u32,
     )
 }
 
-/// Convert a held image value to an uploadable RGBA8 raster: downcast to
-/// the lens [`Image`](LensImage), read its CPU pixels (resident by
-/// construction — the worker's thumbnail pass pulled the shared buffer to
-/// the CPU; the `cpu_only` context is only a formality for `make_cpu`'s
-/// signature), then cap + convert in one fused pass. `Err` carries the
-/// user-facing reason.
-fn render_full(value: &DynamicValue) -> Result<RenderedImage, String> {
+/// Convert a held image value to an uploadable RGBA8 raster capped to
+/// `max_dim` on its longest side, plus the source's native size/format
+/// before that cap: downcast to the lens [`Image`](LensImage), read its CPU
+/// pixels (resident by construction — the worker's thumbnail pass pulled
+/// the shared buffer to the CPU; the `cpu_only` context is only a formality
+/// for `make_cpu`'s signature), then cap + convert in one fused pass. `Err`
+/// carries the user-facing reason. Shared by the viewer's full-resolution
+/// render (capped to [`MAX_TEXTURE_DIM`]) and the canvas pin-preview
+/// thumbnail (capped much smaller).
+pub(crate) fn convert_image_value(
+    value: &DynamicValue,
+    max_dim: u32,
+) -> Result<(aperture::Image, UVec2, ColorFormat), String> {
     let image = value
         .as_custom::<LensImage>()
         .ok_or_else(|| "value is not an image".to_owned())?;
@@ -752,11 +758,20 @@ fn render_full(value: &DynamicValue) -> Result<RenderedImage, String> {
         return Err("image is empty".to_owned());
     }
     let native_format = cpu.desc.color_format;
-    let target = capped_target(native_size);
+    let target = capped_target(native_size, max_dim);
     // 1:1 passes through as a plain RGBA8 convert (Preview never upscales).
     let rgba = Preview::new(target.x as usize, target.y as usize).to_rgba8(&cpu);
+    let image = rgba8_image(rgba).expect("Preview::to_rgba8 yields packed RGBA_U8");
+    Ok((image, native_size, native_format))
+}
+
+/// Convert a held image value to an uploadable RGBA8 raster capped to
+/// [`MAX_TEXTURE_DIM`], plus the source dimensions and pixel format it was
+/// derived from.
+fn render_full(value: &DynamicValue) -> Result<RenderedImage, String> {
+    let (image, native_size, native_format) = convert_image_value(value, MAX_TEXTURE_DIM as u32)?;
     Ok(RenderedImage {
-        image: rgba8_image(rgba).expect("Preview::to_rgba8 yields packed RGBA_U8"),
+        image,
         native_size,
         native_format,
     })
@@ -828,21 +843,34 @@ mod tests {
 
     #[test]
     fn capped_target_shrinks_only_oversized_images() {
+        let cap = MAX_TEXTURE_DIM as u32;
         // Under the cap: unchanged.
         assert_eq!(
-            capped_target(UVec2::new(6000, 4000)),
+            capped_target(UVec2::new(6000, 4000), cap),
             UVec2::new(6000, 4000)
         );
         // Exactly at the cap: unchanged.
-        assert_eq!(capped_target(UVec2::new(8192, 100)), UVec2::new(8192, 100));
+        assert_eq!(
+            capped_target(UVec2::new(8192, 100), cap),
+            UVec2::new(8192, 100)
+        );
         // Over the cap: longest side pinned to 8192, aspect preserved
         // (16384×8192 → 8192×4096).
         assert_eq!(
-            capped_target(UVec2::new(16384, 8192)),
+            capped_target(UVec2::new(16384, 8192), cap),
             UVec2::new(8192, 4096)
         );
         // A degenerate-thin image never rounds to zero.
-        assert_eq!(capped_target(UVec2::new(100_000, 1)), UVec2::new(8192, 1));
+        assert_eq!(
+            capped_target(UVec2::new(100_000, 1), cap),
+            UVec2::new(8192, 1)
+        );
+        // A smaller cap (the pin-preview thumbnail's use case) scales down
+        // the same way, independent of `MAX_TEXTURE_DIM`.
+        assert_eq!(
+            capped_target(UVec2::new(1024, 512), 256),
+            UVec2::new(256, 128)
+        );
     }
 
     #[test]
