@@ -289,16 +289,28 @@ impl PinUi {
                 if broken {
                     probe.mark_broken_pin(out_port);
                 }
-                let hovered = !broken && emphasis.hovered(geometry.ports.is_hovered(port_ref));
+                // Like a data wire, the bezier's emphasis follows *either*
+                // endpoint's hover — the port circle or the satellite.
+                let sat_hover = satellite_hovered(ui, out_port);
+                let hovered =
+                    !broken && emphasis.hovered(geometry.ports.is_hovered(port_ref) || sat_hover);
                 let base = port_color(theme, &output.ty, PortKind::Output, false);
-                let color = if broken {
+                let wire_color = if broken {
                     theme.colors.connection_broken
                 } else {
                     emphasis.tint(base, hovered)
                 };
                 let width = emphasis.width(theme.connection_width, hovered || broken);
-                add_cubic_wire(ui, g.p0, g.p3, handles, width, Brush::Solid(color));
-                record_satellite(ui, out_port, &g, color);
+                add_cubic_wire(ui, g.p0, g.p3, handles, width, Brush::Solid(wire_color));
+                // Unlike the bezier, the satellite's own fill brightens on
+                // its *own* direct hover, like a port circle — not the
+                // wire-style endpoint emphasis.
+                let satellite_fill = if broken {
+                    theme.colors.connection_broken
+                } else {
+                    port_color(theme, &output.ty, PortKind::Output, sat_hover)
+                };
+                record_satellite(ui, out_port, &g, satellite_fill);
             }
         }
     }
@@ -376,6 +388,15 @@ fn scan_satellite_drag_start(ui: &Ui, scene: &Scene) -> Option<PortRef> {
 fn satellite_dragging(ui: &Ui, port: OutputPort) -> bool {
     let r = ui.response_for(pin_satellite_wid(port));
     r.drag_started() || r.drag_delta().is_some()
+}
+
+/// `true` when the pointer is directly over `port`'s satellite this frame —
+/// polled the same way as [`satellite_dragging`], for the same reason (only
+/// one pin is ever relevant at a time, no `CanvasGeometry` domain needed).
+/// Drives the bezier's endpoint-hover emphasis (like a data wire's) and the
+/// satellite's own direct-hover fill (like a port circle's).
+fn satellite_hovered(ui: &Ui, port: OutputPort) -> bool {
+    ui.response_for(pin_satellite_wid(port)).hovered
 }
 
 #[cfg(test)]
