@@ -11,7 +11,6 @@ use scenarium::graph::{
 };
 use scenarium::library::Library;
 use scenarium::node::function::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
-use scenarium::node::special::SpecialNode;
 
 use crate::core::document::{GraphView, Viewport};
 use crate::gui::run_state::{ExecStatus, RunState};
@@ -149,9 +148,6 @@ pub struct SceneNode {
     pub subgraph: Option<SubgraphRef>,
     /// Sink node (its func is `sink` — no outputs feed downstream).
     pub sink: bool,
-    /// The built-in `Preview` special node, which renders its fetched output
-    /// thumbnail as an inline image view in its body.
-    pub preview: bool,
     /// Excluded from execution (`Node::disabled`). The header badge
     /// toggles this via `Intent::SetDisabled`; the body paints dimmed.
     pub disabled: bool,
@@ -162,8 +158,8 @@ pub struct SceneNode {
     /// has an output worth persisting and honors a content digest. Folds the
     /// func-derived reasons caching can't apply — self-caching (`uncacheable`),
     /// no outputs (most sinks / boundary stubs), or [`impure`](Self::impure) (no
-    /// digest, so no mode is honored). A sink *with* an output (a Preview/tap)
-    /// stays `cacheable` — its stored value is the point.
+    /// digest, so no mode is honored). A sink *with* an output stays
+    /// `cacheable` — its stored value is the point.
     pub cacheable: bool,
     /// The node's func is `Impure`. An impure node has no content digest, so no
     /// cache mode is ever honored (folded into `cacheable`); the header also
@@ -451,7 +447,6 @@ impl Scene {
                 events,
                 subgraph: interface.subgraph,
                 sink: interface.sink,
-                preview: matches!(&node.kind, NodeKind::Special(SpecialNode::Preview)),
                 disabled: node.disabled,
                 cache: node.cache,
                 cacheable: !interface.uncacheable
@@ -610,7 +605,6 @@ pub(crate) mod test_support {
             events: Span::default(),
             subgraph: None,
             sink: false,
-            preview: false,
             disabled: false,
             cache: CacheMode::None,
             cacheable: false,
@@ -960,41 +954,5 @@ mod tests {
         );
         assert!(!impure.cacheable, "an Impure func hides cache chips");
         assert!(!pure.sink && !impure.sink);
-    }
-
-    #[test]
-    fn preview_sink_stays_cacheable() {
-        use scenarium::node::special::SpecialNode;
-
-        // A Preview node is a sink (nothing downstream) yet has an output to
-        // persist, so — unlike an output-less sink (Print/RunSinks) — it keeps
-        // its cache chips.
-        let mut graph = Graph::default();
-        let preview = Node::new(NodeKind::Special(SpecialNode::Preview));
-        let preview_id = preview.id;
-        graph.add(preview);
-
-        let view = GraphView::for_graph(&graph);
-        let mut scene = Scene::default();
-        scene.rebuild(
-            &graph,
-            &view,
-            &Library::default(),
-            None,
-            &RunState::default(),
-        );
-
-        let node = scene.nodes.iter().find(|n| n.id == preview_id).unwrap();
-        assert!(node.sink, "Preview is a sink");
-        assert!(
-            node.cacheable,
-            "a sink with an output stays cacheable — its snapshot is the point"
-        );
-        // The flag the node body + watch/open scans key off to render the
-        // inline image view.
-        assert!(
-            node.preview,
-            "the Preview special node is flagged for its view"
-        );
     }
 }

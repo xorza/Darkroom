@@ -11,7 +11,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::elements::preview::preview_func;
 use crate::elements::run_sinks::run_sinks_func;
 use crate::node::function::Func;
 
@@ -25,18 +24,10 @@ pub enum SpecialNode {
     /// promotion lives in the planner's root collection. Interface in
     /// [`run_sinks`](crate::elements::run_sinks).
     RunSinks,
-
-    /// A review sink: one input, one wildcard passthrough output. It snapshots
-    /// its input into its own (RAM-cached by default) output so the editor can
-    /// preview the value on demand, independent of the upstream node's cache.
-    /// Being a sink, a run always reaches it; being a passthrough, it can also
-    /// sit inline on a wire as a caching tap. Interface in
-    /// [`preview`](crate::elements::preview).
-    Preview,
 }
 
 /// Every special node (default config), for the editor's node-add menu.
-pub const ALL: &[SpecialNode] = &[SpecialNode::RunSinks, SpecialNode::Preview];
+pub const ALL: &[SpecialNode] = &[SpecialNode::RunSinks];
 
 impl SpecialNode {
     /// This node's hardcoded interface + lambda. Used by flatten (ports, lambda,
@@ -44,7 +35,6 @@ impl SpecialNode {
     pub fn func(self) -> &'static Func {
         match self {
             SpecialNode::RunSinks => run_sinks_func(),
-            SpecialNode::Preview => preview_func(),
         }
     }
 }

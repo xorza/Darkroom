@@ -799,8 +799,7 @@ impl Node {
     /// The id is minted here (the one RNG-touching constructor); callers fill
     /// in wiring, or use `From<&Func>` / `subgraph_instance` for a node whose
     /// ports are pre-shaped from its definition. A `Special` node copies its
-    /// hardcoded func's `default_cache_mode` (so a Preview node defaults to
-    /// Disk); every other kind seeds `None`.
+    /// hardcoded func's `default_cache_mode`; every other kind seeds `None`.
     pub fn new(kind: NodeKind) -> Self {
         let cache = match &kind {
             NodeKind::Special(s) => s.func().default_cache_mode,

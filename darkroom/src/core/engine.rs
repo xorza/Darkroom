@@ -231,8 +231,8 @@ impl Engine {
     }
 
     /// Ask the worker for several nodes' computed input/output values (GUI
-    /// inspector panels, image viewers, Preview nodes). Replies land on
-    /// later [`Self::drain_worker`] calls.
+    /// inspector panels, image viewers). Replies land on later
+    /// [`Self::drain_worker`] calls.
     pub(crate) fn request_argument_values(&self, requests: impl IntoIterator<Item = ValueRequest>) {
         self.worker.request_argument_values(requests);
     }

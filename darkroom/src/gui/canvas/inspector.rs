@@ -4,8 +4,7 @@
 //!
 //! Input/output lines show the last run's computed runtime value when one
 //! is available (pulled on demand into [`crate::gui::run_state::RunState`] for
-//! open panels), falling back to the static binding otherwise; image
-//! ports also render a preview thumbnail beneath their line.
+//! open panels), falling back to the static binding otherwise.
 //!
 //! Panels are **not** aperture `Popup`s — those record into the
 //! screen-space `Layer::Popup` and wouldn't track the canvas. Instead
@@ -33,13 +32,10 @@ use scenarium::execution::stats::LogLevel;
 use scenarium::graph::NodeId;
 use scenarium::library::Library;
 
-use crate::core::document::{PortKind, PortRef};
-use crate::gui::UiAction;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::node::header::fmt_elapsed;
 use crate::gui::node::{exec_color, node_widget_id};
-use crate::gui::node_values::{PortValueView, image_preview};
 use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
@@ -76,9 +72,6 @@ struct PanelDraw<'a> {
 
 /// Fixed panel width in canvas (pre-transform) units.
 const PANEL_WIDTH: f32 = 280.0;
-/// Max width of an inline preview thumbnail (panel width minus the
-/// panel's 8 px padding on each side).
-const PREVIEW_MAX_WIDTH: f32 = PANEL_WIDTH - 16.0;
 /// Gap between the node's right edge and the panel's left edge.
 const PANEL_GAP: f32 = 16.0;
 /// Most recent log lines shown per node, so the panel stays bounded.
@@ -129,37 +122,6 @@ impl Inspectors {
         }
         self.modes
             .retain(|id, _| scene.nodes.iter().any(|n| n.id == *id));
-    }
-
-    /// Prepass scan: surface clicks on preview thumbnails (from last
-    /// frame's responses, like every navigation input) as
-    /// [`UiAction::OpenImageViewer`] requests. Polls every port of every
-    /// open panel's node — a port that drew no thumbnail simply has no
-    /// response and reads unclicked.
-    pub(crate) fn emit_preview_opens(&self, ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
-        for &node_id in self.modes.keys() {
-            let Some(node) = scene.nodes.iter().find(|n| n.id == node_id) else {
-                continue;
-            };
-            let sides = [
-                (PortKind::Input, scene.inputs(node.inputs).len()),
-                (PortKind::Output, scene.outputs(node.outputs).len()),
-            ];
-            for (kind, count) in sides {
-                for port_idx in 0..count {
-                    if ui
-                        .response_for(preview_wid(node_id, kind, port_idx))
-                        .clicked
-                    {
-                        actions.push(UiAction::OpenImageViewer(PortRef {
-                            node_id,
-                            kind,
-                            port_idx,
-                        }));
-                    }
-                }
-            }
-        }
     }
 
     /// Record a panel for every open inspector, positioned just right of
@@ -265,9 +227,8 @@ impl Inspectors {
                     line(ui, node.kind_label.as_str(), muted_style(theme, ui));
                 }
 
-                // Status right under the title — the most-glanceable fact
-                // shouldn't sit below two full-width previews. The colored
-                // line is self-labeling; no section header.
+                // Status right under the title — the most-glanceable fact.
+                // The colored line is self-labeling; no section header.
                 let status_color =
                     exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
                 line(
@@ -309,7 +270,6 @@ impl Inspectors {
                         match values.and_then(|v| v.inputs.get(i)) {
                             Some(pv) => {
                                 port_row(ui, theme, ctx.library, name, &input.ty, Some(&pv.text));
-                                draw_preview(ui, theme, node.id, PortKind::Input, i, pv);
                             }
                             None => {
                                 let val = value_str(&input.binding);
@@ -334,7 +294,6 @@ impl Inspectors {
                         match values.and_then(|v| v.outputs.get(i)) {
                             Some(pv) => {
                                 port_row(ui, theme, ctx.library, name, &output.ty, Some(&pv.text));
-                                draw_preview(ui, theme, node.id, PortKind::Output, i, pv);
                             }
                             None => port_row(ui, theme, ctx.library, name, &output.ty, None),
                         }
@@ -444,32 +403,6 @@ fn port_label_text(library: &Library, name: &str, ty: &DataType) -> String {
     }
 }
 
-/// Draw a port's preview thumbnail beneath its value line, capped at
-/// [`PREVIEW_MAX_WIDTH`], via the shared [`image_preview`] renderer. The
-/// thumbnail is a click target: [`Inspectors::emit_preview_opens`] reads it in
-/// the prepass to open the full-resolution viewer tab. No-op when the port has
-/// no preview.
-fn draw_preview(
-    ui: &mut Ui,
-    theme: &Theme,
-    node_id: NodeId,
-    kind: PortKind,
-    idx: usize,
-    pv: &PortValueView,
-) {
-    let Some(handle) = &pv.preview else {
-        return;
-    };
-    image_preview(
-        ui,
-        theme,
-        preview_wid(node_id, kind, idx),
-        handle,
-        PREVIEW_MAX_WIDTH,
-        Spacing::ZERO,
-    );
-}
-
 fn title_style(ui: &Ui) -> TextStyle {
     sized_text(ui, 14.0)
 }
@@ -515,12 +448,6 @@ pub(crate) fn inspect_badge_wid(node_id: NodeId) -> WidgetId {
 /// Stable id for a node's floating inspection panel.
 fn inspect_panel_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.inspect_panel", node_id))
-}
-
-/// Stable id for one port's preview thumbnail in a node's panel —
-/// domain-keyed so the prepass can poll its click without a cache.
-fn preview_wid(node_id: NodeId, kind: PortKind, idx: usize) -> WidgetId {
-    WidgetId::from_hash(("inspector.preview", node_id, kind, idx))
 }
 
 #[cfg(test)]

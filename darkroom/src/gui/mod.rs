@@ -52,7 +52,11 @@ pub(crate) enum UiAction {
     /// chip at the end of the strip).
     NewSubgraph,
     /// Show this port's cached runtime image at full resolution in the
-    /// image-viewer tab (an inspector preview thumbnail was clicked).
+    /// image-viewer tab. Currently unreachable — its only triggers (the
+    /// inspector's and the Preview node's inline thumbnails) were removed
+    /// along with those preview surfaces; kept for a future trigger (e.g. a
+    /// port context-menu entry) rather than deleting the viewer-tab feature.
+    #[allow(dead_code)]
     OpenImageViewer(PortRef),
 }
 

@@ -112,8 +112,8 @@ pub(crate) struct Editor {
     pub(crate) run_state: RunState,
     /// Per-frame registry of which nodes' runtime values are needed this run
     /// epoch: the watching surfaces (open inspection panels, image-viewer
-    /// tabs, Preview nodes) each register via `ValueRequests::watch` as they
-    /// record. `App` forwards `take_requests` to the worker. Kept off
+    /// tabs) each register via `ValueRequests::watch` as they record. `App`
+    /// forwards `take_requests` to the worker. Kept off
     /// `RunState` — that's the backward-looking projection of the last
     /// finished run; this is the forward-looking ask for the next one. Reset
     /// alongside `run_state`'s epoch by `Self::begin_run` / `Self::clear_run_state`.

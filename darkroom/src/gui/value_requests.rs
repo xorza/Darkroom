@@ -5,11 +5,11 @@
 //! job is projecting the *last finished* run's status/logs/values onto
 //! nodes — a backward-looking read of what already happened. This is the
 //! forward half of the same protocol: every value-showing surface
-//! (inspector panels, image-viewer tabs, Preview nodes) calls
-//! [`ValueRequests::watch`] as it records itself, declaring its node's
-//! value need for the frame; `App` drains the accumulated batch once via
-//! [`ValueRequests::take_requests`] into worker sends, tagged with the run
-//! epoch [`Self::set_epoch`] last synced from `RunState`.
+//! (inspector panels, image-viewer tabs) calls [`ValueRequests::watch`] as
+//! it records itself, declaring its node's value need for the frame; `App`
+//! drains the accumulated batch once via [`ValueRequests::take_requests`]
+//! into worker sends, tagged with the run epoch [`Self::set_epoch`] last
+//! synced from `RunState`.
 
 use std::cell::RefCell;
 use std::collections::HashSet;

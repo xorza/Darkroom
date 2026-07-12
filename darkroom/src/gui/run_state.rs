@@ -26,7 +26,6 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use aperture::Ui;
 use scenarium::data::RamUsage;
 use scenarium::execution::stats::{ExecutionStats, FlattenMap, LogEntry, RunPhase, RunProgress};
 use scenarium::execution::{ArgumentValues, RunError};
@@ -280,23 +279,18 @@ impl RunState {
             .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty());
     }
 
-    /// Deposit a worker value reply (uploading any preview textures via
-    /// `ui`). A reply tagged with a stale epoch, or for a node the worker
-    /// couldn't resolve (`None`), stores nothing — the node stays "asked"
-    /// either way, so it isn't re-requested until the next epoch.
-    pub(crate) fn ingest_values(
-        &mut self,
-        ui: &Ui,
-        request: ValueRequest,
-        values: Option<ArgumentValues>,
-    ) {
+    /// Deposit a worker value reply. A reply tagged with a stale epoch, or
+    /// for a node the worker couldn't resolve (`None`), stores nothing — the
+    /// node stays "asked" either way, so it isn't re-requested until the next
+    /// epoch.
+    pub(crate) fn ingest_values(&mut self, request: ValueRequest, values: Option<ArgumentValues>) {
         if request.run_id != self.run_id {
             return;
         }
         let Some(values) = values else {
             return;
         };
-        self.nodes.entry(request.node_id).or_default().values = Some(build_view(ui, values));
+        self.nodes.entry(request.node_id).or_default().values = Some(build_view(values));
     }
 }
 

@@ -353,8 +353,6 @@ impl GraphUI {
                                 selected,
                                 geometry,
                                 inspectors,
-                                run_state: ctx.run_state,
-                                value_requests: ctx.value_requests,
                             };
                             node_ui.draw_all(ui, rcx, visible, &mut probe, out);
                         }

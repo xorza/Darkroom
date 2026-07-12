@@ -148,9 +148,9 @@ impl App {
     /// reprojects per-node `ExecStatus` (the status glow) and per-node
     /// logs (the inspector's Log section); a failed run clears both and
     /// surfaces in the status bar. An argument-value reply lands in the run
-    /// state (uploading any preview textures via `ui`). Drained before the
-    /// editor's scene rebuild so they reflect the latest run.
-    fn drain_worker_events(&mut self, ui: &Ui) {
+    /// state. Drained before the editor's scene rebuild so they reflect the
+    /// latest run.
+    fn drain_worker_events(&mut self) {
         // Collect to drop the channel borrow before the status writes below
         // (both live on `self.engine`).
         let events: Vec<WorkerEvent> = self.engine.drain_worker().collect();
@@ -181,15 +181,15 @@ impl App {
                     self.editor.run_state.apply_progress(&progress)
                 }
                 WorkerEvent::ArgumentValues { request, values } => {
-                    self.editor.run_state.ingest_values(ui, request, values)
+                    self.editor.run_state.ingest_values(request, values)
                 }
             }
         }
     }
 
     /// Forward the frame's pending value requests to the worker. Every
-    /// value-showing surface (inspector panels, image-viewer panes, Preview
-    /// nodes) registered its node into the run state's request registry as it
+    /// value-showing surface (inspector panels, image-viewer panes)
+    /// registered its node into the run state's request registry as it
     /// recorded; drain the batch here, after the record. The reply arrives on a
     /// later frame's drain.
     fn request_watched_values(&mut self) {
@@ -326,7 +326,7 @@ impl aperture::App for App {
         // Drain anything the worker posted since last frame, before the
         // editor rebuilds its scene so the status/log projections it
         // reads reflect the latest run.
-        self.drain_worker_events(ui);
+        self.drain_worker_events();
 
         // While nodes are computing, keep repainting (~20 fps) so the running
         // node's live elapsed-so-far timer ticks — a single long node emits no

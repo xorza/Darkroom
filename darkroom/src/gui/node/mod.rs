@@ -3,7 +3,6 @@ pub(crate) mod memory_row;
 pub(crate) mod port_color;
 pub(crate) mod port_rename;
 pub(crate) mod port_row;
-pub(crate) mod preview;
 pub(crate) mod value_editor;
 
 use crate::core::document::GraphRef;
@@ -20,11 +19,9 @@ use crate::gui::node::header::{
 };
 use crate::gui::node::memory_row::memory_row;
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid, ports_row};
-use crate::gui::node::preview::preview_section;
-use crate::gui::run_state::{ExecStatus, RunState};
+use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, Scene, SceneNode};
 use crate::gui::theme::Theme;
-use crate::gui::value_requests::ValueRequests;
 use aperture::{
     Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };
@@ -60,12 +57,6 @@ pub(crate) struct RecordCtx<'a> {
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
     pub(crate) inspectors: &'a Inspectors,
-    /// Last run's per-node runtime values + status — read by the Preview
-    /// node's inline image view (its fetched output thumbnail).
-    pub(crate) run_state: &'a RunState,
-    /// This frame's value-watch registry — the Preview node's inline image
-    /// view registers here as it records, so its output value is fetched.
-    pub(crate) value_requests: &'a ValueRequests,
 }
 
 /// Owns rendering of every graph node plus the single active drag
@@ -258,11 +249,6 @@ impl NodeUI {
                 header(ui, rcx, node, out);
                 status_row(ui, rcx, node, out);
                 ports_row(ui, rcx, node, out);
-                // Preview image above the memory readout, so the footprint
-                // label sits beneath the thumbnail it measures.
-                if node.preview {
-                    preview_section(ui, rcx, node);
-                }
                 memory_row(ui, rcx, node);
             });
         // Pull the body response's flags into locals so its `&mut ui`
