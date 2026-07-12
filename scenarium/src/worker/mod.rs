@@ -116,7 +116,7 @@ impl Worker {
     /// document).
     pub fn new<ExecutionCallback>(callback: ExecutionCallback) -> Self
     where
-        ExecutionCallback: Fn(WorkerReport) + Send + 'static,
+        ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
     {
         let (tx, rx) = unbounded_channel::<Vec<WorkerMessage>>();
         let event_loop_started = Arc::new(AtomicBool::new(false));
@@ -166,6 +166,12 @@ impl Worker {
 
     pub fn exit(&mut self) {
         self.tx.send(vec![WorkerMessage::Exit]).ok();
+        // The abort below fires almost immediately (the loop is normally
+        // parked at a `.await`), racing out the graceful `Exit` message above
+        // before the loop ever gets to observe it — so signal the same
+        // cooperative stop the executor polls between nodes, in case the
+        // task happens to get a chance to notice it first.
+        self.request_cancel();
 
         if let Some(thread_handle) = self.thread_handle.take() {
             thread_handle.abort();
@@ -348,7 +354,7 @@ async fn worker_loop<ExecutionCallback>(
     event_loop_started: Arc<AtomicBool>,
     cancel: CancelToken,
 ) where
-    ExecutionCallback: Fn(WorkerReport) + Send + 'static,
+    ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
 {
     let mut execution_engine = ExecutionEngine::default();
 
@@ -477,49 +483,25 @@ async fn worker_loop<ExecutionCallback>(
             // sets `cancel` directly (a shared token), so no command-channel
             // round-trip is needed for it to be observed mid-run.
             cancel.reset();
-            // Forward each node's live progress (and any pinned-output pushes) to
-            // the host as it runs, ahead of the final stats: the executor sends on
-            // `event_tx`, and this loop drains `event_rx` concurrently with the
-            // run, batching each wake with `recv_many` to keep select churn down.
-            let (event_tx, mut event_rx) = unbounded_channel::<RunEvent>();
-            let mut event_buf: Vec<RunEvent> = Vec::new();
-            let report_of = |event: RunEvent| match event {
-                RunEvent::Progress(p) => WorkerReport::Progress(p),
-                RunEvent::PinnedOutputs(p) => WorkerReport::PinnedOutputs(p),
+            let seeds = RunSeeds {
+                sinks: intent.execute_sinks,
+                event_triggers: in_loop,
+                events: intent.events.drain().collect(),
+                nodes: intent.execute_nodes.drain().collect(),
             };
-            let result = {
-                let run = execution_engine.execute(
-                    RunSeeds {
-                        sinks: intent.execute_sinks,
-                        event_triggers: in_loop,
-                        events: intent.events.drain().collect(),
-                        nodes: intent.execute_nodes.drain().collect(),
-                    },
-                    Some(&event_tx),
-                    cancel.clone(),
-                );
-                tokio::pin!(run);
-                loop {
-                    tokio::select! {
-                        biased;
-                        r = &mut run => break r,
-                        _ = event_rx.recv_many(&mut event_buf, 64) => {
-                            for e in event_buf.drain(..) {
-                                (execution_callback)(report_of(e));
-                            }
-                        }
-                    }
-                }
-            };
-            // Flush anything buffered between the last poll and completion; the
-            // dropped sender lets `recv_many` return all remaining at once.
-            drop(event_tx);
-            event_rx.recv_many(&mut event_buf, usize::MAX).await;
-            for e in event_buf.drain(..) {
-                (execution_callback)(report_of(e));
-            }
+            let result = run_and_forward(
+                &mut execution_engine,
+                seeds,
+                cancel.clone(),
+                &execution_callback,
+            )
+            .await;
 
             if should_start_event_loop && let Ok(stats) = &result {
+                // Every path that can make `should_start_event_loop` true also
+                // sets `intent.loop_request` or `intent.graph_state`, which
+                // trips `needs_stop` above and tears down any prior loop —
+                // so there's never one still standing here to leak.
                 assert!(event_loop.is_none());
                 let triggers = execution_engine.active_event_triggers(stats);
                 if !triggers.is_empty() {
@@ -542,6 +524,54 @@ async fn worker_loop<ExecutionCallback>(
 
         tokio::task::yield_now().await;
     }
+}
+
+/// Run `seeds` against `engine`, forwarding each [`RunEvent`] (live progress,
+/// pinned-output pushes) to `callback` as it arrives rather than only at the
+/// end. The executor sends on a fresh channel scoped to this one run;
+/// `recv_many` batches each wake to keep select churn down. The post-run
+/// drain flushes anything buffered between the last poll and completion (the
+/// dropped sender lets `recv_many` return everything remaining at once)
+/// before this returns, so every `Progress`/`PinnedOutputs` reaches
+/// `callback` strictly before the caller's own `Finished` report.
+async fn run_and_forward<C>(
+    engine: &mut ExecutionEngine,
+    seeds: RunSeeds,
+    cancel: CancelToken,
+    callback: &C,
+) -> Result<ExecutionStats>
+where
+    C: Fn(WorkerReport) + Sync,
+{
+    let (event_tx, mut event_rx) = unbounded_channel::<RunEvent>();
+    let mut event_buf: Vec<RunEvent> = Vec::new();
+    let report_of = |event: RunEvent| match event {
+        RunEvent::Progress(p) => WorkerReport::Progress(p),
+        RunEvent::PinnedOutputs(p) => WorkerReport::PinnedOutputs(p),
+    };
+    let result = {
+        let run = engine.execute(seeds, Some(&event_tx), cancel);
+        tokio::pin!(run);
+        loop {
+            tokio::select! {
+                biased;
+                r = &mut run => break r,
+                _ = event_rx.recv_many(&mut event_buf, 64) => {
+                    for e in event_buf.drain(..) {
+                        callback(report_of(e));
+                    }
+                }
+            }
+        }
+    };
+    // Flush anything buffered between the last poll and completion; the
+    // dropped sender lets `recv_many` return all remaining at once.
+    drop(event_tx);
+    event_rx.recv_many(&mut event_buf, usize::MAX).await;
+    for e in event_buf.drain(..) {
+        callback(report_of(e));
+    }
+    result
 }
 
 /// Outcome of a teardown: whether a loop was running, and any lambda panics
