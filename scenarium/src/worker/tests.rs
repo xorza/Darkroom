@@ -1,9 +1,11 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::PauseGate;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
+use crate::data::StaticValue;
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::Result as ExecResult;
@@ -15,7 +17,8 @@ use crate::node::event_lambda::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 use crate::worker::{
-    EventRef, EventTrigger, Worker, WorkerMessage, WorkerReport, scan, start_event_loop,
+    EventLoopHandle, EventRef, EventTrigger, Worker, WorkerMessage, WorkerReport, scan,
+    start_event_loop,
 };
 
 /// Print messages a run logged, in order — `print` now logs via
@@ -51,13 +54,7 @@ impl FrameHarness {
         let frame_event_node_id = graph.by_name("Frame Event").unwrap().id;
         let library = Arc::new(library);
 
-        let (tx, compute_rx) = mpsc::channel(cap);
-        let worker = Worker::new(move |report| {
-            // The fixture only asserts on final stats; drop live progress.
-            if let WorkerReport::Finished(result) = report {
-                tx.try_send(result).ok();
-            }
-        });
+        let (worker, compute_rx) = finished_worker(cap);
 
         Self {
             worker,
@@ -127,6 +124,94 @@ fn log_frame_no_graph(library: &Library) -> Graph {
     graph
 }
 
+/// A single `Print` sink node bound to a literal string — the minimal graph
+/// several tests use when they only care about the run completing and its
+/// log line, not the graph's shape.
+fn print_literal_graph(library: &Library, message: &str) -> (Graph, NodeId) {
+    let mut graph = Graph::default();
+    let mut print_node: Node = library.by_name("Print").unwrap().into();
+    print_node.id = NodeId::unique();
+    let print_node_id = print_node.id;
+    graph.add(print_node);
+    graph.set_input_binding(
+        InputPort::new(print_node_id, 0),
+        StaticValue::String(message.to_string()).into(),
+    );
+    (graph, print_node_id)
+}
+
+/// Start an event loop with a single lambda as its only trigger, on a fresh
+/// `NodeId` — the shape most `start_event_loop` tests want when they only
+/// care about one lambda's behavior.
+async fn start_single_event_loop(
+    lambda: EventLambda,
+    pause_gate: PauseGate,
+) -> (EventLoopHandle, mpsc::Receiver<EventRef>, NodeId) {
+    let node_id = NodeId::unique();
+    let (handle, rx) = start_event_loop(
+        vec![EventTrigger {
+            event: EventRef {
+                node_id,
+                event_idx: 0,
+            },
+            lambda,
+            state: SharedAnyState::default(),
+        }],
+        pause_gate,
+    )
+    .await;
+    (handle, rx, node_id)
+}
+
+/// A worker whose callback forwards only `Finished` reports into a fresh
+/// mpsc of capacity `cap` — the shape most tests want when they don't care
+/// about live progress. Works with or without a graph loaded.
+fn finished_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionStats>>) {
+    let (tx, rx) = mpsc::channel(cap);
+    let worker = Worker::new(move |report| {
+        if let WorkerReport::Finished(result) = report {
+            tx.try_send(result).ok();
+        }
+    });
+    (worker, rx)
+}
+
+/// Send `msgs` plus a trailing `Sync`, and block until the batch has fully
+/// committed. Panics on timeout or a dropped reply — every call site here
+/// expects the worker to still be alive and processing.
+async fn sync_after(worker: &Worker, msgs: impl IntoIterator<Item = WorkerMessage>) {
+    let (reply, rx) = oneshot::channel();
+    worker
+        .send_many(msgs.into_iter().chain([WorkerMessage::Sync { reply }]))
+        .unwrap();
+    timeout(Duration::from_millis(500), rx)
+        .await
+        .expect("sync timed out")
+        .expect("sync sender dropped");
+}
+
+/// A unique temp dir removed on drop, so tests don't collide or leak.
+/// `prefix` disambiguates directories from different tests sharing the
+/// process-wide temp dir.
+struct TempDir(std::path::PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn temp_dir(prefix: &str) -> TempDir {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let p = std::env::temp_dir().join(format!(
+        "scenarium-worker-{prefix}-{}-{n}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&p).unwrap();
+    TempDir(p)
+}
+
 #[tokio::test]
 async fn test_worker() -> anyhow::Result<()> {
     let mut h = FrameHarness::new().await;
@@ -154,22 +239,9 @@ async fn test_worker() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn start_event_loop_forwards_events() {
-    let node_id = NodeId::unique();
     let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-    let event_state = SharedAnyState::default();
-
-    let (mut handle, mut event_rx) = start_event_loop(
-        vec![EventTrigger {
-            event: EventRef {
-                node_id,
-                event_idx: 0,
-            },
-            lambda: event_lambda,
-            state: event_state,
-        }],
-        PauseGate::default(),
-    )
-    .await;
+    let (mut handle, mut event_rx, node_id) =
+        start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     let event = event_rx.recv().await.expect("Expected event loop event");
     assert_eq!(
@@ -185,7 +257,6 @@ async fn start_event_loop_forwards_events() {
 
 #[tokio::test]
 async fn start_event_loop_waits_for_callback() {
-    let node_id = NodeId::unique();
     let notify = Arc::new(Notify::new());
     let notify_for_event = Arc::clone(&notify);
     let event_lambda = EventLambda::new(move |_state| {
@@ -194,22 +265,11 @@ async fn start_event_loop_waits_for_callback() {
             notify.notified().await;
         })
     });
-    let event_state = SharedAnyState::default();
 
     let notify_for_callback = Arc::clone(&notify);
 
-    let (mut handle, mut event_rx) = start_event_loop(
-        vec![EventTrigger {
-            event: EventRef {
-                node_id,
-                event_idx: 0,
-            },
-            lambda: event_lambda,
-            state: event_state,
-        }],
-        PauseGate::default(),
-    )
-    .await;
+    let (mut handle, mut event_rx, node_id) =
+        start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     notify_for_callback.notify_waiters();
 
@@ -232,7 +292,6 @@ async fn start_event_loop_waits_for_callback() {
 async fn pause_gate_blocks_event_loop_iterations() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    let node_id = NodeId::unique();
     let invoke_count = Arc::new(AtomicUsize::new(0));
     let invoke_count_clone = Arc::clone(&invoke_count);
 
@@ -242,22 +301,11 @@ async fn pause_gate_blocks_event_loop_iterations() {
             invoke_count.fetch_add(1, Ordering::SeqCst);
         })
     });
-    let event_state = SharedAnyState::default();
 
     let pause_gate = PauseGate::default();
 
-    let (mut handle, mut event_rx) = start_event_loop(
-        vec![EventTrigger {
-            event: EventRef {
-                node_id,
-                event_idx: 0,
-            },
-            lambda: event_lambda,
-            state: event_state,
-        }],
-        pause_gate.clone(),
-    )
-    .await;
+    let (mut handle, mut event_rx, _node_id) =
+        start_single_event_loop(event_lambda, pause_gate.clone()).await;
 
     // Wait for first event to arrive
     let _ = timeout(Duration::from_millis(100), event_rx.recv())
@@ -305,21 +353,9 @@ async fn lambda_panic_is_captured_not_unwound() {
     // A panicking event lambda must be isolated: `stop()` captures the panic
     // (attributed to its node) and returns it, rather than unwinding into the
     // worker loop — which would kill the worker.
-    let node_id = NodeId::unique();
     let event_lambda = EventLambda::new(|_state| Box::pin(async { panic!("boom in lambda") }));
-
-    let (mut handle, mut event_rx) = start_event_loop(
-        vec![EventTrigger {
-            event: EventRef {
-                node_id,
-                event_idx: 0,
-            },
-            lambda: event_lambda,
-            state: SharedAnyState::default(),
-        }],
-        PauseGate::default(),
-    )
-    .await;
+    let (mut handle, mut event_rx, node_id) =
+        start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     // The lambda panics on its first invoke and never sends; its sole sender
     // drops, closing the channel. Awaiting that close ensures the panic has
@@ -383,30 +419,11 @@ async fn events_are_deduplicated() {
 
 #[tokio::test]
 async fn execute_sinks_triggers_sink_nodes() {
-    use crate::data::StaticValue;
-
     let library = system_library();
-
     // Simple single-sink graph — doesn't use FrameHarness' frame-event setup.
-    let mut graph = Graph::default();
-    let print_func = library.by_name("Print").unwrap();
+    let (graph, _print_id) = print_literal_graph(&library, "hello");
 
-    let mut print_node: Node = print_func.into();
-    print_node.id = NodeId::unique();
-    let print_node_id = print_node.id;
-    graph.add(print_node);
-    graph.set_input_binding(
-        InputPort::new(print_node_id, 0),
-        StaticValue::String("hello".to_string()).into(),
-    );
-
-    let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(move |report| {
-        if let WorkerReport::Finished(result) = report {
-            compute_finish_tx.try_send(result).ok();
-        }
-    });
-
+    let (worker, mut compute_finish_rx) = finished_worker(8);
     worker
         .send_many([
             WorkerMessage::Update {
@@ -428,19 +445,8 @@ async fn execute_sinks_triggers_sink_nodes() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn worker_streams_node_progress_before_finished() {
-    use crate::data::StaticValue;
-
     let library = system_library();
-    let mut graph = Graph::default();
-    let print_func = library.by_name("Print").unwrap();
-    let mut print_node: Node = print_func.into();
-    print_node.id = NodeId::unique();
-    let print_node_id = print_node.id;
-    graph.add(print_node);
-    graph.set_input_binding(
-        InputPort::new(print_node_id, 0),
-        StaticValue::String("hi".to_string()).into(),
-    );
+    let (graph, print_node_id) = print_literal_graph(&library, "hi");
 
     // Capture the full report stream (progress + final), unlike the fixture.
     let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
@@ -489,26 +495,10 @@ async fn worker_streams_node_progress_before_finished() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn stale_cancel_is_cleared_at_run_start() {
-    use crate::data::StaticValue;
-
     let library = system_library();
-    let mut graph = Graph::default();
-    let print_func = library.by_name("Print").unwrap();
-    let mut print_node: Node = print_func.into();
-    print_node.id = NodeId::unique();
-    let print_node_id = print_node.id;
-    graph.add(print_node);
-    graph.set_input_binding(
-        InputPort::new(print_node_id, 0),
-        StaticValue::String("hi".to_string()).into(),
-    );
+    let (graph, _print_node_id) = print_literal_graph(&library, "hi");
 
-    let (tx, mut rx) = mpsc::channel::<ExecResult<ExecutionStats>>(8);
-    let worker = Worker::new(move |report| {
-        if let WorkerReport::Finished(result) = report {
-            tx.try_send(result).ok();
-        }
-    });
+    let (worker, mut rx) = finished_worker(8);
 
     // Cancel requested with nothing running: it must not bleed into the run
     // kicked next (the worker clears the flag at each run's start).
@@ -566,12 +556,7 @@ async fn execute_nodes_runs_only_the_seeded_cone() {
     }
     let sum_id = graph.by_name("sum").unwrap().id;
 
-    let (tx, mut rx) = mpsc::channel(8);
-    let worker = Worker::new(move |report| {
-        if let WorkerReport::Finished(result) = report {
-            tx.try_send(result).ok();
-        }
-    });
+    let (worker, mut rx) = finished_worker(8);
     worker
         .send_many([
             WorkerMessage::Update {
@@ -595,20 +580,8 @@ async fn execute_nodes_runs_only_the_seeded_cone() {
 async fn sync_fires_after_execution() {
     let mut h = FrameHarness::new().await;
 
-    let (reply, rx) = oneshot::channel();
-    h.worker
-        .send_many([
-            h.update_msg(),
-            h.inject_frame_event(),
-            WorkerMessage::Sync { reply },
-        ])
-        .unwrap();
-
+    sync_after(&h.worker, [h.update_msg(), h.inject_frame_event()]).await;
     let _ = h.compute_rx.recv().await;
-    timeout(Duration::from_millis(200), rx)
-        .await
-        .expect("Sync timeout")
-        .expect("Sync sender dropped");
 }
 
 #[tokio::test]
@@ -636,22 +609,9 @@ async fn update_restarts_event_loop_if_running() {
 // Receiver is closed after its sibling handle is stopped.
 #[tokio::test]
 async fn stopped_event_loop_channel_is_closed() {
-    let node_id = NodeId::unique();
     let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-    let event_state = SharedAnyState::default();
-
-    let (mut handle, mut event_rx) = start_event_loop(
-        vec![EventTrigger {
-            event: EventRef {
-                node_id,
-                event_idx: 0,
-            },
-            lambda: event_lambda,
-            state: event_state,
-        }],
-        PauseGate::default(),
-    )
-    .await;
+    let (mut handle, mut event_rx, _node_id) =
+        start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     handle.stop().await;
 
@@ -679,12 +639,7 @@ async fn send_many_empty_is_noop() {
         .unwrap();
 
     // Subsequent Sync still fires → worker is alive.
-    let (reply, rx) = oneshot::channel();
-    worker.send(WorkerMessage::Sync { reply }).unwrap();
-    timeout(Duration::from_millis(500), rx)
-        .await
-        .expect("Sync should fire after empty send_many")
-        .expect("Sync sender dropped");
+    sync_after(&worker, std::iter::empty()).await;
 }
 
 #[tokio::test]
@@ -695,12 +650,7 @@ async fn stop_event_loop_when_not_running_is_noop() {
     assert!(!worker.is_event_loop_started());
 
     // Worker still responsive after a no-op stop.
-    let (reply, rx) = oneshot::channel();
-    worker.send(WorkerMessage::Sync { reply }).unwrap();
-    timeout(Duration::from_millis(500), rx)
-        .await
-        .expect("StopEventLoop with no running loop should be a no-op")
-        .expect("Sync sender dropped");
+    sync_after(&worker, std::iter::empty()).await;
 }
 
 #[tokio::test]
@@ -763,29 +713,16 @@ async fn assert_no_callback_within(
     );
 }
 
-/// Minimal worker with no graph loaded, for tests that only care
-/// about protocol-level behaviour (empty-graph no-ops, stop-when-
-/// not-running, empty batches, syncs, etc.).
-fn empty_worker() -> (Worker, mpsc::Receiver<ExecResult<ExecutionStats>>) {
-    let (tx, rx) = mpsc::channel(8);
-    let worker = Worker::new(move |report| {
-        if let WorkerReport::Finished(result) = report {
-            tx.try_send(result).ok();
-        }
-    });
-    (worker, rx)
-}
-
 #[tokio::test]
 async fn execute_sinks_on_empty_graph_is_silent_noop() {
-    let (worker, mut rx) = empty_worker();
+    let (worker, mut rx) = finished_worker(8);
     worker.send(WorkerMessage::ExecuteSinks).unwrap();
     assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
 }
 
 #[tokio::test]
 async fn event_on_empty_graph_is_silent_noop() {
-    let (worker, mut rx) = empty_worker();
+    let (worker, mut rx) = finished_worker(8);
     worker
         .send(WorkerMessage::InjectEvents {
             events: vec![EventRef {
@@ -799,7 +736,7 @@ async fn event_on_empty_graph_is_silent_noop() {
 
 #[tokio::test]
 async fn start_event_loop_on_empty_graph_is_silent_noop() {
-    let (worker, mut rx) = empty_worker();
+    let (worker, mut rx) = finished_worker(8);
     worker.send(WorkerMessage::StartEventLoop).unwrap();
     assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
     assert!(
@@ -814,31 +751,14 @@ async fn start_event_loop_on_empty_graph_is_silent_noop() {
 
 #[tokio::test]
 async fn execute_sinks_with_start_event_loop_fires_callback_once() {
-    use crate::data::StaticValue;
-
     // Sink-only graph: active_event_triggers() returns empty, so
     // the loop never actually spawns. This removes lambda-driven
     // callbacks as a confounding factor while still exercising the
     // should_start_event_loop branch.
     let library = system_library();
+    let (graph, _print_node_id) = print_literal_graph(&library, "hi");
 
-    let mut graph = Graph::default();
-    let print_func = library.by_name("Print").unwrap();
-    let mut print_node: Node = print_func.into();
-    print_node.id = NodeId::unique();
-    let print_node_id = print_node.id;
-    graph.add(print_node);
-    graph.set_input_binding(
-        InputPort::new(print_node_id, 0),
-        StaticValue::String("hi".to_string()).into(),
-    );
-
-    let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(move |report| {
-        if let WorkerReport::Finished(result) = report {
-            compute_finish_tx.try_send(result).ok();
-        }
-    });
+    let (worker, mut compute_finish_rx) = finished_worker(8);
 
     worker
         .send_many([
@@ -876,28 +796,12 @@ async fn execute_sinks_with_start_event_loop_fires_callback_once() {
 // deterministically.
 #[tokio::test(flavor = "current_thread")]
 async fn drain_on_wake_folds_queued_batches_into_one_commit() {
-    use crate::data::StaticValue;
-
     let library = system_library();
 
     // Sink-only graph — one execute produces one line of output.
-    let mut graph = Graph::default();
-    let print_func = library.by_name("Print").unwrap();
-    let mut print_node: Node = print_func.into();
-    print_node.id = NodeId::unique();
-    let print_node_id = print_node.id;
-    graph.add(print_node);
-    graph.set_input_binding(
-        InputPort::new(print_node_id, 0),
-        StaticValue::String("once".to_string()).into(),
-    );
+    let (graph, _print_node_id) = print_literal_graph(&library, "once");
 
-    let (compute_finish_tx, mut compute_finish_rx) = mpsc::channel(8);
-    let worker = Worker::new(move |report| {
-        if let WorkerReport::Finished(result) = report {
-            compute_finish_tx.try_send(result).ok();
-        }
-    });
+    let (worker, mut compute_finish_rx) = finished_worker(8);
 
     // Three separate send_many calls, all synchronous — they all
     // land in the channel before the worker task is polled.
@@ -935,7 +839,7 @@ async fn drain_on_wake_folds_queued_batches_into_one_commit() {
 async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
     // F5 + F4: a batch with ExecuteSinks + StartEventLoop on an
     // empty graph must fire no callback at all.
-    let (worker, mut rx) = empty_worker();
+    let (worker, mut rx) = finished_worker(8);
 
     worker
         .send_many([WorkerMessage::ExecuteSinks, WorkerMessage::StartEventLoop])
@@ -1081,55 +985,46 @@ fn scan_update_overwrites_earlier_update_in_same_batch() {
 // Slot reduction: last-write-wins for graph_state and loop_request.
 
 #[test]
-fn scan_clear_then_update_yields_replace() {
-    let intent = scan(vec![
-        WorkerMessage::Clear,
-        WorkerMessage::Update {
-            compiled: empty_compiled(),
-        },
-    ]);
-    assert!(
-        matches!(intent.graph_state, Some(crate::worker::GraphOp::Replace(_))),
-        "last write (Update) wins over earlier Clear"
-    );
-}
+fn scan_last_write_wins_per_slot() {
+    use crate::worker::BatchIntent;
 
-#[test]
-fn scan_update_then_clear_yields_clear() {
-    let intent = scan(vec![
-        WorkerMessage::Update {
-            compiled: empty_compiled(),
-        },
-        WorkerMessage::Clear,
-    ]);
-    assert!(
-        matches!(intent.graph_state, Some(crate::worker::GraphOp::Clear)),
-        "last write (Clear) wins over earlier Update"
-    );
-}
+    let cases: [(&str, Vec<WorkerMessage>, fn(&BatchIntent) -> bool); 4] = [
+        (
+            "Clear then Update -> last write (Update) wins",
+            vec![
+                WorkerMessage::Clear,
+                WorkerMessage::Update {
+                    compiled: empty_compiled(),
+                },
+            ],
+            |intent| matches!(intent.graph_state, Some(crate::worker::GraphOp::Replace(_))),
+        ),
+        (
+            "Update then Clear -> last write (Clear) wins",
+            vec![
+                WorkerMessage::Update {
+                    compiled: empty_compiled(),
+                },
+                WorkerMessage::Clear,
+            ],
+            |intent| matches!(intent.graph_state, Some(crate::worker::GraphOp::Clear)),
+        ),
+        (
+            "Start then Stop -> last write (Stop) wins",
+            vec![WorkerMessage::StartEventLoop, WorkerMessage::StopEventLoop],
+            |intent| matches!(intent.loop_request, Some(crate::worker::LoopCommand::Stop)),
+        ),
+        (
+            "Stop then Start -> last write (Start) wins",
+            vec![WorkerMessage::StopEventLoop, WorkerMessage::StartEventLoop],
+            |intent| matches!(intent.loop_request, Some(crate::worker::LoopCommand::Start)),
+        ),
+    ];
 
-#[test]
-fn scan_start_then_stop_yields_stop() {
-    let intent = scan(vec![
-        WorkerMessage::StartEventLoop,
-        WorkerMessage::StopEventLoop,
-    ]);
-    assert!(
-        matches!(intent.loop_request, Some(crate::worker::LoopCommand::Stop)),
-        "last write (Stop) wins over earlier Start"
-    );
-}
-
-#[test]
-fn scan_stop_then_start_yields_start() {
-    let intent = scan(vec![
-        WorkerMessage::StopEventLoop,
-        WorkerMessage::StartEventLoop,
-    ]);
-    assert!(
-        matches!(intent.loop_request, Some(crate::worker::LoopCommand::Start)),
-        "last write (Start) wins over earlier Stop"
-    );
+    for (label, msgs, expected) in cases {
+        let intent = scan(msgs);
+        assert!(expected(&intent), "{label}");
+    }
 }
 
 // Integration: end-to-end confirmation that Update-then-Clear in
@@ -1169,15 +1064,7 @@ async fn commands_not_starved_by_fast_event_loop() {
 
     // Send Stop + Sync. Both must be observed within the budget
     // even though lambda events are still being produced.
-    let (reply, rx) = oneshot::channel();
-    h.worker
-        .send_many([WorkerMessage::StopEventLoop, WorkerMessage::Sync { reply }])
-        .unwrap();
-
-    timeout(Duration::from_millis(500), rx)
-        .await
-        .expect("Sync after StopEventLoop must fire promptly despite event load")
-        .expect("Sync sender dropped");
+    sync_after(&h.worker, [WorkerMessage::StopEventLoop]).await;
 
     assert!(
         !h.worker.is_event_loop_started(),
@@ -1221,7 +1108,7 @@ async fn lambda_events_drive_worker_execution() {
 // scan side; this pins the end-to-end contract.
 #[tokio::test]
 async fn exit_in_batch_closes_pending_sync() {
-    let (worker, _rx) = empty_worker();
+    let (worker, _rx) = finished_worker(8);
 
     let (reply, rx) = oneshot::channel();
     worker
@@ -1256,15 +1143,7 @@ async fn start_event_loop_twice_is_idempotent() {
     assert!(h.worker.is_event_loop_started());
 
     // Second StartEventLoop — no graph change; must not panic.
-    let (reply, rx) = oneshot::channel();
-    h.worker
-        .send_many([WorkerMessage::StartEventLoop, WorkerMessage::Sync { reply }])
-        .unwrap();
-
-    timeout(Duration::from_millis(500), rx)
-        .await
-        .expect("Sync must fire after second StartEventLoop")
-        .expect("Sync sender dropped");
+    sync_after(&h.worker, [WorkerMessage::StartEventLoop]).await;
 
     assert!(
         h.worker.is_event_loop_started(),
@@ -1281,35 +1160,14 @@ async fn is_event_loop_started_reflects_state_before_sync_reply() {
     let h = FrameHarness::with_callback_capacity(64).await;
 
     // Start: Sync fires in the same commit → observable must be true.
-    let (reply_start, rx_start) = oneshot::channel();
-    h.worker
-        .send_many([
-            h.update_msg(),
-            WorkerMessage::StartEventLoop,
-            WorkerMessage::Sync { reply: reply_start },
-        ])
-        .unwrap();
-    timeout(Duration::from_millis(500), rx_start)
-        .await
-        .expect("Start/Sync must fire")
-        .expect("Start/Sync sender dropped");
+    sync_after(&h.worker, [h.update_msg(), WorkerMessage::StartEventLoop]).await;
     assert!(
         h.worker.is_event_loop_started(),
         "is_event_loop_started must be true immediately after Sync reply for a Start batch"
     );
 
     // Stop: same expectation, opposite direction.
-    let (reply_stop, rx_stop) = oneshot::channel();
-    h.worker
-        .send_many([
-            WorkerMessage::StopEventLoop,
-            WorkerMessage::Sync { reply: reply_stop },
-        ])
-        .unwrap();
-    timeout(Duration::from_millis(500), rx_stop)
-        .await
-        .expect("Stop/Sync must fire")
-        .expect("Stop/Sync sender dropped");
+    sync_after(&h.worker, [WorkerMessage::StopEventLoop]).await;
     assert!(
         !h.worker.is_event_loop_started(),
         "is_event_loop_started must be false immediately after Sync reply for a Stop batch"
@@ -1333,12 +1191,7 @@ async fn drop_without_exit_shuts_down_cleanly() {
         });
 
         // Minimal traffic: confirm the worker is alive before drop.
-        let (reply, rx) = oneshot::channel();
-        worker.send(WorkerMessage::Sync { reply }).unwrap();
-        timeout(Duration::from_millis(500), rx)
-            .await
-            .expect("pre-drop Sync must fire")
-            .expect("Sync sender dropped");
+        sync_after(&worker, std::iter::empty()).await;
 
         // `worker` goes out of scope → Drop → exit().
     }
@@ -1362,29 +1215,13 @@ async fn drop_without_exit_shuts_down_cleanly() {
 #[tokio::test]
 async fn disk_cache_persists_node_across_worker_restart() {
     use std::path::Path;
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::execution::disk_store::DiskStore;
     use crate::graph::CacheMode;
     use crate::testing::{TestFuncHooks, test_func_lib};
 
-    /// A unique temp dir removed on drop, so the test doesn't collide or leak.
-    struct TempDir(std::path::PathBuf);
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let dir = {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let p = std::env::temp_dir().join(format!(
-            "scenarium-worker-diskcache-{}-{n}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&p).unwrap();
-        TempDir(p)
-    };
+    let dir = temp_dir("diskcache");
 
     // `get_a` recompute counter, shared across both worker incarnations.
     let get_a_calls = Arc::new(AtomicUsize::new(0));
@@ -1419,12 +1256,7 @@ async fn disk_cache_persists_node_across_worker_restart() {
     graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
 
     async fn run(root: &Path, graph: Graph, library: Arc<Library>) -> ExecutionStats {
-        let (tx, mut rx) = mpsc::channel(4);
-        let worker = Worker::new(move |report| {
-            if let WorkerReport::Finished(result) = report {
-                tx.try_send(result).ok();
-            }
-        });
+        let (worker, mut rx) = finished_worker(4);
         // SetDiskStore shares the batch with Update, proving it's applied before
         // the install hydrates.
         let cache = DiskStore::new(Arc::new(Library::default()), Some(root.to_path_buf()));
@@ -1481,28 +1313,11 @@ async fn disk_cache_persists_node_across_worker_restart() {
 /// stores — and silently recompute on reopen.
 #[tokio::test]
 async fn set_disk_store_flushes_resident_disk_backed_values() {
-    use std::sync::atomic::{AtomicU64, Ordering};
-
     use crate::execution::disk_store::DiskStore;
     use crate::graph::CacheMode;
     use crate::testing::{TestFuncHooks, test_func_lib};
 
-    struct TempDir(std::path::PathBuf);
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let dir = {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let p = std::env::temp_dir().join(format!(
-            "scenarium-worker-storeswap-{}-{n}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&p).unwrap();
-        TempDir(p)
-    };
+    let dir = temp_dir("storeswap");
 
     let lib = Arc::new(test_func_lib(TestFuncHooks {
         get_a: Arc::new(|| Ok(7)),
@@ -1525,12 +1340,7 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
     graph.set_input_binding(InputPort::new(mult_id, 0), (get_a_id, 0).into());
     graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
 
-    let (tx, mut rx) = mpsc::channel(4);
-    let worker = Worker::new(move |report| {
-        if let WorkerReport::Finished(result) = report {
-            tx.try_send(result).ok();
-        }
-    });
+    let (worker, mut rx) = finished_worker(4);
 
     // Run with NO store root: the Both value stays resident-only.
     worker
