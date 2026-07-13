@@ -465,9 +465,11 @@ enum BadgeGlyph {
 /// [`BadgeKind`]). Build one with [`Badge::control`] /
 /// [`Badge::control_drawn`] / [`Badge::marker`], then
 /// [`show`](Badge::show) — which returns whether a control was clicked this
-/// frame (always `false` for a marker).
+/// frame (always `false` for a marker). `pub(crate)` so
+/// [`crate::gui::canvas::pin_preview`]'s refresh chip can reuse the same
+/// framing rather than re-deriving the chip look.
 #[derive(Debug)]
-struct Badge {
+pub(crate) struct Badge {
     glyph: BadgeGlyph,
     color: Color,
     tip: &'static str,
@@ -476,7 +478,7 @@ struct Badge {
 
 impl Badge {
     /// An interactive chip (`filled` = its "on" state; `wid` makes it clickable).
-    fn control(
+    pub(crate) fn control(
         glyph: &'static str,
         color: Color,
         filled: bool,
@@ -517,7 +519,7 @@ impl Badge {
         }
     }
 
-    fn show(self, ui: &mut Ui) -> bool {
+    pub(crate) fn show(self, ui: &mut Ui) -> bool {
         let Badge {
             glyph,
             color,

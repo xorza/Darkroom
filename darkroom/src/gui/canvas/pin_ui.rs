@@ -39,7 +39,7 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::node_ports;
 use crate::gui::canvas::pin_preview::{
     self, PREVIEW_HEIGHT, PREVIEW_WIDTH, PreviewCache, is_image_type, pin_preview_wid,
-    preview_title,
+    preview_title, refresh_badge_wid,
 };
 use crate::gui::canvas::wire::{CubicHandles, WireEmphasis, add_cubic_wire, cubic_handles};
 use crate::gui::node::click_intents;
@@ -123,6 +123,27 @@ pub(crate) fn selected_group_positions(
         }
     }
     SelectedGroup { nodes, pins }
+}
+
+/// Prepass scan: a click on a pin's header refresh chip (read from last
+/// frame's response), returning the node its output came from. First hit
+/// wins — one refresh per frame. Mirrors
+/// [`crate::gui::node::emit_play_clicks`]: the pin UI surfaces only the
+/// domain fact (which node to re-run); the canvas translates it into the
+/// run command so this file never names `AppCommand`.
+pub(crate) fn emit_pin_refresh_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
+    for n in &scene.nodes {
+        for (i, output) in scene.outputs(n.outputs).iter().enumerate() {
+            if !output.pinned {
+                continue;
+            }
+            let port = OutputPort::new(n.id, i);
+            if ui.response_for(refresh_badge_wid(port)).clicked {
+                return Some(n.id);
+            }
+        }
+    }
+    None
 }
 
 /// The pin (or brand-new pin) a drag latched onto, and every member moving
@@ -408,6 +429,7 @@ impl PinUi {
                     border_width,
                     image.as_ref(),
                     text.as_deref(),
+                    n.runnable(),
                 );
                 // Click without drag → select, exactly like a node body
                 // click (plain replaces the selection, Shift toggles this

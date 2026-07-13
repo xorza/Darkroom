@@ -228,6 +228,14 @@ impl GraphUI {
         {
             *cmd = Some(AppCommand::Run(RunCommand::Node(node_id)));
         }
+        // A pin's own header refresh-chip click re-runs the node its output
+        // came from, refreshing the value the card is showing — same
+        // command, same translation point.
+        if cmd.is_none()
+            && let Some(node_id) = pin_ui::emit_pin_refresh_clicks(ui, scene)
+        {
+            *cmd = Some(AppCommand::Run(RunCommand::Node(node_id)));
+        }
         // Bake the snap target into `CanvasGeometry.hovered` so node_ui's
         // port_row picks up the hover color via the same lookup it
         // uses for ordinary mouse-over. `response.hovered` is

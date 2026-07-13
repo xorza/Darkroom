@@ -29,6 +29,7 @@ use scenarium::graph::OutputPort;
 
 use crate::gui::format::fmt_bytes;
 use crate::gui::image_viewer::convert_image_value;
+use crate::gui::node::header::Badge;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{
     CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, footer_background,
@@ -164,6 +165,37 @@ pub(crate) fn pin_preview_wid(port: OutputPort) -> WidgetId {
     WidgetId::from_hash(("graph.node.pin_preview", port.node_id, port.port_idx))
 }
 
+/// Stable id for a pin preview's refresh chip. `pub(crate)` so the
+/// canvas-level scan ([`crate::gui::canvas::pin_ui::emit_pin_refresh_clicks`])
+/// can poll the click from last frame's response.
+pub(crate) fn refresh_badge_wid(port: OutputPort) -> WidgetId {
+    WidgetId::from_hash(("graph.node.pin_refresh_badge", port.node_id, port.port_idx))
+}
+
+/// The header's refresh chip: re-run to the node this pin's output came
+/// from and refresh the value it's showing — the pin's own version of a
+/// node's play chip ([`crate::gui::node::header::play_chip`]), same
+/// control framing and hover-to-"go" color swap. The click is read at
+/// canvas level via [`refresh_badge_wid`] and translated into the run
+/// command there (this file never names `AppCommand`).
+fn refresh_chip(ui: &mut Ui, theme: &Theme, port: OutputPort) {
+    let wid = refresh_badge_wid(port);
+    let hovered = ui.response_for(wid).hovered;
+    let color = if hovered {
+        theme.colors.exec_executed_glow
+    } else {
+        theme.colors.text_muted
+    };
+    Badge::control(
+        "\u{21bb}",
+        color,
+        false,
+        wid,
+        "Refresh — re-run to this node and update the preview",
+    )
+    .show(ui);
+}
+
 /// Paint one pinned output's preview widget: a header bar (the title) over
 /// a content area, plus — for an image — an info footer below it reporting
 /// resolution, format, and resident size. `border`/`border_width` are the
@@ -183,6 +215,7 @@ pub(crate) fn draw_widget<'ui>(
     border_width: f32,
     image: Option<&ImagePreview>,
     text: Option<&str>,
+    runnable: bool,
 ) -> Response<'ui> {
     // Inner corners follow the border stroke's inner edge, like a real
     // node's header does relative to its own (wider) body stroke — see
@@ -209,8 +242,19 @@ pub(crate) fn draw_widget<'ui>(
                 .id_salt("header")
                 .size((Sizing::FILL, Sizing::Hug))
                 .padding(Spacing::xy(CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y))
+                .gap(4.0)
+                .child_align(Align::v(VAlign::Center))
                 .background(header_background(theme, inner_r))
                 .show(ui, |ui| {
+                    // Leads the band ahead of the title, like a node's own
+                    // play chip — the one control here that *does*
+                    // something rather than describing the card. Hidden
+                    // when the owning node can't resolve as a run seed
+                    // (disabled/instance/boundary/missing), matching the
+                    // node header's own `runnable()` gate.
+                    if runnable {
+                        refresh_chip(ui, theme, port);
+                    }
                     // Same size + weight as a node's title (`node::header::title`)
                     // — the theme's base text, bold — so the two header bars
                     // read as one style at two widths, not two independently
