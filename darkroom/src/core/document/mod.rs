@@ -11,7 +11,7 @@ use scenarium::graph::{Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
 use scenarium::graph::{Node, NodeKind};
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use thiserror::Error;
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
@@ -243,21 +243,27 @@ impl GraphView {
             self.viewport.zoom.is_finite() && self.viewport.zoom > 0.0,
             "graph zoom must be finite and positive"
         );
-        ensure!(
-            self.viewport.pan.x.is_finite() && self.viewport.pan.y.is_finite(),
-            "graph pan must be finite"
-        );
+        ensure!(self.viewport.pan.is_finite(), "graph pan must be finite");
 
-        let mut view_nodes = HashSet::new();
         for node in self.view_nodes.iter() {
             ensure!(
-                node.pos.x.is_finite() && node.pos.y.is_finite(),
+                node.pos.is_finite(),
                 "node {:?} position must be finite",
                 node.id
             );
+        }
+
+        // Exact node-set match. Both sides are `KeyIndexVec`s — duplicate ids
+        // are rejected at deserialize and unrepresentable by construction —
+        // so a length match plus one-way containment proves set equality.
+        ensure!(
+            self.view_nodes.len() == graph.len(),
+            "view node list must match graph nodes"
+        );
+        for node in graph.iter() {
             ensure!(
-                view_nodes.insert(node.id),
-                "duplicate node id {:?} in view",
+                self.view_nodes.by_key(&node.id).is_some(),
+                "graph view missing a position for node {:?}",
                 node.id
             );
         }
@@ -268,41 +274,22 @@ impl GraphView {
                 SelectionKey::Pin(port) => port.node_id,
             };
             ensure!(
-                view_nodes.contains(&owner),
+                self.view_nodes.by_key(&owner).is_some(),
                 "selected node {:?} is absent from the graph",
                 owner
             );
         }
 
-        let mut graph_nodes = HashSet::new();
-        for node in graph.iter() {
-            ensure!(
-                graph_nodes.insert(node.id),
-                "duplicate node id {:?} in graph",
-                node.id
-            );
-        }
-
-        ensure!(
-            view_nodes.len() == graph_nodes.len(),
-            "view node list must match graph nodes"
-        );
-        for node_id in &graph_nodes {
-            ensure!(
-                view_nodes.contains(node_id),
-                "graph view missing a position for node {:?}",
-                node_id
-            );
-        }
-
         for (port, position) in &self.pin_positions {
             ensure!(
-                position.x.is_finite() && position.y.is_finite(),
+                position.is_finite(),
                 "pin position on node {:?} must be finite",
                 port.node_id
             );
             ensure!(
-                graph_nodes.contains(&port.node_id),
+                graph
+                    .find_node(&port.node_id, NodeSearch::TopLevel)
+                    .is_some(),
                 "pin position references a node absent from the graph"
             );
         }

@@ -21,9 +21,9 @@
 //! - every graph tab lives in the primary group — the edit pipeline
 //!   renders one canvas (see the docking plan; lifting this is the
 //!   multi-canvas phase);
-//! - no group is empty, no tab appears twice, per-group `active` is in
-//!   range, `focused` names a live group, ratios stay in
-//!   `RATIO_MIN..=RATIO_MAX`.
+//! - no group is empty, no tab appears twice, group ids are unique,
+//!   per-group `active` is in range, `focused` names a live group,
+//!   ratios stay in `RATIO_MIN..=RATIO_MAX`.
 
 use anyhow::{Context, Result, ensure};
 use common::id_type;
@@ -616,7 +616,16 @@ impl DockLayout {
             .find(|g| g.tabs.contains(&TabRef::Graph(GraphRef::Main)))
             .context("no group holds the Main graph tab")?;
         let mut seen = Vec::new();
+        let mut seen_groups = Vec::new();
         for g in self.groups() {
+            // Group ids address every layout op (`group`/`group_mut` take the
+            // first match), so a duplicate silently retargets ops.
+            ensure!(
+                !seen_groups.contains(&g.id),
+                "dock group id {:?} appears twice",
+                g.id
+            );
+            seen_groups.push(g.id);
             ensure!(!g.tabs.is_empty(), "dock group {:?} is empty", g.id);
             ensure!(
                 g.active < g.tabs.len(),
@@ -1094,5 +1103,141 @@ mod tests {
         let bytes = common::serialize(&l, common::SerdeFormat::Rhai).unwrap();
         let back: DockLayout = common::deserialize(&bytes, common::SerdeFormat::Rhai).unwrap();
         assert_eq!(back, l);
+    }
+
+    #[test]
+    fn check_rejects_each_corruption() {
+        use scenarium::graph::subgraph::SubgraphId;
+
+        // Base: a valid two-pane layout — [split, primary(Main, Prefs),
+        // viewer-pane(viewer 1)] — corrupted one invariant at a time via
+        // direct field access (no public op can produce these states).
+        let base = {
+            let mut l = seeded();
+            l.move_tab(
+                viewer(1),
+                DockDrop::Split {
+                    group: l.primary().id,
+                    side: SplitSide::Right,
+                },
+            );
+            l.check().unwrap();
+            l
+        };
+
+        type Corrupt = fn(&mut DockLayout);
+        let cases: [(&str, Corrupt, &str); 9] = [
+            (
+                "duplicate group id",
+                |l| {
+                    let pid = l.primary().id;
+                    for n in &mut l.nodes {
+                        if let DockNode::Group(g) = n {
+                            g.id = pid;
+                        }
+                    }
+                },
+                "appears twice",
+            ),
+            (
+                "dangling focused",
+                |l| l.focused = TabGroupId::unique(),
+                "focused group",
+            ),
+            (
+                "active out of range",
+                |l| {
+                    let DockNode::Group(g) = &mut l.nodes[1] else {
+                        panic!("slot 1 is the primary group");
+                    };
+                    g.active = g.tabs.len();
+                },
+                "active tab out of range",
+            ),
+            (
+                "ratio out of bounds",
+                |l| {
+                    let DockNode::Split(s) = &mut l.nodes[0] else {
+                        panic!("root is a split");
+                    };
+                    s.ratio = 0.95;
+                },
+                "split ratio",
+            ),
+            (
+                "children out of pre-order",
+                |l| {
+                    let DockNode::Split(s) = &mut l.nodes[0] else {
+                        panic!("root is a split");
+                    };
+                    std::mem::swap(&mut s.first, &mut s.second);
+                },
+                "canonical pre-order",
+            ),
+            (
+                "child index past the end",
+                |l| {
+                    l.nodes.truncate(2);
+                },
+                "dock node index",
+            ),
+            (
+                "unreachable trailing slot",
+                |l| {
+                    let DockNode::Split(s) = &mut l.nodes[0] else {
+                        panic!("root is a split");
+                    };
+                    // Root points only at slot 1; slots 2.. are orphaned.
+                    *s = DockSplit {
+                        first: NodeIdx(1),
+                        second: NodeIdx(1),
+                        ..*s
+                    };
+                },
+                "canonical pre-order",
+            ),
+            (
+                "empty group",
+                |l| {
+                    let DockNode::Group(g) = &mut l.nodes[2] else {
+                        panic!("slot 2 is the split-off viewer pane");
+                    };
+                    g.tabs.clear();
+                },
+                "is empty",
+            ),
+            (
+                "graph tab outside the primary group",
+                |l| {
+                    let DockNode::Group(g) = &mut l.nodes[2] else {
+                        panic!("slot 2 is the split-off viewer pane");
+                    };
+                    g.tabs
+                        .push(TabRef::Graph(GraphRef::Local(SubgraphId::from_u128(7))));
+                },
+                "outside the primary group",
+            ),
+        ];
+        for (name, corrupt, expected) in cases {
+            let mut l = base.clone();
+            corrupt(&mut l);
+            let err = l.check().unwrap_err().to_string();
+            assert!(err.contains(expected), "{name}: unexpected error: {err}");
+        }
+
+        // A layout with no Main tab anywhere is refused too — dropping it
+        // from the primary group leaves both groups non-empty, so nothing
+        // else trips first.
+        let mut l = base.clone();
+        let DockNode::Group(g) = &mut l.nodes[1] else {
+            panic!("slot 1 is the primary group");
+        };
+        g.tabs.retain(|t| *t != main_tab());
+        g.active = 0;
+        let err = l.check().unwrap_err().to_string();
+        assert!(
+            err.contains("no group holds the Main graph tab"),
+            "missing Main: unexpected error: {err}"
+        );
     }
 }
