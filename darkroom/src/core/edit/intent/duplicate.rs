@@ -7,8 +7,7 @@ use std::collections::{BTreeSet, HashMap};
 use glam::Vec2;
 use scenarium::graph::{Binding, InputPort, NodeId, NodeSearch, Subscription};
 
-use crate::core::document::view_node::ViewNode;
-use crate::core::document::{Document, EditScopeRef, GraphRef, GraphView, SelectionKey};
+use crate::core::document::{Document, EditScopeRef, GraphRef, GraphView, ItemRef};
 use crate::core::edit::intent::types::Intent;
 
 /// World-space offset applied to duplicated nodes so the copies don't
@@ -24,8 +23,8 @@ pub(crate) fn selected_node_ids(view: &GraphView) -> BTreeSet<NodeId> {
     view.selected
         .iter()
         .filter_map(|k| match k {
-            SelectionKey::Node(id) => Some(*id),
-            SelectionKey::Pin(_) => None,
+            ItemRef::Node(id) => Some(*id),
+            ItemRef::Pin(_) => None,
         })
         .collect()
 }
@@ -75,12 +74,12 @@ pub(crate) fn build_duplicate_intent_for(
         let mut clone = node.clone();
         clone.id = new_id;
         let pos = view
-            .view_nodes
-            .by_key(old_id)
+            .view_items
+            .by_key(&ItemRef::Node(*old_id))
             .expect("view holds a position for every graph node")
             .pos
             + DUPLICATE_OFFSET;
-        nodes.push((ViewNode { id: new_id, pos }, clone));
+        nodes.push((pos, clone));
     }
 
     // Each cloned node's own input ports. Const/None copy verbatim; a `Bind`
@@ -131,12 +130,12 @@ pub(crate) fn build_duplicate_intent_for(
 /// false }`) — deleting a preview widget just unpins its port rather than
 /// touching the node it lives on. Shared by the Delete/Backspace shortcut
 /// and the node context menu's "Remove".
-pub(crate) fn remove_selection_intents(selected: &BTreeSet<SelectionKey>) -> Vec<Intent> {
+pub(crate) fn remove_selection_intents(selected: &BTreeSet<ItemRef>) -> Vec<Intent> {
     selected
         .iter()
         .map(|key| match *key {
-            SelectionKey::Node(node_id) => Intent::RemoveNode { node_id },
-            SelectionKey::Pin(port) => Intent::SetOutputPinned {
+            ItemRef::Node(node_id) => Intent::RemoveNode { node_id },
+            ItemRef::Pin(port) => Intent::SetOutputPinned {
                 output: port,
                 pinned: false,
             },

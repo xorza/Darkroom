@@ -10,7 +10,6 @@ use scenarium::node::function::{Func, FuncInput};
 use scenarium::node::special::{ALL as SPECIAL_NODES, SpecialNode};
 
 use crate::core::document::PortRef;
-use crate::core::document::view_node::ViewNode;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
@@ -124,12 +123,8 @@ impl NewNodeUi {
             bindings,
         }) = chosen
         {
-            let view_node = ViewNode {
-                id: node.id,
-                pos: self.world_pos,
-            };
             out.push(Intent::AddNode {
-                view_node,
+                pos: self.world_pos,
                 node,
                 def,
                 bindings,

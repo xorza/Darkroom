@@ -11,7 +11,7 @@ use scenarium::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use scenarium::graph::{NodeId, NodeKind, NodeSearch};
 use scenarium::library::Library;
 
-use crate::core::document::{Document, GraphRef, SelectionKey};
+use crate::core::document::{Document, GraphRef, ItemRef};
 
 /// Publish/refresh `node_id`'s local subgraph def into `library`
 /// (no disk write — the caller persists on success). Returns `false`
@@ -168,7 +168,7 @@ fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotab
     let graph = document.graph_for(target)?;
     if let Some(view) = document.view(target) {
         for key in &view.selected {
-            let SelectionKey::Node(nid) = key else {
+            let ItemRef::Node(nid) = key else {
                 continue;
             };
             if let Some(node) = graph.find_node(nid, NodeSearch::TopLevel)
@@ -288,7 +288,7 @@ mod tests {
         let local = def("Widget", None);
         let local_id = local.id;
         let node_id = add_local_instance(&mut doc, local);
-        doc.main_view.selected.insert(SelectionKey::Node(node_id));
+        doc.main_view.selected.insert(ItemRef::Node(node_id));
 
         assert!(promote_to_library(&mut doc, &mut library));
         assert_eq!(library.subgraphs.len(), 1, "a new library entry is added");

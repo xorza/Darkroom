@@ -8,7 +8,7 @@ use aperture::{PointerButton, Rect, ResponseState, Size, Ui};
 use common::FloatExt;
 use glam::Vec2;
 
-use crate::core::document::{SelectionKey, Viewport};
+use crate::core::document::{ItemRef, Viewport};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
@@ -255,7 +255,7 @@ fn reset_target(geometry: &CanvasGeometry, scene: &Scene, pane: Vec2) -> Viewpor
 fn node_bounds(geometry: &CanvasGeometry, scene: &Scene, selected_only: bool) -> Option<Rect> {
     let mut acc: Option<(Vec2, Vec2)> = None;
     for n in &scene.nodes {
-        if selected_only && !scene.selected.contains(&SelectionKey::Node(n.id)) {
+        if selected_only && !scene.selected.contains(&ItemRef::Node(n.id)) {
             continue;
         }
         let rect = geometry.node_world_rect(n).unwrap_or(Rect {
@@ -335,7 +335,7 @@ mod tests {
         assert_eq!(all.size, Size::new(1250.0, 600.0));
 
         // selected_only filters to exactly the selected node's rect.
-        scene.selected.insert(SelectionKey::Node(b));
+        scene.selected.insert(ItemRef::Node(b));
         let sel = node_bounds(&geometry, &scene, true).unwrap();
         assert_eq!(sel.min, Vec2::new(1000.0, 500.0));
         assert_eq!(sel.size, Size::new(200.0, 100.0));

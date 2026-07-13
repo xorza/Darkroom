@@ -8,8 +8,8 @@
 use aperture::{Configure, HAlign, Sense, SmolStr, Text, TextStyle, Tooltip, Ui, WidgetId};
 
 use crate::core::document::BoundarySide;
+use crate::core::document::ItemRef;
 use crate::core::document::PortRef;
-use crate::core::document::SelectionKey;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::node::{RecordCtx, click_intents};
 use crate::gui::widgets::inline_rename::InlineRename;
@@ -79,7 +79,7 @@ pub(crate) fn port_label(
     // Single click selects the node (the label otherwise swallows the
     // click the body would have gotten); a committed value renames.
     if ev.clicked {
-        click_intents(shift, rcx.scene, SelectionKey::Node(port.node_id), out);
+        click_intents(shift, rcx.scene, ItemRef::Node(port.node_id), out);
     }
     if let Some(to) = ev.committed {
         out.push(Intent::RenameBoundaryPort {

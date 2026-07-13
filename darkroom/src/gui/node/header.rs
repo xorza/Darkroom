@@ -14,7 +14,7 @@ use aperture::{
 use glam::Vec2;
 use scenarium::graph::{CacheMode, NodeId};
 
-use crate::core::document::SelectionKey;
+use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::port_color::event_color;
@@ -401,7 +401,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
         })
         .show(ui);
     if ev.clicked {
-        click_intents(shift, rcx.scene, SelectionKey::Node(node.id), out);
+        click_intents(shift, rcx.scene, ItemRef::Node(node.id), out);
     }
     if let Some(to) = ev.committed {
         out.push(Intent::RenameNode {

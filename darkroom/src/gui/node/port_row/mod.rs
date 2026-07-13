@@ -397,13 +397,10 @@ fn output_cell(
     ContextMenu::for_id(menu_id)
         .size((Sizing::Hug, Sizing::Hug))
         .show(ui, |ui, popup| {
-            let label = if output.pinned {
-                "Unpin output"
-            } else {
-                "Pin output"
-            };
+            let pinned = output.pin_position.is_some();
+            let label = if pinned { "Unpin output" } else { "Pin output" };
             if MenuItem::new(label).show(ui, popup).clicked() {
-                let pinning = !output.pinned;
+                let pinning = !pinned;
                 out.push(set_output_pinned(port, pinning));
                 // Unlike Cmd+drag (which places a fresh pin via its own
                 // drag anchor), this toggle has no drag to derive a

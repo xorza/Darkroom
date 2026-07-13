@@ -11,8 +11,7 @@ use scenarium::graph::{Node, NodeId};
 use scenarium::library::Library;
 use scenarium::node::function::FuncId;
 
-use crate::core::document::SelectionKey;
-use crate::core::document::view_node::ViewNode;
+use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::Intent;
 
 use super::{InboundSender, ScriptMessage, StdoutBuffer};
@@ -214,12 +213,8 @@ fn register_host_helpers(engine: &mut Engine, library: Arc<Library>) {
                 .by_id(&func_id)
                 .ok_or_else(|| format!("unknown func id: {id}"))?;
             let node: Node = func.into();
-            let view_node = ViewNode {
-                id: node.id,
-                pos: Vec2::new(x as f32, y as f32),
-            };
             let action = Intent::AddNode {
-                view_node,
+                pos: Vec2::new(x as f32, y as f32),
                 node,
                 def: None,
                 // Script-created nodes set their inputs explicitly; no
@@ -239,10 +234,10 @@ fn register_host_helpers(engine: &mut Engine, library: Arc<Library>) {
             let node_id: NodeId = id
                 .parse()
                 .map_err(|e| format!("invalid node id {id:?}: {e}"))?;
+            let key = ItemRef::Node(node_id);
             let action = Intent::MoveSelection {
-                grabbed: SelectionKey::Node(node_id),
-                nodes: vec![(node_id, Vec2::new(x as f32, y as f32))],
-                pins: vec![],
+                grabbed: key,
+                moves: vec![(key, Vec2::new(x as f32, y as f32))],
             };
             rhai::serde::to_dynamic(&action)
                 .map_err(|e| format!("make_move_node: encode failed: {e}").into())
