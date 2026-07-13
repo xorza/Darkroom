@@ -289,9 +289,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     // Edge a -> b, then select both for deletion.
     doc.graph
         .set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
-    doc.main_view.selected = [ItemRef::Node(a), ItemRef::Node(b)]
-        .into_iter()
-        .collect();
+    doc.main_view.selected = [ItemRef::Node(a), ItemRef::Node(b)].into_iter().collect();
 
     // Mirror `drain_intents`: build each `RemoveNode` against the live
     // doc, apply immediately, collect into one batch entry. The a->b

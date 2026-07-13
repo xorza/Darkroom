@@ -246,10 +246,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     assert_eq!(nodes.len(), 2, "both selected nodes cloned");
     assert!(subscriptions.is_empty());
     // Fresh ids, offset positions.
-    let new_ids: BTreeSet<ItemRef> = nodes
-        .iter()
-        .map(|(_, n)| ItemRef::Node(n.id))
-        .collect();
+    let new_ids: BTreeSet<ItemRef> = nodes.iter().map(|(_, n)| ItemRef::Node(n.id)).collect();
     assert!(
         new_ids.is_disjoint(&doc.main_view.selected),
         "clones get fresh ids"
@@ -331,9 +328,7 @@ fn duplicate_intent_none_without_selection() {
     // A selection of only pin previews has no node identity to clone —
     // same as an empty selection.
     let id = add_node_at(&mut doc, Vec2::new(50.0, 0.0));
-    doc.main_view.selected = [ItemRef::Pin(OutputPort::new(id, 0))]
-        .into_iter()
-        .collect();
+    doc.main_view.selected = [ItemRef::Pin(OutputPort::new(id, 0))].into_iter().collect();
     assert!(
         build_duplicate_intent(&doc, GraphRef::Main).is_none(),
         "pin-only selection has no node to duplicate"
@@ -345,12 +340,9 @@ fn selected_node_ids_drops_pin_keys() {
     let mut doc = Document::default();
     let a = add_node_at(&mut doc, Vec2::ZERO);
     let b = add_node_at(&mut doc, Vec2::new(50.0, 0.0));
-    doc.main_view.selected = [
-        ItemRef::Node(a),
-        ItemRef::Pin(OutputPort::new(b, 0)),
-    ]
-    .into_iter()
-    .collect();
+    doc.main_view.selected = [ItemRef::Node(a), ItemRef::Pin(OutputPort::new(b, 0))]
+        .into_iter()
+        .collect();
 
     let view = doc.scope(GraphRef::Main).unwrap().view;
     assert_eq!(
@@ -750,11 +742,7 @@ fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
     let a = add_node_at(&mut doc, Vec2::ZERO);
     let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
     let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
-    let (a, b, c) = (
-        ItemRef::Node(a),
-        ItemRef::Node(b),
-        ItemRef::Node(c),
-    );
+    let (a, b, c) = (ItemRef::Node(a), ItemRef::Node(b), ItemRef::Node(c));
     assert_eq!(
         stack_order(&doc),
         vec![a, b, c],
