@@ -29,8 +29,11 @@ pub fn solve<const N: usize>(a: &[[f64; N]; N], b: &[f64; N]) -> Option<[f64; N]
             }
         }
 
-        if max_val < 1e-15 {
-            return None; // Singular matrix
+        // Explicit is_nan() check (rather than plain `max_val < 1e-15`) since a NaN pivot
+        // fails every ordered comparison and would otherwise sail through as "not too
+        // small", propagating through the solve as `1.0/NaN` instead of returning None.
+        if max_val.is_nan() || max_val < 1e-15 {
+            return None; // Singular or non-finite matrix
         }
 
         // Swap rows
@@ -156,6 +159,21 @@ mod tests {
     fn test_solve_6x6_singular_returns_none() {
         let a = [[0.0; 6]; 6];
         let b = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        assert!(solve(&a, &b).is_none());
+    }
+
+    #[test]
+    fn test_solve_nan_pivot_returns_none() {
+        // A NaN diagonal entry must not slip past the singularity check: every
+        // ordered comparison against NaN is false, so a naive `max_val < eps`
+        // check would leave `max_row` unmoved and later divide by NaN, returning
+        // `Some([NaN, ...])` instead of the documented `None`.
+        let mut a = [[0.0; 5]; 5];
+        for (i, row) in a.iter_mut().enumerate() {
+            row[i] = 1.0;
+        }
+        a[2][2] = f64::NAN;
+        let b = [1.0, 2.0, 3.0, 4.0, 5.0];
         assert!(solve(&a, &b).is_none());
     }
 

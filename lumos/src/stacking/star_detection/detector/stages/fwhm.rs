@@ -33,7 +33,9 @@ const FWHM_MAD_MULTIPLIER: f32 = 3.0;
 pub(crate) struct FwhmResult {
     /// FWHM value if matched filtering should be used, None if disabled.
     pub fwhm: Option<f32>,
-    /// Number of stars used for auto-estimation (0 if manual or disabled).
+    /// Number of stars that actually contributed to `fwhm`'s value: 0 if manual,
+    /// disabled, or auto-estimation fell back to a value with no star provenance —
+    /// so non-zero means exactly "fwhm came from a genuine auto-estimate".
     pub stars_used: usize,
 }
 
@@ -149,9 +151,13 @@ fn estimate_fwhm_from_stars(
             min_stars,
             fallback_fwhm
         );
+        // `fallback_fwhm` has no dependence on `fwhms` (it's `expected_fwhm` or the
+        // hardcoded default), so `stars_used` must report 0, not the quality-passing
+        // count — otherwise `fwhm_was_auto_estimated` downstream would read true for
+        // a fallback that never actually auto-estimated anything.
         return FwhmResult {
             fwhm: Some(fallback_fwhm),
-            stars_used: fwhms.len(),
+            stars_used: 0,
         };
     }
 
@@ -173,9 +179,12 @@ fn estimate_fwhm_from_stars(
             "Too many outliers rejected ({count_before} -> {}), using pre-rejection median {median:.2}",
             fwhms.len(),
         );
+        // `median` was computed over the pre-rejection set (`count_before` stars),
+        // not the shrunken post-retain `fwhms` — report the count that actually
+        // produced the returned value.
         return FwhmResult {
             fwhm: Some(median),
-            stars_used: fwhms.len(),
+            stars_used: count_before,
         };
     }
 
@@ -230,7 +239,30 @@ mod tests {
 
         assert!(result.fwhm.is_some());
         assert!((result.fwhm.unwrap() - 4.0).abs() < 0.01); // Default FWHM
-        assert_eq!(result.stars_used, 4);
+        // The fallback FWHM has no dependence on the 4 candidate stars, so
+        // stars_used must be 0 — not "4 stars used".
+        assert_eq!(result.stars_used, 0);
+    }
+
+    #[test]
+    fn test_fwhm_estimation_pre_rejection_median_reports_pre_rejection_count() {
+        // 6 stars at FWHM=3.0 (tight cluster) + 4 outliers at FWHM=18.0. MAD-based
+        // rejection drops all 4 outliers, leaving 6 < min_stars(7), so the function
+        // falls back to the pre-rejection median (still 3.0, computed over all 10
+        // stars). stars_used must reflect that provenance: 10 stars actually
+        // contributed to the returned value (non-zero, since a pre-rejection median
+        // is still a genuine auto-estimate, unlike the insufficient-stars fallback).
+        let mut stars: Vec<Star> = (0..6).map(|_| make_good_star(3.0)).collect();
+        stars.extend((0..4).map(|_| make_good_star(18.0)));
+
+        let result = estimate_fwhm_from_stars(&stars, 7, 4.0, 0.8, 0.7);
+
+        assert!(result.fwhm.is_some());
+        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.01);
+        assert_eq!(
+            result.stars_used, 10,
+            "stars_used must report the pre-rejection count that actually produced the median"
+        );
     }
 
     #[test]

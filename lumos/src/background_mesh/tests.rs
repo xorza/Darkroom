@@ -21,6 +21,23 @@ fn make_grid_with_mask(pixels: &Buffer2<f32>, tile_size: usize, mask: &BitBuffer
     grid
 }
 
+#[test]
+fn new_uninit_clamps_tile_size_to_image() {
+    // tile_size larger than the image must clamp to min(width, height) = 8 instead of
+    // producing a 0-tile grid: 10.div_ceil(8) = 2 tiles in x, 8.div_ceil(8) = 1 in y.
+    let grid = TileGrid::new_uninit(10, 8, 64);
+    assert_eq!(grid.tiles_x(), 2);
+    assert_eq!(grid.tiles_y(), 1);
+}
+
+#[test]
+#[should_panic(expected = "non-zero")]
+fn new_uninit_zero_dimension_panics() {
+    // A zero-size image is a logic error upstream (ImageDimensions asserts > 0); fail fast
+    // with a clear message instead of a bare div_ceil divide-by-zero.
+    TileGrid::new_uninit(0, 100, 64);
+}
+
 // --- SExtractor sky estimator ---
 
 #[test]
@@ -379,22 +396,26 @@ fn test_image_smaller_than_tile() {
 
 #[test]
 fn test_large_tile_size() {
+    // A tile size beyond the image clamps to min(w, h) = 50 → 100.div_ceil(50) = 2 x 1 tiles.
     let pixels = create_uniform_image(100, 50, 0.3);
     let grid = make_grid(&pixels, 200);
 
-    assert_eq!(grid.tiles_x(), 1);
+    assert_eq!(grid.tiles_x(), 2);
     assert_eq!(grid.tiles_y(), 1);
 
-    let stats = grid.get(0, 0);
-    assert!((stats.sky - 0.3).abs() < 0.01);
+    for tx in 0..grid.tiles_x() {
+        let stats = grid.get(tx, 0);
+        assert!((stats.sky - 0.3).abs() < 0.01);
+    }
 }
 
 #[test]
 fn test_tile_grid_very_wide_image() {
+    // tile_size clamps to min(w, h) = 10 → 100 x 1 tiles of 10x10.
     let pixels = create_uniform_image(1000, 10, 0.5);
     let grid = make_grid(&pixels, 64);
 
-    assert_eq!(grid.tiles_x(), 16);
+    assert_eq!(grid.tiles_x(), 100);
     assert_eq!(grid.tiles_y(), 1);
 
     for tx in 0..grid.tiles_x() {
@@ -405,11 +426,12 @@ fn test_tile_grid_very_wide_image() {
 
 #[test]
 fn test_tile_grid_very_tall_image() {
+    // tile_size clamps to min(w, h) = 10 → 1 x 100 tiles of 10x10.
     let pixels = create_uniform_image(10, 1000, 0.5);
     let grid = make_grid(&pixels, 64);
 
     assert_eq!(grid.tiles_x(), 1);
-    assert_eq!(grid.tiles_y(), 16);
+    assert_eq!(grid.tiles_y(), 100);
 
     for ty in 0..grid.tiles_y() {
         let stats = grid.get(0, ty);
@@ -528,19 +550,21 @@ fn test_sigma_computation_correctness() {
 
 #[test]
 fn test_mad_sigma_known_value() {
-    // MAD-based sigma for known distribution
-    // For values [0,1,2,3,4,5,6,7,8,9]:
+    // MAD-based sigma for a known distribution. A 10x10 image where each row is
+    // [0,1,...,9] (pixel value = its x coordinate) keeps the whole image in one 10x10
+    // tile and gives 10 copies of each value, so the order statistics match the plain
+    // [0..9] case:
     // - Approximate median (used for performance) = 5 (upper-middle for even length)
-    // - Deviations from median: [5,4,3,2,1,0,1,2,3,4]
+    // - Deviations from median: 10 copies each of [5,4,3,2,1,0,1,2,3,4]
     // - MAD = approximate median of deviations = 3
     // - sigma = MAD * 1.4826 ≈ 4.4
     let width = 10;
-    let height = 1;
-    let data: Vec<f32> = (0..10).map(|x| x as f32).collect();
+    let height = 10;
+    let data: Vec<f32> = (0..width * height).map(|i| (i % width) as f32).collect();
 
     let pixels = Buffer2::new(width, height, data);
 
-    // Use large tile to get all pixels
+    // One tile covering all pixels
     let grid = make_grid(&pixels, 10);
     let stats = grid.get(0, 0);
 

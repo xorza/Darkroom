@@ -13,7 +13,7 @@ use smallvec::SmallVec;
 
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::deblend::{
-    ComponentData, MAX_PEAKS, Pixel, assign_to_nearest_peak,
+    ComponentData, MAX_PEAKS, Pixel, assign_to_nearest_peak, peaks_too_close,
 };
 use crate::stacking::star_detection::labeling::LabelMap;
 use common::Vec2us;
@@ -462,7 +462,13 @@ fn build_deblend_tree(
         return SmallVec::new();
     }
 
-    // Use exponential spacing: threshold[i] = low * (high/low)^(i/n)
+    // Use exponential spacing: threshold[i] = low * (high/low)^(i/n).
+    // A component whose floor pixel is exactly (or near) zero would send
+    // `high/low` to infinity and `low * infinity^t` to NaN for every t > 0 —
+    // every above_threshold set above level 0 comes up empty since `>= NaN` is
+    // always false, so the tree silently never splits. Floor `low` relative to
+    // `high` so the ratio, and every threshold in the ladder, stays finite.
+    let low = low.max(high * 1e-6).max(f32::MIN_POSITIVE);
     let ratio = (high / low).max(1.0);
 
     let mut tree: DeblendTree = SmallVec::new();
@@ -664,6 +670,7 @@ fn create_child_nodes(
     child_regions: &[Vec<Pixel>],
     min_separation: usize,
 ) {
+    let min_sep_sq = min_separation * min_separation;
     let mut child_indices: ArrayVec<usize, MAX_CHILDREN> = ArrayVec::new();
 
     for child_region in child_regions {
@@ -673,15 +680,11 @@ fn create_child_nodes(
 
         let child_peak = find_region_peak(child_region);
 
-        // Check minimum separation from existing children
-        let too_close = child_indices.iter().any(|&idx| {
-            let sibling = &tree[idx];
-            let dx = (child_peak.pos.x as i32 - sibling.peak.pos.x as i32).unsigned_abs() as usize;
-            let dy = (child_peak.pos.y as i32 - sibling.peak.pos.y as i32).unsigned_abs() as usize;
-            // Chebyshev distance (max of dx, dy): matches the separation metric
-            // used in local_maxima peak detection for consistency.
-            dx.max(dy) < min_separation
-        });
+        // Check minimum separation from existing children (squared Euclidean via
+        // the shared `peaks_too_close`, matching local_maxima's metric).
+        let too_close = child_indices
+            .iter()
+            .any(|&idx| peaks_too_close(child_peak.pos, tree[idx].peak.pos, min_sep_sq));
 
         if too_close {
             continue;

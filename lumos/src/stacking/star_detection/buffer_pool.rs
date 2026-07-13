@@ -59,8 +59,12 @@ impl BufferPool {
     ///
     /// The buffer must have the correct dimensions.
     pub fn release_f32(&mut self, buffer: Buffer2<f32>) {
-        debug_assert_eq!(buffer.width(), self.dimensions.x);
-        debug_assert_eq!(buffer.height(), self.dimensions.y);
+        // Release asserts, not debug: a mismatched buffer handed back to acquire_f32() would be
+        // silently reused by SIMD kernels elsewhere in this module that do unchecked-length
+        // loads/stores off the pool's declared dimensions — out-of-bounds UB, not a wrong pixel.
+        // The check is O(1) per acquire/release, not "too expensive for release".
+        assert_eq!(buffer.width(), self.dimensions.x);
+        assert_eq!(buffer.height(), self.dimensions.y);
         self.f32_buffers.push(buffer);
     }
 
@@ -75,8 +79,10 @@ impl BufferPool {
     ///
     /// The buffer must have the correct dimensions.
     pub fn release_bit(&mut self, buffer: BitBuffer2) {
-        debug_assert_eq!(buffer.width(), self.dimensions.x);
-        debug_assert_eq!(buffer.height(), self.dimensions.y);
+        // See release_f32: release assert, not debug — a mismatch here is out-of-bounds UB in
+        // a downstream SIMD kernel, not a wrong pixel.
+        assert_eq!(buffer.width(), self.dimensions.x);
+        assert_eq!(buffer.height(), self.dimensions.y);
         self.bit_buffers.push(buffer);
     }
 
@@ -91,8 +97,10 @@ impl BufferPool {
     ///
     /// The buffer must have the correct dimensions.
     pub fn release_u32(&mut self, buffer: Buffer2<u32>) {
-        debug_assert_eq!(buffer.width(), self.dimensions.x);
-        debug_assert_eq!(buffer.height(), self.dimensions.y);
+        // See release_f32: release assert, not debug — a mismatch here is out-of-bounds UB in
+        // a downstream SIMD kernel, not a wrong pixel.
+        assert_eq!(buffer.width(), self.dimensions.x);
+        assert_eq!(buffer.height(), self.dimensions.y);
         self.u32_buffer = Some(buffer);
     }
 
@@ -227,6 +235,17 @@ mod tests {
         let _ = pool.acquire_f32();
         let _ = pool.acquire_bit();
         let _ = pool.acquire_u32();
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn test_release_f32_wrong_dimensions_panics() {
+        // A mismatched buffer must be rejected even in release builds: downstream SIMD kernels
+        // do unchecked-length loads/stores off the pool's declared dimensions, so a silently
+        // accepted mismatch would be out-of-bounds UB, not just a wrong pixel.
+        let mut pool = BufferPool::new(64, 64);
+        let wrong_size = Buffer2::new_default(32, 32);
+        pool.release_f32(wrong_size);
     }
 
     #[test]

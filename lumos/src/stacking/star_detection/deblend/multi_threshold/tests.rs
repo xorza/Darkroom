@@ -343,6 +343,47 @@ fn test_diagonal_star_pair() {
 }
 
 #[test]
+fn test_create_child_nodes_diagonal_uses_euclidean_not_chebyshev() {
+    // dx=dy=3, min_separation=4: Chebyshev distance is max(3,3)=3 (< 4, "too
+    // close"), but squared Euclidean is 3²+3²=18 (>= 4²=16, "well separated").
+    // create_child_nodes must agree with the squared-Euclidean metric that
+    // local_maxima::add_or_replace_peak and the shared nearest_peak_index/
+    // assign_to_nearest_peak Voronoi step use everywhere else in this module —
+    // not Chebyshev, which would wrongly merge these two.
+    let mut tree: DeblendTree = SmallVec::new();
+    tree.push(DeblendNode {
+        peak: Pixel {
+            pos: Vec2us::new(50, 50),
+            value: 1.0,
+        },
+        flux: 10.0,
+        children: SmallVec::new(),
+    });
+    let parent_idx = 0;
+    let mut pixel_to_node = NodeGrid::empty();
+
+    let child_regions = [
+        vec![Pixel {
+            pos: Vec2us::new(0, 0),
+            value: 1.0,
+        }],
+        vec![Pixel {
+            pos: Vec2us::new(3, 3),
+            value: 0.9,
+        }],
+    ];
+
+    create_child_nodes(&mut tree, &mut pixel_to_node, parent_idx, &child_regions, 4);
+
+    assert_eq!(
+        tree[parent_idx].children.len(),
+        2,
+        "diagonal peaks 3px apart with min_separation=4 must both become children \
+         (Euclidean distance >= min_separation even though Chebyshev distance < min_separation)"
+    );
+}
+
+#[test]
 fn test_n_thresholds_effect() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(35, 50, 1.0, 2.5), (65, 50, 0.9, 2.5)]);
@@ -410,6 +451,68 @@ fn test_flat_profile_no_deblend() {
         result.len(),
         1,
         "Flat profile should not deblend into multiple objects"
+    );
+}
+
+#[test]
+fn test_zero_floor_pixel_does_not_prevent_deblending() {
+    // A component whose minimum pixel value is exactly 0.0 (e.g. a bounding box
+    // padded well past both stars' Gaussian falloff) used to send the exponential
+    // threshold ladder's `ratio = high/low` to infinity, producing NaN thresholds
+    // at every level above 0 (`>= NaN` is always false) and silently preventing
+    // any split. Regression test: two well-separated stars in such a component
+    // must still deblend into two objects.
+    let width = 100;
+    let height = 100;
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+    let mut labels_buf = Buffer2::new_filled(width, height, 0u32);
+
+    let mut bbox = Aabb::empty();
+    let mut area = 0;
+    // The whole rectangle is one connected component; most of it stays at 0.0.
+    for y in 10..90 {
+        for x in 10..90 {
+            labels_buf[(x, y)] = 1;
+            bbox.include(Vec2us::new(x, y));
+            area += 1;
+        }
+    }
+
+    for &(cx, cy, amplitude, sigma) in &[(30i32, 50i32, 1.0f32, 2.5f32), (70, 50, 0.8, 2.5)] {
+        let radius = (sigma * 6.0).ceil() as i32;
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let x = (cx + dx) as usize;
+                let y = (cy + dy) as usize;
+                let r2 = (dx * dx + dy * dy) as f32;
+                pixels[(x, y)] += amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
+            }
+        }
+    }
+
+    let labels = label_map_from_raw(labels_buf, 1);
+    let data = ComponentData {
+        bbox,
+        label: 1,
+        area,
+    };
+
+    // Sanity-check the setup actually reaches the reported bug's precondition.
+    let min_value = data
+        .iter_pixels(&pixels, &labels)
+        .map(|p| p.value)
+        .fold(f32::MAX, f32::min);
+    assert_eq!(
+        min_value, 0.0,
+        "test setup must have an exact-zero floor pixel"
+    );
+
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+
+    assert_eq!(
+        result.len(),
+        2,
+        "Two well-separated stars in a zero-floored component should still deblend"
     );
 }
 

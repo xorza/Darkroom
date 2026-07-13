@@ -243,6 +243,14 @@ pub(crate) fn fit_weights(
     })
 }
 
+/// Flat per-stamp sky estimate: one (background, noise) pair valid at the stamp
+/// scale, as opposed to the per-pixel tiled global map.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LocalBackground {
+    pub bg: f32,
+    pub noise: f32,
+}
+
 /// Compute local background and noise using an annular region around the star.
 ///
 /// The inner radius excludes the star's flux, and the outer radius samples
@@ -257,7 +265,7 @@ pub(crate) fn fit_weights(
 /// * `outer_radius` - Outer radius of annulus
 ///
 /// # Returns
-/// Tuple of (background, noise) or None if not enough valid pixels
+/// The local background/noise, or None if not enough valid pixels
 fn compute_annulus_background(
     pixels: &[f32],
     width: usize,
@@ -265,7 +273,7 @@ fn compute_annulus_background(
     pos: Vec2,
     inner_radius: usize,
     outer_radius: usize,
-) -> Option<(f32, f32)> {
+) -> Option<LocalBackground> {
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
     let inner_r2 = (inner_radius * inner_radius) as f32;
@@ -297,7 +305,10 @@ fn compute_annulus_background(
 
     // Sigma-clipped median (2 iterations, 3-sigma clip)
     let stats = sigma_clipped_median_mad(&mut values, 3.0, 2);
-    Some((stats.median, stats.sigma))
+    Some(LocalBackground {
+        bg: stats.median,
+        noise: stats.sigma,
+    })
 }
 
 /// Compute sigma-clipped median and MAD using the shared implementation.
@@ -374,22 +385,28 @@ pub fn measure_star(
     let icy = pos.y.round() as isize;
     let bg_y = icy as usize;
     let bg_x = icx as usize;
-    let global_fallback = || {
-        (
-            background.background.row(bg_y)[bg_x],
-            background.noise.row(bg_y)[bg_x],
-        )
+    let global_fallback = || LocalBackground {
+        bg: background.background.row(bg_y)[bg_x],
+        noise: background.noise.row(bg_y)[bg_x],
     };
 
-    let (local_bg, local_noise) = match config.local_background {
-        LocalBackgroundMethod::GlobalMap => global_fallback(),
+    // The annulus estimate; None in GlobalMap mode or when the annulus has too few
+    // in-bounds samples (star near an edge). A failed annulus falls back to the
+    // center pixel of the global map for the fit seed below, but must NOT become a
+    // metrics override: flattening one map pixel across the whole stamp would be
+    // strictly worse than the per-pixel map itself.
+    let annulus_background = match config.local_background {
+        LocalBackgroundMethod::GlobalMap => None,
         LocalBackgroundMethod::LocalAnnulus => {
             let inner_radius = stamp_radius;
             let outer_radius = (stamp_radius as f32 * 1.5).ceil() as usize;
             compute_annulus_background(pixels, width, height, pos, inner_radius, outer_radius)
-                .unwrap_or_else(global_fallback)
         }
     };
+    let LocalBackground {
+        bg: local_bg,
+        noise: local_noise,
+    } = annulus_background.unwrap_or_else(global_fallback);
 
     // Refine with profile fitting if requested.
     // When fit converges, also extract FWHM and eccentricity from fit parameters
@@ -416,14 +433,15 @@ pub fn measure_star(
                 // FWHM from geometric mean of sigma_x, sigma_y
                 let geo_sigma = (result.sigma.x * result.sigma.y).sqrt();
                 fit_fwhm = Some(sigma_to_fwhm(geo_sigma));
-                // Eccentricity from sigma ratio: e = sqrt(1 - min/max)
+                // Eccentricity from sigma ratio: e = sqrt(1 - (min/max)^2)
                 let (s_min, s_max) = if result.sigma.x < result.sigma.y {
                     (result.sigma.x, result.sigma.y)
                 } else {
                     (result.sigma.y, result.sigma.x)
                 };
                 if s_max > f32::EPSILON {
-                    fit_eccentricity = Some((1.0 - s_min / s_max).sqrt().clamp(0.0, 1.0));
+                    let ratio = s_min / s_max;
+                    fit_eccentricity = Some((1.0 - ratio * ratio).sqrt().clamp(0.0, 1.0));
                 }
             }
         }
@@ -454,7 +472,15 @@ pub fn measure_star(
         .map(|nm| (Some(nm.gain), Some(nm.read_noise)))
         .unwrap_or((None, None));
 
-    let mut metrics = compute_metrics(pixels, background, pos, stamp_radius, gain, read_noise)?;
+    let mut metrics = compute_metrics(
+        pixels,
+        background,
+        pos,
+        stamp_radius,
+        annulus_background,
+        gain,
+        read_noise,
+    )?;
 
     // Override FWHM and eccentricity with fit-derived values when available
     if let Some(fwhm) = fit_fwhm {
@@ -596,9 +622,14 @@ const MAX_SIGMA_SQ: f64 = 100.0;
 ///
 /// Returns the source covariance, or `None` if it never reaches a valid
 /// positive-definite estimate (caller falls back to the plain moments).
+///
+/// `background_override` replaces the per-pixel map with a flat stamp-level sky,
+/// exactly as in [`compute_metrics`] — both must subtract the same background or
+/// FWHM/eccentricity and flux/SNR would come from different sky conventions.
 fn windowed_covariance(
     pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
+    background_override: Option<LocalBackground>,
     pos: Vec2,
     stamp_radius: usize,
     seed_sigma_sq: f64,
@@ -630,7 +661,11 @@ fn windowed_covariance(
                 let fx = x as f64 - pos_x;
                 let fy = y as f64 - pos_y;
                 let r2 = fx * fx + fy * fy;
-                let wv = (-r2 * inv_two_sw).exp() * (px_row[x] - bg_row[x]) as f64;
+                let bg = match background_override {
+                    Some(local) => local.bg,
+                    None => bg_row[x],
+                };
+                let wv = (-r2 * inv_two_sw).exp() * (px_row[x] - bg) as f64;
                 w_sum += wv;
                 mxx += wv * fx * fx;
                 myy += wv * fy * fy;
@@ -695,11 +730,20 @@ pub(crate) struct StarMetrics {
 ///
 /// Otherwise, uses the simplified background-dominated formula:
 /// `SNR = flux / (σ_sky × sqrt(npix))`
+///
+/// `background_override`, when set, replaces the per-pixel tiled background/noise
+/// map with a single flat estimate for the whole stamp — used for
+/// [`LocalBackgroundMethod::LocalAnnulus`](crate::stacking::star_detection::config::LocalBackgroundMethod::LocalAnnulus),
+/// whose locally-estimated sky level is only valid at the stamp scale, not
+/// interpolated per pixel like the tiled map. It applies to every background
+/// consumer here — flux/marginals, the windowed covariance behind FWHM/eccentricity,
+/// and the SNR noise — so all metrics share one sky convention.
 pub(crate) fn compute_metrics(
     pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
     pos: Vec2,
     stamp_radius: usize,
+    background_override: Option<LocalBackground>,
     gain: Option<f32>,
     read_noise: Option<f32>,
 ) -> Option<StarMetrics> {
@@ -740,7 +784,10 @@ pub(crate) fn compute_metrics(
         for dx in -stamp_radius_i32..=stamp_radius_i32 {
             let x = (icx + dx as isize) as usize;
 
-            let bg = bg_row[x];
+            let bg = match background_override {
+                Some(local) => local.bg,
+                None => bg_row[x],
+            };
             let value = (px_row[x] - bg).max(0.0) as f64;
 
             flux += value;
@@ -767,7 +814,7 @@ pub(crate) fn compute_metrics(
 
             // Collect noise from background region (outer ring)
             let r2 = dx * dx + dy * dy;
-            if r2 > outer_ring_threshold {
+            if background_override.is_none() && r2 > outer_ring_threshold {
                 noise_sum += noise_row[x] as f64;
                 noise_count += 1;
             }
@@ -783,12 +830,19 @@ pub(crate) fn compute_metrics(
     // stay unbiased. Seed the window from the plain moment; fall back to the plain
     // moments if it can't converge to a valid (positive-definite) covariance.
     let seed_sigma_sq = (sum_r2 / flux / 2.0).max(MIN_SIGMA_SQ);
-    let cov =
-        windowed_covariance(pixels, background, pos, stamp_radius, seed_sigma_sq).unwrap_or(Cov2 {
-            xx: sum_x2 / flux,
-            yy: sum_y2 / flux,
-            xy: sum_xy / flux,
-        });
+    let cov = windowed_covariance(
+        pixels,
+        background,
+        background_override,
+        pos,
+        stamp_radius,
+        seed_sigma_sq,
+    )
+    .unwrap_or(Cov2 {
+        xx: sum_x2 / flux,
+        yy: sum_y2 / flux,
+        xy: sum_xy / flux,
+    });
 
     let trace = cov.trace();
     let det = cov.det();
@@ -809,10 +863,10 @@ pub(crate) fn compute_metrics(
     };
 
     // Compute SNR using appropriate noise model
-    let avg_noise = if noise_count > 0 {
-        (noise_sum / noise_count as f64) as f32
-    } else {
-        background.noise.row(icy as usize)[icx as usize]
+    let avg_noise = match background_override {
+        Some(local) => local.noise,
+        None if noise_count > 0 => (noise_sum / noise_count as f64) as f32,
+        None => background.noise.row(icy as usize)[icx as usize],
     };
 
     let npix = (2 * stamp_radius + 1).pow(2) as f32;

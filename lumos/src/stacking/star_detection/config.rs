@@ -146,6 +146,15 @@ impl BackgroundRefinement {
     }
 }
 
+/// Upper bound for `Config::deblend_n_thresholds`.
+///
+/// The multi-threshold deblend tree's max depth is `n_thresholds + 1`
+/// (`build_deblend_tree`'s level loop), and `collect_significant_leaves` recurses
+/// along that depth with no independent cutoff — an unbounded `n_thresholds` risks
+/// stack overflow on a component with enough real structure to keep splitting.
+/// 256 levels is already far beyond the documented useful range ("32+ = SExtractor-style").
+const MAX_DEBLEND_N_THRESHOLDS: usize = 256;
+
 /// Configuration for the star detection pipeline.
 ///
 /// Single flat struct with all parameters grouped by pipeline stage.
@@ -352,8 +361,10 @@ impl Config {
             self.deblend_min_prominence
         );
         assert!(
-            self.deblend_n_thresholds == 0 || self.deblend_n_thresholds >= 2,
-            "deblend_n_thresholds must be 0 (disabled) or at least 2, got {}",
+            self.deblend_n_thresholds == 0
+                || (2..=MAX_DEBLEND_N_THRESHOLDS).contains(&self.deblend_n_thresholds),
+            "deblend_n_thresholds must be 0 (disabled) or between 2 and {}, got {}",
+            MAX_DEBLEND_N_THRESHOLDS,
             self.deblend_n_thresholds
         );
         assert!(
@@ -722,10 +733,32 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "deblend_n_thresholds must be 0 (disabled) or at least 2")]
+    #[should_panic(expected = "deblend_n_thresholds must be 0 (disabled) or between 2 and")]
     fn test_config_invalid_deblend_n_thresholds() {
         Config {
             deblend_n_thresholds: 1,
+            ..Default::default()
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "deblend_n_thresholds must be 0 (disabled) or between 2 and")]
+    fn test_config_deblend_n_thresholds_above_max_rejected() {
+        // Unbounded n_thresholds drives the multi-threshold deblend tree's recursion
+        // depth (build_deblend_tree's level loop is 0..=n_thresholds) with no
+        // independent cutoff — validate() must reject values beyond the cap.
+        Config {
+            deblend_n_thresholds: MAX_DEBLEND_N_THRESHOLDS + 1,
+            ..Default::default()
+        }
+        .validate();
+    }
+
+    #[test]
+    fn test_config_deblend_n_thresholds_at_max_accepted() {
+        Config {
+            deblend_n_thresholds: MAX_DEBLEND_N_THRESHOLDS,
             ..Default::default()
         }
         .validate();

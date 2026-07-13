@@ -128,18 +128,35 @@ pub(crate) fn assign_to_nearest_peak(
     result
 }
 
+/// Squared Euclidean distance between two pixel positions — the one peak-separation
+/// metric shared by the Voronoi assignment and every min-separation check.
+#[inline]
+fn dist_sq(a: Vec2us, b: Vec2us) -> usize {
+    let dx = (a.x as i32 - b.x as i32).unsigned_abs() as usize;
+    let dy = (a.y as i32 - b.y as i32).unsigned_abs() as usize;
+    dx * dx + dy * dy
+}
+
 /// Index of the nearest peak to `pos` by squared Euclidean distance; the first peak wins ties.
 fn nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
     let mut min_dist_sq = usize::MAX;
     let mut nearest = 0;
     for (i, peak) in peaks.iter().enumerate() {
-        let dx = (pos.x as i32 - peak.pos.x as i32).unsigned_abs() as usize;
-        let dy = (pos.y as i32 - peak.pos.y as i32).unsigned_abs() as usize;
-        let dist_sq = dx * dx + dy * dy;
-        if dist_sq < min_dist_sq {
-            min_dist_sq = dist_sq;
+        let d = dist_sq(pos, peak.pos);
+        if d < min_dist_sq {
+            min_dist_sq = d;
             nearest = i;
         }
     }
     nearest
+}
+
+/// Whether two peak positions are closer than a squared-distance threshold, by the same
+/// squared Euclidean metric [`nearest_peak_index`] uses for the Voronoi assignment every
+/// deblender's peaks eventually feed into. `min_sep_sq` is
+/// `min_separation * min_separation`, pre-squared by the caller since peak-separation
+/// checks run in a loop over many candidate pairs.
+#[inline]
+pub(crate) fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
+    dist_sq(a, b) < min_sep_sq
 }

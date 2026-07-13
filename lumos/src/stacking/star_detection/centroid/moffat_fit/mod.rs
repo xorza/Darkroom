@@ -22,7 +22,9 @@ mod simd_avx2;
 mod simd_neon;
 
 use crate::math::FWHM_TO_SIGMA;
-use crate::stacking::star_detection::centroid::lm_optimizer::{LMConfig, LMModel, optimize};
+use crate::stacking::star_detection::centroid::lm_optimizer::{
+    LMConfig, LMModel, accumulate_chi2, build_normal_equations_scalar, optimize,
+};
 use crate::stacking::star_detection::centroid::{
     FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights,
 };
@@ -53,27 +55,28 @@ impl Default for MoffatFitConfig {
 pub(crate) struct MoffatFitResult {
     /// Position of profile center (sub-pixel).
     pub pos: Vec2,
-    /// Amplitude of profile.
-    #[allow(dead_code)] // Used in tests
-    pub amplitude: f32,
-    /// Core width parameter (alpha).
-    #[allow(dead_code)] // Used in tests
-    pub alpha: f32,
-    /// Power law slope (beta).
-    #[allow(dead_code)] // Used in tests
-    pub beta: f32,
-    /// Background level.
-    #[allow(dead_code)] // Used in tests
-    pub background: f32,
     /// FWHM computed from alpha and beta.
     pub fwhm: f32,
-    /// RMS residual of fit.
-    #[allow(dead_code)] // Used in tests
-    pub rms_residual: f32,
     /// Whether the fit converged.
     pub converged: bool,
+    /// Fit diagnostics (amplitude/alpha/background/iteration count) that no
+    /// production caller reads — `measure_star` only uses `pos`/`fwhm`/`converged` —
+    /// but that tests need to verify LM convergence against synthetic ground truth.
+    #[allow(dead_code)] // read only by tests
+    pub debug: MoffatFitDebug,
+}
+
+/// Fit diagnostics kept for tests; see [`MoffatFitResult::debug`].
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // read only by tests
+pub(crate) struct MoffatFitDebug {
+    /// Amplitude of profile.
+    pub amplitude: f32,
+    /// Core width parameter (alpha).
+    pub alpha: f32,
+    /// Background level.
+    pub background: f32,
     /// Number of iterations used.
-    #[allow(dead_code)] // Used in tests
     pub iterations: usize,
 }
 
@@ -226,7 +229,8 @@ impl LMModel<5> for MoffatFixedBeta {
         params[3] = params[3].clamp(0.5, self.stamp_radius); // Alpha
     }
 
-    #[allow(clippy::needless_range_loop)]
+    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
+    #[allow(unreachable_code)]
     fn batch_build_normal_equations(
         &self,
         data_x: &[f64],
@@ -248,29 +252,11 @@ impl LMModel<5> for MoffatFixedBeta {
             };
         }
         // Scalar fallback
-        #[allow(unreachable_code)]
-        let mut hessian = [[0.0f64; 5]; 5];
-        let mut gradient = [0.0f64; 5];
-        let mut chi2 = 0.0f64;
-        for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-            let (model_val, row) = self.evaluate_and_jacobian(x, y, params);
-            let r = z - model_val;
-            chi2 += r * r;
-            for i in 0..5 {
-                gradient[i] += row[i] * r;
-                for j in i..5 {
-                    hessian[i][j] += row[i] * row[j];
-                }
-            }
-        }
-        for i in 1..5 {
-            for j in 0..i {
-                hessian[i][j] = hessian[j][i];
-            }
-        }
-        (hessian, gradient, chi2)
+        build_normal_equations_scalar(self, data_x, data_y, data_z, None, params)
     }
 
+    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
+    #[allow(unreachable_code)]
     fn batch_compute_chi2(
         &self,
         data_x: &[f64],
@@ -292,16 +278,7 @@ impl LMModel<5> for MoffatFixedBeta {
             };
         }
         // Scalar fallback
-        #[allow(unreachable_code)]
-        data_x
-            .iter()
-            .zip(data_y.iter())
-            .zip(data_z.iter())
-            .map(|((&x, &y), &z)| {
-                let residual = z - self.evaluate(x, y, params);
-                residual * residual
-            })
-            .sum()
+        accumulate_chi2(self, data_x, data_y, data_z, None, params, 0..data_x.len())
     }
 }
 
@@ -367,19 +344,18 @@ pub(crate) fn fit_moffat_2d(
         return None;
     }
 
-    let rms = (result.chi2 / n as f64).sqrt() as f32;
     let fwhm = alpha_beta_to_fwhm(alpha as f32, config.fixed_beta);
 
     Some(MoffatFitResult {
         pos: result_pos,
-        amplitude: amplitude as f32,
-        alpha: alpha as f32,
-        beta: config.fixed_beta,
-        background: bg as f32,
         fwhm,
-        rms_residual: rms,
         converged: result.converged,
-        iterations: result.iterations,
+        debug: MoffatFitDebug {
+            amplitude: amplitude as f32,
+            alpha: alpha as f32,
+            background: bg as f32,
+            iterations: result.iterations,
+        },
     })
 }
 
