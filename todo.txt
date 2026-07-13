@@ -10,8 +10,8 @@ tooltip near the edge of screen overflows
 
 file name as argument clap
 
-curve gpu tesselation
-
 try repair & broken document
 
 pined preview cull bug
+
+polyline retirement
