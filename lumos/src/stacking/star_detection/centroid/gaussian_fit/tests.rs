@@ -184,7 +184,7 @@ fn test_gaussian_fit_high_snr() {
     let result = result.unwrap();
     assert!((result.pos.x - true_cx).abs() < 0.02);
     assert!((result.pos.y - true_cy).abs() < 0.02);
-    assert!((result.amplitude - true_amp).abs() < 1.0);
+    assert!((result.debug.amplitude - true_amp).abs() < 1.0);
 }
 
 #[test]
@@ -327,7 +327,7 @@ fn test_gaussian_fit_zero_background() {
     let result = result.unwrap();
     assert!((result.pos.x - true_cx).abs() < 0.1);
     assert!((result.pos.y - true_cy).abs() < 0.1);
-    assert!(result.background.abs() < 0.05);
+    assert!(result.debug.background.abs() < 0.05);
 }
 
 #[test]
@@ -510,9 +510,9 @@ fn test_gaussian_fit_wrong_background_estimate() {
     );
     // Fitted background should be close to true value
     assert!(
-        (result.background - true_bg).abs() < 0.05,
+        (result.debug.background - true_bg).abs() < 0.05,
         "bg error: {}",
-        (result.background - true_bg).abs()
+        (result.debug.background - true_bg).abs()
     );
 }
 
@@ -543,7 +543,7 @@ fn test_gaussian_fit_very_high_amplitude() {
     assert!(result.converged);
     assert!((result.pos.x - true_cx).abs() < 0.1);
     assert!((result.pos.y - true_cy).abs() < 0.1);
-    assert!((result.amplitude - true_amp).abs() / true_amp < 0.01);
+    assert!((result.debug.amplitude - true_amp).abs() / true_amp < 0.01);
 }
 
 #[test]
@@ -600,7 +600,7 @@ fn test_gaussian_fit_converges_within_max_iterations() {
     let result = result.unwrap();
     // Should converge quickly for perfect data
     assert!(result.converged);
-    assert!(result.iterations <= 10);
+    assert!(result.debug.iterations <= 10);
 }
 
 #[test]
@@ -666,7 +666,7 @@ fn test_gaussian_fit_uniform_data_returns_result() {
     // Values should be finite
     assert!((result.pos.x as f32).is_finite());
     assert!((result.pos.y as f32).is_finite());
-    assert!(result.amplitude.is_finite());
+    assert!(result.debug.amplitude.is_finite());
     assert!(result.sigma.x.is_finite());
     assert!(result.sigma.y.is_finite());
 }
@@ -721,11 +721,11 @@ fn test_gaussian_fit_rms_residual_computed() {
 
     // For perfect data, RMS residual should be very small
     assert!(
-        result.rms_residual < 1e-4,
+        result.debug.rms_residual < 1e-4,
         "RMS residual too high: {}",
-        result.rms_residual
+        result.debug.rms_residual
     );
-    assert!(result.rms_residual >= 0.0);
+    assert!(result.debug.rms_residual >= 0.0);
 }
 
 #[test]
@@ -1197,7 +1197,7 @@ fn test_gaussian_fit_extreme_amplitude_range() {
             amp_exp
         );
         assert!(
-            result.amplitude.is_finite(),
+            result.debug.amplitude.is_finite(),
             "Non-finite amplitude for amplitude=10^{}",
             amp_exp
         );
@@ -1259,9 +1259,9 @@ fn test_gaussian_fit_residual_distribution() {
     // RMS residual should be roughly proportional to noise level
     // Allow factor of 2-3 due to fitting degrees of freedom
     assert!(
-        result.rms_residual < noise_sigma * 3.0,
+        result.debug.rms_residual < noise_sigma * 3.0,
         "RMS residual {} much larger than noise {}",
-        result.rms_residual,
+        result.debug.rms_residual,
         noise_sigma
     );
 }

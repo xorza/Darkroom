@@ -525,6 +525,7 @@ fn test_compute_metrics_valid_star() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     );
 
     assert!(metrics.is_some());
@@ -553,6 +554,7 @@ fn test_compute_metrics_invalid_position_returns_none() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     );
     assert!(metrics.is_none());
 }
@@ -570,6 +572,7 @@ fn test_compute_metrics_zero_flux_returns_none() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     );
@@ -596,6 +599,7 @@ fn test_compute_metrics_fwhm_scales_with_sigma() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
     let metrics_large = compute_metrics(
@@ -603,6 +607,7 @@ fn test_compute_metrics_fwhm_scales_with_sigma() {
         &bg,
         Vec2::splat(64.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -633,6 +638,7 @@ fn test_compute_metrics_snr_scales_with_amplitude() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
     let metrics_bright = compute_metrics(
@@ -640,6 +646,7 @@ fn test_compute_metrics_snr_scales_with_amplitude() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -673,6 +680,7 @@ fn test_elongated_star_high_eccentricity() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -700,6 +708,7 @@ fn test_circular_vs_elongated_eccentricity() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
     let metrics_elongated = compute_metrics(
@@ -707,6 +716,7 @@ fn test_circular_vs_elongated_eccentricity() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -780,6 +790,7 @@ fn test_snr_decreases_with_higher_noise() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
     let metrics_high = compute_metrics(
@@ -787,6 +798,7 @@ fn test_snr_decreases_with_higher_noise() {
         &bg_high_noise,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -822,6 +834,7 @@ fn test_fwhm_formula_for_known_gaussian() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -852,6 +865,7 @@ fn test_flux_proportional_to_amplitude() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
     let metrics2 = compute_metrics(
@@ -859,6 +873,7 @@ fn test_flux_proportional_to_amplitude() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -900,6 +915,7 @@ fn test_eccentricity_bounds() {
             TEST_STAMP_RADIUS,
             None,
             None,
+            None,
         )
         .unwrap();
         assert!(
@@ -928,6 +944,7 @@ fn test_eccentricity_orientation_invariant() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
     let metrics_y = compute_metrics(
@@ -935,6 +952,7 @@ fn test_eccentricity_orientation_invariant() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -972,6 +990,7 @@ fn test_snr_formula_consistency() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
     let metrics2 = compute_metrics(
@@ -979,6 +998,7 @@ fn test_snr_formula_consistency() {
         &bg2,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -1023,6 +1043,7 @@ fn test_metrics_with_high_background() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     );
 
     assert!(
@@ -1052,6 +1073,7 @@ fn test_fwhm_independent_of_amplitude() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
     let metrics_bright = compute_metrics(
@@ -1059,6 +1081,7 @@ fn test_fwhm_independent_of_amplitude() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -1093,6 +1116,7 @@ fn test_eccentricity_increases_with_elongation() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap()
     .eccentricity;
@@ -1103,6 +1127,7 @@ fn test_eccentricity_increases_with_elongation() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap()
     .eccentricity;
@@ -1111,6 +1136,7 @@ fn test_eccentricity_increases_with_elongation() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -1624,6 +1650,7 @@ fn test_fwhm_estimation_accuracy() {
             TEST_STAMP_RADIUS,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -1671,6 +1698,7 @@ fn test_eccentricity_calculation_accuracy() {
             TEST_STAMP_RADIUS,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -1709,6 +1737,7 @@ fn test_snr_calculation_with_gain() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -1718,6 +1747,7 @@ fn test_snr_calculation_with_gain() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         Some(gain),
         Some(read_noise),
     )
@@ -1764,6 +1794,7 @@ fn test_sharpness_point_vs_extended() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -1774,6 +1805,7 @@ fn test_sharpness_point_vs_extended() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -1924,14 +1956,14 @@ fn test_moffat_fit_alpha_recovery() {
 
         // Check that alpha is accurate (convergence flag may be false if
         // initial guess was already close)
-        let alpha_error = (result.alpha - true_alpha).abs() / true_alpha;
+        let alpha_error = (result.debug.alpha - true_alpha).abs() / true_alpha;
 
         assert!(
             alpha_error < 0.15,
             "Alpha error {:.1}% too large for alpha={} (got={})",
             alpha_error * 100.0,
             true_alpha,
-            result.alpha
+            result.debug.alpha
         );
     }
 }
@@ -1994,6 +2026,7 @@ fn test_roundness1_circular_source() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -2018,6 +2051,7 @@ fn test_roundness1_x_elongated() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -2045,6 +2079,7 @@ fn test_roundness2_symmetric_source() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -3277,7 +3312,7 @@ fn test_metrics_small_fwhm() {
     let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), sigma, 0.9, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(&pixels, &bg, Vec2::splat(32.0), 5, None, None);
+    let metrics = compute_metrics(&pixels, &bg, Vec2::splat(32.0), 5, None, None, None);
 
     assert!(metrics.is_some(), "Should compute metrics for small FWHM");
     let m = metrics.unwrap();
@@ -3299,6 +3334,7 @@ fn test_metrics_large_fwhm() {
         &bg,
         Vec2::splat(64.0),
         MAX_STAMP_RADIUS,
+        None,
         None,
         None,
     );
@@ -3513,6 +3549,7 @@ fn test_eccentricity_with_contamination() {
         TEST_STAMP_RADIUS,
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -3521,6 +3558,7 @@ fn test_eccentricity_with_contamination() {
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
+        None,
         None,
         None,
     )
@@ -3665,7 +3703,8 @@ fn test_eccentricity_rotation_invariant() {
         let angle_rad = (angle_deg as f32).to_radians();
         let pixels = make_rotated_elliptical_star(width, height, pos, 4.0, 2.0, angle_rad, 0.8);
 
-        let metrics = compute_metrics(&pixels, &bg, pos, TEST_STAMP_RADIUS, None, None).unwrap();
+        let metrics =
+            compute_metrics(&pixels, &bg, pos, TEST_STAMP_RADIUS, None, None, None).unwrap();
         eccentricities.push((angle_deg, metrics.eccentricity));
     }
 
@@ -3991,13 +4030,13 @@ fn test_gaussian_fit_fwhm_from_fit_params() {
 /// GaussianFit: eccentricity should come from fit sigma_x/sigma_y ratio.
 ///
 /// Elongated Gaussian with sigma_x=2.0, sigma_y=4.0.
-/// True eccentricity = sqrt(1 - sigma_min/sigma_max) = sqrt(1 - 2/4) = sqrt(0.5) ≈ 0.7071.
+/// True eccentricity = sqrt(1 - (sigma_min/sigma_max)^2) = sqrt(1 - (2/4)^2) = sqrt(0.75) ≈ 0.8660.
 #[test]
 fn test_gaussian_fit_eccentricity_from_fit_params() {
     let sigma_x = 2.0f32;
     let sigma_y = 4.0f32;
-    // e = sqrt(1 - min/max) = sqrt(1 - 2/4) = sqrt(0.5) = 0.7071
-    let true_ecc = (1.0 - sigma_x / sigma_y).sqrt();
+    // e = sqrt(1 - (min/max)^2) = sqrt(1 - (2/4)^2) = sqrt(0.75) = 0.8660
+    let true_ecc = (1.0 - (sigma_x / sigma_y).powi(2)).sqrt();
 
     let pos = Vec2::new(64.0, 64.0);
     let pixels = make_elliptical_gaussian(128, 128, pos, sigma_x, sigma_y, 0.8, 0.1);

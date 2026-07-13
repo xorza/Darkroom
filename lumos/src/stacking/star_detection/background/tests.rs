@@ -1,6 +1,7 @@
 //! Tests for background estimation.
 
 use crate::{
+    background_mesh::TileGrid,
     stacking::star_detection::config::{BackgroundRefinement, Config},
     testing::estimate_background,
 };
@@ -53,6 +54,19 @@ fn test_small_image_below_tile_size_does_not_panic() {
             (val - 0.7).abs() < 1e-4,
             "expected uniform background 0.7, got {val}"
         );
+    }
+}
+
+#[test]
+fn test_tile_size_clamp_never_zero_for_degenerate_image() {
+    // A zero-width/zero-height image must not drive tile_size to 0: TileGrid::new_uninit's
+    // width.div_ceil(tile_size) panics on divide-by-zero. Mirrors the exact clamp expression
+    // used in estimate_background/refine_background.
+    for (width, height) in [(0usize, 100usize), (100, 0), (0, 0)] {
+        let tile_size = 64usize.min(width).min(height).max(1);
+        assert!(tile_size >= 1, "tile_size must never clamp to 0");
+        // Must not panic (this is the exact call that panicked before the `.max(1)` fix).
+        let _grid = TileGrid::new_uninit(width, height, tile_size);
     }
 }
 

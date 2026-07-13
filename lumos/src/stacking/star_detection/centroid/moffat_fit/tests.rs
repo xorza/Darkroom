@@ -56,7 +56,7 @@ fn test_moffat_fit_centered_fixed_beta() {
     assert!(result.converged);
     assert!((result.pos.x - true_cx).abs() < 0.1);
     assert!((result.pos.y - true_cy).abs() < 0.1);
-    assert!((result.alpha - true_alpha).abs() < 0.3);
+    assert!((result.debug.alpha - true_alpha).abs() < 0.3);
 }
 
 #[test]
@@ -230,9 +230,9 @@ fn test_moffat_fit_low_snr() {
         pos_error
     );
     assert!(
-        (result.alpha - true_alpha).abs() < 1.0,
+        (result.debug.alpha - true_alpha).abs() < 1.0,
         "Low-SNR alpha error {:.3} too large",
-        (result.alpha - true_alpha).abs()
+        (result.debug.alpha - true_alpha).abs()
     );
 }
 
@@ -278,9 +278,9 @@ fn test_moffat_fit_wrong_background_estimate() {
     );
     // Fitted background should be close to true value
     assert!(
-        (result.background - true_bg).abs() < 0.05,
+        (result.debug.background - true_bg).abs() < 0.05,
         "bg error: {}",
-        (result.background - true_bg).abs()
+        (result.debug.background - true_bg).abs()
     );
 }
 
@@ -353,7 +353,7 @@ fn test_moffat_fit_very_high_amplitude() {
     assert!(result.converged);
     assert!((result.pos.x - true_cx).abs() < 0.1);
     assert!((result.pos.y - true_cy).abs() < 0.1);
-    assert!((result.amplitude - true_amp).abs() / true_amp < 0.01);
+    assert!((result.debug.amplitude - true_amp).abs() / true_amp < 0.01);
 }
 
 #[test]
@@ -442,9 +442,9 @@ fn test_moffat_fit_wide_psf() {
     assert!((result.pos.x - true_cx).abs() < 0.1);
     assert!((result.pos.y - true_cy).abs() < 0.1);
     assert!(
-        (result.alpha - true_alpha).abs() < 0.5,
+        (result.debug.alpha - true_alpha).abs() < 0.5,
         "alpha error: {}",
-        (result.alpha - true_alpha).abs()
+        (result.debug.alpha - true_alpha).abs()
     );
 }
 
@@ -520,7 +520,7 @@ fn test_moffat_fit_converges_within_max_iterations() {
     let result = result.unwrap();
     // Should converge quickly for perfect data
     assert!(result.converged);
-    assert!(result.iterations <= 20);
+    assert!(result.debug.iterations <= 20);
 }
 
 #[test]
@@ -590,7 +590,7 @@ fn test_moffat_fit_uniform_data_returns_result() {
     // Values should be finite
     assert!((result.pos.x as f32).is_finite());
     assert!((result.pos.y as f32).is_finite());
-    assert!(result.amplitude.is_finite());
+    assert!(result.debug.amplitude.is_finite());
 }
 
 // ============================================================================
