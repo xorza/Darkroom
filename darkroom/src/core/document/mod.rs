@@ -11,7 +11,7 @@ use scenarium::graph::{Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
 use scenarium::graph::{Node, NodeKind};
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use thiserror::Error;
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
@@ -71,7 +71,9 @@ impl PortKind {
 /// without threading a cache, and serializable so a persisted tab
 /// ([`TabRef::ImageViewer`]) can bind to it. Node ids are unique across
 /// the whole document (subgraph interiors included), so no graph ref is
-/// needed alongside.
+/// needed alongside — upheld by `SubgraphDef::fresh_copy` at every
+/// def-copy boundary (import/localize/detach) and enforced by
+/// [`Document::check`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PortRef {
     pub node_id: NodeId,
@@ -522,17 +524,20 @@ impl Document {
     }
 
     /// Add an imported subgraph `def` to this document's local defs,
-    /// returning its assigned id. The top-level id is regenerated so an
-    /// import never overwrites an existing def. Nested child defs ride
-    /// along inside `def.graph.subgraphs` (a `Graph` carries its own
-    /// subgraph table) and resolve only within this def's interior, so
-    /// their ids can't collide with the document's table — they're left
-    /// untouched. The undo stack is unaffected: no existing history
-    /// references the freshly added def.
-    pub fn import_subgraph(&mut self, mut def: SubgraphDef) -> SubgraphId {
-        def.id = SubgraphId::unique();
-        let id = def.id;
-        self.graph.subgraphs.add(def);
+    /// returning its assigned id. The copy takes fresh identity end to
+    /// end via [`SubgraphDef::fresh_copy`]: a fresh def id so an import
+    /// never overwrites an existing def, and fresh interior node ids —
+    /// nested defs included — so re-importing the same file can't break
+    /// the document-wide node-id uniqueness [`PortRef`] relies on
+    /// (nested def ids are level-scoped and ride along unchanged).
+    /// `origin` is carried over so a re-imported asset keeps its library
+    /// lineage for Publish. The undo stack is unaffected: no existing
+    /// history references the freshly added def.
+    pub fn import_subgraph(&mut self, def: SubgraphDef) -> SubgraphId {
+        let mut copy = def.fresh_copy();
+        copy.origin = def.origin;
+        let id = copy.id;
+        self.graph.subgraphs.add(copy);
         id
     }
 
@@ -672,6 +677,27 @@ impl Document {
     /// boundary converts to the typed error.
     fn check_inner(&self) -> Result<()> {
         self.graph.check()?;
+
+        // Node ids must be unique across the whole document, def interiors
+        // included: `PortRef` carries no graph ref, and run state, inspectors,
+        // and widget ids all key nodes by bare `NodeId`. Every def-copy
+        // boundary (import / localize / detach) severs identity via
+        // `SubgraphDef::fresh_copy`, so a duplicate is corrupt input.
+        fn collect_node_ids(graph: &CoreGraph, seen: &mut HashSet<NodeId>) -> Result<()> {
+            for node in graph.iter() {
+                ensure!(
+                    seen.insert(node.id),
+                    "node id {:?} appears in more than one graph",
+                    node.id
+                );
+            }
+            for def in graph.subgraphs.iter() {
+                collect_node_ids(&def.graph, seen)?;
+            }
+            Ok(())
+        }
+        collect_node_ids(&self.graph, &mut HashSet::new())?;
+
         self.main_view.check(&self.graph).context("main view")?;
 
         // Each opened subgraph view must match its interior graph; a
@@ -752,35 +778,81 @@ mod tests {
     }
 
     #[test]
-    fn import_regenerates_top_id_and_keeps_nested_defs() {
+    fn import_regenerates_ids_and_keeps_nested_def_ids() {
         // Real storage shape: a child def lives in its *parent's* interior
         // `graph.subgraphs`, instanced by an interior node — not in a flat
         // root table. Importing the parent carries the child with it.
         let child_id = SubgraphId::unique();
         let parent_id = SubgraphId::unique();
+        let origin_id = SubgraphId::unique();
         let mut interior = CoreGraph::default();
         interior.subgraphs.add(leaf_def(child_id, "child"));
         interior.add(Node::new(NodeKind::Subgraph(SubgraphRef::Local(child_id))));
-        let parent = SubgraphDef::new(parent_id, "parent").graph(interior);
+        let parent = SubgraphDef::new(parent_id, "parent")
+            .graph(interior)
+            .origin(origin_id);
+        let source_ids: Vec<NodeId> = parent.graph.iter().map(|n| n.id).collect();
 
         let mut doc = Document::default();
-        let new_id = doc.import_subgraph(parent);
+        let id_a = doc.import_subgraph(parent.clone());
+        let id_b = doc.import_subgraph(parent);
 
-        assert_ne!(new_id, parent_id, "top-level id is regenerated");
+        assert_ne!(id_a, parent_id, "top-level id is regenerated");
+        assert_ne!(id_a, id_b, "each import is its own def");
         assert!(
             doc.graph.subgraphs.by_key(&parent_id).is_none(),
             "original top id is not reused"
         );
-        let imported = doc
-            .graph
+        let interior_ids = |id: SubgraphId| -> Vec<NodeId> {
+            let def = doc.graph.subgraphs.by_key(&id).expect("def resolves");
+            assert_eq!(
+                def.origin,
+                Some(origin_id),
+                "library lineage is carried over"
+            );
+            // The nested child def rides along under its (level-scoped) id.
+            assert_eq!(def.graph.subgraphs.len(), 1);
+            assert!(
+                def.graph.subgraphs.by_key(&child_id).is_some(),
+                "nested child def is preserved with its original id"
+            );
+            def.graph.iter().map(|n| n.id).collect()
+        };
+        // Interior node ids are freshly generated per import: the copies
+        // share none with the source file or each other, so the
+        // document-wide uniqueness gate holds after a double import.
+        let (ids_a, ids_b) = (interior_ids(id_a), interior_ids(id_b));
+        assert_eq!(ids_a.len(), source_ids.len());
+        for id in &ids_a {
+            assert!(
+                !source_ids.contains(id) && !ids_b.contains(id),
+                "interior ids are fresh per import"
+            );
+        }
+        doc.check().unwrap();
+    }
+
+    #[test]
+    fn check_rejects_duplicate_node_ids_across_graphs() {
+        // The same node id planted in the root graph and a def interior —
+        // unreachable through the editor (import/localize/detach sever
+        // identity via `fresh_copy`), so it's corrupt input `check` refuses.
+        let mut doc = Document::default();
+        let node_id = add_node_at(&mut doc, Vec2::ZERO);
+        let sub_id = doc.create_subgraph();
+        let mut dup = Node::new(NodeKind::Func(FuncId::unique()));
+        dup.id = node_id;
+        doc.graph
             .subgraphs
-            .by_key(&new_id)
-            .expect("def resolves under its new id");
-        // The nested child rides along untouched inside the interior table.
-        assert_eq!(imported.graph.subgraphs.len(), 1);
+            .by_key_mut(&sub_id)
+            .unwrap()
+            .graph
+            .add(dup);
+
+        let err = doc.check().unwrap_err();
         assert!(
-            imported.graph.subgraphs.by_key(&child_id).is_some(),
-            "nested child def is preserved with its original id"
+            err.message.contains("appears in more than one graph"),
+            "unexpected check error: {err}"
         );
     }
 

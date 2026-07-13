@@ -152,10 +152,26 @@ impl SubgraphDef {
     }
 
     /// An independent copy with a fresh def id and fresh interior node
-    /// ids (exposed-event emitters remapped to match), preserving the
-    /// interface. Used to localize a `Linked` instance or make an
-    /// instance unique without sharing identity with the original.
+    /// ids — nested defs' interiors included, recursively — with wiring
+    /// and exposed-event emitters remapped to match, preserving the
+    /// interface. Used to localize a `Linked` instance, make an instance
+    /// unique, or import a def without sharing node identity with
+    /// anything already in the document.
     pub fn fresh_copy(&self) -> SubgraphDef {
+        let mut copy = self.remapped_interior();
+        copy.id = SubgraphId::unique();
+        // A fresh copy is its own def; the caller (library instancing) sets
+        // `origin` to the source library id if it wants lineage.
+        copy.origin = None;
+        copy
+    }
+
+    /// The recursive half of [`Self::fresh_copy`]: an identical def (same
+    /// id, name, interface, origin) whose interior node ids are freshly
+    /// generated all the way down — this level via
+    /// [`Graph::with_fresh_node_ids`] (which re-enters here for each
+    /// nested def), exposed-event emitters remapped onto the new ids.
+    pub(crate) fn remapped_interior(&self) -> SubgraphDef {
         let fresh = self.graph.with_fresh_node_ids();
         let events: Vec<SubgraphEvent> = self
             .events
@@ -165,14 +181,16 @@ impl SubgraphDef {
                 ..e.clone()
             })
             .collect();
-        // A fresh copy is its own def; the caller (library instancing) sets
-        // `origin` to the source library id if it wants lineage.
-        SubgraphDef::new(SubgraphId::unique(), self.name.clone())
-            .category(self.category.clone())
-            .graph(fresh.graph)
-            .inputs(self.inputs.clone())
-            .outputs(self.outputs.clone())
-            .events(events)
+        SubgraphDef {
+            id: self.id,
+            name: self.name.clone(),
+            category: self.category.clone(),
+            graph: fresh.graph,
+            inputs: self.inputs.clone(),
+            outputs: self.outputs.clone(),
+            events,
+            origin: self.origin,
+        }
     }
 }
 
@@ -254,6 +272,50 @@ mod tests {
             assert!(copy_ids.contains(&dst.node_id));
             assert!(copy_ids.contains(&src.node_id));
         }
+
+        // Deep: wrap the def as a nested child of a parent def. The copy
+        // keeps the child's (level-scoped) `SubgraphId` — the interior
+        // instance node must still resolve — but the child's interior node
+        // ids, wiring, and exposed-event emitter are all remapped too.
+        let mut child = wrap_sum(&library);
+        let child_id = child.id;
+        let emitter = child.graph.iter().next().unwrap().id;
+        child.events.push(SubgraphEvent {
+            name: "tick".into(),
+            emitter,
+            emitter_event_idx: 0,
+        });
+        let child_node_ids: Vec<_> = child.graph.iter().map(|n| n.id).collect();
+        let mut interior = Graph::default();
+        interior.subgraphs.add(child);
+        interior.add(Node::new(NodeKind::Subgraph(SubgraphRef::Local(child_id))));
+        let parent = SubgraphDef::new(SubgraphId::unique(), "Parent").graph(interior);
+
+        let parent_copy = parent.fresh_copy();
+        parent_copy.graph.check().unwrap();
+        let child_copy = parent_copy
+            .graph
+            .subgraphs
+            .by_key(&child_id)
+            .expect("nested def id is preserved");
+        let child_copy_ids: Vec<_> = child_copy.graph.iter().map(|n| n.id).collect();
+        assert_eq!(child_copy_ids.len(), child_node_ids.len());
+        for id in &child_copy_ids {
+            assert!(
+                !child_node_ids.contains(id),
+                "nested interior id must be remapped"
+            );
+        }
+        for (dst, src) in child_copy.graph.edges() {
+            assert!(child_copy_ids.contains(&dst.node_id));
+            assert!(child_copy_ids.contains(&src.node_id));
+        }
+        let copy_emitter = child_copy.events[0].emitter;
+        assert_ne!(copy_emitter, emitter, "nested event emitter is remapped");
+        assert!(
+            child_copy_ids.contains(&copy_emitter),
+            "onto the copy's own interior node"
+        );
     }
 
     #[test]

@@ -988,7 +988,8 @@ fn scan_update_overwrites_earlier_update_in_same_batch() {
 fn scan_last_write_wins_per_slot() {
     use crate::worker::BatchIntent;
 
-    let cases: [(&str, Vec<WorkerMessage>, fn(&BatchIntent) -> bool); 4] = [
+    type Expect = fn(&BatchIntent) -> bool;
+    let cases: [(&str, Vec<WorkerMessage>, Expect); 4] = [
         (
             "Clear then Update -> last write (Update) wins",
             vec![

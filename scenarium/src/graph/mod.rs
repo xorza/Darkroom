@@ -402,12 +402,15 @@ impl Graph {
         })
     }
 
-    /// Deep-clone with a freshly generated id for every node, remapping
-    /// all bindings + subscriptions onto the new ids. Nested per-graph
-    /// subgraph defs are copied verbatim — their ids are private to this
-    /// graph's table. Returns the clone plus the old→new id map (callers
-    /// like subgraph localization need it to remap exposed-event
-    /// emitters). Used to make an independent copy of a subgraph interior.
+    /// Deep-clone with a freshly generated id for every node — at this
+    /// level and inside every nested def's interior, recursively — with
+    /// all bindings + subscriptions remapped onto the new ids. Nested
+    /// defs keep their `SubgraphId`s (level-scoped, so interior
+    /// `SubgraphRef::Local` references stay valid) but get fresh node
+    /// ids via [`SubgraphDef::remapped_interior`]. Returns the clone plus
+    /// this level's old→new id map (callers like subgraph localization
+    /// need it to remap exposed-event emitters). Used to make an
+    /// independent copy of a subgraph interior.
     pub(crate) fn with_fresh_node_ids(&self) -> FreshGraph {
         let mut id_map = HashMap::with_capacity(self.nodes.len());
         let mut nodes = KeyIndexVec::with_capacity(self.nodes.len());
@@ -445,12 +448,16 @@ impl Graph {
             .iter()
             .map(|port| OutputPort::new(remap(port.node_id), port.port_idx))
             .collect();
+        let mut subgraphs = KeyIndexVec::with_capacity(self.subgraphs.len());
+        for def in self.subgraphs.iter() {
+            subgraphs.add(def.remapped_interior());
+        }
         let graph = Graph {
             nodes,
             bindings,
             subscriptions,
             pinned_outputs,
-            subgraphs: self.subgraphs.clone(),
+            subgraphs,
         };
         FreshGraph { graph, id_map }
     }
