@@ -355,6 +355,12 @@ impl GraphUI {
                             // share the breaker probe so they're cuttable too.
                             subscription_ui
                                 .draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
+                            // Pin wires too — same z-order as every other
+                            // wire, so one passing behind an unrelated node
+                            // goes under it rather than drawing on top.
+                            pin_ui.draw_wire(
+                                ui, ctx, scene, geometry, visible, &mut probe, &emphasis,
+                            );
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,
@@ -364,12 +370,14 @@ impl GraphUI {
                                 inspectors,
                             };
                             node_ui.draw_all(ui, rcx, visible, &mut probe, out);
-                            // Pins paint after the node bodies, like the
-                            // inspection panels below — a preview widget can
-                            // end up anywhere on the canvas once dragged, and
-                            // should read as floating above everything, not
-                            // nested in (or hidden under) its node's body.
-                            pin_ui.draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
+                            // The pin's port-circle glyph + card paint after
+                            // the node bodies, like the inspection panels
+                            // below — the widget can end up anywhere on the
+                            // canvas once dragged, and should read as
+                            // floating above everything, not nested in (or
+                            // hidden under) its node's body. Only the wire
+                            // itself (above) shares the other wires' z-order.
+                            pin_ui.draw_widget(ui, ctx, scene, geometry, visible, &mut probe);
                         }
                         // Inspection panels paint after the node bodies so
                         // they sit on top and win clicks over the nodes

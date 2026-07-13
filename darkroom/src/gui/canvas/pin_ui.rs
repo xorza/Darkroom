@@ -18,11 +18,12 @@
 //! `GestureKey::PinDrag` into one undo entry. Since the position lands in
 //! `Document` (and `Scene` rebuilds) before the record pass, there's no
 //! separate in-flight preview to paint — the widget's real position already
-//! reflects the live drag by the time [`PinUi::draw`] runs.
+//! reflects the live drag by the time [`PinUi::draw_wire`]/[`PinUi::draw_widget`]
+//! run.
 
 use aperture::{Brush, Rect, Ui, WidgetId};
 use glam::Vec2;
-use scenarium::graph::OutputPort;
+use scenarium::graph::{NodeId, OutputPort};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::Intent;
@@ -151,13 +152,20 @@ impl PinUi {
         }
     }
 
-    /// Paint every pinned output's bezier + port circle + preview widget on
-    /// top of the node bodies, marking those the active breaker crosses as
-    /// broken via `probe.mark_broken_pin` for the breaker's release-frame
-    /// drain.
+    /// Paint every pinned output's connecting bezier — called alongside
+    /// `ConnectionUI`/`SubscriptionUI`'s wire draws, *before* the node
+    /// bodies, so a pin wire passing behind an unrelated node goes under it
+    /// like any other wire, instead of drawing on top. Marks a
+    /// breaker-crossed pin via `probe.mark_broken_pin` for the breaker's
+    /// release-frame drain — the same combined bezier-or-widget-rect test
+    /// [`draw_widget`](Self::draw_widget) runs, so both halves agree on
+    /// `broken` within the same frame even though they paint at different
+    /// points in the pass. Only the wire's z-order changes here; the
+    /// port-circle glyph and the card itself still float above everything
+    /// (see [`draw_widget`](Self::draw_widget)).
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn draw(
-        &mut self,
+    pub(crate) fn draw_wire(
+        &self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
         scene: &Scene,
@@ -165,6 +173,56 @@ impl PinUi {
         visible: Option<Rect>,
         probe: &mut BreakerProbe<'_>,
         emphasis: &WireEmphasis,
+    ) {
+        let theme = ctx.theme;
+        for n in &scene.nodes {
+            for (i, output) in scene.outputs(n.outputs).iter().enumerate() {
+                if !output.pinned {
+                    continue;
+                }
+                let Some(g) = resolve_pin_geometry(ui, geometry, probe, visible, n.id, i, output)
+                else {
+                    continue;
+                };
+                let port_ref = PortRef {
+                    node_id: n.id,
+                    kind: PortKind::Output,
+                    port_idx: i,
+                };
+                let hovered = !g.broken
+                    && emphasis.hovered(geometry.ports.is_hovered(port_ref) || g.box_hover);
+                let base = port_color(theme, &output.ty, PortKind::Output, false);
+                let wire_color = if g.broken {
+                    theme.colors.connection_broken
+                } else {
+                    emphasis.tint(base, hovered)
+                };
+                let width = emphasis.width(theme.connection_width, hovered || g.broken);
+                add_cubic_wire(
+                    ui,
+                    g.port_center,
+                    g.top_left,
+                    g.handles,
+                    width,
+                    Brush::Solid(wire_color),
+                );
+            }
+        }
+    }
+
+    /// Paint every pinned output's port-circle glyph + preview widget, on
+    /// top of the node bodies — the widget floats above everything even
+    /// though its wire now draws under node bodies like any other wire
+    /// (see [`draw_wire`](Self::draw_wire)).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_widget(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &AppContext<'_>,
+        scene: &Scene,
+        geometry: &CanvasGeometry,
+        visible: Option<Rect>,
+        probe: &mut BreakerProbe<'_>,
     ) {
         self.previews.prune(|port| {
             scene.nodes.by_key(&port.node_id).is_some_and(|n| {
@@ -180,68 +238,36 @@ impl PinUi {
                 if !output.pinned {
                     continue;
                 }
-                let port_ref = PortRef {
-                    node_id: n.id,
-                    kind: PortKind::Output,
-                    port_idx: i,
-                };
-                let Some(port_center) = geometry.ports.center(port_ref) else {
+                let Some(g) = resolve_pin_geometry(ui, geometry, probe, visible, n.id, i, output)
+                else {
                     continue;
                 };
-                let out_port = OutputPort::new(n.id, i);
-                // The wire's far end, and the preview widget's own
-                // top-left corner — one and the same point, so the wire
-                // lands exactly on the port-circle glyph peeking from
-                // under that corner.
-                let top_left = port_center + resolved_pin_offset(output);
-                let handles = cubic_handles(port_center, top_left);
-                if !wire_visible(visible, port_center, &handles, top_left) {
-                    continue;
-                }
-                let box_rect = Rect::new(top_left.x, top_left.y, PREVIEW_WIDTH, PREVIEW_HEIGHT);
-                let broken = pin_targeted(probe, port_center, &handles, top_left, box_rect);
-                if broken {
-                    probe.mark_broken_pin(out_port);
-                }
-                let box_hover = preview_hovered(ui, out_port);
-                let hovered =
-                    !broken && emphasis.hovered(geometry.ports.is_hovered(port_ref) || box_hover);
-                let base = port_color(theme, &output.ty, PortKind::Output, false);
-                let wire_color = if broken {
-                    theme.colors.connection_broken
-                } else {
-                    emphasis.tint(base, hovered)
-                };
-                let width = emphasis.width(theme.connection_width, hovered || broken);
-                add_cubic_wire(
-                    ui,
-                    port_center,
-                    top_left,
-                    handles,
-                    width,
-                    Brush::Solid(wire_color),
-                );
-
                 // The data-type accent lives *only* on the port-circle
                 // glyph (brightening on the widget's own hover, like a
                 // real port circle) — the widget's own border stays
                 // neutral (see `pin_preview::draw_widget`), so the accent
                 // doesn't double up right next to itself.
-                let accent = if broken {
+                let accent = if g.broken {
                     theme.colors.connection_broken
                 } else {
-                    port_color(theme, &output.ty, PortKind::Output, box_hover)
+                    port_color(theme, &output.ty, PortKind::Output, g.box_hover)
                 };
-                dot(ui, top_left.x, top_left.y, theme.port_size * 0.5, accent);
+                dot(
+                    ui,
+                    g.top_left.x,
+                    g.top_left.y,
+                    theme.port_size * 0.5,
+                    accent,
+                );
 
-                let card_border = if broken {
+                let card_border = if g.broken {
                     theme.colors.connection_broken
                 } else {
                     theme.colors.node_border
                 };
                 let value = ctx.run_state.pinned_value(n.id, i);
                 let image = if is_image_type(&output.ty) {
-                    value.and_then(|v| self.previews.resolve(ui, out_port, v))
+                    value.and_then(|v| self.previews.resolve(ui, g.out_port, v))
                 } else {
                     None
                 };
@@ -253,8 +279,8 @@ impl PinUi {
                 pin_preview::draw_widget(
                     ui,
                     theme,
-                    out_port,
-                    top_left,
+                    g.out_port,
+                    g.top_left,
                     &preview_title(n.name.as_str(), output.name.as_str()),
                     card_border,
                     image.as_ref(),
@@ -263,6 +289,65 @@ impl PinUi {
             }
         }
     }
+}
+
+/// One pinned output's resolved geometry + breaker/hover state for this
+/// frame — computed once, fed to both [`PinUi::draw_wire`] (the bezier,
+/// pre-node-body) and [`PinUi::draw_widget`] (the port circle + card,
+/// post-node-body) so a pin drawn in two passes still agrees on `broken`
+/// and hover within the same frame. `None` when the wire's control hull
+/// misses the visible rect entirely (culled).
+struct PinGeometry {
+    out_port: OutputPort,
+    port_center: Vec2,
+    top_left: Vec2,
+    handles: CubicHandles,
+    box_hover: bool,
+    /// Whether the active breaker gesture crosses this pin's bezier or its
+    /// widget rect — already folded into `probe.mark_broken_pin` here, so
+    /// neither caller needs to repeat that.
+    broken: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_pin_geometry(
+    ui: &Ui,
+    geometry: &CanvasGeometry,
+    probe: &mut BreakerProbe<'_>,
+    visible: Option<Rect>,
+    node_id: NodeId,
+    port_idx: usize,
+    output: &SceneOutput,
+) -> Option<PinGeometry> {
+    let port_ref = PortRef {
+        node_id,
+        kind: PortKind::Output,
+        port_idx,
+    };
+    let port_center = geometry.ports.center(port_ref)?;
+    let out_port = OutputPort::new(node_id, port_idx);
+    // The wire's far end, and the preview widget's own top-left corner —
+    // one and the same point, so the wire lands exactly on the port-circle
+    // glyph peeking from under that corner.
+    let top_left = port_center + resolved_pin_offset(output);
+    let handles = cubic_handles(port_center, top_left);
+    if !wire_visible(visible, port_center, &handles, top_left) {
+        return None;
+    }
+    let box_rect = Rect::new(top_left.x, top_left.y, PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    let broken = pin_targeted(probe, port_center, &handles, top_left, box_rect);
+    if broken {
+        probe.mark_broken_pin(out_port);
+    }
+    let box_hover = preview_hovered(ui, out_port);
+    Some(PinGeometry {
+        out_port,
+        port_center,
+        top_left,
+        handles,
+        box_hover,
+        broken,
+    })
 }
 
 /// True if the active breaker gesture crosses the pin's glyph — either the
