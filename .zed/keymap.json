@@ -1,0 +1,9 @@
+[
+  {
+    "context": "Workspace",
+    "bindings": {
+      "cmd-alt-d": ["task::Spawn", { "task_name": "run darkroom" }],
+      "cmd-alt-r": ["task::Spawn", { "task_name": "run darkroom release" }]
+    }
+  }
+]

@@ -22,6 +22,11 @@
     "args": ["run", "-p", "darkroom"],
   },
   {
+    "label": "run darkroom release",
+    "command": "cargo",
+    "args": ["run", "--release", "-p", "darkroom"],
+  },
+  {
     "label": "run darkroom release with tracy",
     "command": "cargo",
     "args": [
