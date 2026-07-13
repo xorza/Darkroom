@@ -3,7 +3,10 @@
 //! and layout spacers. Chrome-level composition (pills, chips) lives in
 //! [`toolbar`](crate::gui::widgets::toolbar).
 
-use aperture::{Color, Configure, Corners, Panel, Rect, Shape, Sizing, Stroke, TextStyle, Ui};
+use aperture::{
+    Background, Color, Configure, Corners, FontFamily, Panel, Rect, Shape, Sizing, Stroke, Text,
+    TextStyle, Ui,
+};
 
 use crate::gui::theme::Theme;
 
@@ -27,6 +30,39 @@ pub(crate) fn colored_text(ui: &Ui, color: Color, px: f32) -> TextStyle {
 /// readout/label style.
 pub(crate) fn muted_text(ui: &Ui, theme: &Theme, px: f32) -> TextStyle {
     colored_text(ui, theme.colors.text_muted, px)
+}
+
+/// [`sized_text`] in the monospace family — tabular readouts (byte figures,
+/// dimensions) that should hold a column rather than proportionally kern.
+pub(crate) fn mono_text(ui: &Ui, px: f32) -> TextStyle {
+    TextStyle {
+        family: FontFamily::Mono,
+        ..sized_text(ui, px)
+    }
+}
+
+/// A muted micro-label immediately followed by its mono-styled value, as two
+/// direct `Text` widgets (no wrapping panel — draw it inside the caller's
+/// own panel so its `gap` spaces the pair like any other sibling). Shared
+/// shape behind a node body's memory footer
+/// ([`crate::gui::node::memory_row::meter`]) and the pin-preview widget's
+/// image-info facts.
+pub(crate) fn labeled_value(ui: &mut Ui, theme: &Theme, label: &str, value: String) {
+    Text::new(label.to_owned())
+        .style(muted_text(ui, theme, 8.5))
+        .show(ui);
+    Text::new(value).style(mono_text(ui, 10.5)).show(ui);
+}
+
+/// A read-only "fact strip" footer's background: the chrome fill, rounded
+/// on only its bottom two corners so it seats under whatever rounds the
+/// top (a header bar, or the card's own top edge). Shared by a node body's
+/// memory footer and the pin-preview widget's image-info footer.
+pub(crate) fn footer_background(theme: &Theme, corner_radius: f32) -> Background {
+    Background::rounded(
+        theme.colors.chrome_fill,
+        Corners::new(0.0, 0.0, corner_radius, corner_radius),
+    )
 }
 
 /// A filled rounded rect — the fill sibling of [`stroked_rect`].

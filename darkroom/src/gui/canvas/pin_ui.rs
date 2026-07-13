@@ -240,12 +240,12 @@ impl PinUi {
                     theme.colors.node_border
                 };
                 let value = ctx.run_state.pinned_value(n.id, i);
-                let texture = if is_image_type(&output.ty) {
+                let image = if is_image_type(&output.ty) {
                     value.and_then(|v| self.previews.resolve(ui, out_port, v))
                 } else {
                     None
                 };
-                let text = texture.is_none().then(|| {
+                let text = image.is_none().then(|| {
                     value
                         .map(ToString::to_string)
                         .unwrap_or_else(|| "not yet run".to_owned())
@@ -257,7 +257,7 @@ impl PinUi {
                     top_left,
                     &preview_title(n.name.as_str(), output.name.as_str()),
                     card_border,
-                    texture.as_ref(),
+                    image.as_ref(),
                     text.as_deref(),
                 );
             }

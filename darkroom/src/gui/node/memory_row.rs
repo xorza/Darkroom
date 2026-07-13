@@ -3,12 +3,9 @@
 //! only when the node retains bytes — a zero pool is dropped and an idle node
 //! shows no strip at all, matching the window status bar.
 
-use aperture::{
-    Align, Background, Color, Configure, Corners, FontFamily, Panel, Sizing, Spacing, Text,
-    TextStyle, Ui, VAlign,
-};
+use aperture::{Align, Background, Color, Configure, Corners, Panel, Sizing, Spacing, Ui, VAlign};
 
-use crate::gui::widgets::support::muted_text;
+use crate::gui::widgets::support::{footer_background, labeled_value};
 use scenarium::data::RamUsage;
 
 use crate::gui::format::fmt_bytes;
@@ -16,8 +13,6 @@ use crate::gui::node::RecordCtx;
 use crate::gui::scene::SceneNode;
 use crate::gui::theme::Theme;
 
-const VALUE_FONT: f32 = 10.5;
-const LABEL_FONT: f32 = 8.5;
 const DOT: f32 = 6.0;
 const BAR_H: f32 = 3.0;
 const PAD_X: f32 = 10.0;
@@ -40,10 +35,7 @@ pub(crate) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode) {
         .gap(5.0)
         // Round only the bottom corners so the strip seats into the node's
         // rounded bottom — the header rounds the top the same way.
-        .background(Background::rounded(
-            theme.colors.chrome_fill,
-            Corners::new(0.0, 0.0, r, r),
-        ))
+        .background(footer_background(theme, r))
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("node_mem_meters")
@@ -72,16 +64,7 @@ fn meter(ui: &mut Ui, theme: &Theme, hue: Color, label: &'static str, bytes: usi
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             dot(ui, hue);
-            Text::new(label)
-                .style(muted_text(ui, theme, LABEL_FONT))
-                .show(ui);
-            Text::new(fmt_bytes(bytes))
-                .style(TextStyle {
-                    font_size_px: VALUE_FONT,
-                    family: FontFamily::Mono,
-                    ..ui.theme.text
-                })
-                .show(ui);
+            labeled_value(ui, theme, label, fmt_bytes(bytes));
         });
 }
 

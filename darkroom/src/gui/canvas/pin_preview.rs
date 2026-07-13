@@ -1,8 +1,9 @@
 //! The pinned-output preview widget's own look: a small card (fixed
-//! footprint, a header bar over a content area) plus its uploaded-texture
-//! cache. Sibling of [`crate::gui::canvas::pin_ui`], which owns the wire,
-//! the port-circle glyph, and the drag gesture — this file only knows how
-//! to paint the card and keep its thumbnail texture current.
+//! footprint, a header bar and — for an image — an info footer around the
+//! content area) plus its uploaded-texture cache. Sibling of
+//! [`crate::gui::canvas::pin_ui`], which owns the wire, the port-circle
+//! glyph, and the drag gesture — this file only knows how to paint the
+//! card and keep its thumbnail texture current.
 //!
 //! The card borrows a node body's fill/corner-radius/shadow so it reads as
 //! "a small floating surface" like the inspector panels, but its *border*
@@ -15,32 +16,35 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aperture::{
-    Background, Color, Configure, Corners, FontWeight, ImageFilter, ImageFit, ImageHandle, Panel,
-    Sense, Shadow, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
+    Align, Background, Color, Configure, Corners, FontWeight, ImageFilter, ImageFit, ImageHandle,
+    Panel, Sense, Shadow, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, VAlign,
+    WidgetId,
 };
-use glam::Vec2;
-use scenarium::data::{CustomValue, DataType, DynamicValue};
+use glam::{UVec2, Vec2};
+use imaginarium::ColorFormat;
+use scenarium::data::{CustomValue, DataType, DynamicValue, RamUsage};
 use scenarium::graph::OutputPort;
 
+use crate::gui::format::fmt_bytes;
 use crate::gui::image_viewer::convert_image_value;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::support::sized_text;
+use crate::gui::widgets::support::{footer_background, labeled_value, mono_text, sized_text};
 
 /// Fixed footprint of a pinned output's preview widget, canvas-world units —
 /// a stable size regardless of content, so a drag never has to re-measure
 /// and an image never grows the widget. An image letterboxes inside via
 /// `Contain`; a non-image value's formatted text centers in the same frame.
-pub(crate) const PREVIEW_WIDTH: f32 = 120.0;
-pub(crate) const PREVIEW_HEIGHT: f32 = 90.0;
+pub(crate) const PREVIEW_WIDTH: f32 = 240.0;
+pub(crate) const PREVIEW_HEIGHT: f32 = 180.0;
 
 /// Longest side, in pixels, an image-typed pinned value is downscaled to
 /// before upload — small enough to stay cheap with many simultaneous pins.
 const PREVIEW_TEXTURE_DIM: u32 = 256;
 
 /// Stroke width of the preview widget's own border — its rounded corners'
-/// *inner* radius (the header bar's top corners, the image's bottom
-/// corners) is `node_corner_radius` minus this, matching how a real node's
-/// header follows its body stroke's inner edge.
+/// *inner* radius (the header/footer strips' own corners) is
+/// `node_corner_radius` minus this, matching how a real node's header
+/// follows its body stroke's inner edge.
 const PREVIEW_BORDER_WIDTH: f32 = 1.0;
 
 /// Whether `ty` is an image value — the pinned output's preview widget
@@ -60,6 +64,21 @@ pub(crate) fn preview_title(node_name: &str, output_name: &str) -> String {
     }
 }
 
+/// A resolved image thumbnail: the uploaded texture plus the source facts
+/// its info footer reports. Cheap to clone (an `ImageHandle` is an `Rc`
+/// clone; the rest are small `Copy` values).
+#[derive(Clone, Debug)]
+pub(crate) struct ImagePreview {
+    handle: ImageHandle,
+    native_size: UVec2,
+    native_format: ColorFormat,
+    /// This value's resident memory, refreshed every [`PreviewCache::resolve`]
+    /// call regardless of whether the texture itself was cached — cheap
+    /// (`CustomValue::ram_bytes` just reads a stored size) and can't go stale
+    /// the way a cached texture's *pixels* would if it weren't reconverted.
+    ram: RamUsage,
+}
+
 /// An uploaded preview texture, kept alive across frames (an `ImageHandle`
 /// frees its GPU texture when its last clone drops) and reconverted only
 /// when the pinned value it came from actually changed.
@@ -68,14 +87,14 @@ struct CachedPreview {
     /// `Arc::ptr_eq` hit against a fresh push skips a redundant
     /// reconvert+reupload.
     source: Arc<dyn CustomValue>,
-    handle: ImageHandle,
+    preview: ImagePreview,
 }
 
 impl std::fmt::Debug for CachedPreview {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CachedPreview")
             .field("source_type", &self.source.type_id())
-            .field("handle", &self.handle)
+            .field("preview", &self.preview)
             .finish()
     }
 }
@@ -88,35 +107,46 @@ pub(crate) struct PreviewCache {
 }
 
 impl PreviewCache {
-    /// The current thumbnail texture for `port`'s pinned image value,
-    /// converting + uploading fresh only when the value changed since last
-    /// time (an `Arc` identity miss) or nothing's cached yet. `None` when
-    /// `value` isn't a (decodable) image — the caller falls back to text.
+    /// The current thumbnail for `port`'s pinned image value, converting +
+    /// uploading fresh only when the value changed since last time (an
+    /// `Arc` identity miss) or nothing's cached yet. `None` when `value`
+    /// isn't a (decodable) image — the caller falls back to text.
     pub(crate) fn resolve(
         &mut self,
         ui: &Ui,
         port: OutputPort,
         value: &DynamicValue,
-    ) -> Option<ImageHandle> {
+    ) -> Option<ImagePreview> {
         let DynamicValue::Custom(data) = value else {
             self.textures.remove(&port);
             return None;
         };
+        let ram = data.ram_bytes();
         if let Some(cached) = self.textures.get(&port)
             && Arc::ptr_eq(&cached.source, data)
         {
-            return Some(cached.handle.clone());
+            return Some(ImagePreview {
+                ram,
+                ..cached.preview.clone()
+            });
         }
-        let (image, _, _) = convert_image_value(value, PREVIEW_TEXTURE_DIM).ok()?;
+        let (image, native_size, native_format) =
+            convert_image_value(value, PREVIEW_TEXTURE_DIM).ok()?;
         let handle = ui.register_image(image);
+        let preview = ImagePreview {
+            handle,
+            native_size,
+            native_format,
+            ram,
+        };
         self.textures.insert(
             port,
             CachedPreview {
                 source: Arc::clone(data),
-                handle: handle.clone(),
+                preview: preview.clone(),
             },
         );
-        Some(handle)
+        Some(preview)
     }
 
     /// Drop cached textures for ports `keep` no longer includes (unpinned
@@ -136,11 +166,12 @@ pub(crate) fn pin_preview_wid(port: OutputPort) -> WidgetId {
 }
 
 /// Paint one pinned output's preview widget: a header bar (the title) over
-/// a content area — a letterboxed image if `texture` is `Some`, else
-/// centered `text`. `border` is the card's own (neutral, or broken-red)
-/// outline — never the port's data-type accent; that lives on the
-/// port-circle glyph [`super::pin_ui`] paints separately. Senses `DRAG` so
-/// it doubles as the reposition drag's grab target ([`pin_preview_wid`]).
+/// a content area, plus — for an image — an info footer below it reporting
+/// resolution, format, and resident size. `border` is the card's own
+/// (neutral, or broken-red) outline — never the port's data-type accent;
+/// that lives on the port-circle glyph [`super::pin_ui`] paints separately.
+/// Senses `DRAG` so it doubles as the reposition drag's grab target
+/// ([`pin_preview_wid`]).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_widget(
     ui: &mut Ui,
@@ -149,7 +180,7 @@ pub(crate) fn draw_widget(
     top_left: Vec2,
     title: &str,
     border: Color,
-    texture: Option<&ImageHandle>,
+    image: Option<&ImagePreview>,
     text: Option<&str>,
 ) {
     // Inner corners follow the border stroke's inner edge, like a real
@@ -194,23 +225,17 @@ pub(crate) fn draw_widget(
                 .id_salt("content")
                 .size((Sizing::FILL, Sizing::FILL))
                 .show(ui, |ui| {
-                    if let Some(handle) = texture {
+                    if let Some(image) = image {
+                        // Content sits between the header and the info
+                        // footer (both full-width strips), so its own
+                        // corners are already interior — no rounding trick
+                        // needed here, unlike a lone image with nothing
+                        // below it.
                         ui.add_shape(
-                            Shape::image(handle.clone())
+                            Shape::image(image.handle.clone())
                                 .fit(ImageFit::Contain)
                                 .filter(ImageFilter::Linear),
                         );
-                        // Rounds the image's square corners into the card's
-                        // own fill on the two corners the header doesn't
-                        // already round — a plain image fill ignores the
-                        // panel's rounded background. Stroked in the
-                        // card's own (neutral) border, matching its edge.
-                        ui.add_shape(Shape::WindowedRect {
-                            local_rect: None,
-                            corners: Corners::new(0.0, 0.0, inner_r, inner_r),
-                            fill: theme.colors.node_fill.into(),
-                            stroke: Stroke::solid(border, PREVIEW_BORDER_WIDTH),
-                        });
                     } else if let Some(text) = text {
                         Panel::vstack()
                             .id_salt("text")
@@ -224,7 +249,54 @@ pub(crate) fn draw_widget(
                             });
                     }
                 });
+            if let Some(image) = image {
+                info_row(ui, theme, inner_r, image);
+            }
         });
+}
+
+/// The pinned image's info footer: resolution, pixel format (channel
+/// layout + bit depth), and resident size — styled like a node body's
+/// memory footer ([`crate::gui::node::memory_row`]), so every read-only
+/// fact strip in the app reads as the same kind of thing.
+fn info_row(ui: &mut Ui, theme: &Theme, inner_r: f32, image: &ImagePreview) {
+    Panel::hstack()
+        .id_salt("info")
+        .size((Sizing::FILL, Sizing::Hug))
+        .padding(Spacing::xy(8.0, 5.0))
+        .gap(10.0)
+        .child_align(Align::v(VAlign::Center))
+        // Round only the bottom corners so the strip seats into the card's
+        // rounded bottom — the header rounds the top the same way.
+        .background(footer_background(theme, inner_r))
+        .show(ui, |ui| {
+            bare_value(
+                ui,
+                format!("{}\u{d7}{}", image.native_size.x, image.native_size.y),
+            );
+            bare_value(ui, format_label(image.native_format));
+            Panel::hstack()
+                .id_salt("info_size")
+                .size((Sizing::Hug, Sizing::Hug))
+                .gap(4.0)
+                .child_align(Align::v(VAlign::Center))
+                .show(ui, |ui| {
+                    labeled_value(ui, theme, "Size", fmt_bytes(image.ram.total()));
+                });
+        });
+}
+
+/// `"RGBA \u{b7} 8-bit"`-style shorthand for a pixel format: channel layout,
+/// then per-channel bit depth.
+fn format_label(format: ColorFormat) -> String {
+    let bits = format.channel_size.byte_count() as u32 * 8;
+    format!("{} \u{b7} {bits}-bit", format.channel_count)
+}
+
+/// A bare mono-styled value with no label — used where the value's own
+/// shape (`1920×1080`, `RGBA · 8-bit`) already says what it is.
+fn bare_value(ui: &mut Ui, text: String) {
+    Text::new(text).style(mono_text(ui, 10.5)).show(ui);
 }
 
 #[cfg(test)]
@@ -236,5 +308,12 @@ mod tests {
         assert_eq!(preview_title("Blend", "Blend"), "Blend");
         assert_eq!(preview_title("Blend", "Result"), "Blend \u{b7} Result");
         assert_eq!(preview_title("Blend", ""), "Blend");
+    }
+
+    #[test]
+    fn format_label_reports_channel_layout_and_bit_depth() {
+        assert_eq!(format_label(ColorFormat::RGBA_U8), "RGBA \u{b7} 8-bit");
+        assert_eq!(format_label(ColorFormat::RGB_U16), "RGB \u{b7} 16-bit");
+        assert_eq!(format_label(ColorFormat::L_F32), "L \u{b7} 32-bit");
     }
 }
