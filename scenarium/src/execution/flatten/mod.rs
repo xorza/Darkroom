@@ -206,7 +206,7 @@ fn flatten_id(path: &[NodeId], interior: NodeId) -> NodeId {
 
 /// Where an output reference resolves once boundaries are followed through.
 enum Source {
-    Producer { node_id: NodeId, port_idx: usize },
+    Producer(OutputPort),
     Const(StaticValue),
     None,
 }
@@ -369,7 +369,7 @@ impl<'a> Run<'a> {
                 let source = match binding {
                     Binding::None => Source::None,
                     Binding::Const(v) => Source::Const(v),
-                    Binding::Bind(op) => self.resolve(op.node_id, op.port_idx),
+                    Binding::Bind(op) => self.resolve(op),
                 };
                 self.set_input(input_idx, source);
             }
@@ -500,24 +500,25 @@ impl<'a> Run<'a> {
         let binding = match source {
             Source::None => ExecutionBinding::None,
             Source::Const(v) => ExecutionBinding::Const(v),
-            Source::Producer { node_id, port_idx } => {
-                let (target_idx, _) = self.compact.insert_with(&node_id, || ExecutionNode {
-                    id: node_id,
+            Source::Producer(port) => {
+                let (target_idx, _) = self.compact.insert_with(&port.node_id, || ExecutionNode {
+                    id: port.node_id,
                     ..Default::default()
                 });
                 ExecutionBinding::Bind(ExecutionPortAddress {
                     target_idx: target_idx.into(),
-                    port_idx,
+                    port_idx: port.port_idx,
                 })
             }
         };
         self.new_inputs[pool_idx].binding = binding;
     }
 
-    /// Resolve an output reference `(node_id, port_idx)` in the current frame
-    /// to a concrete flat producer, following through boundary and composite
-    /// nodes. Leaves the descent stack as it found it.
-    fn resolve(&mut self, node_id: NodeId, port_idx: usize) -> Source {
+    /// Resolve an output reference in the current frame to a concrete flat
+    /// producer, following through boundary and composite nodes. Leaves the
+    /// descent stack as it found it.
+    fn resolve(&mut self, port: OutputPort) -> Source {
+        let OutputPort { node_id, port_idx } = port;
         let graph = self.current();
         let node = graph
             .find_node(&node_id, NodeSearch::TopLevel)
@@ -528,10 +529,10 @@ impl<'a> Run<'a> {
             return Source::None;
         }
         match &node.kind {
-            NodeKind::Func(_) | NodeKind::Special(_) => Source::Producer {
-                node_id: flatten_id(self.path.as_slice(), node_id),
+            NodeKind::Func(_) | NodeKind::Special(_) => Source::Producer(OutputPort::new(
+                flatten_id(self.path.as_slice(), node_id),
                 port_idx,
-            },
+            )),
             // Follow into the composite: its output `port_idx` is wired by the
             // SubgraphOutput node's input `port_idx`.
             NodeKind::Subgraph(r) => {
@@ -570,7 +571,7 @@ impl<'a> Run<'a> {
         match binding {
             Binding::None => Source::None,
             Binding::Const(v) => Source::Const(v.clone()),
-            Binding::Bind(op) => self.resolve(op.node_id, op.port_idx),
+            Binding::Bind(op) => self.resolve(*op),
         }
     }
 }

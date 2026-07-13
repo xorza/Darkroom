@@ -22,6 +22,7 @@ use scenarium::execution::stats::{
     ExecutionStats, FlattenMap, LogEntry, PinnedOutputs, RunPhase, RunProgress,
 };
 use scenarium::graph::NodeId;
+use scenarium::graph::OutputPort;
 
 use crate::core::worker::RunId;
 
@@ -150,8 +151,11 @@ impl RunState {
     /// (not pinned, or pinned but not yet run). Read by the canvas pin-
     /// preview widget ([`crate::gui::canvas::pin_ui::PinUi::draw`]) every
     /// frame.
-    pub(crate) fn pinned_value(&self, id: NodeId, port_idx: usize) -> Option<&DynamicValue> {
-        self.nodes.get(&id)?.pinned_values.get(&port_idx)
+    pub(crate) fn pinned_value(&self, port: OutputPort) -> Option<&DynamicValue> {
+        self.nodes
+            .get(&port.node_id)?
+            .pinned_values
+            .get(&port.port_idx)
     }
 
     /// Fold a just-arrived pinned-output push onto its node: each pushed
@@ -548,14 +552,17 @@ mod tests {
 
         let node = nid(1);
         let mut rs = RunState::default();
-        assert!(rs.pinned_value(node, 0).is_none(), "nothing pushed yet");
+        assert!(
+            rs.pinned_value(OutputPort::new(node, 0)).is_none(),
+            "nothing pushed yet"
+        );
 
         rs.set_pinned_values(PinnedOutputs {
             node_id: node,
             values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
         });
         assert_eq!(
-            rs.pinned_value(node, 0).unwrap().as_i64(),
+            rs.pinned_value(OutputPort::new(node, 0)).unwrap().as_i64(),
             Some(7),
             "first push is stored"
         );
@@ -565,7 +572,7 @@ mod tests {
             values: vec![(0, DynamicValue::Static(StaticValue::Int(8)))],
         });
         assert_eq!(
-            rs.pinned_value(node, 0).unwrap().as_i64(),
+            rs.pinned_value(OutputPort::new(node, 0)).unwrap().as_i64(),
             Some(8),
             "a fresh push for the same port replaces it, not appends"
         );
@@ -584,7 +591,7 @@ mod tests {
             values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
         });
         rs.clear();
-        assert!(rs.pinned_value(node, 0).is_none());
+        assert!(rs.pinned_value(OutputPort::new(node, 0)).is_none());
     }
 
     /// A new epoch keeps a pinned value alive even when its node carries no
@@ -605,7 +612,7 @@ mod tests {
         rs.begin_run();
 
         assert_eq!(
-            rs.pinned_value(node, 0).unwrap().as_i64(),
+            rs.pinned_value(OutputPort::new(node, 0)).unwrap().as_i64(),
             Some(7),
             "pinned value survives an epoch bump with nothing else to anchor it"
         );
@@ -630,7 +637,7 @@ mod tests {
         rs.set_results(&stats(&[], &[]), &FlattenMap::default());
 
         assert_eq!(
-            rs.pinned_value(node, 0).unwrap().as_i64(),
+            rs.pinned_value(OutputPort::new(node, 0)).unwrap().as_i64(),
             Some(7),
             "pinned value isn't dropped just because this run didn't mention the node"
         );

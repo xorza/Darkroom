@@ -40,8 +40,7 @@ impl App {
         let library = self.engine.library().clone();
         self.editor.apply_edit(
             Intent::SetInput {
-                node_id: req.node_id,
-                input_idx: req.port_idx,
+                input: req.port,
                 to: Binding::Const(value),
             },
             &library,

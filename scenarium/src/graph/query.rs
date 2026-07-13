@@ -128,16 +128,11 @@ impl Graph {
         self.node_outputs(library, node)?.get(port.port_idx)
     }
 
-    /// Output ports of `node_id` whose type *mirrors* input `input_idx` —
+    /// Output ports of `input.node_id` whose type *mirrors* `input` —
     /// wildcard (passthrough / reroute) outputs that retype when that input
     /// changes. Empty for an ordinary input or node.
-    fn wildcard_outputs_mirroring(
-        &self,
-        library: &Library,
-        node_id: NodeId,
-        input_idx: usize,
-    ) -> Vec<OutputPort> {
-        let Some(node) = self.find_node(&node_id, NodeSearch::TopLevel) else {
+    fn wildcard_outputs_mirroring(&self, library: &Library, input: InputPort) -> Vec<OutputPort> {
+        let Some(node) = self.find_node(&input.node_id, NodeSearch::TopLevel) else {
             return Vec::new();
         };
         let Some(outputs) = self.node_outputs(library, node) else {
@@ -146,33 +141,27 @@ impl Graph {
         outputs
             .iter()
             .enumerate()
-            .filter(
-                |(_, o)| matches!(o.ty, OutputType::Wildcard { mirrors } if mirrors == input_idx),
-            )
-            .map(|(i, _)| OutputPort::new(node_id, i))
+            .filter(|(_, o)| {
+                matches!(o.ty, OutputType::Wildcard { mirrors } if mirrors == input.port_idx)
+            })
+            .map(|(i, _)| OutputPort::new(input.node_id, i))
             .collect()
     }
 
     /// The input ports whose incoming `Bind` is no longer type-compatible once
-    /// input `changed_input` of `changed_node` changed — the wires the editor
-    /// drops to keep the graph well-typed. Follows wildcard outputs
-    /// *transitively*: a passthrough / reroute fed by the change retypes too, so
-    /// its now-incompatible consumers (any number of hops downstream) are
-    /// included. Empty when the change retypes nothing (an ordinary node's
-    /// input, or a wildcard input no output mirrors). The engine never
-    /// type-checks, so only the editor calls this.
-    pub fn edges_invalidated_by(
-        &self,
-        library: &Library,
-        changed_node: NodeId,
-        changed_input: usize,
-    ) -> Vec<InputPort> {
+    /// `changed` changed — the wires the editor drops to keep the graph
+    /// well-typed. Follows wildcard outputs *transitively*: a passthrough /
+    /// reroute fed by the change retypes too, so its now-incompatible consumers
+    /// (any number of hops downstream) are included. Empty when the change
+    /// retypes nothing (an ordinary node's input, or a wildcard input no output
+    /// mirrors). The engine never type-checks, so only the editor calls this.
+    pub fn edges_invalidated_by(&self, library: &Library, changed: InputPort) -> Vec<InputPort> {
         // Output ports whose resolved type just changed, grown forward from
-        // `changed_node`'s wildcard outputs through downstream wildcards. The
+        // `changed`'s wildcard outputs through downstream wildcards. The
         // set doubles as the cycle / re-visit guard.
         let mut retyped: HashSet<OutputPort> = HashSet::new();
         let mut frontier: Vec<OutputPort> = Vec::new();
-        for port in self.wildcard_outputs_mirroring(library, changed_node, changed_input) {
+        for port in self.wildcard_outputs_mirroring(library, changed) {
             if retyped.insert(port) {
                 frontier.push(port);
             }
@@ -191,9 +180,7 @@ impl Graph {
                     // Kept: a wildcard output of the consumer mirroring this
                     // input retypes too, so follow it further downstream.
                     _ => {
-                        for port in
-                            self.wildcard_outputs_mirroring(library, dst.node_id, dst.port_idx)
-                        {
+                        for port in self.wildcard_outputs_mirroring(library, dst) {
                             if retyped.insert(port) {
                                 frontier.push(port);
                             }

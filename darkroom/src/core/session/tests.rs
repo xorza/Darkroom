@@ -159,8 +159,7 @@ fn apply_intents_severs_incompatible_passthrough_output_edges() {
     apply_intents(
         &mut doc,
         vec![Intent::SetInput {
-            node_id: pass,
-            input_idx: 0,
+            input: InputPort::new(pass, 0),
             to: Binding::bind(sp, 0),
         }],
         &library,
@@ -222,8 +221,7 @@ fn apply_intents_severs_through_a_passthrough_chain() {
     apply_intents(
         &mut doc,
         vec![Intent::SetInput {
-            node_id: p1,
-            input_idx: 0,
+            input: InputPort::new(p1, 0),
             to: Binding::bind(sp, 0),
         }],
         &library,

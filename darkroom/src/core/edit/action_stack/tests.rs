@@ -287,7 +287,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     let b = doc.graph.iter().nth(1).unwrap().id;
     // Edge a -> b, then select both for deletion.
     doc.graph
-        .set_input_binding(InputPort::new(b, 0), (a, 0).into());
+        .set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
     doc.main_view.selected = [SelectionKey::Node(a), SelectionKey::Node(b)]
         .into_iter()
         .collect();

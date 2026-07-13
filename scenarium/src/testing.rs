@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::async_lambda;
 use crate::data::DataType;
-use crate::graph::{CacheMode, Graph, InputPort, Node, NodeId};
+use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeId};
 use crate::library::Library;
 use crate::node::function::{Func, FuncInput, FuncOutput};
 
@@ -155,11 +155,26 @@ pub fn test_graph() -> Graph {
     print_node.id = print_node_id;
     graph.add(print_node);
 
-    graph.set_input_binding(InputPort::new(sum_node_id, 0), (get_a_node_id, 0).into());
-    graph.set_input_binding(InputPort::new(sum_node_id, 1), (get_b_node_id, 0).into());
-    graph.set_input_binding(InputPort::new(mult_node_id, 0), (sum_node_id, 0).into());
-    graph.set_input_binding(InputPort::new(mult_node_id, 1), (get_b_node_id, 0).into());
-    graph.set_input_binding(InputPort::new(print_node_id, 0), (mult_node_id, 0).into());
+    graph.set_input_binding(
+        InputPort::new(sum_node_id, 0),
+        Binding::bind(get_a_node_id, 0),
+    );
+    graph.set_input_binding(
+        InputPort::new(sum_node_id, 1),
+        Binding::bind(get_b_node_id, 0),
+    );
+    graph.set_input_binding(
+        InputPort::new(mult_node_id, 0),
+        Binding::bind(sum_node_id, 0),
+    );
+    graph.set_input_binding(
+        InputPort::new(mult_node_id, 1),
+        Binding::bind(get_b_node_id, 0),
+    );
+    graph.set_input_binding(
+        InputPort::new(print_node_id, 0),
+        Binding::bind(mult_node_id, 0),
+    );
 
     graph.validate();
 

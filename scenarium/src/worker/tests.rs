@@ -11,7 +11,7 @@ use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::Result as ExecResult;
 use crate::execution::compile::Compiler;
 use crate::execution::stats::{ExecutionStats, RunPhase};
-use crate::graph::{Graph, InputPort, Node, NodeId, NodeSearch};
+use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
 use crate::node::event_lambda::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -114,11 +114,11 @@ fn log_frame_no_graph(library: &Library) -> Graph {
     graph.subscribe(frame_event_node_id, 0, print_node_id);
     graph.set_input_binding(
         InputPort::new(to_string_node_id, 0),
-        (frame_event_node_id, 1).into(),
+        Binding::bind(frame_event_node_id, 1),
     );
     graph.set_input_binding(
         InputPort::new(print_node_id, 0),
-        (to_string_node_id, 0).into(),
+        Binding::bind(to_string_node_id, 0),
     );
 
     graph
@@ -1251,9 +1251,9 @@ async fn disk_cache_persists_node_across_worker_restart() {
         .find_node_mut(&mult_id, NodeSearch::TopLevel)
         .unwrap()
         .cache = CacheMode::Disk;
-    graph.set_input_binding(InputPort::new(mult_id, 0), (get_a_id, 0).into());
-    graph.set_input_binding(InputPort::new(mult_id, 1), (get_a_id, 0).into());
-    graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
+    graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
+    graph.set_input_binding(InputPort::new(mult_id, 1), Binding::bind(get_a_id, 0));
+    graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(mult_id, 0));
 
     async fn run(root: &Path, graph: Graph, library: Arc<Library>) -> ExecutionStats {
         let (worker, mut rx) = finished_worker(4);
@@ -1337,8 +1337,8 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
         .find_node_mut(&mult_id, NodeSearch::TopLevel)
         .unwrap()
         .cache = CacheMode::Both;
-    graph.set_input_binding(InputPort::new(mult_id, 0), (get_a_id, 0).into());
-    graph.set_input_binding(InputPort::new(print_id, 0), (mult_id, 0).into());
+    graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
+    graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(mult_id, 0));
 
     let (worker, mut rx) = finished_worker(4);
 

@@ -2,7 +2,7 @@ use super::*;
 use crate::core::document::SelectionKey;
 use glam::Vec2;
 use rhai::Array;
-use scenarium::graph::{Binding, NodeId, NodeKind, OutputPort};
+use scenarium::graph::{Binding, InputPort, NodeId, NodeKind, OutputPort};
 use scenarium::library::Library;
 
 /// Build an `InboundSender` paired with the receiver tests assert on.
@@ -216,13 +216,8 @@ fn prelude_connect_decodes_to_setinput_bind() {
     let actions = expect_apply(&mut rx);
     assert_eq!(actions.len(), 1);
     match &actions[0] {
-        Intent::SetInput {
-            node_id,
-            input_idx,
-            to,
-        } => {
-            assert_eq!(*node_id, inp);
-            assert_eq!(*input_idx, 1);
+        Intent::SetInput { input, to } => {
+            assert_eq!(*input, InputPort::new(inp, 1));
             match to {
                 Binding::Bind(OutputPort { node_id, port_idx }) => {
                     assert_eq!(*node_id, out);

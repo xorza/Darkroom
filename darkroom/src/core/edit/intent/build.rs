@@ -3,7 +3,7 @@
 //! intent pipeline. Pure: never writes to the graph.
 
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
-use scenarium::graph::{Graph, InputPort, Node, NodeKind, NodeSearch, OutputPort};
+use scenarium::graph::{Graph, Node, NodeKind, NodeSearch};
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, EditScopeRef, GraphRef, SelectionKey};
@@ -154,16 +154,11 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             node_id,
             to,
         },
-        Intent::SetInput {
-            node_id,
-            input_idx,
-            to,
-        } => {
-            graph.find_node(&node_id, NodeSearch::TopLevel)?;
+        Intent::SetInput { input, to } => {
+            graph.find_node(&input.node_id, NodeSearch::TopLevel)?;
             GraphStep::SetInput {
-                from: graph.input_binding(InputPort::new(node_id, input_idx)),
-                node_id,
-                input_idx,
+                from: graph.input_binding(input),
+                input,
                 to,
             }
         }
@@ -230,24 +225,18 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
                 subscriber,
             }
         }
-        Intent::SetOutputPinned {
-            node_id,
-            port_idx,
-            pinned,
-        } => {
+        Intent::SetOutputPinned { output, pinned } => {
             // From the GUI this only ever targets a port rendered in the
             // current frame's Scene — but `core::script::register_mutations`
             // also reaches this variant directly, unchecked, from a script's
             // generic `apply()`/`apply_all()`, so a stale or bogus `node_id`
             // must drop like every other intent here, not assert.
-            graph.find_node(&node_id, NodeSearch::TopLevel)?;
-            let port = OutputPort::new(node_id, port_idx);
+            graph.find_node(&output.node_id, NodeSearch::TopLevel)?;
             GraphStep::SetOutputPinned {
-                node_id,
-                port_idx,
-                from: graph.is_output_pinned(port),
+                output,
+                from: graph.is_output_pinned(output),
                 to: pinned,
-                was_selected: view.selected.contains(&SelectionKey::Pin(port)),
+                was_selected: view.selected.contains(&SelectionKey::Pin(output)),
             }
         }
     };

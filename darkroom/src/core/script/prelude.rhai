@@ -34,8 +34,7 @@ fn delete_node(node_id) {
 // input port `input_port` (a `SetInput` with a `Bind` binding).
 fn connect(output_node, output_port, input_node, input_port) {
     apply(#{ SetInput: #{
-        node_id: input_node,
-        input_idx: input_port,
+        input: #{ node_id: input_node, port_idx: input_port },
         to: #{ Bind: #{ node_id: output_node, port_idx: output_port } },
     }});
 }
@@ -43,8 +42,7 @@ fn connect(output_node, output_port, input_node, input_port) {
 // Drop the binding on `input_node`'s input port `input_port`.
 fn disconnect(input_node, input_port) {
     apply(#{ SetInput: #{
-        node_id: input_node,
-        input_idx: input_port,
+        input: #{ node_id: input_node, port_idx: input_port },
         to: "None",
     }});
 }

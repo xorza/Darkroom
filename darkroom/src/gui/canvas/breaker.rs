@@ -321,8 +321,7 @@ impl BreakerUI {
                         continue;
                     }
                     out.push(Intent::SetInput {
-                        node_id: addr.node_id,
-                        input_idx: addr.port_idx,
+                        input: addr,
                         to: Binding::None,
                     });
                 }
@@ -348,8 +347,7 @@ impl BreakerUI {
                         continue;
                     }
                     out.push(Intent::SetOutputPinned {
-                        node_id: port.node_id,
-                        port_idx: port.port_idx,
+                        output: port,
                         pinned: false,
                     });
                 }

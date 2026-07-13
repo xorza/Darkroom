@@ -26,7 +26,9 @@ use aperture::{
 };
 use glam::Vec2;
 use scenarium::graph::Binding;
+use scenarium::graph::InputPort;
 use scenarium::graph::NodeId;
+use scenarium::graph::OutputPort;
 use scenarium::library::Library;
 use std::collections::BTreeSet;
 
@@ -385,8 +387,7 @@ pub(crate) fn node_rename_wid(node_id: NodeId) -> WidgetId {
 
 pub(crate) fn set_input(port: PortRef, to: Binding) -> Intent {
     Intent::SetInput {
-        node_id: port.node_id,
-        input_idx: port.port_idx,
+        input: InputPort::new(port.node_id, port.port_idx),
         to,
     }
 }
@@ -394,8 +395,7 @@ pub(crate) fn set_input(port: PortRef, to: Binding) -> Intent {
 /// Toggle (or set) whether an output port is pinned.
 pub(crate) fn set_output_pinned(port: PortRef, pinned: bool) -> Intent {
     Intent::SetOutputPinned {
-        node_id: port.node_id,
-        port_idx: port.port_idx,
+        output: OutputPort::new(port.node_id, port.port_idx),
         pinned,
     }
 }

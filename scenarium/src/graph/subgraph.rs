@@ -186,7 +186,7 @@ impl KeyIndexKey<SubgraphId> for SubgraphDef {
 mod tests {
     use super::*;
     use crate::data::DataType;
-    use crate::graph::{Graph, InputPort, Node, NodeKind};
+    use crate::graph::{Binding, Graph, InputPort, Node, NodeKind};
     use crate::library::Library;
     use crate::node::function::FuncId;
     use crate::testing::{TestFuncHooks, test_func_lib};
@@ -217,9 +217,9 @@ mod tests {
         graph.add(in_node);
         graph.add(sum_node);
         graph.add(out_node);
-        graph.set_input_binding(InputPort::new(sum_node_id, 0), (in_id, 0).into());
-        graph.set_input_binding(InputPort::new(sum_node_id, 1), (in_id, 1).into());
-        graph.set_input_binding(InputPort::new(out_id, 0), (sum_node_id, 0).into());
+        graph.set_input_binding(InputPort::new(sum_node_id, 0), Binding::bind(in_id, 0));
+        graph.set_input_binding(InputPort::new(sum_node_id, 1), Binding::bind(in_id, 1));
+        graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_node_id, 0));
 
         SubgraphDef::new(SubgraphId::unique(), "WrapSum")
             .category("Test")
@@ -306,7 +306,7 @@ mod tests {
         let mut graph = Graph::default();
         graph.add(src);
         graph.add(out_node);
-        graph.set_input_binding(InputPort::new(out_id, 0), (src_id, 0).into());
+        graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(src_id, 0));
 
         let def = SubgraphDef::new(SubgraphId::unique(), "Source")
             .category("Test")
@@ -336,7 +336,7 @@ mod tests {
         let mut graph = Graph::default();
         graph.add(in_node);
         graph.add(print_node);
-        graph.set_input_binding(InputPort::new(print_node_id, 0), (in_id, 0).into());
+        graph.set_input_binding(InputPort::new(print_node_id, 0), Binding::bind(in_id, 0));
 
         let def = SubgraphDef::new(SubgraphId::unique(), "Sink")
             .category("Test")

@@ -7,7 +7,7 @@ use glam::Vec2;
 use scenarium::data::{DataType, RamUsage, StaticValue};
 use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
 use scenarium::graph::{
-    Binding, CacheMode, Graph, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
+    Binding, CacheMode, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
 };
 use scenarium::library::Library;
 use scenarium::node::function::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
@@ -217,10 +217,10 @@ impl KeyIndexKey<NodeId> for SceneNode {
 
 #[derive(Debug)]
 pub struct SceneConnection {
-    pub src_node: NodeId,
-    pub src_port: usize,
-    pub tgt_node: NodeId,
-    pub tgt_port: usize,
+    /// Producer side — the output feeding the wire.
+    pub src: OutputPort,
+    /// Consumer side — the input the wire lands on.
+    pub tgt: InputPort,
 }
 
 impl Scene {
@@ -481,13 +481,8 @@ impl Scene {
             });
         }
 
-        for (dst, src) in graph.edges() {
-            self.connections.push(SceneConnection {
-                src_node: src.node_id,
-                src_port: src.port_idx,
-                tgt_node: dst.node_id,
-                tgt_port: dst.port_idx,
-            });
+        for (tgt, src) in graph.edges() {
+            self.connections.push(SceneConnection { src, tgt });
         }
 
         self.subscriptions.extend(graph.subscriptions());
@@ -640,7 +635,7 @@ mod tests {
     use super::*;
     use scenarium::data::DataType;
     use scenarium::graph::subgraph::SubgraphDef;
-    use scenarium::graph::{InputPort, Node};
+    use scenarium::graph::{InputPort, Node, OutputPort};
 
     fn finput(name: &str, ty: DataType) -> FuncInput {
         FuncInput::optional(name, ty)
@@ -658,7 +653,7 @@ mod tests {
         let mut inner = Graph::default();
         inner.add(in_node);
         inner.add(out_node);
-        inner.set_input_binding(InputPort::new(out_id, 0), (in_id, 0).into());
+        inner.set_input_binding(InputPort::new(out_id, 0), Binding::bind(in_id, 0));
 
         let def = SubgraphDef::new("00000000-0000-0000-0000-000000000000", "Adder")
             .category("Subgraph")
@@ -738,8 +733,8 @@ mod tests {
         // The interior wire shows up as a connection between the boundaries.
         assert_eq!(scene.connections.len(), 1);
         let c = &scene.connections[0];
-        assert_eq!((c.src_node, c.src_port), (in_id, 0));
-        assert_eq!((c.tgt_node, c.tgt_port), (out_id, 0));
+        assert_eq!(c.src, OutputPort::new(in_id, 0));
+        assert_eq!(c.tgt, InputPort::new(out_id, 0));
     }
 
     #[test]

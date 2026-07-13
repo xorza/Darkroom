@@ -153,7 +153,10 @@ fn check_rejects_dangling_binding() {
     let mut graph = test_graph();
     let sum_id = graph.by_name("sum").unwrap().id;
     // Repoint sum's input at a node that doesn't exist.
-    graph.set_input_binding(InputPort::new(sum_id, 0), (NodeId::unique(), 0).into());
+    graph.set_input_binding(
+        InputPort::new(sum_id, 0),
+        Binding::bind(NodeId::unique(), 0),
+    );
 
     let err = graph.check().expect_err("dangling binding must fail check");
     assert!(err.to_string().contains("binds to missing node"));
@@ -456,15 +459,21 @@ fn edges_invalidated_by_follows_wildcard_chains() {
     // the one now incompatible — the chain must be followed to find it.
     g.set_input_binding(InputPort::new(p1, 0), Binding::bind(sp, 0));
     assert_eq!(
-        g.edges_invalidated_by(&library, p1, 0),
+        g.edges_invalidated_by(&library, InputPort::new(p1, 0)),
         vec![InputPort::new(sink, 0)],
         "the edge two passthroughs downstream is flagged"
     );
 
     // Changing an ordinary node's input retypes nothing → no invalidations.
-    assert!(g.edges_invalidated_by(&library, sink, 0).is_empty());
+    assert!(
+        g.edges_invalidated_by(&library, InputPort::new(sink, 0))
+            .is_empty()
+    );
     // Changing the passthrough's *path* input (no output mirrors it) → none.
-    assert!(g.edges_invalidated_by(&library, p1, 1).is_empty());
+    assert!(
+        g.edges_invalidated_by(&library, InputPort::new(p1, 1))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -555,7 +564,10 @@ fn input_type_resolves_declared_types_and_skips_boundaries() {
 fn deserialize_rejects_corrupt_graph() {
     let mut graph = test_graph();
     let sum_id = graph.by_name("sum").unwrap().id;
-    graph.set_input_binding(InputPort::new(sum_id, 0), (NodeId::unique(), 0).into());
+    graph.set_input_binding(
+        InputPort::new(sum_id, 0),
+        Binding::bind(NodeId::unique(), 0),
+    );
 
     // serialize doesn't validate; deserialize must reject the dangling bind
     // (the release-path structural guard, not a debug-only assert).
@@ -638,8 +650,7 @@ fn binding_accessors() {
 fn binding_conversions() {
     let nid = NodeId::unique();
     let from_port: Binding = OutputPort::new(nid, 1).into();
-    let from_tuple: Binding = (nid, 1usize).into();
-    assert_eq!(from_port, from_tuple);
+    assert_eq!(from_port, Binding::bind(nid, 1));
     assert_eq!(from_port.as_output_binding().unwrap().port_idx, 1);
 
     assert_eq!(Binding::from(7i64), Binding::Const(7i64.into()));
@@ -1022,11 +1033,11 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
     let (a, b, c, d, e) = (ids[0], ids[1], ids[2], ids[3], ids[4]);
     let ghost = NodeId::unique();
 
-    graph.set_input_binding(InputPort::new(b, 0), (a, 0).into()); // fully valid
-    graph.set_input_binding(InputPort::new(c, 5), (a, 0).into()); // consumer input out of range
-    graph.set_input_binding(InputPort::new(d, 0), (a, 9).into()); // producer output out of range
-    graph.set_input_binding(InputPort::new(e, 0), (ghost, 0).into()); // producer node gone
-    graph.set_input_binding(InputPort::new(ghost, 0), (a, 0).into()); // consumer node gone
+    graph.set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0)); // fully valid
+    graph.set_input_binding(InputPort::new(c, 5), Binding::bind(a, 0)); // consumer input out of range
+    graph.set_input_binding(InputPort::new(d, 0), Binding::bind(a, 9)); // producer output out of range
+    graph.set_input_binding(InputPort::new(e, 0), Binding::bind(ghost, 0)); // producer node gone
+    graph.set_input_binding(InputPort::new(ghost, 0), Binding::bind(a, 0)); // consumer node gone
 
     let removed = graph.prune_dangling_wiring(&library);
     assert_eq!(
@@ -1059,8 +1070,8 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
     let ghost_func = Node::new(NodeKind::Func(FuncId::from_u128(0xdead)));
     let ghost_id = ghost_func.id;
     graph.add(ghost_func);
-    graph.set_input_binding(InputPort::new(ghost_id, 3), (a, 0).into());
-    graph.set_input_binding(InputPort::new(b, 0), (ghost_id, 7).into());
+    graph.set_input_binding(InputPort::new(ghost_id, 3), Binding::bind(a, 0));
+    graph.set_input_binding(InputPort::new(b, 0), Binding::bind(ghost_id, 7));
     assert_eq!(
         graph.prune_dangling_wiring(&library),
         0,

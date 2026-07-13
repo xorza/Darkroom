@@ -10,6 +10,7 @@ use std::sync::Arc;
 use aperture::Ui;
 use scenarium::data::{DataType, FsPathConfig, StaticValue};
 use scenarium::graph::Binding;
+use scenarium::graph::InputPort;
 use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphRef;
 
@@ -61,8 +62,7 @@ pub(crate) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
 /// owns the command channel, does the translation.
 #[derive(Clone, Debug)]
 pub(crate) struct PathPickRequest {
-    pub(crate) node_id: NodeId,
-    pub(crate) port_idx: usize,
+    pub(crate) port: InputPort,
     /// The picker config is type-level metadata, taken from the port's
     /// `DataType` (the value only carries the path string).
     pub(crate) config: Arc<FsPathConfig>,
@@ -75,13 +75,13 @@ pub(crate) struct PathPickRequest {
 pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest> {
     for node in &scene.nodes {
         for (port_idx, input) in scene.inputs(node.inputs).iter().enumerate() {
+            let port = InputPort::new(node.id, port_idx);
             if let InputBindingView::Const(StaticValue::FsPath(_)) = &input.binding
                 && let DataType::FsPath(config) = &input.ty
-                && ui.response_for(const_editor_wid(node.id, port_idx)).clicked
+                && ui.response_for(const_editor_wid(port)).clicked
             {
                 return Some(PathPickRequest {
-                    node_id: node.id,
-                    port_idx,
+                    port,
                     config: config.clone(),
                 });
             }
@@ -132,12 +132,12 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>)
             if ui.response_for(port_circle_wid(port)).double_clicked() {
                 // An output may feed many inputs — clear each consumer.
                 for c in &scene.connections {
-                    if c.src_node == port.node_id && c.src_port == port.port_idx {
+                    if c.src.node_id == port.node_id && c.src.port_idx == port.port_idx {
                         out.push(set_input(
                             PortRef {
-                                node_id: c.tgt_node,
+                                node_id: c.tgt.node_id,
                                 kind: PortKind::Input,
-                                port_idx: c.tgt_port,
+                                port_idx: c.tgt.port_idx,
                             },
                             Binding::None,
                         ));

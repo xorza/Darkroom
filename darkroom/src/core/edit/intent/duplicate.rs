@@ -137,8 +137,7 @@ pub(crate) fn remove_selection_intents(selected: &BTreeSet<SelectionKey>) -> Vec
         .map(|key| match *key {
             SelectionKey::Node(node_id) => Intent::RemoveNode { node_id },
             SelectionKey::Pin(port) => Intent::SetOutputPinned {
-                node_id: port.node_id,
-                port_idx: port.port_idx,
+                output: port,
                 pinned: false,
             },
         })

@@ -270,14 +270,14 @@ impl ConnectionUI {
         let width = ctx.theme.connection_width;
         for c in &scene.connections {
             let src_port = PortRef {
-                node_id: c.src_node,
+                node_id: c.src.node_id,
                 kind: PortKind::Output,
-                port_idx: c.src_port,
+                port_idx: c.src.port_idx,
             };
             let tgt_port = PortRef {
-                node_id: c.tgt_node,
+                node_id: c.tgt.node_id,
                 kind: PortKind::Input,
-                port_idx: c.tgt_port,
+                port_idx: c.tgt.port_idx,
             };
             let (Some(p0), Some(p3)) = (
                 geometry.ports.center(src_port),
@@ -291,7 +291,7 @@ impl ConnectionUI {
             }
             let broken = probe.crosses_cubic(p0, handles.p1, handles.p2, p3);
             if broken {
-                probe.mark_broken_input(InputPort::new(c.tgt_node, c.tgt_port));
+                probe.mark_broken_input(c.tgt);
             }
             // Gradient from output (p0) → input (p3) port color so each
             // end of a connection visually matches the port it touches —
@@ -476,7 +476,10 @@ fn scan_snap_target(
                     PortKind::Output => (start.node_id, port.node_id),
                     PortKind::Input => (port.node_id, start.node_id),
                 };
-                let edges = scene.connections.iter().map(|c| (c.src_node, c.tgt_node));
+                let edges = scene
+                    .connections
+                    .iter()
+                    .map(|c| (c.src.node_id, c.tgt.node_id));
                 if compatible && !closes_data_cycle(edges, producer, consumer) {
                     return Some(port);
                 }
@@ -532,8 +535,7 @@ fn commit_connection(start: PortRef, end: PortRef, out: &mut Vec<Intent>) {
         _ => return, // unreachable — scan_snap_target enforces opposite kinds
     };
     out.push(Intent::SetInput {
-        node_id: input.node_id,
-        input_idx: input.port_idx,
+        input: InputPort::new(input.node_id, input.port_idx),
         to: Binding::bind(output.node_id, output.port_idx),
     });
 }

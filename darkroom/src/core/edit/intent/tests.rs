@@ -203,13 +203,13 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
     let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
     doc.graph
-        .set_input_binding(InputPort::new(b, 0), (a, 0).into());
+        .set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
     doc.graph.set_input_binding(
         InputPort::new(b, 1),
         Binding::Const(StaticValue::from(7i64)),
     );
     doc.graph
-        .set_input_binding(InputPort::new(b, 2), (c, 0).into());
+        .set_input_binding(InputPort::new(b, 2), Binding::bind(c, 0));
     let node_ids: BTreeSet<NodeId> = [a, b].into_iter().collect();
     doc.main_view.selected = node_ids.iter().copied().map(SelectionKey::Node).collect();
 
@@ -357,8 +357,8 @@ fn remove_selection_intents_splits_nodes_from_pins() {
     ));
     assert!(matches!(
         intents[1],
-        Intent::SetOutputPinned { node_id: n, port_idx: 2, pinned: false }
-            if n == port.node_id
+        Intent::SetOutputPinned { output, pinned: false }
+            if output == port
     ));
 }
 
@@ -443,8 +443,7 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
 
     let step = commit_intent(
         Intent::SetOutputPinned {
-            node_id: id,
-            port_idx: 0,
+            output: port,
             pinned: true,
         },
         &mut doc,
@@ -478,8 +477,7 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
     doc.main_view.selected.insert(SelectionKey::Pin(port));
     let unpin = commit_intent(
         Intent::SetOutputPinned {
-            node_id: id,
-            port_idx: 0,
+            output: port,
             pinned: false,
         },
         &mut doc,
@@ -507,8 +505,7 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
     assert!(
         commit_intent(
             Intent::SetOutputPinned {
-                node_id: id,
-                port_idx: 0,
+                output: port,
                 pinned: true,
             },
             &mut doc,
@@ -528,8 +525,7 @@ fn set_output_pinned_on_missing_node_is_dropped() {
     let mut doc = Document::default();
     let step = commit_intent(
         Intent::SetOutputPinned {
-            node_id: NodeId::unique(),
-            port_idx: 0,
+            output: OutputPort::new(NodeId::unique(), 0),
             pinned: true,
         },
         &mut doc,
@@ -558,8 +554,7 @@ fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
     // explicit entry from the moment it's pinned, no unset/sparse state.
     commit_intent(
         Intent::SetOutputPinned {
-            node_id: id,
-            port_idx: 0,
+            output: port,
             pinned: true,
         },
         &mut doc,
@@ -730,15 +725,14 @@ fn commit_intent_rejects_cycle_forming_bind() {
     let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
     let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
     doc.graph
-        .set_input_binding(InputPort::new(b, 0), (a, 0).into());
+        .set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
 
     // Wiring a's input back to b's output would close the a → b loop:
     // rejected, nothing written, the existing edge untouched.
     assert!(
         commit_intent(
             Intent::SetInput {
-                node_id: a,
-                input_idx: 0,
+                input: InputPort::new(a, 0),
                 to: Binding::bind(b, 0),
             },
             &mut doc,
@@ -763,8 +757,7 @@ fn commit_intent_rejects_cycle_forming_bind() {
     assert!(
         commit_intent(
             Intent::SetInput {
-                node_id: c,
-                input_idx: 0,
+                input: InputPort::new(c, 0),
                 to: Binding::bind(b, 0),
             },
             &mut doc,

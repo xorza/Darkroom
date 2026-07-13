@@ -104,8 +104,7 @@ pub(crate) enum Intent {
         to: String,
     },
     SetInput {
-        node_id: NodeId,
-        input_idx: usize,
+        input: InputPort,
         to: Binding,
     },
     /// Replace the whole selection set. The rubber band, node/pin clicks,
@@ -187,8 +186,7 @@ pub(crate) enum Intent {
     /// generic `apply()` (see `core::script::register_mutations`), so a
     /// stale or bogus `node_id` must drop quietly, not crash.
     SetOutputPinned {
-        node_id: NodeId,
-        port_idx: usize,
+        output: OutputPort,
         pinned: bool,
     },
 }
@@ -270,8 +268,7 @@ pub(crate) enum GraphStep {
         to: String,
     },
     SetInput {
-        node_id: NodeId,
-        input_idx: usize,
+        input: InputPort,
         from: Binding,
         to: Binding,
     },
@@ -326,8 +323,7 @@ pub(crate) enum GraphStep {
     /// widget disappears with it), so a revert back to `pinned` restores it,
     /// mirroring `RemoveNode`'s `was_selected`.
     SetOutputPinned {
-        node_id: NodeId,
-        port_idx: usize,
+        output: OutputPort,
         from: bool,
         to: bool,
         was_selected: bool,

@@ -921,12 +921,6 @@ impl From<OutputPort> for Binding {
     }
 }
 
-impl From<(NodeId, usize)> for Binding {
-    fn from((output_node_id, output_idx): (NodeId, usize)) -> Self {
-        Binding::bind(output_node_id, output_idx)
-    }
-}
-
 impl From<StaticValue> for Binding {
     fn from(value: StaticValue) -> Self {
         Binding::Const(value)

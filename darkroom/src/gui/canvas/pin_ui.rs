@@ -285,8 +285,14 @@ impl PinUi {
                 if !output.pinned {
                     continue;
                 }
-                let Some(g) = resolve_pin_geometry(ui, geometry, probe, visible, n.id, i, output)
-                else {
+                let Some(g) = resolve_pin_geometry(
+                    ui,
+                    geometry,
+                    probe,
+                    visible,
+                    OutputPort::new(n.id, i),
+                    output,
+                ) else {
                     continue;
                 };
                 let port_ref = PortRef {
@@ -345,8 +351,14 @@ impl PinUi {
                 if !output.pinned {
                     continue;
                 }
-                let Some(g) = resolve_pin_geometry(ui, geometry, probe, visible, n.id, i, output)
-                else {
+                let Some(g) = resolve_pin_geometry(
+                    ui,
+                    geometry,
+                    probe,
+                    visible,
+                    OutputPort::new(n.id, i),
+                    output,
+                ) else {
                     continue;
                 };
                 // The data-type accent lives *only* on the port-circle
@@ -374,7 +386,7 @@ impl PinUi {
                 let border = theme.card_border(g.broken, is_selected);
                 let card_border = border.color;
                 let border_width = border.width;
-                let value = ctx.run_state.pinned_value(n.id, i);
+                let value = ctx.run_state.pinned_value(g.out_port);
                 let image = if is_image_type(&output.ty) {
                     value.and_then(|v| self.previews.resolve(ui, g.out_port, v))
                 } else {
@@ -434,17 +446,15 @@ fn resolve_pin_geometry(
     geometry: &CanvasGeometry,
     probe: &mut BreakerProbe<'_>,
     visible: Option<Rect>,
-    node_id: NodeId,
-    port_idx: usize,
+    out_port: OutputPort,
     output: &SceneOutput,
 ) -> Option<PinGeometry> {
     let port_ref = PortRef {
-        node_id,
+        node_id: out_port.node_id,
         kind: PortKind::Output,
-        port_idx,
+        port_idx: out_port.port_idx,
     };
     let port_center = geometry.ports.center(port_ref)?;
-    let out_port = OutputPort::new(node_id, port_idx);
     // The wire's far end, and the preview widget's own top-left corner —
     // one and the same point, so the wire lands exactly on the port-circle
     // glyph peeking from under that corner.

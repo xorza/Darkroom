@@ -789,8 +789,7 @@ mod tests {
         // severs the now-incompatible Float sink edge, in one undo batch.
         editor.apply_edit(
             Intent::SetInput {
-                node_id: pass,
-                input_idx: 0,
+                input: InputPort::new(pass, 0),
                 to: Binding::bind(sp, 0),
             },
             &library,

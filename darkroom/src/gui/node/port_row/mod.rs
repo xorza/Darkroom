@@ -16,6 +16,7 @@ use aperture::{
 };
 use scenarium::data::{DataType, FsPathMode};
 use scenarium::graph::Binding;
+use scenarium::graph::InputPort;
 use scenarium::graph::NodeId;
 use scenarium::graph::OutputPort;
 use scenarium::library::Library;
@@ -160,8 +161,8 @@ pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
 /// Stable widget id for an input port's inline const editor (text field,
 /// checkbox, or file-pick button). Reconstructible from domain coords so
 /// the path-pick scan can poll the button's click without threading state.
-pub(crate) fn const_editor_wid(node_id: NodeId, port_idx: usize) -> WidgetId {
-    WidgetId::from_hash(("graph.node.const_editor", node_id, port_idx))
+pub(crate) fn const_editor_wid(input: InputPort) -> WidgetId {
+    WidgetId::from_hash(("graph.node.const_editor", input.node_id, input.port_idx))
 }
 
 /// Stable widget id for an input port's cell (circle + label). The prepass
@@ -309,7 +310,7 @@ fn value_cell(
     };
     let data_type = &input.ty;
     let value_variants = rcx.scene.value_variants(input.value_variants);
-    let editor_id = const_editor_wid(port.node_id, port.port_idx);
+    let editor_id = const_editor_wid(InputPort::new(port.node_id, port.port_idx));
     // Fill the value column so every editor is the same width (the column
     // hugs to the widest editor's content). `min_size` on the editors keeps
     // a sensible floor; the editor fills this cell, this cell fills the col.

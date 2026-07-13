@@ -6,7 +6,7 @@
 //! undo-stack redo, which applies a *stored* step without rebuilding it.
 
 use scenarium::graph::subgraph::SubgraphRef;
-use scenarium::graph::{Binding, InputPort, NodeId, NodeKind, NodeSearch, OutputPort};
+use scenarium::graph::{Binding, NodeId, NodeKind, NodeSearch, OutputPort};
 use scenarium::library::Library;
 
 use crate::core::document::{Document, EditScope, GraphRef, SelectionKey};
@@ -34,13 +34,13 @@ pub(crate) fn commit_intent(
     // GUI snap filter normally stops this earlier; this is the authoritative
     // guard covering every binding path, including any that bypass the canvas.
     if let Intent::SetInput {
-        node_id,
+        input,
         to: Binding::Bind(src),
         ..
     } = &intent
         && doc
             .graph_for(target)
-            .is_some_and(|g| g.would_create_cycle(src.node_id, *node_id))
+            .is_some_and(|g| g.would_create_cycle(src.node_id, input.node_id))
     {
         return None;
     }
@@ -68,27 +68,24 @@ pub(crate) fn commit_intent_cascading(
     // Only a `SetInput` can retype a node's output, so only it can invalidate
     // downstream wires. Capture which input changed before the intent is moved.
     let retyped = match &intent {
-        Intent::SetInput {
-            node_id, input_idx, ..
-        } => Some((*node_id, *input_idx)),
+        Intent::SetInput { input, .. } => Some(*input),
         _ => None,
     };
     let Some(step) = commit_intent(intent, doc, target) else {
         return Vec::new();
     };
     let mut steps = vec![step];
-    if let Some((node, input_idx)) = retyped {
+    if let Some(input) = retyped {
         // The engine resolves which wires the retype invalidated (transitively,
         // through any chain of wildcard outputs); drop each in the same batch.
         let severed = doc
             .graph_for(target)
-            .map(|graph| graph.edges_invalidated_by(library, node, input_idx))
+            .map(|graph| graph.edges_invalidated_by(library, input))
             .unwrap_or_default();
         for dst in severed {
             steps.extend(commit_intent(
                 Intent::SetInput {
-                    node_id: dst.node_id,
-                    input_idx: dst.port_idx,
+                    input: dst,
                     to: Binding::None,
                 },
                 doc,
@@ -212,15 +209,8 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 .unwrap()
                 .name = to.clone();
         }
-        GraphStep::SetInput {
-            node_id,
-            input_idx,
-            to,
-            ..
-        } => {
-            scope
-                .graph
-                .set_input_binding(InputPort::new(*node_id, *input_idx), to.clone());
+        GraphStep::SetInput { input, to, .. } => {
+            scope.graph.set_input_binding(*input, to.clone());
         }
         GraphStep::SetSelection { to, .. } => {
             scope.view.selected = to.clone();
@@ -251,12 +241,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             to,
             ..
         } => set_subscription(scope, *emitter, *event_idx, *subscriber, *to),
-        GraphStep::SetOutputPinned {
-            node_id,
-            port_idx,
-            to,
-            ..
-        } => set_output_pinned(scope, *node_id, *port_idx, *to),
+        GraphStep::SetOutputPinned { output, to, .. } => set_output_pinned(scope, *output, *to),
     }
 }
 
@@ -303,13 +288,12 @@ fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProp
 /// thus guaranteed an explicit position no matter the caller, which is what
 /// lets `build_step` treat a missing entry as a genuine bug rather than a
 /// case to handle gracefully.
-fn set_output_pinned(scope: &mut EditScope<'_>, node_id: NodeId, port_idx: usize, pinned: bool) {
-    let port = OutputPort::new(node_id, port_idx);
-    scope.graph.set_output_pinned(port, pinned);
+fn set_output_pinned(scope: &mut EditScope<'_>, output: OutputPort, pinned: bool) {
+    scope.graph.set_output_pinned(output, pinned);
     if pinned {
-        scope.view.pin_positions.entry(port).or_default();
+        scope.view.pin_positions.entry(output).or_default();
     } else {
-        scope.view.selected.remove(&SelectionKey::Pin(port));
+        scope.view.selected.remove(&SelectionKey::Pin(output));
     }
 }
 
@@ -415,15 +399,8 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 .unwrap()
                 .name = from.clone();
         }
-        GraphStep::SetInput {
-            node_id,
-            input_idx,
-            from,
-            ..
-        } => {
-            scope
-                .graph
-                .set_input_binding(InputPort::new(*node_id, *input_idx), from.clone());
+        GraphStep::SetInput { input, from, .. } => {
+            scope.graph.set_input_binding(*input, from.clone());
         }
         GraphStep::SetSelection { from, .. } => {
             scope.view.selected = from.clone();
@@ -461,21 +438,17 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             ..
         } => set_subscription(scope, *emitter, *event_idx, *subscriber, *from),
         GraphStep::SetOutputPinned {
-            node_id,
-            port_idx,
+            output,
             from,
             was_selected,
             ..
         } => {
-            set_output_pinned(scope, *node_id, *port_idx, *from);
+            set_output_pinned(scope, *output, *from);
             // Re-pinning on undo doesn't itself restore selection (pinning
             // never auto-selects) — restore it explicitly when the pin was
             // selected before the edit that unpinned it.
             if *from && *was_selected {
-                scope
-                    .view
-                    .selected
-                    .insert(SelectionKey::Pin(OutputPort::new(*node_id, *port_idx)));
+                scope.view.selected.insert(SelectionKey::Pin(*output));
             }
         }
     }
