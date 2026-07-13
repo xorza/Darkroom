@@ -1,7 +1,7 @@
 use super::*;
 use crate::core::document::dock::DockOp;
 use crate::core::document::view_item::ViewItem;
-use crate::core::document::{Document, SelectionKey, TabRef};
+use crate::core::document::{Document, ItemRef, TabRef};
 use crate::core::edit::intent::apply::apply_step;
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::Intent;
@@ -111,7 +111,7 @@ fn switch_does_not_merge_across_an_intervening_edit() {
     // Intervening selection edit (a real change, so not a no-op).
     let node_id = doc.graph.iter().next().unwrap().id;
     let mut want = std::collections::BTreeSet::new();
-    want.insert(SelectionKey::Node(node_id));
+    want.insert(ItemRef::Node(node_id));
     let sel = build_step(Intent::SetSelection { to: want }, &doc, GraphRef::Main).unwrap();
     apply_step(&sel, &mut doc, GraphRef::Main);
     stack.push_current(GraphRef::Main, &[sel]);
@@ -216,7 +216,7 @@ fn consecutive_moves_coalesce_keeping_first_from() {
 
     let mut doc: Document = test_graph().into();
     let node = doc.graph.iter().next().unwrap().id;
-    let key = SelectionKey::Node(node);
+    let key = ItemRef::Node(node);
     let start = doc.main_view.view_items.by_key(&key).unwrap().pos;
     let mut stack = ActionStack::new(1 << 20);
 
@@ -262,7 +262,7 @@ fn moves_of_different_nodes_do_not_coalesce() {
     let mut stack = ActionStack::new(1 << 20);
 
     for (node, to) in [(a, Vec2::new(5.0, 5.0)), (b, Vec2::new(6.0, 6.0))] {
-        let key = SelectionKey::Node(node);
+        let key = ItemRef::Node(node);
         let intent = Intent::MoveSelection {
             grabbed: key,
             moves: vec![(key, to)],
@@ -289,7 +289,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     // Edge a -> b, then select both for deletion.
     doc.graph
         .set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
-    doc.main_view.selected = [SelectionKey::Node(a), SelectionKey::Node(b)]
+    doc.main_view.selected = [ItemRef::Node(a), ItemRef::Node(b)]
         .into_iter()
         .collect();
 
@@ -330,13 +330,13 @@ fn group_drag_moves_all_and_undoes_as_one() {
     let mut doc: Document = test_graph().into();
     let a = doc.graph.iter().next().unwrap().id;
     let b = doc.graph.iter().nth(1).unwrap().id;
-    let (ka, kb) = (SelectionKey::Node(a), SelectionKey::Node(b));
+    let (ka, kb) = (ItemRef::Node(a), ItemRef::Node(b));
     let a0 = doc.main_view.view_items.by_key(&ka).unwrap().pos;
     let b0 = doc.main_view.view_items.by_key(&kb).unwrap().pos;
     // A pinned-output preview joins the group too — a mixed node+pin drag,
     // like grabbing a node that's multi-selected alongside a pin.
     let port = OutputPort::new(a, 0);
-    let pin = SelectionKey::Pin(port);
+    let pin = ItemRef::Pin(port);
     let pin0 = Vec2::new(100.0, -50.0);
     doc.graph.set_output_pinned(port, true);
     doc.main_view.view_items.add(ViewItem::pin(port, pin0));
@@ -357,7 +357,7 @@ fn group_drag_moves_all_and_undoes_as_one() {
     drag(&mut stack, &mut doc, Vec2::new(25.0, 5.0));
 
     // All three ended at origin + last offset.
-    let item_pos = |doc: &Document, key: &SelectionKey| -> Vec2 {
+    let item_pos = |doc: &Document, key: &ItemRef| -> Vec2 {
         doc.main_view.view_items.by_key(key).unwrap().pos
     };
     assert_eq!(item_pos(&doc, &ka), a0 + Vec2::new(25.0, 5.0));
@@ -388,7 +388,7 @@ fn new_edit_discards_the_redo_tail() {
         apply_step(&step, doc, GraphRef::Main);
         stack.push_current(GraphRef::Main, &[step]);
     };
-    let one: BTreeSet<_> = [SelectionKey::Node(node)].into_iter().collect();
+    let one: BTreeSet<_> = [ItemRef::Node(node)].into_iter().collect();
     select(&mut stack, &mut doc, one.clone()); // A: {} -> {node}
     select(&mut stack, &mut doc, BTreeSet::new()); // B: {node} -> {}
 
@@ -435,7 +435,7 @@ fn history_bounded_by_byte_budget() {
     // in/out — `from != to` each time, gesture key `None`).
     for i in 0..200 {
         let to: BTreeSet<_> = if i % 2 == 0 {
-            [SelectionKey::Node(node)].into_iter().collect()
+            [ItemRef::Node(node)].into_iter().collect()
         } else {
             BTreeSet::new()
         };

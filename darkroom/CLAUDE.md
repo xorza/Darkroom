@@ -152,14 +152,16 @@ Everything else is editor view-state, split per graph:
 
 - **`GraphRef`** — `Main` (root graph) or `Local(SubgraphId)` (a subgraph
   interior). The active-graph handle threaded through the whole edit pipeline.
-- **`GraphView`** — per-graph view metadata: `view_nodes`
-  (`KeyIndexVec<NodeId, ViewNode>` of positions, kept in sync with the graph,
-  `validate()` asserts node sets match), `pan`, `scale`, and `selected_nodes`
-  (a `BTreeSet` so equality/serde are order-independent). Root lives in
-  `main_view`; each opened subgraph in `sub_views` (lazily seeded +
-  auto-laid-out on first open). **All of this is persisted and undoable by
-  design** — reopening restores camera + selection, and Ctrl+Z walks them
-  alongside structural edits.
+- **`GraphView`** — per-graph view metadata: `view_items`
+  (`KeyIndexVec<ItemRef, ViewItem>` of node-body and pinned-output
+  preview positions whose *order* is the shared paint stack — later items
+  draw in front, `Intent::Raise` lifts either kind; `check()` asserts one
+  `Node` item per graph node and one `Pin` item per pinned output),
+  `viewport`, and `selected` (a `BTreeSet` so equality/serde are
+  order-independent). Root lives in `main_view`; each opened subgraph in
+  `sub_views` (lazily seeded + auto-laid-out on first open). **All of this
+  is persisted and undoable by design** — reopening restores camera +
+  selection, and Ctrl+Z walks them alongside structural edits.
 - **`layout: DockLayout`** (`src/document/dock.rs`) — the pane arrangement:
   a binary split tree stored as a flat, canonically pre-ordered
   `Vec<DockNode>` whose leaves are `TabGroup`s (tabs + per-group active),
@@ -189,8 +191,9 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   mutation — activate, close, move/split, divider resize — is uniformly
   reversible by assignment, and refused/degenerate ops fall out as `from ==
   to` no-ops. Adding a variant touches ~6 spots — the doc comment lists them.
-- Variants: `AddNode`, `DuplicateNodes`, `RemoveNode`, `MoveNodes`,
-  `RenameNode`, `SetInput`, `SetSelection`, `RaiseNode`, `SetNodeProperty`
+- Variants: `AddNode`, `DuplicateNodes`, `RemoveNode`, `MoveSelection`,
+  `RenameNode`, `SetInput`, `SetSelection`, `Raise` (either kind of
+  paint-stack item — node body or pin preview), `SetNodeProperty`
   (a `NodeProperty::Disabled`/`Cache` — one intent backs both scalar toggles),
   `SetSubscription` (`subscribe: bool` — one intent backs subscribe + unsubscribe),
   `DetachSubgraph`, `SetViewport`, `RenameBoundaryPort`, `RenameSubgraph`,

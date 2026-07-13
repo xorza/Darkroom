@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::document::SelectionKey;
+use crate::core::document::ItemRef;
 use glam::Vec2;
 use rhai::Array;
 use scenarium::graph::{Binding, InputPort, NodeId, NodeKind, OutputPort};
@@ -264,9 +264,9 @@ fn prelude_move_node_decodes_to_moveselection() {
     let actions = expect_apply(&mut rx);
     match &actions[0] {
         Intent::MoveSelection { grabbed, moves } => {
-            assert_eq!(*grabbed, SelectionKey::Node(id));
+            assert_eq!(*grabbed, ItemRef::Node(id));
             assert_eq!(moves.len(), 1);
-            assert_eq!(moves[0].0, SelectionKey::Node(id));
+            assert_eq!(moves[0].0, ItemRef::Node(id));
             assert_eq!(moves[0].1, Vec2::new(5.0, -6.5));
         }
         other => panic!("expected MoveSelection, got {other:?}"),
@@ -288,7 +288,7 @@ fn prelude_select_node_decodes_to_setselection() {
     match &actions[0] {
         Intent::SetSelection { to } => {
             assert_eq!(to.len(), 1);
-            assert!(to.contains(&SelectionKey::Node(id)));
+            assert!(to.contains(&ItemRef::Node(id)));
         }
         other => panic!("expected SetSelection, got {other:?}"),
     }

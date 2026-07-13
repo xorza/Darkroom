@@ -9,7 +9,7 @@ use scenarium::node::function::FuncId;
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::view_item::ViewItem;
-use crate::core::document::{Document, GraphRef, SelectionKey, Viewport};
+use crate::core::document::{Document, GraphRef, ItemRef, Viewport};
 use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::duplicate::{
@@ -35,12 +35,12 @@ fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
 fn pin_pos(doc: &Document, port: OutputPort) -> Option<Vec2> {
     doc.main_view
         .view_items
-        .by_key(&SelectionKey::Pin(port))
+        .by_key(&ItemRef::Pin(port))
         .map(|item| item.pos)
 }
 
 /// The main view's paint-stack order, back to front.
-fn stack_order(doc: &Document) -> Vec<SelectionKey> {
+fn stack_order(doc: &Document) -> Vec<ItemRef> {
     doc.main_view
         .view_items
         .iter()
@@ -67,7 +67,7 @@ fn dirties_document_splits_edits_from_navigation() {
     let navigation = [
         UndoStep::Graph(GraphStep::SetSelection {
             from: BTreeSet::new(),
-            to: BTreeSet::from([SelectionKey::Node(NodeId::unique())]),
+            to: BTreeSet::from([ItemRef::Node(NodeId::unique())]),
         }),
         UndoStep::Graph(GraphStep::SetViewport {
             from: Viewport {
@@ -111,9 +111,9 @@ fn dirties_document_splits_edits_from_navigation() {
         })
         .unwrap(),
         UndoStep::Graph(GraphStep::MoveSelection {
-            grabbed: SelectionKey::Node(NodeId::unique()),
+            grabbed: ItemRef::Node(NodeId::unique()),
             moves: vec![(
-                SelectionKey::Node(NodeId::unique()),
+                ItemRef::Node(NodeId::unique()),
                 Vec2::ZERO,
                 Vec2::new(5.0, 5.0),
             )],
@@ -232,7 +232,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     doc.graph
         .set_input_binding(InputPort::new(b, 2), Binding::bind(c, 0));
     let node_ids: BTreeSet<NodeId> = [a, b].into_iter().collect();
-    doc.main_view.selected = node_ids.iter().copied().map(SelectionKey::Node).collect();
+    doc.main_view.selected = node_ids.iter().copied().map(ItemRef::Node).collect();
 
     let Some(Intent::DuplicateNodes {
         nodes,
@@ -246,9 +246,9 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     assert_eq!(nodes.len(), 2, "both selected nodes cloned");
     assert!(subscriptions.is_empty());
     // Fresh ids, offset positions.
-    let new_ids: BTreeSet<SelectionKey> = nodes
+    let new_ids: BTreeSet<ItemRef> = nodes
         .iter()
-        .map(|(_, n)| SelectionKey::Node(n.id))
+        .map(|(_, n)| ItemRef::Node(n.id))
         .collect();
     assert!(
         new_ids.is_disjoint(&doc.main_view.selected),
@@ -331,7 +331,7 @@ fn duplicate_intent_none_without_selection() {
     // A selection of only pin previews has no node identity to clone —
     // same as an empty selection.
     let id = add_node_at(&mut doc, Vec2::new(50.0, 0.0));
-    doc.main_view.selected = [SelectionKey::Pin(OutputPort::new(id, 0))]
+    doc.main_view.selected = [ItemRef::Pin(OutputPort::new(id, 0))]
         .into_iter()
         .collect();
     assert!(
@@ -346,8 +346,8 @@ fn selected_node_ids_drops_pin_keys() {
     let a = add_node_at(&mut doc, Vec2::ZERO);
     let b = add_node_at(&mut doc, Vec2::new(50.0, 0.0));
     doc.main_view.selected = [
-        SelectionKey::Node(a),
-        SelectionKey::Pin(OutputPort::new(b, 0)),
+        ItemRef::Node(a),
+        ItemRef::Pin(OutputPort::new(b, 0)),
     ]
     .into_iter()
     .collect();
@@ -364,7 +364,7 @@ fn selected_node_ids_drops_pin_keys() {
 fn remove_selection_intents_splits_nodes_from_pins() {
     let node_id = NodeId::unique();
     let port = OutputPort::new(NodeId::unique(), 2);
-    let selected: BTreeSet<SelectionKey> = [SelectionKey::Node(node_id), SelectionKey::Pin(port)]
+    let selected: BTreeSet<ItemRef> = [ItemRef::Node(node_id), ItemRef::Pin(port)]
         .into_iter()
         .collect();
 
@@ -460,7 +460,7 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
     let mut doc = Document::default();
     let id = add_node_at(&mut doc, Vec2::ZERO);
     let port = OutputPort::new(id, 0);
-    let key = SelectionKey::Pin(port);
+    let key = ItemRef::Pin(port);
     assert!(!doc.graph.is_output_pinned(port));
 
     let step = commit_intent(
@@ -480,7 +480,7 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
     );
     assert_eq!(
         stack_order(&doc),
-        vec![SelectionKey::Node(id), key],
+        vec![ItemRef::Node(id), key],
         "a fresh pin's item lands at the top of the paint stack"
     );
     assert!(
@@ -508,7 +508,7 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
     // non-default slot and position to prove it restores.
     doc.main_view.view_items.by_key_mut(&key).unwrap().pos = Vec2::new(40.0, -30.0);
     doc.main_view.view_items.move_to_index(&key, 0);
-    assert_eq!(stack_order(&doc), vec![key, SelectionKey::Node(id)]);
+    assert_eq!(stack_order(&doc), vec![key, ItemRef::Node(id)]);
 
     // Selecting the pin, then unpinning it, drops the selection — its
     // preview widget is gone; reverting the unpin restores it (mirrors
@@ -547,7 +547,7 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
     );
     assert_eq!(
         stack_order(&doc),
-        vec![key, SelectionKey::Node(id)],
+        vec![key, ItemRef::Node(id)],
         "revert restores the widget's exact paint-stack slot (bottom), not the top"
     );
 
@@ -587,7 +587,7 @@ fn set_output_pinned_on_missing_node_is_dropped() {
 /// A lone-pin `MoveSelection` intent: `grabbed`/`moves` target `port`,
 /// no nodes in the group.
 fn move_pin(port: OutputPort, to: Vec2) -> Intent {
-    let key = SelectionKey::Pin(port);
+    let key = ItemRef::Pin(port);
     Intent::MoveSelection {
         grabbed: key,
         moves: vec![(key, to)],
@@ -627,7 +627,7 @@ fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
     assert!(step.dirties_document(), "a real, persisted edit");
     assert_eq!(
         step.gesture_key(),
-        Some(GestureKey::SelectionDrag(SelectionKey::Pin(port))),
+        Some(GestureKey::SelectionDrag(ItemRef::Pin(port))),
         "consecutive frames of the same pin's drag must coalesce"
     );
 
@@ -638,7 +638,7 @@ fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
     let merged = step.coalesce(&step2).expect("same pin ⇒ coalesces");
     assert_eq!(
         merged.gesture_key(),
-        Some(GestureKey::SelectionDrag(SelectionKey::Pin(port))),
+        Some(GestureKey::SelectionDrag(ItemRef::Pin(port))),
         "merged step keeps the same key"
     );
 
@@ -654,7 +654,7 @@ fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
     // Dragging to the exact position it already holds is a no-op.
     doc.main_view
         .view_items
-        .by_key_mut(&SelectionKey::Pin(port))
+        .by_key_mut(&ItemRef::Pin(port))
         .unwrap()
         .pos = Vec2::new(1.0, 2.0);
     assert!(
@@ -692,7 +692,7 @@ fn removing_a_node_captures_and_restores_its_pins() {
     let a = add_node_at(&mut doc, Vec2::ZERO);
     let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
     let port = OutputPort::new(b, 0);
-    let key = SelectionKey::Pin(port);
+    let key = ItemRef::Pin(port);
     commit_intent(
         Intent::SetOutputPinned {
             output: port,
@@ -705,14 +705,14 @@ fn removing_a_node_captures_and_restores_its_pins() {
     doc.main_view.view_items.by_key_mut(&key).unwrap().pos = Vec2::new(7.0, 8.0);
     doc.main_view.view_items.move_to_index(&key, 1);
     doc.main_view.selected.insert(key);
-    let expected = vec![SelectionKey::Node(a), key, SelectionKey::Node(b)];
+    let expected = vec![ItemRef::Node(a), key, ItemRef::Node(b)];
     assert_eq!(stack_order(&doc), expected);
 
     let step = commit_intent(Intent::RemoveNode { node_id: b }, &mut doc, GraphRef::Main)
         .expect("removing an existing node is a real change");
     assert_eq!(
         stack_order(&doc),
-        vec![SelectionKey::Node(a)],
+        vec![ItemRef::Node(a)],
         "the node's own item and its pin's item are pruned together"
     );
     assert!(
@@ -751,9 +751,9 @@ fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
     let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
     let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
     let (a, b, c) = (
-        SelectionKey::Node(a),
-        SelectionKey::Node(b),
-        SelectionKey::Node(c),
+        ItemRef::Node(a),
+        ItemRef::Node(b),
+        ItemRef::Node(c),
     );
     assert_eq!(
         stack_order(&doc),
@@ -803,11 +803,11 @@ fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
     // A pin's preview shares the same stack: pinning lands its item on
     // top; raising a node buries it; raising the pin lifts it back —
     // fully independent of its owner node's own slot (b stays put).
-    let SelectionKey::Node(b_id) = b else {
+    let ItemRef::Node(b_id) = b else {
         unreachable!()
     };
     let port = OutputPort::new(b_id, 0);
-    let pin = SelectionKey::Pin(port);
+    let pin = ItemRef::Pin(port);
     commit_intent(
         Intent::SetOutputPinned {
             output: port,
