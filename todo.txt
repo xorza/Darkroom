@@ -12,8 +12,8 @@ file name as argument clap
 
 curve gpu tesselation
 
-review scenarium worker
-
 load broken document
 
 (nodeidx, prtnuber) - to struct
+
+mix order of nodes and previews
