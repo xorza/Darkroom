@@ -5,7 +5,7 @@ use scenarium::node::function::FuncId;
 
 use super::*;
 use crate::core::document::SelectionKey;
-use crate::core::document::view_node::ViewNode;
+use crate::core::document::view_item::ViewItem;
 
 #[test]
 fn apply_intents_adds_node_and_flags_reconcile() {
@@ -15,10 +15,7 @@ fn apply_intents_adds_node_and_flags_reconcile() {
     let node = Node::new(NodeKind::Func(FuncId::unique()));
     let id = node.id;
     let intent = Intent::AddNode {
-        view_node: ViewNode {
-            id,
-            pos: Vec2::new(10.0, 20.0),
-        },
+        pos: Vec2::new(10.0, 20.0),
         node,
         def: None,
         bindings: vec![],
@@ -40,10 +37,7 @@ fn apply_add_node_seeds_initial_bindings() {
     let id = node.id;
     let port = InputPort::new(id, 0);
     let intent = Intent::AddNode {
-        view_node: ViewNode {
-            id,
-            pos: Vec2::ZERO,
-        },
+        pos: Vec2::ZERO,
         node,
         def: None,
         bindings: vec![(port, Binding::Const(StaticValue::Float(5.0)))],
@@ -79,10 +73,7 @@ fn apply_intents_selection_skips_reconcile() {
     let node = Node::new(NodeKind::Func(FuncId::unique()));
     let id = node.id;
     doc.graph.add(node);
-    doc.main_view.view_nodes.add(ViewNode {
-        id,
-        pos: Vec2::ZERO,
-    });
+    doc.main_view.view_items.add(ViewItem::node(id, Vec2::ZERO));
 
     // Selecting an existing node is a real change but a pure view edit —
     // no interface impact, so it must not request a reconcile.
@@ -104,10 +95,7 @@ fn apply_intents_batches_multiple() {
         .map(|i| {
             let node = Node::new(NodeKind::Func(FuncId::unique()));
             Intent::AddNode {
-                view_node: ViewNode {
-                    id: node.id,
-                    pos: Vec2::new(i as f32 * 100.0, 0.0),
-                },
+                pos: Vec2::new(i as f32 * 100.0, 0.0),
                 node,
                 def: None,
                 bindings: vec![],

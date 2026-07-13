@@ -122,7 +122,7 @@ fn create_node_known_id_enqueues_add_node() {
     assert_eq!(actions.len(), 1);
     match &actions[0] {
         Intent::AddNode {
-            view_node,
+            pos,
             node,
             def,
             bindings,
@@ -130,8 +130,7 @@ fn create_node_known_id_enqueues_add_node() {
             assert!(bindings.is_empty(), "script-created nodes seed no defaults");
             assert_eq!(node.kind, NodeKind::Func(alpha_id));
             assert_eq!(node.name, "alpha");
-            assert_eq!(view_node.id, node.id);
-            assert_eq!(view_node.pos, Vec2::new(12.5, -3.0));
+            assert_eq!(*pos, Vec2::new(12.5, -3.0));
             assert!(def.is_none(), "func nodes carry no subgraph def");
             // The id `create_node` returned to Rhai matches the node id.
             assert_eq!(returned_id, node.id.to_string());
@@ -264,16 +263,11 @@ fn prelude_move_node_decodes_to_moveselection() {
 
     let actions = expect_apply(&mut rx);
     match &actions[0] {
-        Intent::MoveSelection {
-            grabbed,
-            nodes,
-            pins,
-        } => {
+        Intent::MoveSelection { grabbed, moves } => {
             assert_eq!(*grabbed, SelectionKey::Node(id));
-            assert!(pins.is_empty());
-            assert_eq!(nodes.len(), 1);
-            assert_eq!(nodes[0].0, id);
-            assert_eq!(nodes[0].1, Vec2::new(5.0, -6.5));
+            assert_eq!(moves.len(), 1);
+            assert_eq!(moves[0].0, SelectionKey::Node(id));
+            assert_eq!(moves[0].1, Vec2::new(5.0, -6.5));
         }
         other => panic!("expected MoveSelection, got {other:?}"),
     }

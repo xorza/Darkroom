@@ -8,7 +8,7 @@ use scenarium::graph::{
 use scenarium::node::function::FuncId;
 
 use crate::core::document::dock::DockOp;
-use crate::core::document::view_node::ViewNode;
+use crate::core::document::view_item::ViewItem;
 use crate::core::document::{Document, GraphRef, SelectionKey, Viewport};
 use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
 use crate::core::edit::intent::build::build_step;
@@ -26,8 +26,26 @@ fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
     let node = Node::new(NodeKind::Func(FuncId::unique()));
     let id = node.id;
     doc.graph.add(node);
-    doc.main_view.view_nodes.add(ViewNode { id, pos });
+    doc.main_view.view_items.add(ViewItem::node(id, pos));
     id
+}
+
+/// `port`'s preview position in the main view, `None` when it has no item
+/// (i.e. isn't pinned).
+fn pin_pos(doc: &Document, port: OutputPort) -> Option<Vec2> {
+    doc.main_view
+        .view_items
+        .by_key(&SelectionKey::Pin(port))
+        .map(|item| item.pos)
+}
+
+/// The main view's paint-stack order, back to front.
+fn stack_order(doc: &Document) -> Vec<SelectionKey> {
+    doc.main_view
+        .view_items
+        .iter()
+        .map(|item| item.key)
+        .collect()
 }
 
 #[test]
@@ -94,8 +112,11 @@ fn dirties_document_splits_edits_from_navigation() {
         .unwrap(),
         UndoStep::Graph(GraphStep::MoveSelection {
             grabbed: SelectionKey::Node(NodeId::unique()),
-            node_moves: vec![(NodeId::unique(), Vec2::ZERO, Vec2::new(5.0, 5.0))],
-            pin_moves: vec![],
+            moves: vec![(
+                SelectionKey::Node(NodeId::unique()),
+                Vec2::ZERO,
+                Vec2::new(5.0, 5.0),
+            )],
         }),
         UndoStep::Doc(DocStep::RenameSubgraph {
             id: SubgraphId::unique(),
@@ -235,7 +256,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     );
     let a_clone = nodes
         .iter()
-        .find(|(vn, _)| vn.pos == Vec2::new(0.0, 0.0) + DUPLICATE_OFFSET)
+        .find(|(pos, _)| *pos == Vec2::new(0.0, 0.0) + DUPLICATE_OFFSET)
         .map(|(_, n)| n.id)
         .expect("a's clone offset from its origin");
 
@@ -244,7 +265,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     assert_eq!(bindings.len(), 2);
     let b_clone = nodes
         .iter()
-        .find(|(vn, _)| vn.pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
+        .find(|(pos, _)| *pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
         .map(|(_, n)| n.id)
         .unwrap();
     let internal = bindings
@@ -284,7 +305,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     assert_eq!(incoming.len(), 3, "internal + const + kept external");
     let b_clone2 = incoming_nodes
         .iter()
-        .find(|(vn, _)| vn.pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
+        .find(|(pos, _)| *pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
         .map(|(_, n)| n.id)
         .unwrap();
     let external = incoming
@@ -439,6 +460,7 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
     let mut doc = Document::default();
     let id = add_node_at(&mut doc, Vec2::ZERO);
     let port = OutputPort::new(id, 0);
+    let key = SelectionKey::Pin(port);
     assert!(!doc.graph.is_output_pinned(port));
 
     let step = commit_intent(
@@ -452,9 +474,14 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
     .expect("marking an unbound port is a real change");
     assert!(doc.graph.is_output_pinned(port));
     assert_eq!(
-        doc.main_view.pin_positions.get(&port),
-        Some(&Vec2::ZERO),
-        "pinning seeds an explicit position — no unset/sparse state"
+        pin_pos(&doc, port),
+        Some(Vec2::ZERO),
+        "pinning seeds an explicit zero-positioned item — no unset/sparse state"
+    );
+    assert_eq!(
+        stack_order(&doc),
+        vec![SelectionKey::Node(id), key],
+        "a fresh pin's item lands at the top of the paint stack"
     );
     assert!(
         !step.requires_relayout() && !step.requires_reconcile(),
@@ -468,13 +495,26 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
 
     revert_step(&step, &mut doc, GraphRef::Main);
     assert!(!doc.graph.is_output_pinned(port), "revert clears it");
+    assert_eq!(
+        pin_pos(&doc, port),
+        None,
+        "revert removes the widget's item — no ghost slot in the stack"
+    );
     apply_step(&step, &mut doc, GraphRef::Main);
     assert!(doc.graph.is_output_pinned(port), "redo re-marks it");
 
+    // Bury the pin's widget at the *bottom* of the stack and give it a
+    // real position, so the unpin→revert round-trip below has a
+    // non-default slot and position to prove it restores.
+    doc.main_view.view_items.by_key_mut(&key).unwrap().pos = Vec2::new(40.0, -30.0);
+    doc.main_view.view_items.move_to_index(&key, 0);
+    assert_eq!(stack_order(&doc), vec![key, SelectionKey::Node(id)]);
+
     // Selecting the pin, then unpinning it, drops the selection — its
     // preview widget is gone; reverting the unpin restores it (mirrors
-    // `RemoveNode`'s `was_selected`).
-    doc.main_view.selected.insert(SelectionKey::Pin(port));
+    // `RemoveNode`'s `selected`), along with the widget's exact position
+    // and paint-stack slot.
+    doc.main_view.selected.insert(key);
     let unpin = commit_intent(
         Intent::SetOutputPinned {
             output: port,
@@ -485,20 +525,30 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
     )
     .expect("unpinning a pinned port is a real change");
     assert!(!doc.graph.is_output_pinned(port));
+    assert_eq!(
+        pin_pos(&doc, port),
+        None,
+        "unpinning removes the widget's item"
+    );
     assert!(
-        !doc.main_view.selected.contains(&SelectionKey::Pin(port)),
+        !doc.main_view.selected.contains(&key),
         "unpinning drops the now-gone widget's selection"
     );
     revert_step(&unpin, &mut doc, GraphRef::Main);
     assert!(doc.graph.is_output_pinned(port), "revert re-pins it");
     assert!(
-        doc.main_view.selected.contains(&SelectionKey::Pin(port)),
+        doc.main_view.selected.contains(&key),
         "revert restores the selection the pin had before it was unpinned"
     );
     assert_eq!(
-        doc.main_view.pin_positions.get(&port),
-        Some(&Vec2::ZERO),
-        "unpinning leaves the position entry in place rather than pruning it"
+        pin_pos(&doc, port),
+        Some(Vec2::new(40.0, -30.0)),
+        "revert restores the widget's exact position"
+    );
+    assert_eq!(
+        stack_order(&doc),
+        vec![key, SelectionKey::Node(id)],
+        "revert restores the widget's exact paint-stack slot (bottom), not the top"
     );
 
     // Setting to the value it already holds is a no-op (no undo entry).
@@ -534,13 +584,13 @@ fn set_output_pinned_on_missing_node_is_dropped() {
     assert!(step.is_none());
 }
 
-/// A lone-pin `MoveSelection` intent: `grabbed`/`pins` target `port`,
+/// A lone-pin `MoveSelection` intent: `grabbed`/`moves` target `port`,
 /// no nodes in the group.
 fn move_pin(port: OutputPort, to: Vec2) -> Intent {
+    let key = SelectionKey::Pin(port);
     Intent::MoveSelection {
-        grabbed: SelectionKey::Pin(port),
-        nodes: vec![],
-        pins: vec![(port, to)],
+        grabbed: key,
+        moves: vec![(key, to)],
     }
 }
 
@@ -551,7 +601,7 @@ fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
     let port = OutputPort::new(id, 0);
 
     // Pinning seeds a zero-default position — every pinned port has an
-    // explicit entry from the moment it's pinned, no unset/sparse state.
+    // explicit item from the moment it's pinned, no unset/sparse state.
     commit_intent(
         Intent::SetOutputPinned {
             output: port,
@@ -561,7 +611,7 @@ fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
         GraphRef::Main,
     )
     .expect("pinning is a real change");
-    assert_eq!(doc.main_view.pin_positions.get(&port), Some(&Vec2::ZERO));
+    assert_eq!(pin_pos(&doc, port), Some(Vec2::ZERO));
 
     let step = commit_intent(
         move_pin(port, Vec2::new(30.0, -12.0)),
@@ -569,10 +619,7 @@ fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
         GraphRef::Main,
     )
     .expect("first drag off the seeded default is a real change");
-    assert_eq!(
-        doc.main_view.pin_positions.get(&port),
-        Some(&Vec2::new(30.0, -12.0))
-    );
+    assert_eq!(pin_pos(&doc, port), Some(Vec2::new(30.0, -12.0)));
     assert!(
         !step.requires_relayout() && !step.requires_reconcile(),
         "repositioning a decoration (no nodes in the group) neither remeasures nor reshapes the interface"
@@ -599,15 +646,17 @@ fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
     // position rather than the drag's intermediate or final position.
     revert_step(&merged, &mut doc, GraphRef::Main);
     assert_eq!(
-        doc.main_view.pin_positions.get(&port),
-        Some(&Vec2::ZERO),
+        pin_pos(&doc, port),
+        Some(Vec2::ZERO),
         "revert restores the pre-drag default, not a leftover offset"
     );
 
     // Dragging to the exact position it already holds is a no-op.
     doc.main_view
-        .pin_positions
-        .insert(port, Vec2::new(1.0, 2.0));
+        .view_items
+        .by_key_mut(&SelectionKey::Pin(port))
+        .unwrap()
+        .pos = Vec2::new(1.0, 2.0);
     assert!(
         commit_intent(
             move_pin(port, Vec2::new(1.0, 2.0)),
@@ -635,49 +684,89 @@ fn move_selection_pin_on_missing_node_is_dropped() {
 }
 
 #[test]
-fn removing_a_node_captures_and_restores_its_pin_positions() {
+fn removing_a_node_captures_and_restores_its_pins() {
+    // b's pin item is deliberately *interleaved* between the two node
+    // items (stack: [a, pin, b]), so the undo has to restore not just the
+    // pin's existence + position but its exact slot among survivors.
     let mut doc = Document::default();
-    let id = add_node_at(&mut doc, Vec2::ZERO);
-    let port = OutputPort::new(id, 0);
-    doc.main_view
-        .pin_positions
-        .insert(port, Vec2::new(7.0, 8.0));
+    let a = add_node_at(&mut doc, Vec2::ZERO);
+    let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
+    let port = OutputPort::new(b, 0);
+    let key = SelectionKey::Pin(port);
+    commit_intent(
+        Intent::SetOutputPinned {
+            output: port,
+            pinned: true,
+        },
+        &mut doc,
+        GraphRef::Main,
+    )
+    .expect("pinning is a real change");
+    doc.main_view.view_items.by_key_mut(&key).unwrap().pos = Vec2::new(7.0, 8.0);
+    doc.main_view.view_items.move_to_index(&key, 1);
+    doc.main_view.selected.insert(key);
+    let expected = vec![SelectionKey::Node(a), key, SelectionKey::Node(b)];
+    assert_eq!(stack_order(&doc), expected);
 
-    let step = commit_intent(Intent::RemoveNode { node_id: id }, &mut doc, GraphRef::Main)
+    let step = commit_intent(Intent::RemoveNode { node_id: b }, &mut doc, GraphRef::Main)
         .expect("removing an existing node is a real change");
+    assert_eq!(
+        stack_order(&doc),
+        vec![SelectionKey::Node(a)],
+        "the node's own item and its pin's item are pruned together"
+    );
     assert!(
-        !doc.main_view.pin_positions.contains_key(&port),
-        "the node's pin offset is pruned along with everything else"
+        !doc.graph.is_output_pinned(port) && !doc.main_view.selected.contains(&key),
+        "the pinned flag and selection membership go with the node"
     );
 
     revert_step(&step, &mut doc, GraphRef::Main);
-    assert_eq!(
-        doc.main_view.pin_positions.get(&port),
-        Some(&Vec2::new(7.0, 8.0)),
-        "undo restores the node's custom pin offset"
+    assert!(
+        doc.graph.is_output_pinned(port),
+        "undo re-pins the restored node's output"
     );
+    assert_eq!(
+        pin_pos(&doc, port),
+        Some(Vec2::new(7.0, 8.0)),
+        "undo restores the pin's custom position"
+    );
+    assert_eq!(
+        stack_order(&doc),
+        expected,
+        "undo restores the exact interleaved paint-stack order"
+    );
+    assert!(
+        doc.main_view.selected.contains(&key),
+        "undo restores the pin's selection membership"
+    );
+    doc.validate();
 }
 
 #[test]
-fn raise_node_reorders_persists_and_undoes() {
+fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
     use common::SerdeFormat;
 
     let mut doc = Document::default();
     let a = add_node_at(&mut doc, Vec2::ZERO);
     let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
     let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
+    let (a, b, c) = (
+        SelectionKey::Node(a),
+        SelectionKey::Node(b),
+        SelectionKey::Node(c),
+    );
+    assert_eq!(
+        stack_order(&doc),
+        vec![a, b, c],
+        "seed order is insertion order"
+    );
 
-    let order = |doc: &Document| -> Vec<NodeId> {
-        doc.main_view.view_nodes.iter().map(|vn| vn.id).collect()
-    };
-    assert_eq!(order(&doc), vec![a, b, c], "seed order is insertion order");
-
-    // Raise `a` (the back node) to the top — the end of `view_nodes`,
+    // Raise `a` (the back node) to the top — the end of `view_items`,
     // painted last and so drawn in front.
-    let step = commit_intent(Intent::RaiseNode { node_id: a }, &mut doc, GraphRef::Main)
+    let step = commit_intent(Intent::Raise { key: a }, &mut doc, GraphRef::Main)
         .expect("raising a back node is a real reorder");
     assert_eq!(
-        order(&doc),
+        stack_order(&doc),
         vec![b, c, a],
         "a moved to the top of the stack"
     );
@@ -697,23 +786,62 @@ fn raise_node_reorders_persists_and_undoes() {
 
     // Undo restores the prior order; redo re-raises.
     revert_step(&step, &mut doc, GraphRef::Main);
-    assert_eq!(order(&doc), vec![a, b, c], "undo restores the prior order");
+    assert_eq!(
+        stack_order(&doc),
+        vec![a, b, c],
+        "undo restores the prior order"
+    );
     apply_step(&step, &mut doc, GraphRef::Main);
-    assert_eq!(order(&doc), vec![b, c, a], "redo re-raises a");
+    assert_eq!(stack_order(&doc), vec![b, c, a], "redo re-raises a");
 
     // Raising the node already on top writes nothing.
     assert!(
-        commit_intent(Intent::RaiseNode { node_id: a }, &mut doc, GraphRef::Main).is_none(),
-        "raising the frontmost node is a no-op"
+        commit_intent(Intent::Raise { key: a }, &mut doc, GraphRef::Main).is_none(),
+        "raising the frontmost item is a no-op"
     );
 
-    // The whole point: render order round-trips through save/load.
+    // A pin's preview shares the same stack: pinning lands its item on
+    // top; raising a node buries it; raising the pin lifts it back —
+    // fully independent of its owner node's own slot (b stays put).
+    let SelectionKey::Node(b_id) = b else {
+        unreachable!()
+    };
+    let port = OutputPort::new(b_id, 0);
+    let pin = SelectionKey::Pin(port);
+    commit_intent(
+        Intent::SetOutputPinned {
+            output: port,
+            pinned: true,
+        },
+        &mut doc,
+        GraphRef::Main,
+    )
+    .expect("pinning is a real change");
+    assert_eq!(stack_order(&doc), vec![b, c, a, pin]);
+    commit_intent(Intent::Raise { key: c }, &mut doc, GraphRef::Main).expect("real reorder");
+    assert_eq!(
+        stack_order(&doc),
+        vec![b, a, pin, c],
+        "node c covers the pin"
+    );
+    let raise_pin = commit_intent(Intent::Raise { key: pin }, &mut doc, GraphRef::Main)
+        .expect("raising a buried pin is a real reorder");
+    assert_eq!(
+        stack_order(&doc),
+        vec![b, a, c, pin],
+        "the pin lifts above every node; its owner b stays at the back"
+    );
+    revert_step(&raise_pin, &mut doc, GraphRef::Main);
+    assert_eq!(stack_order(&doc), vec![b, a, pin, c], "pin raise undoes");
+    apply_step(&raise_pin, &mut doc, GraphRef::Main);
+
+    // The whole point: the mixed render order round-trips through save/load.
     let bytes = doc.serialize(SerdeFormat::Rhai).unwrap();
     let reloaded = Document::deserialize(SerdeFormat::Rhai, &bytes).unwrap();
     assert_eq!(
-        order(&reloaded),
-        vec![b, c, a],
-        "render order survives save/load"
+        stack_order(&reloaded),
+        vec![b, a, c, pin],
+        "the interleaved render order survives save/load"
     );
 }
 
