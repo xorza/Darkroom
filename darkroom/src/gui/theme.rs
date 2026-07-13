@@ -764,7 +764,7 @@ impl Theme {
     /// common (plain-radius) case.
     #[inline]
     pub fn port_overhang_for(&self, radius: f32) -> f32 {
-        radius + self.port_col_pad_x + self.node_border_width * 2.0
+        radius + self.port_col_pad_x + self.card_border_width()
     }
 
     /// [`Self::port_overhang_for`] at the plain port radius. Independent of
@@ -772,6 +772,41 @@ impl Theme {
     #[inline]
     pub fn port_overhang(&self) -> f32 {
         self.port_overhang_for(self.port_radius())
+    }
+
+    /// The stroke width every selectable card draws — node bodies and
+    /// pin-preview widgets alike — always the *selection* width
+    /// (`node_border_width * 2`) regardless of selection state, so
+    /// selecting one never resizes it (only its color changes). Named so
+    /// the doubling can't drift between the call sites that need to agree
+    /// on it: the stroke itself, [`Self::card_inner_radius`], and
+    /// [`Self::port_overhang_for`].
+    #[inline]
+    pub fn card_border_width(&self) -> f32 {
+        self.node_border_width * 2.0
+    }
+
+    /// Inner corner radius for a header or footer strip that seats flush
+    /// against a card's own outer stroke — node bodies and pin-preview
+    /// widgets both round their header/footer band to this, not the raw
+    /// `node_corner_radius`, else the strip's corner leaves a wedge of the
+    /// card's plain fill showing between it and the (selection-lit) stroke.
+    #[inline]
+    pub fn card_inner_radius(&self) -> f32 {
+        (self.node_corner_radius - self.card_border_width()).max(0.0)
+    }
+
+    /// Ambient elevation shadow shared by every floating card — node
+    /// bodies, pin previews, inspector panels — so they all read as the
+    /// same kind of surface. Only the blur scales with how high a surface
+    /// sits; color and offset are fixed.
+    #[inline]
+    pub fn elevation_shadow(&self, blur: f32) -> Shadow {
+        Shadow::drop(
+            self.colors.node_ambient_shadow,
+            glam::Vec2::new(0.0, 3.0),
+            blur,
+        )
     }
 
     /// Assemble the full theme for a built-in preset. One place so

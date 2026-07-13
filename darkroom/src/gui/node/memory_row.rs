@@ -5,7 +5,9 @@
 
 use aperture::{Align, Background, Color, Configure, Corners, Panel, Sizing, Spacing, Ui, VAlign};
 
-use crate::gui::widgets::support::{footer_background, labeled_value};
+use crate::gui::widgets::support::{
+    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, footer_background, labeled_value,
+};
 use scenarium::data::RamUsage;
 
 use crate::gui::format::fmt_bytes;
@@ -15,8 +17,6 @@ use crate::gui::theme::Theme;
 
 const DOT: f32 = 6.0;
 const BAR_H: f32 = 3.0;
-const PAD_X: f32 = 10.0;
-const PAD_Y: f32 = 6.0;
 
 /// Draw the node's memory footer, or nothing when it holds no RAM. `node.ram`
 /// is mirrored from the run cache; each pool shows only when non-zero.
@@ -26,12 +26,15 @@ pub(crate) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode) {
         return;
     }
     let theme = rcx.theme;
-    let r = theme.node_corner_radius;
+    // Same inner radius the header rounds to (`Theme::card_inner_radius`),
+    // not the card's raw outer `node_corner_radius` — else this strip's
+    // corner leaves a wedge of body fill showing past the border stroke.
+    let r = theme.card_inner_radius();
 
     Panel::vstack()
         .id_salt("node_mem")
         .size((Sizing::FILL, Sizing::Hug))
-        .padding(Spacing::xy(PAD_X, PAD_Y))
+        .padding(Spacing::xy(CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y))
         .gap(5.0)
         // Round only the bottom corners so the strip seats into the node's
         // rounded bottom — the header rounds the top the same way.

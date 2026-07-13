@@ -24,7 +24,9 @@ use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::SceneNode;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::inline_rename::InlineRename;
-use crate::gui::widgets::support::hspacer;
+use crate::gui::widgets::support::{
+    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, header_background, hspacer,
+};
 
 /// Character cap for a node title in the inline rename editor.
 const NODE_NAME_MAX_CHARS: usize = 32;
@@ -122,22 +124,17 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let theme = rcx.theme;
     // The header sits inside the body's border stroke (the layout folds
-    // the stroke width into the body's padding). Its top corners must
-    // follow the stroke's *inner* radius — `node_corner_radius` minus the
-    // stroke width (the node draws a `2 × node_border_width` stroke) —
-    // otherwise the header's rounder corner leaves a wedge of body
-    // `node_fill` showing between it and the (selection-lit) stroke.
-    let r = (theme.node_corner_radius - theme.node_border_width * 2.0).max(0.0);
+    // the stroke width into the body's padding), so it must round to the
+    // stroke's *inner* radius, not the card's outer `node_corner_radius` —
+    // see `Theme::card_inner_radius`.
+    let r = theme.card_inner_radius();
     Panel::hstack()
         .id_salt("header")
         .size((Sizing::FILL, Sizing::Hug))
-        .padding(Spacing::xy(8.0, 7.0))
+        .padding(Spacing::xy(CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
-        .background(Background::rounded(
-            theme.colors.header_fill,
-            Corners::new(r, r, 0.0, 0.0),
-        ))
+        .background(header_background(theme, r))
         .show(ui, |ui| {
             // The run affordance leads the band, ahead of the title — the
             // one control that *does* something with the node's output

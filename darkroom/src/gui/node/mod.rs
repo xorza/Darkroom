@@ -195,7 +195,7 @@ impl NodeUI {
         // not color-gated). Only the color changes: the breaker alarm wins,
         // then the bright selection halo, else the resting `node_border`
         // (transparent in the dark theme, a hairline in the light one).
-        let border_width = theme.node_border_width * 2.0;
+        let border_width = theme.card_border_width();
         let border = if broken {
             theme.colors.connection_broken
         } else if node.missing {
@@ -517,7 +517,7 @@ fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
         // sitting flatter than its idle neighbors. Kept a touch tighter than
         // the ambient shadow so the status reads as a crisp halo, not a bloom.
         Some(color) => Shadow::drop(color, Vec2::ZERO, 3.0).with_spread(0.5),
-        None => Shadow::drop(theme.colors.node_ambient_shadow, Vec2::new(0.0, 3.0), 10.0),
+        None => theme.elevation_shadow(10.0),
     }
 }
 

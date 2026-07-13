@@ -374,12 +374,12 @@ impl PinUi {
                     accent,
                 );
 
-                // Same border-width formula as a node body (always the
-                // selection width, so selecting the card never resizes it —
-                // see `gui::node::draw_one`), so "in the selection" reads as
-                // one visual language across nodes and pin previews.
+                // Same border width a node body draws (always the selection
+                // width, so selecting the card never resizes it — see
+                // `Theme::card_border_width`), so "in the selection" reads
+                // as one visual language across nodes and pin previews.
                 let is_selected = selected.contains(&SelectionKey::Pin(g.out_port));
-                let border_width = theme.node_border_width * 2.0;
+                let border_width = theme.card_border_width();
                 let card_border = if g.broken {
                     theme.colors.connection_broken
                 } else if is_selected {

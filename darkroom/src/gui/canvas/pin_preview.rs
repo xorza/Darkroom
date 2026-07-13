@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use aperture::{
     Align, Background, Color, Configure, Corners, FontWeight, ImageFilter, ImageFit, ImageHandle,
-    Panel, Response, Sense, Shadow, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui,
-    VAlign, WidgetId,
+    Panel, Response, Sense, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, VAlign,
+    WidgetId,
 };
 use glam::{UVec2, Vec2};
 use imaginarium::ColorFormat;
@@ -30,7 +30,10 @@ use scenarium::graph::OutputPort;
 use crate::gui::format::fmt_bytes;
 use crate::gui::image_viewer::convert_image_value;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::support::{footer_background, labeled_value, mono_text, sized_text};
+use crate::gui::widgets::support::{
+    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, footer_background,
+    header_background, labeled_value, mono_text, sized_text,
+};
 
 /// Fixed footprint of a pinned output's preview widget, canvas-world units —
 /// a stable size regardless of content, so a drag never has to re-measure
@@ -182,8 +185,9 @@ pub(crate) fn draw_widget<'ui>(
     text: Option<&str>,
 ) -> Response<'ui> {
     // Inner corners follow the border stroke's inner edge, like a real
-    // node's header does relative to its own (wider) body stroke.
-    let inner_r = (theme.node_corner_radius - theme.node_border_width).max(0.0);
+    // node's header does relative to its own (wider) body stroke — see
+    // `Theme::card_inner_radius`.
+    let inner_r = theme.card_inner_radius();
     Panel::vstack()
         .id(pin_preview_wid(port))
         .position(top_left)
@@ -195,21 +199,17 @@ pub(crate) fn draw_widget<'ui>(
                 Corners::all(theme.node_corner_radius),
             )
             .with_stroke(Stroke::solid(border, border_width))
-            .with_shadow(Shadow::drop(
-                theme.colors.node_ambient_shadow,
-                Vec2::new(0.0, 3.0),
-                8.0,
-            )),
+            // Same ambient shadow a resting node body casts (see
+            // `Theme::elevation_shadow`) — the card is meant to read as one
+            // more instance of the same floating surface, not its own look.
+            .with_shadow(theme.elevation_shadow(10.0)),
         )
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("header")
                 .size((Sizing::FILL, Sizing::Hug))
-                .padding(Spacing::xy(8.0, 5.0))
-                .background(Background::rounded(
-                    theme.colors.header_fill,
-                    Corners::new(inner_r, inner_r, 0.0, 0.0),
-                ))
+                .padding(Spacing::xy(CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y))
+                .background(header_background(theme, inner_r))
                 .show(ui, |ui| {
                     Text::new(title.to_owned())
                         .style(TextStyle {
@@ -262,7 +262,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, inner_r: f32, image: &ImagePreview) {
     Panel::hstack()
         .id_salt("info")
         .size((Sizing::FILL, Sizing::Hug))
-        .padding(Spacing::xy(8.0, 5.0))
+        .padding(Spacing::xy(CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y))
         .gap(10.0)
         .child_align(Align::v(VAlign::Center))
         // Round only the bottom corners so the strip seats into the card's

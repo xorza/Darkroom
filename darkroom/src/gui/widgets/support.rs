@@ -65,6 +65,30 @@ pub(crate) fn footer_background(theme: &Theme, corner_radius: f32) -> Background
     )
 }
 
+/// A card's title-bar background: the header fill, rounded on only its top
+/// two corners so it seats inside the card's own outer stroke — `corner_radius`
+/// should be [`Theme::card_inner_radius`](crate::gui::theme::Theme::card_inner_radius),
+/// not the card's outer radius, else the band's corner leaves a wedge of the
+/// card's plain fill showing through. Shared by a node body's header and the
+/// pin-preview widget's title bar.
+pub(crate) fn header_background(theme: &Theme, corner_radius: f32) -> Background {
+    Background::rounded(
+        theme.colors.header_fill,
+        Corners::new(corner_radius, corner_radius, 0.0, 0.0),
+    )
+}
+
+/// Horizontal/vertical padding of a card's header band — shared by a node
+/// body's header and the pin-preview widget's title bar so the two read as
+/// the same strip at a different width, not two independently-tuned bars.
+pub(crate) const CARD_HEADER_PAD_X: f32 = 8.0;
+pub(crate) const CARD_HEADER_PAD_Y: f32 = 7.0;
+
+/// Horizontal/vertical padding of a card's fact-strip footer — shared by a
+/// node body's memory footer and the pin-preview widget's image-info footer.
+pub(crate) const CARD_FOOTER_PAD_X: f32 = 10.0;
+pub(crate) const CARD_FOOTER_PAD_Y: f32 = 6.0;
+
 /// A filled rounded rect — the fill sibling of [`stroked_rect`].
 pub(crate) fn filled_rect(ui: &mut Ui, rect: Rect, radius: f32, color: Color) {
     ui.add_shape(Shape::rect(rect).corners(Corners::all(radius)).fill(color));
