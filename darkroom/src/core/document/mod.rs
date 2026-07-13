@@ -285,6 +285,19 @@ impl GraphView {
                 "pin position references a node absent from the graph"
             );
         }
+        // Every pinned output must carry an explicit position: the edit layer
+        // treats a missing one as a logic error (a `MoveSelection` over the pin
+        // looks it up unconditionally in `build_step`). Pinning always seeds it,
+        // so a document reaching here without one is malformed — surface it
+        // rather than paper over it. The reverse isn't required: `pin_positions`
+        // keeps stale entries for since-unpinned ports on purpose (undo restores
+        // them), so a position without a matching pin is fine.
+        for port in graph.pinned_outputs() {
+            assert!(
+                self.pin_positions.contains_key(&port),
+                "pinned output must have an explicit pin position"
+            );
+        }
     }
 }
 
@@ -1235,5 +1248,42 @@ mod tests {
             doc.main_view.viewport.pan, deserialized.main_view.viewport.pan,
             "pan should round-trip"
         );
+    }
+
+    #[test]
+    fn validate_accepts_and_round_trips_a_pinned_output_with_its_position() {
+        // A well-formed document — every pinned output carries a position, the
+        // way the edit layer seeds it on pin — validates and round-trips with
+        // no repair pass.
+        let mut graph = core_test_graph();
+        let node_id = graph.by_name("sum").unwrap().id;
+        let port = OutputPort::new(node_id, 0);
+        graph.set_output_pinned(port, true);
+
+        let mut doc: Document = graph.into();
+        let pos = Vec2::new(5.0, 6.0);
+        doc.main_view.pin_positions.insert(port, pos);
+        doc.validate();
+
+        let bytes = doc.serialize(SerdeFormat::Rhai).expect("serialize");
+        let reloaded = Document::deserialize(SerdeFormat::Rhai, &bytes).expect("load");
+        assert_eq!(
+            reloaded.main_view.pin_positions.get(&port),
+            Some(&pos),
+            "the pinned output's position round-trips"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "pinned output must have an explicit pin position")]
+    fn validate_rejects_a_pinned_output_without_a_position() {
+        // A pinned output with no matching pin position is malformed: the edit
+        // layer's `MoveSelection` build looks the position up unconditionally,
+        // so validate surfaces the drift rather than letting it crash later.
+        let mut graph = core_test_graph();
+        let port = OutputPort::new(graph.by_name("sum").unwrap().id, 0);
+        graph.set_output_pinned(port, true);
+        let doc: Document = graph.into(); // no position — nothing auto-seeds one
+        doc.validate();
     }
 }

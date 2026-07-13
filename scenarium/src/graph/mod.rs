@@ -536,6 +536,13 @@ impl Graph {
         self.pinned_outputs.contains(&port)
     }
 
+    /// Every currently-pinned output, in the set's deterministic order. Lets a
+    /// host check its per-port view state (e.g. darkroom's pin-preview
+    /// positions) against the authoritative pinned set.
+    pub fn pinned_outputs(&self) -> impl Iterator<Item = OutputPort> + '_ {
+        self.pinned_outputs.iter().copied()
+    }
+
     /// Drop data bindings left dangling when a node's func/def shrank its
     /// interface (e.g. a document loaded against a newer library): the
     /// consumer input or the producer output is now out of range, or the
