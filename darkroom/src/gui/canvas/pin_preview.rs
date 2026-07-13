@@ -41,12 +41,6 @@ pub(crate) const PREVIEW_HEIGHT: f32 = 180.0;
 /// before upload — small enough to stay cheap with many simultaneous pins.
 const PREVIEW_TEXTURE_DIM: u32 = 256;
 
-/// Stroke width of the preview widget's own border — its rounded corners'
-/// *inner* radius (the header/footer strips' own corners) is
-/// `node_corner_radius` minus this, matching how a real node's header
-/// follows its body stroke's inner edge.
-const PREVIEW_BORDER_WIDTH: f32 = 1.0;
-
 /// Whether `ty` is an image value — the pinned output's preview widget
 /// shows a thumbnail for these, and its formatted text for everything else.
 pub(crate) fn is_image_type(ty: &DataType) -> bool {
@@ -185,7 +179,7 @@ pub(crate) fn draw_widget(
 ) {
     // Inner corners follow the border stroke's inner edge, like a real
     // node's header does relative to its own (wider) body stroke.
-    let inner_r = (theme.node_corner_radius - PREVIEW_BORDER_WIDTH).max(0.0);
+    let inner_r = (theme.node_corner_radius - theme.node_border_width).max(0.0);
     Panel::vstack()
         .id(pin_preview_wid(port))
         .position(top_left)
@@ -196,7 +190,7 @@ pub(crate) fn draw_widget(
                 theme.colors.node_fill,
                 Corners::all(theme.node_corner_radius),
             )
-            .with_stroke(Stroke::solid(border, PREVIEW_BORDER_WIDTH))
+            .with_stroke(Stroke::solid(border, theme.node_border_width))
             .with_shadow(Shadow::drop(
                 theme.colors.node_ambient_shadow,
                 Vec2::new(0.0, 3.0),

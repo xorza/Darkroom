@@ -147,10 +147,9 @@ impl RunState {
     }
 
     /// A pinned output's latest pushed value, or `None` if it's never arrived
-    /// (not pinned, or pinned but not yet run). No GUI reader yet — a preview
-    /// panel is the natural next consumer; kept (and unit-tested) as the
-    /// query surface `set_pinned_values` populates.
-    #[allow(dead_code)]
+    /// (not pinned, or pinned but not yet run). Read by the canvas pin-
+    /// preview widget ([`crate::gui::canvas::pin_ui::PinUi::draw`]) every
+    /// frame.
     pub(crate) fn pinned_value(&self, id: NodeId, port_idx: usize) -> Option<&DynamicValue> {
         self.nodes.get(&id)?.pinned_values.get(&port_idx)
     }
