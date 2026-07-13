@@ -540,6 +540,62 @@ fn test_compute_metrics_valid_star() {
 }
 
 #[test]
+fn test_compute_metrics_background_override_replaces_global_map() {
+    // Star (sigma 2.5, amplitude 0.8) on an exact 0.1 pedestal, with a global map matching
+    // the truth (bg 0.1, noise 0.01). An override of bg 0.05 under-subtracts every stamp
+    // pixel by exactly 0.05 (every pixel stays above both bg values, so `.max(0)` never
+    // clamps), hence: flux_override - flux_global = 0.05 * npix = 0.05 * 15² = 11.25.
+    // The override noise (0.05, vs the map's 0.01) must feed the simplified SNR formula
+    // `flux / (noise * sqrt(npix))`, and the override bg must reach the windowed
+    // covariance, where the unsubtracted 0.05 pedestal inflates the second moments and
+    // therefore the FWHM relative to the correctly-subtracted global-map run.
+    let width = 64;
+    let height = 64;
+    let pos = Vec2::splat(32.0);
+    let pixels = make_gaussian_star(width, height, pos, 2.5, 0.8, 0.1);
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let local_bg = LocalBackground {
+        bg: 0.05,
+        noise: 0.05,
+    };
+
+    let global = compute_metrics(&pixels, &bg, pos, TEST_STAMP_RADIUS, None, None, None).unwrap();
+    let local = compute_metrics(
+        &pixels,
+        &bg,
+        pos,
+        TEST_STAMP_RADIUS,
+        Some(local_bg),
+        None,
+        None,
+    )
+    .unwrap();
+
+    let npix = (2 * TEST_STAMP_RADIUS + 1).pow(2) as f32; // 15² = 225
+    let flux_diff = local.flux - global.flux;
+    let expected_diff = 0.05 * npix; // 11.25
+    assert!(
+        (flux_diff - expected_diff).abs() < 1e-2,
+        "override bg must under-subtract exactly 0.05/pixel: flux diff {flux_diff}, expected {expected_diff}"
+    );
+
+    let expected_snr = local.flux / (0.05 * npix.sqrt());
+    assert!(
+        (local.snr - expected_snr).abs() / expected_snr < 1e-3,
+        "override noise must feed the SNR: got {}, expected {expected_snr}",
+        local.snr
+    );
+
+    assert!(
+        local.fwhm > global.fwhm,
+        "override bg must reach the windowed covariance: the unsubtracted pedestal should \
+         inflate FWHM (override {} vs global {})",
+        local.fwhm,
+        global.fwhm
+    );
+}
+
+#[test]
 fn test_compute_metrics_invalid_position_returns_none() {
     let width = 64;
     let height = 64;
@@ -4217,7 +4273,7 @@ fn windowed_covariance_recovers_gaussian_sigma() {
     let pixels = make_gaussian_star(width, height, pos, sigma, 1.0, 0.0);
     let bg = background_map::uniform(width, height, 0.0, 1.0);
 
-    let cov = windowed_covariance(&pixels, &bg, pos, 12, (sigma * sigma) as f64)
+    let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
         .expect("clean Gaussian should converge");
 
     let expected = (sigma * sigma) as f64; // σ² per axis
@@ -4250,7 +4306,7 @@ fn windowed_covariance_recovers_elliptical_axes() {
     let bg = background_map::uniform(width, height, 0.0, 1.0);
 
     let seed = ((sx * sx + sy * sy) / 2.0) as f64;
-    let cov = windowed_covariance(&pixels, &bg, pos, 14, seed)
+    let cov = windowed_covariance(&pixels, &bg, None, pos, 14, seed)
         .expect("clean elliptical Gaussian should converge");
 
     assert!(
@@ -4286,7 +4342,7 @@ fn windowed_covariance_resists_wing_noise() {
     add_noise(pixels.pixels_mut(), 0.03, 12345);
     let bg = background_map::uniform(width, height, 0.1, 1.0);
 
-    let cov = windowed_covariance(&pixels, &bg, pos, 12, (sigma * sigma) as f64)
+    let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
         .expect("noisy Gaussian should still converge");
 
     let ratio = (cov.yy / cov.xx).sqrt();
