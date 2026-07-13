@@ -12,6 +12,6 @@ file name as argument clap
 
 curve gpu tesselation
 
-load broken document && validate it
+try & broken document
 
 mix order of nodes and previews
