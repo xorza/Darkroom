@@ -20,16 +20,16 @@ use uuid::Uuid;
 /// Drop a session after this much inactivity. Hit whenever a request
 /// comes in; a disconnected client has this long to reconnect and
 /// resume before their Rhai scope is reclaimed.
-pub const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
+pub(crate) const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Hard cap on live sessions. On overflow the store reaps expired
 /// entries first; if full after reaping, new session creation errors
 /// out (clients retry later).
-pub const MAX_SESSIONS: usize = 32;
+pub(crate) const MAX_SESSIONS: usize = 32;
 
 /// Reasons [`SessionStore::get_or_create`] can fail.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SessionError {
+pub(crate) enum SessionError {
     /// Client supplied a session id that isn't known (never existed or
     /// was reaped for inactivity).
     Unknown(Uuid),
@@ -65,16 +65,16 @@ struct Session {
 /// [`SessionStore::get_or_create`] so the caller can echo the id back
 /// in the reply.
 #[derive(Debug)]
-pub struct SessionRef<'a> {
-    pub id: Uuid,
-    pub scope: &'a mut Scope<'static>,
+pub(crate) struct SessionRef<'a> {
+    pub(crate) id: Uuid,
+    pub(crate) scope: &'a mut Scope<'static>,
 }
 
 /// Holds every live session. Single-threaded — owned by the executor
 /// task, so no Mutex. `now: Instant` is injected into every mutating
 /// method so tests can drive the clock without sleeping.
 #[derive(Debug)]
-pub struct SessionStore {
+pub(crate) struct SessionStore {
     sessions: HashMap<Uuid, Session>,
     idle_timeout: Duration,
     max_sessions: usize,
@@ -90,7 +90,7 @@ impl SessionStore {
     /// Testing-facing constructor; lets tests supply small/short limits
     /// without waiting on a real clock. Production code should use
     /// [`SessionStore::default`], which picks up module-level consts.
-    pub fn with_limits(idle_timeout: Duration, max_sessions: usize) -> Self {
+    pub(crate) fn with_limits(idle_timeout: Duration, max_sessions: usize) -> Self {
         Self {
             sessions: HashMap::new(),
             idle_timeout,
@@ -105,7 +105,7 @@ impl SessionStore {
     /// Bumps `last_activity` on every hit. Callers should invoke
     /// [`Self::reap`] first if they want capacity to reflect expired
     /// sessions.
-    pub fn get_or_create(
+    pub(crate) fn get_or_create(
         &mut self,
         requested: Option<Uuid>,
         origin: &str,
@@ -147,7 +147,7 @@ impl SessionStore {
     /// Drop sessions idle longer than `idle_timeout`. Returns the number
     /// reaped. No-op if `now` is earlier than any session's
     /// `last_activity` (won't happen in production — `Instant` is monotonic).
-    pub fn reap(&mut self, now: Instant) -> usize {
+    pub(crate) fn reap(&mut self, now: Instant) -> usize {
         let timeout = self.idle_timeout;
         let before = self.sessions.len();
         self.sessions.retain(|id, s| {

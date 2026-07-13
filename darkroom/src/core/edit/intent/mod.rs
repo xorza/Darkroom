@@ -1,15 +1,6 @@
 //! Forward-only descriptions of graph mutations + the self-contained undo
-//! entries built from them.
-//!
-//! An [`Intent`](types::Intent) is "what the caller wants the graph to look
-//! like after"; it carries no history. To make the change reversible, we
-//! pair the intent with a snapshot of the slot it overwrites. Rather than
-//! carrying that snapshot in a sibling enum, [`UndoStep`](types::UndoStep)
-//! folds both halves into one variant per kind: every variant has both the
-//! "from" payload (for revert) and the "to" payload (for forward apply).
-//! Type-level enforcement means an `UndoStep` can never be constructed
-//! inconsistently — there's no `(Intent::A, Snapshot::B)` mismatch to worry
-//! about at runtime.
+//! entries built from them. The Intent/UndoStep model itself is documented
+//! on [`types`].
 //!
 //! Split by responsibility:
 //!   - [`types`] — the `Intent` / `UndoStep` / `GraphStep` / `DocStep` /

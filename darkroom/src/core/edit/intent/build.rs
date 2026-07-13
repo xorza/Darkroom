@@ -18,7 +18,7 @@ use crate::core::edit::intent::types::{
 /// `RemoveNode` applied earlier in the same frame). Callers should treat a
 /// `None` result as "stale intent, drop it". (`MoveSelection` instead skips
 /// vanished nodes/pins individually rather than dropping the whole batch.)
-pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<UndoStep> {
+pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<UndoStep> {
     // Document-global intents don't resolve a graph scope.
     if let Intent::Dock(op) = intent {
         let key = match op {

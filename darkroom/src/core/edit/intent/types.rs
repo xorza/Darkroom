@@ -27,7 +27,7 @@ use crate::core::document::{BoundarySide, SelectionKey, Viewport};
 /// one never remeasures the node or reshapes a subgraph interface) and dirty
 /// the document, so they share one intent / step rather than a variant each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NodeProperty {
+pub(crate) enum NodeProperty {
     /// `Node::disabled` — excluded from execution, skipped at flatten time.
     Disabled(bool),
     /// `Node::cache` — where the node's output is cached (see [`CacheMode`]).
@@ -58,7 +58,7 @@ pub enum NodeProperty {
 ///      [`crate::core::edit::intent::query`]) if the variant coalesces in
 ///      undo history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Intent {
+pub(crate) enum Intent {
     AddNode {
         view_node: ViewNode,
         node: Node,
@@ -205,7 +205,7 @@ pub enum Intent {
 /// outside any single graph. The graph path therefore can't even *name*
 /// a document-global variant — no convention-only `unreachable!` arms.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum UndoStep {
+pub(crate) enum UndoStep {
     Graph(GraphStep),
     Doc(DocStep),
 }
@@ -213,7 +213,7 @@ pub enum UndoStep {
 /// Steps applied through an `EditScope` (graph + view) for the batch's
 /// `GraphRef` target.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum GraphStep {
+pub(crate) enum GraphStep {
     /// Pure creation: the "from" state is "node absent", which is
     /// implicit — undo removes the node by id (and `def` if present).
     /// `def` is a `Local` subgraph def added alongside the instance node
@@ -338,7 +338,7 @@ pub enum GraphStep {
 /// single graph (active tab, the tab list, a subgraph's interface), so
 /// they bypass the `EditScope` resolution entirely.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DocStep {
+pub(crate) enum DocStep {
     /// Whole-layout snapshot around one dock op (activate/close/move/
     /// resize) — the tree is a handful of nodes, so both halves ride the
     /// step and apply/revert are plain assignments. `key` is the gesture
@@ -383,7 +383,7 @@ pub enum DocStep {
 /// Serde because [`DocStep::Dock`] stores its key on the step (the undo
 /// stack packs steps with bitcode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GestureKey {
+pub(crate) enum GestureKey {
     Viewport,
     /// A group drag, keyed by whichever item the pointer latched — a node
     /// body or a pin preview widget — so two different grabbed items never

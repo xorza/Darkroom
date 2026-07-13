@@ -4,6 +4,7 @@ use aperture::ImageFilter;
 use common::{SerdeFormat, deserialize, serialize};
 use glam::{IVec2, UVec2};
 
+use crate::core::io::cwd_file;
 use crate::core::theme_pref::ThemeChoice;
 
 /// Preferences file name, resolved relative to the process working
@@ -149,7 +150,7 @@ impl From<&MlModelPreferences> for lens::MlModelPaths {
 
 impl Preferences {
     fn path() -> PathBuf {
-        super::cwd_file(PREFERENCES_FILE)
+        cwd_file(PREFERENCES_FILE)
     }
 
     /// Publish the ML model paths into lens's runtime global so the `ml_denoise` / `remove_stars`

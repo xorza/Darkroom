@@ -5,11 +5,11 @@
 // `host::make_move_node`) into ergonomic constructors. Every helper
 // specifies *intent only* — the previous state is captured by the editor
 // at apply time, so callers never pass a "before" value. The map shapes
-// below mirror `crate::edit::intent::Intent`'s serde representation
-// (externally-tagged enums; a `NodeId` is a UUID string).
+// below mirror `crate::core::edit::intent::types::Intent`'s serde
+// representation (externally-tagged enums; a `NodeId` is a UUID string).
 //
-// Loaded as a global module by `script::build_engine`, so every function
-// defined here is callable from any user script.
+// Loaded as a global module by `script::engine::build_engine`, so every
+// function defined here is callable from any user script.
 
 // Spawn a new node bound to `func_id` at world-space position `(x, y)`.
 // Returns the new node's id (UUID string) so the caller can chain

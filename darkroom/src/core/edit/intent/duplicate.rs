@@ -35,7 +35,7 @@ pub(crate) fn selected_node_ids(view: &GraphView) -> BTreeSet<NodeId> {
 /// bodies (pinned-output previews carry no node identity to clone, so
 /// they're filtered out) and incoming (external) wires dropped — the Ctrl+D
 /// path.
-pub fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent> {
+pub(crate) fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent> {
     let EditScopeRef { view, .. } = doc.scope(target)?;
     let node_ids = selected_node_ids(view);
     if node_ids.is_empty() {
@@ -53,7 +53,7 @@ pub fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent
 /// `node_ids` is empty or the target doesn't resolve. Reads the document to
 /// assemble the intent — editor-operation construction, kept with the rest
 /// of the intent machinery rather than on the `Document` model.
-pub fn build_duplicate_intent_for(
+pub(crate) fn build_duplicate_intent_for(
     doc: &Document,
     target: GraphRef,
     node_ids: &BTreeSet<NodeId>,
@@ -131,7 +131,7 @@ pub fn build_duplicate_intent_for(
 /// false }`) — deleting a preview widget just unpins its port rather than
 /// touching the node it lives on. Shared by the Delete/Backspace shortcut
 /// and the node context menu's "Remove".
-pub fn remove_selection_intents(selected: &BTreeSet<SelectionKey>) -> Vec<Intent> {
+pub(crate) fn remove_selection_intents(selected: &BTreeSet<SelectionKey>) -> Vec<Intent> {
     selected
         .iter()
         .map(|key| match *key {

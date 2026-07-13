@@ -18,9 +18,9 @@ cargo clippy -p darkroom --all-targets -- -D warnings
 cargo run -p darkroom --features profile-with-tracy   # tracy zones across darkroom + aperture
 ```
 
-Run the ignored one-shot asset generator after changing the default look:
-`cargo test -p darkroom ayu_graphite_asset_in_sync -- --ignored` (regenerates
-`assets/ayu-graphite.toml` from the code-defined theme consts; see `theme.rs`).
+The `ayu_graphite_asset_in_sync` test regenerates `assets/ayu-graphite.toml`
+from the code-defined theme consts on every test run, so after changing the
+default look just run the tests and commit the asset diff (see `theme.rs`).
 
 ## Dependencies / boundaries
 
@@ -406,7 +406,7 @@ color (`CANVAS_BG`, `NODE_FILL`, `BADGE_SUBGRAPH`, `EXEC_EXECUTED_GLOW`,
 darkroom's own fields *and* the nested `aperture::Theme` (scalar fields first,
 the aperture table last — a TOML serialization ordering requirement), so it's a
 complete bundle serialized as TOML. The checked-in `assets/ayu-graphite.toml`
-is a reference/round-trip fixture kept in sync by an ignored test, **not** a
+is a reference/round-trip fixture kept in sync by a test, **not** a
 parallel source of truth.
 
 **Colors come from the palette.** Values trace back to the semantic Ayu Mirage

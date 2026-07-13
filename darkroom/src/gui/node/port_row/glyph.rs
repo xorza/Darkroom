@@ -48,6 +48,7 @@ pub(crate) fn port_diameter(base: f32, enlarged: bool) -> f32 {
 /// (an output's pinned satellite is a canvas-level decoration instead — see
 /// `crate::gui::canvas::pin_ui`). A flag rather than a bare `Option<Color>`
 /// so a future second decoration doesn't need restructuring.
+#[derive(Debug)]
 pub(crate) enum PortDecoration {
     None,
     Outline(Color),
@@ -64,7 +65,11 @@ pub(crate) fn circle_frame(
     tip: &str,
 ) {
     let port = diameter;
-    let (hit, inset, hit_margin) = grown_hit_box(port, margin);
+    let GrownHitBox {
+        hit,
+        inset,
+        margin: hit_margin,
+    } = grown_hit_box(port, margin);
     let radius = port * 0.5;
 
     // Explicit `id(wid)` so the cross-frame id stays stable: prepass
@@ -122,7 +127,11 @@ pub(crate) fn event_glyph(
     tip: &str,
 ) {
     let port = theme.port_size;
-    let (hit, inset, hit_margin) = grown_hit_box(port, margin);
+    let GrownHitBox {
+        hit,
+        inset,
+        margin: hit_margin,
+    } = grown_hit_box(port, margin);
     let glyph = Panel::zstack()
         .id(wid)
         .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
@@ -151,19 +160,31 @@ pub(crate) fn event_glyph(
     tooltip_after(ui, &snapshot, tip.to_owned());
 }
 
+/// A glyph's `PORT_HIT_SCALE`-grown sensing box, from [`grown_hit_box`].
+#[derive(Debug)]
+struct GrownHitBox {
+    /// The grown box side.
+    hit: f32,
+    /// Half the growth — the glyph's paint offset within the box.
+    inset: f32,
+    /// The caller's margin with the growth folded back out.
+    margin: Spacing,
+}
+
 /// Grows `base` into a `PORT_HIT_SCALE`-larger sensing box and folds that
 /// growth back out of `margin` (as a negative adjustment) so the extra hit
 /// area doesn't displace the painted glyph — node layout and the glyph's
 /// own position are unchanged, only the hover/grab area grows. Shared by
 /// port circles ([`circle_frame`]) and event triangles ([`event_glyph`]).
-/// Returns `(hit, inset, hit_margin)`: the grown box side, half the growth
-/// (the glyph's paint offset within that box), and the adjusted margin.
-fn grown_hit_box(base: f32, margin: Spacing) -> (f32, f32, Spacing) {
+fn grown_hit_box(base: f32, margin: Spacing) -> GrownHitBox {
     let hit = base * PORT_HIT_SCALE;
     let inset = (hit - base) * 0.5;
     let [l, t, r, b] = margin.as_array();
-    let hit_margin = Spacing::new(l - inset, t - inset, r - inset, b - inset);
-    (hit, inset, hit_margin)
+    GrownHitBox {
+        hit,
+        inset,
+        margin: Spacing::new(l - inset, t - inset, r - inset, b - inset),
+    }
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ impl UndoStep {
     /// True when applying this step would leave the document unchanged.
     /// Filtered out post-`build_step` so phantom entries (re-selecting
     /// the same node, dragging zero pixels) don't pollute the undo stack.
-    pub fn is_noop(&self) -> bool {
+    pub(crate) fn is_noop(&self) -> bool {
         match self {
             UndoStep::Graph(g) => g.is_noop(),
             UndoStep::Doc(d) => d.is_noop(),
@@ -30,7 +30,7 @@ impl UndoStep {
     /// UI-only state with no measure/arrange input (selection, cache
     /// behavior, model-only bindings) returns false. Exhaustive on
     /// purpose — a new variant must declare its layout effect.
-    pub fn requires_relayout(&self) -> bool {
+    pub(crate) fn requires_relayout(&self) -> bool {
         match self {
         // A dock change reshapes panes/strips (and can swap which graph
         // the scene renders); a port rename changes a label's width so
@@ -93,7 +93,7 @@ impl UndoStep {
     /// Conservative on `SetInput` — a const-value edit on a plain func port
     /// can't change an interface, but filtering that needs a doc lookup, and
     /// reconcile is an idempotent no-op there anyway. Exhaustive on purpose.
-    pub fn requires_reconcile(&self) -> bool {
+    pub(crate) fn requires_reconcile(&self) -> bool {
         match self {
             UndoStep::Graph(
                 GraphStep::AddNode { .. }
@@ -124,7 +124,7 @@ impl UndoStep {
     /// prompting to save on exit. Drives `Editor::dirty`. Exhaustive so a
     /// new step variant must declare which side it's on rather than
     /// silently defaulting.
-    pub fn dirties_document(&self) -> bool {
+    pub(crate) fn dirties_document(&self) -> bool {
         match self {
             // A structural dock op (a tab moved or split into its own
             // pane) is invested arrangement work worth the exit prompt;
@@ -162,7 +162,7 @@ impl UndoStep {
     /// stack collapses consecutive steps with the same key into one entry
     /// (keeping the *first* "from" payload). Two viewport changes coalesce;
     /// two `MoveSelection`s of the *same* grabbed item coalesce.
-    pub fn gesture_key(&self) -> Option<GestureKey> {
+    pub(crate) fn gesture_key(&self) -> Option<GestureKey> {
         match self {
             UndoStep::Graph(GraphStep::SetViewport { .. }) => Some(GestureKey::Viewport),
             UndoStep::Graph(GraphStep::MoveSelection { grabbed, .. }) => {
@@ -201,7 +201,7 @@ impl UndoStep {
     /// so the fold stays self-contained — variant internals live here next
     /// to the step definitions, not in the stack. Keep this in sync with
     /// `gesture_key`.
-    pub fn coalesce(&self, next: &UndoStep) -> Option<UndoStep> {
+    pub(crate) fn coalesce(&self, next: &UndoStep) -> Option<UndoStep> {
         match (self, next) {
             (
                 UndoStep::Graph(GraphStep::SetViewport { from, .. }),

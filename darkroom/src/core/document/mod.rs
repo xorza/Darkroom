@@ -451,7 +451,7 @@ impl Document {
                 return false;
             };
             let mut view = GraphView::for_graph(&def.graph);
-            view.auto_layout_default(&def.graph);
+            view.auto_layout(&def.graph);
             view
         };
         self.sub_views.insert(id, view);

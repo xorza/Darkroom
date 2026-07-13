@@ -59,7 +59,7 @@ pub(crate) fn commit_intent(
 /// the port types. Returns every committed step (the triggering one first), so
 /// the caller records / inspects them as one unit. Both the GUI editor and the
 /// headless session drive their forward-apply loop through this.
-pub fn commit_intent_cascading(
+pub(crate) fn commit_intent_cascading(
     intent: Intent,
     doc: &mut Document,
     target: GraphRef,
@@ -111,7 +111,7 @@ fn with_scope(doc: &mut Document, target: GraphRef, body: impl FnOnce(&mut EditS
 /// Forward apply: write the step's "to" half to `doc`. Used by
 /// the initial commit (right after `build_step`) and by undo-stack
 /// redo (replaying a popped step).
-pub fn apply_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
+pub(crate) fn apply_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
     match step {
         UndoStep::Doc(step) => apply_doc(step, doc),
         UndoStep::Graph(step) => with_scope(doc, target, |scope| apply_graph(step, scope)),
@@ -316,7 +316,7 @@ fn set_output_pinned(scope: &mut EditScope<'_>, node_id: NodeId, port_idx: usize
 /// Backward apply: write the step's "from" half to `doc`. Pairs
 /// with [`apply_step`]; calling one after the other restores the
 /// graph to its pre-commit state.
-pub fn revert_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
+pub(crate) fn revert_step(step: &UndoStep, doc: &mut Document, target: GraphRef) {
     match step {
         UndoStep::Doc(step) => revert_doc(step, doc),
         UndoStep::Graph(step) => with_scope(doc, target, |scope| revert_graph(step, scope)),

@@ -97,7 +97,7 @@ impl App {
         preferences: Preferences,
     ) -> Self {
         let mut document: Document = CoreGraph::default().into();
-        document.main_view.auto_layout_default(&document.graph);
+        document.main_view.auto_layout(&document.graph);
         // The worker + script host wake the winit loop via the host handle;
         // the headless/tui drivers swap in a tokio `Notify` (see
         // `crate::core::wake`).

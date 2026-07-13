@@ -241,7 +241,7 @@ fn path_preview(path: &str) -> String {
 /// What [`buffered_text_edit`] hands back: the buffer's current text and
 /// whether this frame committed the edit (Enter, or focus left the field).
 #[derive(Debug)]
-struct BufferedEdit {
+struct TextEditOutcome {
     text: String,
     committed: bool,
 }
@@ -260,7 +260,7 @@ fn buffered_text_edit<T>(
     canonical: &T,
     fmt: fn(&T) -> String,
     width: f32,
-) -> BufferedEdit {
+) -> TextEditOutcome {
     let focused = ui.focused_id() == Some(id);
     let state = ui.state_mut::<EditBuffer>(id);
     let blurred = state.blur_edge(focused);
@@ -276,7 +276,7 @@ fn buffered_text_edit<T>(
         .submitted;
     let snapshot = text.clone();
     ui.state_mut::<EditBuffer>(id).text = text;
-    BufferedEdit {
+    TextEditOutcome {
         text: snapshot,
         committed: submitted || blurred,
     }

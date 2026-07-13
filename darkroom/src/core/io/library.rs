@@ -16,6 +16,8 @@ use std::path::{Path, PathBuf};
 use common::{SerdeFormat, deserialize, serialize};
 use scenarium::graph::subgraph::SubgraphDef;
 
+use crate::core::io::cwd_file;
+
 /// Library file name, resolved relative to the process working directory.
 /// Rhai so it's hand-editable and matches the doc / theme / preferences format.
 const LIBRARY_FILE: &str = "darkroom.library.rhai";
@@ -31,7 +33,7 @@ struct LibraryFile {
 }
 
 fn path() -> PathBuf {
-    super::cwd_file(LIBRARY_FILE)
+    cwd_file(LIBRARY_FILE)
 }
 
 /// Where a failed-to-load library file is moved so a later save can't

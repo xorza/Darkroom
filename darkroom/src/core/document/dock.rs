@@ -385,11 +385,8 @@ impl DockLayout {
             return;
         }
         // Depth cap, checked before any mutation so a refused split
-        // can't lose the already-removed tab. `can_split` is this same
-        // check, expressed as its own negation; `target`'s existence
-        // was confirmed above, so a `None` depth here would mean
-        // `group` and `group_depth` disagree — a bug, not a normal
-        // refusal.
+        // can't lose the already-removed tab (`target` was confirmed
+        // above, so a `None` depth would be a bug, not a refusal).
         if matches!(drop, DockDrop::Split { .. }) {
             assert!(self.group_depth(target).is_some(), "target exists");
             if !self.can_split(target) {

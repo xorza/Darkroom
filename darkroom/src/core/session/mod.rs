@@ -176,7 +176,7 @@ impl Session {
 /// when no last document is restored.
 fn empty_document() -> Document {
     let mut document: Document = CoreGraph::default().into();
-    document.main_view.auto_layout_default(&document.graph);
+    document.main_view.auto_layout(&document.graph);
     document
 }
 
