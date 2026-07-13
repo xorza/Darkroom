@@ -3,105 +3,100 @@
 //! `crate::gui::dialogs`. Pure persistence — no app state, no undo stack,
 //! no preferences; callers orchestrate (when to load/save, what to do with the
 //! result), this only turns paths into values and values into files.
-//! Failures log the detail via `tracing` and return `None`/`false` so a bad
-//! read/write degrades instead of crashing; the GUI caller surfaces a short
-//! message in the status bar off the return value.
+//! Failures return the reason with the path attached (render with `{:#}`);
+//! callers surface it through the status log, which also traces it.
 
-use std::fmt::Display;
 use std::path::Path;
 
+use anyhow::{Context, Result};
 use common::{SerdeFormat, deserialize, serialize};
 use scenarium::graph::subgraph::SubgraphDef;
 
 use crate::core::document::Document;
 
 /// Read + deserialize a document from `path`, picking the format from its
-/// extension. Returns `None` (and logs) on an unsupported extension, an
-/// unreadable file, or a parse failure.
-pub(crate) fn load_document(path: &Path) -> Option<Document> {
-    load_typed(path, "load", |format, bytes| {
-        Document::deserialize(format, bytes)
-    })
+/// extension. Errors on an unsupported extension, an unreadable file, a
+/// parse failure, or a document that fails [`Document::check`].
+pub(crate) fn load_document(path: &Path) -> Result<Document> {
+    load_typed(path, Document::deserialize)
 }
 
 /// Serialize `doc` and write it to `path`, picking the format from its
-/// extension (defaulting to Rhai for unknown extensions). Returns whether
-/// the write succeeded.
-pub(crate) fn save_document(doc: &Document, path: &Path) -> bool {
-    save_typed(path, "save", |format| doc.serialize(format))
+/// extension (defaulting to Rhai for unknown extensions).
+pub(crate) fn save_document(doc: &Document, path: &Path) -> Result<()> {
+    save_typed(path, |format| doc.serialize(format))
 }
 
 /// Serialize a subgraph `def` and write it to `path`, picking the format
 /// from its extension (defaulting to Rhai). The def's interior `Graph`
 /// carries its own nested subgraph table, so nested defs travel along
-/// automatically. Returns whether the write succeeded.
-pub(crate) fn export_subgraph(def: &SubgraphDef, path: &Path) -> bool {
-    save_typed(path, "subgraph export", |format| serialize(def, format))
+/// automatically.
+pub(crate) fn export_subgraph(def: &SubgraphDef, path: &Path) -> Result<()> {
+    save_typed(path, |format| serialize(def, format))
 }
 
-/// Read + deserialize a subgraph def from `path`. Returns `None` (and
-/// logs) on an unsupported extension, an unreadable file, or a parse
-/// failure.
-pub(crate) fn import_subgraph(path: &Path) -> Option<SubgraphDef> {
-    load_typed(path, "subgraph import", |format, bytes| {
-        deserialize::<SubgraphDef>(bytes, format)
+/// Read + deserialize a subgraph def from `path`. Errors on an unsupported
+/// extension, an unreadable file, a parse failure, or a def that fails
+/// [`SubgraphDef::check`] — an imported file is untrusted input, gated
+/// like a document.
+pub(crate) fn import_subgraph(path: &Path) -> Result<SubgraphDef> {
+    load_typed(path, |format, bytes| {
+        let def = deserialize::<SubgraphDef>(bytes, format)?;
+        def.check()?;
+        Ok(def)
     })
 }
 
 /// Shared load shell: pick the format from the extension, read the file,
-/// hand both to `parse`. Every failure logs its detail under `label` and
-/// degrades to `None`. `parse` is a closure (not plain `deserialize`)
-/// because documents route through the validating
-/// [`Document::deserialize`] while subgraphs use bare serde.
-fn load_typed<T, E: Display>(
-    path: &Path,
-    label: &str,
-    parse: impl FnOnce(SerdeFormat, &[u8]) -> Result<T, E>,
-) -> Option<T> {
-    let format = match SerdeFormat::from_file_name(&path.to_string_lossy()) {
-        Ok(f) => f,
-        Err(err) => {
-            tracing::error!("{label} failed: unsupported file extension ({err})");
-            return None;
-        }
-    };
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(err) => {
-            tracing::error!("{label} failed: {} {err}", path.display());
-            return None;
-        }
-    };
-    match parse(format, &bytes) {
-        Ok(value) => Some(value),
-        Err(err) => {
-            tracing::error!("{label} failed: {} {err}", path.display());
-            None
-        }
-    }
+/// hand both to `parse`. `parse` is a closure (not plain `deserialize`)
+/// because each type routes through its validating gate —
+/// [`Document::deserialize`] / [`SubgraphDef::check`].
+fn load_typed<T>(path: &Path, parse: impl FnOnce(SerdeFormat, &[u8]) -> Result<T>) -> Result<T> {
+    let format =
+        SerdeFormat::from_file_name(&path.to_string_lossy()).context("unsupported file")?;
+    let bytes = std::fs::read(path).with_context(|| path.display().to_string())?;
+    parse(format, &bytes).with_context(|| path.display().to_string())
 }
 
 /// Shared save shell: pick the format from the extension (Rhai default),
-/// encode via `encode`, write the bytes. Every failure logs its detail
-/// under `label` and degrades to `false`.
-fn save_typed<E: Display>(
-    path: &Path,
-    label: &str,
-    encode: impl FnOnce(SerdeFormat) -> Result<Vec<u8>, E>,
-) -> bool {
+/// encode via `encode`, write the bytes.
+fn save_typed(path: &Path, encode: impl FnOnce(SerdeFormat) -> Result<Vec<u8>>) -> Result<()> {
     let format = SerdeFormat::from_file_name(&path.to_string_lossy()).unwrap_or(SerdeFormat::Rhai);
-    let bytes = match encode(format) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            tracing::error!("{label} failed: {} {err}", path.display());
-            return false;
-        }
-    };
-    match std::fs::write(path, &bytes) {
-        Ok(()) => true,
-        Err(err) => {
-            tracing::error!("{label} failed: {} {err}", path.display());
-            false
-        }
+    let bytes = encode(format)?;
+    std::fs::write(path, &bytes).with_context(|| path.display().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use common::test_utils::test_output_path;
+    use scenarium::graph::NodeId;
+    use scenarium::graph::subgraph::{SubgraphEvent, SubgraphId};
+
+    use super::*;
+
+    #[test]
+    fn subgraph_import_round_trips_and_gates_on_check() {
+        // A well-formed def survives the export → import round trip.
+        let path = test_output_path("darkroom_persistence/def.rhai");
+        let def = SubgraphDef::new(SubgraphId::unique(), "ok").category("test");
+        export_subgraph(&def, &path).unwrap();
+        assert_eq!(import_subgraph(&path).expect("valid def imports"), def);
+
+        // A def that parses but fails `SubgraphDef::check` (dangling event
+        // emitter) is refused at the import gate. Export doesn't gate —
+        // it writes editor-built state.
+        let bad_path = test_output_path("darkroom_persistence/bad-def.rhai");
+        let mut bad = SubgraphDef::new(SubgraphId::unique(), "bad");
+        bad.events.push(SubgraphEvent {
+            name: "tick".into(),
+            emitter: NodeId::unique(),
+            emitter_event_idx: 0,
+        });
+        export_subgraph(&bad, &bad_path).unwrap();
+        let err = format!("{:#}", import_subgraph(&bad_path).unwrap_err());
+        assert!(
+            err.contains("names missing emitter"),
+            "structurally invalid def must not import: {err}"
+        );
     }
 }

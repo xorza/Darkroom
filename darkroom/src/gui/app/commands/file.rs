@@ -50,13 +50,14 @@ impl App {
     /// Load `path` into a fresh editor. Returns whether it loaded — `false`
     /// when the file is missing/corrupt (startup uses this to drop a stale
     /// `document_path`; the menu-load path ignores it, leaving the open doc).
-    /// The failure surfaces in the status bar; the detail is in the log.
+    /// The failure surfaces in the status bar with its reason.
     pub(crate) fn load_document(&mut self, path: &Path) -> bool {
-        let Some(doc) = persistence::load_document(path) else {
-            self.engine
-                .status
-                .error(format!("load failed: {}", path.display()));
-            return false;
+        let doc = match persistence::load_document(path) {
+            Ok(doc) => doc,
+            Err(err) => {
+                self.engine.status.error(format!("load failed: {err:#}"));
+                return false;
+            }
         };
         // Fresh editor around the loaded doc — see `new_document` for why
         // a wholesale reset (rather than poking individual fields) is right.
@@ -83,14 +84,13 @@ impl App {
     }
 
     fn save_document(&mut self, path: &Path) {
-        if persistence::save_document(&self.editor.document, path) {
-            self.editor.dirty = false;
-            self.set_document_path(Some(path.to_path_buf()));
-            self.engine.status.error = None;
-        } else {
-            self.engine
-                .status
-                .error(format!("save failed: {}", path.display()));
+        match persistence::save_document(&self.editor.document, path) {
+            Ok(()) => {
+                self.editor.dirty = false;
+                self.set_document_path(Some(path.to_path_buf()));
+                self.engine.status.error = None;
+            }
+            Err(err) => self.engine.status.error(format!("save failed: {err:#}")),
         }
     }
 

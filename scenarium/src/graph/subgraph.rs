@@ -5,11 +5,12 @@
 //!
 //! See `execution/README.md` Part A for the full design.
 
+use anyhow::ensure;
 use common::KeyIndexKey;
-use common::id_type;
+use common::{Result, id_type};
 use serde::{Deserialize, Serialize};
 
-use crate::graph::{Graph, NodeId};
+use crate::graph::{Graph, NodeId, NodeSearch};
 use crate::node::function::{FuncInput, FuncOutput};
 
 id_type!(SubgraphId);
@@ -149,6 +150,34 @@ impl SubgraphDef {
     pub fn origin(mut self, origin: SubgraphId) -> Self {
         self.origin = Some(origin);
         self
+    }
+
+    /// Library-free structural validation of this definition, in all
+    /// builds — the def-level peer of [`Graph::check`], run wherever a def
+    /// crosses an untrusted boundary (document load, subgraph import, the
+    /// shared-library file). Checks the interior in def mode (boundary
+    /// nodes allowed, at most one of each, recursing into nested defs) and
+    /// that every exposed event names an existing interior emitter.
+    /// Library-dependent checks (func resolution, port/event index ranges,
+    /// type compatibility) stay with `Graph::check_with`.
+    pub fn check(&self) -> Result<()> {
+        ensure!(
+            !self.id.is_nil(),
+            "subgraph def {:?} has a nil id",
+            self.name
+        );
+        self.graph.check_impl(true)?;
+        for event in &self.events {
+            ensure!(
+                self.graph
+                    .find_node(&event.emitter, NodeSearch::TopLevel)
+                    .is_some(),
+                "exposed event {:?} names missing emitter {:?}",
+                event.name,
+                event.emitter
+            );
+        }
+        Ok(())
     }
 
     /// An independent copy with a fresh def id and fresh interior node
@@ -316,6 +345,56 @@ mod tests {
             child_copy_ids.contains(&copy_emitter),
             "onto the copy's own interior node"
         );
+    }
+
+    #[test]
+    fn def_check_accepts_boundaries_and_rejects_corruption() {
+        let library = test_func_lib(TestFuncHooks::default());
+
+        // The healthy fixture passes: boundary nodes are legal inside a
+        // def interior (one of each).
+        wrap_sum(&library).check().unwrap();
+
+        // A boundary node in a root graph is misplaced.
+        let mut root = Graph::default();
+        root.add(Node::new(NodeKind::SubgraphInput));
+        let err = root.check().unwrap_err().to_string();
+        assert!(err.contains("only valid inside a subgraph def"), "{err}");
+
+        // Two input boundaries in one interior: flatten routes through the
+        // first match, so the duplicate is refused rather than misrouted.
+        let mut def = wrap_sum(&library);
+        def.graph.add(Node::new(NodeKind::SubgraphInput));
+        let err = def.check().unwrap_err().to_string();
+        assert!(err.contains("at most one SubgraphInput"), "{err}");
+
+        // ...and a parent graph's check recurses into its local defs,
+        // naming the offender.
+        let def_id = def.id;
+        let mut parent = Graph::default();
+        parent.add(Node::new(NodeKind::Subgraph(SubgraphRef::Local(def_id))));
+        parent.subgraphs.add(def);
+        let err = format!("{:#}", parent.check().unwrap_err());
+        assert!(
+            err.contains("in local subgraph") && err.contains("at most one SubgraphInput"),
+            "{err}"
+        );
+
+        // An exposed event must name an interior node.
+        let mut def = wrap_sum(&library);
+        def.events.push(SubgraphEvent {
+            name: "tick".into(),
+            emitter: NodeId::unique(),
+            emitter_event_idx: 0,
+        });
+        let err = def.check().unwrap_err().to_string();
+        assert!(err.contains("names missing emitter"), "{err}");
+
+        // A nil def id is refused.
+        let mut def = wrap_sum(&library);
+        def.id = SubgraphId::nil();
+        let err = def.check().unwrap_err().to_string();
+        assert!(err.contains("has a nil id"), "{err}");
     }
 
     #[test]

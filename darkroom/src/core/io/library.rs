@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result, anyhow, bail};
 use common::{SerdeFormat, deserialize, serialize};
 use scenarium::graph::subgraph::SubgraphDef;
 
@@ -47,86 +48,90 @@ fn broken_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
-/// Read + parse the library file. A missing file is the normal first-launch
-/// case (`Ok(empty)`); any other failure is `Err` with the display-ready
-/// reason. No side effects — the recovery move is [`load_library`]'s.
-fn read_defs(path: &Path) -> Result<Vec<SubgraphDef>, String> {
+/// Read + parse the library file, structurally checking every def — the
+/// file is hand-editable, so it's untrusted input gated like a document.
+/// A missing file is the normal first-launch case (`Ok(empty)`); any
+/// other failure is `Err` (render with `{:#}` for the full reason). No
+/// side effects — the recovery move is [`load_library`]'s.
+fn read_defs(path: &Path) -> Result<Vec<SubgraphDef>> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(format!("{}: {err}", path.display())),
+        Err(err) => return Err(err).with_context(|| path.display().to_string()),
     };
-    deserialize::<LibraryFile>(&bytes, SerdeFormat::Rhai)
-        .map(|lib| lib.subgraphs)
-        .map_err(|err| format!("{}: {err}", path.display()))
+    let lib = deserialize::<LibraryFile>(&bytes, SerdeFormat::Rhai)
+        .with_context(|| path.display().to_string())?;
+    for def in &lib.subgraphs {
+        def.check()
+            .with_context(|| format!("{}: invalid subgraph {:?}", path.display(), def.name))?;
+    }
+    Ok(lib.subgraphs)
 }
 
 /// Load the shared subgraph defs from the working dir. On a failed load the
 /// session degrades to an empty library, so the file is moved aside to
 /// `<name>.broken` — recoverable by the user, and no longer in the way of
 /// the saves that would otherwise overwrite it with that empty set. The
-/// `Err` is the display-ready reason, including where the file went.
-pub(crate) fn load_library() -> Result<Vec<SubgraphDef>, String> {
+/// `Err` carries the reason plus where the file went.
+pub(crate) fn load_library() -> Result<Vec<SubgraphDef>> {
     load_library_from(&path())
 }
 
-fn load_library_from(path: &Path) -> Result<Vec<SubgraphDef>, String> {
+fn load_library_from(path: &Path) -> Result<Vec<SubgraphDef>> {
     read_defs(path).map_err(|err| {
         let broken = broken_path(path);
+        // Flatten the chain (`:#`) so the recovery note reads after the
+        // reason, not as an outer context in front of it.
         match std::fs::rename(path, &broken) {
-            Ok(()) => format!("{err} — file moved to {}", broken.display()),
+            Ok(()) => anyhow!("{err:#} — file moved to {}", broken.display()),
             Err(rename_err) => {
-                format!("{err} — couldn't move the file aside ({rename_err}); fix or remove it")
+                anyhow!("{err:#} — couldn't move the file aside ({rename_err}); fix or remove it")
             }
         }
     })
 }
 
 /// Write the shared subgraph defs to the working dir, refusing to overwrite
-/// a file whose defs can't be re-read (they'd be destroyed). The error is
-/// the display-ready reason — the caller (`Engine::edit_library`) reports it
-/// to the status log, which also traces it.
-pub(crate) fn save_library<'a>(
-    subgraphs: impl Iterator<Item = &'a SubgraphDef>,
-) -> Result<(), String> {
+/// a file whose defs can't be re-read (they'd be destroyed). The caller
+/// (`Engine::edit_library`) reports the error to the status log, which also
+/// traces it.
+pub(crate) fn save_library<'a>(subgraphs: impl Iterator<Item = &'a SubgraphDef>) -> Result<()> {
     save_library_to(&path(), subgraphs)
 }
 
 fn save_library_to<'a>(
     path: &Path,
     subgraphs: impl Iterator<Item = &'a SubgraphDef>,
-) -> Result<(), String> {
+) -> Result<()> {
     // Normally a bad file was already moved aside at load; this closes the
     // gaps (a failed move, corruption after startup).
     if let Err(err) = read_defs(path) {
-        return Err(format!(
-            "refusing to overwrite a library file that can't be re-read — {err}"
-        ));
+        bail!("refusing to overwrite a library file that can't be re-read — {err:#}");
     }
     let lib = LibraryFile {
         subgraphs: subgraphs.cloned().collect(),
     };
-    let bytes = serialize(&lib, SerdeFormat::Rhai).map_err(|err| err.to_string())?;
-    std::fs::write(path, &bytes).map_err(|err| format!("{}: {err}", path.display()))
+    let bytes = serialize(&lib, SerdeFormat::Rhai)?;
+    std::fs::write(path, &bytes).with_context(|| path.display().to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use common::test_utils::test_output_path;
+    use scenarium::graph::NodeId;
+    use scenarium::graph::subgraph::{SubgraphEvent, SubgraphId};
 
     use super::*;
 
     fn def(name: &str) -> SubgraphDef {
-        SubgraphDef {
-            name: name.into(),
-            category: "test".into(),
-            ..Default::default()
-        }
+        SubgraphDef::new(SubgraphId::unique(), name).category("test")
     }
 
     #[test]
     fn save_load_roundtrip() {
         let path = test_output_path("darkroom_library/roundtrip.rhai");
+        // A stale file from an earlier run would trip save's re-read guard.
+        let _ = std::fs::remove_file(&path);
         let defs = [def("blur"), def("sharpen")];
         save_library_to(&path, defs.iter()).unwrap();
 
@@ -146,7 +151,7 @@ mod tests {
         let garbage = "#{ subgraphs: [ truncated";
         std::fs::write(&path, garbage).unwrap();
 
-        let err = load_library_from(&path).unwrap_err();
+        let err = format!("{:#}", load_library_from(&path).unwrap_err());
         assert!(
             err.contains(path.to_str().unwrap()) && err.contains(broken.to_str().unwrap()),
             "error names the file and the backup: {err}"
@@ -167,12 +172,39 @@ mod tests {
     }
 
     #[test]
+    fn structurally_invalid_def_is_quarantined_like_a_parse_failure() {
+        // Parses fine but fails `SubgraphDef::check` (dangling event
+        // emitter): the load refuses it and moves the file aside, exactly
+        // like syntactic corruption.
+        let path = test_output_path("darkroom_library/invalid-def.rhai");
+        // A stale file from an earlier run would trip save's re-read guard.
+        let _ = std::fs::remove_file(&path);
+        let mut bad = def("dangling");
+        bad.events.push(SubgraphEvent {
+            name: "tick".into(),
+            emitter: NodeId::unique(),
+            emitter_event_idx: 0,
+        });
+        save_library_to(&path, [bad].iter()).unwrap();
+
+        let err = format!("{:#}", load_library_from(&path).unwrap_err());
+        assert!(
+            err.contains("invalid subgraph") && err.contains("dangling"),
+            "error names the bad def: {err}"
+        );
+        assert!(!path.exists(), "the invalid file was moved aside");
+    }
+
+    #[test]
     fn save_refuses_to_overwrite_an_unreadable_file() {
         let path = test_output_path("darkroom_library/corrupt-at-save.rhai");
         let garbage = "not a library";
         std::fs::write(&path, garbage).unwrap();
 
-        let err = save_library_to(&path, [def("x")].iter()).unwrap_err();
+        let err = format!(
+            "{:#}",
+            save_library_to(&path, [def("x")].iter()).unwrap_err()
+        );
         assert!(
             err.contains(path.to_str().unwrap()),
             "error names the file: {err}"
@@ -187,7 +219,10 @@ mod tests {
     #[test]
     fn unwritable_path_reports_save_failure() {
         let path = test_output_path("darkroom_library/no-such-dir").join("lib.rhai");
-        let err = save_library_to(&path, [def("x")].iter()).unwrap_err();
+        let err = format!(
+            "{:#}",
+            save_library_to(&path, [def("x")].iter()).unwrap_err()
+        );
         assert!(
             err.contains(path.to_str().unwrap()),
             "error names the file: {err}"

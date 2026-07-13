@@ -85,7 +85,7 @@ impl Engine {
         // path); `set_document_cache` repoints the root as documents open.
         engine.refresh_disk_store();
         if let Some(err) = load_error {
-            engine.status.error(format!("library load failed: {err}"));
+            engine.status.error(format!("library load failed: {err:#}"));
         }
         engine
     }
@@ -114,7 +114,7 @@ impl Engine {
         if changed {
             match save_library(self.library.subgraphs.iter()) {
                 Ok(()) => self.status.error = None,
-                Err(err) => self.status.error(format!("library save failed: {err}")),
+                Err(err) => self.status.error(format!("library save failed: {err:#}")),
             }
             self.refresh_disk_store();
         }

@@ -57,8 +57,11 @@ impl Session {
         let preferences = Preferences::load();
         let (document, current_path) = match preferences.document_path.as_deref() {
             Some(path) => match persistence::load_document(path) {
-                Some(doc) => (doc, Some(path.to_path_buf())),
-                None => (empty_document(), None),
+                Ok(doc) => (doc, Some(path.to_path_buf())),
+                Err(err) => {
+                    engine.status.error(format!("load failed: {err:#}"));
+                    (empty_document(), None)
+                }
             },
             None => (empty_document(), None),
         };
@@ -125,13 +128,20 @@ impl Session {
     }
 
     /// Write the document back to the file it was opened from. Returns
-    /// `false` when there's no path to save to (a fresh, never-loaded doc).
+    /// `false` when there's no path to save to (a fresh, never-loaded doc)
+    /// or the write failed — the reason lands on the status log.
     pub(crate) fn save(&mut self) -> bool {
         let Some(path) = self.current_path.clone() else {
             return false;
         };
         self.reconcile_if_needed();
-        persistence::save_document(&self.document, &path)
+        match persistence::save_document(&self.document, &path) {
+            Ok(()) => true,
+            Err(err) => {
+                self.engine.status.error(format!("save failed: {err:#}"));
+                false
+            }
+        }
     }
 
     fn reconcile_if_needed(&mut self) {

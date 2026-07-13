@@ -52,12 +52,12 @@ impl App {
             return;
         };
         if let Some(path) = dialogs::pick_save_path(self.current_path.as_deref()) {
-            if persistence::export_subgraph(def, &path) {
-                self.engine.status.error = None;
-            } else {
-                self.engine
+            match persistence::export_subgraph(def, &path) {
+                Ok(()) => self.engine.status.error = None,
+                Err(err) => self
+                    .engine
                     .status
-                    .error(format!("subgraph export failed: {}", path.display()));
+                    .error(format!("subgraph export failed: {err:#}")),
             }
         }
     }
@@ -70,13 +70,15 @@ impl App {
         let Some(path) = dialogs::pick_open_path(self.current_path.as_deref()) else {
             return;
         };
-        if let Some(def) = persistence::import_subgraph(&path) {
-            self.editor.import_subgraph(def);
-            self.engine.status.error = None;
-        } else {
-            self.engine
+        match persistence::import_subgraph(&path) {
+            Ok(def) => {
+                self.editor.import_subgraph(def);
+                self.engine.status.error = None;
+            }
+            Err(err) => self
+                .engine
                 .status
-                .error(format!("subgraph import failed: {}", path.display()));
+                .error(format!("subgraph import failed: {err:#}")),
         }
     }
 

@@ -8,7 +8,7 @@ use crate::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use crate::library::Library;
 use crate::node::function::{Func, FuncId};
 use crate::node::special::SpecialNode;
-use anyhow::ensure;
+use anyhow::{Context, ensure};
 use common::id_type;
 use common::{Result, SerdeFormat, deserialize, serialize};
 use hashbrown::HashSet;
@@ -726,9 +726,22 @@ impl Graph {
     /// Structural validation of a (possibly untrusted) graph — runs in all
     /// builds and returns an error rather than panicking. `validate` below is
     /// the debug-only internal-invariant check; this is the load-path guard.
-    /// Port-index ranges need a `Library`, so they're checked by
-    /// `validate_with`, not here.
+    /// Treats `self` as a root graph (boundary nodes are invalid at this
+    /// level); nested defs are checked via [`SubgraphDef::check`], which
+    /// re-enters in def-interior mode. Port-index ranges (and anything else
+    /// needing a `Library`) are checked by `check_with`, not here.
     pub fn check(&self) -> Result<()> {
+        self.check_impl(false)
+    }
+
+    /// The recursive body of [`Self::check`]. `is_def_interior` toggles the
+    /// one context-dependent rule: `SubgraphInput`/`SubgraphOutput` are valid
+    /// only inside a subgraph def, at most one of each — flattening routes
+    /// through the *first* boundary node of a kind, so a duplicate would
+    /// silently misroute rather than fail.
+    pub(crate) fn check_impl(&self, is_def_interior: bool) -> Result<()> {
+        let mut boundary_inputs = 0usize;
+        let mut boundary_outputs = 0usize;
         for node in self.nodes.iter() {
             ensure!(!node.id.is_nil(), "graph contains a node with a nil id");
             match &node.kind {
@@ -748,9 +761,33 @@ impl Graph {
                 }
                 // Special nodes carry no id to validate; their declaration is
                 // hardcoded and always resolves.
-                NodeKind::Special(_) | NodeKind::SubgraphInput | NodeKind::SubgraphOutput => {}
+                NodeKind::Special(_) => {}
+                NodeKind::SubgraphInput => {
+                    ensure!(
+                        is_def_interior,
+                        "node {:?}: SubgraphInput is only valid inside a subgraph def",
+                        node.id
+                    );
+                    boundary_inputs += 1;
+                }
+                NodeKind::SubgraphOutput => {
+                    ensure!(
+                        is_def_interior,
+                        "node {:?}: SubgraphOutput is only valid inside a subgraph def",
+                        node.id
+                    );
+                    boundary_outputs += 1;
+                }
             }
         }
+        ensure!(
+            boundary_inputs <= 1,
+            "a def interior holds at most one SubgraphInput, found {boundary_inputs}"
+        );
+        ensure!(
+            boundary_outputs <= 1,
+            "a def interior holds at most one SubgraphOutput, found {boundary_outputs}"
+        );
 
         for (dst, binding) in &self.bindings {
             ensure!(
@@ -793,8 +830,8 @@ impl Graph {
         }
 
         for def in self.subgraphs.iter() {
-            ensure!(!def.id.is_nil(), "local subgraph has a nil id");
-            def.graph.check()?;
+            def.check()
+                .with_context(|| format!("in local subgraph {:?}", def.name))?;
         }
 
         Ok(())
