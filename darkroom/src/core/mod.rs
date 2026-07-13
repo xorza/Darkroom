@@ -4,6 +4,7 @@
 //! (`crate::gui`) is one consumer; `tui` / `headless` are the others. This
 //! layer never imports from `crate::gui`.
 
+pub(crate) mod background_runtime;
 pub(crate) mod document;
 pub(crate) mod edit;
 pub(crate) mod engine;

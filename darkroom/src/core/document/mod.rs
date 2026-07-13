@@ -1,3 +1,4 @@
+pub(crate) mod auto_layout;
 pub mod dock;
 pub mod view_node;
 
@@ -12,17 +13,10 @@ use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
 use crate::core::document::dock::DockLayout;
 use crate::core::document::view_node::ViewNode;
 use crate::core::edit::reconcile::reconcile_def;
-
-/// Default topological-column auto-layout parameters, shared by every
-/// place that seeds a fresh view (the root on load, each subgraph
-/// interior on first open). Kept in one spot so the seeding paths can't
-/// drift. The boundary placement below reuses `AUTO_LAYOUT_ORIGIN`.
-const AUTO_LAYOUT_COL_SPACING: f32 = 220.0;
-const AUTO_LAYOUT_ROW_SPACING: f32 = 110.0;
-const AUTO_LAYOUT_ORIGIN: Vec2 = Vec2::new(40.0, 40.0);
 
 /// Initial placement of a fresh subgraph's boundary nodes: the input
 /// boundary at the origin, the output boundary one gap to the right and
@@ -230,47 +224,6 @@ impl GraphView {
             view_nodes,
             ..Default::default()
         }
-    }
-
-    /// Assign positions using topological-depth columns: nodes with no
-    /// bound inputs go in column 0, downstream nodes shift right by one
-    /// column per max-upstream-depth. Within a column, stack vertically
-    /// in graph insertion order.
-    pub fn auto_layout(
-        &mut self,
-        graph: &CoreGraph,
-        col_spacing: f32,
-        row_spacing: f32,
-        origin: Vec2,
-    ) {
-        let mut depth: HashMap<NodeId, u32> = HashMap::new();
-        for node in graph.iter() {
-            let d = graph
-                .edges()
-                .filter(|(dst, _)| dst.node_id == node.id)
-                .filter_map(|(_, src)| depth.get(&src.node_id).copied().map(|d| d + 1))
-                .max()
-                .unwrap_or(0);
-            depth.insert(node.id, d);
-        }
-
-        let mut row_in_col: HashMap<u32, u32> = HashMap::new();
-        for view_node in self.view_nodes.iter_mut() {
-            let d = depth.get(&view_node.id).copied().unwrap_or(0);
-            let row = row_in_col.entry(d).or_insert(0);
-            view_node.pos = origin + Vec2::new(d as f32 * col_spacing, *row as f32 * row_spacing);
-            *row += 1;
-        }
-    }
-
-    /// `auto_layout` with the shared default column/row spacing + origin.
-    pub fn auto_layout_default(&mut self, graph: &CoreGraph) {
-        self.auto_layout(
-            graph,
-            AUTO_LAYOUT_COL_SPACING,
-            AUTO_LAYOUT_ROW_SPACING,
-            AUTO_LAYOUT_ORIGIN,
-        );
     }
 
     fn validate(&self, graph: &CoreGraph) {
@@ -799,7 +752,9 @@ mod tests {
 
     #[test]
     fn add_node_with_def_round_trips() {
-        use crate::core::edit::intent::{Intent, apply_step, build_step, revert_step};
+        use crate::core::edit::intent::apply::{apply_step, revert_step};
+        use crate::core::edit::intent::build::build_step;
+        use crate::core::edit::intent::types::Intent;
 
         // Instancing a library subgraph localizes it: a `Local` def copy
         // (recording its `origin`) is added alongside the instance node, as
@@ -862,7 +817,9 @@ mod tests {
     /// `(node_id, local_def_id)`. `origin` tags the copy's library
     /// lineage so a later instance can dedup against it.
     fn add_library_instance(doc: &mut Document, lib_id: SubgraphId) -> (NodeId, SubgraphId) {
-        use crate::core::edit::intent::{Intent, apply_step, build_step};
+        use crate::core::edit::intent::apply::apply_step;
+        use crate::core::edit::intent::build::build_step;
+        use crate::core::edit::intent::types::Intent;
 
         let mut local = leaf_def(lib_id, "Lib").fresh_copy();
         local.origin = Some(lib_id);
@@ -920,7 +877,9 @@ mod tests {
 
     #[test]
     fn detach_forks_standalone_copy_and_repoints_node() {
-        use crate::core::edit::intent::{Intent, apply_step, build_step, revert_step};
+        use crate::core::edit::intent::apply::{apply_step, revert_step};
+        use crate::core::edit::intent::build::build_step;
+        use crate::core::edit::intent::types::Intent;
 
         // A node on a library-linked local def. Detach must fork a fresh
         // standalone copy (origin cleared), add it, and repoint the node.
@@ -999,9 +958,9 @@ mod tests {
 
     #[test]
     fn set_disabled_round_trips_through_undo() {
-        use crate::core::edit::intent::{
-            Intent, NodeProperty, apply_step, build_step, revert_step,
-        };
+        use crate::core::edit::intent::apply::{apply_step, revert_step};
+        use crate::core::edit::intent::build::build_step;
+        use crate::core::edit::intent::types::{Intent, NodeProperty};
 
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);

@@ -17,7 +17,8 @@ use scenarium::graph::Graph as CoreGraph;
 use scenarium::library::Library;
 
 use crate::core::document::{Document, GraphRef};
-use crate::core::edit::intent::{Intent, commit_intent_cascading};
+use crate::core::edit::intent::apply::commit_intent_cascading;
+use crate::core::edit::intent::types::Intent;
 use crate::core::engine::Engine;
 use crate::core::io::persistence;
 use crate::core::io::preferences::Preferences;

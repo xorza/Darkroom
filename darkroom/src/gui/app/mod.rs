@@ -248,6 +248,15 @@ impl App {
         self.host_handle.quit();
     }
 
+    /// Whether a pending quit needs to prompt before proceeding: unsaved
+    /// changes and the confirm-on-exit preference both hold. Shared by the
+    /// titlebar-X path ([`Self::handle_exit`]) and File ▸ Quit
+    /// (`commands::shell::ShellCommand`'s handler), which both raise the
+    /// same dialog off the same condition.
+    fn needs_exit_confirmation(&self) -> bool {
+        self.editor.dirty && self.preferences.confirm_unsaved_on_exit
+    }
+
     /// Resolve a pending quit. A window-close request (titlebar X) with
     /// unsaved changes raises the confirm dialog and vetoes the close
     /// ([`Ui::keep_open`]); a clean document lets the close proceed. While
@@ -263,7 +272,7 @@ impl App {
             self.save_preferences();
             // Unsaved changes raise the prompt and veto the close — unless
             // the user turned confirmation off, in which case it proceeds.
-            if self.editor.dirty && self.preferences.confirm_unsaved_on_exit {
+            if self.needs_exit_confirmation() {
                 ui.keep_open();
                 self.confirm_quit = true;
             }

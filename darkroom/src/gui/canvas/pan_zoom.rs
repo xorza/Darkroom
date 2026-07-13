@@ -9,7 +9,7 @@ use common::FloatExt;
 use glam::Vec2;
 
 use crate::core::document::{SelectionKey, Viewport};
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
 use crate::gui::scene::Scene;

@@ -17,8 +17,8 @@ use scenarium::execution::disk_store::DiskStore;
 use scenarium::execution::stats::{ExecutionStats, PinnedOutputs, RunProgress};
 use scenarium::graph::NodeId;
 use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
-use tokio::runtime::Runtime;
 
+use crate::core::background_runtime::BackgroundRuntime;
 use crate::core::wake::Wake;
 
 /// Run epoch. Bumped each time a frontend kicks a fresh run so values from
@@ -42,7 +42,7 @@ pub(crate) struct WorkerBridge {
     /// Kept alive so the worker's spawned tasks keep running; dropping it
     /// shuts the runtime down. Never read — its lifetime is the point.
     #[allow(dead_code)]
-    runtime: Runtime,
+    runtime: BackgroundRuntime,
     worker: Worker,
     rx: Receiver<WorkerEvent>,
 }
@@ -60,16 +60,10 @@ impl WorkerBridge {
     /// it forwards the result over `tx` and asks the host to paint, so the next
     /// frame drains it.
     pub(crate) fn new(wake: Wake) -> Self {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("build worker runtime");
+        let runtime = BackgroundRuntime::new().expect("build worker runtime");
         let (tx, rx) = channel::<WorkerEvent>();
         // `Worker`'s `tokio::spawn` needs an ambient runtime.
-        let worker = {
-            let _guard = runtime.enter();
-            Worker::new(move |report| Self::deliver(&tx, &wake, report))
-        };
+        let worker = runtime.enter(|| Worker::new(move |report| Self::deliver(&tx, &wake, report)));
         Self {
             runtime,
             worker,

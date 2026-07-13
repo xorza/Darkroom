@@ -4,7 +4,8 @@
 //! ([`crate::gui::node::header`]) and the subgraph boundary-port names
 //! ([`crate::gui::node::port_rename`]); each maps the returned
 //! [`RenameEvent`] onto its own intent. Mirrors the per-widget split of
-//! [`crate::gui::node::value_editor`].
+//! [`crate::gui::node::value_editor`]; both share the blur-edge /
+//! buffered-text core in [`crate::gui::widgets::buffered_edit`].
 
 use aperture::{
     Align, Configure, HAlign, Justify, Key, Panel, Sense, Shortcut, Sizing, SmolStr, Spacing, Text,
@@ -12,17 +13,18 @@ use aperture::{
 };
 
 use crate::gui::theme::InlineRenameTheme;
+use crate::gui::widgets::buffered_edit::EditBuffer;
 
 /// Cross-frame state for one inline-rename editor, held in aperture's
 /// `StateMap` under the editor's `WidgetId`.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 struct RenameState {
     active: bool,
-    /// Latches once the editor actually holds focus, so the frames
-    /// between `request_focus` and focus landing don't read as a blur
-    /// and commit early.
-    focused_once: bool,
-    draft: String,
+    /// The in-progress draft plus blur-edge tracking, shared with
+    /// [`crate::gui::node::value_editor`]'s buffered fields — see
+    /// [`EditBuffer`] for why the latch needs to survive the
+    /// `request_focus` → focus-landing gap this widget opens.
+    edit: EditBuffer,
 }
 
 /// What one frame of [`InlineRename`] surfaced. `clicked` (idle label
@@ -199,8 +201,8 @@ impl<'a> InlineRename<'a> {
             if double_clicked {
                 let st = ui.state_mut::<RenameState>(id);
                 st.active = true;
-                st.focused_once = false;
-                st.draft = name.as_str().to_owned();
+                st.edit.reset_latch();
+                st.edit.text = name.as_str().to_owned();
                 ui.request_focus(Some(id));
             }
             return RenameEvent {
@@ -209,7 +211,7 @@ impl<'a> InlineRename<'a> {
             };
         }
 
-        let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).draft);
+        let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).edit.text);
         TextEdit::new(&mut draft)
             .id(id)
             .style(edit_style(theme_ref, style))
@@ -223,11 +225,10 @@ impl<'a> InlineRename<'a> {
         let enter = ui.key_pressed(Shortcut::key(Key::Enter));
         let commit = {
             let st = ui.state_mut::<RenameState>(id);
-            st.draft = draft.clone();
-            st.focused_once |= focused;
-            // Commit on Enter or on blur (once focus had landed); Esc
-            // wins as a cancel.
-            !escape && (enter || (st.focused_once && !focused))
+            st.edit.text = draft.clone();
+            let blurred = st.edit.blur_edge(focused);
+            // Commit on Enter or on blur; Esc wins as a cancel.
+            !escape && (enter || blurred)
         };
         if !(commit || escape) {
             return RenameEvent {
@@ -237,7 +238,7 @@ impl<'a> InlineRename<'a> {
         }
         let st = ui.state_mut::<RenameState>(id);
         st.active = false;
-        st.focused_once = false;
+        st.edit.reset_latch();
         ui.request_focus(None);
         RenameEvent {
             clicked: false,

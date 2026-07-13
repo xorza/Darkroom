@@ -13,6 +13,7 @@ port_col_pad_top = 6.0
 port_col_pad_x = 8.0
 port_gap = 6.0
 port_cols_gap = 12.0
+floating_widget_gap = 16.0
 new_node_popup_max_height = 400.0
 
 [colors]

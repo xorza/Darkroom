@@ -149,9 +149,7 @@ impl From<&MlModelPreferences> for lens::MlModelPaths {
 
 impl Preferences {
     fn path() -> PathBuf {
-        std::env::current_dir()
-            .unwrap_or_default()
-            .join(PREFERENCES_FILE)
+        super::cwd_file(PREFERENCES_FILE)
     }
 
     /// Publish the ML model paths into lens's runtime global so the `ml_denoise` / `remove_stars`

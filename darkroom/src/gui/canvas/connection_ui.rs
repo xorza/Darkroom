@@ -6,7 +6,7 @@ use scenarium::data::DataType;
 use scenarium::graph::{Binding, InputPort, closes_data_cycle};
 
 use crate::core::document::{PortKind, PortRef};
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::wire_visible;
@@ -391,19 +391,13 @@ fn port_gradient(start: Color, end: Color) -> Brush {
 /// `pin_ui.rs`), so the two controllers never both latch the same press.
 fn scan_drag_start(geometry: &CanvasGeometry, scene: &Scene, ui: &Ui) -> Option<PortRef> {
     let cmd_reserved_for_pin = ui.modifiers().ctrl;
-    for n in &scene.nodes {
-        for kind in [PortKind::Input, PortKind::Output] {
-            if kind == PortKind::Output && cmd_reserved_for_pin {
-                continue;
-            }
-            for port in node_ports(n, kind) {
-                if geometry.ports.drag_started(port) {
-                    return Some(port);
-                }
-            }
-        }
-    }
-    None
+    let keys = scene.nodes.iter().flat_map(move |n| {
+        [PortKind::Input, PortKind::Output]
+            .into_iter()
+            .filter(move |&kind| !(kind == PortKind::Output && cmd_reserved_for_pin))
+            .flat_map(move |kind| node_ports(n, kind))
+    });
+    geometry.ports.first_drag_started(keys)
 }
 
 /// Whether `port` is a const-only input — one that rejects a wired binding, so a

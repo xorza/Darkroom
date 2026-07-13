@@ -23,6 +23,11 @@ const PORT_COL_PAD_TOP: f32 = 6.0;
 const PORT_COL_PAD_X: f32 = 8.0;
 const PORT_GAP: f32 = 6.0;
 const PORT_COLS_GAP: f32 = 12.0;
+/// Gap between a node's edge (or a port circle) and a floating widget's near
+/// edge — shared by the pin-preview card (from the port circle) and the
+/// inspector panel (from the node's right edge), so every floating overlay
+/// keeps the same clearance.
+const FLOATING_WIDGET_GAP: f32 = 16.0;
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// Upper bound on the value column: editors fill the column up to here, then a
 /// long value (a wide enum/preset dropdown, a long path) ellipsizes instead of
@@ -313,6 +318,11 @@ pub struct Theme {
     pub port_gap: f32,
     /// Horizontal gap between the input and output port columns.
     pub port_cols_gap: f32,
+    /// Gap between a node's edge (or a port circle) and a floating widget's
+    /// near edge — the pin-preview card anchors from the port circle, the
+    /// inspector panel from the node's right edge, so both read as the same
+    /// clearance.
+    pub floating_widget_gap: f32,
     /// Cap on the new-node popup's height. Inner scroll handles
     /// overflow when the function list exceeds the cap.
     pub new_node_popup_max_height: f32,
@@ -744,6 +754,14 @@ palette_struct! {
     event_port_hover => EVENT_PORT_HOVER,
 }
 
+/// Result of [`Theme::card_border`]: the resolved outline color plus the
+/// width every selectable card draws it at.
+#[derive(Clone, Copy, Debug)]
+pub struct CardBorder {
+    pub color: Color,
+    pub width: f32,
+}
+
 impl Theme {
     /// Derived radius for port circles — half the port side. Lives as
     /// a method instead of a stored field so the two can't drift if
@@ -784,6 +802,30 @@ impl Theme {
     #[inline]
     pub fn card_border_width(&self) -> f32 {
         self.node_border_width * 2.0
+    }
+
+    /// Border color + width for a selectable card's 3-tier resting decision
+    /// — node bodies and pin-preview widgets both resolve their outline this
+    /// way: a breaker hit wins as the alarm color, else the selection halo
+    /// when selected, else the neutral resting `node_border`. Width is
+    /// always [`Self::card_border_width`] regardless of tier, so selecting
+    /// (or breaking) a card never resizes it — only the color changes. A
+    /// caller with an extra tier of its own (e.g. a node body's "missing"
+    /// stub state) special-cases that tier around this call instead of
+    /// forcing it in here.
+    #[inline]
+    pub fn card_border(&self, broken: bool, selected: bool) -> CardBorder {
+        let color = if broken {
+            self.colors.connection_broken
+        } else if selected {
+            self.colors.selection_rect
+        } else {
+            self.colors.node_border
+        };
+        CardBorder {
+            color,
+            width: self.card_border_width(),
+        }
     }
 
     /// Inner corner radius for a header or footer strip that seats flush
@@ -873,6 +915,7 @@ impl Theme {
             port_col_pad_x: PORT_COL_PAD_X,
             port_gap: PORT_GAP,
             port_cols_gap: PORT_COLS_GAP,
+            floating_widget_gap: FLOATING_WIDGET_GAP,
             new_node_popup_max_height: NEW_NODE_POPUP_MAX_HEIGHT,
             colors,
             static_value_editor: sve,

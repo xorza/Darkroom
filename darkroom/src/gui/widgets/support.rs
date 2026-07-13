@@ -4,8 +4,8 @@
 //! [`toolbar`](crate::gui::widgets::toolbar).
 
 use aperture::{
-    Background, Color, Configure, Corners, FontFamily, Panel, Rect, Shape, Sizing, Stroke, Text,
-    TextStyle, Ui,
+    Background, Color, Configure, Corners, FontFamily, Panel, Rect, ResponseSnapshot, Shape,
+    Sizing, Stroke, Text, TextStyle, Tooltip, Ui,
 };
 
 use crate::gui::theme::Theme;
@@ -123,4 +123,16 @@ pub(crate) fn hspacer(ui: &mut Ui, salt: &'static str) {
         .id_salt(salt)
         .size((Sizing::FILL, Sizing::Hug))
         .show(ui, |_| {});
+}
+
+/// Shows `tip` as a hover tooltip anchored to `snapshot`, unless `tip` is
+/// empty. Takes an already-snapshotted response (rather than `&Response<'_>`)
+/// so a caller that just finished building the widget can end its own `ui`
+/// borrow (via `.snapshot()`) before this one needs `ui` back mutably to
+/// record the tooltip. Shared by every chip/badge/port-glyph that pairs a
+/// widget with a hover tooltip.
+pub(crate) fn tooltip_after(ui: &mut Ui, snapshot: &ResponseSnapshot, tip: &str) {
+    if !tip.is_empty() {
+        Tooltip::on(snapshot).text(tip.to_owned()).show(ui);
+    }
 }

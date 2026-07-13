@@ -11,20 +11,18 @@
 //!
 //! [`App`]: crate::gui::app::App
 
-use std::collections::BTreeSet;
-
 use aperture::Ui;
-use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphDef;
 use scenarium::library::Library;
 
 use crate::core::document::dock::{DockOp, TabAddress};
-use crate::core::document::{Document, GraphRef, PortRef, SelectionKey, TabRef};
+use crate::core::document::{Document, GraphRef, PortRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
-use crate::core::edit::intent::{
-    Intent, NodeProperty, build_duplicate_intent_for, commit_intent_cascading,
-    remove_selection_intents,
+use crate::core::edit::intent::apply::commit_intent_cascading;
+use crate::core::edit::intent::duplicate::{
+    build_duplicate_intent_for, remove_selection_intents, selected_node_ids,
 };
+use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
 use crate::gui::app::commands::AppCommand;
@@ -323,14 +321,7 @@ impl Editor {
         match action {
             NodeMenuAction::Duplicate | NodeMenuAction::DuplicateWithIncoming => {
                 let incoming = matches!(action, NodeMenuAction::DuplicateWithIncoming);
-                let node_ids: BTreeSet<NodeId> = view
-                    .selected
-                    .iter()
-                    .filter_map(|k| match k {
-                        SelectionKey::Node(id) => Some(*id),
-                        SelectionKey::Pin(_) => None,
-                    })
-                    .collect();
+                let node_ids = selected_node_ids(view);
                 if let Some(intent) =
                     build_duplicate_intent_for(&self.document, target, &node_ids, incoming)
                 {
@@ -571,6 +562,7 @@ fn activate_intent(addr: TabAddress) -> Intent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::document::SelectionKey;
 
     /// Run an `OpenGraph` exactly as `navigate` does: queue the focus
     /// switch, then drain it onto the undo stack.

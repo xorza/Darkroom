@@ -3,7 +3,7 @@ use glam::Vec2;
 use scenarium::graph::NodeId;
 use scenarium::graph::{Binding, InputPort, OutputPort, Subscription};
 
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::Scene;

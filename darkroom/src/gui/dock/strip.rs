@@ -15,7 +15,7 @@ use scenarium::graph::subgraph::SubgraphId;
 
 use crate::core::document::dock::{DockDrop, DockOp, SplitSide, TabGroup, TabGroupId};
 use crate::core::document::{GraphRef, TabRef};
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::inline_rename::InlineRename;
 use crate::gui::widgets::support::{colored_text, muted_text};

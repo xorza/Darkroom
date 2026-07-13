@@ -4,11 +4,11 @@
 //! own glyphs and toggle color policy.
 
 use aperture::{
-    Background, Color, Configure, Corners, Panel, Sense, Separator, Sizing, Spacing, Tooltip, Ui,
-    WidgetId,
+    Background, Color, Configure, Corners, Panel, Sense, Separator, Sizing, Spacing, Ui, WidgetId,
 };
 
 use crate::gui::theme::Theme;
+use crate::gui::widgets::support::tooltip_after;
 
 /// Side of each square button, in px.
 const BUTTON_SIZE: f32 = 30.0;
@@ -146,7 +146,7 @@ impl Chip {
         // borrow ends before the tooltip records into `ui`.
         let snapshot = button.response.snapshot();
         let clicked = button.response.clicked();
-        Tooltip::on(&snapshot).text(self.tip).show(ui);
+        tooltip_after(ui, &snapshot, self.tip);
         clicked
     }
 }

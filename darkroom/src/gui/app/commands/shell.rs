@@ -29,7 +29,7 @@ impl App {
     /// on; otherwise exit now. The confirm dialog is rendered and resolved
     /// by [`App::handle_exit`].
     fn request_quit(&mut self) {
-        if self.editor.dirty && self.preferences.confirm_unsaved_on_exit {
+        if self.needs_exit_confirmation() {
             self.confirm_quit = true;
         } else {
             self.quit();

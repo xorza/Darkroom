@@ -2,7 +2,7 @@ use aperture::{Brush, Rect, Ui};
 use glam::Vec2;
 use scenarium::graph::NodeId;
 
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
@@ -276,29 +276,20 @@ impl SubscriptionUI {
 
 /// First emitter event glyph whose drag started this frame, or `None`.
 fn scan_event_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<EventRef> {
-    for n in &scene.nodes {
-        for event_idx in 0..n.events.len as usize {
-            let e = EventRef {
-                node_id: n.id,
-                event_idx,
-            };
-            if geometry.events.drag_started(e) {
-                return Some(e);
-            }
-        }
-    }
-    None
+    let keys = scene.nodes.iter().flat_map(|n| {
+        (0..n.events.len as usize).map(move |event_idx| EventRef {
+            node_id: n.id,
+            event_idx,
+        })
+    });
+    geometry.events.first_drag_started(keys)
 }
 
 /// First subscription pin whose drag started this frame, or `None`. Only
 /// sink nodes render a pin, so only they can start a reverse event drag.
 fn scan_sub_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<NodeId> {
-    for n in &scene.nodes {
-        if n.sink && geometry.subs.drag_started(n.id) {
-            return Some(n.id);
-        }
-    }
-    None
+    let keys = scene.nodes.iter().filter(|n| n.sink).map(|n| n.id);
+    geometry.subs.first_drag_started(keys)
 }
 
 /// Subscription pin under the pointer that's a valid drop for `emitter`: a

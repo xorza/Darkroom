@@ -9,23 +9,23 @@
 
 use aperture::{
     Align, Background, Color, Configure, Corners, FontFamily, FontWeight, Panel, Sense, Shape,
-    Sizing, Spacing, Spinner, Stroke, Text, TextStyle, Tooltip, Ui, VAlign, WidgetId,
+    Sizing, Spacing, Spinner, Stroke, Text, TextStyle, Ui, VAlign, WidgetId,
 };
 use glam::Vec2;
 use scenarium::graph::{CacheMode, NodeId};
 
 use crate::core::document::SelectionKey;
-use crate::core::edit::intent::{Intent, NodeProperty};
+use crate::core::edit::intent::types::{Intent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::node::port_color::event_color;
-use crate::gui::node::port_row::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
+use crate::gui::node::port_row::glyph::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
 use crate::gui::node::{RecordCtx, click_intents, exec_color, node_rename_wid};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::SceneNode;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::inline_rename::InlineRename;
 use crate::gui::widgets::support::{
-    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, header_background, hspacer,
+    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, header_background, hspacer, tooltip_after,
 };
 
 /// Character cap for a node title in the inline rename editor.
@@ -102,9 +102,12 @@ pub(crate) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hov
                 .fill(event_color(theme, hovered)),
             );
         });
-    Tooltip::on(&pin.response.snapshot())
-        .text("Event subscription — drag to an emitter, or drop an event wire here")
-        .show(ui);
+    let snapshot = pin.response.snapshot();
+    tooltip_after(
+        ui,
+        &snapshot,
+        "Event subscription — drag to an emitter, or drop an event wire here",
+    );
 }
 
 /// Stable id for a node's event-subscription pin. Keyed on the node (a
@@ -409,7 +412,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
 }
 
 /// Stable id for a node's clickable run-to-node play chip. `pub(crate)` so
-/// the canvas-level scan ([`crate::gui::node::emit_play_clicks`]) can poll
+/// the canvas-level scan ([`crate::gui::node::prepass::emit_play_clicks`]) can poll
 /// the click from last frame's response.
 pub(crate) fn play_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.play_badge", node_id))
@@ -590,11 +593,7 @@ impl Badge {
         // ends before the tooltip records into `ui`.
         let snapshot = chip.response.snapshot();
         let clicked = chip.response.clicked();
-        if !tip.is_empty() {
-            // `tip` is `&'static str`, so it rides into the tooltip as a
-            // borrowed `Cow` — no per-frame allocation.
-            Tooltip::on(&snapshot).text(tip).show(ui);
-        }
+        tooltip_after(ui, &snapshot, tip);
         clicked
     }
 }

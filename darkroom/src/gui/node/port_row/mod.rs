@@ -4,13 +4,16 @@
 //! output port+label (col 3, right-aligned against the node edge). Row `i`
 //! holds input `i` and output `i`, so the two sides align. Drawn below the
 //! header by [`crate::gui::node::NodeUI`]; the boundary-port rename
-//! affordance lives in [`crate::gui::node::port_rename`].
+//! affordance lives in [`crate::gui::node::port_rename`]. The low-level
+//! glyph primitives (circle, event triangle, hit-box growth) this grid
+//! renders each cell with live in the sibling [`glyph`] module.
+
+pub(crate) mod glyph;
 
 use aperture::{
-    Align, Color, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, Rect, ResponseSnapshot,
-    Sense, Shape, Sizing, Spacing, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
+    Align, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, Sense, Sizing, Spacing, Text,
+    TextStyle, Track, Ui, VAlign, WidgetId,
 };
-use glam::Vec2;
 use scenarium::data::{DataType, FsPathMode};
 use scenarium::graph::Binding;
 use scenarium::graph::NodeId;
@@ -19,17 +22,17 @@ use scenarium::library::Library;
 
 use crate::core::document::BoundarySide;
 use crate::core::document::{PortKind, PortRef};
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;
 use crate::gui::canvas::pin_ui;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
+use crate::gui::node::port_row::glyph::{PortDecoration, circle_frame, event_glyph, port_diameter};
 use crate::gui::node::value_editor;
 use crate::gui::node::{RecordCtx, node_hovered, set_input, set_output_pinned};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
-use crate::gui::theme::{StaticValueEditorTheme, Theme};
-use crate::gui::widgets::support::{filled_rect, stroked_rect};
+use crate::gui::theme::StaticValueEditorTheme;
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -409,7 +412,7 @@ fn output_cell(
                     let out_port = OutputPort::new(port.node_id, port.port_idx);
                     out.push(pin_ui::seed_pin_position_intent(
                         out_port,
-                        port_center + pin_ui::default_pin_offset(),
+                        port_center + pin_ui::default_pin_offset(theme),
                     ));
                 }
             }
@@ -468,165 +471,6 @@ pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
     WidgetId::from_hash(("graph.node.event_glyph", node_id, event_idx))
 }
 
-/// Paints an event port glyph: a right-pointing triangle (a port dot rotated
-/// 90°), the same `port_size` box and edge overhang as a data port's circle,
-/// so it lines up with the outputs above it. `fill` carries the hover state;
-/// `tip` shows as a hover tooltip. Senses `CLICK | DRAG` so a subscription
-/// wire can be dragged out of it. Like `circle_frame`, the sensing box is
-/// `PORT_HIT_SCALE`-grown with the extra pulled back out of layout via
-/// negative margin, so the triangle stays put while hover/grab (and the
-/// wire hover-highlight zone) get generous.
-fn event_glyph(ui: &mut Ui, theme: &Theme, wid: WidgetId, fill: Color, margin: Spacing, tip: &str) {
-    let port = theme.port_size;
-    let (hit, inset, hit_margin) = grown_hit_box(port, margin);
-    let glyph = Panel::zstack()
-        .id(wid)
-        .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
-        .margin(hit_margin)
-        .sense(Sense::CLICK | Sense::DRAG)
-        .show(ui, |ui| {
-            // Right-pointing isosceles triangle filling the port box (offset
-            // by `inset` to center in the grown hit box): the apex points
-            // outward (away from the node body), matching the emit
-            // direction. SDF-antialiased via the triangle primitive. Vertices
-            // are inset by the corner radius: the SDF rounds by *dilating*
-            // (`sdf - radius`), so the rounded result grows back out to the
-            // port box instead of past it.
-            let r = EVENT_TRIANGLE_RADIUS;
-            ui.add_shape(
-                Shape::triangle(
-                    Vec2::new(inset + r, inset + r),
-                    Vec2::new(inset + r, inset + port - r),
-                    Vec2::new(inset + port - r, inset + port * 0.5),
-                )
-                .radius(r)
-                .fill(fill),
-            );
-        });
-    let snapshot = glyph.response.snapshot();
-    show_port_tip(ui, snapshot, tip);
-}
-
-/// Hover / grab box scaled past the painted glyph so ports, event
-/// triangles, and subscription pins are easier to hit and snap to,
-/// while the visible shape stays `port_size`. The enlarged box is also
-/// what keeps the wire hover-highlight repaint-correct: the glyph's own
-/// (hover-target) box carries the emphasis zone, so entering/leaving it
-/// is a hover-target change and repaints without any pointer
-/// subscription.
-pub(crate) const PORT_HIT_SCALE: f32 = 1.8;
-
-/// Corner rounding of the event triangles (emitter glyph + subscription
-/// pin), matching the soft corners of the rest of the chrome.
-pub(crate) const EVENT_TRIANGLE_RADIUS: f32 = 2.0;
-
-/// Stroke width of the muted ring drawn around a non-required input's port
-/// circle (see `circle_frame`'s `outline` param). Also the amount a
-/// required input's plain circle grows by (on each side), so a required
-/// input's total footprint matches that ring — "important port" reads as
-/// one consistent size regardless of which visual (ring vs. bigger fill)
-/// carries it.
-const PORT_OUTLINE_WIDTH: f32 = 2.5;
-
-/// A port circle's diameter — `base` for a plain port, or `base` grown by
-/// [`PORT_OUTLINE_WIDTH`] on each side to match a non-required input's
-/// circle-plus-ring footprint (a required input, via [`circle_frame`]'s
-/// `diameter`).
-fn port_diameter(base: f32, enlarged: bool) -> f32 {
-    if enlarged {
-        base + 2.0 * PORT_OUTLINE_WIDTH
-    } else {
-        base
-    }
-}
-
-/// A port circle's extra decoration — currently just an input's muted ring
-/// (an output's pinned satellite is a canvas-level decoration instead — see
-/// `crate::gui::canvas::pin_ui`). A flag rather than a bare `Option<Color>`
-/// so a future second decoration doesn't need restructuring.
-enum PortDecoration {
-    None,
-    Outline(Color),
-}
-
-#[allow(clippy::too_many_arguments)]
-fn circle_frame(
-    ui: &mut Ui,
-    wid: WidgetId,
-    diameter: f32,
-    fill: Color,
-    decoration: PortDecoration,
-    margin: Spacing,
-    tip: &str,
-) {
-    let port = diameter;
-    let (hit, inset, hit_margin) = grown_hit_box(port, margin);
-    let radius = port * 0.5;
-
-    // Explicit `id(wid)` so the cross-frame id stays stable: prepass
-    // computes the same `port_circle_wid` and reads its response,
-    // record paints with the same id — no drift even if the parent
-    // structure shifts. CLICK | DRAG so the port (a) intercepts the
-    // press before it falls through to the node body's `Sense::DRAG`,
-    // and (b) can latch a connection drag.
-    let circle = Panel::zstack()
-        .id(wid)
-        .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
-        .margin(hit_margin)
-        .sense(Sense::CLICK | Sense::DRAG)
-        .show(ui, |ui| {
-            let rect = Rect::new(inset, inset, port, port);
-            // Decoration paints *before* the fill: the ring (an annulus
-            // strictly outside the fill's radius) doesn't overlap it either
-            // way.
-            match decoration {
-                PortDecoration::None => {}
-                PortDecoration::Outline(color) => {
-                    // A stroke paints its own rect's *inner*-edge annulus, so
-                    // drawing it on `rect` itself would eat into the fill.
-                    // Inflate first: the ring's inner edge then lands exactly
-                    // on the fill's outer edge instead of inside it.
-                    stroked_rect(
-                        ui,
-                        rect.inflated(PORT_OUTLINE_WIDTH),
-                        radius + PORT_OUTLINE_WIDTH,
-                        color,
-                        PORT_OUTLINE_WIDTH,
-                    );
-                }
-            }
-            filled_rect(ui, rect, radius, fill);
-        });
-    let snapshot = circle.response.snapshot();
-    show_port_tip(ui, snapshot, tip);
-}
-
-/// Grows `base` into a `PORT_HIT_SCALE`-larger sensing box and folds that
-/// growth back out of `margin` (as a negative adjustment) so the extra hit
-/// area doesn't displace the painted glyph — node layout and the glyph's
-/// own position are unchanged, only the hover/grab area grows. Shared by
-/// port circles ([`circle_frame`]) and event triangles ([`event_glyph`]).
-/// Returns `(hit, inset, hit_margin)`: the grown box side, half the growth
-/// (the glyph's paint offset within that box), and the adjusted margin.
-fn grown_hit_box(base: f32, margin: Spacing) -> (f32, f32, Spacing) {
-    let hit = base * PORT_HIT_SCALE;
-    let inset = (hit - base) * 0.5;
-    let [l, t, r, b] = margin.as_array();
-    let hit_margin = Spacing::new(l - inset, t - inset, r - inset, b - inset);
-    (hit, inset, hit_margin)
-}
-
-/// Shows `tip` as a hover tooltip anchored to `snapshot`, unless empty.
-/// Takes an already-snapshotted response (rather than `&Response<'_>`)
-/// because the snapshot ends the response's borrow of `ui` before this is
-/// called — `ui` is needed mutably right after, to show the tooltip
-/// itself. Shared by [`circle_frame`] and [`event_glyph`].
-fn show_port_tip(ui: &mut Ui, snapshot: ResponseSnapshot, tip: &str) {
-    if !tip.is_empty() {
-        Tooltip::on(&snapshot).text(tip.to_owned()).show(ui);
-    }
-}
-
 /// A port's hover tooltip: its `description` (when the func declares one) above a
 /// dimmer type line, else just the type. `description` is the resolved
 /// [`crate::gui::scene::SceneInput::description`] text (empty = none).
@@ -657,21 +501,5 @@ fn type_label(library: &Library, ty: &DataType) -> String {
             }
         }
         _ => library.type_name(ty).into_owned(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn port_diameter_enlarges_by_the_outline_width_on_each_side() {
-        let base = 10.0;
-        assert_eq!(port_diameter(base, false), base, "plain port is unchanged");
-        assert_eq!(
-            port_diameter(base, true),
-            base + 2.0 * PORT_OUTLINE_WIDTH,
-            "enlarged port matches an optional input's circle-plus-ring footprint"
-        );
     }
 }

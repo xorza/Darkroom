@@ -31,7 +31,7 @@ use crate::core::document::dock::{
     DockLayout, DockNode, DockOp, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
 };
 use crate::core::document::{Document, GraphRef, TabRef};
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::UiAction;
 use crate::gui::dock::drag::{DropTarget, TabDrag, classify_drop};
 use crate::gui::dock::strip::TabLabel;

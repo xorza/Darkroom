@@ -31,9 +31,7 @@ struct LibraryFile {
 }
 
 fn path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_default()
-        .join(LIBRARY_FILE)
+    super::cwd_file(LIBRARY_FILE)
 }
 
 /// Where a failed-to-load library file is moved so a later save can't

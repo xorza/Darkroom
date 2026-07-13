@@ -11,7 +11,7 @@ use scenarium::node::special::{ALL as SPECIAL_NODES, SpecialNode};
 
 use crate::core::document::PortRef;
 use crate::core::document::view_node::ViewNode;
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};

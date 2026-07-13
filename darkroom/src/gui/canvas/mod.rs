@@ -3,6 +3,7 @@ pub(crate) mod background;
 pub(crate) mod breaker;
 pub(crate) mod connection_ui;
 pub(crate) mod cull;
+pub(crate) mod drag_anchor;
 pub(crate) mod geometry;
 pub(crate) mod inspector;
 pub(crate) mod new_node_ui;
@@ -23,7 +24,7 @@ use std::collections::BTreeSet;
 
 use crate::core::document::Viewport;
 use crate::core::document::{PortKind, PortRef};
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::edit::EditCommand;
@@ -41,7 +42,8 @@ use crate::gui::canvas::selection_ui::SelectionUI;
 use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::canvas::wire::WireEmphasis;
-use crate::gui::node::{NodeUI, RecordCtx, emit_path_picks, emit_play_clicks, emit_port_dblclicks};
+use crate::gui::node::prepass::{emit_path_picks, emit_play_clicks, emit_port_dblclicks};
+use crate::gui::node::{NodeUI, RecordCtx};
 use crate::gui::scene::{Scene, SceneNode};
 
 /// Canvas-level UI scope: owns the port-widget-id cache, the

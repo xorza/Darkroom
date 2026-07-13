@@ -26,9 +26,11 @@
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
 //! formatting would clobber partial input (typing "3." would reformat
 //! to "3" on the next frame). The buffer lives in aperture's StateMap
-//! keyed by the editor id; we mirror canonical → buffer only while
-//! unfocused — skipping the blur frame, whose buffer still holds the
-//! user's text to commit — and parse only when the edit commits.
+//! keyed by the editor id ([`crate::gui::widgets::buffered_edit::EditBuffer`],
+//! shared with [`crate::gui::widgets::inline_rename`]'s renaming editor);
+//! we mirror canonical → buffer only while unfocused — skipping the blur
+//! frame, whose buffer still holds the user's text to commit — and parse
+//! only when the edit commits.
 
 use aperture::{
     Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextEditTheme, TextWrap,
@@ -39,14 +41,7 @@ use scenarium::library::Library;
 use scenarium::node::function::ValueVariant;
 
 use crate::gui::theme::StaticValueEditorTheme;
-
-#[derive(Default, Clone, Debug)]
-struct EditBuffer {
-    text: String,
-    /// Focus state last frame; a true→false edge marks the blur-commit
-    /// frame, where the buffer must survive the canonical mirror.
-    was_focused: bool,
-}
+use crate::gui::widgets::buffered_edit::EditBuffer;
 
 /// Render the editor for `value`. Returns the new value when the user
 /// committed an edit this frame (scrub released, Enter, blur, or a
@@ -255,8 +250,9 @@ struct BufferedEdit {
 /// StateMap. While the editor is unfocused, the buffer mirrors the
 /// canonical value (re-formatted via `fmt`); while focused, the user's
 /// in-progress text is left alone. The blur frame is detected *before*
-/// the mirror (via `was_focused`) so the user's text survives to be
-/// committed rather than being clobbered back to canonical.
+/// the mirror (via [`EditBuffer::blur_edge`]) so the user's text
+/// survives to be committed rather than being clobbered back to
+/// canonical.
 fn buffered_text_edit<T>(
     ui: &mut Ui,
     editor: &TextEditTheme,
@@ -267,8 +263,7 @@ fn buffered_text_edit<T>(
 ) -> BufferedEdit {
     let focused = ui.focused_id() == Some(id);
     let state = ui.state_mut::<EditBuffer>(id);
-    let blurred = state.was_focused && !focused;
-    state.was_focused = focused;
+    let blurred = state.blur_edge(focused);
     if !focused && !blurred {
         state.text = fmt(canonical);
     }

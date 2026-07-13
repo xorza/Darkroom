@@ -12,7 +12,7 @@ use aperture::{
 };
 use glam::Vec2;
 
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;

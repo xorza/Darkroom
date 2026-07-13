@@ -5,10 +5,10 @@
 use scenarium::data::StaticValue;
 use scenarium::graph::Binding;
 
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::app::App;
 use crate::gui::dialogs;
-use crate::gui::node::PathPickRequest;
+use crate::gui::node::prepass::PathPickRequest;
 
 /// Node edits that need a dialog before applying. Handled by
 /// [`App::handle_edit`].
@@ -16,7 +16,7 @@ use crate::gui::node::PathPickRequest;
 pub(crate) enum EditCommand {
     /// Open a file dialog (filtered by the request's picker config) for a
     /// node's `FsPath` const input, applying the chosen path as a `SetInput`
-    /// edit. Raised by the inline pick button (see `gui::node::emit_path_picks`,
+    /// edit. Raised by the inline pick button (see `gui::node::prepass::emit_path_picks`,
     /// which produces the [`PathPickRequest`]).
     PickInputPath(PathPickRequest),
 }

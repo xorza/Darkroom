@@ -9,7 +9,8 @@ use std::collections::BTreeSet;
 use aperture::{Key, Shortcut, Ui};
 
 use crate::core::document::{GraphRef, Viewport};
-use crate::core::edit::intent::{self, Intent, build_duplicate_intent, remove_selection_intents};
+use crate::core::edit::intent::duplicate::{build_duplicate_intent, remove_selection_intents};
+use crate::core::edit::intent::types::{Intent, UndoStep};
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
@@ -52,7 +53,7 @@ impl Editor {
         let mut relayout = false;
         let mut reconcile = false;
         let mut dirtied = false;
-        let mut on_step = |step: &intent::UndoStep| {
+        let mut on_step = |step: &UndoStep| {
             relayout |= step.requires_relayout();
             reconcile |= step.requires_reconcile();
             dirtied |= step.dirties_document();

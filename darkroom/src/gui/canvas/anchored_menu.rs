@@ -58,3 +58,22 @@ impl AnchoredMenu {
         pick
     }
 }
+
+/// The open-time target a context menu latches, read while resolving its
+/// pick — the shape every [`AnchoredMenu`] caller wraps around it (the node
+/// menu's clicked node, the subgraph menu's badge node). `set` overwrites
+/// any previous target (a fresh secondary-click always wins); `get` reads
+/// without consuming, since a pick fires the same frame the menu is still
+/// showing the latched target.
+#[derive(Default, Debug)]
+pub(crate) struct Latched<T>(Option<T>);
+
+impl<T: Copy> Latched<T> {
+    pub(crate) fn set(&mut self, target: T) {
+        self.0 = Some(target);
+    }
+
+    pub(crate) fn get(&self) -> Option<T> {
+        self.0
+    }
+}

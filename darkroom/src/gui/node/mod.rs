@@ -3,39 +3,32 @@ pub(crate) mod memory_row;
 pub(crate) mod port_color;
 pub(crate) mod port_rename;
 pub(crate) mod port_row;
+pub(crate) mod prepass;
 pub(crate) mod value_editor;
 
-use crate::core::document::GraphRef;
+use crate::core::document::PortRef;
 use crate::core::document::SelectionKey;
-use crate::core::document::{PortKind, PortRef};
-use crate::core::edit::intent::Intent;
-use crate::gui::UiAction;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::node_visible;
+use crate::gui::canvas::drag_anchor::GroupDragAnchor;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
-use crate::gui::canvas::node_ports;
 use crate::gui::canvas::pin_ui;
-use crate::gui::node::header::{
-    header, play_badge_wid, status_row, subgraph_badge_wid, subscription_pin,
-};
+use crate::gui::node::header::{header, status_row, subscription_pin};
 use crate::gui::node::memory_row::memory_row;
-use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid, ports_row};
+use crate::gui::node::port_row::ports_row;
 use crate::gui::run_state::ExecStatus;
-use crate::gui::scene::{InputBindingView, Scene, SceneNode};
+use crate::gui::scene::{Scene, SceneNode};
 use crate::gui::theme::Theme;
 use aperture::{
     Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };
 use glam::Vec2;
-use scenarium::data::{DataType, FsPathConfig, StaticValue};
 use scenarium::graph::Binding;
 use scenarium::graph::NodeId;
-use scenarium::graph::OutputPort;
-use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::library::Library;
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 /// Read-only context the node-draw chain threads top to bottom: the
 /// theme, the scene being rendered, and last frame's port geometry.
@@ -83,27 +76,13 @@ pub(crate) struct NodeUI {
     focus_kept_last: Option<NodeId>,
 }
 
-#[derive(Clone, Debug)]
-struct DragAnchor {
-    /// The node the pointer latched. Keys the `response_for` lookup and
-    /// the drag gesture; always present in `start_node_positions`.
-    node_id: NodeId,
-    /// Every node moving with this drag and its position at drag start:
-    /// the whole selection's nodes when the grabbed node was already
-    /// selected, else just the grabbed node. Each emits `start + delta`.
-    start_node_positions: Vec<(NodeId, Vec2)>,
-    /// Every pinned-output preview moving alongside the nodes above and its
-    /// absolute position at drag start — the selection's pins when the
-    /// grabbed node was already selected, else empty (a lone node drag
-    /// carries no pins).
-    start_pin_positions: Vec<(OutputPort, Vec2)>,
-    /// Captured from the `drag_started` frame's `Response::widget_id()`
-    /// so subsequent frames can `ui.response_for(widget_id)` *before*
-    /// recording and bake the current `drag_delta` into `.position(...)`.
-    /// Lets the node paint at the cursor's location in Pass A directly
-    /// — no need to wait for Pass B's relayout to catch up.
-    widget_id: WidgetId,
-}
+/// A node-body drag anchor: `key` is the grabbed node's id, always present
+/// in `start_node_positions`. Captured from the `drag_started` frame's
+/// `Response::widget_id()` so subsequent frames can `ui.response_for
+/// (widget_id)` *before* recording and bake the current `drag_delta` into
+/// `.position(...)` — letting the node paint at the cursor's location in
+/// Pass A directly, with no need to wait for Pass B's relayout to catch up.
+type DragAnchor = GroupDragAnchor<NodeId>;
 
 impl NodeUI {
     /// Record the widget tree of every scene node that can intersect
@@ -159,7 +138,7 @@ impl NodeUI {
         // (mid-drag delete). Without this, the slot would linger and
         // could fire when a fresh node reused the id.
         if let Some(a) = &self.drag_anchor
-            && rcx.scene.nodes.by_key(&a.node_id).is_none()
+            && rcx.scene.nodes.by_key(&a.key).is_none()
         {
             self.drag_anchor = None;
         }
@@ -192,22 +171,18 @@ impl NodeUI {
         let selected = rcx.selected.contains(&SelectionKey::Node(node.id));
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding — width-gated,
-        // not color-gated). Only the color changes: the breaker alarm wins,
-        // then the bright selection halo, else the resting `node_border`
-        // (transparent in the dark theme, a hairline in the light one).
+        // not color-gated). Only the color changes, a 4-tier decision: the
+        // breaker alarm wins, then the missing-stub color, then
+        // `Theme::card_border`'s own broken/selected/resting 3-tier (broken
+        // can't recur here since it's already handled, but the helper still
+        // carries the shape node body and pin preview share).
         let border_width = theme.card_border_width();
-        let border = if broken {
-            theme.colors.connection_broken
-        } else if node.missing {
+        let border = if node.missing && !broken {
             // A stub for a node whose func is gone from the library: paint it
             // in the error color so it reads as broken-but-deletable.
             theme.colors.exec_errored_glow
-        } else if selected {
-            // The rubber-band's accent, so "in the selection" reads as one
-            // color from sweep to committed halo.
-            theme.colors.selection_rect
         } else {
-            theme.colors.node_border
+            theme.card_border(broken, selected).color
         };
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).
@@ -289,7 +264,7 @@ impl NodeUI {
                 }
             };
             self.drag_anchor = Some(DragAnchor {
-                node_id: node.id,
+                key: node.id,
                 start_node_positions,
                 start_pin_positions,
                 widget_id: if title_drag { title_wid } else { body_wid },
@@ -304,15 +279,12 @@ impl NodeUI {
     /// `MoveSelection`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
     pub(crate) fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
-        // `node_id`/`widget_id` are `Copy`, so pull them out and drop the
+        // `key`/`widget_id` are `Copy`, so pull them out and drop the
         // borrow — that lets the early returns below reassign
         // `self.drag_anchor` without cloning the `start_*_positions` `Vec`s,
         // which are only read in the success path (where the anchor isn't
         // cleared and can be re-borrowed).
-        let Some(&DragAnchor {
-            node_id, widget_id, ..
-        }) = self.drag_anchor.as_ref()
-        else {
+        let Some(&DragAnchor { key, widget_id, .. }) = self.drag_anchor.as_ref() else {
             return;
         };
         // Drop a stale anchor whose node was removed last frame (e.g.
@@ -320,7 +292,7 @@ impl NodeUI {
         // emitted `MoveSelection` would target a missing node and panic in
         // `build_step`. `draw_all` also clears stale anchors, but only
         // after this prepass runs.
-        if scene.nodes.by_key(&node_id).is_none() {
+        if scene.nodes.by_key(&key).is_none() {
             self.drag_anchor = None;
             return;
         }
@@ -347,146 +319,7 @@ impl NodeUI {
         // Anchor still present (success path never cleared it); re-borrow
         // to read the start positions without cloning.
         let anchor = self.drag_anchor.as_ref().unwrap();
-        let nodes = anchor
-            .start_node_positions
-            .iter()
-            .map(|(id, start)| (*id, *start + offset))
-            .collect();
-        let pins = anchor
-            .start_pin_positions
-            .iter()
-            .map(|(port, start)| (*port, *start + offset))
-            .collect();
-        out.push(Intent::MoveSelection {
-            grabbed: SelectionKey::Node(node_id),
-            nodes,
-            pins,
-        });
-    }
-}
-
-/// Prepass scan: surface an `OpenGraph` for any subgraph node whose `S`
-/// chip was clicked (read from last frame's response). Detecting the
-/// open here — *before* the record — lets `App` switch the active graph
-/// ahead of Pass A, so the subgraph records a pass earlier and its
-/// connections draw with no first-frame gap. Linked subgraphs aren't
-/// editable targets yet, so only `Local` opens.
-pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
-    for n in &scene.nodes {
-        // Instances are always `Local` (library subgraphs are localized on
-        // instance), so the "S" chip opens the interior directly.
-        if let Some(SubgraphRef::Local(id)) = n.subgraph
-            && ui.response_for(subgraph_badge_wid(n.id)).clicked
-        {
-            actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
-        }
-    }
-}
-
-/// Scan for a click on a node's header play chip (read from last frame's
-/// response), returning the node to run to. First hit wins — one run per
-/// frame. The node UI surfaces only the domain fact (which node); the
-/// canvas translates it into the run command. The `runnable` guard matches
-/// where the chip draws, so a stale response can't seed an unrunnable node.
-pub(crate) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
-    scene
-        .nodes
-        .iter()
-        .find(|n| n.runnable() && ui.response_for(play_badge_wid(n.id)).clicked)
-        .map(|n| n.id)
-}
-
-/// A click on an `FsPath` input's inline pick button, surfaced for the
-/// caller to translate into a deferred file-dialog command. The node UI
-/// produces the domain request (node + port + picker config) and stays
-/// unaware of the app-level `AppCommand` enum — the canvas, which already
-/// owns the command channel, does the translation.
-#[derive(Clone, Debug)]
-pub(crate) struct PathPickRequest {
-    pub(crate) node_id: NodeId,
-    pub(crate) port_idx: usize,
-    /// The picker config is type-level metadata, taken from the port's
-    /// `DataType` (the value only carries the path string).
-    pub(crate) config: Arc<FsPathConfig>,
-}
-
-/// Scan for a click on an `FsPath` input's inline pick button (polled by
-/// its const-editor id, from last frame's responses). Returns the first
-/// hit — one pick per frame — for the caller to defer into a blocking file
-/// dialog outside the record.
-pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest> {
-    for node in &scene.nodes {
-        for (port_idx, input) in scene.inputs(node.inputs).iter().enumerate() {
-            if let InputBindingView::Const(StaticValue::FsPath(_)) = &input.binding
-                && let DataType::FsPath(config) = &input.ty
-                && ui.response_for(const_editor_wid(node.id, port_idx)).clicked
-            {
-                return Some(PathPickRequest {
-                    node_id: node.id,
-                    port_idx,
-                    config: config.clone(),
-                });
-            }
-        }
-    }
-    None
-}
-
-/// Prepass scan: port double-clicks read from last frame's responses. An
-/// input double-click (on the port circle *or* its label) toggles the
-/// binding — clears it, or seeds the default const when unbound; an output
-/// double-click disconnects every consumer it feeds.
-///
-/// Emitted pre-record (like the connection commit) because adding or removing
-/// a `Const` input's inline editor resizes the node — doing it before Pass A
-/// lets the node arrange at its settled size and the wires re-anchor the same
-/// frame, instead of floating until the relayout pass.
-pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
-    for node in &scene.nodes {
-        // Boundary ports route the interface — no const affordance, so an
-        // unbound one has nothing to seed (its label double-click renames).
-        let can_set = !node.boundary;
-        for (i, input) in scene.inputs(node.inputs).iter().enumerate() {
-            let port = PortRef {
-                node_id: node.id,
-                kind: PortKind::Input,
-                port_idx: i,
-            };
-            // The circle intercepts its own rect; the cell catches the label.
-            let dbl = ui.response_for(port_circle_wid(port)).double_clicked()
-                || ui.response_for(input_cell_wid(port)).double_clicked();
-            if !dbl {
-                continue;
-            }
-            match &input.binding {
-                // Unbound → seed the default literal (or first enum / value-
-                // option variant, both already folded into `SceneInput::default`).
-                InputBindingView::None => {
-                    if can_set && let Some(default) = &input.default {
-                        out.push(set_input(port, Binding::Const(default.clone())));
-                    }
-                }
-                // Already bound → clear it.
-                _ => out.push(set_input(port, Binding::None)),
-            }
-        }
-        for port in node_ports(node, PortKind::Output) {
-            if ui.response_for(port_circle_wid(port)).double_clicked() {
-                // An output may feed many inputs — clear each consumer.
-                for c in &scene.connections {
-                    if c.src_node == port.node_id && c.src_port == port.port_idx {
-                        out.push(set_input(
-                            PortRef {
-                                node_id: c.tgt_node,
-                                kind: PortKind::Input,
-                                port_idx: c.tgt_port,
-                            },
-                            Binding::None,
-                        ));
-                    }
-                }
-            }
-        }
+        out.push(anchor.resolve(offset, SelectionKey::Node(key)));
     }
 }
 

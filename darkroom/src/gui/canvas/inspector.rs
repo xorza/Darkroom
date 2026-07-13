@@ -70,8 +70,6 @@ struct PanelDraw<'a> {
 
 /// Fixed panel width in canvas (pre-transform) units.
 const PANEL_WIDTH: f32 = 280.0;
-/// Gap between the node's right edge and the panel's left edge.
-const PANEL_GAP: f32 = 16.0;
 /// Most recent log lines shown per node, so the panel stays bounded.
 const LOG_LINE_CAP: usize = 20;
 
@@ -160,7 +158,7 @@ impl Inspectors {
                 .node_world_rect(node)
                 .map(|r| r.size.w)
                 .unwrap_or(theme.node_min_width);
-            let pos = node.pos + Vec2::new(node_w + PANEL_GAP, 0.0);
+            let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
             self.draw_one(ui, &ctx, node, mode, pos);
         }
     }

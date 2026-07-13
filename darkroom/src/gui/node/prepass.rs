@@ -1,0 +1,149 @@
+//! Free-standing prepass scanners: plain `(ui, scene, ..)` functions that
+//! read last frame's chip/port responses into domain facts (a graph to
+//! open, a node to run, a file dialog to open, a binding to toggle). None
+//! of these touch [`crate::gui::node::NodeUI`]'s own state — that's the
+//! node body's drag anchor, handled in `NodeUI::prepass` — so they live
+//! here instead of crowding `node::mod` alongside the `NodeUI` struct.
+
+use std::sync::Arc;
+
+use aperture::Ui;
+use scenarium::data::{DataType, FsPathConfig, StaticValue};
+use scenarium::graph::Binding;
+use scenarium::graph::NodeId;
+use scenarium::graph::subgraph::SubgraphRef;
+
+use crate::core::document::GraphRef;
+use crate::core::document::{PortKind, PortRef};
+use crate::core::edit::intent::types::Intent;
+use crate::gui::UiAction;
+use crate::gui::canvas::node_ports;
+use crate::gui::node::header::{play_badge_wid, subgraph_badge_wid};
+use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid};
+use crate::gui::node::set_input;
+use crate::gui::scene::{InputBindingView, Scene};
+
+/// Prepass scan: surface an `OpenGraph` for any subgraph node whose `S`
+/// chip was clicked (read from last frame's response). Detecting the
+/// open here — *before* the record — lets `App` switch the active graph
+/// ahead of Pass A, so the subgraph records a pass earlier and its
+/// connections draw with no first-frame gap. Linked subgraphs aren't
+/// editable targets yet, so only `Local` opens.
+pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
+    for n in &scene.nodes {
+        // Instances are always `Local` (library subgraphs are localized on
+        // instance), so the "S" chip opens the interior directly.
+        if let Some(SubgraphRef::Local(id)) = n.subgraph
+            && ui.response_for(subgraph_badge_wid(n.id)).clicked
+        {
+            actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
+        }
+    }
+}
+
+/// Scan for a click on a node's header play chip (read from last frame's
+/// response), returning the node to run to. First hit wins — one run per
+/// frame. The node UI surfaces only the domain fact (which node); the
+/// canvas translates it into the run command. The `runnable` guard matches
+/// where the chip draws, so a stale response can't seed an unrunnable node.
+pub(crate) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
+    scene
+        .nodes
+        .iter()
+        .find(|n| n.runnable() && ui.response_for(play_badge_wid(n.id)).clicked)
+        .map(|n| n.id)
+}
+
+/// A click on an `FsPath` input's inline pick button, surfaced for the
+/// caller to translate into a deferred file-dialog command. The node UI
+/// produces the domain request (node + port + picker config) and stays
+/// unaware of the app-level `AppCommand` enum — the canvas, which already
+/// owns the command channel, does the translation.
+#[derive(Clone, Debug)]
+pub(crate) struct PathPickRequest {
+    pub(crate) node_id: NodeId,
+    pub(crate) port_idx: usize,
+    /// The picker config is type-level metadata, taken from the port's
+    /// `DataType` (the value only carries the path string).
+    pub(crate) config: Arc<FsPathConfig>,
+}
+
+/// Scan for a click on an `FsPath` input's inline pick button (polled by
+/// its const-editor id, from last frame's responses). Returns the first
+/// hit — one pick per frame — for the caller to defer into a blocking file
+/// dialog outside the record.
+pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest> {
+    for node in &scene.nodes {
+        for (port_idx, input) in scene.inputs(node.inputs).iter().enumerate() {
+            if let InputBindingView::Const(StaticValue::FsPath(_)) = &input.binding
+                && let DataType::FsPath(config) = &input.ty
+                && ui.response_for(const_editor_wid(node.id, port_idx)).clicked
+            {
+                return Some(PathPickRequest {
+                    node_id: node.id,
+                    port_idx,
+                    config: config.clone(),
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Prepass scan: port double-clicks read from last frame's responses. An
+/// input double-click (on the port circle *or* its label) toggles the
+/// binding — clears it, or seeds the default const when unbound; an output
+/// double-click disconnects every consumer it feeds.
+///
+/// Emitted pre-record (like the connection commit) because adding or removing
+/// a `Const` input's inline editor resizes the node — doing it before Pass A
+/// lets the node arrange at its settled size and the wires re-anchor the same
+/// frame, instead of floating until the relayout pass.
+pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
+    for node in &scene.nodes {
+        // Boundary ports route the interface — no const affordance, so an
+        // unbound one has nothing to seed (its label double-click renames).
+        let can_set = !node.boundary;
+        for (i, input) in scene.inputs(node.inputs).iter().enumerate() {
+            let port = PortRef {
+                node_id: node.id,
+                kind: PortKind::Input,
+                port_idx: i,
+            };
+            // The circle intercepts its own rect; the cell catches the label.
+            let dbl = ui.response_for(port_circle_wid(port)).double_clicked()
+                || ui.response_for(input_cell_wid(port)).double_clicked();
+            if !dbl {
+                continue;
+            }
+            match &input.binding {
+                // Unbound → seed the default literal (or first enum / value-
+                // option variant, both already folded into `SceneInput::default`).
+                InputBindingView::None => {
+                    if can_set && let Some(default) = &input.default {
+                        out.push(set_input(port, Binding::Const(default.clone())));
+                    }
+                }
+                // Already bound → clear it.
+                _ => out.push(set_input(port, Binding::None)),
+            }
+        }
+        for port in node_ports(node, PortKind::Output) {
+            if ui.response_for(port_circle_wid(port)).double_clicked() {
+                // An output may feed many inputs — clear each consumer.
+                for c in &scene.connections {
+                    if c.src_node == port.node_id && c.src_port == port.port_idx {
+                        out.push(set_input(
+                            PortRef {
+                                node_id: c.tgt_node,
+                                kind: PortKind::Input,
+                                port_idx: c.tgt_port,
+                            },
+                            Binding::None,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}

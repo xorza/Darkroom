@@ -105,6 +105,15 @@ impl<K: Eq + Hash + Copy> PortLayer<K> {
         self.live.get(&key).is_some_and(|i| i.drag_started)
     }
 
+    /// First key in `keys` whose drag started this frame, or `None` — the
+    /// "which glyph did a fresh drag just latch onto" scan every drag-source
+    /// controller (connection/pin/event/subscription) needs, differing only
+    /// in the key sequence it feeds in (a node's ports, its events, or its
+    /// subscription pin).
+    pub(crate) fn first_drag_started(&self, mut keys: impl Iterator<Item = K>) -> Option<K> {
+        keys.find(|k| self.drag_started(*k))
+    }
+
     /// `true` while a drag started on this widget is still live.
     pub(crate) fn dragging(&self, key: K) -> bool {
         self.live.get(&key).is_some_and(|i| i.dragging)

@@ -26,7 +26,8 @@ use std::ops::Range;
 use common::SerdeFormat;
 
 use crate::core::document::{Document, GraphRef};
-use crate::core::edit::intent::{self, GestureKey, UndoStep};
+use crate::core::edit::intent::apply::{apply_step, revert_step};
+use crate::core::edit::intent::types::{GestureKey, UndoStep};
 
 #[derive(Debug)]
 struct Entry {
@@ -132,7 +133,7 @@ impl ActionStack {
             &mut self.temp_buffer,
         );
         for step in steps.iter().rev() {
-            intent::revert_step(step, doc, target);
+            revert_step(step, doc, target);
             on_step(step);
         }
         true
@@ -149,7 +150,7 @@ impl ActionStack {
             &mut self.temp_buffer,
         );
         for step in steps.iter() {
-            intent::apply_step(step, doc, target);
+            apply_step(step, doc, target);
             on_step(step);
         }
         self.cursor += 1;

@@ -4,7 +4,7 @@ use std::mem::take;
 use aperture::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
 
 use crate::core::document::{Document, PortRef, TabRef};
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
 use crate::gui::app::AppContext;
@@ -15,7 +15,7 @@ use crate::gui::dock::DockUi;
 use crate::gui::graph_toolbar;
 use crate::gui::image_viewer::ImageViewer;
 use crate::gui::menu_bar;
-use crate::gui::node::emit_subgraph_opens;
+use crate::gui::node::prepass::emit_subgraph_opens;
 use crate::gui::preferences_view;
 use crate::gui::scene::Scene;
 use crate::gui::status_bar;

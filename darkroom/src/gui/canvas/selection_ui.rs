@@ -5,7 +5,7 @@ use glam::Vec2;
 use scenarium::graph::OutputPort;
 
 use crate::core::document::SelectionKey;
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pin_ui;

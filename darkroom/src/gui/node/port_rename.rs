@@ -10,7 +10,7 @@ use aperture::{Configure, HAlign, Sense, SmolStr, Text, TextStyle, Tooltip, Ui, 
 use crate::core::document::BoundarySide;
 use crate::core::document::PortRef;
 use crate::core::document::SelectionKey;
-use crate::core::edit::intent::Intent;
+use crate::core::edit::intent::types::Intent;
 use crate::gui::node::{RecordCtx, click_intents};
 use crate::gui::widgets::inline_rename::InlineRename;
 
