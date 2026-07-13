@@ -5,7 +5,7 @@ use scenarium::graph::subgraph::SubgraphRef;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::subgraph::SubgraphCommand;
-use crate::gui::canvas::anchored_menu::{AnchoredMenu, Latched};
+use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::node::header::subgraph_badge_wid;
 use crate::gui::scene::Scene;
 
@@ -18,7 +18,7 @@ use crate::gui::scene::Scene;
 pub(crate) struct SubgraphMenuUi {
     menu: AnchoredMenu,
     /// Badge node the open menu targets — set at open, read at pick.
-    node_id: Latched<NodeId>,
+    node_id: Option<NodeId>,
 }
 
 impl SubgraphMenuUi {
@@ -36,7 +36,7 @@ impl SubgraphMenuUi {
                 && ui.response_for(subgraph_badge_wid(n.id)).secondary_clicked
                 && let Some(p) = ui.pointer_pos()
             {
-                self.node_id.set(n.id);
+                self.node_id = Some(n.id);
                 self.menu.open_at(p);
             }
         }
@@ -57,7 +57,7 @@ impl SubgraphMenuUi {
         // A pick only fires while the menu is open, where `node_id` holds
         // this open's target.
         if let Some(choice) = pick
-            && let Some(node_id) = self.node_id.get()
+            && let Some(node_id) = self.node_id
         {
             match choice {
                 MenuChoice::Publish => {

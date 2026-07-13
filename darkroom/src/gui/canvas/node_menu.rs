@@ -7,7 +7,7 @@ use crate::core::document::SelectionKey;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::canvas::anchored_menu::{AnchoredMenu, Latched};
+use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::node::node_widget_id;
 use crate::gui::scene::Scene;
 
@@ -25,7 +25,7 @@ pub(crate) struct NodeMenuUi {
     /// Node whose body opened the menu — the "Run to this node" target,
     /// which is the clicked node regardless of the selection. Set at open,
     /// read at pick (same latch as the subgraph menu's).
-    target: Latched<NodeId>,
+    target: Option<NodeId>,
 }
 
 /// A structural action picked from a node's context menu. The target is the
@@ -70,7 +70,7 @@ impl NodeMenuUi {
                         to: BTreeSet::from([SelectionKey::Node(n.id)]),
                     });
                 }
-                self.target.set(n.id);
+                self.target = Some(n.id);
                 self.menu.open_at(p);
             }
         }
@@ -82,7 +82,6 @@ impl NodeMenuUi {
             // runs while the menu is open.
             let run_target = self
                 .target
-                .get()
                 .and_then(|id| scene.nodes.iter().find(|n| n.id == id))
                 .filter(|n| n.runnable())
                 .map(|n| n.id);

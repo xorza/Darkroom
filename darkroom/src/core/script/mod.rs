@@ -44,7 +44,7 @@ pub mod tcp;
 #[cfg(test)]
 mod tests;
 
-pub use session::{SessionError, SessionRef, SessionStore};
+use session::{SessionError, SessionRef, SessionStore};
 use tcp::TcpScriptConfig;
 
 /// Runtime configuration for the scripting surface. Built from CLI flags in

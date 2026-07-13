@@ -36,3 +36,23 @@ impl BackgroundRuntime {
         f()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::BackgroundRuntime;
+
+    #[test]
+    fn enter_provides_an_ambient_runtime_for_spawn() {
+        let rt = BackgroundRuntime::new().unwrap();
+        let (tx, rx) = mpsc::channel();
+        // Outside `enter`, this `tokio::spawn` would panic (no ambient
+        // runtime); the received value proves the task ran on `rt`.
+        rt.enter(|| {
+            tokio::spawn(async move { tx.send(42).unwrap() });
+        });
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), 42);
+    }
+}

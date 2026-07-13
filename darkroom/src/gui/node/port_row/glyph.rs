@@ -102,7 +102,7 @@ pub(crate) fn circle_frame(
             filled_rect(ui, rect, radius, fill);
         });
     let snapshot = circle.response.snapshot();
-    tooltip_after(ui, &snapshot, tip);
+    tooltip_after(ui, &snapshot, tip.to_owned());
 }
 
 /// Paints an event port glyph: a right-pointing triangle (a port dot rotated
@@ -148,7 +148,7 @@ pub(crate) fn event_glyph(
             );
         });
     let snapshot = glyph.response.snapshot();
-    tooltip_after(ui, &snapshot, tip);
+    tooltip_after(ui, &snapshot, tip.to_owned());
 }
 
 /// Grows `base` into a `PORT_HIT_SCALE`-larger sensing box and folds that

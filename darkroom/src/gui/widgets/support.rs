@@ -3,6 +3,8 @@
 //! and layout spacers. Chrome-level composition (pills, chips) lives in
 //! [`toolbar`](crate::gui::widgets::toolbar).
 
+use std::borrow::Cow;
+
 use aperture::{
     Background, Color, Configure, Corners, FontFamily, Panel, Rect, ResponseSnapshot, Shape,
     Sizing, Stroke, Text, TextStyle, Tooltip, Ui,
@@ -130,9 +132,15 @@ pub(crate) fn hspacer(ui: &mut Ui, salt: &'static str) {
 /// so a caller that just finished building the widget can end its own `ui`
 /// borrow (via `.snapshot()`) before this one needs `ui` back mutably to
 /// record the tooltip. Shared by every chip/badge/port-glyph that pairs a
-/// widget with a hover tooltip.
-pub(crate) fn tooltip_after(ui: &mut Ui, snapshot: &ResponseSnapshot, tip: &str) {
+/// widget with a hover tooltip. `Cow` so the common `&'static str` tips
+/// don't allocate per frame.
+pub(crate) fn tooltip_after(
+    ui: &mut Ui,
+    snapshot: &ResponseSnapshot,
+    tip: impl Into<Cow<'static, str>>,
+) {
+    let tip = tip.into();
     if !tip.is_empty() {
-        Tooltip::on(snapshot).text(tip.to_owned()).show(ui);
+        Tooltip::on(snapshot).text(tip).show(ui);
     }
 }
