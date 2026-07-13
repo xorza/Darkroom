@@ -562,7 +562,7 @@ fn activate_intent(addr: TabAddress) -> Intent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::document::SelectionKey;
+    use crate::core::document::ItemRef;
 
     /// Run an `OpenGraph` exactly as `navigate` does: queue the focus
     /// switch, then drain it onto the undo stack.
@@ -588,7 +588,7 @@ mod tests {
         use scenarium::graph::{Node, NodeKind};
         use scenarium::node::function::FuncId;
 
-        use crate::core::document::view_node::ViewNode;
+        use crate::core::document::view_item::ViewItem;
 
         let lib = Library::default();
         let mut editor = Editor::new(Document::default());
@@ -598,10 +598,11 @@ mod tests {
         let node = Node::new(NodeKind::Func(FuncId::unique()));
         let id = node.id;
         editor.document.graph.add(node);
-        editor.document.main_view.view_nodes.add(ViewNode {
-            id,
-            pos: Vec2::ZERO,
-        });
+        editor
+            .document
+            .main_view
+            .view_items
+            .add(ViewItem::node(id, Vec2::ZERO));
         editor.apply_edit(
             Intent::RenameNode {
                 node_id: id,
@@ -616,13 +617,13 @@ mod tests {
         editor.dirty = false;
         editor.apply_edit(
             Intent::SetSelection {
-                to: BTreeSet::from([SelectionKey::Node(id)]),
+                to: BTreeSet::from([ItemRef::Node(id)]),
             },
             &lib,
         );
         assert_eq!(
             editor.document.main_view.selected,
-            BTreeSet::from([SelectionKey::Node(id)]),
+            BTreeSet::from([ItemRef::Node(id)]),
             "the selection edit did apply",
         );
         assert!(
@@ -644,17 +645,18 @@ mod tests {
         use scenarium::node::function::FuncId;
 
         use crate::core::document::PortKind;
-        use crate::core::document::view_node::ViewNode;
+        use crate::core::document::view_item::ViewItem;
 
         let lib = Library::default();
         let mut editor = Editor::new(Document::default());
         let node = Node::new(NodeKind::Func(FuncId::unique()));
         let id = node.id;
         editor.document.graph.add(node);
-        editor.document.main_view.view_nodes.add(ViewNode {
-            id,
-            pos: Vec2::ZERO,
-        });
+        editor
+            .document
+            .main_view
+            .view_items
+            .add(ViewItem::node(id, Vec2::ZERO));
         let port = |port_idx| PortRef {
             node_id: id,
             kind: PortKind::Output,
