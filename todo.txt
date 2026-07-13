@@ -13,3 +13,5 @@ file name as argument clap
 curve gpu tesselation
 
 try repair & broken document
+
+pined preview cull bug
