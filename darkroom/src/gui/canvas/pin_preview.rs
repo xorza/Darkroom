@@ -211,10 +211,14 @@ pub(crate) fn draw_widget<'ui>(
                 .padding(Spacing::xy(CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y))
                 .background(header_background(theme, inner_r))
                 .show(ui, |ui| {
+                    // Same size + weight as a node's title (`node::header::title`)
+                    // — the theme's base text, bold — so the two header bars
+                    // read as one style at two widths, not two independently
+                    // tuned looks.
                     Text::new(title.to_owned())
                         .style(TextStyle {
                             weight: FontWeight::Bold,
-                            ..sized_text(ui, 11.0)
+                            ..ui.theme.text
                         })
                         .text_wrap(TextWrap::Wrap)
                         .show(ui);
