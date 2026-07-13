@@ -13,5 +13,3 @@ file name as argument clap
 try repair & broken document
 
 pined preview cull bug
-
-polyline retirement
