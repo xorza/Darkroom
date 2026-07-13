@@ -14,6 +14,4 @@ curve gpu tesselation
 
 load broken document
 
-(nodeidx, prtnuber) - to struct
-
 mix order of nodes and previews
