@@ -142,6 +142,20 @@ fn extract_and_filter_candidates(
 ) -> ExtractionResult {
     let mut result = extract_candidates(pixels, label_map, config);
 
+    // `Config::validate()` can't bound `edge_margin` against the image (it doesn't know the
+    // image size), so a margin that swallows the whole image is only catchable here: the retain
+    // below needs `bbox.min >= edge_margin && bbox.max < dim - edge_margin`, which no bbox can
+    // satisfy once `2 * edge_margin >= dim` — every region is silently filtered out. Surface it
+    // instead of leaving an empty result indistinguishable from "no stars in the image".
+    if 2 * config.edge_margin >= width.min(height) {
+        tracing::warn!(
+            "edge_margin ({}) leaves no valid interior in a {width}x{height} image \
+             (needs 2 * edge_margin < the smallest dimension); every detected region \
+             will be filtered out",
+            config.edge_margin,
+        );
+    }
+
     result.regions.retain(|c| {
         c.area >= config.min_area
             && c.bbox.min.x >= config.edge_margin
@@ -422,5 +436,30 @@ mod tests {
 
         assert_eq!(result.regions.len(), 1);
         assert_eq!(result.deblended_components, 0);
+    }
+
+    #[test]
+    fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
+        // Once 2 * edge_margin >= the smallest dimension, the retain predicate
+        // `bbox.min >= margin && bbox.max < dim - margin` is unsatisfiable, so every region
+        // is filtered out. This must degrade gracefully (empty result, no panic/overflow)
+        // rather than crash, since detect() runs once per frame in a batch and one
+        // oddly-sized frame shouldn't abort the whole run. Covers both the exact boundary
+        // (2 * 16 == 32) and a margin past the dimension itself (saturating_sub floors at 0).
+        for edge_margin in [16, 32] {
+            let (pixels, label_map) = one_component(32, 32, &[(16, 16, 1.0, 3.0)]);
+            let config = Config {
+                edge_margin,
+                ..local_maxima_config()
+            };
+
+            let result = extract_and_filter_candidates(&pixels, &label_map, &config, 32, 32);
+
+            assert!(
+                result.regions.is_empty(),
+                "edge_margin {edge_margin} leaves no valid interior in 32x32, so every \
+                 region must be filtered out"
+            );
+        }
     }
 }

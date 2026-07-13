@@ -37,7 +37,10 @@ pub(crate) fn interpolate_segment_cubic_simd(
     tx_start: f32,
     tx_step: f32,
 ) {
-    debug_assert_eq!(bg_out.len(), noise_out.len());
+    // Release assert, not debug: every SIMD backend below derives its store bound solely from
+    // bg_out.len() and writes into noise_out using that same bound — a length mismatch would be
+    // an out-of-bounds write into noise_out, not just a wrong value. O(1) check, not expensive.
+    assert_eq!(bg_out.len(), noise_out.len());
 
     #[cfg(target_arch = "x86_64")]
     {
@@ -401,6 +404,19 @@ mod tests {
     use super::*;
 
     // ========== Cubic spline interpolation SIMD tests ==========
+
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn test_cubic_segment_simd_mismatched_lengths_panics() {
+        // Every SIMD backend derives its store bound solely from bg_out.len() and writes
+        // into noise_out with that same bound — a mismatch must be rejected even in release
+        // builds, not just debug, since it would otherwise be an out-of-bounds write.
+        let mut bg = vec![0.0f32; 8];
+        let mut noise = vec![0.0f32; 4];
+        interpolate_segment_cubic_simd(
+            &mut bg, &mut noise, 100.0, 200.0, -5.0, 3.0, 5.0, 10.0, -0.5, 0.3, 0.0, 0.1,
+        );
+    }
 
     #[test]
     fn test_cubic_segment_simd_matches_scalar() {

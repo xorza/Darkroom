@@ -44,11 +44,19 @@ impl QualityFilterStats {
     }
 }
 
+/// Result of the filter stage: the surviving stars plus rejection statistics.
+#[derive(Debug)]
+pub(crate) struct FilterOutcome {
+    /// Filtered stars, sorted by flux (brightest first).
+    pub stars: Vec<Star>,
+    pub stats: QualityFilterStats,
+}
+
 /// Filter stars by quality metrics, remove duplicates, and sort by flux.
 ///
 /// Returns the filtered stars and rejection statistics. Stars are returned
 /// sorted by flux (brightest first).
-pub(crate) fn filter(mut stars: Vec<Star>, config: &Config) -> (Vec<Star>, QualityFilterStats) {
+pub(crate) fn filter(mut stars: Vec<Star>, config: &Config) -> FilterOutcome {
     let mut stats = QualityFilterStats::default();
 
     // Apply quality filters
@@ -82,7 +90,7 @@ pub(crate) fn filter(mut stars: Vec<Star>, config: &Config) -> (Vec<Star>, Quali
     // Remove duplicates
     stats.duplicates = remove_duplicate_stars(&mut stars, config.duplicate_min_separation);
 
-    (stars, stats)
+    FilterOutcome { stars, stats }
 }
 
 /// Sort stars by flux (brightest first).
@@ -114,6 +122,13 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
 }
 
 /// Remove duplicate star detections that are too close together.
+///
+/// For each cluster of stars within `min_separation`, keeps the *first* star
+/// encountered in `stars` and drops the rest — neither this function nor its
+/// `_simple`/spatial-hash helpers ever compare `.flux`. Callers therefore MUST
+/// pass `stars` already sorted by flux descending (as `filter()` does via
+/// `sort_by_flux` before calling this) for "first kept" to mean "brightest
+/// kept"; otherwise an arbitrary, non-brightest star in each cluster survives.
 pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     if stars.len() < 2 {
         return 0;
@@ -510,6 +525,28 @@ mod tests {
         assert_eq!(removed, 1);
         assert_eq!(stars.len(), 1);
         assert!((stars[0].flux - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_remove_duplicate_stars_unsorted_input_keeps_first_not_brightest() {
+        // Pins the documented precondition: remove_duplicate_stars keeps the FIRST
+        // star in a cluster, never the brightest — it never reads `.flux`. Callers
+        // (i.e. filter(), via sort_by_flux) are responsible for sorting first; this
+        // test feeds dimmer-first input to show what a caller that skips sorting
+        // actually gets, so a future refactor can't silently assume flux-awareness.
+        let mut stars = vec![
+            make_star_at(11.0, 11.0, 50.0),  // Dimmer, but first in the Vec
+            make_star_at(10.0, 10.0, 100.0), // Brighter, but second
+        ];
+
+        let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+        assert_eq!(removed, 1);
+        assert_eq!(stars.len(), 1);
+        assert!(
+            (stars[0].flux - 50.0).abs() < 0.01,
+            "unsorted input keeps the first-encountered star (flux 50), not the brightest (100)"
+        );
     }
 
     #[test]

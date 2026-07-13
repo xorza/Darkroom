@@ -40,7 +40,7 @@ pub(crate) const LN2_HI: f64 = 6.931_457_519_531_25e-1;
 pub(crate) const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
 
 use crate::stacking::star_detection::centroid::lm_optimizer::{
-    LMConfig, LMModel, LMResult, optimize,
+    LMConfig, LMModel, LMResult, accumulate_chi2, build_normal_equations_scalar, optimize,
 };
 use crate::stacking::star_detection::centroid::{
     FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights,
@@ -57,21 +57,28 @@ pub(crate) type GaussianFitConfig = LMConfig;
 pub(crate) struct GaussianFitResult {
     /// Position of Gaussian center (sub-pixel).
     pub pos: Vec2,
-    /// Amplitude of Gaussian.
-    #[allow(dead_code)] // Used in tests
-    pub amplitude: f32,
     /// Sigma in X and Y directions.
     pub sigma: Vec2,
-    /// Background level.
-    #[allow(dead_code)] // Used in tests
-    pub background: f32,
-    /// RMS residual of fit.
-    #[allow(dead_code)] // Used in tests
-    pub rms_residual: f32,
     /// Whether the fit converged.
     pub converged: bool,
+    /// Fit diagnostics (amplitude/background/RMS residual/iteration count) that no
+    /// production caller reads — `measure_star` only uses `pos`/`sigma`/`converged` —
+    /// but that tests need to verify LM convergence against synthetic ground truth.
+    #[allow(dead_code)] // read only by tests
+    pub debug: GaussianFitDebug,
+}
+
+/// Fit diagnostics kept for tests; see [`GaussianFitResult::debug`].
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // read only by tests
+pub(crate) struct GaussianFitDebug {
+    /// Amplitude of Gaussian.
+    pub amplitude: f32,
+    /// Background level.
+    pub background: f32,
+    /// RMS residual of fit.
+    pub rms_residual: f32,
     /// Number of iterations used.
-    #[allow(dead_code)] // Used in tests
     pub iterations: usize,
 }
 
@@ -145,7 +152,8 @@ impl LMModel<6> for Gaussian2D {
         params[4] = params[4].clamp(0.5, self.stamp_radius); // Sigma_y
     }
 
-    #[allow(clippy::needless_range_loop)]
+    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
+    #[allow(unreachable_code)]
     fn batch_build_normal_equations(
         &self,
         data_x: &[f64],
@@ -166,29 +174,11 @@ impl LMModel<6> for Gaussian2D {
             };
         }
         // Scalar fallback
-        #[allow(unreachable_code)]
-        let mut hessian = [[0.0f64; 6]; 6];
-        let mut gradient = [0.0f64; 6];
-        let mut chi2 = 0.0f64;
-        for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-            let (model_val, row) = self.evaluate_and_jacobian(x, y, params);
-            let r = z - model_val;
-            chi2 += r * r;
-            for i in 0..6 {
-                gradient[i] += row[i] * r;
-                for j in i..6 {
-                    hessian[i][j] += row[i] * row[j];
-                }
-            }
-        }
-        for i in 1..6 {
-            for j in 0..i {
-                hessian[i][j] = hessian[j][i];
-            }
-        }
-        (hessian, gradient, chi2)
+        build_normal_equations_scalar(self, data_x, data_y, data_z, None, params)
     }
 
+    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
+    #[allow(unreachable_code)]
     fn batch_compute_chi2(
         &self,
         data_x: &[f64],
@@ -209,16 +199,7 @@ impl LMModel<6> for Gaussian2D {
             };
         }
         // Scalar fallback
-        #[allow(unreachable_code)]
-        data_x
-            .iter()
-            .zip(data_y.iter())
-            .zip(data_z.iter())
-            .map(|((&x, &y), &z)| {
-                let residual = z - self.evaluate(x, y, params);
-                residual * residual
-            })
-            .sum()
+        accumulate_chi2(self, data_x, data_y, data_z, None, params, 0..data_x.len())
     }
 }
 
@@ -301,15 +282,15 @@ fn validate_result(
         return None;
     }
 
-    let rms = (result.chi2 / n as f64).sqrt() as f32;
-
     Some(GaussianFitResult {
         pos: Vec2::new(x0 as f32, y0 as f32),
-        amplitude: amplitude as f32,
         sigma: Vec2::new(sigma_x as f32, sigma_y as f32),
-        background: bg as f32,
-        rms_residual: rms,
         converged: result.converged,
-        iterations: result.iterations,
+        debug: GaussianFitDebug {
+            amplitude: amplitude as f32,
+            background: bg as f32,
+            rms_residual: (result.chi2 / n as f64).sqrt() as f32,
+            iterations: result.iterations,
+        },
     })
 }

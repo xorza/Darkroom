@@ -7,7 +7,9 @@
 use crate::stacking::star_detection::centroid::gaussian_fit::{
     EXP_P0, EXP_P1, EXP_P2, EXP_Q0, EXP_Q1, EXP_Q2, EXP_Q3, Gaussian2D, LN2_HI, LN2_LO,
 };
-use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
+use crate::stacking::star_detection::centroid::lm_optimizer::{
+    accumulate_chi2, accumulate_normal_equations,
+};
 use std::arch::aarch64::*;
 
 const LOG2E: f64 = std::f64::consts::LOG2_E;
@@ -252,21 +254,19 @@ pub(crate) unsafe fn batch_build_normal_equations_neon(
         hessian[5][5] = hsum(v_h55);
 
         // Scalar tail (0 or 1 element)
-        let model = Gaussian2D {
-            stamp_radius: _model.stamp_radius,
-        };
         let tail_start = chunks * 2;
-        for i in tail_start..n {
-            let (model_val, row) = model.evaluate_and_jacobian(data_x[i], data_y[i], params);
-            let r = data_z[i] - model_val;
-            chi2 += r * r;
-            for k in 0..6 {
-                gradient[k] += row[k] * r;
-                for j in k..6 {
-                    hessian[k][j] += row[k] * row[j];
-                }
-            }
-        }
+        accumulate_normal_equations(
+            _model,
+            data_x,
+            data_y,
+            data_z,
+            None,
+            params,
+            tail_start..n,
+            &mut hessian,
+            &mut gradient,
+            &mut chi2,
+        );
 
         // Mirror upper triangle to lower
         for i in 1..6 {
@@ -326,14 +326,8 @@ pub(crate) unsafe fn batch_compute_chi2_neon(
         let mut chi2 = hsum(v_chi2);
 
         // Scalar tail
-        let model = Gaussian2D {
-            stamp_radius: _model.stamp_radius,
-        };
         let tail_start = chunks * 2;
-        for i in tail_start..n {
-            let residual = data_z[i] - model.evaluate(data_x[i], data_y[i], params);
-            chi2 += residual * residual;
-        }
+        chi2 += accumulate_chi2(_model, data_x, data_y, data_z, None, params, tail_start..n);
 
         chi2
     }

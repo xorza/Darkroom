@@ -3,7 +3,9 @@
 //! Processes 2 f64 pixels per NEON iteration for `batch_build_normal_equations`
 //! and `batch_compute_chi2`. Supports HalfInt, Int, and General PowStrategy variants.
 
-use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
+use crate::stacking::star_detection::centroid::lm_optimizer::{
+    accumulate_chi2, accumulate_normal_equations,
+};
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
 use std::arch::aarch64::*;
 
@@ -206,17 +208,18 @@ pub(crate) unsafe fn batch_build_normal_equations_neon(
 
         // Scalar tail
         let tail_start = chunks * 2;
-        for i in tail_start..n {
-            let (model_val, row) = model.evaluate_and_jacobian(data_x[i], data_y[i], params);
-            let r = data_z[i] - model_val;
-            chi2 += r * r;
-            for k in 0..5 {
-                gradient[k] += row[k] * r;
-                for j in k..5 {
-                    hessian[k][j] += row[k] * row[j];
-                }
-            }
-        }
+        accumulate_normal_equations(
+            model,
+            data_x,
+            data_y,
+            data_z,
+            None,
+            params,
+            tail_start..n,
+            &mut hessian,
+            &mut gradient,
+            &mut chi2,
+        );
 
         // Mirror upper triangle to lower
         for i in 1..5 {
@@ -272,10 +275,7 @@ pub(crate) unsafe fn batch_compute_chi2_neon(
 
         // Scalar tail
         let tail_start = chunks * 2;
-        for i in tail_start..n {
-            let residual = data_z[i] - model.evaluate(data_x[i], data_y[i], params);
-            chi2 += residual * residual;
-        }
+        chi2 += accumulate_chi2(model, data_x, data_y, data_z, None, params, tail_start..n);
 
         chi2
     }

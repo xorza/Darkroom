@@ -13,7 +13,7 @@ use arrayvec::ArrayVec;
 
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::deblend::{
-    ComponentData, MAX_PEAKS, Pixel, assign_to_nearest_peak,
+    ComponentData, MAX_PEAKS, Pixel, assign_to_nearest_peak, peaks_too_close,
 };
 use crate::stacking::star_detection::labeling::LabelMap;
 use imaginarium::Buffer2;
@@ -137,15 +137,13 @@ pub(crate) fn is_local_maximum(pixel: Pixel, pixels: &Buffer2<f32>) -> bool {
 }
 
 /// Add a peak to the list, or replace an existing nearby peak if this one is brighter.
-/// Uses squared Euclidean distance, matching the shared nearest-peak assignment.
+/// Uses squared Euclidean distance (via [`peaks_too_close`]), matching the shared
+/// nearest-peak assignment.
 #[inline]
 fn add_or_replace_peak(peaks: &mut ArrayVec<Pixel, MAX_PEAKS>, pixel: Pixel, min_sep_sq: usize) {
-    // Check separation from existing peaks using squared Euclidean distance
-    let well_separated = peaks.iter().all(|peak| {
-        let dx = (pixel.pos.x as i32 - peak.pos.x as i32).unsigned_abs() as usize;
-        let dy = (pixel.pos.y as i32 - peak.pos.y as i32).unsigned_abs() as usize;
-        dx * dx + dy * dy >= min_sep_sq
-    });
+    let well_separated = peaks
+        .iter()
+        .all(|peak| !peaks_too_close(pixel.pos, peak.pos, min_sep_sq));
 
     if well_separated {
         if !peaks.is_full() {
@@ -154,9 +152,7 @@ fn add_or_replace_peak(peaks: &mut ArrayVec<Pixel, MAX_PEAKS>, pixel: Pixel, min
     } else {
         // Replace nearby peak if this one is brighter
         for peak in peaks.iter_mut() {
-            let dx = (pixel.pos.x as i32 - peak.pos.x as i32).unsigned_abs() as usize;
-            let dy = (pixel.pos.y as i32 - peak.pos.y as i32).unsigned_abs() as usize;
-            if dx * dx + dy * dy < min_sep_sq && pixel.value > peak.value {
+            if peaks_too_close(pixel.pos, peak.pos, min_sep_sq) && pixel.value > peak.value {
                 *peak = pixel;
                 break;
             }
