@@ -8,6 +8,7 @@ pub(crate) mod inspector;
 pub(crate) mod new_node_ui;
 pub(crate) mod node_menu;
 pub(crate) mod pan_zoom;
+pub(crate) mod pin_preview;
 pub(crate) mod pin_ui;
 pub(crate) mod selection_ui;
 pub(crate) mod subgraph_menu;

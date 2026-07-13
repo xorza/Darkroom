@@ -1,5 +1,10 @@
-//! A pinned output's preview widget: a small card floating above the node
-//! bodies, connected back to its port by a bezier wire. A sibling of
+//! A pinned output's wire, port-circle glyph, and drag gesture. The
+//! widget's own look (the card, its header, its texture cache) lives in the
+//! sibling [`crate::gui::canvas::pin_preview`] — this file draws the bezier
+//! from the port to the widget's top-left corner, the port-circle glyph
+//! peeking from under that corner (the same corner-peek trick as
+//! [`crate::gui::node::header::subscription_pin`]), and owns the drag
+//! gesture that positions it. A sibling of
 //! [`crate::gui::canvas::connection_ui::ConnectionUI`], drawn at the canvas
 //! level (like a wire) rather than nested in the node body, since a dragged
 //! widget can end up anywhere on the canvas — not just overhanging its own
@@ -15,15 +20,8 @@
 //! separate in-flight preview to paint — the widget's real position already
 //! reflects the live drag by the time [`PinUi::draw`] runs.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use aperture::{
-    Background, Brush, Color, Configure, Corners, ImageFilter, ImageFit, ImageHandle, Panel, Rect,
-    Sense, Shadow, Shape, Sizing, Spacing, Stroke, Text, TextWrap, Ui, WidgetId,
-};
+use aperture::{Brush, Rect, Ui, WidgetId};
 use glam::Vec2;
-use scenarium::data::{CustomValue, DataType, DynamicValue};
 use scenarium::graph::OutputPort;
 
 use crate::core::document::{PortKind, PortRef};
@@ -33,52 +31,36 @@ use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::wire_visible;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::node_ports;
+use crate::gui::canvas::pin_preview::{
+    self, PREVIEW_HEIGHT, PREVIEW_WIDTH, PreviewCache, is_image_type, pin_preview_wid,
+    preview_title,
+};
 use crate::gui::canvas::wire::{CubicHandles, WireEmphasis, add_cubic_wire, cubic_handles};
-use crate::gui::image_viewer::convert_image_value;
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::port_row::port_circle_wid;
 use crate::gui::node::set_output_pinned;
 use crate::gui::scene::{Scene, SceneOutput};
-use crate::gui::theme::Theme;
-use crate::gui::widgets::support::sized_text;
-
-/// Fixed footprint of a pinned output's preview widget, canvas-world units —
-/// a stable size regardless of content, so a drag never has to re-measure
-/// and an image never grows the widget. An image letterboxes inside via
-/// `Contain`; a non-image value's formatted text centers in the same frame.
-const PREVIEW_WIDTH: f32 = 120.0;
-const PREVIEW_HEIGHT: f32 = 90.0;
-
-/// Longest side, in pixels, an image-typed pinned value is downscaled to
-/// before upload — small enough to stay cheap with many simultaneous pins.
-const PREVIEW_TEXTURE_DIM: u32 = 256;
+use crate::gui::widgets::support::dot;
 
 /// Gap between the port circle's edge and the preview widget's near edge,
 /// at the default (never-dragged) position.
 const PIN_GAP: f32 = 16.0;
 
-/// The default widget-center offset (from the port center) a freshly
-/// pinned output falls back to before it's ever been dragged: up and to
-/// the right of the port, clear of the port circle.
+/// The default widget-position offset (its top-left corner, from the port
+/// center) a freshly pinned output falls back to before it's ever been
+/// dragged: directly above the port, clear of the port circle.
 fn default_pin_offset() -> Vec2 {
-    Vec2::new(
-        PREVIEW_WIDTH * 0.5 + PIN_GAP,
-        -(PREVIEW_HEIGHT * 0.5 + PIN_GAP),
-    )
+    Vec2::new(PIN_GAP, -(PREVIEW_HEIGHT + PIN_GAP))
 }
 
-/// `output`'s widget-center offset from its port: its stored custom
-/// position ([`crate::core::document::GraphView::pin_offsets`], mirrored
-/// onto [`SceneOutput::pin_offset`]) if it's ever been dragged, else
+/// `output`'s widget-position offset from its port (top-left corner, so the
+/// wire lands exactly on the port-circle glyph peeking from under that
+/// corner): its stored custom position
+/// ([`crate::core::document::GraphView::pin_offsets`], mirrored onto
+/// [`SceneOutput::pin_offset`]) if it's ever been dragged, else
 /// [`default_pin_offset`].
 fn resolved_pin_offset(output: &SceneOutput) -> Vec2 {
     output.pin_offset.unwrap_or_else(default_pin_offset)
-}
-
-/// Whether `ty` is an image value — the pinned output's preview widget
-/// shows a thumbnail for these, and its formatted text for everything else.
-fn is_image_type(ty: &DataType) -> bool {
-    matches!(ty, DataType::Custom(id) if *id == *lens::IMAGE_TYPE_ID)
 }
 
 /// The port or widget a drag latched onto, and where its offset started —
@@ -98,33 +80,12 @@ struct PinDragAnchor {
     widget_id: WidgetId,
 }
 
-/// An uploaded preview texture, kept alive across frames (an `ImageHandle`
-/// frees its GPU texture when its last clone drops) and reconverted only
-/// when the pinned value it came from actually changed.
-struct CachedPreview {
-    /// Identity of the pinned value this texture was converted from — an
-    /// `Arc::ptr_eq` hit against a fresh push skips a redundant
-    /// reconvert+reupload.
-    source: Arc<dyn CustomValue>,
-    handle: ImageHandle,
-}
-
-impl std::fmt::Debug for CachedPreview {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CachedPreview")
-            .field("source_type", &self.source.type_id())
-            .field("handle", &self.handle)
-            .finish()
-    }
-}
-
 /// Pinned outputs' preview-widget drag state plus their uploaded thumbnail
-/// cache. Only one pin drag is ever in flight, so `drag` is a single slot;
-/// `previews` is keyed by port since many pins can hold thumbnails at once.
+/// cache. Only one pin drag is ever in flight, so `drag` is a single slot.
 #[derive(Default, Debug)]
 pub(crate) struct PinUi {
     drag: Option<PinDragAnchor>,
-    previews: HashMap<OutputPort, CachedPreview>,
+    previews: PreviewCache,
 }
 
 impl PinUi {
@@ -190,9 +151,10 @@ impl PinUi {
         }
     }
 
-    /// Paint every pinned output's bezier + preview widget on top of the
-    /// node bodies, marking those the active breaker crosses as broken via
-    /// `probe.mark_broken_pin` for the breaker's release-frame drain.
+    /// Paint every pinned output's bezier + port circle + preview widget on
+    /// top of the node bodies, marking those the active breaker crosses as
+    /// broken via `probe.mark_broken_pin` for the breaker's release-frame
+    /// drain.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &mut self,
@@ -204,7 +166,14 @@ impl PinUi {
         probe: &mut BreakerProbe<'_>,
         emphasis: &WireEmphasis,
     ) {
-        self.prune_previews(scene);
+        self.previews.prune(|port| {
+            scene.nodes.by_key(&port.node_id).is_some_and(|n| {
+                scene
+                    .outputs(n.outputs)
+                    .get(port.port_idx)
+                    .is_some_and(|o| o.pinned)
+            })
+        });
         let theme = ctx.theme;
         for n in &scene.nodes {
             for (i, output) in scene.outputs(n.outputs).iter().enumerate() {
@@ -220,18 +189,17 @@ impl PinUi {
                     continue;
                 };
                 let out_port = OutputPort::new(n.id, i);
-                let box_center = port_center + resolved_pin_offset(output);
-                let handles = cubic_handles(port_center, box_center);
-                if !wire_visible(visible, port_center, &handles, box_center) {
+                // The wire's far end, and the preview widget's own
+                // top-left corner — one and the same point, so the wire
+                // lands exactly on the port-circle glyph peeking from
+                // under that corner.
+                let top_left = port_center + resolved_pin_offset(output);
+                let handles = cubic_handles(port_center, top_left);
+                if !wire_visible(visible, port_center, &handles, top_left) {
                     continue;
                 }
-                let box_rect = Rect::new(
-                    box_center.x - PREVIEW_WIDTH * 0.5,
-                    box_center.y - PREVIEW_HEIGHT * 0.5,
-                    PREVIEW_WIDTH,
-                    PREVIEW_HEIGHT,
-                );
-                let broken = pin_targeted(probe, port_center, &handles, box_center, box_rect);
+                let box_rect = Rect::new(top_left.x, top_left.y, PREVIEW_WIDTH, PREVIEW_HEIGHT);
+                let broken = pin_targeted(probe, port_center, &handles, top_left, box_rect);
                 if broken {
                     probe.mark_broken_pin(out_port);
                 }
@@ -248,23 +216,32 @@ impl PinUi {
                 add_cubic_wire(
                     ui,
                     port_center,
-                    box_center,
+                    top_left,
                     handles,
                     width,
                     Brush::Solid(wire_color),
                 );
 
-                // Unlike the wire, the widget's own border brightens on its
-                // *own* direct hover, like a port circle — not the
-                // wire-style endpoint emphasis.
-                let border = if broken {
+                // The data-type accent lives *only* on the port-circle
+                // glyph (brightening on the widget's own hover, like a
+                // real port circle) — the widget's own border stays
+                // neutral (see `pin_preview::draw_widget`), so the accent
+                // doesn't double up right next to itself.
+                let accent = if broken {
                     theme.colors.connection_broken
                 } else {
                     port_color(theme, &output.ty, PortKind::Output, box_hover)
                 };
+                dot(ui, top_left.x, top_left.y, theme.port_size * 0.5, accent);
+
+                let card_border = if broken {
+                    theme.colors.connection_broken
+                } else {
+                    theme.colors.node_border
+                };
                 let value = ctx.run_state.pinned_value(n.id, i);
                 let texture = if is_image_type(&output.ty) {
-                    value.and_then(|v| self.resolve_preview(ui, out_port, v))
+                    value.and_then(|v| self.previews.resolve(ui, out_port, v))
                 } else {
                     None
                 };
@@ -273,123 +250,19 @@ impl PinUi {
                         .map(ToString::to_string)
                         .unwrap_or_else(|| "not yet run".to_owned())
                 });
-                draw_preview_box(
+                pin_preview::draw_widget(
                     ui,
                     theme,
                     out_port,
-                    box_center,
-                    border,
+                    top_left,
+                    &preview_title(n.name.as_str(), output.name.as_str()),
+                    card_border,
                     texture.as_ref(),
                     text.as_deref(),
                 );
             }
         }
     }
-
-    /// The current thumbnail texture for `port`'s pinned image value,
-    /// converting + uploading fresh only when the value changed since last
-    /// time (an `Arc` identity miss) or nothing's cached yet. `None` when
-    /// `value` isn't a (decodable) image — the caller falls back to text.
-    fn resolve_preview(
-        &mut self,
-        ui: &Ui,
-        port: OutputPort,
-        value: &DynamicValue,
-    ) -> Option<ImageHandle> {
-        let DynamicValue::Custom(data) = value else {
-            self.previews.remove(&port);
-            return None;
-        };
-        if let Some(cached) = self.previews.get(&port)
-            && Arc::ptr_eq(&cached.source, data)
-        {
-            return Some(cached.handle.clone());
-        }
-        let (image, _, _) = convert_image_value(value, PREVIEW_TEXTURE_DIM).ok()?;
-        let handle = ui.register_image(image);
-        self.previews.insert(
-            port,
-            CachedPreview {
-                source: Arc::clone(data),
-                handle: handle.clone(),
-            },
-        );
-        Some(handle)
-    }
-
-    /// Drop cached textures for outputs no longer pinned (or removed) —
-    /// otherwise a session that pins/unpins/deletes many nodes over time
-    /// would leak textures indefinitely.
-    fn prune_previews(&mut self, scene: &Scene) {
-        self.previews.retain(|port, _| {
-            scene.nodes.by_key(&port.node_id).is_some_and(|n| {
-                scene
-                    .outputs(n.outputs)
-                    .get(port.port_idx)
-                    .is_some_and(|o| o.pinned)
-            })
-        });
-    }
-}
-
-/// Paint one pinned output's preview widget: a fixed-size card, letterboxed
-/// image if `texture` is `Some`, else centered `text`. Senses `DRAG` so it
-/// doubles as the reposition drag's grab target ([`pin_preview_wid`]).
-fn draw_preview_box(
-    ui: &mut Ui,
-    theme: &Theme,
-    port: OutputPort,
-    center: Vec2,
-    border: Color,
-    texture: Option<&ImageHandle>,
-    text: Option<&str>,
-) {
-    Panel::vstack()
-        .id(pin_preview_wid(port))
-        .position(center - Vec2::new(PREVIEW_WIDTH * 0.5, PREVIEW_HEIGHT * 0.5))
-        .size((Sizing::Fixed(PREVIEW_WIDTH), Sizing::Fixed(PREVIEW_HEIGHT)))
-        .sense(Sense::DRAG)
-        .background(
-            Background::rounded(
-                theme.colors.node_fill,
-                Corners::all(theme.node_corner_radius),
-            )
-            .with_stroke(Stroke::solid(border, 1.0))
-            .with_shadow(Shadow::drop(
-                theme.colors.node_ambient_shadow,
-                Vec2::new(0.0, 3.0),
-                8.0,
-            )),
-        )
-        .show(ui, |ui| {
-            if let Some(handle) = texture {
-                ui.add_shape(
-                    Shape::image(handle.clone())
-                        .fit(ImageFit::Contain)
-                        .filter(ImageFilter::Linear),
-                );
-                // Rounds the image's square corners into the card's own
-                // fill, matching the card's own rounding — a plain image
-                // fill ignores the panel's rounded background.
-                ui.add_shape(Shape::WindowedRect {
-                    local_rect: None,
-                    corners: Corners::all(theme.node_corner_radius),
-                    fill: theme.colors.node_fill.into(),
-                    stroke: Stroke::solid(border, 1.0),
-                });
-            } else if let Some(text) = text {
-                Panel::vstack()
-                    .id_salt(("graph.node.pin_preview_text", port))
-                    .size((Sizing::FILL, Sizing::FILL))
-                    .padding(Spacing::all(8.0))
-                    .show(ui, |ui| {
-                        Text::new(text.to_owned())
-                            .style(sized_text(ui, 11.0))
-                            .text_wrap(TextWrap::Wrap)
-                            .show(ui);
-                    });
-            }
-        });
 }
 
 /// True if the active breaker gesture crosses the pin's glyph — either the
@@ -399,21 +272,13 @@ fn pin_targeted(
     probe: &BreakerProbe<'_>,
     port_center: Vec2,
     handles: &CubicHandles,
-    box_center: Vec2,
+    wire_end: Vec2,
     box_rect: Rect,
 ) -> bool {
-    if probe.crosses_cubic(port_center, handles.p1, handles.p2, box_center) {
+    if probe.crosses_cubic(port_center, handles.p1, handles.p2, wire_end) {
         return true;
     }
     probe.crosses_rect(box_rect)
-}
-
-/// Stable widget id for a pinned output's preview widget — the drag target
-/// for repositioning it. Reconstructible from the port so
-/// [`CanvasGeometry::rebuild`]-style polling can read its response without
-/// a cache.
-pub(crate) fn pin_preview_wid(port: OutputPort) -> WidgetId {
-    WidgetId::from_hash(("graph.node.pin_preview", port.node_id, port.port_idx))
 }
 
 /// First output port whose circle's drag started this frame, or `None`.
@@ -448,7 +313,8 @@ fn scan_widget_drag_start(ui: &Ui, scene: &Scene) -> Option<(OutputPort, Vec2)> 
 
 /// `true` when the pointer is directly over `port`'s preview widget this
 /// frame. Drives the bezier's endpoint-hover emphasis (like a data wire's)
-/// and the widget's own direct-hover border tint (like a port circle's).
+/// and the port-circle glyph's own direct-hover tint (like a real port
+/// circle's).
 fn preview_hovered(ui: &Ui, port: OutputPort) -> bool {
     ui.response_for(pin_preview_wid(port)).hovered
 }
@@ -468,43 +334,27 @@ mod tests {
         }
     }
 
-    fn box_rect_at(center: Vec2) -> Rect {
-        Rect::new(
-            center.x - PREVIEW_WIDTH * 0.5,
-            center.y - PREVIEW_HEIGHT * 0.5,
-            PREVIEW_WIDTH,
-            PREVIEW_HEIGHT,
-        )
+    fn box_rect_at(top_left: Vec2) -> Rect {
+        Rect::new(top_left.x, top_left.y, PREVIEW_WIDTH, PREVIEW_HEIGHT)
     }
 
     #[test]
     fn pin_targeted_hits_the_preview_box_but_not_empty_space() {
         let port_center = Vec2::ZERO;
-        let box_center = port_center + default_pin_offset();
-        let handles = cubic_handles(port_center, box_center);
-        let rect = box_rect_at(box_center);
+        let top_left = port_center + default_pin_offset();
+        let handles = cubic_handles(port_center, top_left);
+        let rect = box_rect_at(top_left);
+        let box_center = top_left + Vec2::new(PREVIEW_WIDTH, PREVIEW_HEIGHT) * 0.5;
 
         let mut hit = BreakerState::start(box_center, PointerButton::Right);
         assert!(
-            pin_targeted(
-                &probe_for(&mut hit),
-                port_center,
-                &handles,
-                box_center,
-                rect
-            ),
+            pin_targeted(&probe_for(&mut hit), port_center, &handles, top_left, rect),
             "a breaker sample landing dead-center in the preview widget must register"
         );
 
         let mut miss = BreakerState::start(Vec2::new(1000.0, 1000.0), PointerButton::Right);
         assert!(
-            !pin_targeted(
-                &probe_for(&mut miss),
-                port_center,
-                &handles,
-                box_center,
-                rect
-            ),
+            !pin_targeted(&probe_for(&mut miss), port_center, &handles, top_left, rect),
             "a breaker far from the glyph must not register"
         );
     }
@@ -515,10 +365,10 @@ mod tests {
         // so the bezier's midpoint is unambiguously clear of the box rect —
         // this test exercises the bezier-crossing path, not the box-rect one.
         let port_center = Vec2::ZERO;
-        let box_center = Vec2::new(300.0, 0.0);
-        let handles = cubic_handles(port_center, box_center);
-        let rect = box_rect_at(box_center);
-        let mid = cubic_point(port_center, handles.p1, handles.p2, box_center, 0.53);
+        let top_left = Vec2::new(300.0, 0.0);
+        let handles = cubic_handles(port_center, top_left);
+        let rect = box_rect_at(top_left);
+        let mid = cubic_point(port_center, handles.p1, handles.p2, top_left, 0.53);
 
         let mut state = BreakerState::start(mid + Vec2::new(0.0, -80.0), PointerButton::Right);
         state.add_point(mid + Vec2::new(0.0, 80.0));
@@ -526,7 +376,7 @@ mod tests {
             &probe_for(&mut state),
             port_center,
             &handles,
-            box_center,
+            top_left,
             rect
         ));
     }
