@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use aperture::{MenuItem, Ui};
 use scenarium::graph::NodeId;
 
+use crate::core::document::SelectionKey;
 use crate::core::edit::intent::Intent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
@@ -64,9 +65,9 @@ impl NodeMenuUi {
                 && ui.response_for(node_widget_id(n.id)).secondary_clicked
                 && let Some(p) = ui.pointer_pos()
             {
-                if !scene.selected_nodes.contains(&n.id) {
+                if !scene.selected.contains(&SelectionKey::Node(n.id)) {
                     out.push(Intent::SetSelection {
-                        to: BTreeSet::from([n.id]),
+                        to: BTreeSet::from([SelectionKey::Node(n.id)]),
                     });
                 }
                 self.target = Some(n.id);

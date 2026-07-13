@@ -180,7 +180,7 @@ impl GraphUI {
         // the undo stack with no-op `SetSelection` entries every time
         // the user clicks the empty canvas. A *drag* on bare canvas is
         // the rubber band (classified as `Select`), not a `Deselect`.
-        if gesture == Some(CanvasGesture::Deselect) && !scene.selected_nodes.is_empty() {
+        if gesture == Some(CanvasGesture::Deselect) && !scene.selected.is_empty() {
             out.push(Intent::SetSelection {
                 to: BTreeSet::new(),
             });
@@ -271,7 +271,7 @@ impl GraphUI {
         // Effective selection to paint: the live rubber-band preview while
         // a band is in flight, else the committed set. Kept off `Scene` so
         // the projection stays a read-only mirror of `Document`.
-        let selected = selection_ui.preview().unwrap_or(&scene.selected_nodes);
+        let selected = selection_ui.preview().unwrap_or(&scene.selected);
 
         // Outer canvas: covers the whole pane, paints the canvas
         // background, owns the input routing for empty-canvas
@@ -377,7 +377,9 @@ impl GraphUI {
                             // floating above everything, not nested in (or
                             // hidden under) its node's body. Only the wire
                             // itself (above) shares the other wires' z-order.
-                            pin_ui.draw_widget(ui, ctx, scene, geometry, visible, &mut probe);
+                            pin_ui.draw_widget(
+                                ui, ctx, scene, geometry, visible, &mut probe, selected, out,
+                            );
                         }
                         // Inspection panels paint after the node bodies so
                         // they sit on top and win clicks over the nodes

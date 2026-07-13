@@ -6,19 +6,21 @@
 //! card and keep its thumbnail texture current.
 //!
 //! The card borrows a node body's fill/corner-radius/shadow so it reads as
-//! "a small floating surface" like the inspector panels, but its *border*
-//! stays the neutral [`crate::gui::theme::Theme::colors`]`.node_border` —
-//! not the port's data-type accent. The accent lives on the port-circle
-//! glyph alone (see [`super::pin_ui`]); tinting the card's own outline too
-//! doubled up the color right next to it and read as over-decorated.
+//! "a small floating surface" like the inspector panels. Its *border* is
+//! the neutral [`crate::gui::theme::Theme::colors`]`.node_border` at rest,
+//! or the selection halo when selected — the same two-state border a node
+//! body paints — but never the port's data-type accent. The accent lives on
+//! the port-circle glyph alone (see [`super::pin_ui`]); tinting the card's
+//! own outline too doubled up the color right next to it and read as
+//! over-decorated.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use aperture::{
     Align, Background, Color, Configure, Corners, FontWeight, ImageFilter, ImageFit, ImageHandle,
-    Panel, Sense, Shadow, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, VAlign,
-    WidgetId,
+    Panel, Response, Sense, Shadow, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui,
+    VAlign, WidgetId,
 };
 use glam::{UVec2, Vec2};
 use imaginarium::ColorFormat;
@@ -161,22 +163,24 @@ pub(crate) fn pin_preview_wid(port: OutputPort) -> WidgetId {
 
 /// Paint one pinned output's preview widget: a header bar (the title) over
 /// a content area, plus — for an image — an info footer below it reporting
-/// resolution, format, and resident size. `border` is the card's own
-/// (neutral, or broken-red) outline — never the port's data-type accent;
-/// that lives on the port-circle glyph [`super::pin_ui`] paints separately.
-/// Senses `DRAG` so it doubles as the reposition drag's grab target
+/// resolution, format, and resident size. `border`/`border_width` are the
+/// card's own outline (neutral, broken-red, or the selection halo) — never
+/// the port's data-type accent; that lives on the port-circle glyph
+/// [`super::pin_ui`] paints separately. Senses `CLICK | DRAG` so it doubles
+/// as the reposition drag's grab target and the selection click target
 /// ([`pin_preview_wid`]).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn draw_widget(
-    ui: &mut Ui,
+pub(crate) fn draw_widget<'ui>(
+    ui: &'ui mut Ui,
     theme: &Theme,
     port: OutputPort,
     top_left: Vec2,
     title: &str,
     border: Color,
+    border_width: f32,
     image: Option<&ImagePreview>,
     text: Option<&str>,
-) {
+) -> Response<'ui> {
     // Inner corners follow the border stroke's inner edge, like a real
     // node's header does relative to its own (wider) body stroke.
     let inner_r = (theme.node_corner_radius - theme.node_border_width).max(0.0);
@@ -184,13 +188,13 @@ pub(crate) fn draw_widget(
         .id(pin_preview_wid(port))
         .position(top_left)
         .size((Sizing::Fixed(PREVIEW_WIDTH), Sizing::Fixed(PREVIEW_HEIGHT)))
-        .sense(Sense::DRAG)
+        .sense(Sense::CLICK | Sense::DRAG)
         .background(
             Background::rounded(
                 theme.colors.node_fill,
                 Corners::all(theme.node_corner_radius),
             )
-            .with_stroke(Stroke::solid(border, theme.node_border_width))
+            .with_stroke(Stroke::solid(border, border_width))
             .with_shadow(Shadow::drop(
                 theme.colors.node_ambient_shadow,
                 Vec2::new(0.0, 3.0),
@@ -246,7 +250,8 @@ pub(crate) fn draw_widget(
             if let Some(image) = image {
                 info_row(ui, theme, inner_r, image);
             }
-        });
+        })
+        .response
 }
 
 /// The pinned image's info footer: resolution, pixel format (channel

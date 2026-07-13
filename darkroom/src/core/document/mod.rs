@@ -106,6 +106,29 @@ pub enum BoundarySide {
     Output,
 }
 
+/// A member of the selection set: either a node body or a pinned output's
+/// floating preview widget. The two share one selection mechanism (click to
+/// select, Shift-click to toggle membership, rubber-band to sweep both kinds
+/// in) so `GraphView::selected` and everything downstream of it stay a
+/// single `BTreeSet` rather than two parallel selection tracks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum SelectionKey {
+    Node(NodeId),
+    Pin(OutputPort),
+}
+
+impl SelectionKey {
+    /// Whether this key names something that lives on `node_id` — the node
+    /// itself, or one of its pinned outputs. Used to prune a node's
+    /// selection membership (both forms) when it's removed from the graph.
+    fn belongs_to(self, node_id: NodeId) -> bool {
+        match self {
+            SelectionKey::Node(id) => id == node_id,
+            SelectionKey::Pin(port) => port.node_id == node_id,
+        }
+    }
+}
+
 /// A graph's camera: pan offset (canvas-local px) + zoom factor. One
 /// value shared by the persisted per-graph [`GraphView`], the per-frame
 /// `Scene` projection, and the `SetViewport` edit, so the three can't
@@ -149,8 +172,9 @@ pub struct GraphView {
     pub view_nodes: KeyIndexVec<NodeId, ViewNode>,
     pub viewport: Viewport,
     /// `BTreeSet` so equality and serialization are order-independent
-    /// (no spurious undo entries from reordering).
-    pub selected_nodes: BTreeSet<NodeId>,
+    /// (no spurious undo entries from reordering). Holds both node bodies
+    /// and pinned-output preview widgets — see [`SelectionKey`].
+    pub selected: BTreeSet<SelectionKey>,
     /// A pinned output's satellite position, as a canvas-local offset from
     /// its port center — sparse, present only once a user has dragged that
     /// pin at least once (see `crate::gui::canvas::pin_ui::default_pin_offset`
@@ -262,9 +286,13 @@ impl GraphView {
             assert!(prior.is_none(), "duplicate node id detected");
         }
 
-        for selected in &self.selected_nodes {
+        for key in &self.selected {
+            let owner = match key {
+                SelectionKey::Node(id) => *id,
+                SelectionKey::Pin(port) => port.node_id,
+            };
             assert!(
-                view_nodes.contains_key(selected),
+                view_nodes.contains_key(&owner),
                 "selected node id must exist in graph"
             );
         }
@@ -323,7 +351,7 @@ impl EditScope<'_> {
     pub fn remove_node(&mut self, node_id: &NodeId) {
         self.view.view_nodes.retain(|node| node.id != *node_id);
         self.graph.remove_by_id(*node_id);
-        self.view.selected_nodes.remove(node_id);
+        self.view.selected.retain(|k| !k.belongs_to(*node_id));
         self.view
             .pin_offsets
             .retain(|port, _| port.node_id != *node_id);

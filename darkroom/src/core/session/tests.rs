@@ -4,6 +4,7 @@ use scenarium::graph::{Binding, InputPort, Node, NodeId, NodeKind, NodeSearch};
 use scenarium::node::function::FuncId;
 
 use super::*;
+use crate::core::document::SelectionKey;
 use crate::core::document::view_node::ViewNode;
 
 #[test]
@@ -88,12 +89,12 @@ fn apply_intents_selection_skips_reconcile() {
     let reconcile = apply_intents(
         &mut doc,
         vec![Intent::SetSelection {
-            to: [id].into_iter().collect(),
+            to: [SelectionKey::Node(id)].into_iter().collect(),
         }],
         &Library::default(),
     );
     assert!(!reconcile);
-    assert!(doc.main_view.selected_nodes.contains(&id));
+    assert!(doc.main_view.selected.contains(&SelectionKey::Node(id)));
 }
 
 #[test]

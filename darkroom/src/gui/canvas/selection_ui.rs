@@ -2,36 +2,38 @@ use std::collections::BTreeSet;
 
 use aperture::{PointerButton, Rect, Shape, Stroke, Ui};
 use glam::Vec2;
-use scenarium::graph::NodeId;
+use scenarium::graph::OutputPort;
 
+use crate::core::document::SelectionKey;
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
+use crate::gui::canvas::pin_ui;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::Scene;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
-/// sweeps a rectangle; intersecting nodes highlight live as it moves
-/// and the set is committed on release. Holding Shift at drag-start
-/// *extends* the current selection instead of replacing it. Cmd+LMB is the breaker
-/// and RMB opens the new-node menu / breaker, so this only claims
-/// unmodified left-drags that fall through to the bare canvas (node
-/// bodies hit-test first, so a drag that starts on a node never reaches
-/// here).
+/// sweeps a rectangle; intersecting nodes *and* pinned-output preview
+/// widgets highlight live as it moves and the set is committed on
+/// release. Holding Shift at drag-start *extends* the current selection
+/// instead of replacing it. Cmd+LMB is the breaker and RMB opens the
+/// new-node menu / breaker, so this only claims unmodified left-drags
+/// that fall through to the bare canvas (node bodies hit-test first, so
+/// a drag that starts on a node never reaches here).
 #[derive(Default, Debug)]
 pub(crate) struct SelectionUI {
     band: Option<RubberBand>,
     /// Pre-drag selection captured at latch (empty unless Shift extends).
     /// The swept set unions onto this each frame, so we never re-read
-    /// `scene.selected_nodes` mid-drag — no dependency on the document
-    /// staying untouched, and the additive base is fixed at latch.
-    base: BTreeSet<NodeId>,
-    /// The swept set while a band is active, for node draw to highlight
-    /// live. Owned here rather than written into `Scene::selected_nodes`
-    /// so the projection stays a read-only mirror of `Document`. `None`
-    /// when no band is in flight (node draw falls back to the committed
-    /// selection).
-    preview: Option<BTreeSet<NodeId>>,
+    /// `scene.selected` mid-drag — no dependency on the document staying
+    /// untouched, and the additive base is fixed at latch.
+    base: BTreeSet<SelectionKey>,
+    /// The swept set while a band is active, for node/pin draw to
+    /// highlight live. Owned here rather than written into
+    /// `Scene::selected` so the projection stays a read-only mirror of
+    /// `Document`. `None` when no band is in flight (draw falls back to
+    /// the committed selection).
+    preview: Option<BTreeSet<SelectionKey>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -53,10 +55,10 @@ impl RubberBand {
 }
 
 impl SelectionUI {
-    /// The live swept set while a band is in flight, for node draw to
+    /// The live swept set while a band is in flight, for node/pin draw to
     /// paint against; `None` when no band is active (the caller falls back
-    /// to the committed `scene.selected_nodes`).
-    pub(crate) fn preview(&self) -> Option<&BTreeSet<NodeId>> {
+    /// to the committed `scene.selected`).
+    pub(crate) fn preview(&self) -> Option<&BTreeSet<SelectionKey>> {
         self.preview.as_ref()
     }
 
@@ -86,7 +88,7 @@ impl SelectionUI {
             // arbitration — read it here, not in the classifier. Capture
             // the base once so the per-frame union doesn't re-read the doc.
             self.base = if ui.modifiers().shift {
-                scene.selected_nodes.clone()
+                scene.selected.clone()
             } else {
                 BTreeSet::new()
             };
@@ -98,7 +100,7 @@ impl SelectionUI {
         let Some(mut band) = self.band else {
             // No band in flight — drop any preview left by the
             // just-committed (or cancelled) drag so node draw falls back
-            // to the now-committed `scene.selected_nodes`.
+            // to the now-committed `scene.selected`.
             self.preview = None;
             return;
         };
@@ -111,7 +113,7 @@ impl SelectionUI {
             band.current = to_world(p, &scene.viewport);
         }
         let rect = band.rect();
-        let mut selected: BTreeSet<NodeId> = self.base.clone();
+        let mut selected: BTreeSet<SelectionKey> = self.base.clone();
         for n in &scene.nodes {
             // The cached-size world rect, so nodes the viewport cull
             // skipped this frame still sweep. Never-measured nodes
@@ -120,7 +122,18 @@ impl SelectionUI {
                 continue;
             };
             if rect.intersects(body) {
-                selected.insert(n.id);
+                selected.insert(SelectionKey::Node(n.id));
+            }
+            for (i, output) in scene.outputs(n.outputs).iter().enumerate() {
+                if !output.pinned {
+                    continue;
+                }
+                let Some(pin_body) = pin_ui::pin_world_rect(geometry, n.id, i, output) else {
+                    continue;
+                };
+                if rect.intersects(pin_body) {
+                    selected.insert(SelectionKey::Pin(OutputPort::new(n.id, i)));
+                }
             }
         }
         // Still dragging → stash the updated corner + the swept preview

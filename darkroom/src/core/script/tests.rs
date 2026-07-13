@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::document::SelectionKey;
 use scenarium::graph::{Binding, NodeKind, OutputPort};
 use scenarium::library::Library;
 
@@ -291,7 +292,7 @@ fn prelude_select_node_decodes_to_setselection() {
     match &actions[0] {
         Intent::SetSelection { to } => {
             assert_eq!(to.len(), 1);
-            assert!(to.contains(&id));
+            assert!(to.contains(&SelectionKey::Node(id)));
         }
         other => panic!("expected SetSelection, got {other:?}"),
     }

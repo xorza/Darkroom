@@ -12,7 +12,7 @@ use scenarium::graph::{
 use scenarium::library::Library;
 use scenarium::node::function::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 
-use crate::core::document::{GraphView, Viewport};
+use crate::core::document::{GraphView, SelectionKey, Viewport};
 use crate::gui::run_state::{ExecStatus, RunState};
 
 #[derive(Debug, Default)]
@@ -49,13 +49,14 @@ pub struct Scene {
     /// pan/zoom gesture writes it back here, and `App` copies it onto the
     /// document so it persists (single owner = `Document`).
     pub viewport: Viewport,
-    /// Currently-selected nodes, the committed set mirrored from
-    /// `Document` each rebuild so `node_ui` can pick a different paint
-    /// without taking a `&Document`. Read-only, like the rest of `Scene`:
-    /// the in-progress rubber-band preview lives on `SelectionUI` (read
-    /// back via `SelectionUI::preview`) and the canvas unions the two when
-    /// drawing, so the gesture never writes into this projection.
-    pub selected_nodes: BTreeSet<NodeId>,
+    /// Currently-selected nodes and pinned-output previews, the committed
+    /// set mirrored from `Document` each rebuild so `node_ui`/`pin_ui` can
+    /// pick a different paint without taking a `&Document`. Read-only, like
+    /// the rest of `Scene`: the in-progress rubber-band preview lives on
+    /// `SelectionUI` (read back via `SelectionUI::preview`) and the canvas
+    /// unions the two when drawing, so the gesture never writes into this
+    /// projection.
+    pub selected: BTreeSet<SelectionKey>,
 }
 
 /// Per-frame snapshot of an input port's [`Binding`] for the UI tree.
@@ -238,7 +239,7 @@ impl Scene {
         ctx_def: Option<&SubgraphDef>,
         run_state: &RunState,
     ) {
-        self.selected_nodes = view.selected_nodes.clone();
+        self.selected = view.selected.clone();
         // Mirror the persisted viewport. The gesture overwrites this
         // later this frame and `App` copies it back onto the doc, so
         // a fresh value (e.g. just-loaded document) shows up here while

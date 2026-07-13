@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use aperture::{Key, Shortcut, Ui};
 
 use crate::core::document::{GraphRef, Viewport};
-use crate::core::edit::intent::{self, Intent, build_duplicate_intent};
+use crate::core::edit::intent::{self, Intent, build_duplicate_intent, remove_selection_intents};
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
@@ -89,7 +89,7 @@ impl Editor {
             return;
         }
         let view = self.document.view(target).expect("active tab view exists");
-        let has_selection = !view.selected_nodes.is_empty();
+        let has_selection = !view.selected.is_empty();
         let pan = view.viewport.pan;
         if escape && has_selection {
             self.intents.push(Intent::SetSelection {
@@ -104,21 +104,13 @@ impl Editor {
         if duplicate && let Some(intent) = build_duplicate_intent(&self.document, target) {
             self.intents.push(intent);
         }
-        // Delete/Backspace removes the whole selection. One `RemoveNode`
-        // per node; `drain_intents` batches a frame's intents into a single
+        // Delete/Backspace removes the whole selection: a selected node
+        // becomes `RemoveNode`, a selected pin preview just unpins its
+        // port. `drain_intents` batches a frame's intents into a single
         // undo entry, so it's one Cmd-Z (mirrors the breaker's multi-delete).
         if delete {
-            let ids: Vec<_> = self
-                .document
-                .view(target)
-                .expect("active tab view exists")
-                .selected_nodes
-                .iter()
-                .copied()
-                .collect();
-            for node_id in ids {
-                self.intents.push(Intent::RemoveNode { node_id });
-            }
+            self.intents
+                .extend(remove_selection_intents(&view.selected));
         }
     }
 

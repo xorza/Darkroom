@@ -11,16 +11,19 @@
 //!
 //! [`App`]: crate::gui::app::App
 
+use std::collections::BTreeSet;
+
 use aperture::Ui;
 use scenarium::graph::NodeId;
 use scenarium::graph::subgraph::SubgraphDef;
 use scenarium::library::Library;
 
 use crate::core::document::dock::{DockOp, TabAddress};
-use crate::core::document::{Document, GraphRef, PortRef, TabRef};
+use crate::core::document::{Document, GraphRef, PortRef, SelectionKey, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::{
     Intent, NodeProperty, build_duplicate_intent_for, commit_intent_cascading,
+    remove_selection_intents,
 };
 use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
@@ -309,9 +312,10 @@ impl Editor {
 
     /// Resolve a node context-menu pick against `target`'s live selection
     /// (right-click already selected the clicked node). Duplicate variants
-    /// reuse the Ctrl+D builder; Remove mirrors the Delete-key path —
-    /// one `RemoveNode` per node, batched into a single undo entry by the
-    /// post-record drain.
+    /// reuse the Ctrl+D builder (pinned-output previews carry no node
+    /// identity to clone, so they're filtered out); Remove mirrors the
+    /// Delete-key path — one intent per selected member, batched into a
+    /// single undo entry by the post-record drain.
     fn apply_node_menu_action(&mut self, action: NodeMenuAction, target: GraphRef) {
         let Some(view) = self.document.view(target) else {
             return;
@@ -319,20 +323,23 @@ impl Editor {
         match action {
             NodeMenuAction::Duplicate | NodeMenuAction::DuplicateWithIncoming => {
                 let incoming = matches!(action, NodeMenuAction::DuplicateWithIncoming);
-                if let Some(intent) = build_duplicate_intent_for(
-                    &self.document,
-                    target,
-                    &view.selected_nodes,
-                    incoming,
-                ) {
+                let node_ids: BTreeSet<NodeId> = view
+                    .selected
+                    .iter()
+                    .filter_map(|k| match k {
+                        SelectionKey::Node(id) => Some(*id),
+                        SelectionKey::Pin(_) => None,
+                    })
+                    .collect();
+                if let Some(intent) =
+                    build_duplicate_intent_for(&self.document, target, &node_ids, incoming)
+                {
                     self.intents.push(intent);
                 }
             }
             NodeMenuAction::Remove => {
-                let ids: Vec<NodeId> = view.selected_nodes.iter().copied().collect();
-                for node_id in ids {
-                    self.intents.push(Intent::RemoveNode { node_id });
-                }
+                self.intents
+                    .extend(remove_selection_intents(&view.selected));
             }
         }
     }
@@ -617,13 +624,13 @@ mod tests {
         editor.dirty = false;
         editor.apply_edit(
             Intent::SetSelection {
-                to: BTreeSet::from([id]),
+                to: BTreeSet::from([SelectionKey::Node(id)]),
             },
             &lib,
         );
         assert_eq!(
-            editor.document.main_view.selected_nodes,
-            BTreeSet::from([id]),
+            editor.document.main_view.selected,
+            BTreeSet::from([SelectionKey::Node(id)]),
             "the selection edit did apply",
         );
         assert!(

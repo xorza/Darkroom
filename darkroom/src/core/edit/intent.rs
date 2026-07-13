@@ -41,7 +41,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::document::dock::{DockLayout, DockOp, DockPath};
 use crate::core::document::view_node::ViewNode;
-use crate::core::document::{BoundarySide, Document, EditScope, EditScopeRef, GraphRef, Viewport};
+use crate::core::document::{
+    BoundarySide, Document, EditScope, EditScopeRef, GraphRef, SelectionKey, Viewport,
+};
 
 /// One scalar node property an editor can toggle — the payload of
 /// [`Intent::SetNodeProperty`]. Both variants are geometry-neutral (changing
@@ -121,11 +123,11 @@ pub enum Intent {
         input_idx: usize,
         to: Binding,
     },
-    /// Replace the whole selection set. The rubber band, node clicks,
+    /// Replace the whole selection set. The rubber band, node/pin clicks,
     /// and Esc-deselect all funnel through this — the caller computes
     /// the desired final set and the undo layer captures the prior one.
     SetSelection {
-        to: BTreeSet<NodeId>,
+        to: BTreeSet<SelectionKey>,
     },
     /// Lift `node_id` to the top of its graph's paint stack — the end of
     /// `view_nodes`, which is drawn last and so sits in front. Emitted
@@ -255,8 +257,8 @@ pub enum GraphStep {
         nodes: Vec<(ViewNode, Node)>,
         bindings: Vec<(InputPort, Binding)>,
         subscriptions: Vec<Subscription>,
-        from_selection: BTreeSet<NodeId>,
-        to_selection: BTreeSet<NodeId>,
+        from_selection: BTreeSet<SelectionKey>,
+        to_selection: BTreeSet<SelectionKey>,
     },
     /// Pre-removal state lives entirely on the step: every reference
     /// into the doomed node, so undo can fully restore it.
@@ -292,8 +294,8 @@ pub enum GraphStep {
         to: Binding,
     },
     SetSelection {
-        from: BTreeSet<NodeId>,
-        to: BTreeSet<NodeId>,
+        from: BTreeSet<SelectionKey>,
+        to: BTreeSet<SelectionKey>,
     },
     /// Reorder within `view_nodes` to raise a node to the top of the paint
     /// stack. `from_index`/`to_index` are its slot before/after the raise,
@@ -337,11 +339,16 @@ pub enum GraphStep {
     },
     /// Mark or clear whether an output port is pinned. `from`/`to` are the
     /// pinned-state booleans — exact inverses, one step type backs the toggle.
+    /// `was_selected` is whether the pin's preview widget was selected
+    /// *before* this edit — unpinning drops its selection membership (the
+    /// widget disappears with it), so a revert back to `pinned` restores it,
+    /// mirroring `RemoveNode`'s `was_selected`.
     SetOutputPinned {
         node_id: NodeId,
         port_idx: usize,
         from: bool,
         to: bool,
+        was_selected: bool,
     },
     /// Move a pinned output's satellite. `from` is `None` when the port had
     /// no custom offset yet (falling back to the default formula) — revert
@@ -536,19 +543,22 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             bindings,
             subscriptions,
         } => {
-            let to_selection = nodes.iter().map(|(_, node)| node.id).collect();
+            let to_selection = nodes
+                .iter()
+                .map(|(_, node)| SelectionKey::Node(node.id))
+                .collect();
             GraphStep::DuplicateNodes {
                 nodes,
                 bindings,
                 subscriptions,
-                from_selection: view.selected_nodes.clone(),
+                from_selection: view.selected.clone(),
                 to_selection,
             }
         }
         Intent::RemoveNode { node_id } => {
             let view_node = view.view_nodes.by_key(&node_id)?.clone();
             let node = graph.find_node(&node_id, NodeSearch::TopLevel)?.clone();
-            let was_selected = view.selected_nodes.contains(&node_id);
+            let was_selected = view.selected.contains(&SelectionKey::Node(node_id));
             let pin_offsets = view
                 .pin_offsets
                 .iter()
@@ -595,7 +605,7 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             }
         }
         Intent::SetSelection { to } => GraphStep::SetSelection {
-            from: view.selected_nodes.clone(),
+            from: view.selected.clone(),
             to,
         },
         Intent::RaiseNode { node_id } => {
@@ -674,6 +684,7 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
                 port_idx,
                 from: graph.is_output_pinned(port),
                 to: pinned,
+                was_selected: view.selected.contains(&SelectionKey::Pin(port)),
             }
         }
         Intent::SetPinOffset {
@@ -779,14 +790,24 @@ pub fn commit_intent_cascading(
 }
 
 /// Build an [`Intent::DuplicateNodes`] for `target`'s current selection.
-/// Thin wrapper over [`build_duplicate_intent_for`] with the selection as
-/// the node set and incoming (external) wires dropped — the Ctrl+D path.
+/// Thin wrapper over [`build_duplicate_intent_for`] with the selected node
+/// bodies (pinned-output previews carry no node identity to clone, so
+/// they're filtered out) and incoming (external) wires dropped — the Ctrl+D
+/// path.
 pub fn build_duplicate_intent(doc: &Document, target: GraphRef) -> Option<Intent> {
     let EditScopeRef { view, .. } = doc.scope(target)?;
-    if view.selected_nodes.is_empty() {
+    let node_ids: BTreeSet<NodeId> = view
+        .selected
+        .iter()
+        .filter_map(|k| match k {
+            SelectionKey::Node(id) => Some(*id),
+            SelectionKey::Pin(_) => None,
+        })
+        .collect();
+    if node_ids.is_empty() {
         return None;
     }
-    build_duplicate_intent_for(doc, target, &view.selected_nodes, false)
+    build_duplicate_intent_for(doc, target, &node_ids, false)
 }
 
 /// Build an [`Intent::DuplicateNodes`] cloning `node_ids` in `target`: each
@@ -869,6 +890,25 @@ pub fn build_duplicate_intent_for(
         bindings,
         subscriptions,
     })
+}
+
+/// The intents that remove every member of `selected`: a node key becomes
+/// `RemoveNode`, a pin key becomes an unpin (`SetOutputPinned { pinned:
+/// false }`) — deleting a preview widget just unpins its port rather than
+/// touching the node it lives on. Shared by the Delete/Backspace shortcut
+/// and the node context menu's "Remove".
+pub fn remove_selection_intents(selected: &BTreeSet<SelectionKey>) -> Vec<Intent> {
+    selected
+        .iter()
+        .map(|key| match *key {
+            SelectionKey::Node(node_id) => Intent::RemoveNode { node_id },
+            SelectionKey::Pin(port) => Intent::SetOutputPinned {
+                node_id: port.node_id,
+                port_idx: port.port_idx,
+                pinned: false,
+            },
+        })
+        .collect()
 }
 
 /// Library subgraphs are localized on instance: the new-node menu drops
@@ -977,7 +1017,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             for s in subscriptions {
                 scope.graph.subscribe(s.emitter, s.event_idx, s.subscriber);
             }
-            scope.view.selected_nodes = to_selection.clone();
+            scope.view.selected = to_selection.clone();
         }
         GraphStep::RemoveNode { node, .. } => {
             assert!(
@@ -1014,7 +1054,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 .set_input_binding(InputPort::new(*node_id, *input_idx), to.clone());
         }
         GraphStep::SetSelection { to, .. } => {
-            scope.view.selected_nodes = to.clone();
+            scope.view.selected = to.clone();
         }
         GraphStep::RaiseNode {
             node_id, to_index, ..
@@ -1092,11 +1132,15 @@ fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProp
 }
 
 /// Mark or clear whether one output port is pinned. Shared by `apply_graph`
-/// (writes `to`) and `revert_graph` (writes `from`).
+/// (writes `to`) and `revert_graph` (writes `from`). Unpinning drops the
+/// port's preview widget, so its selection membership goes with it — a
+/// selected pin left in the set once the widget is gone would be dead state.
 fn set_output_pinned(scope: &mut EditScope<'_>, node_id: NodeId, port_idx: usize, pinned: bool) {
-    scope
-        .graph
-        .set_output_pinned(OutputPort::new(node_id, port_idx), pinned);
+    let port = OutputPort::new(node_id, port_idx);
+    scope.graph.set_output_pinned(port, pinned);
+    if !pinned {
+        scope.view.selected.remove(&SelectionKey::Pin(port));
+    }
 }
 
 /// Backward apply: write the step's "from" half to `doc`. Pairs
@@ -1148,7 +1192,7 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             for (_, node) in nodes {
                 scope.remove_node(&node.id);
             }
-            scope.view.selected_nodes = from_selection.clone();
+            scope.view.selected = from_selection.clone();
         }
         GraphStep::RemoveNode {
             view_node,
@@ -1171,7 +1215,10 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.graph.restore_wiring(bindings, subscriptions);
             scope.view.pin_offsets.extend(pin_offsets.iter().copied());
             if *was_selected {
-                scope.view.selected_nodes.insert(removed_node_id);
+                scope
+                    .view
+                    .selected
+                    .insert(SelectionKey::Node(removed_node_id));
             }
         }
         GraphStep::MoveNodes { moves, .. } => {
@@ -1199,7 +1246,7 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 .set_input_binding(InputPort::new(*node_id, *input_idx), from.clone());
         }
         GraphStep::SetSelection { from, .. } => {
-            scope.view.selected_nodes = from.clone();
+            scope.view.selected = from.clone();
         }
         GraphStep::RaiseNode {
             node_id,
@@ -1237,8 +1284,20 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             node_id,
             port_idx,
             from,
+            was_selected,
             ..
-        } => set_output_pinned(scope, *node_id, *port_idx, *from),
+        } => {
+            set_output_pinned(scope, *node_id, *port_idx, *from);
+            // Re-pinning on undo doesn't itself restore selection (pinning
+            // never auto-selects) — restore it explicitly when the pin was
+            // selected before the edit that unpinned it.
+            if *from && *was_selected {
+                scope
+                    .view
+                    .selected
+                    .insert(SelectionKey::Pin(OutputPort::new(*node_id, *port_idx)));
+            }
+        }
         GraphStep::SetPinOffset {
             node_id,
             port_idx,
@@ -1560,7 +1619,7 @@ mod tests {
         let navigation = [
             UndoStep::Graph(GraphStep::SetSelection {
                 from: BTreeSet::new(),
-                to: BTreeSet::from([NodeId::unique()]),
+                to: BTreeSet::from([SelectionKey::Node(NodeId::unique())]),
             }),
             UndoStep::Graph(GraphStep::SetViewport {
                 from: Viewport {
@@ -1720,7 +1779,8 @@ mod tests {
         );
         doc.graph
             .set_input_binding(InputPort::new(b, 2), (c, 0).into());
-        doc.main_view.selected_nodes = [a, b].into_iter().collect();
+        let node_ids: BTreeSet<NodeId> = [a, b].into_iter().collect();
+        doc.main_view.selected = node_ids.iter().copied().map(SelectionKey::Node).collect();
 
         let Some(Intent::DuplicateNodes {
             nodes,
@@ -1734,9 +1794,12 @@ mod tests {
         assert_eq!(nodes.len(), 2, "both selected nodes cloned");
         assert!(subscriptions.is_empty());
         // Fresh ids, offset positions.
-        let new_ids: BTreeSet<NodeId> = nodes.iter().map(|(_, n)| n.id).collect();
+        let new_ids: BTreeSet<SelectionKey> = nodes
+            .iter()
+            .map(|(_, n)| SelectionKey::Node(n.id))
+            .collect();
         assert!(
-            new_ids.is_disjoint(&doc.main_view.selected_nodes),
+            new_ids.is_disjoint(&doc.main_view.selected),
             "clones get fresh ids"
         );
         let a_clone = nodes
@@ -1783,7 +1846,7 @@ mod tests {
             nodes: incoming_nodes,
             bindings: incoming,
             ..
-        }) = build_duplicate_intent_for(&doc, GraphRef::Main, &doc.main_view.selected_nodes, true)
+        }) = build_duplicate_intent_for(&doc, GraphRef::Main, &node_ids, true)
         else {
             panic!("expected a DuplicateNodes intent");
         };
@@ -1812,6 +1875,41 @@ mod tests {
         let mut doc = Document::default();
         add_node_at(&mut doc, Vec2::ZERO);
         assert!(build_duplicate_intent(&doc, GraphRef::Main).is_none());
+
+        // A selection of only pin previews has no node identity to clone —
+        // same as an empty selection.
+        let id = add_node_at(&mut doc, Vec2::new(50.0, 0.0));
+        doc.main_view.selected = [SelectionKey::Pin(OutputPort::new(id, 0))]
+            .into_iter()
+            .collect();
+        assert!(
+            build_duplicate_intent(&doc, GraphRef::Main).is_none(),
+            "pin-only selection has no node to duplicate"
+        );
+    }
+
+    #[test]
+    fn remove_selection_intents_splits_nodes_from_pins() {
+        let node_id = NodeId::unique();
+        let port = OutputPort::new(NodeId::unique(), 2);
+        let selected: BTreeSet<SelectionKey> =
+            [SelectionKey::Node(node_id), SelectionKey::Pin(port)]
+                .into_iter()
+                .collect();
+
+        let mut intents = remove_selection_intents(&selected);
+        assert_eq!(intents.len(), 2);
+        intents.sort_by_key(|i| matches!(i, Intent::SetOutputPinned { .. }));
+
+        assert!(matches!(
+            intents[0],
+            Intent::RemoveNode { node_id: id } if id == node_id
+        ));
+        assert!(matches!(
+            intents[1],
+            Intent::SetOutputPinned { node_id: n, port_idx: 2, pinned: false }
+                if n == port.node_id
+        ));
     }
 
     #[test]
@@ -1918,6 +2016,32 @@ mod tests {
         assert!(!doc.graph.is_output_pinned(port), "revert clears it");
         apply_step(&step, &mut doc, GraphRef::Main);
         assert!(doc.graph.is_output_pinned(port), "redo re-marks it");
+
+        // Selecting the pin, then unpinning it, drops the selection — its
+        // preview widget is gone; reverting the unpin restores it (mirrors
+        // `RemoveNode`'s `was_selected`).
+        doc.main_view.selected.insert(SelectionKey::Pin(port));
+        let unpin = commit_intent(
+            Intent::SetOutputPinned {
+                node_id: id,
+                port_idx: 0,
+                pinned: false,
+            },
+            &mut doc,
+            GraphRef::Main,
+        )
+        .expect("unpinning a pinned port is a real change");
+        assert!(!doc.graph.is_output_pinned(port));
+        assert!(
+            !doc.main_view.selected.contains(&SelectionKey::Pin(port)),
+            "unpinning drops the now-gone widget's selection"
+        );
+        revert_step(&unpin, &mut doc, GraphRef::Main);
+        assert!(doc.graph.is_output_pinned(port), "revert re-pins it");
+        assert!(
+            doc.main_view.selected.contains(&SelectionKey::Pin(port)),
+            "revert restores the selection the pin had before it was unpinned"
+        );
 
         // Setting to the value it already holds is a no-op (no undo entry).
         assert!(

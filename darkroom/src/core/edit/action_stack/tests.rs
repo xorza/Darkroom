@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::document::dock::DockOp;
-use crate::core::document::{Document, TabRef};
+use crate::core::document::{Document, SelectionKey, TabRef};
 use crate::core::edit::intent::{Intent, apply_step, build_step};
 use scenarium::graph::NodeSearch;
 use scenarium::graph::subgraph::SubgraphId;
@@ -108,7 +108,7 @@ fn switch_does_not_merge_across_an_intervening_edit() {
     // Intervening selection edit (a real change, so not a no-op).
     let node_id = doc.graph.iter().next().unwrap().id;
     let mut want = std::collections::BTreeSet::new();
-    want.insert(node_id);
+    want.insert(SelectionKey::Node(node_id));
     let sel = build_step(Intent::SetSelection { to: want }, &doc, GraphRef::Main).unwrap();
     apply_step(&sel, &mut doc, GraphRef::Main);
     stack.push_current(GraphRef::Main, &[sel]);
@@ -284,7 +284,9 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     // Edge a -> b, then select both for deletion.
     doc.graph
         .set_input_binding(InputPort::new(b, 0), (a, 0).into());
-    doc.main_view.selected_nodes = [a, b].into_iter().collect();
+    doc.main_view.selected = [SelectionKey::Node(a), SelectionKey::Node(b)]
+        .into_iter()
+        .collect();
 
     // Mirror `drain_intents`: build each `RemoveNode` against the live
     // doc, apply immediately, collect into one batch entry. The a->b
@@ -373,7 +375,7 @@ fn new_edit_discards_the_redo_tail() {
         apply_step(&step, doc, GraphRef::Main);
         stack.push_current(GraphRef::Main, &[step]);
     };
-    let one: BTreeSet<_> = [node].into_iter().collect();
+    let one: BTreeSet<_> = [SelectionKey::Node(node)].into_iter().collect();
     select(&mut stack, &mut doc, one.clone()); // A: {} -> {node}
     select(&mut stack, &mut doc, BTreeSet::new()); // B: {node} -> {}
 
@@ -420,7 +422,7 @@ fn history_bounded_by_byte_budget() {
     // in/out — `from != to` each time, gesture key `None`).
     for i in 0..200 {
         let to: BTreeSet<_> = if i % 2 == 0 {
-            [node].into_iter().collect()
+            [SelectionKey::Node(node)].into_iter().collect()
         } else {
             BTreeSet::new()
         };

@@ -21,11 +21,13 @@
 //! reflects the live drag by the time [`PinUi::draw_wire`]/[`PinUi::draw_widget`]
 //! run.
 
+use std::collections::BTreeSet;
+
 use aperture::{Brush, Rect, Ui, WidgetId};
 use glam::Vec2;
 use scenarium::graph::{NodeId, OutputPort};
 
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::{PortKind, PortRef, SelectionKey};
 use crate::core::edit::intent::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
@@ -37,6 +39,7 @@ use crate::gui::canvas::pin_preview::{
     preview_title,
 };
 use crate::gui::canvas::wire::{CubicHandles, WireEmphasis, add_cubic_wire, cubic_handles};
+use crate::gui::node::click_intents;
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::port_row::port_circle_wid;
 use crate::gui::node::set_output_pinned;
@@ -62,6 +65,31 @@ fn default_pin_offset() -> Vec2 {
 /// [`default_pin_offset`].
 fn resolved_pin_offset(output: &SceneOutput) -> Vec2 {
     output.pin_offset.unwrap_or_else(default_pin_offset)
+}
+
+/// World-space rect of a pinned output's preview widget, for hit-testing
+/// (the rubber-band sweep) — the same fixed footprint at the same
+/// port-relative offset [`draw_widget`](PinUi::draw_widget) paints at.
+/// `None` before the port has measured (its geometry not resolved yet).
+pub(crate) fn pin_world_rect(
+    geometry: &CanvasGeometry,
+    node_id: NodeId,
+    port_idx: usize,
+    output: &SceneOutput,
+) -> Option<Rect> {
+    let port_ref = PortRef {
+        node_id,
+        kind: PortKind::Output,
+        port_idx,
+    };
+    let port_center = geometry.ports.center(port_ref)?;
+    let top_left = port_center + resolved_pin_offset(output);
+    Some(Rect::new(
+        top_left.x,
+        top_left.y,
+        PREVIEW_WIDTH,
+        PREVIEW_HEIGHT,
+    ))
 }
 
 /// The port or widget a drag latched onto, and where its offset started —
@@ -223,6 +251,8 @@ impl PinUi {
         geometry: &CanvasGeometry,
         visible: Option<Rect>,
         probe: &mut BreakerProbe<'_>,
+        selected: &BTreeSet<SelectionKey>,
+        out: &mut Vec<Intent>,
     ) {
         self.previews.prune(|port| {
             scene.nodes.by_key(&port.node_id).is_some_and(|n| {
@@ -260,8 +290,16 @@ impl PinUi {
                     accent,
                 );
 
+                // Same border-width formula as a node body (always the
+                // selection width, so selecting the card never resizes it —
+                // see `gui::node::draw_one`), so "in the selection" reads as
+                // one visual language across nodes and pin previews.
+                let is_selected = selected.contains(&SelectionKey::Pin(g.out_port));
+                let border_width = theme.node_border_width * 2.0;
                 let card_border = if g.broken {
                     theme.colors.connection_broken
+                } else if is_selected {
+                    theme.colors.selection_rect
                 } else {
                     theme.colors.node_border
                 };
@@ -276,16 +314,25 @@ impl PinUi {
                         .map(ToString::to_string)
                         .unwrap_or_else(|| "not yet run".to_owned())
                 });
-                pin_preview::draw_widget(
+                let response = pin_preview::draw_widget(
                     ui,
                     theme,
                     g.out_port,
                     g.top_left,
                     &preview_title(n.name.as_str(), output.name.as_str()),
                     card_border,
+                    border_width,
                     image.as_ref(),
                     text.as_deref(),
                 );
+                // Click without drag → select, exactly like a node body
+                // click (plain replaces the selection, Shift toggles this
+                // pin's membership); a drag repositions instead (handled by
+                // `PinUi::apply`).
+                if response.clicked() {
+                    let shift = ui.modifiers().shift;
+                    click_intents(shift, scene, SelectionKey::Pin(g.out_port), out);
+                }
             }
         }
     }
