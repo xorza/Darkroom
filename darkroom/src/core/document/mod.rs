@@ -2,7 +2,7 @@ pub(crate) mod auto_layout;
 pub mod dock;
 pub mod view_node;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use common::{KeyIndexVec, SerdeFormat, is_debug};
 use glam::Vec2;
 use scenarium::graph::subgraph::SubgraphRef;
@@ -11,7 +11,8 @@ use scenarium::graph::{Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
 use scenarium::graph::{Node, NodeKind};
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use thiserror::Error;
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
 use crate::core::document::dock::DockLayout;
@@ -23,6 +24,17 @@ use crate::core::edit::reconcile::reconcile_def;
 /// level with it (instead of the generic auto-layout stacking the two
 /// unconnected nodes in one column).
 const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
+
+/// The document is structurally invalid: a file read from disk is untrusted
+/// input (hand-edited, corrupt, or stale against the editor), so
+/// [`Document::check`] surfaces a violation as this recoverable error rather
+/// than panicking. The load-path counterpart of scenarium's `CompileError`;
+/// only `check` produces it.
+#[derive(Debug, Error)]
+#[error("invalid document: {message}")]
+pub struct DocumentError {
+    pub message: String,
+}
 
 /// Which graph an editor tab is pointed at. `Main` is the document's
 /// root graph; `Local(id)` is a local subgraph def's interior graph
@@ -226,24 +238,28 @@ impl GraphView {
         }
     }
 
-    fn validate(&self, graph: &CoreGraph) {
-        assert!(
+    fn check(&self, graph: &CoreGraph) -> Result<()> {
+        ensure!(
             self.viewport.zoom.is_finite() && self.viewport.zoom > 0.0,
             "graph zoom must be finite and positive"
         );
-        assert!(
+        ensure!(
             self.viewport.pan.x.is_finite() && self.viewport.pan.y.is_finite(),
             "graph pan must be finite"
         );
 
-        let mut view_nodes = HashMap::new();
+        let mut view_nodes = HashSet::new();
         for node in self.view_nodes.iter() {
-            assert!(
+            ensure!(
                 node.pos.x.is_finite() && node.pos.y.is_finite(),
-                "node position must be finite"
+                "node {:?} position must be finite",
+                node.id
             );
-            let prior = view_nodes.insert(node.id, ());
-            assert!(prior.is_none(), "duplicate node id detected");
+            ensure!(
+                view_nodes.insert(node.id),
+                "duplicate node id {:?} in view",
+                node.id
+            );
         }
 
         for key in &self.selected {
@@ -251,37 +267,42 @@ impl GraphView {
                 SelectionKey::Node(id) => *id,
                 SelectionKey::Pin(port) => port.node_id,
             };
-            assert!(
-                view_nodes.contains_key(&owner),
-                "selected node id must exist in graph"
+            ensure!(
+                view_nodes.contains(&owner),
+                "selected node {:?} is absent from the graph",
+                owner
             );
         }
 
-        let mut graph_nodes = HashMap::new();
+        let mut graph_nodes = HashSet::new();
         for node in graph.iter() {
-            let prior = graph_nodes.insert(node.id, ());
-            assert!(prior.is_none(), "duplicate node id detected in graph");
+            ensure!(
+                graph_nodes.insert(node.id),
+                "duplicate node id {:?} in graph",
+                node.id
+            );
         }
 
-        assert_eq!(
-            view_nodes.len(),
-            graph_nodes.len(),
+        ensure!(
+            view_nodes.len() == graph_nodes.len(),
             "view node list must match graph nodes"
         );
-        for node_id in graph_nodes.keys() {
-            assert!(
-                view_nodes.contains_key(node_id),
-                "graph view missing node position"
+        for node_id in &graph_nodes {
+            ensure!(
+                view_nodes.contains(node_id),
+                "graph view missing a position for node {:?}",
+                node_id
             );
         }
 
         for (port, position) in &self.pin_positions {
-            assert!(
+            ensure!(
                 position.x.is_finite() && position.y.is_finite(),
-                "pin position must be finite"
+                "pin position on node {:?} must be finite",
+                port.node_id
             );
-            assert!(
-                graph_nodes.contains_key(&port.node_id),
+            ensure!(
+                graph_nodes.contains(&port.node_id),
                 "pin position references a node absent from the graph"
             );
         }
@@ -293,11 +314,12 @@ impl GraphView {
         // keeps stale entries for since-unpinned ports on purpose (undo restores
         // them), so a position without a matching pin is fine.
         for port in graph.pinned_outputs() {
-            assert!(
+            ensure!(
                 self.pin_positions.contains_key(&port),
                 "pinned output must have an explicit pin position"
             );
         }
+        Ok(())
     }
 }
 
@@ -648,33 +670,55 @@ impl Document {
         self.graph.prune_dangling_wiring(library);
     }
 
+    /// Full structural validation, in all builds. A document read from disk
+    /// is untrusted input, so a violation is a recoverable [`DocumentError`]
+    /// the caller surfaces — not a panic. The debug-only assert form for
+    /// documents the editor itself built is [`Self::validate`].
+    pub fn check(&self) -> Result<(), DocumentError> {
+        self.check_inner().map_err(|e| DocumentError {
+            message: format!("{e:#}"),
+        })
+    }
+
+    /// The anyhow-backed body of [`Self::check`], kept separate so the
+    /// individual checks compose with `ensure!`/`context` and only the
+    /// boundary converts to the typed error.
+    fn check_inner(&self) -> Result<()> {
+        self.graph.check()?;
+        self.main_view.check(&self.graph).context("main view")?;
+
+        // Each opened subgraph view must match its interior graph; a
+        // view whose subgraph was deleted is a stale entry.
+        for (id, view) in &self.sub_views {
+            let def = self.graph.subgraphs.by_key(id).with_context(|| {
+                format!("sub_views entry references missing local subgraph {id:?}")
+            })?;
+            view.check(&def.graph)
+                .with_context(|| format!("subgraph {id:?} view"))?;
+        }
+
+        self.layout.check()?;
+        for tab in self.layout.all_tabs() {
+            if let TabRef::Graph(g) = tab {
+                ensure!(
+                    self.graph_for(g).is_some(),
+                    "open tab references a missing graph {g:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Debug-only assert form of [`Self::check`]: a violation in a document
+    /// the editor itself built is our bug, caught loudly in development and
+    /// free in release. Untrusted (deserialized) documents go through `check`
+    /// in every build.
     pub fn validate(&self) {
         if !is_debug() {
             return;
         }
-
-        self.graph.validate();
-        self.main_view.validate(&self.graph);
-
-        // Each opened subgraph view must match its interior graph; a
-        // view whose subgraph was deleted is a stale-entry bug.
-        for (id, view) in &self.sub_views {
-            let def = self
-                .graph
-                .subgraphs
-                .by_key(id)
-                .expect("sub_views entry references missing local subgraph");
-            view.validate(&def.graph);
-        }
-
-        self.layout.validate();
-        for tab in self.layout.all_tabs() {
-            if let TabRef::Graph(g) = tab {
-                assert!(
-                    self.graph_for(g).is_some(),
-                    "open tab references a missing graph"
-                );
-            }
+        if let Err(err) = self.check() {
+            panic!("{err}");
         }
     }
 
@@ -689,7 +733,7 @@ impl Document {
         }
 
         let doc = common::deserialize::<Document>(input, format)?;
-        doc.validate();
+        doc.check()?;
 
         Ok(doc)
     }
@@ -1275,15 +1319,29 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "pinned output must have an explicit pin position")]
-    fn validate_rejects_a_pinned_output_without_a_position() {
+    fn check_rejects_a_pinned_output_without_a_position() {
         // A pinned output with no matching pin position is malformed: the edit
         // layer's `MoveSelection` build looks the position up unconditionally,
-        // so validate surfaces the drift rather than letting it crash later.
+        // so check surfaces the drift rather than letting it crash later.
         let mut graph = core_test_graph();
         let port = OutputPort::new(graph.by_name("sum").unwrap().id, 0);
         graph.set_output_pinned(port, true);
         let doc: Document = graph.into(); // no position — nothing auto-seeds one
-        doc.validate();
+        let err = doc.check().unwrap_err();
+        assert!(
+            err.message
+                .contains("pinned output must have an explicit pin position"),
+            "unexpected check error: {err}"
+        );
+
+        // The same gate guards deserialization in every build (release too):
+        // encoding with bare serde bypasses `Document::serialize`'s debug
+        // assert, and the load still refuses the malformed document.
+        let bytes = common::serialize(&doc, SerdeFormat::Rhai).expect("serialize");
+        let err = Document::deserialize(SerdeFormat::Rhai, &bytes).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("pinned output must have an explicit pin position"),
+            "unexpected deserialize error: {err:#}"
+        );
     }
 }
