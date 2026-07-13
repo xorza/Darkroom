@@ -6,7 +6,7 @@ use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
 use scenarium::graph::{Graph, Node, NodeKind, NodeSearch};
 
 use crate::core::document::dock::DockOp;
-use crate::core::document::{Document, EditScopeRef, GraphRef, SelectionKey};
+use crate::core::document::{Document, EditScopeRef, GraphRef, ItemRef};
 use crate::core::edit::intent::types::{
     DocStep, GestureKey, GraphStep, Intent, NodeProperty, UndoStep,
 };
@@ -64,14 +64,14 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             unreachable!("document-global intents handled above")
         }
         Intent::AddNode {
-            view_node,
+            pos,
             mut node,
             def,
             bindings,
         } => {
             let def = reuse_local_subgraph(graph, &mut node, def);
             GraphStep::AddNode {
-                view_node,
+                pos,
                 node,
                 def,
                 bindings,
@@ -84,7 +84,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         } => {
             let to_selection = nodes
                 .iter()
-                .map(|(_, node)| SelectionKey::Node(node.id))
+                .map(|(_, node)| ItemRef::Node(node.id))
                 .collect();
             GraphStep::DuplicateNodes {
                 nodes,
@@ -95,56 +95,41 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             }
         }
         Intent::RemoveNode { node_id } => {
-            let view_node = view.view_nodes.by_key(&node_id)?.clone();
             let node = graph.find_node(&node_id, NodeSearch::TopLevel)?.clone();
-            let was_selected = view.selected.contains(&SelectionKey::Node(node_id));
-            let pin_positions = view
-                .pin_positions
+            // The node's own item plus its pinned outputs', each with its
+            // paint-stack slot — ascending by construction (enumerate).
+            let view_items = view
+                .view_items
                 .iter()
-                .filter(|(port, _)| port.node_id == node_id)
-                .map(|(port, position)| (*port, *position))
+                .enumerate()
+                .filter(|(_, item)| item.key.belongs_to(node_id))
+                .map(|(slot, item)| (slot, item.clone()))
+                .collect();
+            let selected = view
+                .selected
+                .iter()
+                .filter(|key| key.belongs_to(node_id))
+                .copied()
                 .collect();
             GraphStep::RemoveNode {
-                view_node,
                 node,
+                view_items,
                 bindings: graph.bindings_touching(node_id),
                 subscriptions: graph.subscriptions_touching(node_id),
-                pin_positions,
-                was_selected,
+                selected,
             }
         }
-        Intent::MoveSelection {
-            grabbed,
-            nodes,
-            pins,
-        } => {
-            let mut node_moves = Vec::with_capacity(nodes.len());
-            for (id, to) in nodes {
-                if let Some(vn) = view.view_nodes.by_key(&id) {
-                    node_moves.push((id, vn.pos, to));
-                }
-            }
-            let mut pin_moves = Vec::with_capacity(pins.len());
-            for (port, to) in pins {
-                // Drag-sourced (spans frames): a stale drag whose node
-                // vanished mid-gesture drops that pin quietly, like a
-                // vanished node above.
-                if graph
-                    .find_node(&port.node_id, NodeSearch::TopLevel)
-                    .is_none()
-                {
-                    continue;
-                }
-                let from = view.pin_positions.get(&port).copied().expect(
-                    "a pinned port always has an explicit position, seeded when it was pinned",
-                );
-                pin_moves.push((port, from, to));
-            }
-            GraphStep::MoveSelection {
-                grabbed,
-                node_moves,
-                pin_moves,
-            }
+        Intent::MoveSelection { grabbed, moves } => {
+            // Drag-sourced (spans frames): a member whose item vanished
+            // mid-gesture (node removed, port unpinned) drops quietly.
+            let moves = moves
+                .into_iter()
+                .filter_map(|(key, to)| {
+                    let item = view.view_items.by_key(&key)?;
+                    Some((key, item.pos, to))
+                })
+                .collect();
+            GraphStep::MoveSelection { grabbed, moves }
         }
         Intent::RenameNode { node_id, to } => GraphStep::RenameNode {
             from: graph
@@ -166,12 +151,12 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             from: view.selected.clone(),
             to,
         },
-        Intent::RaiseNode { node_id } => {
-            let from_index = view.view_nodes.index_of_key(&node_id)?;
+        Intent::Raise { key } => {
+            let from_index = view.view_items.index_of_key(&key)?;
             // Top of the stack is the last slot — painted last, drawn in front.
-            let to_index = view.view_nodes.len() - 1;
-            GraphStep::RaiseNode {
-                node_id,
+            let to_index = view.view_items.len() - 1;
+            GraphStep::Raise {
+                key,
                 from_index,
                 to_index,
             }
@@ -232,11 +217,19 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             // generic `apply()`/`apply_all()`, so a stale or bogus `node_id`
             // must drop like every other intent here, not assert.
             graph.find_node(&output.node_id, NodeSearch::TopLevel)?;
+            let key = ItemRef::Pin(output);
+            // Present iff currently pinned; captured so reverting an unpin
+            // puts the widget back in its exact paint-stack slot.
+            let prior_slot = view
+                .view_items
+                .index_of_key(&key)
+                .map(|slot| (slot, view.view_items[slot].pos));
             GraphStep::SetOutputPinned {
                 output,
                 from: graph.is_output_pinned(output),
                 to: pinned,
-                was_selected: view.selected.contains(&SelectionKey::Pin(output)),
+                was_selected: view.selected.contains(&key),
+                prior_slot,
             }
         }
     };

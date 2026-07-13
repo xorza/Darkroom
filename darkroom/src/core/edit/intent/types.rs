@@ -19,8 +19,8 @@ use scenarium::graph::{Binding, CacheMode, InputPort, Node, NodeId, OutputPort, 
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::dock::{DockLayout, DockOp, DockPath};
-use crate::core::document::view_node::ViewNode;
-use crate::core::document::{BoundarySide, SelectionKey, Viewport};
+use crate::core::document::view_item::ViewItem;
+use crate::core::document::{BoundarySide, ItemRef, Viewport};
 
 /// One scalar node property an editor can toggle — the payload of
 /// [`Intent::SetNodeProperty`]. Both variants are geometry-neutral (changing
@@ -60,7 +60,9 @@ pub(crate) enum NodeProperty {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Intent {
     AddNode {
-        view_node: ViewNode,
+        /// Where the node lands on the canvas; its view item is created
+        /// alongside it, at the top of the paint stack.
+        pos: Vec2,
         node: Node,
         /// Local subgraph def to add alongside the node — set when the
         /// node is a `Subgraph(Local(_))` instance whose def the caller
@@ -80,7 +82,8 @@ pub(crate) enum Intent {
     /// only captures the prior selection. One undo entry for the whole
     /// duplicate.
     DuplicateNodes {
-        nodes: Vec<(ViewNode, Node)>,
+        /// `(position, node)` per clone.
+        nodes: Vec<(Vec2, Node)>,
         bindings: Vec<(InputPort, Binding)>,
         subscriptions: Vec<Subscription>,
     },
@@ -92,12 +95,11 @@ pub(crate) enum Intent {
     /// multi-select drag moves the whole group as a single undo entry; a
     /// plain drag carries just the one grabbed item. `grabbed` is whichever
     /// member the pointer latched — it keys the drag gesture so consecutive
-    /// frames coalesce. Either list may be empty (a lone node drag has no
-    /// pins; a lone pin drag/creation has no nodes).
+    /// frames coalesce.
     MoveSelection {
-        grabbed: SelectionKey,
-        nodes: Vec<(NodeId, Vec2)>,
-        pins: Vec<(OutputPort, Vec2)>,
+        grabbed: ItemRef,
+        /// `(item, target position)` per moved member, both kinds mixed.
+        moves: Vec<(ItemRef, Vec2)>,
     },
     RenameNode {
         node_id: NodeId,
@@ -111,16 +113,17 @@ pub(crate) enum Intent {
     /// and Esc-deselect all funnel through this — the caller computes
     /// the desired final set and the undo layer captures the prior one.
     SetSelection {
-        to: BTreeSet<SelectionKey>,
+        to: BTreeSet<ItemRef>,
     },
-    /// Lift `node_id` to the top of its graph's paint stack — the end of
-    /// `view_nodes`, which is drawn last and so sits in front. Emitted
-    /// when a node is clicked or grabbed, so clicking a node brings it
-    /// forward. The stack order lives in `view_nodes`, so it persists
-    /// across save/load and tab switches and walks with undo/redo — unlike
-    /// the transient selection-recency stack it replaced.
-    RaiseNode {
-        node_id: NodeId,
+    /// Lift an item — a node body or a pinned output's preview widget —
+    /// to the top of its graph's paint stack: the end of `view_items`,
+    /// which is drawn last and so sits in front. Emitted when either kind
+    /// is clicked or grabbed, so clicking brings it forward. The stack
+    /// order lives in `view_items`, so it persists across save/load and
+    /// tab switches and walks with undo/redo — unlike the transient
+    /// selection-recency stack it replaced.
+    Raise {
+        key: ItemRef,
     },
     /// Set one scalar property of a node — its `disabled` flag or its cache
     /// [`CacheMode`] (see [`NodeProperty`]). Emitted by the header badges: `D`
@@ -217,7 +220,7 @@ pub(crate) enum GraphStep {
     /// `def` is a `Local` subgraph def added alongside the instance node
     /// (library-subgraph instancing); `None` for plain func nodes.
     AddNode {
-        view_node: ViewNode,
+        pos: Vec2,
         node: Node,
         def: Option<Box<SubgraphDef>>,
         bindings: Vec<(InputPort, Binding)>,
@@ -228,39 +231,38 @@ pub(crate) enum GraphStep {
     /// `from_selection`. `nodes` carry fresh ids, so there's no prior
     /// state to capture beyond the selection.
     DuplicateNodes {
-        nodes: Vec<(ViewNode, Node)>,
+        nodes: Vec<(Vec2, Node)>,
         bindings: Vec<(InputPort, Binding)>,
         subscriptions: Vec<Subscription>,
-        from_selection: BTreeSet<SelectionKey>,
-        to_selection: BTreeSet<SelectionKey>,
+        from_selection: BTreeSet<ItemRef>,
+        to_selection: BTreeSet<ItemRef>,
     },
     /// Pre-removal state lives entirely on the step: every reference
     /// into the doomed node, so undo can fully restore it.
     RemoveNode {
-        view_node: ViewNode,
         node: Node,
+        /// The node's own view item and every pinned output's, each with
+        /// the paint-stack slot it occupied, in ascending slot order —
+        /// undo restores positions, pins, *and* stacking exactly
+        /// (re-inserting in ascending order reproduces the original
+        /// interleaving).
+        view_items: Vec<(usize, ViewItem)>,
         /// All bindings `remove_by_id` drops (the node's own inputs + edges
         /// into it), captured so undo can fully restore the wiring.
         bindings: Vec<(InputPort, Binding)>,
         /// All subscriptions touching the node (as emitter or subscriber).
         subscriptions: Vec<Subscription>,
-        /// Every pinned output's custom satellite position on this node
-        /// (`EditScope::remove_node` prunes them along with everything
-        /// else), captured so undo can fully restore it.
-        pin_positions: Vec<(OutputPort, Vec2)>,
-        was_selected: bool,
+        /// The selection members that lived on this node (its own key +
+        /// any pinned-output keys) — removal prunes them, undo re-adds.
+        selected: Vec<ItemRef>,
     },
     MoveSelection {
-        grabbed: SelectionKey,
-        /// `(node_id, from, to)` per moved node. A node missing at build
-        /// time is dropped, so this can be shorter than the intent's `nodes`.
-        node_moves: Vec<(NodeId, Vec2, Vec2)>,
-        /// `(port, from, to)` per moved pin. Every pinned port is seeded
-        /// with an explicit position the moment it's pinned (see
-        /// `crate::gui::canvas::pin_ui::PinUi::apply`), so `from` is always
-        /// its current stored position — a port whose node vanished
-        /// mid-drag is dropped, like a missing node above.
-        pin_moves: Vec<(OutputPort, Vec2, Vec2)>,
+        grabbed: ItemRef,
+        /// `(item, from, to)` per moved member, both kinds mixed. An item
+        /// missing at build time (node vanished or port unpinned
+        /// mid-drag) is dropped, so this can be shorter than the intent's
+        /// `moves`.
+        moves: Vec<(ItemRef, Vec2, Vec2)>,
     },
     RenameNode {
         node_id: NodeId,
@@ -273,15 +275,16 @@ pub(crate) enum GraphStep {
         to: Binding,
     },
     SetSelection {
-        from: BTreeSet<SelectionKey>,
-        to: BTreeSet<SelectionKey>,
+        from: BTreeSet<ItemRef>,
+        to: BTreeSet<ItemRef>,
     },
-    /// Reorder within `view_nodes` to raise a node to the top of the paint
-    /// stack. `from_index`/`to_index` are its slot before/after the raise,
-    /// so apply slides it to `to_index` and revert slides it back — a
-    /// stable reorder that leaves every other node's relative order intact.
-    RaiseNode {
-        node_id: NodeId,
+    /// Reorder within `view_items` to raise an item (node body or pin
+    /// preview) to the top of the paint stack. `from_index`/`to_index` are
+    /// its slot before/after the raise, so apply slides it to `to_index`
+    /// and revert slides it back — a stable reorder that leaves every
+    /// other item's relative order intact.
+    Raise {
+        key: ItemRef,
         from_index: usize,
         to_index: usize,
     },
@@ -321,12 +324,18 @@ pub(crate) enum GraphStep {
     /// `was_selected` is whether the pin's preview widget was selected
     /// *before* this edit — unpinning drops its selection membership (the
     /// widget disappears with it), so a revert back to `pinned` restores it,
-    /// mirroring `RemoveNode`'s `was_selected`.
+    /// mirroring `RemoveNode`'s `selected`.
     SetOutputPinned {
         output: OutputPort,
         from: bool,
         to: bool,
         was_selected: bool,
+        /// The widget's paint-stack slot + position before an unpin
+        /// (`Some` iff `from` is pinned), so reverting the unpin restores
+        /// the item exactly where it sat. A pin apply inserts a fresh
+        /// item at the top instead (the caller's seed `MoveSelection`
+        /// places it).
+        prior_slot: Option<(usize, Vec2)>,
     },
 }
 
@@ -384,7 +393,7 @@ pub(crate) enum GestureKey {
     /// A group drag, keyed by whichever item the pointer latched — a node
     /// body or a pin preview widget — so two different grabbed items never
     /// coalesce.
-    SelectionDrag(SelectionKey),
+    SelectionDrag(ItemRef),
     TabSwitch,
     /// One divider's drag, keyed by the split's packed root path, so
     /// two different dividers never coalesce.

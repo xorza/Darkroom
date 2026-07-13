@@ -5,11 +5,13 @@
 //! through. The `build_step` / `apply_step` halves stay public for
 //! undo-stack redo, which applies a *stored* step without rebuilding it.
 
+use glam::Vec2;
 use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::graph::{Binding, NodeId, NodeKind, NodeSearch, OutputPort};
 use scenarium::library::Library;
 
-use crate::core::document::{Document, EditScope, GraphRef, SelectionKey};
+use crate::core::document::view_item::ViewItem;
+use crate::core::document::{Document, EditScope, GraphRef, ItemRef};
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::{DocStep, GraphStep, Intent, NodeProperty, UndoStep};
 
@@ -138,7 +140,7 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
 fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
     match step {
         GraphStep::AddNode {
-            view_node,
+            pos,
             node,
             def,
             bindings,
@@ -157,7 +159,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             for (port, binding) in bindings {
                 scope.graph.set_input_binding(*port, binding.clone());
             }
-            scope.view.view_nodes.add(view_node.clone());
+            scope.view.view_items.add(ViewItem::node(node.id, *pos));
         }
         GraphStep::DuplicateNodes {
             nodes,
@@ -166,9 +168,9 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             to_selection,
             ..
         } => {
-            for (view_node, node) in nodes {
+            for (pos, node) in nodes {
                 scope.graph.add(node.clone());
-                scope.view.view_nodes.add(view_node.clone());
+                scope.view.view_items.add(ViewItem::node(node.id, *pos));
             }
             for (port, binding) in bindings {
                 scope.graph.set_input_binding(*port, binding.clone());
@@ -188,18 +190,11 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             );
             scope.remove_node(&node.id);
         }
-        GraphStep::MoveSelection {
-            node_moves,
-            pin_moves,
-            ..
-        } => {
-            for (id, _, to) in node_moves {
-                if let Some(vn) = scope.view.view_nodes.by_key_mut(id) {
-                    vn.pos = *to;
+        GraphStep::MoveSelection { moves, .. } => {
+            for (key, _, to) in moves {
+                if let Some(item) = scope.view.view_items.by_key_mut(key) {
+                    item.pos = *to;
                 }
-            }
-            for (port, _, to) in pin_moves {
-                scope.view.pin_positions.insert(*port, *to);
             }
         }
         GraphStep::RenameNode { node_id, to, .. } => {
@@ -215,10 +210,8 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetSelection { to, .. } => {
             scope.view.selected = to.clone();
         }
-        GraphStep::RaiseNode {
-            node_id, to_index, ..
-        } => {
-            scope.view.view_nodes.move_to_index(node_id, *to_index);
+        GraphStep::Raise { key, to_index, .. } => {
+            scope.view.view_items.move_to_index(key, *to_index);
         }
         GraphStep::SetNodeProperty { node_id, to, .. } => {
             set_node_property(scope, node_id, *to);
@@ -241,7 +234,12 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             to,
             ..
         } => set_subscription(scope, *emitter, *event_idx, *subscriber, *to),
-        GraphStep::SetOutputPinned { output, to, .. } => set_output_pinned(scope, *output, *to),
+        GraphStep::SetOutputPinned { output, to, .. } => {
+            // Forward apply inserts a fresh pin at the top of the paint
+            // stack (`restore_slot: None`); the GUI's follow-up seed
+            // `MoveSelection` places it.
+            set_output_pinned(scope, *output, *to, None);
+        }
     }
 }
 
@@ -274,26 +272,36 @@ fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProp
     }
 }
 
-/// Mark or clear whether one output port is pinned. Shared by `apply_graph`
-/// (writes `to`) and `revert_graph` (writes `from`). Unpinning drops the
-/// port's preview widget, so its selection membership goes with it — a
-/// selected pin left in the set once the widget is gone would be dead state.
-///
-/// Pinning guarantees the port has a `pin_positions` entry: the GUI paths
-/// (`PinUi::apply`'s Cmd+drag, `port_row`'s pin/unpin menu toggle) always
-/// follow this with a `MoveSelection` that seeds the port's real on-screen
-/// position, but a script driving `Intent::SetOutputPinned` directly has no
-/// canvas geometry to compute one — so this seeds a zero fallback whenever
-/// pinning would otherwise leave the port without one. Every pinned port is
-/// thus guaranteed an explicit position no matter the caller, which is what
-/// lets `build_step` treat a missing entry as a genuine bug rather than a
-/// case to handle gracefully.
-fn set_output_pinned(scope: &mut EditScope<'_>, output: OutputPort, pinned: bool) {
+/// Mark or clear whether one output port is pinned, keeping the view item
+/// in lockstep (a `Pin` item exists iff the port is pinned — the invariant
+/// `GraphView::check` enforces). Shared by `apply_graph` (writes `to`,
+/// `restore_slot: None` — a fresh pin lands at the top of the paint stack
+/// with a zero position; the GUI paths always follow with a seed
+/// `MoveSelection` that places it, and a script driving the intent
+/// directly just gets the zero fallback) and `revert_graph` (writes
+/// `from` + the step's captured `prior_slot`, so undoing an unpin puts
+/// the widget back in its exact slot). Unpinning drops the port's preview
+/// widget, so its selection membership goes with it — a selected pin left
+/// in the set once the widget is gone would be dead state.
+fn set_output_pinned(
+    scope: &mut EditScope<'_>,
+    output: OutputPort,
+    pinned: bool,
+    restore_slot: Option<(usize, Vec2)>,
+) {
     scope.graph.set_output_pinned(output, pinned);
+    let key = ItemRef::Pin(output);
     if pinned {
-        scope.view.pin_positions.entry(output).or_default();
+        if scope.view.view_items.by_key(&key).is_none() {
+            let (slot, pos) = restore_slot.unwrap_or((usize::MAX, Vec2::ZERO));
+            scope.view.view_items.add(ViewItem::pin(output, pos));
+            // `move_to_index` clamps, so the `usize::MAX` fresh-pin case
+            // stays where `add` put it — the top of the stack.
+            scope.view.view_items.move_to_index(&key, slot);
+        }
     } else {
-        scope.view.selected.remove(&SelectionKey::Pin(output));
+        scope.view.view_items.remove_by_key(&key);
+        scope.view.selected.remove(&key);
     }
 }
 
@@ -349,14 +357,12 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.view.selected = from_selection.clone();
         }
         GraphStep::RemoveNode {
-            view_node,
             node,
+            view_items,
             bindings,
             subscriptions,
-            pin_positions,
-            was_selected,
+            selected,
         } => {
-            let removed_node_id = node.id;
             assert!(
                 scope
                     .graph
@@ -365,31 +371,30 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 "revert RemoveNode expects removed node to be absent"
             );
             scope.graph.add(node.clone());
-            scope.view.view_nodes.add(view_node.clone());
             scope.graph.restore_wiring(bindings, subscriptions);
-            scope
-                .view
-                .pin_positions
-                .extend(pin_positions.iter().copied());
-            if *was_selected {
-                scope
-                    .view
-                    .selected
-                    .insert(SelectionKey::Node(removed_node_id));
-            }
-        }
-        GraphStep::MoveSelection {
-            node_moves,
-            pin_moves,
-            ..
-        } => {
-            for (id, from, _) in node_moves {
-                if let Some(vn) = scope.view.view_nodes.by_key_mut(id) {
-                    vn.pos = *from;
+            // Ascending slot order (captured that way), so each insert
+            // lands among already-restored earlier slots and the original
+            // interleaving comes back exactly. A pin item goes through
+            // `set_output_pinned` — it also re-pins the graph port
+            // (`remove_by_id` cleared the pinned set too).
+            for (slot, item) in view_items {
+                match item.key {
+                    ItemRef::Pin(port) => {
+                        set_output_pinned(scope, port, true, Some((*slot, item.pos)));
+                    }
+                    ItemRef::Node(_) => {
+                        scope.view.view_items.add(item.clone());
+                        scope.view.view_items.move_to_index(&item.key, *slot);
+                    }
                 }
             }
-            for (port, from, _) in pin_moves {
-                scope.view.pin_positions.insert(*port, *from);
+            scope.view.selected.extend(selected.iter().copied());
+        }
+        GraphStep::MoveSelection { moves, .. } => {
+            for (key, from, _) in moves {
+                if let Some(item) = scope.view.view_items.by_key_mut(key) {
+                    item.pos = *from;
+                }
             }
         }
         GraphStep::RenameNode { node_id, from, .. } => {
@@ -405,12 +410,10 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetSelection { from, .. } => {
             scope.view.selected = from.clone();
         }
-        GraphStep::RaiseNode {
-            node_id,
-            from_index,
-            ..
+        GraphStep::Raise {
+            key, from_index, ..
         } => {
-            scope.view.view_nodes.move_to_index(node_id, *from_index);
+            scope.view.view_items.move_to_index(key, *from_index);
         }
         GraphStep::SetNodeProperty { node_id, from, .. } => {
             set_node_property(scope, node_id, *from);
@@ -441,14 +444,15 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             output,
             from,
             was_selected,
+            prior_slot,
             ..
         } => {
-            set_output_pinned(scope, *output, *from);
+            set_output_pinned(scope, *output, *from, *prior_slot);
             // Re-pinning on undo doesn't itself restore selection (pinning
             // never auto-selects) — restore it explicitly when the pin was
             // selected before the edit that unpinned it.
             if *from && *was_selected {
-                scope.view.selected.insert(SelectionKey::Pin(*output));
+                scope.view.selected.insert(ItemRef::Pin(*output));
             }
         }
     }

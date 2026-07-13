@@ -12,14 +12,19 @@ use scenarium::graph::{
 use scenarium::library::Library;
 use scenarium::node::function::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
 
-use crate::core::document::{GraphView, SelectionKey, Viewport};
+use crate::core::document::{GraphView, ItemRef, Viewport};
 use crate::gui::run_state::{ExecStatus, RunState};
 
 #[derive(Debug, Default)]
 pub struct Scene {
-    /// Insertion-ordered (draw order) with an `id → index` map, so per-frame
-    /// lookups by `NodeId` (`by_key`) are O(1) without losing the ordered
-    /// iteration the paint/z-order passes rely on.
+    /// The shared paint stack, mirrored from `GraphView::view_items` order:
+    /// node bodies and pinned-output previews interleaved, later entries
+    /// drawn in front. The canvas draw pass iterates this and dispatches on
+    /// the key kind; everything else looks items up through `nodes`.
+    pub z_order: Vec<ItemRef>,
+    /// Keyed node projections (`by_key` is O(1)). Iteration order mirrors
+    /// the node items' relative order in `view_items`, but the paint pass
+    /// walks [`Self::z_order`], not this.
     pub nodes: KeyIndexVec<NodeId, SceneNode>,
     pub connections: Vec<SceneConnection>,
     /// Event-subscription edges (emitter event → subscriber node), mirrored
@@ -56,7 +61,7 @@ pub struct Scene {
     /// `SelectionUI` (read back via `SelectionUI::preview`) and the canvas
     /// unions the two when drawing, so the gesture never writes into this
     /// projection.
-    pub selected: BTreeSet<SelectionKey>,
+    pub selected: BTreeSet<ItemRef>,
 }
 
 /// Per-frame snapshot of an input port's [`Binding`] for the UI tree.
@@ -116,17 +121,13 @@ pub struct SceneOutput {
     /// port declares none.
     pub description: SmolStr,
     pub ty: DataType,
-    /// Whether this port is pinned — kept computed and read even with no
-    /// in-graph consumer (e.g. a GUI inspector reading it live) — see
-    /// [`scenarium::graph::Graph::is_output_pinned`]. Drives the port
-    /// circle's outline.
-    pub pinned: bool,
-    /// This pinned output's satellite position, in absolute canvas-world
-    /// coordinates — see [`GraphView::pin_positions`]. Every pinned port
-    /// has an explicit entry (seeded the moment it's pinned), so this is
-    /// only ever the zero default for a port that's never been pinned —
-    /// meaningless in that case, since an unpinned port shows no widget.
-    pub pin_position: Vec2,
+    /// The pinned preview widget's top-left corner in absolute
+    /// canvas-world coordinates — `Some` iff this output is pinned
+    /// (kept computed and read even with no in-graph consumer — see
+    /// [`scenarium::graph::Graph::is_output_pinned`]). Mirrors the port's
+    /// `GraphView::view_items` entry, which exists exactly while pinned,
+    /// so pinned-ness and position can't desync.
+    pub pin_position: Option<Vec2>,
 }
 
 /// One event (emitter) port in the per-frame projection. Events carry no data
@@ -246,6 +247,7 @@ impl Scene {
         // a fresh value (e.g. just-loaded document) shows up here while
         // an active pan/zoom isn't clobbered (it re-persists each frame).
         self.viewport = view.viewport;
+        self.z_order.clear();
         self.nodes.clear();
         self.connections.clear();
         self.subscriptions.clear();
@@ -254,8 +256,17 @@ impl Scene {
         self.events.clear();
         self.value_variants_pool.clear();
 
-        for vn in view.view_nodes.iter() {
-            let Some(node) = graph.find_node(&vn.id, NodeSearch::TopLevel) else {
+        for item in view.view_items.iter() {
+            let id = match item.key {
+                ItemRef::Node(id) => id,
+                ItemRef::Pin(_) => {
+                    // A pin's card draws from its owner's `SceneOutput`;
+                    // only its slot in the shared paint order lives here.
+                    self.z_order.push(item.key);
+                    continue;
+                }
+            };
+            let Some(node) = graph.find_node(&id, NodeSearch::TopLevel) else {
                 continue;
             };
             // A node's interface (port names + input defaults) comes from
@@ -432,12 +443,10 @@ impl Scene {
                             }
                             OutputType::Fixed(dt) => dt.clone(),
                         },
-                        pinned: graph.is_output_pinned(OutputPort::new(node.id, i)),
                         pin_position: view
-                            .pin_positions
-                            .get(&OutputPort::new(node.id, i))
-                            .copied()
-                            .unwrap_or_default(),
+                            .view_items
+                            .by_key(&ItemRef::Pin(OutputPort::new(node.id, i)))
+                            .map(|item| item.pos),
                     }),
             );
             let events = extend_pool(
@@ -455,8 +464,8 @@ impl Scene {
                 _ => node.name.clone().into(),
             };
             self.nodes.add(SceneNode {
-                id: vn.id,
-                pos: vn.pos,
+                id,
+                pos: item.pos,
                 name,
                 kind_label: interface.kind_label,
                 description: interface.description,
@@ -475,10 +484,11 @@ impl Scene {
                     node.kind,
                     NodeKind::SubgraphInput | NodeKind::SubgraphOutput
                 ),
-                exec_status: run_state.status(vn.id),
-                ram: run_state.ram(vn.id),
+                exec_status: run_state.status(id),
+                ram: run_state.ram(id),
                 missing,
             });
+            self.z_order.push(item.key);
         }
 
         for (tgt, src) in graph.edges() {
@@ -498,6 +508,23 @@ impl Scene {
         slice_pool(&self.outputs, span)
     }
 
+    /// Every pinned output in the scene — the one iteration the pin scans
+    /// (drag/click polls, wire draw, rubber-band sweep) share.
+    pub fn pinned_outputs(&self) -> impl Iterator<Item = PinnedOutput<'_>> {
+        self.nodes.iter().flat_map(|n| {
+            self.outputs(n.outputs)
+                .iter()
+                .enumerate()
+                .filter_map(move |(i, output)| {
+                    output.pin_position.map(|pos| PinnedOutput {
+                        port: OutputPort::new(n.id, i),
+                        pos,
+                        output,
+                    })
+                })
+        })
+    }
+
     /// A node's event (emitter) ports, sliced by its `events` span.
     pub fn events(&self, span: Span) -> &[SceneEvent] {
         slice_pool(&self.events, span)
@@ -508,6 +535,16 @@ impl Scene {
     pub fn value_variants(&self, span: Span) -> &[ValueVariant] {
         slice_pool(&self.value_variants_pool, span)
     }
+}
+
+/// One pinned output surfaced by [`Scene::pinned_outputs`]: its port, its
+/// preview widget's top-left corner (the unwrapped
+/// [`SceneOutput::pin_position`]), and the projected output.
+#[derive(Debug)]
+pub struct PinnedOutput<'a> {
+    pub port: OutputPort,
+    pub pos: Vec2,
+    pub output: &'a SceneOutput,
 }
 
 fn slice_pool<T>(pool: &[T], span: Span) -> &[T] {
@@ -868,7 +905,7 @@ mod tests {
     }
 
     #[test]
-    fn pinned_output_projects_per_output_port() {
+    fn pinned_output_projects_per_output_port_and_shares_the_z_order() {
         use scenarium::elements::worker_events_library::{
             FRAME_EVENT_FUNC_ID, worker_events_library,
         };
@@ -881,15 +918,43 @@ mod tests {
         let node: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
         let node_id = node.id;
         graph.add(node);
-        graph.set_output_pinned(OutputPort::new(node_id, 1), true);
+        let port = OutputPort::new(node_id, 1);
+        graph.set_output_pinned(port, true);
 
-        let view = GraphView::for_graph(&graph);
+        let mut view = GraphView::for_graph(&graph);
+        let pin_key = ItemRef::Pin(port);
+        view.view_items.by_key_mut(&pin_key).unwrap().pos = Vec2::new(320.0, -40.0);
         let mut scene = Scene::default();
         scene.rebuild(&graph, &view, &library, None, &RunState::default());
 
         let n = scene.nodes.iter().find(|n| n.id == node_id).unwrap();
-        let pins: Vec<bool> = scene.outputs(n.outputs).iter().map(|o| o.pinned).collect();
-        assert_eq!(pins, [false, true]);
+        let pins: Vec<Option<Vec2>> = scene
+            .outputs(n.outputs)
+            .iter()
+            .map(|o| o.pin_position)
+            .collect();
+        assert_eq!(
+            pins,
+            [None, Some(Vec2::new(320.0, -40.0))],
+            "only the pinned port carries a position, projected from its item"
+        );
+
+        // The shared paint stack mirrors `view_items` order — node then
+        // pin here (`for_graph` seeds pins after nodes)...
+        assert_eq!(
+            scene.z_order,
+            vec![ItemRef::Node(node_id), pin_key],
+            "z_order interleaves node bodies and pin previews in item order"
+        );
+
+        // ...and a reorder (pin buried beneath the node) projects verbatim.
+        view.view_items.move_to_index(&pin_key, 0);
+        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+        assert_eq!(
+            scene.z_order,
+            vec![pin_key, ItemRef::Node(node_id)],
+            "restacking the view items restacks the projected z_order"
+        );
     }
 
     #[test]

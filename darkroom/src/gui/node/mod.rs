@@ -6,19 +6,20 @@ pub(crate) mod port_row;
 pub(crate) mod prepass;
 pub(crate) mod value_editor;
 
+use crate::core::document::ItemRef;
 use crate::core::document::PortRef;
-use crate::core::document::SelectionKey;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::node_visible;
 use crate::gui::canvas::drag_anchor::GroupDragAnchor;
+use crate::gui::canvas::drag_anchor::selected_group_positions;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
-use crate::gui::canvas::pin_ui;
+use crate::gui::canvas::pin_ui::PinUi;
 use crate::gui::node::header::{header, status_row, subscription_pin};
 use crate::gui::node::memory_row::memory_row;
 use crate::gui::node::port_row::ports_row;
-use crate::gui::run_state::ExecStatus;
+use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{Scene, SceneNode};
 use crate::gui::theme::Theme;
 use aperture::{
@@ -49,11 +50,14 @@ pub(crate) struct RecordCtx<'a> {
     /// or, mid-rubber-band, the live swept preview owned by `SelectionUI`.
     /// Kept off `Scene` so the projection stays a read-only mirror — the
     /// gesture no longer scribbles its preview into the committed field.
-    pub(crate) selected: &'a BTreeSet<SelectionKey>,
+    pub(crate) selected: &'a BTreeSet<ItemRef>,
     pub(crate) geometry: &'a CanvasGeometry,
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
     pub(crate) inspectors: &'a Inspectors,
+    /// Live run results — the pin previews drawn interleaved with the
+    /// node bodies read their pinned values from here.
+    pub(crate) run_state: &'a RunState,
 }
 
 /// Owns rendering of every graph node plus the single active drag
@@ -79,7 +83,7 @@ pub(crate) struct NodeUI {
 }
 
 /// A node-body drag anchor: `key` is the grabbed node's id, always present
-/// in `start_node_positions`. Captured from the `drag_started` frame's
+/// in `start_positions`. Captured from the `drag_started` frame's
 /// `Response::widget_id()` so subsequent frames can `ui.response_for
 /// (widget_id)` *before* recording and bake the current `drag_delta` into
 /// `.position(...)` — letting the node paint at the cursor's location in
@@ -87,7 +91,8 @@ pub(crate) struct NodeUI {
 type DragAnchor = GroupDragAnchor<NodeId>;
 
 impl NodeUI {
-    /// Record the widget tree of every scene node that can intersect
+    /// Record the widget tree of every scene item — node bodies and
+    /// pinned-output preview widgets interleaved — that can intersect
     /// `visible` (plus the focus-owning node — see the loop comment),
     /// skipping off-screen ones entirely. Emits selection/raise intents
     /// for body clicks and latches the drag anchor for a body/title drag
@@ -100,14 +105,16 @@ impl NodeUI {
         rcx: RecordCtx<'_>,
         visible: Option<Rect>,
         probe: &mut BreakerProbe<'_>,
+        pin_ui: &mut PinUi,
         out: &mut Vec<Intent>,
     ) {
-        // Paint in `view_nodes` order (mirrored into `scene.nodes`) — later
-        // draws sit on top, so the last node in the list is frontmost. The
-        // order is persisted view state, so a raised node stays raised across
-        // save/load and tab switches; `Intent::RaiseNode` moves a clicked node
-        // to the end. `RecordCtx` is `Copy`, so the `&scene.nodes` borrow held
-        // by the loop coexists with copying `rcx` into `draw_one`.
+        // Paint in `scene.z_order` (mirrored from `view_items`) — later
+        // draws sit on top, so the last item in the list is frontmost, and
+        // a pin preview can sit above or below any node body. The order is
+        // persisted view state, so a raised item stays raised across
+        // save/load and tab switches; `Intent::Raise` moves a clicked item
+        // to the end. `RecordCtx` is `Copy`, so the `&scene` borrows held
+        // by the loop coexist with copying `rcx` into the draw calls.
         //
         // Off-`visible` nodes are skipped entirely — no measure, arrange, or
         // paint. Every widget id in a node's subtree derives from its
@@ -122,7 +129,19 @@ impl NodeUI {
         // and that first post-blur record is where the edit's pending draft
         // commits.
         let mut focus_kept = None;
-        for n in rcx.scene.nodes.iter() {
+        for key in &rcx.scene.z_order {
+            let id = match *key {
+                ItemRef::Node(id) => id,
+                ItemRef::Pin(port) => {
+                    // Pin previews cull on their own wire hull inside
+                    // `draw_pin`, and hold no keyboard focus.
+                    pin_ui.draw_pin(ui, rcx, port, visible, probe, out);
+                    continue;
+                }
+            };
+            let Some(n) = rcx.scene.nodes.by_key(&id) else {
+                continue;
+            };
             let keeps_focus = ui.focus_within(node_widget_id(n.id));
             if keeps_focus {
                 focus_kept = Some(n.id);
@@ -170,7 +189,7 @@ impl NodeUI {
         if broken {
             probe.mark_broken_node(node.id);
         }
-        let selected = rcx.selected.contains(&SelectionKey::Node(node.id));
+        let selected = rcx.selected.contains(&ItemRef::Node(node.id));
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding — width-gated,
         // not color-gated). Only the color changes, a 4-tier decision: the
@@ -232,7 +251,7 @@ impl NodeUI {
         // selection. `UndoStep::is_noop` filters a click that doesn't
         // change the set (e.g. clicking the sole selected node).
         if body_clicked {
-            click_intents(shift_click, rcx.scene, SelectionKey::Node(node.id), out);
+            click_intents(shift_click, rcx.scene, ItemRef::Node(node.id), out);
         }
 
         // The header title doubles as a drag handle: its idle label
@@ -253,22 +272,15 @@ impl NodeUI {
             // group (nodes and pinned-output previews alike) together;
             // grabbing an unselected node selects only it and drags it
             // alone.
-            let pin_ui::SelectedGroup {
-                nodes: start_node_positions,
-                pins: start_pin_positions,
-            } = if selected {
-                pin_ui::selected_group_positions(rcx.scene, rcx.selected)
+            let start_positions = if selected {
+                selected_group_positions(rcx.scene, rcx.selected)
             } else {
-                click_intents(false, rcx.scene, SelectionKey::Node(node.id), out);
-                pin_ui::SelectedGroup {
-                    nodes: vec![(node.id, node.pos)],
-                    pins: vec![],
-                }
+                click_intents(false, rcx.scene, ItemRef::Node(node.id), out);
+                vec![(ItemRef::Node(node.id), node.pos)]
             };
             self.drag_anchor = Some(DragAnchor {
                 key: node.id,
-                start_node_positions,
-                start_pin_positions,
+                start_positions,
                 widget_id: if title_drag { title_wid } else { body_wid },
             });
         }
@@ -321,7 +333,7 @@ impl NodeUI {
         // Anchor still present (success path never cleared it); re-borrow
         // to read the start positions without cloning.
         let anchor = self.drag_anchor.as_ref().unwrap();
-        out.push(anchor.resolve(offset, SelectionKey::Node(key)));
+        out.push(anchor.resolve(offset, ItemRef::Node(key)));
     }
 }
 
@@ -400,26 +412,25 @@ pub(crate) fn set_output_pinned(port: PortRef, pinned: bool) -> Intent {
     }
 }
 
-/// The intents a click on `key` produces: the selection change plus, for a
-/// node, a lift to the top of the paint stack, so clicking a node brings it
-/// to the front (a pin preview has no paint-stack slot to raise — it always
-/// floats above every node body). The raise is skipped only when a
-/// Shift-click *removes* the node from the selection — a node you just
+/// The intents a click on `key` produces: the selection change plus a lift
+/// to the top of the shared paint stack, so clicking a node body or a pin
+/// preview brings it to the front. The raise is skipped only when a
+/// Shift-click *removes* the item from the selection — an item you just
 /// deselected shouldn't jump forward. Shared by the node body, header
 /// title, and port labels so clicking any of them behaves like clicking the
 /// body; also shared by the pin preview widget's own click.
-pub(crate) fn click_intents(shift: bool, scene: &Scene, key: SelectionKey, out: &mut Vec<Intent>) {
+pub(crate) fn click_intents(shift: bool, scene: &Scene, key: ItemRef, out: &mut Vec<Intent>) {
     out.push(select_intent(shift, scene, key));
     let deselecting = shift && scene.selected.contains(&key);
-    if !deselecting && let SelectionKey::Node(node_id) = key {
-        out.push(Intent::RaiseNode { node_id });
+    if !deselecting {
+        out.push(Intent::Raise { key });
     }
 }
 
 /// The `SetSelection` a click on `key` produces: plain click selects only
 /// it, Shift-click toggles its membership. `UndoStep::is_noop` drops the
 /// entry when nothing changed.
-fn select_intent(shift: bool, scene: &Scene, key: SelectionKey) -> Intent {
+fn select_intent(shift: bool, scene: &Scene, key: ItemRef) -> Intent {
     let mut to = if shift {
         scene.selected.clone()
     } else {
@@ -439,14 +450,14 @@ mod tests {
 
     fn scene_with_selection(selected: impl IntoIterator<Item = NodeId>) -> Scene {
         Scene {
-            selected: selected.into_iter().map(SelectionKey::Node).collect(),
+            selected: selected.into_iter().map(ItemRef::Node).collect(),
             ..Default::default()
         }
     }
 
     fn click(shift: bool, scene: &Scene, id: NodeId) -> Vec<Intent> {
         let mut out = Vec::new();
-        click_intents(shift, scene, SelectionKey::Node(id), &mut out);
+        click_intents(shift, scene, ItemRef::Node(id), &mut out);
         out
     }
 
@@ -459,13 +470,13 @@ mod tests {
         let out = click(false, &scene_with_selection([]), a);
         assert_eq!(out.len(), 2);
         assert!(matches!(out[0], Intent::SetSelection { .. }));
-        assert!(matches!(out[1], Intent::RaiseNode { node_id } if node_id == a));
+        assert!(matches!(out[1], Intent::Raise { key } if key == ItemRef::Node(a)));
 
         // Plain click on an already-selected node still raises it.
         let out = click(false, &scene_with_selection([a]), a);
         assert!(
             out.iter()
-                .any(|i| matches!(i, Intent::RaiseNode { node_id } if *node_id == a)),
+                .any(|i| matches!(i, Intent::Raise { key } if *key == ItemRef::Node(a))),
             "a plain click always lifts its node to the front"
         );
 
@@ -473,7 +484,7 @@ mod tests {
         let out = click(true, &scene_with_selection([a]), b);
         assert!(
             out.iter()
-                .any(|i| matches!(i, Intent::RaiseNode { node_id } if *node_id == b)),
+                .any(|i| matches!(i, Intent::Raise { key } if *key == ItemRef::Node(b))),
             "shift-adding a node raises it"
         );
 
@@ -485,13 +496,15 @@ mod tests {
     }
 
     #[test]
-    fn click_intents_never_raises_a_pin() {
-        // A pin preview has no paint-stack slot — clicking it selects but
-        // never emits `RaiseNode`.
+    fn click_intents_raises_a_pin_like_a_node() {
+        // A pin preview owns a slot in the same paint stack as node
+        // bodies — clicking it selects it *and* lifts it to the front.
         let port = scenarium::graph::OutputPort::new(NodeId::unique(), 0);
+        let key = ItemRef::Pin(port);
         let mut out = Vec::new();
-        click_intents(false, &Scene::default(), SelectionKey::Pin(port), &mut out);
-        assert_eq!(out.len(), 1);
+        click_intents(false, &Scene::default(), key, &mut out);
+        assert_eq!(out.len(), 2);
         assert!(matches!(out[0], Intent::SetSelection { .. }));
+        assert!(matches!(out[1], Intent::Raise { key: k } if k == key));
     }
 }

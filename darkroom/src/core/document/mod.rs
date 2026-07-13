@@ -1,6 +1,6 @@
 pub(crate) mod auto_layout;
 pub mod dock;
-pub mod view_node;
+pub mod view_item;
 
 use anyhow::{Context, Result, bail, ensure};
 use common::{KeyIndexVec, SerdeFormat, is_debug};
@@ -11,12 +11,12 @@ use scenarium::graph::{Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
 use scenarium::graph::{Node, NodeKind};
 use scenarium::library::Library;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use thiserror::Error;
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
 use crate::core::document::dock::DockLayout;
-use crate::core::document::view_node::ViewNode;
+use crate::core::document::view_item::ViewItem;
 use crate::core::edit::reconcile::reconcile_def;
 
 /// Initial placement of a fresh subgraph's boundary nodes: the input
@@ -114,25 +114,29 @@ pub enum BoundarySide {
     Output,
 }
 
-/// A member of the selection set: either a node body or a pinned output's
-/// floating preview widget. The two share one selection mechanism (click to
-/// select, Shift-click to toggle membership, rubber-band to sweep both kinds
-/// in) so `GraphView::selected` and everything downstream of it stay a
-/// single `BTreeSet` rather than two parallel selection tracks.
+/// One canvas item's identity: a node body or a pinned output's floating
+/// preview widget — the [`GraphRef`]/[`PortRef`]/[`TabRef`] sibling for
+/// the things that occupy canvas space. The two kinds share every
+/// item-level mechanism: one selection set (`GraphView::selected` stays a
+/// single `BTreeSet` — click to select, Shift-click to toggle,
+/// rubber-band sweeps both kinds in), one paint stack
+/// (`GraphView::view_items`, keyed by this — `Intent::Raise` lifts either
+/// kind), and one group-drag path (`Intent::MoveSelection`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum SelectionKey {
+pub enum ItemRef {
     Node(NodeId),
     Pin(OutputPort),
 }
 
-impl SelectionKey {
+impl ItemRef {
     /// Whether this key names something that lives on `node_id` — the node
     /// itself, or one of its pinned outputs. Used to prune a node's
-    /// selection membership (both forms) when it's removed from the graph.
-    fn belongs_to(self, node_id: NodeId) -> bool {
+    /// selection membership and view items (both forms) when it's removed
+    /// from the graph.
+    pub(crate) fn belongs_to(self, node_id: NodeId) -> bool {
         match self {
-            SelectionKey::Node(id) => id == node_id,
-            SelectionKey::Pin(port) => port.node_id == node_id,
+            ItemRef::Node(id) => id == node_id,
+            ItemRef::Pin(port) => port.node_id == node_id,
         }
     }
 }
@@ -165,11 +169,12 @@ impl Default for Viewport {
     }
 }
 
-/// Editor-side view metadata for one graph: per-node positions, the
-/// viewport, and the selection. One of these exists per open/edited
-/// graph (the root in `Document::main_view`, each subgraph interior in
-/// `Document::sub_views`). The graph *data* itself lives in the core
-/// `Graph`; this is purely how the editor presents and navigates it.
+/// Editor-side view metadata for one graph: per-item positions and paint
+/// order, the viewport, and the selection. One of these exists per
+/// open/edited graph (the root in `Document::main_view`, each subgraph
+/// interior in `Document::sub_views`). The graph *data* itself lives in
+/// the core `Graph`; this is purely how the editor presents and
+/// navigates it.
 ///
 /// **Everything here is persisted and undoable, by design** — reopening
 /// a file restores the exact camera and selection, and Ctrl+Z walks
@@ -177,65 +182,42 @@ impl Default for Viewport {
 /// note that used to live on `Document`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct GraphView {
-    pub view_nodes: KeyIndexVec<NodeId, ViewNode>,
+    /// Node bodies and pinned-output preview widgets in one list — the
+    /// canvas's **paint stack**: the order is the shared z-order (later
+    /// items draw in front), so a preview can sit above or below any
+    /// node independently, and `Intent::Raise` lifts either kind to the
+    /// top. Exactly one `Node` item per graph node, exactly one `Pin`
+    /// item per *currently pinned* output (unpinning removes the item;
+    /// undo restores it, slot included) — enforced by [`Self::check`].
+    ///
+    /// A pin's position is absolute rather than port-relative: the
+    /// widget sits where it was put and does *not* follow its node when
+    /// that node is moved — only its wire re-routes, like a connection
+    /// to another node would.
+    pub view_items: KeyIndexVec<ItemRef, ViewItem>,
     pub viewport: Viewport,
     /// `BTreeSet` so equality and serialization are order-independent
     /// (no spurious undo entries from reordering). Holds both node bodies
-    /// and pinned-output preview widgets — see [`SelectionKey`].
-    pub selected: BTreeSet<SelectionKey>,
-    /// A pinned output's satellite position, in absolute canvas-world
-    /// coordinates (its top-left corner). Seeded the moment a port is
-    /// pinned (see `crate::gui::canvas::pin_ui::PinUi::apply` and
-    /// `crate::gui::node::port_row`'s pin/unpin menu toggle — both resolve
-    /// the port's current on-screen position and write it here right away,
-    /// so a pinned port always has an explicit entry) and re-seeded fresh
-    /// on every pin — no memory of where a since-unpinned satellite last
-    /// sat. Absolute rather than port-relative: the widget sits where it
-    /// was put and does *not* follow the node if it's moved — only its
-    /// wire re-routes, like a connection to another node would. Unpinning
-    /// leaves a stale entry rather than pruning it — harmless (only read
-    /// while `pinned`), and it means undoing an unpin restores the exact
-    /// prior position with no extra bookkeeping. Pruned only when the node
-    /// itself is removed (see [`EditScope::remove_node`]). Serialized as a
-    /// `(port, position)` sequence — struct keys aren't valid map keys in
-    /// string-keyed formats (JSON/TOML/Rhai), same reasoning as
-    /// `scenarium::graph`'s `binding_map_serde`.
-    #[serde(default, with = "pin_position_serde")]
-    pub pin_positions: BTreeMap<OutputPort, Vec2>,
-}
-
-mod pin_position_serde {
-    use super::{BTreeMap, OutputPort, Vec2};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub(crate) fn serialize<S: Serializer>(
-        map: &BTreeMap<OutputPort, Vec2>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        map.iter().collect::<Vec<_>>().serialize(serializer)
-    }
-
-    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<BTreeMap<OutputPort, Vec2>, D::Error> {
-        Ok(Vec::<(OutputPort, Vec2)>::deserialize(deserializer)?
-            .into_iter()
-            .collect())
-    }
+    /// and pinned-output preview widgets — see [`ItemRef`].
+    pub selected: BTreeSet<ItemRef>,
 }
 
 impl Eq for GraphView {}
 
 impl GraphView {
-    /// A fresh view seeded with a zero-positioned `ViewNode` for every
-    /// node in `graph` (callers usually `auto_layout` right after).
+    /// A fresh view seeded with a zero-positioned item for every node in
+    /// `graph` and every pinned output (callers usually `auto_layout`
+    /// right after, which places both kinds).
     pub fn for_graph(graph: &CoreGraph) -> Self {
-        let mut view_nodes = KeyIndexVec::with_capacity(graph.len());
+        let mut view_items = KeyIndexVec::with_capacity(graph.len());
         for node in graph.iter() {
-            view_nodes.add(ViewNode::from(node));
+            view_items.add(ViewItem::node(node.id, Vec2::ZERO));
+        }
+        for port in graph.pinned_outputs() {
+            view_items.add(ViewItem::pin(port, Vec2::ZERO));
         }
         Self {
-            view_nodes,
+            view_items,
             ..Default::default()
         }
     }
@@ -247,65 +229,52 @@ impl GraphView {
         );
         ensure!(self.viewport.pan.is_finite(), "graph pan must be finite");
 
-        for node in self.view_nodes.iter() {
+        // Item-set match, both kinds. Duplicate keys are rejected at
+        // deserialize and unrepresentable by construction (`KeyIndexVec`),
+        // so per-kind count matches plus one-way containment prove set
+        // equality: exactly one `Node` item per graph node, exactly one
+        // `Pin` item per currently-pinned output. Pin items track the
+        // pinned set exactly — the edit layer removes the item on unpin
+        // (its undo step restores it), so a `Pin` item for an unpinned
+        // port is corrupt input, and a pinned port without an item would
+        // break the `MoveSelection` lookup in `build_step`.
+        let mut node_items = 0usize;
+        for item in self.view_items.iter() {
             ensure!(
-                node.pos.is_finite(),
-                "node {:?} position must be finite",
-                node.id
+                item.pos.is_finite(),
+                "view item {:?} position must be finite",
+                item.key
             );
+            match item.key {
+                ItemRef::Node(_) => node_items += 1,
+                ItemRef::Pin(port) => ensure!(
+                    graph.is_output_pinned(port),
+                    "view item references an output that isn't pinned"
+                ),
+            }
         }
-
-        // Exact node-set match. Both sides are `KeyIndexVec`s — duplicate ids
-        // are rejected at deserialize and unrepresentable by construction —
-        // so a length match plus one-way containment proves set equality.
         ensure!(
-            self.view_nodes.len() == graph.len(),
-            "view node list must match graph nodes"
+            node_items == graph.len(),
+            "view node items must match graph nodes"
         );
         for node in graph.iter() {
             ensure!(
-                self.view_nodes.by_key(&node.id).is_some(),
+                self.view_items.by_key(&ItemRef::Node(node.id)).is_some(),
                 "graph view missing a position for node {:?}",
                 node.id
             );
         }
-
-        for key in &self.selected {
-            let owner = match key {
-                SelectionKey::Node(id) => *id,
-                SelectionKey::Pin(port) => port.node_id,
-            };
-            ensure!(
-                self.view_nodes.by_key(&owner).is_some(),
-                "selected node {:?} is absent from the graph",
-                owner
-            );
-        }
-
-        for (port, position) in &self.pin_positions {
-            ensure!(
-                position.is_finite(),
-                "pin position on node {:?} must be finite",
-                port.node_id
-            );
-            ensure!(
-                graph
-                    .find_node(&port.node_id, NodeSearch::TopLevel)
-                    .is_some(),
-                "pin position references a node absent from the graph"
-            );
-        }
-        // Every pinned output must carry an explicit position: the edit layer
-        // treats a missing one as a logic error (a `MoveSelection` over the pin
-        // looks it up unconditionally in `build_step`). Pinning always seeds it,
-        // so a document reaching here without one is malformed — surface it
-        // rather than paper over it. The reverse isn't required: `pin_positions`
-        // keeps stale entries for since-unpinned ports on purpose (undo restores
-        // them), so a position without a matching pin is fine.
         for port in graph.pinned_outputs() {
             ensure!(
-                self.pin_positions.contains_key(&port),
-                "pinned output must have an explicit pin position"
+                self.view_items.by_key(&ItemRef::Pin(port)).is_some(),
+                "pinned output must have a view item"
+            );
+        }
+
+        for key in &self.selected {
+            ensure!(
+                self.view_items.by_key(key).is_some(),
+                "selected item {key:?} has no view item"
             );
         }
         Ok(())
@@ -329,16 +298,15 @@ pub struct EditScopeRef<'a> {
 }
 
 impl EditScope<'_> {
-    /// Drop a node from both the graph and its view (positions +
-    /// selection + any pinned outputs' custom satellite offsets). Mirrors
-    /// the old `Document::remove_node`.
+    /// Drop a node from both the graph and its view (its own item, its
+    /// pinned outputs' items, and any selection membership). Mirrors the
+    /// old `Document::remove_node`.
     pub fn remove_node(&mut self, node_id: &NodeId) {
-        self.view.view_nodes.retain(|node| node.id != *node_id);
+        self.view
+            .view_items
+            .retain(|item| !item.key.belongs_to(*node_id));
         self.graph.remove_by_id(*node_id);
         self.view.selected.retain(|k| !k.belongs_to(*node_id));
-        self.view
-            .pin_positions
-            .retain(|port, _| port.node_id != *node_id);
     }
 }
 
@@ -568,23 +536,20 @@ impl Document {
             Vec2::new(60.0, 60.0) + Vec2::splat(36.0) * self.graph.subgraphs.len() as f32;
         self.graph.subgraphs.add(def);
         self.graph.add(inst);
-        self.main_view.view_nodes.add(ViewNode {
-            id: inst_id,
-            pos: inst_pos,
-        });
+        self.main_view
+            .view_items
+            .add(ViewItem::node(inst_id, inst_pos));
 
         // Seed the interior view explicitly so the pair opens input-left /
         // output-right; `ensure_sub_view` then finds it and skips the
         // generic auto-layout that would stack them.
         let mut view = GraphView::default();
-        view.view_nodes.add(ViewNode {
-            id: input_id,
-            pos: AUTO_LAYOUT_ORIGIN,
-        });
-        view.view_nodes.add(ViewNode {
-            id: output_id,
-            pos: AUTO_LAYOUT_ORIGIN + Vec2::new(BOUNDARY_LAYOUT_GAP, 0.0),
-        });
+        view.view_items
+            .add(ViewItem::node(input_id, AUTO_LAYOUT_ORIGIN));
+        view.view_items.add(ViewItem::node(
+            output_id,
+            AUTO_LAYOUT_ORIGIN + Vec2::new(BOUNDARY_LAYOUT_GAP, 0.0),
+        ));
         self.sub_views.insert(id, view);
 
         id
@@ -881,15 +846,11 @@ mod tests {
         let local_id = local.id;
         let node = Node::subgraph_instance(&local, SubgraphRef::Local(local_id));
         let node_id = node.id;
-        let view_node = ViewNode {
-            id: node_id,
-            pos: Vec2::ZERO,
-        };
 
         let mut doc = Document::default();
         let step = build_step(
             Intent::AddNode {
-                view_node,
+                pos: Vec2::ZERO,
                 node,
                 def: Some(Box::new(local)),
                 bindings: vec![],
@@ -944,10 +905,7 @@ mod tests {
         let node_id = node.id;
         let step = build_step(
             Intent::AddNode {
-                view_node: ViewNode {
-                    id: node_id,
-                    pos: Vec2::ZERO,
-                },
+                pos: Vec2::ZERO,
                 node,
                 def: Some(Box::new(local)),
                 bindings: vec![],
@@ -1011,10 +969,9 @@ mod tests {
         );
         let node_id = node.id;
         doc.graph.add(node);
-        doc.main_view.view_nodes.add(ViewNode {
-            id: node_id,
-            pos: Vec2::ZERO,
-        });
+        doc.main_view
+            .view_items
+            .add(ViewItem::node(node_id, Vec2::ZERO));
 
         let step = build_step(Intent::DetachSubgraph { node_id }, &doc, GraphRef::Main)
             .expect("detach builds");
@@ -1068,7 +1025,7 @@ mod tests {
         let node = Node::new(NodeKind::Func(FuncId::unique()));
         let id = node.id;
         doc.graph.add(node);
-        doc.main_view.view_nodes.add(ViewNode { id, pos });
+        doc.main_view.view_items.add(ViewItem::node(id, pos));
         id
     }
 
@@ -1154,8 +1111,16 @@ mod tests {
             .unwrap()
             .id;
         let view = doc.sub_views.get(&id).expect("view seeded on create");
-        let ip = view.view_nodes.by_key(&input_id).unwrap().pos;
-        let op = view.view_nodes.by_key(&output_id).unwrap().pos;
+        let ip = view
+            .view_items
+            .by_key(&ItemRef::Node(input_id))
+            .unwrap()
+            .pos;
+        let op = view
+            .view_items
+            .by_key(&ItemRef::Node(output_id))
+            .unwrap()
+            .pos;
         assert!(op.x > ip.x, "output boundary sits right of input");
         assert_eq!(ip.y, op.y, "boundaries are level");
 
@@ -1166,8 +1131,11 @@ mod tests {
             .find(|n| matches!(n.kind, NodeKind::Subgraph(SubgraphRef::Local(sid)) if sid == id))
             .expect("instance added to main graph");
         assert!(
-            doc.main_view.view_nodes.by_key(&inst.id).is_some(),
-            "instance has a main view node"
+            doc.main_view
+                .view_items
+                .by_key(&ItemRef::Node(inst.id))
+                .is_some(),
+            "instance has a main view item"
         );
 
         // Each create mints a distinct id (no overwrite).
@@ -1330,13 +1298,13 @@ mod tests {
             .expect("document deserialization should succeed for test payload");
         deserialized.validate();
         assert_eq!(
-            doc.main_view.view_nodes.len(),
-            deserialized.main_view.view_nodes.len(),
-            "node view counts should round-trip"
+            doc.main_view.view_items.len(),
+            deserialized.main_view.view_items.len(),
+            "view item counts should round-trip"
         );
         assert_eq!(
-            doc.main_view.view_nodes[0].id, deserialized.main_view.view_nodes[0].id,
-            "node view ids should round-trip"
+            doc.main_view.view_items[0].key, deserialized.main_view.view_items[0].key,
+            "view item keys should round-trip"
         );
         assert_eq!(
             doc.graph.len(),
@@ -1354,42 +1322,48 @@ mod tests {
     }
 
     #[test]
-    fn validate_accepts_and_round_trips_a_pinned_output_with_its_position() {
-        // A well-formed document — every pinned output carries a position, the
-        // way the edit layer seeds it on pin — validates and round-trips with
-        // no repair pass.
+    fn validate_accepts_and_round_trips_a_pinned_output_with_its_item() {
+        // A well-formed document — every pinned output carries a view item
+        // (`for_graph` seeds one; the edit layer does the same on pin) —
+        // validates and round-trips, position, slot, and all.
         let mut graph = core_test_graph();
         let node_id = graph.by_name("sum").unwrap().id;
         let port = OutputPort::new(node_id, 0);
         graph.set_output_pinned(port, true);
 
         let mut doc: Document = graph.into();
+        let key = ItemRef::Pin(port);
         let pos = Vec2::new(5.0, 6.0);
-        doc.main_view.pin_positions.insert(port, pos);
+        doc.main_view.view_items.by_key_mut(&key).unwrap().pos = pos;
         doc.validate();
 
         let bytes = doc.serialize(SerdeFormat::Rhai).expect("serialize");
         let reloaded = Document::deserialize(SerdeFormat::Rhai, &bytes).expect("load");
         assert_eq!(
-            reloaded.main_view.pin_positions.get(&port),
-            Some(&pos),
+            reloaded.main_view.view_items.by_key(&key).map(|i| i.pos),
+            Some(pos),
             "the pinned output's position round-trips"
+        );
+        assert_eq!(
+            reloaded.main_view.view_items.index_of_key(&key),
+            doc.main_view.view_items.index_of_key(&key),
+            "the pinned output's paint-stack slot round-trips"
         );
     }
 
     #[test]
-    fn check_rejects_a_pinned_output_without_a_position() {
-        // A pinned output with no matching pin position is malformed: the edit
-        // layer's `MoveSelection` build looks the position up unconditionally,
-        // so check surfaces the drift rather than letting it crash later.
-        let mut graph = core_test_graph();
+    fn check_rejects_pin_item_drift_in_both_directions() {
+        // A pinned output with no view item is malformed: the edit layer's
+        // `MoveSelection` build looks the item up unconditionally, so check
+        // surfaces the drift rather than letting it crash later. Pin the
+        // port *after* the view was built so nothing seeds the item.
+        let graph = core_test_graph();
         let port = OutputPort::new(graph.by_name("sum").unwrap().id, 0);
-        graph.set_output_pinned(port, true);
-        let doc: Document = graph.into(); // no position — nothing auto-seeds one
+        let mut doc: Document = graph.into();
+        doc.graph.set_output_pinned(port, true);
         let err = doc.check().unwrap_err();
         assert!(
-            err.message
-                .contains("pinned output must have an explicit pin position"),
+            err.message.contains("pinned output must have a view item"),
             "unexpected check error: {err}"
         );
 
@@ -1399,8 +1373,22 @@ mod tests {
         let bytes = common::serialize(&doc, SerdeFormat::Rhai).expect("serialize");
         let err = Document::deserialize(SerdeFormat::Rhai, &bytes).unwrap_err();
         assert!(
-            format!("{err:#}").contains("pinned output must have an explicit pin position"),
+            format!("{err:#}").contains("pinned output must have a view item"),
             "unexpected deserialize error: {err:#}"
+        );
+
+        // The reverse drift — a ghost item for an unpinned port (unpinning
+        // removes the item; a leftover would be a phantom slot in the paint
+        // stack) — is rejected too.
+        doc.graph.set_output_pinned(port, false);
+        doc.main_view
+            .view_items
+            .add(ViewItem::pin(port, Vec2::ZERO));
+        let err = doc.check().unwrap_err();
+        assert!(
+            err.message
+                .contains("view item references an output that isn't pinned"),
+            "unexpected check error: {err}"
         );
     }
 }

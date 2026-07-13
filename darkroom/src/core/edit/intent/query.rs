@@ -5,6 +5,7 @@
 
 use scenarium::graph::Binding;
 
+use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::{DocStep, GestureKey, GraphStep, UndoStep};
 
 /// 1e-4 is the threshold below which two pan/scale samples are
@@ -54,7 +55,9 @@ impl UndoStep {
             // node's own rect — no remeasure, same as a viewport pan. A
             // node move (alone or as part of a mixed group drag) does need
             // one.
-            GraphStep::MoveSelection { node_moves, .. } => !node_moves.is_empty(),
+            GraphStep::MoveSelection { moves, .. } => moves
+                .iter()
+                .any(|(key, ..)| matches!(key, ItemRef::Node(_))),
             // Viewport is the inner-canvas `TranslateScale`, applied at
             // paint; children arrange in pre-transform space, so a pan/zoom
             // changes nothing the layout engine reads — no Pass B needed.
@@ -71,7 +74,7 @@ impl UndoStep {
             }
             GraphStep::SetSelection { .. }
             // Raising only reorders the paint stack — no node remeasures.
-            | GraphStep::RaiseNode { .. }
+            | GraphStep::Raise { .. }
             // A node property (disable dims the body, a cache toggle flips a
             // badge fill) keeps the same rect — no remeasure.
             | GraphStep::SetNodeProperty { .. }
@@ -106,7 +109,7 @@ impl UndoStep {
                 GraphStep::MoveSelection { .. }
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetSelection { .. }
-                | GraphStep::RaiseNode { .. }
+                | GraphStep::Raise { .. }
                 | GraphStep::SetNodeProperty { .. }
                 | GraphStep::SetViewport { .. }
                 // Subscriptions don't feed a subgraph's derived interface.
@@ -132,11 +135,11 @@ impl UndoStep {
             UndoStep::Doc(DocStep::Dock { structural, .. }) => *structural,
             // Navigation only — panning, zooming, selecting, or
             // restacking is view state the user doesn't "save".
-            // Stacking order rides in `view_nodes` and still writes on any
+            // Stacking order rides in `view_items` and still writes on any
             // save (like selection), but a bare restack shouldn't nag on exit.
             UndoStep::Graph(
                 GraphStep::SetSelection { .. }
-                | GraphStep::RaiseNode { .. }
+                | GraphStep::Raise { .. }
                 | GraphStep::SetViewport { .. },
             ) => false,
             // Graph data + node layout — real edits worth persisting.
@@ -180,7 +183,7 @@ impl UndoStep {
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetSelection { .. }
-                | GraphStep::RaiseNode { .. }
+                | GraphStep::Raise { .. }
                 | GraphStep::SetNodeProperty { .. }
                 | GraphStep::DetachSubgraph { .. }
                 | GraphStep::SetSubscription { .. }
@@ -213,43 +216,28 @@ impl UndoStep {
             (
                 UndoStep::Graph(GraphStep::MoveSelection {
                     grabbed,
-                    node_moves: prev_nodes,
-                    pin_moves: prev_pins,
+                    moves: prev_moves,
                 }),
                 UndoStep::Graph(GraphStep::MoveSelection {
-                    node_moves: next_nodes,
-                    pin_moves: next_pins,
-                    ..
+                    moves: next_moves, ..
                 }),
             ) => {
                 // Same gesture (matched `SelectionDrag` key) ⇒ same group;
                 // keep each member's original `from`, adopt its latest `to`.
-                let node_moves = prev_nodes
+                let moves = prev_moves
                     .iter()
-                    .map(|(id, from, prev_to)| {
-                        let to = next_nodes
+                    .map(|(key, from, prev_to)| {
+                        let to = next_moves
                             .iter()
-                            .find(|(nid, _, _)| nid == id)
+                            .find(|(k, _, _)| k == key)
                             .map(|(_, _, t)| *t)
                             .unwrap_or(*prev_to);
-                        (*id, *from, to)
-                    })
-                    .collect();
-                let pin_moves = prev_pins
-                    .iter()
-                    .map(|(port, from, prev_to)| {
-                        let to = next_pins
-                            .iter()
-                            .find(|(p, _, _)| p == port)
-                            .map(|(_, _, t)| *t)
-                            .unwrap_or(*prev_to);
-                        (*port, *from, to)
+                        (*key, *from, to)
                     })
                     .collect();
                 Some(UndoStep::Graph(GraphStep::MoveSelection {
                     grabbed: *grabbed,
-                    node_moves,
-                    pin_moves,
+                    moves,
                 }))
             }
             (
@@ -283,19 +271,12 @@ impl GraphStep {
             | GraphStep::RemoveNode { .. }
             | GraphStep::DetachSubgraph { .. } => false,
             GraphStep::DuplicateNodes { nodes, .. } => nodes.is_empty(),
-            GraphStep::MoveSelection {
-                node_moves,
-                pin_moves,
-                ..
-            } => {
-                node_moves.iter().all(|(_, from, to)| from == to)
-                    && pin_moves.iter().all(|(_, from, to)| from == to)
-            }
+            GraphStep::MoveSelection { moves, .. } => moves.iter().all(|(_, from, to)| from == to),
             GraphStep::RenameNode { from, to, .. } => from == to,
             GraphStep::SetInput { from, to, .. } => from == to,
             GraphStep::SetSelection { from, to } => from == to,
             // Already on top (its slot is the last one) → nothing to raise.
-            GraphStep::RaiseNode {
+            GraphStep::Raise {
                 from_index,
                 to_index,
                 ..

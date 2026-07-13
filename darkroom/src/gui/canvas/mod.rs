@@ -380,18 +380,15 @@ impl GraphUI {
                                 selected,
                                 geometry,
                                 inspectors,
+                                run_state: ctx.run_state,
                             };
-                            node_ui.draw_all(ui, rcx, visible, &mut probe, out);
-                            // The pin's port-circle glyph + card paint after
-                            // the node bodies, like the inspection panels
-                            // below — the widget can end up anywhere on the
-                            // canvas once dragged, and should read as
-                            // floating above everything, not nested in (or
-                            // hidden under) its node's body. Only the wire
-                            // itself (above) shares the other wires' z-order.
-                            pin_ui.draw_widget(
-                                ui, ctx, scene, geometry, visible, &mut probe, selected, out,
-                            );
+                            // Node bodies and pin preview cards paint
+                            // interleaved, in `scene.z_order` — one shared
+                            // paint stack, so either kind can sit above the
+                            // other and clicking raises it. Only the pin
+                            // wire (above) shares the other wires' z-order.
+                            pin_ui.prune_previews(scene);
+                            node_ui.draw_all(ui, rcx, visible, &mut probe, pin_ui, out);
                         }
                         // Inspection panels paint after the node bodies so
                         // they sit on top and win clicks over the nodes

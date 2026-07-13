@@ -2,9 +2,8 @@ use std::collections::BTreeSet;
 
 use aperture::{PointerButton, Rect, Shape, Stroke, Ui};
 use glam::Vec2;
-use scenarium::graph::OutputPort;
 
-use crate::core::document::SelectionKey;
+use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
@@ -27,13 +26,13 @@ pub(crate) struct SelectionUI {
     /// The swept set unions onto this each frame, so we never re-read
     /// `scene.selected` mid-drag — no dependency on the document staying
     /// untouched, and the additive base is fixed at latch.
-    base: BTreeSet<SelectionKey>,
+    base: BTreeSet<ItemRef>,
     /// The swept set while a band is active, for node/pin draw to
     /// highlight live. Owned here rather than written into
     /// `Scene::selected` so the projection stays a read-only mirror of
     /// `Document`. `None` when no band is in flight (draw falls back to
     /// the committed selection).
-    preview: Option<BTreeSet<SelectionKey>>,
+    preview: Option<BTreeSet<ItemRef>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -58,7 +57,7 @@ impl SelectionUI {
     /// The live swept set while a band is in flight, for node/pin draw to
     /// paint against; `None` when no band is active (the caller falls back
     /// to the committed `scene.selected`).
-    pub(crate) fn preview(&self) -> Option<&BTreeSet<SelectionKey>> {
+    pub(crate) fn preview(&self) -> Option<&BTreeSet<ItemRef>> {
         self.preview.as_ref()
     }
 
@@ -113,7 +112,7 @@ impl SelectionUI {
             band.current = to_world(p, &scene.viewport);
         }
         let rect = band.rect();
-        let mut selected: BTreeSet<SelectionKey> = self.base.clone();
+        let mut selected: BTreeSet<ItemRef> = self.base.clone();
         for n in &scene.nodes {
             // The cached-size world rect, so nodes the viewport cull
             // skipped this frame still sweep. Never-measured nodes
@@ -122,15 +121,12 @@ impl SelectionUI {
                 continue;
             };
             if rect.intersects(body) {
-                selected.insert(SelectionKey::Node(n.id));
+                selected.insert(ItemRef::Node(n.id));
             }
-            for (i, output) in scene.outputs(n.outputs).iter().enumerate() {
-                if !output.pinned {
-                    continue;
-                }
-                if rect.intersects(pin_ui::pin_preview_rect(output)) {
-                    selected.insert(SelectionKey::Pin(OutputPort::new(n.id, i)));
-                }
+        }
+        for pin in scene.pinned_outputs() {
+            if rect.intersects(pin_ui::pin_preview_rect(pin.pos)) {
+                selected.insert(ItemRef::Pin(pin.port));
             }
         }
         // Still dragging → stash the updated corner + the swept preview
