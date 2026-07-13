@@ -217,9 +217,10 @@ fn consecutive_moves_coalesce_keeping_first_from() {
     let mut stack = ActionStack::new(1 << 20);
 
     let drag_to = |stack: &mut ActionStack, doc: &mut Document, to: Vec2| {
-        let intent = Intent::MoveNodes {
-            grabbed: node,
-            to: vec![(node, to)],
+        let intent = Intent::MoveSelection {
+            grabbed: SelectionKey::Node(node),
+            nodes: vec![(node, to)],
+            pins: vec![],
         };
         let step = build_step(intent, doc, GraphRef::Main).unwrap();
         apply_step(&step, doc, GraphRef::Main);
@@ -258,15 +259,16 @@ fn moves_of_different_nodes_do_not_coalesce() {
     let mut stack = ActionStack::new(1 << 20);
 
     for (node, to) in [(a, Vec2::new(5.0, 5.0)), (b, Vec2::new(6.0, 6.0))] {
-        let intent = Intent::MoveNodes {
-            grabbed: node,
-            to: vec![(node, to)],
+        let intent = Intent::MoveSelection {
+            grabbed: SelectionKey::Node(node),
+            nodes: vec![(node, to)],
+            pins: vec![],
         };
         let step = build_step(intent, &doc, GraphRef::Main).unwrap();
         apply_step(&step, &mut doc, GraphRef::Main);
         stack.push_current(GraphRef::Main, &[step]);
     }
-    // Different grabbed nodes ⇒ different `NodeDrag` keys ⇒ two entries.
+    // Different grabbed nodes ⇒ different `SelectionDrag` keys ⇒ two entries.
     assert!(stack.undo(&mut doc, &mut |_| {}));
     assert!(
         stack.undo(&mut doc, &mut |_| {}),
@@ -320,20 +322,27 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
 #[test]
 fn group_drag_moves_all_and_undoes_as_one() {
     use glam::Vec2;
+    use scenarium::graph::OutputPort;
 
     let mut doc: Document = test_graph().into();
     let a = doc.graph.iter().next().unwrap().id;
     let b = doc.graph.iter().nth(1).unwrap().id;
     let a0 = doc.main_view.view_nodes.by_key(&a).unwrap().pos;
     let b0 = doc.main_view.view_nodes.by_key(&b).unwrap().pos;
+    // A pinned-output preview joins the group too — a mixed node+pin drag,
+    // like grabbing a node that's multi-selected alongside a pin.
+    let port = OutputPort::new(a, 0);
+    let pin0 = Vec2::new(100.0, -50.0);
+    doc.main_view.pin_positions.insert(port, pin0);
     let mut stack = ActionStack::new(1 << 20);
 
-    // Two frames of a group drag (grabbed = a), each frame moving both
-    // a and b by the running offset. Same grabbed ⇒ one coalesced entry.
+    // Two frames of a group drag (grabbed = a), each frame moving a, b,
+    // and the pin by the running offset. Same grabbed ⇒ one coalesced entry.
     let drag = |stack: &mut ActionStack, doc: &mut Document, off: Vec2| {
-        let intent = Intent::MoveNodes {
-            grabbed: a,
-            to: vec![(a, a0 + off), (b, b0 + off)],
+        let intent = Intent::MoveSelection {
+            grabbed: SelectionKey::Node(a),
+            nodes: vec![(a, a0 + off), (b, b0 + off)],
+            pins: vec![(port, pin0 + off)],
         };
         let step = build_step(intent, doc, GraphRef::Main).unwrap();
         apply_step(&step, doc, GraphRef::Main);
@@ -342,7 +351,7 @@ fn group_drag_moves_all_and_undoes_as_one() {
     drag(&mut stack, &mut doc, Vec2::new(10.0, 0.0));
     drag(&mut stack, &mut doc, Vec2::new(25.0, 5.0));
 
-    // Both ended at origin + last offset.
+    // All three ended at origin + last offset.
     assert_eq!(
         doc.main_view.view_nodes.by_key(&a).unwrap().pos,
         a0 + Vec2::new(25.0, 5.0)
@@ -351,11 +360,16 @@ fn group_drag_moves_all_and_undoes_as_one() {
         doc.main_view.view_nodes.by_key(&b).unwrap().pos,
         b0 + Vec2::new(25.0, 5.0)
     );
+    assert_eq!(
+        doc.main_view.pin_positions.get(&port),
+        Some(&(pin0 + Vec2::new(25.0, 5.0)))
+    );
 
-    // One undo restores BOTH to their pre-drag positions (first `from`).
+    // One undo restores ALL THREE to their pre-drag positions (first `from`).
     assert!(stack.undo(&mut doc, &mut |_| {}));
     assert_eq!(doc.main_view.view_nodes.by_key(&a).unwrap().pos, a0);
     assert_eq!(doc.main_view.view_nodes.by_key(&b).unwrap().pos, b0);
+    assert_eq!(doc.main_view.pin_positions.get(&port), Some(&pin0));
     assert!(
         !stack.undo(&mut doc, &mut |_| {}),
         "the group drag collapsed to exactly one entry"

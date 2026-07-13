@@ -128,10 +128,7 @@ impl SelectionUI {
                 if !output.pinned {
                     continue;
                 }
-                let Some(pin_body) = pin_ui::pin_world_rect(geometry, n.id, i, output) else {
-                    continue;
-                };
-                if rect.intersects(pin_body) {
+                if rect.intersects(pin_ui::pin_preview_rect(output)) {
                     selected.insert(SelectionKey::Pin(OutputPort::new(n.id, i)));
                 }
             }

@@ -32,6 +32,7 @@ use rhai::{Array, Dynamic, Engine};
 use scenarium::graph::{Node, NodeId};
 use scenarium::node::function::FuncId;
 
+use crate::core::document::SelectionKey;
 use crate::core::document::view_node::ViewNode;
 use crate::core::edit::intent::Intent;
 use crate::core::wake::Wake;
@@ -453,8 +454,8 @@ fn register_introspection(engine: &mut Engine, library: Arc<Library>) {
 ///   shapes a node from it (`From<&Func> for Node`), positioned at
 ///   `(x, y)`. Wrapped by `create_node` in `prelude.rhai`. Func nodes
 ///   only (`def: None`); subgraph instancing isn't scriptable yet.
-/// - `make_move_node(node_id, x, y)` — an `Intent::MoveNodes` for the one
-///   node. Wrapped by `move_node`.
+/// - `make_move_node(node_id, x, y)` — an `Intent::MoveSelection` for the
+///   one node (no pins). Wrapped by `move_node`.
 ///
 /// Registered inside a static `host` module so callers reach them as
 /// `host::name(...)` — visually marked as internal and kept off the
@@ -503,9 +504,10 @@ fn register_host_helpers(engine: &mut Engine, library: Arc<Library>) {
             let node_id: NodeId = id
                 .parse()
                 .map_err(|e| format!("invalid node id {id:?}: {e}"))?;
-            let action = Intent::MoveNodes {
-                grabbed: node_id,
-                to: vec![(node_id, Vec2::new(x as f32, y as f32))],
+            let action = Intent::MoveSelection {
+                grabbed: SelectionKey::Node(node_id),
+                nodes: vec![(node_id, Vec2::new(x as f32, y as f32))],
+                pins: vec![],
             };
             rhai::serde::to_dynamic(&action)
                 .map_err(|e| format!("make_move_node: encode failed: {e}").into())

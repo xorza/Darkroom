@@ -105,14 +105,17 @@ pub enum Intent {
     RemoveNode {
         node_id: NodeId,
     },
-    /// Move one or more nodes. A multi-select drag moves the whole group
-    /// as a single undo entry; a plain drag carries just the one node.
-    /// `grabbed` is the node the pointer latched — it keys the drag
-    /// gesture so consecutive frames coalesce. Each `to` entry is
-    /// `(node_id, new_pos)`.
-    MoveNodes {
-        grabbed: NodeId,
-        to: Vec<(NodeId, Vec2)>,
+    /// Drag-move one or more selected items — node bodies and/or
+    /// pinned-output preview widgets — in canvas-world coordinates. A
+    /// multi-select drag moves the whole group as a single undo entry; a
+    /// plain drag carries just the one grabbed item. `grabbed` is whichever
+    /// member the pointer latched — it keys the drag gesture so consecutive
+    /// frames coalesce. Either list may be empty (a lone node drag has no
+    /// pins; a lone pin drag/creation has no nodes).
+    MoveSelection {
+        grabbed: SelectionKey,
+        nodes: Vec<(NodeId, Vec2)>,
+        pins: Vec<(OutputPort, Vec2)>,
     },
     RenameNode {
         node_id: NodeId,
@@ -206,15 +209,6 @@ pub enum Intent {
         port_idx: usize,
         pinned: bool,
     },
-    /// Move a pinned output's satellite to a new canvas-local offset from
-    /// its port (see `GraphView::pin_offsets`). Emitted every frame of a
-    /// satellite drag ([`crate::gui::canvas::pin_ui::PinUi`]);
-    /// `port_idx` keys the drag gesture so consecutive frames coalesce.
-    SetPinOffset {
-        node_id: NodeId,
-        port_idx: usize,
-        to: Vec2,
-    },
 }
 
 /// Self-contained undo-stack entry. Each leaf variant carries both
@@ -270,17 +264,23 @@ pub enum GraphStep {
         bindings: Vec<(InputPort, Binding)>,
         /// All subscriptions touching the node (as emitter or subscriber).
         subscriptions: Vec<Subscription>,
-        /// Every pinned output's custom satellite offset on this node
+        /// Every pinned output's custom satellite position on this node
         /// (`EditScope::remove_node` prunes them along with everything
         /// else), captured so undo can fully restore it.
-        pin_offsets: Vec<(OutputPort, Vec2)>,
+        pin_positions: Vec<(OutputPort, Vec2)>,
         was_selected: bool,
     },
-    MoveNodes {
-        grabbed: NodeId,
-        /// `(node_id, from, to)` per moved node. Nodes missing at build
-        /// time are dropped, so this can be shorter than the intent's `to`.
-        moves: Vec<(NodeId, Vec2, Vec2)>,
+    MoveSelection {
+        grabbed: SelectionKey,
+        /// `(node_id, from, to)` per moved node. A node missing at build
+        /// time is dropped, so this can be shorter than the intent's `nodes`.
+        node_moves: Vec<(NodeId, Vec2, Vec2)>,
+        /// `(port, from, to)` per moved pin. Every pinned port is seeded
+        /// with an explicit position the moment it's pinned (see
+        /// `crate::gui::canvas::pin_ui::PinUi::apply`), so `from` is always
+        /// its current stored position — a port whose node vanished
+        /// mid-drag is dropped, like a missing node above.
+        pin_moves: Vec<(OutputPort, Vec2, Vec2)>,
     },
     RenameNode {
         node_id: NodeId,
@@ -349,15 +349,6 @@ pub enum GraphStep {
         from: bool,
         to: bool,
         was_selected: bool,
-    },
-    /// Move a pinned output's satellite. `from` is `None` when the port had
-    /// no custom offset yet (falling back to the default formula) — revert
-    /// then removes the entry rather than writing one back.
-    SetPinOffset {
-        node_id: NodeId,
-        port_idx: usize,
-        from: Option<Vec2>,
-        to: Vec2,
     },
 }
 
@@ -438,7 +429,14 @@ impl GraphStep {
             | GraphStep::RemoveNode { .. }
             | GraphStep::DetachSubgraph { .. } => false,
             GraphStep::DuplicateNodes { nodes, .. } => nodes.is_empty(),
-            GraphStep::MoveNodes { moves, .. } => moves.iter().all(|(_, from, to)| from == to),
+            GraphStep::MoveSelection {
+                node_moves,
+                pin_moves,
+                ..
+            } => {
+                node_moves.iter().all(|(_, from, to)| from == to)
+                    && pin_moves.iter().all(|(_, from, to)| from == to)
+            }
             GraphStep::RenameNode { from, to, .. } => from == to,
             GraphStep::SetInput { from, to, .. } => from == to,
             GraphStep::SetSelection { from, to } => from == to,
@@ -450,7 +448,6 @@ impl GraphStep {
             } => from_index == to_index,
             GraphStep::SetNodeProperty { from, to, .. } => from == to,
             GraphStep::SetOutputPinned { from, to, .. } => from == to,
-            GraphStep::SetPinOffset { from, to, .. } => from.as_ref() == Some(to),
             GraphStep::SetViewport { from, to } => {
                 (from.pan - to.pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
                     && (from.zoom - to.zoom).abs() < VIEWPORT_EPS
@@ -477,8 +474,8 @@ impl DocStep {
 /// Returns `None` when the intent targets a node that no longer exists
 /// (e.g. a `RemoveNode`/`SetInput` whose anchor lingered one frame past a
 /// `RemoveNode` applied earlier in the same frame). Callers should treat a
-/// `None` result as "stale intent, drop it". (`MoveNodes` instead skips
-/// vanished nodes individually rather than dropping the whole batch.)
+/// `None` result as "stale intent, drop it". (`MoveSelection` instead skips
+/// vanished nodes/pins individually rather than dropping the whole batch.)
 pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<UndoStep> {
     // Document-global intents don't resolve a graph scope.
     if let Intent::Dock(op) = intent {
@@ -559,29 +556,53 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
             let view_node = view.view_nodes.by_key(&node_id)?.clone();
             let node = graph.find_node(&node_id, NodeSearch::TopLevel)?.clone();
             let was_selected = view.selected.contains(&SelectionKey::Node(node_id));
-            let pin_offsets = view
-                .pin_offsets
+            let pin_positions = view
+                .pin_positions
                 .iter()
                 .filter(|(port, _)| port.node_id == node_id)
-                .map(|(port, offset)| (*port, *offset))
+                .map(|(port, position)| (*port, *position))
                 .collect();
             GraphStep::RemoveNode {
                 view_node,
                 node,
                 bindings: graph.bindings_touching(node_id),
                 subscriptions: graph.subscriptions_touching(node_id),
-                pin_offsets,
+                pin_positions,
                 was_selected,
             }
         }
-        Intent::MoveNodes { grabbed, to } => {
-            let mut moves = Vec::with_capacity(to.len());
-            for (id, t) in to {
+        Intent::MoveSelection {
+            grabbed,
+            nodes,
+            pins,
+        } => {
+            let mut node_moves = Vec::with_capacity(nodes.len());
+            for (id, to) in nodes {
                 if let Some(vn) = view.view_nodes.by_key(&id) {
-                    moves.push((id, vn.pos, t));
+                    node_moves.push((id, vn.pos, to));
                 }
             }
-            GraphStep::MoveNodes { grabbed, moves }
+            let mut pin_moves = Vec::with_capacity(pins.len());
+            for (port, to) in pins {
+                // Drag-sourced (spans frames): a stale drag whose node
+                // vanished mid-gesture drops that pin quietly, like a
+                // vanished node above.
+                if graph
+                    .find_node(&port.node_id, NodeSearch::TopLevel)
+                    .is_none()
+                {
+                    continue;
+                }
+                let from = view.pin_positions.get(&port).copied().expect(
+                    "a pinned port always has an explicit position, seeded when it was pinned",
+                );
+                pin_moves.push((port, from, to));
+            }
+            GraphStep::MoveSelection {
+                grabbed,
+                node_moves,
+                pin_moves,
+            }
         }
         Intent::RenameNode { node_id, to } => GraphStep::RenameNode {
             from: graph
@@ -685,22 +706,6 @@ pub fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<Un
                 from: graph.is_output_pinned(port),
                 to: pinned,
                 was_selected: view.selected.contains(&SelectionKey::Pin(port)),
-            }
-        }
-        Intent::SetPinOffset {
-            node_id,
-            port_idx,
-            to,
-        } => {
-            // Drag-sourced (spans frames): a stale drag whose node vanished
-            // mid-gesture drops quietly, like `SetInput`/`MoveNodes`.
-            graph.find_node(&node_id, NodeSearch::TopLevel)?;
-            let port = OutputPort::new(node_id, port_idx);
-            GraphStep::SetPinOffset {
-                node_id,
-                port_idx,
-                from: view.pin_offsets.get(&port).copied(),
-                to,
             }
         }
     };
@@ -1029,11 +1034,18 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             );
             scope.remove_node(&node.id);
         }
-        GraphStep::MoveNodes { moves, .. } => {
-            for (id, _, to) in moves {
+        GraphStep::MoveSelection {
+            node_moves,
+            pin_moves,
+            ..
+        } => {
+            for (id, _, to) in node_moves {
                 if let Some(vn) = scope.view.view_nodes.by_key_mut(id) {
                     vn.pos = *to;
                 }
+            }
+            for (port, _, to) in pin_moves {
+                scope.view.pin_positions.insert(*port, *to);
             }
         }
         GraphStep::RenameNode { node_id, to, .. } => {
@@ -1088,17 +1100,6 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             to,
             ..
         } => set_output_pinned(scope, *node_id, *port_idx, *to),
-        GraphStep::SetPinOffset {
-            node_id,
-            port_idx,
-            to,
-            ..
-        } => {
-            scope
-                .view
-                .pin_offsets
-                .insert(OutputPort::new(*node_id, *port_idx), *to);
-        }
     }
 }
 
@@ -1135,10 +1136,22 @@ fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProp
 /// (writes `to`) and `revert_graph` (writes `from`). Unpinning drops the
 /// port's preview widget, so its selection membership goes with it — a
 /// selected pin left in the set once the widget is gone would be dead state.
+///
+/// Pinning guarantees the port has a `pin_positions` entry: the GUI paths
+/// (`PinUi::apply`'s Cmd+drag, `port_row`'s pin/unpin menu toggle) always
+/// follow this with a `MoveSelection` that seeds the port's real on-screen
+/// position, but a script driving `Intent::SetOutputPinned` directly has no
+/// canvas geometry to compute one — so this seeds a zero fallback whenever
+/// pinning would otherwise leave the port without one. Every pinned port is
+/// thus guaranteed an explicit position no matter the caller, which is what
+/// lets `build_step` treat a missing entry as a genuine bug rather than a
+/// case to handle gracefully.
 fn set_output_pinned(scope: &mut EditScope<'_>, node_id: NodeId, port_idx: usize, pinned: bool) {
     let port = OutputPort::new(node_id, port_idx);
     scope.graph.set_output_pinned(port, pinned);
-    if !pinned {
+    if pinned {
+        scope.view.pin_positions.entry(port).or_default();
+    } else {
         scope.view.selected.remove(&SelectionKey::Pin(port));
     }
 }
@@ -1199,7 +1212,7 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             node,
             bindings,
             subscriptions,
-            pin_offsets,
+            pin_positions,
             was_selected,
         } => {
             let removed_node_id = node.id;
@@ -1213,7 +1226,10 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.graph.add(node.clone());
             scope.view.view_nodes.add(view_node.clone());
             scope.graph.restore_wiring(bindings, subscriptions);
-            scope.view.pin_offsets.extend(pin_offsets.iter().copied());
+            scope
+                .view
+                .pin_positions
+                .extend(pin_positions.iter().copied());
             if *was_selected {
                 scope
                     .view
@@ -1221,11 +1237,18 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                     .insert(SelectionKey::Node(removed_node_id));
             }
         }
-        GraphStep::MoveNodes { moves, .. } => {
-            for (id, from, _) in moves {
+        GraphStep::MoveSelection {
+            node_moves,
+            pin_moves,
+            ..
+        } => {
+            for (id, from, _) in node_moves {
                 if let Some(vn) = scope.view.view_nodes.by_key_mut(id) {
                     vn.pos = *from;
                 }
+            }
+            for (port, from, _) in pin_moves {
+                scope.view.pin_positions.insert(*port, *from);
             }
         }
         GraphStep::RenameNode { node_id, from, .. } => {
@@ -1298,22 +1321,6 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                     .insert(SelectionKey::Pin(OutputPort::new(*node_id, *port_idx)));
             }
         }
-        GraphStep::SetPinOffset {
-            node_id,
-            port_idx,
-            from,
-            ..
-        } => {
-            let port = OutputPort::new(*node_id, *port_idx);
-            match from {
-                Some(offset) => {
-                    scope.view.pin_offsets.insert(port, *offset);
-                }
-                None => {
-                    scope.view.pin_offsets.remove(&port);
-                }
-            }
-        }
     }
 }
 
@@ -1340,12 +1347,16 @@ impl UndoStep {
             GraphStep::AddNode { .. }
             | GraphStep::DuplicateNodes { .. }
             | GraphStep::RemoveNode { .. }
-            | GraphStep::MoveNodes { .. }
             | GraphStep::RenameNode { .. }
             // Forks an identical-interface def, so the node doesn't
             // resize — but it's a structural edit and rare, so eat one
             // relayout rather than reason about it staying in lockstep.
             | GraphStep::DetachSubgraph { .. } => true,
+            // A pin-only drag repositions a decoration drawn past the
+            // node's own rect — no remeasure, same as a viewport pan. A
+            // node move (alone or as part of a mixed group drag) does need
+            // one.
+            GraphStep::MoveSelection { node_moves, .. } => !node_moves.is_empty(),
             // Viewport is the inner-canvas `TranslateScale`, applied at
             // paint; children arrange in pre-transform space, so a pan/zoom
             // changes nothing the layout engine reads — no Pass B needed.
@@ -1370,10 +1381,7 @@ impl UndoStep {
             // node remeasure.
             | GraphStep::SetSubscription { .. }
             // Flips a port's outline paint only — no remeasure.
-            | GraphStep::SetOutputPinned { .. }
-            // Repositions a decoration drawn past the node's own rect — no
-            // remeasure, same as a viewport pan.
-            | GraphStep::SetPinOffset { .. } => false,
+            | GraphStep::SetOutputPinned { .. } => false,
         },
     }
     }
@@ -1397,7 +1405,7 @@ impl UndoStep {
                 | GraphStep::DetachSubgraph { .. },
             ) => true,
             UndoStep::Graph(
-                GraphStep::MoveNodes { .. }
+                GraphStep::MoveSelection { .. }
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetSelection { .. }
                 | GraphStep::RaiseNode { .. }
@@ -1406,9 +1414,7 @@ impl UndoStep {
                 // Subscriptions don't feed a subgraph's derived interface.
                 | GraphStep::SetSubscription { .. }
                 // Nor does pinning an output — it's not wiring at all.
-                | GraphStep::SetOutputPinned { .. }
-                // Nor does repositioning a pin's satellite.
-                | GraphStep::SetPinOffset { .. },
+                | GraphStep::SetOutputPinned { .. },
             )
             | UndoStep::Doc(_) => false,
         }
@@ -1440,14 +1446,13 @@ impl UndoStep {
                 GraphStep::AddNode { .. }
                 | GraphStep::DuplicateNodes { .. }
                 | GraphStep::RemoveNode { .. }
-                | GraphStep::MoveNodes { .. }
+                | GraphStep::MoveSelection { .. }
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetNodeProperty { .. }
                 | GraphStep::DetachSubgraph { .. }
                 | GraphStep::SetSubscription { .. }
-                | GraphStep::SetOutputPinned { .. }
-                | GraphStep::SetPinOffset { .. },
+                | GraphStep::SetOutputPinned { .. },
             )
             | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameSubgraph { .. }) => {
                 true
@@ -1458,16 +1463,13 @@ impl UndoStep {
     /// Identifies "same continuous gesture" for undo coalescing. The undo
     /// stack collapses consecutive steps with the same key into one entry
     /// (keeping the *first* "from" payload). Two viewport changes coalesce;
-    /// two `MoveNodes` of the *same* grabbed node coalesce.
+    /// two `MoveSelection`s of the *same* grabbed item coalesce.
     pub fn gesture_key(&self) -> Option<GestureKey> {
         match self {
             UndoStep::Graph(GraphStep::SetViewport { .. }) => Some(GestureKey::Viewport),
-            UndoStep::Graph(GraphStep::MoveNodes { grabbed, .. }) => {
-                Some(GestureKey::NodeDrag(*grabbed))
+            UndoStep::Graph(GraphStep::MoveSelection { grabbed, .. }) => {
+                Some(GestureKey::SelectionDrag(*grabbed))
             }
-            UndoStep::Graph(GraphStep::SetPinOffset {
-                node_id, port_idx, ..
-            }) => Some(GestureKey::PinDrag(OutputPort::new(*node_id, *port_idx))),
             // The key was derived from the dock intent at build time:
             // tab-switch bursts and one divider's drag frames collapse
             // into single entries; a close or move never coalesces.
@@ -1496,7 +1498,8 @@ impl UndoStep {
     /// `self`'s "from" half and adopt `next`'s "to" half. `None` for any
     /// pair that doesn't coalesce. The undo stack calls this after matching
     /// [`Self::gesture_key`] (so the pair is the same variant, and for
-    /// `NodeDrag` the same node), but the match below re-checks the pairing
+    /// `SelectionDrag` the same grabbed member), but the match below
+    /// re-checks the pairing
     /// so the fold stays self-contained — variant internals live here next
     /// to the step definitions, not in the stack. Keep this in sync with
     /// `gesture_key`.
@@ -1510,32 +1513,23 @@ impl UndoStep {
                 to: *to,
             })),
             (
-                UndoStep::Graph(GraphStep::SetPinOffset {
-                    node_id,
-                    port_idx,
-                    from,
+                UndoStep::Graph(GraphStep::MoveSelection {
+                    grabbed,
+                    node_moves: prev_nodes,
+                    pin_moves: prev_pins,
+                }),
+                UndoStep::Graph(GraphStep::MoveSelection {
+                    node_moves: next_nodes,
+                    pin_moves: next_pins,
                     ..
                 }),
-                UndoStep::Graph(GraphStep::SetPinOffset { to, .. }),
-            ) => Some(UndoStep::Graph(GraphStep::SetPinOffset {
-                node_id: *node_id,
-                port_idx: *port_idx,
-                from: *from,
-                to: *to,
-            })),
-            (
-                UndoStep::Graph(GraphStep::MoveNodes {
-                    grabbed,
-                    moves: prev,
-                }),
-                UndoStep::Graph(GraphStep::MoveNodes { moves: next, .. }),
             ) => {
-                // Same gesture (matched `NodeDrag` key) ⇒ same node set; keep
-                // each node's original `from`, adopt its latest `to`.
-                let merged = prev
+                // Same gesture (matched `SelectionDrag` key) ⇒ same group;
+                // keep each member's original `from`, adopt its latest `to`.
+                let node_moves = prev_nodes
                     .iter()
                     .map(|(id, from, prev_to)| {
-                        let to = next
+                        let to = next_nodes
                             .iter()
                             .find(|(nid, _, _)| nid == id)
                             .map(|(_, _, t)| *t)
@@ -1543,9 +1537,21 @@ impl UndoStep {
                         (*id, *from, to)
                     })
                     .collect();
-                Some(UndoStep::Graph(GraphStep::MoveNodes {
+                let pin_moves = prev_pins
+                    .iter()
+                    .map(|(port, from, prev_to)| {
+                        let to = next_pins
+                            .iter()
+                            .find(|(p, _, _)| p == port)
+                            .map(|(_, _, t)| *t)
+                            .unwrap_or(*prev_to);
+                        (*port, *from, to)
+                    })
+                    .collect();
+                Some(UndoStep::Graph(GraphStep::MoveSelection {
                     grabbed: *grabbed,
-                    moves: merged,
+                    node_moves,
+                    pin_moves,
                 }))
             }
             (
@@ -1574,10 +1580,10 @@ impl UndoStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GestureKey {
     Viewport,
-    NodeDrag(NodeId),
-    /// A pinned output's satellite drag, keyed by port so two different
-    /// pins' drags never coalesce.
-    PinDrag(OutputPort),
+    /// A group drag, keyed by whichever item the pointer latched — a node
+    /// body or a pin preview widget — so two different grabbed items never
+    /// coalesce.
+    SelectionDrag(SelectionKey),
     TabSwitch,
     /// One divider's drag, keyed by the split's packed root path, so
     /// two different dividers never coalesce.
@@ -1662,9 +1668,10 @@ mod tests {
                 },
             })
             .unwrap(),
-            UndoStep::Graph(GraphStep::MoveNodes {
-                grabbed: NodeId::unique(),
-                moves: vec![(NodeId::unique(), Vec2::ZERO, Vec2::new(5.0, 5.0))],
+            UndoStep::Graph(GraphStep::MoveSelection {
+                grabbed: SelectionKey::Node(NodeId::unique()),
+                node_moves: vec![(NodeId::unique(), Vec2::ZERO, Vec2::new(5.0, 5.0))],
+                pin_moves: vec![],
             }),
             UndoStep::Doc(DocStep::RenameSubgraph {
                 id: SubgraphId::unique(),
@@ -2002,6 +2009,11 @@ mod tests {
         )
         .expect("marking an unbound port is a real change");
         assert!(doc.graph.is_output_pinned(port));
+        assert_eq!(
+            doc.main_view.pin_positions.get(&port),
+            Some(&Vec2::ZERO),
+            "pinning seeds an explicit position — no unset/sparse state"
+        );
         assert!(
             !step.requires_relayout() && !step.requires_reconcile(),
             "a pin toggle neither remeasures nor reshapes the interface"
@@ -2042,6 +2054,11 @@ mod tests {
             doc.main_view.selected.contains(&SelectionKey::Pin(port)),
             "revert restores the selection the pin had before it was unpinned"
         );
+        assert_eq!(
+            doc.main_view.pin_positions.get(&port),
+            Some(&Vec2::ZERO),
+            "unpinning leaves the position entry in place rather than pruning it"
+        );
 
         // Setting to the value it already holds is a no-op (no undo entry).
         assert!(
@@ -2078,95 +2095,102 @@ mod tests {
         assert!(step.is_none());
     }
 
+    /// A lone-pin `MoveSelection` intent: `grabbed`/`pins` target `port`,
+    /// no nodes in the group.
+    fn move_pin(port: OutputPort, to: Vec2) -> Intent {
+        Intent::MoveSelection {
+            grabbed: SelectionKey::Pin(port),
+            nodes: vec![],
+            pins: vec![(port, to)],
+        }
+    }
+
     #[test]
-    fn set_pin_offset_commits_reverts_and_coalesces() {
+    fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
         let port = OutputPort::new(id, 0);
-        assert!(!doc.main_view.pin_offsets.contains_key(&port));
 
-        let step = commit_intent(
-            Intent::SetPinOffset {
+        // Pinning seeds a zero-default position — every pinned port has an
+        // explicit entry from the moment it's pinned, no unset/sparse state.
+        commit_intent(
+            Intent::SetOutputPinned {
                 node_id: id,
                 port_idx: 0,
-                to: Vec2::new(30.0, -12.0),
+                pinned: true,
             },
             &mut doc,
             GraphRef::Main,
         )
-        .expect("first drag of an unset pin is a real change");
+        .expect("pinning is a real change");
+        assert_eq!(doc.main_view.pin_positions.get(&port), Some(&Vec2::ZERO));
+
+        let step = commit_intent(
+            move_pin(port, Vec2::new(30.0, -12.0)),
+            &mut doc,
+            GraphRef::Main,
+        )
+        .expect("first drag off the seeded default is a real change");
         assert_eq!(
-            doc.main_view.pin_offsets.get(&port),
+            doc.main_view.pin_positions.get(&port),
             Some(&Vec2::new(30.0, -12.0))
         );
         assert!(
             !step.requires_relayout() && !step.requires_reconcile(),
-            "repositioning a decoration neither remeasures nor reshapes the interface"
+            "repositioning a decoration (no nodes in the group) neither remeasures nor reshapes the interface"
         );
         assert!(step.dirties_document(), "a real, persisted edit");
         assert_eq!(
             step.gesture_key(),
-            Some(GestureKey::PinDrag(port)),
-            "consecutive frames of the same port's drag must coalesce"
+            Some(GestureKey::SelectionDrag(SelectionKey::Pin(port))),
+            "consecutive frames of the same pin's drag must coalesce"
         );
 
         // A later frame of the same drag: coalesce keeps the original
-        // (unset) `from` and adopts the new `to`.
-        let step2 = build_step(
-            Intent::SetPinOffset {
-                node_id: id,
-                port_idx: 0,
-                to: Vec2::new(50.0, -20.0),
-            },
-            &doc,
-            GraphRef::Main,
-        )
-        .unwrap();
+        // `from` (the seeded zero default) and adopts the new `to`.
+        let step2 =
+            build_step(move_pin(port, Vec2::new(50.0, -20.0)), &doc, GraphRef::Main).unwrap();
         apply_step(&step2, &mut doc, GraphRef::Main);
-        let merged = step.coalesce(&step2).expect("same port ⇒ coalesces");
+        let merged = step.coalesce(&step2).expect("same pin ⇒ coalesces");
         assert_eq!(
             merged.gesture_key(),
-            Some(GestureKey::PinDrag(port)),
+            Some(GestureKey::SelectionDrag(SelectionKey::Pin(port))),
             "merged step keeps the same key"
         );
 
-        // Reverting the *merged* step (whose `from` is the original unset
-        // state) removes the entry rather than writing a stale offset back.
+        // Reverting the *merged* step restores the original seeded (zero)
+        // position rather than the drag's intermediate or final position.
         revert_step(&merged, &mut doc, GraphRef::Main);
-        assert!(
-            !doc.main_view.pin_offsets.contains_key(&port),
-            "revert restores the pre-drag absence, not a leftover offset"
+        assert_eq!(
+            doc.main_view.pin_positions.get(&port),
+            Some(&Vec2::ZERO),
+            "revert restores the pre-drag default, not a leftover offset"
         );
 
         // Dragging to the exact position it already holds is a no-op.
-        doc.main_view.pin_offsets.insert(port, Vec2::new(1.0, 2.0));
+        doc.main_view
+            .pin_positions
+            .insert(port, Vec2::new(1.0, 2.0));
         assert!(
             commit_intent(
-                Intent::SetPinOffset {
-                    node_id: id,
-                    port_idx: 0,
-                    to: Vec2::new(1.0, 2.0),
-                },
+                move_pin(port, Vec2::new(1.0, 2.0)),
                 &mut doc,
-                GraphRef::Main,
+                GraphRef::Main
             )
             .is_none(),
-            "same offset → writes nothing"
+            "same position → writes nothing"
         );
     }
 
     #[test]
-    fn set_pin_offset_on_missing_node_is_dropped() {
-        // Unlike `SetOutputPinned`, a satellite drag spans frames and can
-        // outlive its anchor (the node was deleted mid-drag) — a stale
-        // target drops quietly rather than asserting.
+    fn move_selection_pin_on_missing_node_is_dropped() {
+        // A satellite drag spans frames and can outlive its anchor (the
+        // node was deleted mid-drag) — a stale target's pin move drops
+        // quietly rather than asserting; an empty resulting batch is a
+        // no-op, not an error.
         let mut doc = Document::default();
         let step = commit_intent(
-            Intent::SetPinOffset {
-                node_id: NodeId::unique(),
-                port_idx: 0,
-                to: Vec2::ZERO,
-            },
+            move_pin(OutputPort::new(NodeId::unique(), 0), Vec2::ZERO),
             &mut doc,
             GraphRef::Main,
         );
@@ -2174,22 +2198,24 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_node_captures_and_restores_its_pin_offsets() {
+    fn removing_a_node_captures_and_restores_its_pin_positions() {
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
         let port = OutputPort::new(id, 0);
-        doc.main_view.pin_offsets.insert(port, Vec2::new(7.0, 8.0));
+        doc.main_view
+            .pin_positions
+            .insert(port, Vec2::new(7.0, 8.0));
 
         let step = commit_intent(Intent::RemoveNode { node_id: id }, &mut doc, GraphRef::Main)
             .expect("removing an existing node is a real change");
         assert!(
-            !doc.main_view.pin_offsets.contains_key(&port),
+            !doc.main_view.pin_positions.contains_key(&port),
             "the node's pin offset is pruned along with everything else"
         );
 
         revert_step(&step, &mut doc, GraphRef::Main);
         assert_eq!(
-            doc.main_view.pin_offsets.get(&port),
+            doc.main_view.pin_positions.get(&port),
             Some(&Vec2::new(7.0, 8.0)),
             "undo restores the node's custom pin offset"
         );

@@ -15,6 +15,7 @@ use crate::gui::canvas::cull::node_visible;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::node_ports;
+use crate::gui::canvas::pin_ui;
 use crate::gui::node::header::{
     header, play_badge_wid, status_row, subgraph_badge_wid, subscription_pin,
 };
@@ -30,6 +31,7 @@ use glam::Vec2;
 use scenarium::data::{DataType, FsPathConfig, StaticValue};
 use scenarium::graph::Binding;
 use scenarium::graph::NodeId;
+use scenarium::graph::OutputPort;
 use scenarium::graph::subgraph::SubgraphRef;
 use scenarium::library::Library;
 use std::collections::BTreeSet;
@@ -61,7 +63,7 @@ pub(crate) struct RecordCtx<'a> {
 
 /// Owns rendering of every graph node plus the single active drag
 /// anchor — the press-frame positions are snapshotted here so each
-/// `MoveNodes` target is `start_pos + drag_delta`, not a running
+/// `MoveSelection` target is `start_pos + drag_delta`, not a running
 /// integration over the moving source. Only one node can hold the
 /// pointer at a time, so one anchor slot is enough.
 ///
@@ -84,12 +86,17 @@ pub(crate) struct NodeUI {
 #[derive(Clone, Debug)]
 struct DragAnchor {
     /// The node the pointer latched. Keys the `response_for` lookup and
-    /// the drag gesture; always present in `start_positions`.
+    /// the drag gesture; always present in `start_node_positions`.
     node_id: NodeId,
     /// Every node moving with this drag and its position at drag start:
-    /// the whole selection when the grabbed node was already selected,
-    /// else just the grabbed node. Each emits `start + delta`.
-    start_positions: Vec<(NodeId, Vec2)>,
+    /// the whole selection's nodes when the grabbed node was already
+    /// selected, else just the grabbed node. Each emits `start + delta`.
+    start_node_positions: Vec<(NodeId, Vec2)>,
+    /// Every pinned-output preview moving alongside the nodes above and its
+    /// absolute position at drag start — the selection's pins when the
+    /// grabbed node was already selected, else empty (a lone node drag
+    /// carries no pins).
+    start_pin_positions: Vec<(OutputPort, Vec2)>,
     /// Captured from the `drag_started` frame's `Response::widget_id()`
     /// so subsequent frames can `ui.response_for(widget_id)` *before*
     /// recording and bake the current `drag_delta` into `.position(...)`.
@@ -105,7 +112,7 @@ impl NodeUI {
     /// for body clicks and latches the drag anchor for a body/title drag
     /// (port circles capture their own presses via `Sense::CLICK`, so
     /// drags don't latch off the port grabs); `prepass` converts the
-    /// anchor into `Intent::MoveNodes` on later frames.
+    /// anchor into `Intent::MoveSelection` on later frames.
     pub(crate) fn draw_all(
         &mut self,
         ui: &mut Ui,
@@ -262,26 +269,29 @@ impl NodeUI {
 
         // Latch the anchor on the press-frame edge; subsequent frames'
         // `prepass` peeks `response_for(widget_id)` before record runs
-        // and converts `drag_delta` into a `MoveNodes` applied to
+        // and converts `drag_delta` into a `MoveSelection` applied to
         // `Document` upstream of `Scene::rebuild`.
         if title_drag || body_drag_started {
             // Grabbing a node already in the selection drags the whole
-            // group together; grabbing an unselected node selects only it
-            // and drags it alone.
-            let start_positions = if selected {
-                rcx.scene
-                    .nodes
-                    .iter()
-                    .filter(|n| rcx.selected.contains(&SelectionKey::Node(n.id)))
-                    .map(|n| (n.id, n.pos))
-                    .collect()
+            // group (nodes and pinned-output previews alike) together;
+            // grabbing an unselected node selects only it and drags it
+            // alone.
+            let pin_ui::SelectedGroup {
+                nodes: start_node_positions,
+                pins: start_pin_positions,
+            } = if selected {
+                pin_ui::selected_group_positions(rcx.scene, rcx.selected)
             } else {
                 click_intents(false, rcx.scene, SelectionKey::Node(node.id), out);
-                vec![(node.id, node.pos)]
+                pin_ui::SelectedGroup {
+                    nodes: vec![(node.id, node.pos)],
+                    pins: vec![],
+                }
             };
             self.drag_anchor = Some(DragAnchor {
                 node_id: node.id,
-                start_positions,
+                start_node_positions,
+                start_pin_positions,
                 widget_id: if title_drag { title_wid } else { body_wid },
             });
         }
@@ -291,13 +301,13 @@ impl NodeUI {
     /// this `NodeUI` owns and push the corresponding `Intent`s into
     /// `out`. Runs before `Scene::rebuild` in `App::frame`, so any
     /// state mutation applied from these intents (notably drag-driven
-    /// `MoveNodes`) lands in `Document` before recording — Pass A's
+    /// `MoveSelection`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.
     pub(crate) fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
         // `node_id`/`widget_id` are `Copy`, so pull them out and drop the
         // borrow — that lets the early returns below reassign
-        // `self.drag_anchor` without cloning the `start_positions` `Vec`,
-        // which is only read in the success path (where the anchor isn't
+        // `self.drag_anchor` without cloning the `start_*_positions` `Vec`s,
+        // which are only read in the success path (where the anchor isn't
         // cleared and can be re-borrowed).
         let Some(&DragAnchor {
             node_id, widget_id, ..
@@ -307,7 +317,7 @@ impl NodeUI {
         };
         // Drop a stale anchor whose node was removed last frame (e.g.
         // breaker swipe deleted the dragged node). Without this, the
-        // emitted `MoveNodes` would target a missing node and panic in
+        // emitted `MoveSelection` would target a missing node and panic in
         // `build_step`. `draw_all` also clears stale anchors, but only
         // after this prepass runs.
         if scene.nodes.by_key(&node_id).is_none() {
@@ -336,17 +346,21 @@ impl NodeUI {
         let offset = delta / scene.viewport.safe_zoom();
         // Anchor still present (success path never cleared it); re-borrow
         // to read the start positions without cloning.
-        let to = self
-            .drag_anchor
-            .as_ref()
-            .unwrap()
-            .start_positions
+        let anchor = self.drag_anchor.as_ref().unwrap();
+        let nodes = anchor
+            .start_node_positions
             .iter()
             .map(|(id, start)| (*id, *start + offset))
             .collect();
-        out.push(Intent::MoveNodes {
-            grabbed: node_id,
-            to,
+        let pins = anchor
+            .start_pin_positions
+            .iter()
+            .map(|(port, start)| (*port, *start + offset))
+            .collect();
+        out.push(Intent::MoveSelection {
+            grabbed: SelectionKey::Node(node_id),
+            nodes,
+            pins,
         });
     }
 }

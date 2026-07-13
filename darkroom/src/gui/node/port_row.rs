@@ -14,12 +14,14 @@ use glam::Vec2;
 use scenarium::data::{DataType, FsPathMode};
 use scenarium::graph::Binding;
 use scenarium::graph::NodeId;
+use scenarium::graph::OutputPort;
 use scenarium::library::Library;
 
 use crate::core::document::BoundarySide;
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::Intent;
 use crate::gui::EventRef;
+use crate::gui::canvas::pin_ui;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_rename::port_label;
 use crate::gui::node::value_editor;
@@ -397,7 +399,19 @@ fn output_cell(
                 "Pin output"
             };
             if MenuItem::new(label).show(ui, popup).clicked() {
-                out.push(set_output_pinned(port, !output.pinned));
+                let pinning = !output.pinned;
+                out.push(set_output_pinned(port, pinning));
+                // Unlike Cmd+drag (which places a fresh pin via its own
+                // drag anchor), this toggle has no drag to derive a
+                // position from — seed one explicitly so the widget floats
+                // clear of the node instead of landing on top of it.
+                if pinning && let Some(port_center) = rcx.geometry.ports.center(port) {
+                    let out_port = OutputPort::new(port.node_id, port.port_idx);
+                    out.push(pin_ui::seed_pin_position_intent(
+                        out_port,
+                        port_center + pin_ui::default_pin_offset(),
+                    ));
+                }
             }
         });
 }

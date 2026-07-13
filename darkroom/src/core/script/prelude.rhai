@@ -50,7 +50,7 @@ fn disconnect(input_node, input_port) {
 }
 
 // Move `node_id` to world-space `(x, y)`. `host::make_move_node` builds
-// the `MoveNodes` intent in Rust so the prelude needn't know `Vec2`'s
+// the `MoveSelection` intent in Rust so the prelude needn't know `Vec2`'s
 // serde shape.
 fn move_node(node_id, x, y) {
     apply(host::make_move_node(node_id, x, y));

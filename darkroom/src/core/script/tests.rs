@@ -252,7 +252,7 @@ fn prelude_disconnect_decodes_to_setinput_none() {
 }
 
 #[test]
-fn prelude_move_node_decodes_to_movenodes() {
+fn prelude_move_node_decodes_to_moveselection() {
     // `host::make_move_node` builds the intent in Rust and round-trips it
     // through Rhai → serde_json → `Intent`, so this also pins that
     // `glam::Vec2` survives the round-trip intact.
@@ -267,13 +267,18 @@ fn prelude_move_node_decodes_to_movenodes() {
 
     let actions = expect_apply(&mut rx);
     match &actions[0] {
-        Intent::MoveNodes { grabbed, to } => {
-            assert_eq!(*grabbed, id);
-            assert_eq!(to.len(), 1);
-            assert_eq!(to[0].0, id);
-            assert_eq!(to[0].1, Vec2::new(5.0, -6.5));
+        Intent::MoveSelection {
+            grabbed,
+            nodes,
+            pins,
+        } => {
+            assert_eq!(*grabbed, SelectionKey::Node(id));
+            assert!(pins.is_empty());
+            assert_eq!(nodes.len(), 1);
+            assert_eq!(nodes[0].0, id);
+            assert_eq!(nodes[0].1, Vec2::new(5.0, -6.5));
         }
-        other => panic!("expected MoveNodes, got {other:?}"),
+        other => panic!("expected MoveSelection, got {other:?}"),
     }
 }
 

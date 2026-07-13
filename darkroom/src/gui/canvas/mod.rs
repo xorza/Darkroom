@@ -126,7 +126,7 @@ impl GraphUI {
     /// drain and Pass A records the settled layout:
     ///
     /// - pan/zoom (`emit_pan_zoom` → `Intent::SetViewport`),
-    /// - node drag (`node_ui.prepass` → `Intent::MoveNodes`),
+    /// - node drag (`node_ui.prepass` → `Intent::MoveSelection`),
     /// - connection commit (`connection_ui.apply` → `Intent::SetInput`).
     ///
     /// Connection commit specifically *must* be here: binding an input
@@ -153,7 +153,9 @@ impl GraphUI {
             .apply(ui, scene, &self.geometry, resume, out);
         // Cmd+drag from an output port pins it — same pre-record timing as
         // the connection/subscription gestures above, for the same reasons.
-        self.gestures.pin_ui.apply(ui, scene, &self.geometry, out);
+        self.gestures
+            .pin_ui
+            .apply(ui, scene, &self.geometry, &scene.selected, out);
         // Subscription wires (emitter → subscriber) latch/commit here too,
         // for the same pre-record reasons; an emitter glyph and a data port
         // can't both latch (different widget-id spaces).

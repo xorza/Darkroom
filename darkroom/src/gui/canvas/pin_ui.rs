@@ -12,14 +12,17 @@
 //!
 //! Owns one gesture, unified across how it *starts*: Cmd+drag from an
 //! output port's circle creates a fresh pin; a plain drag on an existing
-//! preview widget repositions it. Both commit continuously — every frame
-//! the drag is held, not just on release — exactly like a node body drag
-//! (see [`crate::gui::node::NodeUI`]'s `DragAnchor`/`prepass`), coalesced by
-//! `GestureKey::PinDrag` into one undo entry. Since the position lands in
-//! `Document` (and `Scene` rebuilds) before the record pass, there's no
-//! separate in-flight preview to paint — the widget's real position already
-//! reflects the live drag by the time [`PinUi::draw_wire`]/[`PinUi::draw_widget`]
-//! run.
+//! preview widget repositions it (dragging one that's part of a
+//! multi-selection moves the whole group — nodes and other pins alike —
+//! together, via the same [`crate::core::edit::intent::Intent::MoveSelection`]
+//! [`crate::gui::node::NodeUI`]'s node-body drag emits). Both commit
+//! continuously — every frame the drag is held, not just on release —
+//! exactly like a node body drag (see `NodeUI`'s `DragAnchor`/`prepass`),
+//! coalesced by `GestureKey::SelectionDrag` into one undo entry. Since the
+//! position lands in `Document` (and `Scene` rebuilds) before the record
+//! pass, there's no separate in-flight preview to paint — the widget's
+//! real position already reflects the live drag by the time
+//! [`PinUi::draw_wire`]/[`PinUi::draw_widget`] run.
 
 use std::collections::BTreeSet;
 
@@ -50,59 +53,100 @@ use crate::gui::widgets::support::dot;
 /// at the default (never-dragged) position.
 const PIN_GAP: f32 = 16.0;
 
-/// The default widget-position offset (its top-left corner, from the port
-/// center) a freshly pinned output falls back to before it's ever been
-/// dragged: directly above the port, clear of the port circle.
-fn default_pin_offset() -> Vec2 {
+/// The port-relative offset (top-left corner, from the port center) a
+/// pinned output's widget is placed at when it needs a sensible starting
+/// point with no drag to derive one from — the context-menu pin toggle
+/// (`crate::gui::node::port_row`) seeds a fresh pin's position with this;
+/// dragging to create one instead starts it exactly at the port (see
+/// [`PinUi::apply`]) so it visually "grows out of" the circle.
+pub(crate) fn default_pin_offset() -> Vec2 {
     Vec2::new(PIN_GAP, -(PREVIEW_HEIGHT + PIN_GAP))
 }
 
-/// `output`'s widget-position offset from its port (top-left corner, so the
-/// wire lands exactly on the port-circle glyph peeking from under that
-/// corner): its stored custom position
-/// ([`crate::core::document::GraphView::pin_offsets`], mirrored onto
-/// [`SceneOutput::pin_offset`]) if it's ever been dragged, else
-/// [`default_pin_offset`].
-fn resolved_pin_offset(output: &SceneOutput) -> Vec2 {
-    output.pin_offset.unwrap_or_else(default_pin_offset)
+/// World-space rect of a pinned output's preview widget — the same fixed
+/// footprint at the same absolute position [`draw_widget`](PinUi::draw_widget)
+/// paints at. Shared by the rubber-band sweep's hit-test and
+/// [`resolve_pin_geometry`]'s breaker/hover geometry.
+pub(crate) fn pin_preview_rect(output: &SceneOutput) -> Rect {
+    let top_left = output.pin_position;
+    Rect::new(top_left.x, top_left.y, PREVIEW_WIDTH, PREVIEW_HEIGHT)
 }
 
-/// World-space rect of a pinned output's preview widget, for hit-testing
-/// (the rubber-band sweep) — the same fixed footprint at the same
-/// port-relative offset [`draw_widget`](PinUi::draw_widget) paints at.
-/// `None` before the port has measured (its geometry not resolved yet).
-pub(crate) fn pin_world_rect(
-    geometry: &CanvasGeometry,
-    node_id: NodeId,
-    port_idx: usize,
-    output: &SceneOutput,
-) -> Option<Rect> {
-    let port_ref = PortRef {
-        node_id,
-        kind: PortKind::Output,
-        port_idx,
-    };
-    let port_center = geometry.ports.center(port_ref)?;
-    let top_left = port_center + resolved_pin_offset(output);
-    Some(Rect::new(
-        top_left.x,
-        top_left.y,
-        PREVIEW_WIDTH,
-        PREVIEW_HEIGHT,
-    ))
+/// The lone-member `Intent::MoveSelection` that seeds `port`'s position —
+/// shared by the two places a pin can come into existence with no drag
+/// already in flight to place it naturally: this file's Cmd+drag creation
+/// (seeded at the port center) and `port_row`'s context-menu pin toggle
+/// (seeded at `port_center + `[`default_pin_offset`]`()`).
+pub(crate) fn seed_pin_position_intent(port: OutputPort, position: Vec2) -> Intent {
+    Intent::MoveSelection {
+        grabbed: SelectionKey::Pin(port),
+        nodes: vec![],
+        pins: vec![(port, position)],
+    }
 }
 
-/// The port or widget a drag latched onto, and where its offset started —
-/// mirrors `NodeUI`'s `DragAnchor`: every later frame's committed offset is
-/// `start_offset + drag_delta`, not a running integration over the moving
-/// widget.
-#[derive(Clone, Copy, Debug)]
+/// Result of [`selected_group_positions`]: every selected node's position
+/// and every selected pinned-output preview's absolute position, for a
+/// group drag.
+pub(crate) struct SelectedGroup {
+    pub(crate) nodes: Vec<(NodeId, Vec2)>,
+    pub(crate) pins: Vec<(OutputPort, Vec2)>,
+}
+
+/// Resolve the current selection into a [`SelectedGroup`] for a group drag
+/// latched by grabbing either kind of member — shared by
+/// [`crate::gui::node::NodeUI`]'s node-body drag and this file's
+/// pin-widget drag, so both produce the same
+/// [`Intent::MoveSelection`] group regardless of which member's press
+/// started it.
+pub(crate) fn selected_group_positions(
+    scene: &Scene,
+    selected: &BTreeSet<SelectionKey>,
+) -> SelectedGroup {
+    let nodes = scene
+        .nodes
+        .iter()
+        .filter(|n| selected.contains(&SelectionKey::Node(n.id)))
+        .map(|n| (n.id, n.pos))
+        .collect();
+    let mut pins = Vec::new();
+    for n in &scene.nodes {
+        for (i, output) in scene.outputs(n.outputs).iter().enumerate() {
+            if !output.pinned {
+                continue;
+            }
+            let port = OutputPort::new(n.id, i);
+            if !selected.contains(&SelectionKey::Pin(port)) {
+                continue;
+            }
+            pins.push((port, output.pin_position));
+        }
+    }
+    SelectedGroup { nodes, pins }
+}
+
+/// The pin (or brand-new pin) a drag latched onto, and every member moving
+/// with it — mirrors `NodeUI`'s `DragAnchor`: every later frame's committed
+/// position is `start + drag_delta`, not a running integration over the
+/// moving widget.
+#[derive(Clone, Debug)]
 struct PinDragAnchor {
+    /// The pin the pointer latched. Keys the `response_for` lookup and the
+    /// drag gesture.
     port: OutputPort,
-    /// Zero for a freshly created pin (it tracks cursor-minus-port from the
-    /// press); the widget's already-resolved offset for a reposition (so it
-    /// continues from where it visually sits instead of jumping).
-    start_offset: Vec2,
+    /// Every node moving with this drag and its position at drag start:
+    /// the selected nodes when the grabbed pin was already part of a
+    /// multi-selection, else empty (a lone pin drag/creation carries no
+    /// nodes).
+    start_node_positions: Vec<(NodeId, Vec2)>,
+    /// Every pin moving with this drag (including the grabbed one) and its
+    /// absolute position at drag start: the whole selection's pins when
+    /// the grabbed pin was already selected, else just the grabbed pin —
+    /// the port center itself for a freshly created pin (so it "grows out
+    /// of" the port circle as the user drags), or the widget's
+    /// already-resolved position for a reposition (so it continues from
+    /// where it visually sits instead of jumping).
+    start_pin_positions: Vec<(OutputPort, Vec2)>,
     /// Captured at latch so later frames can `ui.response_for(widget_id)`
     /// directly: the port circle for a fresh pin, the preview widget for a
     /// reposition.
@@ -127,15 +171,19 @@ impl PinUi {
     /// Continuous per-frame drag, exactly like a node body drag: latch on a
     /// Cmd+drag off an output port's circle (creates a fresh pin) or a
     /// plain drag off an existing preview widget (repositions it), then
-    /// push `Intent::SetPinOffset` every frame the drag is held.
+    /// push one `Intent::MoveSelection` every frame the drag is held.
+    /// Grabbing a pin that's already part of a multi-selection drags the
+    /// whole group (nodes and pins alike) together, exactly like grabbing
+    /// an already-selected node does.
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
         scene: &Scene,
         geometry: &CanvasGeometry,
+        selected: &BTreeSet<SelectionKey>,
         out: &mut Vec<Intent>,
     ) {
-        if let Some(anchor) = self.drag {
+        if let Some(anchor) = self.drag.clone() {
             if scene.nodes.by_key(&anchor.port.node_id).is_none() {
                 // Stale: the node vanished mid-drag (breaker/undo). Drop
                 // rather than build an intent against a missing node.
@@ -147,11 +195,21 @@ impl PinUi {
                     // widget; drop rather than fire with stale start data.
                     self.drag = None;
                 } else if let Some(delta) = resp.drag_delta() {
-                    let to = anchor.start_offset + delta / scene.viewport.safe_zoom();
-                    out.push(Intent::SetPinOffset {
-                        node_id: anchor.port.node_id,
-                        port_idx: anchor.port.port_idx,
-                        to,
+                    let offset = delta / scene.viewport.safe_zoom();
+                    let nodes = anchor
+                        .start_node_positions
+                        .iter()
+                        .map(|(id, start)| (*id, *start + offset))
+                        .collect();
+                    let pins = anchor
+                        .start_pin_positions
+                        .iter()
+                        .map(|(port, start)| (*port, *start + offset))
+                        .collect();
+                    out.push(Intent::MoveSelection {
+                        grabbed: SelectionKey::Pin(anchor.port),
+                        nodes,
+                        pins,
                     });
                     return;
                 } else {
@@ -162,19 +220,45 @@ impl PinUi {
             }
         }
         if ui.modifiers().ctrl
-            && let Some(port) = scan_port_drag_start(geometry, scene)
+            && let Some(port_ref) = scan_port_drag_start(geometry, scene)
         {
-            let widget_id = port_circle_wid(port);
-            out.push(set_output_pinned(port, true));
-            self.drag = Some(PinDragAnchor {
-                port: OutputPort::new(port.node_id, port.port_idx),
-                start_offset: Vec2::ZERO,
-                widget_id,
-            });
-        } else if let Some((port, start_offset)) = scan_widget_drag_start(ui, scene) {
+            let widget_id = port_circle_wid(port_ref);
+            out.push(set_output_pinned(port_ref, true));
+            let port = OutputPort::new(port_ref.node_id, port_ref.port_idx);
+            // A brand-new pin isn't part of any selection yet — it drags
+            // alone, starting exactly at the port (so it visually "grows
+            // out of" the circle) and tracking the cursor from there.
+            // Seeded here — rather than left to `set_output_pinned`'s zero
+            // default — so this very first frame doesn't flash the widget
+            // at the canvas origin before the drag below places it.
+            if let Some(port_center) = geometry.ports.center(port_ref) {
+                out.push(seed_pin_position_intent(port, port_center));
+                self.drag = Some(PinDragAnchor {
+                    port,
+                    start_node_positions: vec![],
+                    start_pin_positions: vec![(port, port_center)],
+                    widget_id,
+                });
+            }
+        } else if let Some((port, start_position)) = scan_widget_drag_start(ui, scene) {
+            // Grabbing a pin already in the selection drags the whole
+            // group (nodes + pins) together; grabbing an unselected pin
+            // repositions it alone, leaving the selection untouched.
+            let SelectedGroup {
+                nodes: start_node_positions,
+                pins: start_pin_positions,
+            } = if selected.contains(&SelectionKey::Pin(port)) {
+                selected_group_positions(scene, selected)
+            } else {
+                SelectedGroup {
+                    nodes: vec![],
+                    pins: vec![(port, start_position)],
+                }
+            };
             self.drag = Some(PinDragAnchor {
                 port,
-                start_offset,
+                start_node_positions,
+                start_pin_positions,
                 widget_id: pin_preview_wid(port),
             });
         }
@@ -376,12 +460,12 @@ fn resolve_pin_geometry(
     // The wire's far end, and the preview widget's own top-left corner —
     // one and the same point, so the wire lands exactly on the port-circle
     // glyph peeking from under that corner.
-    let top_left = port_center + resolved_pin_offset(output);
+    let top_left = output.pin_position;
     let handles = cubic_handles(port_center, top_left);
     if !wire_visible(visible, port_center, &handles, top_left) {
         return None;
     }
-    let box_rect = Rect::new(top_left.x, top_left.y, PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    let box_rect = pin_preview_rect(output);
     let broken = pin_targeted(probe, port_center, &handles, top_left, box_rect);
     if broken {
         probe.mark_broken_pin(out_port);
@@ -426,8 +510,8 @@ fn scan_port_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<Port
 }
 
 /// First pinned output whose preview widget's drag started this frame, with
-/// its currently-resolved offset (the drag's start point) — or `None`. Only
-/// a pinned output has a preview widget at all.
+/// its current absolute position (the drag's start point) — or `None`.
+/// Only a pinned output has a preview widget at all.
 fn scan_widget_drag_start(ui: &Ui, scene: &Scene) -> Option<(OutputPort, Vec2)> {
     for n in &scene.nodes {
         for (i, output) in scene.outputs(n.outputs).iter().enumerate() {
@@ -436,7 +520,7 @@ fn scan_widget_drag_start(ui: &Ui, scene: &Scene) -> Option<(OutputPort, Vec2)> 
             }
             let port = OutputPort::new(n.id, i);
             if ui.response_for(pin_preview_wid(port)).drag_started() {
-                return Some((port, resolved_pin_offset(output)));
+                return Some((port, output.pin_position));
             }
         }
     }

@@ -236,7 +236,7 @@ impl ActionStack {
         // Fold the existing entry's "from" half with the incoming step's
         // "to" half. `intent` owns the per-variant logic; the
         // `gesture_key == Some(key)` gate above already guarantees a
-        // matching variant (and same node, for `NodeDrag`).
+        // matching variant (and same grabbed member, for `SelectionDrag`).
         let Some(merged) = last_steps[0].coalesce(new_step) else {
             return false;
         };

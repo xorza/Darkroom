@@ -175,21 +175,28 @@ pub struct GraphView {
     /// (no spurious undo entries from reordering). Holds both node bodies
     /// and pinned-output preview widgets — see [`SelectionKey`].
     pub selected: BTreeSet<SelectionKey>,
-    /// A pinned output's satellite position, as a canvas-local offset from
-    /// its port center — sparse, present only once a user has dragged that
-    /// pin at least once (see `crate::gui::canvas::pin_ui::default_pin_offset`
-    /// for the default a missing entry falls back to).
-    /// Outlives an unpin: re-pinning the same port remembers where its
-    /// satellite last sat. Pruned only when the node itself is removed (see
-    /// [`EditScope::remove_node`]). Serialized as a `(port, offset)`
-    /// sequence — struct keys aren't valid map keys in string-keyed formats
-    /// (JSON/TOML/Rhai), same reasoning as `scenarium::graph`'s
-    /// `binding_map_serde`.
-    #[serde(default, with = "pin_offset_serde")]
-    pub pin_offsets: BTreeMap<OutputPort, Vec2>,
+    /// A pinned output's satellite position, in absolute canvas-world
+    /// coordinates (its top-left corner). Seeded the moment a port is
+    /// pinned (see `crate::gui::canvas::pin_ui::PinUi::apply` and
+    /// `crate::gui::node::port_row`'s pin/unpin menu toggle — both resolve
+    /// the port's current on-screen position and write it here right away,
+    /// so a pinned port always has an explicit entry) and re-seeded fresh
+    /// on every pin — no memory of where a since-unpinned satellite last
+    /// sat. Absolute rather than port-relative: the widget sits where it
+    /// was put and does *not* follow the node if it's moved — only its
+    /// wire re-routes, like a connection to another node would. Unpinning
+    /// leaves a stale entry rather than pruning it — harmless (only read
+    /// while `pinned`), and it means undoing an unpin restores the exact
+    /// prior position with no extra bookkeeping. Pruned only when the node
+    /// itself is removed (see [`EditScope::remove_node`]). Serialized as a
+    /// `(port, position)` sequence — struct keys aren't valid map keys in
+    /// string-keyed formats (JSON/TOML/Rhai), same reasoning as
+    /// `scenarium::graph`'s `binding_map_serde`.
+    #[serde(default, with = "pin_position_serde")]
+    pub pin_positions: BTreeMap<OutputPort, Vec2>,
 }
 
-mod pin_offset_serde {
+mod pin_position_serde {
     use super::{BTreeMap, OutputPort, Vec2};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -315,14 +322,14 @@ impl GraphView {
             );
         }
 
-        for (port, offset) in &self.pin_offsets {
+        for (port, position) in &self.pin_positions {
             assert!(
-                offset.x.is_finite() && offset.y.is_finite(),
-                "pin offset must be finite"
+                position.x.is_finite() && position.y.is_finite(),
+                "pin position must be finite"
             );
             assert!(
                 graph_nodes.contains_key(&port.node_id),
-                "pin offset references a node absent from the graph"
+                "pin position references a node absent from the graph"
             );
         }
     }
@@ -353,7 +360,7 @@ impl EditScope<'_> {
         self.graph.remove_by_id(*node_id);
         self.view.selected.retain(|k| !k.belongs_to(*node_id));
         self.view
-            .pin_offsets
+            .pin_positions
             .retain(|port, _| port.node_id != *node_id);
     }
 }
