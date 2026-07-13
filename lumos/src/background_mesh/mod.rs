@@ -47,8 +47,17 @@ pub(crate) struct TileGrid {
 impl TileGrid {
     /// Create an uninitialized TileGrid with preallocated buffers.
     ///
+    /// `tile_size` is clamped to the image dimensions rather than panicking on a small image:
+    /// a sub-tile_size image yields a coarse (possibly single-tile) grid, which the spline
+    /// interpolation path handles correctly (1-tile dimensions degenerate to a constant fill).
+    ///
     /// Call `compute` to fill in the tile statistics.
     pub(crate) fn new_uninit(width: usize, height: usize, tile_size: usize) -> Self {
+        assert!(
+            width > 0 && height > 0 && tile_size > 0,
+            "TileGrid needs non-zero dimensions and tile size, got {width}x{height} tile {tile_size}"
+        );
+        let tile_size = tile_size.min(width).min(height);
         let tiles_x = width.div_ceil(tile_size);
         let tiles_y = height.div_ceil(tile_size);
         let n = tiles_x * tiles_y;

@@ -172,7 +172,6 @@ struct Sample {
 /// star/bright-signal mask here is the §6.2 refinement.
 fn collect_samples(channel: &Buffer2<f32>, tile: usize) -> Vec<Sample> {
     let (w, h) = (channel.width(), channel.height());
-    let tile = tile.min(w).min(h).max(1);
     let mut grid = TileGrid::new_uninit(w, h, tile);
     grid.compute(channel, None, SKY_CLIP_ITERATIONS, false);
 

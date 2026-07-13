@@ -18,6 +18,7 @@ use crate::stacking::star_detection::buffer_pool::BufferPool;
 #[cfg(test)]
 use crate::stacking::star_detection::buffer_pool::PoolCounts;
 use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::detector::stages::filter::FilterOutcome;
 use crate::stacking::star_detection::star::Star;
 
 /// Result of star detection with diagnostics.
@@ -162,20 +163,17 @@ impl StarDetector {
         pool.release_f32(grayscale_image);
 
         // Step 6: Apply quality filters, sort, and remove duplicates
-        let (stars, filter_stats) = stages::filter::filter(stars, &self.config);
-        filter_stats.apply_to(&mut diagnostics);
+        let FilterOutcome { stars, stats } = stages::filter::filter(stars, &self.config);
+        stats.apply_to(&mut diagnostics);
 
-        if filter_stats.fwhm_outliers > 0 {
+        if stats.fwhm_outliers > 0 {
             tracing::debug!(
                 "Removed {} stars with abnormally large FWHM",
-                filter_stats.fwhm_outliers
+                stats.fwhm_outliers
             );
         }
-        if filter_stats.duplicates > 0 {
-            tracing::debug!(
-                "Removed {} duplicate star detections",
-                filter_stats.duplicates
-            );
+        if stats.duplicates > 0 {
+            tracing::debug!("Removed {} duplicate star detections", stats.duplicates);
         }
 
         // Compute final statistics
