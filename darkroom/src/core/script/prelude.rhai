@@ -20,7 +20,7 @@
 fn create_node(func_id, x, y) {
     let action = host::make_add_node(func_id, x, y);
     apply(action);
-    action.AddNode.view_node.id
+    action.AddNode.node.id
 }
 
 // Remove `node_id` from the graph. The editor walks the graph at apply
@@ -55,7 +55,7 @@ fn move_node(node_id, x, y) {
 }
 
 // Replace the selection with exactly `node_id`. A selection member is
-// tagged by kind (`Node`/`Pin` — see `crate::core::document::SelectionKey`);
+// tagged by kind (`Node`/`Pin` — see `crate::core::document::ItemRef`);
 // this helper only ever selects a node body.
 fn select_node(node_id) {
     apply(#{ SetSelection: #{ to: [#{ Node: node_id }] } });
