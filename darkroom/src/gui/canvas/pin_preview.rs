@@ -40,8 +40,8 @@ use crate::gui::widgets::support::{
 /// a stable size regardless of content, so a drag never has to re-measure
 /// and an image never grows the widget. An image letterboxes inside via
 /// `Contain`; a non-image value's formatted text centers in the same frame.
-pub(crate) const PREVIEW_WIDTH: f32 = 240.0;
-pub(crate) const PREVIEW_HEIGHT: f32 = 180.0;
+pub(crate) const PREVIEW_WIDTH: f32 = 280.0;
+pub(crate) const PREVIEW_HEIGHT: f32 = 200.0;
 
 /// Longest side, in pixels, an image-typed pinned value is downscaled to
 /// before upload — small enough to stay cheap with many simultaneous pins.
@@ -312,6 +312,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, inner_r: f32, image: &ImagePreview) {
         .size((Sizing::FILL, Sizing::Hug))
         .padding(Spacing::xy(CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y))
         .gap(10.0)
+        .line_gap(4.0)
         .child_align(Align::v(VAlign::Center))
         // Round only the bottom corners so the strip seats into the card's
         // rounded bottom — the header rounds the top the same way.
