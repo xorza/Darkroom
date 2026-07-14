@@ -669,7 +669,7 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     cache.slots[a].value = ValueState::Resident {
         snapshot: crate::execution::cache::OutputSnapshot::new(
             vec![DynamicValue::Static(StaticValue::Int(9))],
-            crate::execution::cache::CachedOutputCoverage::all(1),
+            crate::execution::cache::CachedOutputCoverage { ports: vec![true] },
         ),
         produced_under: None,
     };

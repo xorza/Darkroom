@@ -9,7 +9,7 @@ fn out() -> Vec<DynamicValue> {
 const DEMANDED: &[OutputDemand] = &[OutputDemand::Produce];
 
 fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
-    let coverage = CachedOutputCoverage::all(values.len());
+    let coverage = CachedOutputCoverage::from_values(&values);
     OutputSnapshot::new(values, coverage)
 }
 
@@ -126,6 +126,16 @@ fn resident_hit_requires_coverage_for_every_demanded_output() {
     assert!(cache.is_resident_hit(NodeIdx(0), &[OutputDemand::Produce, OutputDemand::Skip]));
     assert!(!cache.is_resident_hit(NodeIdx(0), &[OutputDemand::Produce, OutputDemand::Produce]));
 
+    cache.clear_output_port(NodeIdx(0), 0);
+    let ValueState::Resident { snapshot, .. } = &cache.slots[0].value else {
+        panic!("clearing one output keeps the snapshot resident");
+    };
+    assert_eq!(snapshot.coverage.ports, [false, false]);
+    assert!(matches!(
+        snapshot.values.as_slice(),
+        [DynamicValue::Unbound, DynamicValue::Unbound]
+    ));
+
     let mismatch = std::panic::catch_unwind(|| {
         CachedOutputCoverage::from_bytes(&[1, 0])
             .unwrap()
@@ -147,7 +157,7 @@ fn resident_hit_requires_coverage_for_every_demanded_output() {
     let invalid = std::panic::catch_unwind(|| {
         OutputSnapshot::new(
             vec![DynamicValue::Unbound],
-            CachedOutputCoverage::all(1),
+            CachedOutputCoverage { ports: vec![true] },
         );
     });
     assert!(
@@ -157,10 +167,26 @@ fn resident_hit_requires_coverage_for_every_demanded_output() {
     assert!(
         OutputSnapshot::try_new(
             vec![DynamicValue::Unbound],
-            CachedOutputCoverage::all(1),
+            CachedOutputCoverage { ports: vec![true] },
         )
         .is_none(),
         "invalid persisted coverage is rejected as a cache miss"
+    );
+    assert!(
+        OutputSnapshot::try_new(
+            vec![DynamicValue::Static(StaticValue::Int(1))],
+            CachedOutputCoverage::none(1),
+        )
+        .is_none(),
+        "coverage cannot omit a bound cached value"
+    );
+
+    let missing_invocation = std::panic::catch_unwind(|| {
+        RuntimeSlot::default().stamp_produced();
+    });
+    assert!(
+        missing_invocation.is_err(),
+        "only an invoked resident output can be stamped produced"
     );
 }
 
@@ -233,7 +259,7 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
         id: NodeId::from_u128(3),
         current_digest: Some(d),
         value: ValueState::OnDisk {
-            coverage: CachedOutputCoverage::all(1),
+            coverage: CachedOutputCoverage { ports: vec![true] },
         },
         ..Default::default()
     });

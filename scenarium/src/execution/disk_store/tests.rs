@@ -27,7 +27,7 @@ fn target(path: &Path, digest: Digest) -> BlobTarget {
 }
 
 fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
-    let coverage = CachedOutputCoverage::all(values.len());
+    let coverage = CachedOutputCoverage::from_values(&values);
     OutputSnapshot::new(values, coverage)
 }
 
@@ -98,7 +98,7 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
         .await;
     assert_eq!(
         target(&file.0, d_b).coverage(1),
-        Some(CachedOutputCoverage::all(1)),
+        Some(CachedOutputCoverage { ports: vec![true] }),
         "blob re-stamped D_B"
     );
     let back = store.read(&target(&file.0, d_b)).await.expect("hit");
@@ -136,7 +136,12 @@ async fn store_replaces_same_digest_blob_when_output_coverage_expands() {
         .await;
 
     let cached = store.read(&target).await.expect("expanded blob");
-    assert_eq!(cached.coverage, CachedOutputCoverage::all(2));
+    assert_eq!(
+        cached.coverage,
+        CachedOutputCoverage {
+            ports: vec![true, true],
+        }
+    );
     assert_eq!(cached.values[0].as_i64(), Some(7));
     assert_eq!(cached.values[1].as_i64(), Some(9));
 }

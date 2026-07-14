@@ -549,7 +549,7 @@ impl ExecutionEngine {
             .index_of_key(&self.by_name(node_name).unwrap().id);
         let idx = idx.unwrap();
         let slot = &mut self.cache.slots[idx];
-        let coverage = cache::CachedOutputCoverage::all(values.len());
+        let coverage = cache::CachedOutputCoverage::from_values(&values);
         slot.value = cache::ValueState::Resident {
             snapshot: cache::OutputSnapshot::new(values, coverage),
             produced_under: slot.current_digest,

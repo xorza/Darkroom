@@ -348,7 +348,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
                 NodeIdx(0),
                 crate::execution::cache::OutputSnapshot::new(
                     vec![value],
-                    crate::execution::cache::CachedOutputCoverage::all(1),
+                    crate::execution::cache::CachedOutputCoverage { ports: vec![true] },
                 ),
                 producer,
             );
@@ -446,7 +446,7 @@ fn custom_stamper_folds_referent_version() {
             NodeIdx(0),
             crate::execution::cache::OutputSnapshot::new(
                 vec![StaticValue::Int(42).into()],
-                crate::execution::cache::CachedOutputCoverage::all(1),
+                crate::execution::cache::CachedOutputCoverage { ports: vec![true] },
             ),
             producer,
         );
