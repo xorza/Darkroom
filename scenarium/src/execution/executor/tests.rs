@@ -290,9 +290,9 @@ async fn unbound_output_errors_only_when_demanded() {
         Ok(())
     });
     let a = p.node(&[], 2, producer);
-    let b = p.node(&[bind(a, 1)], 1, consumer);
+    let b = p.node(&[bind(a, 0), bind(a, 1)], 1, consumer);
 
-    let plan = plan_with_readers(&p.program, vec![0, 1, 0]);
+    let plan = plan_with_readers(&p.program, vec![1, 1, 0]);
     let (cache, stats) = run(&p.program, &plan).await;
     let error_of = |idx: usize| {
         stats
@@ -306,7 +306,7 @@ async fn unbound_output_errors_only_when_demanded() {
     assert!(cache.slots[b].output_values().is_none());
     assert!(matches!(
         error_of(a),
-        Some(RunError::OutputNotProduced { output: 1, .. })
+        Some(RunError::OutputsNotProduced { outputs, .. }) if outputs == &[0, 1]
     ));
     assert!(matches!(
         error_of(b),

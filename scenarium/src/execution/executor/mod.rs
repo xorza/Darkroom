@@ -422,11 +422,15 @@ impl Executor {
                     Ok(()) if self.ctx_manager.cancel.is_cancelled() => {
                         Err(RunError::Cancelled { func_id })
                     }
-                    Ok(()) => frame.cache.slots[e_node_idx]
-                        .unbound_demanded_output(demand)
-                        .map_or(Ok(()), |output| {
-                            Err(RunError::OutputNotProduced { func_id, output })
-                        }),
+                    Ok(()) => {
+                        let outputs =
+                            frame.cache.slots[e_node_idx].unbound_demanded_outputs(demand);
+                        if outputs.is_empty() {
+                            Ok(())
+                        } else {
+                            Err(RunError::OutputsNotProduced { func_id, outputs })
+                        }
+                    }
                     other => other,
                 };
                 let cancelled = matches!(&result, Err(RunError::Cancelled { .. }));

@@ -227,8 +227,11 @@ pub enum RunError {
     /// the producer recomputes next run. `input` is the consumer's input position.
     #[error("skipped: a cached input failed to load from disk (recomputes next run)")]
     InputLoadFailed { func_id: FuncId, input: usize },
-    #[error("demanded output {output} was left unbound")]
-    OutputNotProduced { func_id: FuncId, output: usize },
+    #[error("demanded outputs {outputs:?} were left unbound")]
+    OutputsNotProduced {
+        func_id: FuncId,
+        outputs: Vec<usize>,
+    },
     #[error("cancelled before completing")]
     Cancelled { func_id: FuncId },
 }
