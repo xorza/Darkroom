@@ -3235,7 +3235,8 @@ mod execution {
 
         // Run 2: only port 0 is written. The reused buffer is cleared before invoke,
         // so port 1 cannot masquerade as a value produced by this run.
-        eg.execute_sinks().await?;
+        let stats = eg.execute_sinks().await?;
+        assert!(stats.node_errors.is_empty());
         let outputs = eg
             .runtime_slot(eg.by_name("partial_writer").unwrap())
             .output_values()

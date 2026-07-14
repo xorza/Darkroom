@@ -278,7 +278,7 @@ mod tests {
                 &mut node_state,
                 &event_state,
                 &mut inputs,
-                &outputs_meta,
+                &output_demand,
                 &mut outputs,
             )
             .await?;
