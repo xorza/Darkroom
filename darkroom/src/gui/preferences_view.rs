@@ -256,7 +256,11 @@ fn model_row(
                     // the error tint (message under the row says what's wrong).
                     if problem.is_some() {
                         let mut style = ui.theme.text_edit.clone();
-                        for look in [&mut style.normal, &mut style.focused] {
+                        for look in [
+                            &mut style.looks.normal,
+                            &mut style.looks.hovered,
+                            &mut style.looks.active,
+                        ] {
                             if let Some(bg) = look.background.as_mut() {
                                 bg.stroke =
                                     Stroke::solid(theme.colors.exec_errored_glow, bg.stroke.width);

@@ -411,6 +411,7 @@ impl StaticValueEditorTheme {
         let Some(Brush::Solid(c)) = self
             .drag_value
             .chip
+            .looks
             .hovered
             .background
             .as_ref()
@@ -420,8 +421,8 @@ impl StaticValueEditorTheme {
         };
         let reveal = Brush::Solid(c.with_alpha(REVEAL_ALPHA));
         for look in [
-            out.drag_value.chip.normal.background.as_mut(),
-            out.drag_value.editor.normal.background.as_mut(),
+            out.drag_value.chip.looks.normal.background.as_mut(),
+            out.drag_value.editor.looks.normal.background.as_mut(),
         ]
         .into_iter()
         .flatten()
@@ -437,10 +438,10 @@ impl StaticValueEditorTheme {
     /// taken from the palette so it matches the app's other text fields.
     fn from_palette(hover: Color, pressed: Color, caret: Color, selection: Color) -> Self {
         let mut chip = ButtonTheme::menu_button();
-        if let Some(bg) = chip.hovered.background.as_mut() {
+        if let Some(bg) = chip.looks.hovered.background.as_mut() {
             bg.fill = hover.into();
         }
-        if let Some(bg) = chip.pressed.background.as_mut() {
+        if let Some(bg) = chip.looks.active.background.as_mut() {
             bg.fill = pressed.into();
         }
         let editor_colors = TextEditTheme {
@@ -492,7 +493,12 @@ impl InlineRenameTheme {
             margin: Spacing::ZERO,
             ..TextEditTheme::default()
         };
-        for look in [&mut style.normal, &mut style.focused, &mut style.disabled] {
+        for look in [
+            &mut style.looks.normal,
+            &mut style.looks.hovered,
+            &mut style.looks.active,
+            &mut style.looks.disabled,
+        ] {
             if let Some(bg) = look.background.as_mut() {
                 bg.stroke = Stroke::ZERO;
                 bg.fill = Brush::TRANSPARENT;
@@ -562,15 +568,16 @@ fn aperture_theme_for(p: &AperturePalette, chrome_fill: Color) -> aperture::Them
         );
     };
     let mb = &mut theme.menu_button;
-    restyle(&mut mb.normal, p.text_muted);
-    restyle(&mut mb.hovered, p.text);
-    restyle(&mut mb.pressed, p.text);
-    restyle(&mut mb.disabled, p.text_disabled);
+    restyle(&mut mb.looks.normal, p.text_muted);
+    restyle(&mut mb.looks.hovered, p.text);
+    restyle(&mut mb.looks.active, p.text);
+    restyle(&mut mb.looks.disabled, p.text_disabled);
 
     let item = &mut theme.context_menu.item;
-    shrink(&mut item.normal);
-    shrink(&mut item.hovered);
-    shrink(&mut item.disabled);
+    shrink(&mut item.looks.normal);
+    shrink(&mut item.looks.hovered);
+    shrink(&mut item.looks.active);
+    shrink(&mut item.looks.disabled);
     theme
 }
 
@@ -598,26 +605,29 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
     t.window_clear = p.terminal_bg;
 
     // Button — same recipe as `ButtonTheme::default`, recoloured.
-    t.button.normal.background = Some(solid_bg(p.elem_hover, muted_edge, 1.0));
-    t.button.hovered.background = Some(solid_bg(p.elem_active, muted_edge, 1.0));
-    t.button.pressed.background = Some(solid_bg(p.elem_active, p.border_focused, 1.0));
-    t.button.disabled.background = Some(solid_bg(p.elem, muted_edge, 1.0));
-    t.button.disabled.text = disabled_text;
+    t.button.looks.normal.background = Some(solid_bg(p.elem_hover, muted_edge, 1.0));
+    t.button.looks.hovered.background = Some(solid_bg(p.elem_active, muted_edge, 1.0));
+    t.button.looks.active.background = Some(solid_bg(p.elem_active, p.border_focused, 1.0));
+    t.button.looks.disabled.background = Some(solid_bg(p.elem, muted_edge, 1.0));
+    t.button.looks.disabled.text = disabled_text;
 
     // Menu-button — `ButtonTheme::menu_button` recipe: transparent at
     // rest + disabled, hover = elem_hover, pressed = elem_active. The
     // darkroom-side `aperture_theme_for` then overlays a semi-transparent
     // node-fill chip on the normal/disabled looks for legibility over
     // busy nodes; we only need to recolour the hover/pressed fills here.
-    t.menu_button.hovered.background = Some(flat_round(p.elem_hover));
-    t.menu_button.pressed.background = Some(flat_round(p.elem_active));
+    t.menu_button.looks.hovered.background = Some(flat_round(p.elem_hover));
+    t.menu_button.looks.active.background = Some(flat_round(p.elem_active));
 
     // TextEdit — stroke-width-constant recipe from `TextEditTheme::default`.
     let te_stroke_w = 1.5;
-    t.text_edit.normal.background = Some(solid_bg(p.elem_hover, muted_edge, te_stroke_w));
-    t.text_edit.focused.background = Some(solid_bg(p.elem_hover, p.border_focused, te_stroke_w));
-    t.text_edit.disabled.background = Some(solid_bg(p.elem, muted_edge, te_stroke_w));
-    t.text_edit.disabled.text = disabled_text;
+    t.text_edit.looks.normal.background = Some(solid_bg(p.elem_hover, muted_edge, te_stroke_w));
+    // `hovered` mirrors `normal` — no hover feedback, matching the default.
+    t.text_edit.looks.hovered.background = Some(solid_bg(p.elem_hover, muted_edge, te_stroke_w));
+    t.text_edit.looks.active.background =
+        Some(solid_bg(p.elem_hover, p.border_focused, te_stroke_w));
+    t.text_edit.looks.disabled.background = Some(solid_bg(p.elem, muted_edge, te_stroke_w));
+    t.text_edit.looks.disabled.text = disabled_text;
     t.text_edit.placeholder = p.text_muted;
     t.text_edit.caret = p.text;
     t.text_edit.selection = p.accent.with_alpha(0.25);
@@ -632,14 +642,14 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
         };
         toggle.unchecked.normal.background = make(p.elem_hover, Stroke::solid(edge, 1.0));
         toggle.unchecked.hovered.background = make(p.elem_active, Stroke::solid(edge, 1.0));
-        toggle.unchecked.pressed.background =
+        toggle.unchecked.active.background =
             make(p.elem_active, Stroke::solid(p.border_focused, 1.0));
         toggle.unchecked.disabled.background =
             make(p.elem, Stroke::solid(edge.with_alpha(0.18), 1.0));
         toggle.unchecked.disabled.text = disabled_text;
         toggle.checked.normal.background = make(p.accent, Stroke::ZERO);
         toggle.checked.hovered.background = make(p.accent, Stroke::ZERO);
-        toggle.checked.pressed.background = make(p.accent, Stroke::solid(p.border_focused, 1.0));
+        toggle.checked.active.background = make(p.accent, Stroke::solid(p.border_focused, 1.0));
         toggle.checked.disabled.background = make(p.accent.with_alpha(0.45), Stroke::ZERO);
         toggle.checked.disabled.text = disabled_text;
         toggle.indicator = p.terminal_bg;
@@ -659,10 +669,12 @@ fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
     // (`ContextMenuTheme::default` recipe.)
     t.context_menu.panel =
         Background::rounded(p.elem, Corners::all(6.0)).with_stroke(Stroke::solid(panel_edge, 1.0));
-    t.context_menu.item.normal.background = None;
-    t.context_menu.item.hovered.background = Some(flat_round(p.elem_hover));
-    t.context_menu.item.disabled.background = None;
-    t.context_menu.item.disabled.text = disabled_text;
+    t.context_menu.item.looks.normal.background = None;
+    t.context_menu.item.looks.hovered.background = Some(flat_round(p.elem_hover));
+    // `active` (pressed) mirrors `hovered` — the click closes the menu.
+    t.context_menu.item.looks.active.background = Some(flat_round(p.elem_hover));
+    t.context_menu.item.looks.disabled.background = None;
+    t.context_menu.item.looks.disabled.text = disabled_text;
     t.context_menu.item.shortcut = p.text_muted;
     t.context_menu.separator = p.text_muted.with_alpha(0.18);
 
@@ -1003,6 +1015,7 @@ mod tests {
         let menu_text = theme
             .aperture_theme
             .menu_button
+            .looks
             .normal
             .text
             .expect("menu button carries an explicit text style");

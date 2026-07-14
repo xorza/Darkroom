@@ -254,7 +254,12 @@ impl<'a> InlineRename<'a> {
 fn edit_style(theme: &InlineRenameTheme, text: Option<TextStyle>) -> TextEditTheme {
     let mut style = theme.text_edit.clone();
     if text.is_some() {
-        for look in [&mut style.normal, &mut style.focused, &mut style.disabled] {
+        for look in [
+            &mut style.looks.normal,
+            &mut style.looks.hovered,
+            &mut style.looks.active,
+            &mut style.looks.disabled,
+        ] {
             look.text = text;
         }
     }
