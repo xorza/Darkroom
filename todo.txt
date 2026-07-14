@@ -1,7 +1,5 @@
 scrolview on newnode popup
 
-update ram usage on graph changes
-
 darkroom string interning
 
 cleanup binary caches
