@@ -118,8 +118,8 @@ fn resolve_structural(
         // Fold the digest (reading producers' just-stamped digests) and decide reuse — the
         // one verdict for the run; the run loop reads the merged `disposition` rather than
         // re-deriving.
-        let usage = &plan.output_usage[program.e_nodes[idx].outputs.range()];
-        resolved[idx] = if cache.stamp_and_check_reuse(program, idx, usage) {
+        let demand = plan.outputs.demand.slice(program.e_nodes[idx].outputs);
+        resolved[idx] = if cache.stamp_and_check_reuse(program, idx, demand) {
             Resolved::Reuse
         } else {
             Resolved::Run

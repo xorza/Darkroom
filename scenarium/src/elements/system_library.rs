@@ -85,7 +85,7 @@ pub fn system_library() -> Library {
 mod tests {
     use super::*;
     use crate::DynamicValue;
-    use crate::node::lambda::{InvokeInput, OutputUsage};
+    use crate::node::lambda::{InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;
@@ -107,7 +107,7 @@ mod tests {
                 &mut state,
                 &event_state,
                 &mut inputs,
-                &[OutputUsage::Needed(1)],
+                &[OutputDemand::Produce],
                 &mut outputs,
             )
             .await

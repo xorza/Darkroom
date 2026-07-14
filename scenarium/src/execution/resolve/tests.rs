@@ -1,10 +1,10 @@
 use super::*;
 use crate::DataType;
-use crate::execution::plan::NodeVerdict;
+use crate::execution::plan::{NodeVerdict, PlannedOutputs};
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
-use crate::node::lambda::OutputUsage;
+use crate::node::lambda::OutputDemand;
 use common::Span;
 
 /// Hand-built program for cut tests: each node is `(sink, &[producer_idx])` — an edge
@@ -50,7 +50,10 @@ fn dispositions_of(fix: &Fix, roots: &[NodeIdx], resolved: &[Resolved]) -> Vec<D
         // added before its consumer), matching the planner's post-order.
         process_order: (0..fix.program.e_nodes.len()).map(NodeIdx::from).collect(),
         verdicts: vec![NodeVerdict::Execute; fix.program.e_nodes.len()].into(),
-        output_usage: vec![OutputUsage::Skip; fix.program.n_outputs()],
+        outputs: PlannedOutputs {
+            demand: vec![OutputDemand::Skip; fix.program.n_outputs()].into(),
+            readers: vec![0; fix.program.n_outputs()].into(),
+        },
         roots: roots.to_vec(),
         pinned: Vec::new(),
     };

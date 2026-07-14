@@ -161,7 +161,7 @@ pub fn fs_watch_library() -> Library {
                 }),
             )
             .lambda(FuncLambda::new(
-                move |_ctx, _state, event_state, inputs, _usage, outputs| {
+                move |_ctx, _state, event_state, inputs, _demand, outputs| {
                     Box::pin(async move {
                         let path =
                             inputs[0].value.as_fs_path().unwrap_or_default().to_string();
@@ -206,7 +206,7 @@ pub fn fs_watch_library() -> Library {
 mod tests {
     use super::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
     use crate::node::definition::FuncBehavior;
-    use crate::node::lambda::{FuncLambda, InvokeInput, OutputUsage};
+    use crate::node::lambda::{FuncLambda, InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;
@@ -244,10 +244,10 @@ mod tests {
                 value: StaticValue::Int(250).into(),
             },
         ];
-        let usage = [OutputUsage::Needed(1)];
+        let demand = [OutputDemand::Produce];
         let mut outputs = [DynamicValue::Unbound];
         lambda
-            .invoke(ctx, state, event_state, &mut inputs, &usage, &mut outputs)
+            .invoke(ctx, state, event_state, &mut inputs, &demand, &mut outputs)
             .await
             .unwrap();
         outputs[0].clone()

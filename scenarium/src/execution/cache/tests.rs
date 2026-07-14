@@ -1,12 +1,17 @@
 use super::*;
 use crate::StaticValue;
-use crate::node::lambda::OutputUsage;
+use crate::node::lambda::OutputDemand;
 
 fn out() -> Vec<DynamicValue> {
     vec![DynamicValue::Static(StaticValue::Int(1))]
 }
 
-const NEEDED: &[OutputUsage] = &[OutputUsage::Needed(1)];
+const DEMANDED: &[OutputDemand] = &[OutputDemand::Produce];
+
+fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
+    let coverage = CachedOutputCoverage::all(values.len());
+    OutputSnapshot::new(values, coverage)
+}
 
 /// `is_resident_hit` is the resident-cache definition: a slot hits iff it has a
 /// current digest, holds values, and those values were produced under that
@@ -21,9 +26,8 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     cache.slots.add(RuntimeSlot {
         id: NodeId::from_u128(1),
         value: ValueState::Resident {
-            values: out(),
+            snapshot: complete_snapshot(out()),
             produced_under: Some(d),
-            materialized: MaterializedOutputs::all(1),
         },
         current_digest: None,
         ..Default::default()
@@ -39,9 +43,8 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
         id: NodeId::from_u128(3),
         current_digest: Some(d),
         value: ValueState::Resident {
-            values: out(),
+            snapshot: complete_snapshot(out()),
             produced_under: Some(other),
-            materialized: MaterializedOutputs::all(1),
         },
         ..Default::default()
     });
@@ -50,27 +53,26 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
         id: NodeId::from_u128(4),
         current_digest: Some(d),
         value: ValueState::Resident {
-            values: out(),
+            snapshot: complete_snapshot(out()),
             produced_under: Some(d),
-            materialized: MaterializedOutputs::all(1),
         },
         ..Default::default()
     });
 
     assert!(
-        !cache.is_resident_hit(NodeIdx(0), NEEDED),
+        !cache.is_resident_hit(NodeIdx(0), DEMANDED),
         "impure cone never hits"
     );
     assert!(
-        !cache.is_resident_hit(NodeIdx(1), NEEDED),
+        !cache.is_resident_hit(NodeIdx(1), DEMANDED),
         "no cached values is a miss"
     );
     assert!(
-        !cache.is_resident_hit(NodeIdx(2), NEEDED),
+        !cache.is_resident_hit(NodeIdx(2), DEMANDED),
         "values under a stale digest is a miss"
     );
     assert!(
-        cache.is_resident_hit(NodeIdx(3), NEEDED),
+        cache.is_resident_hit(NodeIdx(3), DEMANDED),
         "values under the current digest is a hit"
     );
 }
@@ -85,53 +87,60 @@ fn hydrate_turns_a_miss_into_a_hit() {
         ..Default::default()
     });
     assert!(
-        !cache.is_resident_hit(NodeIdx(0), NEEDED),
+        !cache.is_resident_hit(NodeIdx(0), DEMANDED),
         "empty slot misses"
     );
 
-    cache.hydrate(NodeIdx(0), out(), d, MaterializedOutputs::all(1));
+    cache.hydrate(NodeIdx(0), complete_snapshot(out()), d);
     assert!(
-        cache.is_resident_hit(NodeIdx(0), NEEDED),
+        cache.is_resident_hit(NodeIdx(0), DEMANDED),
         "a slot hydrated under its current digest hits"
     );
 
     // Hydrating under a digest that is no longer current does not hit.
     cache.slots[0].current_digest = Some(Digest([9u8; 32]));
     assert!(
-        !cache.is_resident_hit(NodeIdx(0), NEEDED),
+        !cache.is_resident_hit(NodeIdx(0), DEMANDED),
         "current digest moved on ⇒ miss"
     );
 }
 
 #[test]
-fn resident_hit_requires_every_demanded_output_to_be_materialized() {
+fn resident_hit_requires_coverage_for_every_demanded_output() {
     let digest = Digest([5; 32]);
     let mut cache = RuntimeCache::default();
     cache.slots.add(RuntimeSlot {
         id: NodeId::from_u128(1),
         current_digest: Some(digest),
         value: ValueState::Resident {
-            values: vec![StaticValue::Int(10).into(), DynamicValue::Unbound],
+            snapshot: OutputSnapshot::new(
+                vec![StaticValue::Int(10).into(), DynamicValue::Unbound],
+                CachedOutputCoverage::from_bytes(&[1, 0]).unwrap(),
+            ),
             produced_under: Some(digest),
-            materialized: MaterializedOutputs::from_bytes(&[1, 0]).unwrap(),
         },
         ..Default::default()
     });
 
-    assert!(cache.is_resident_hit(NodeIdx(0), &[OutputUsage::Needed(1), OutputUsage::Skip]));
-    assert!(!cache.is_resident_hit(
-        NodeIdx(0),
-        &[OutputUsage::Needed(1), OutputUsage::Needed(1)]
-    ));
+    assert!(cache.is_resident_hit(NodeIdx(0), &[OutputDemand::Produce, OutputDemand::Skip]));
+    assert!(!cache.is_resident_hit(NodeIdx(0), &[OutputDemand::Produce, OutputDemand::Produce]));
 
     let mismatch = std::panic::catch_unwind(|| {
-        MaterializedOutputs::from_bytes(&[1, 0])
+        CachedOutputCoverage::from_bytes(&[1, 0])
             .unwrap()
-            .covers_usage(&[OutputUsage::Needed(1)]);
+            .covers_demand(&[OutputDemand::Produce]);
     });
     assert!(
         mismatch.is_err(),
-        "a materialization mask with the wrong arity is corrupt internal state"
+        "a coverage mask with the wrong arity is corrupt internal state"
+    );
+
+    let mismatch = std::panic::catch_unwind(|| {
+        OutputSnapshot::new(vec![DynamicValue::Unbound], CachedOutputCoverage::none(2));
+    });
+    assert!(
+        mismatch.is_err(),
+        "a snapshot cannot pair values with coverage of another arity"
     );
 }
 
@@ -180,13 +189,12 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
         id: NodeId::from_u128(1),
         current_digest: Some(d),
         value: ValueState::Resident {
-            values: vec![
+            snapshot: complete_snapshot(vec![
                 DynamicValue::Custom(shared.clone()),
                 DynamicValue::Custom(Arc::new(Payload { cpu: 5, gpu: 0 })),
                 DynamicValue::Static(StaticValue::Int(9)),
-            ],
+            ]),
             produced_under: Some(d),
-            materialized: MaterializedOutputs::all(3),
         },
         ..Default::default()
     });
@@ -195,9 +203,8 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
         id: NodeId::from_u128(2),
         current_digest: Some(d),
         value: ValueState::Resident {
-            values: vec![DynamicValue::Custom(shared.clone())],
+            snapshot: complete_snapshot(vec![DynamicValue::Custom(shared.clone())]),
             produced_under: Some(d),
-            materialized: MaterializedOutputs::all(1),
         },
         ..Default::default()
     });
@@ -206,7 +213,7 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
         id: NodeId::from_u128(3),
         current_digest: Some(d),
         value: ValueState::OnDisk {
-            materialized: MaterializedOutputs::all(1),
+            coverage: CachedOutputCoverage::all(1),
         },
         ..Default::default()
     });

@@ -1,5 +1,5 @@
 use super::*;
-use crate::{CustomValue, StaticValue, TypeId};
+use crate::{CustomValue, DynamicValue, StaticValue, TypeId};
 use std::any::Any;
 use std::fmt;
 
@@ -26,6 +26,11 @@ fn target(path: &Path, digest: Digest) -> BlobTarget {
     }
 }
 
+fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
+    let coverage = CachedOutputCoverage::all(values.len());
+    OutputSnapshot::new(values, coverage)
+}
+
 /// The full store↔read contract on one file: a stored blob round-trips under the
 /// digest it was stamped with, every probe/read under any *other* digest is a miss
 /// (never a stale hit), and a store under a new digest *overwrites* the node's one
@@ -38,16 +43,15 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
     let d_b = Digest([8u8; 32]);
 
     // Config A: three plain values, stamped D_A.
-    let outputs_a = vec![
+    let snapshot_a = complete_snapshot(vec![
         DynamicValue::Unbound,
         DynamicValue::Static(StaticValue::Int(7)),
         DynamicValue::Static(StaticValue::String("x".into())),
-    ];
+    ]);
     store
         .store(
             &target(&file.0, d_a),
-            &outputs_a,
-            &MaterializedOutputs::all(outputs_a.len()),
+            &snapshot_a,
             &mut ContextManager::default(),
         )
         .await;
@@ -55,20 +59,20 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
     // The stamped digest is probed off the header alone; any other digest — or a
     // missing file — is not a hit.
     assert_eq!(
-        target(&file.0, d_a).materialized(3),
-        Some(MaterializedOutputs::all(3))
+        target(&file.0, d_a).coverage(3),
+        Some(CachedOutputCoverage::all(3))
     );
     assert!(
-        target(&file.0, d_b).materialized(3).is_none(),
+        target(&file.0, d_b).coverage(3).is_none(),
         "another digest means the blob is superseded, not present"
     );
     let absent = temp_file("absent");
-    assert!(target(&absent.0, d_a).materialized(3).is_none());
+    assert!(target(&absent.0, d_a).coverage(3).is_none());
     assert!(store.read(&target(&absent.0, d_a)).await.is_none());
 
     let back = store.read(&target(&file.0, d_a)).await.expect("hit");
     assert_eq!(back.values.len(), 3);
-    assert_eq!(back.materialized, MaterializedOutputs::all(3));
+    assert_eq!(back.coverage, CachedOutputCoverage::all(3));
     assert!(matches!(back.values[0], DynamicValue::Unbound));
     assert_eq!(back.values[1].as_i64(), Some(7));
     assert_eq!(back.values[2].as_string(), Some("x"));
@@ -78,18 +82,17 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
     );
 
     // Config B supersedes A: same node file, new digest — overwritten in place.
-    let outputs_b = vec![DynamicValue::Static(StaticValue::Int(35))];
+    let snapshot_b = complete_snapshot(vec![DynamicValue::Static(StaticValue::Int(35))]);
     store
         .store(
             &target(&file.0, d_b),
-            &outputs_b,
-            &MaterializedOutputs::all(outputs_b.len()),
+            &snapshot_b,
             &mut ContextManager::default(),
         )
         .await;
     assert_eq!(
-        target(&file.0, d_b).materialized(1),
-        Some(MaterializedOutputs::all(1)),
+        target(&file.0, d_b).coverage(1),
+        Some(CachedOutputCoverage::all(1)),
         "blob re-stamped D_B"
     );
     let back = store.read(&target(&file.0, d_b)).await.expect("hit");
@@ -102,40 +105,32 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
 }
 
 #[tokio::test]
-async fn store_replaces_same_digest_blob_when_more_outputs_are_materialized() {
+async fn store_replaces_same_digest_blob_when_output_coverage_expands() {
     let file = temp_file("expanded-materialization");
     let store = DiskStore::default();
     let digest = Digest([11; 32]);
     let target = target(&file.0, digest);
-    let partial = vec![
-        DynamicValue::Static(StaticValue::Int(7)),
-        DynamicValue::Unbound,
-    ];
-    let partial_mask = MaterializedOutputs::from_bytes(&[1, 0]).unwrap();
+    let partial = OutputSnapshot::new(
+        vec![
+            DynamicValue::Static(StaticValue::Int(7)),
+            DynamicValue::Unbound,
+        ],
+        CachedOutputCoverage::from_bytes(&[1, 0]).unwrap(),
+    );
     store
-        .store(
-            &target,
-            &partial,
-            &partial_mask,
-            &mut ContextManager::default(),
-        )
+        .store(&target, &partial, &mut ContextManager::default())
         .await;
 
-    let complete = vec![
+    let complete = complete_snapshot(vec![
         DynamicValue::Static(StaticValue::Int(7)),
         DynamicValue::Static(StaticValue::Int(9)),
-    ];
+    ]);
     store
-        .store(
-            &target,
-            &complete,
-            &MaterializedOutputs::all(2),
-            &mut ContextManager::default(),
-        )
+        .store(&target, &complete, &mut ContextManager::default())
         .await;
 
     let cached = store.read(&target).await.expect("expanded blob");
-    assert_eq!(cached.materialized, MaterializedOutputs::all(2));
+    assert_eq!(cached.coverage, CachedOutputCoverage::all(2));
     assert_eq!(cached.values[0].as_i64(), Some(7));
     assert_eq!(cached.values[1].as_i64(), Some(9));
 }
@@ -163,15 +158,14 @@ impl CustomValue for Opaque {
 #[tokio::test]
 async fn non_codecable_custom_is_skipped_not_written() {
     let file = temp_file("noncodec");
-    let outputs = vec![
+    let snapshot = complete_snapshot(vec![
         DynamicValue::Static(StaticValue::Int(1)),
         DynamicValue::from_custom(Opaque),
-    ];
+    ]);
     DiskStore::default()
         .store(
             &target(&file.0, Digest([1u8; 32])),
-            &outputs,
-            &MaterializedOutputs::all(outputs.len()),
+            &snapshot,
             &mut ContextManager::default(),
         )
         .await;
@@ -186,12 +180,11 @@ async fn read_rejects_an_unknown_format_version() {
     let file = temp_file("badversion");
     let store = DiskStore::default();
     let digest = Digest([2u8; 32]);
-    let outputs = vec![DynamicValue::Static(StaticValue::Int(1))];
+    let snapshot = complete_snapshot(vec![DynamicValue::Static(StaticValue::Int(1))]);
     store
         .store(
             &target(&file.0, digest),
-            &outputs,
-            &MaterializedOutputs::all(outputs.len()),
+            &snapshot,
             &mut ContextManager::default(),
         )
         .await;

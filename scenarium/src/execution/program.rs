@@ -53,6 +53,23 @@ impl<V: KeyIndexKey<NodeId>> IndexMut<NodeIdx> for KeyIndexVec<NodeId, V> {
     }
 }
 
+/// A position in the program's flat output pool. It cannot be confused with a node
+/// position or a node-local port number.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct OutputIdx(pub(crate) u32);
+
+impl OutputIdx {
+    pub(crate) fn idx(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl From<usize> for OutputIdx {
+    fn from(i: usize) -> Self {
+        OutputIdx(u32::try_from(i).expect("output pool index must fit in u32"))
+    }
+}
+
 // === Execution Binding ===
 
 /// A flat output address: producer node `target_idx` (a [`NodeIdx`], resolved at
@@ -164,7 +181,7 @@ pub(crate) struct ExecutionProgram {
     pub(crate) inputs: Vec<ExecutionInput>,
     pub(crate) events: Vec<ExecutionEvent>,
     /// The output pool: each node's resolved declared output types (wildcards
-    /// followed), flat and indexed like `output_usage` — `e_node.outputs.range()` is
+    /// followed), flat and indexed like the plan's output columns — `e_node.outputs.range()` is
     /// the node's slice. Resolved once at flatten by [`Self::resolve_output_types`]
     /// from the func library (which the program doesn't retain), so the compiled
     /// program is self-describing. Read by the digest (an output-signature change
@@ -181,7 +198,7 @@ pub(crate) struct ExecutionProgram {
 
 impl ExecutionProgram {
     /// The program's total output count: the length of the `output_types` pool and the
-    /// plan's `output_usage` column (every node's output span summed). Derived from
+    /// plan's output columns (every node's output span summed). Derived from
     /// `output_types` rather than stored, so it can't disagree with the pool it sizes.
     pub(crate) fn n_outputs(&self) -> usize {
         self.output_types.len()
@@ -191,6 +208,28 @@ impl ExecutionProgram {
     /// `for idx in 0..program.e_nodes.len()` so the loop variable is a [`NodeIdx`].
     pub(crate) fn node_indices(&self) -> impl Iterator<Item = NodeIdx> {
         (0..self.e_nodes.len()).map(NodeIdx::from)
+    }
+
+    pub(crate) fn output_idx(&self, node_idx: NodeIdx, port_idx: usize) -> OutputIdx {
+        let outputs = self.e_nodes[node_idx].outputs;
+        assert!(
+            port_idx < outputs.len as usize,
+            "output port is out of range"
+        );
+        let port_idx = u32::try_from(port_idx).expect("output port index must fit in u32");
+        OutputIdx(outputs.start + port_idx)
+    }
+
+    pub(crate) fn pinned_output_indices(&self) -> impl Iterator<Item = OutputIdx> + '_ {
+        self.output_pinned
+            .iter()
+            .enumerate()
+            .filter(|(_, pinned)| **pinned)
+            .map(|(idx, _)| OutputIdx::from(idx))
+    }
+
+    pub(crate) fn is_output_pinned(&self, output_idx: OutputIdx) -> bool {
+        self.output_pinned[output_idx.idx()]
     }
 
     /// `e_node`'s slice of the shared input pool.

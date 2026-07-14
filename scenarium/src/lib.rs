@@ -42,7 +42,7 @@ pub use node::definition::{
 };
 pub use node::event::{AsyncEvent, AsyncEventFn, EventLambda};
 pub use node::lambda::{
-    AsyncLambda, AsyncLambdaFn, FuncLambda, InvokeError, InvokeInput, InvokeResult, OutputUsage,
+    AsyncLambda, AsyncLambdaFn, FuncLambda, InvokeError, InvokeInput, InvokeResult, OutputDemand,
 };
 pub use node::special::{SPECIAL_NODES, SpecialNode};
 pub use runtime::any_state::AnyState;

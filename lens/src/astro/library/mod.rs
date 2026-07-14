@@ -712,10 +712,10 @@ pub fn astro_library() -> Library {
                     .description("The recovered star layer."),
             )
             .lambda(FuncLambda::new(
-                move |_, _, _, inputs, output_usage, outputs| {
+                move |_, _, _, inputs, output_demand, outputs| {
                     // The unscreen pass that recovers "Stars" is a whole-image pixel loop on
                     // top of the ONNX inference — skip it when nothing reads that output.
-                    let need_stars = !output_usage[1].is_skip();
+                    let need_stars = !output_demand[1].is_skip();
                     Box::pin(async move {
                         let model = ml_model_paths().star_removal;
                         if need_stars {

@@ -61,15 +61,15 @@ Choosing a representative instance is an explicit host-side policy.
 `Compiler::compile` runs synchronously on the host and returns a
 `CompiledGraph`; compile errors never enter the worker. Planning is structural:
 it selects roots, orders dependencies before consumers, detects missing inputs,
-and computes `OutputUsage` for every output. Execution resolves content digests
-and reuse, prunes cones that feed only reusable results, then invokes surviving
-nodes in plan order.
+and computes immutable `OutputDemand` plus binding-reader counts for every
+output. Execution resolves content digests and reuse, prunes cones that feed
+only reusable results, then invokes surviving nodes in plan order.
 
 A cache slot is valid only when its digest matches and its
-`MaterializedOutputs` mask covers every currently demanded output. Invocation
+`OutputSnapshot` coverage contains every currently demanded output. Invocation
 clears the output buffer first, so an output the lambda skips cannot retain a
-stale value. Disk frames persist the same mask; a same-digest write replaces an
-older frame when the new result materializes more outputs.
+stale value. Disk frames persist the same coverage; a same-digest write replaces
+an older frame when the new result covers more outputs.
 
 Only `FuncBehavior::Pure` cones receive reusable content digests. Resource
 inputs fold the current referent identity through `ResourceStamper`; filesystem

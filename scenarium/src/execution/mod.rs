@@ -7,7 +7,7 @@
 //!    via [`ExecutionEngine::install`], which cannot fail.
 //! 2. **plan** — the [`Planner`](plan::Planner) turns the program into an
 //!    [`ExecutionPlan`](plan::ExecutionPlan) (the schedule). Purely structural —
-//!    reachability + topological order + output usage, no cache/digest state.
+//!    reachability + topological order + output demand/readers, no cache/digest state.
 //! 3. **execute** — the [`Executor`](executor::Executor) first resolves which
 //!    pure-structural nodes reuse a cache and cuts every cone that feeds only
 //!    reuse hits (so a cached node's stale upstream isn't recomputed on reopen),
@@ -20,7 +20,7 @@
 
 use std::ops::{Index, IndexMut};
 
-use common::CancelToken;
+use common::{CancelToken, Span};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
@@ -60,7 +60,7 @@ use executor::Executor;
 use plan::{ExecutionPlan, Planner};
 #[cfg(test)]
 use program::ExecutionNode;
-use program::NodeIdx;
+use program::{NodeIdx, OutputIdx};
 use resolve::Resolver;
 
 /// A per-node column: a `Vec<T>` addressable *only* by [`NodeIdx`], never a raw
@@ -119,6 +119,60 @@ impl<T> Index<NodeIdx> for NodeColumn<T> {
 
 impl<T> IndexMut<NodeIdx> for NodeColumn<T> {
     fn index_mut(&mut self, i: NodeIdx) -> &mut T {
+        &mut self.values[i.idx()]
+    }
+}
+
+/// A column aligned to the program's flat output pool. Node-local views are sliced by
+/// their compiled output span, while individual entries require an [`OutputIdx`].
+#[derive(Debug, Clone)]
+pub(crate) struct OutputColumn<T> {
+    values: Vec<T>,
+}
+
+impl<T> Default for OutputColumn<T> {
+    fn default() -> Self {
+        Self { values: Vec::new() }
+    }
+}
+
+impl<T> OutputColumn<T> {
+    pub(crate) fn clear(&mut self) {
+        self.values.clear();
+    }
+
+    pub(crate) fn slice(&self, outputs: Span) -> &[T] {
+        &self.values[outputs.range()]
+    }
+
+    pub(crate) fn slice_mut(&mut self, outputs: Span) -> &mut [T] {
+        &mut self.values[outputs.range()]
+    }
+}
+
+impl<T: Clone> OutputColumn<T> {
+    pub(crate) fn reset(&mut self, len: usize, value: T) {
+        self.values.clear();
+        self.values.resize(len, value);
+    }
+}
+
+impl<T> From<Vec<T>> for OutputColumn<T> {
+    fn from(values: Vec<T>) -> Self {
+        Self { values }
+    }
+}
+
+impl<T> Index<OutputIdx> for OutputColumn<T> {
+    type Output = T;
+
+    fn index(&self, i: OutputIdx) -> &T {
+        &self.values[i.idx()]
+    }
+}
+
+impl<T> IndexMut<OutputIdx> for OutputColumn<T> {
+    fn index_mut(&mut self, i: OutputIdx) -> &mut T {
         &mut self.values[i.idx()]
     }
 }
@@ -287,7 +341,7 @@ impl ExecutionEngine {
         cancel: CancelToken,
     ) -> Result<ExecutionStats> {
         // Phase 2: schedule into the reusable plan buffer. Purely structural —
-        // reachability + topological order + output usage + the walk roots, no cache/digest
+        // reachability + topological order + output demand/readers + the walk roots, no cache/digest
         // state. The artifact's flatten map resolves node seeds (authoring ids) to flat roots.
         self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
 
@@ -463,11 +517,15 @@ impl ExecutionEngine {
         self.plan.verdicts[idx.into()]
     }
 
-    pub(crate) fn node_output_usage(
+    pub(crate) fn node_output_demand(
         &self,
         e_node: &ExecutionNode,
-    ) -> &[crate::node::lambda::OutputUsage] {
-        &self.plan.output_usage[e_node.outputs.range()]
+    ) -> &[crate::node::lambda::OutputDemand] {
+        self.plan.outputs.demand.slice(e_node.outputs)
+    }
+
+    pub(crate) fn node_output_readers(&self, e_node: &ExecutionNode) -> &[u32] {
+        self.plan.outputs.readers.slice(e_node.outputs)
     }
 
     /// Whether node `idx` recomputed (rather than reused a cache) in the last run.
@@ -489,9 +547,9 @@ impl ExecutionEngine {
             .index_of_key(&self.by_name(node_name).unwrap().id);
         let idx = idx.unwrap();
         let slot = &mut self.cache.slots[idx];
+        let coverage = cache::CachedOutputCoverage::all(values.len());
         slot.value = cache::ValueState::Resident {
-            materialized: cache::MaterializedOutputs::all(values.len()),
-            values,
+            snapshot: cache::OutputSnapshot::new(values, coverage),
             produced_under: slot.current_digest,
         };
     }

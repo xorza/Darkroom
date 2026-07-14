@@ -3,13 +3,13 @@ use std::sync::Arc;
 use super::*;
 use crate::async_lambda;
 use crate::execution::cache::{RuntimeCache, ValueState};
-use crate::execution::plan::NodeVerdict;
+use crate::execution::plan::{NodeVerdict, PlannedOutputs};
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
 use crate::execution::resolve::Resolver;
 use crate::graph::CacheMode;
 use crate::graph::NodeId;
 use crate::node::definition::{FuncBehavior, FuncId};
-use crate::node::lambda::FuncLambda;
+use crate::node::lambda::{FuncLambda, OutputDemand};
 use crate::{DataType, StaticValue};
 use common::Span;
 
@@ -89,15 +89,35 @@ fn self_mapped_flatten(program: &ExecutionProgram) -> FlattenMap {
 /// index, so its length is `n_outputs`), instead of the all-`1` default. Lets a test claim
 /// more consumers than actually read (to prove the release waits for the full count) or none
 /// (a sink, released the instant it runs).
-fn plan_with_usage(program: &ExecutionProgram, output_usage: Vec<u32>) -> ExecutionPlan {
-    assert_eq!(output_usage.len(), program.n_outputs());
+fn plan_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> ExecutionPlan {
+    assert_eq!(readers.len(), program.n_outputs());
+    let demand: Vec<OutputDemand> = readers
+        .iter()
+        .map(|count| {
+            if *count == 0 {
+                OutputDemand::Skip
+            } else {
+                OutputDemand::Produce
+            }
+        })
+        .collect();
     ExecutionPlan {
-        output_usage: output_usage
-            .into_iter()
-            .map(|c| OutputUsage::from(c as usize))
-            .collect(),
+        outputs: PlannedOutputs {
+            demand: OutputColumn::from(demand),
+            readers: OutputColumn::from(readers),
+        },
         ..straight_plan(program)
     }
+}
+
+fn demand_output(
+    program: &ExecutionProgram,
+    plan: &mut ExecutionPlan,
+    node_idx: usize,
+    port_idx: usize,
+) {
+    let output_idx = program.output_idx(node_idx.into(), port_idx);
+    plan.outputs.demand[output_idx] = OutputDemand::Produce;
 }
 
 fn bind(idx: usize, port: usize) -> ExecutionBinding {
@@ -115,7 +135,10 @@ fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
     ExecutionPlan {
         process_order: (0..n).map(NodeIdx::from).collect(),
         verdicts: vec![NodeVerdict::Execute; n].into(),
-        output_usage: vec![OutputUsage::Needed(1); program.n_outputs()],
+        outputs: PlannedOutputs {
+            demand: vec![OutputDemand::Produce; program.n_outputs()].into(),
+            readers: vec![1; program.n_outputs()].into(),
+        },
         roots: (0..n).map(NodeIdx::from).collect(),
         pinned: Vec::new(),
     }
@@ -194,11 +217,11 @@ async fn run_with_pinned(
 #[tokio::test]
 async fn runs_in_order_resolving_binds_and_storing_outputs() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _usage, outputs| {
+    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let consumer = async_lambda!(|_ctx, _state, _ev, inputs, _usage, outputs| {
+    let consumer = async_lambda!(|_ctx, _state, _ev, inputs, _demand, outputs| {
         let v = inputs[0].value.as_i64().unwrap();
         outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
         Ok(())
@@ -226,10 +249,10 @@ async fn runs_in_order_resolving_binds_and_storing_outputs() {
 #[tokio::test]
 async fn upstream_error_skips_dependents_and_clears_output() {
     let mut p = Prog::default();
-    let failing = async_lambda!(|_ctx, _state, _ev, _inputs, _usage, _outputs| {
+    let failing = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| {
         Err(anyhow::anyhow!("boom").into())
     });
-    let downstream = async_lambda!(|_ctx, _state, _ev, _inputs, _usage, outputs| {
+    let downstream = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
         Ok(())
     });
@@ -265,11 +288,11 @@ async fn upstream_error_skips_dependents_and_clears_output() {
 #[tokio::test]
 async fn frees_none_cache_output_once_last_consumer_reads() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _usage, outputs| {
+    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _demand, outputs| {
         let v = inputs[0].value.as_i64().unwrap();
         outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
         Ok(())
@@ -280,7 +303,7 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
     p.set_cache(b, CacheMode::Ram);
 
     // A's one output has one consumer (B); B's output has a phantom consumer, so B never drains.
-    let plan = plan_with_usage(&p.program, vec![1, 1]);
+    let plan = plan_with_readers(&p.program, vec![1, 1]);
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert!(
@@ -295,22 +318,16 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
     );
 }
 
-/// A port with both a real consumer and an extra usage unit (standing in for a
-/// pinned port — `Planner::plan` folds that in as `+= 1` on top of the real
-/// consumer count, not a floor, precisely so this case is handled) must NOT free its
-/// value on the real consumer's read: the last real read has to decrement to
-/// `Needed(1)`, not `Skip`, or the move-on-last-use optimization in `collect_inputs`
-/// would take the value out from under the extra reader. Same fixture as
-/// `frees_none_cache_output_once_last_consumer_reads` above, but A's usage is `2`
-/// instead of `1` — A survives B's read instead of being freed.
+/// A host pin demands and receives the value before the downstream binding reads it, but
+/// does not delay release after that final real reader.
 #[tokio::test]
-async fn extra_usage_unit_survives_the_last_real_consumer_read() {
+async fn pinned_delivery_does_not_create_a_reader() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _usage, outputs| {
+    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _demand, outputs| {
         let v = inputs[0].value.as_i64().unwrap();
         outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
         Ok(())
@@ -319,45 +336,33 @@ async fn extra_usage_unit_survives_the_last_real_consumer_read() {
     let b = p.node(&[bind(a, 0)], 1, consumer);
     p.set_cache(a, CacheMode::None);
     p.set_cache(b, CacheMode::Ram);
+    p.set_output_pinned(a, 0, true);
 
-    // A's one output has one real consumer (B) plus one extra unit; B's output has a
-    // phantom consumer, so B never drains.
-    let plan = plan_with_usage(&p.program, vec![2, 1]);
-    let (cache, _stats) = run(&p.program, &plan).await;
+    let plan = plan_with_readers(&p.program, vec![1, 1]);
+    let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert!(
-        matches!(cache.slots[a].value, ValueState::Resident { .. }),
-        "A (None) survives B's read when a usage unit is still left over: {:?}",
+        matches!(cache.slots[a].value, ValueState::Empty),
+        "A is released after its only binding reader despite host delivery: {:?}",
         cache.slots[a].value
     );
-    assert_eq!(
-        cache.slots[a].output_values().unwrap()[0].as_i64(),
-        Some(7),
-        "A keeps its own value, not just B's derived one"
-    );
+    assert_eq!(pushes.len(), 1);
+    assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
 }
 
 /// A pinned (node-seeded preview) root's output survives even in `CacheMode::None`,
-/// unlike an unpinned `Skip` root on the same program. The usage count itself
-/// (`vec![1]`, as `Planner::plan` would produce for a pinned zero-consumer port — see
-/// `execution::plan::tests::node_seed_schedules_only_its_cone_and_pins_it`) only decides
-/// whether the lambda bothers computing the value at all (`Skip` vs `Needed`); survival
-/// itself is `retain`'s doing — `collect_inputs`'s move-on-last-use check and
-/// `release_spent_output` both gate on `!retain[target]` directly, so a pinned node
-/// (`retain` always `true`) never has its value taken or reclaimed regardless of the
-/// exact count. `plan.pinned` is set here purely for that `retain` effect; the count
-/// itself is no longer the executor's concern (see `ExecutionPlan::output_usage`).
+/// unlike an unpinned `Skip` root on the same program. Demand controls production;
+/// `plan.pinned` independently controls retention.
 #[tokio::test]
-async fn pinned_root_sees_needed_usage_and_survives_drain() {
-    use crate::node::lambda::OutputUsage;
+async fn pinned_root_sees_demand_and_survives_drain() {
     use std::sync::Mutex;
 
-    let seen: Arc<Mutex<Option<OutputUsage>>> = Arc::new(Mutex::new(None));
+    let seen: Arc<Mutex<Option<OutputDemand>>> = Arc::new(Mutex::new(None));
     let probe_seen = Arc::clone(&seen);
     let mut p = Prog::default();
     let probe = async_lambda!(
-        move |_ctx, _s, _ev, _inputs, usage, outputs| { seen = Arc::clone(&probe_seen) } => {
-            *seen.lock().unwrap() = Some(usage[0]);
+        move |_ctx, _s, _ev, _inputs, demand, outputs| { seen = Arc::clone(&probe_seen) } => {
+            *seen.lock().unwrap() = Some(demand[0]);
             outputs[0] = DynamicValue::Static(StaticValue::Int(7));
             Ok(())
         }
@@ -365,26 +370,22 @@ async fn pinned_root_sees_needed_usage_and_survives_drain() {
     let a = p.node(&[], 1, probe);
     p.set_cache(a, CacheMode::None);
 
-    // Unpinned root, no consumers (usage 0): the lambda reads `Skip` and the slot is
+    // Unpinned root, no consumers: the lambda reads `Skip` and the slot is
     // reclaimed the instant it's stored.
-    let plan = plan_with_usage(&p.program, vec![0]);
+    let plan = plan_with_readers(&p.program, vec![0]);
     let (cache, _stats) = run(&p.program, &plan).await;
-    assert_eq!(*seen.lock().unwrap(), Some(OutputUsage::Skip));
+    assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Skip));
     assert!(
         matches!(cache.slots[a].value, ValueState::Empty),
         "unpinned Skip root is drained at store time: {:?}",
         cache.slots[a].value
     );
 
-    // Pinned: same program, but the usage the planner would have produced for a
-    // pinned zero-consumer port (`1`, not `0`) — the lambda sees `Needed(1)` and the
-    // value stays resident, `pinned` here driving `retain` rather than the count.
-    let plan = ExecutionPlan {
-        pinned: vec![a.into()],
-        ..plan_with_usage(&p.program, vec![1])
-    };
+    let mut plan = plan_with_readers(&p.program, vec![0]);
+    demand_output(&p.program, &mut plan, a, 0);
+    plan.pinned.push(a.into());
     let (cache, _stats) = run(&p.program, &plan).await;
-    assert_eq!(*seen.lock().unwrap(), Some(OutputUsage::Needed(1)));
+    assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
     assert_eq!(
         cache.slots[a].output_values().unwrap()[0].as_i64(),
         Some(7),
@@ -397,7 +398,7 @@ async fn pinned_root_sees_needed_usage_and_survives_drain() {
 #[tokio::test]
 async fn pinned_output_pushes_right_after_it_runs() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
@@ -414,15 +415,12 @@ async fn pinned_output_pushes_right_after_it_runs() {
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
 }
 
-/// A pinned output with zero real consumers and a non-RAM cache mode is
-/// reclaimed the instant the push has cloned it — not held to end-of-run
-/// eviction. Proves the usage floor's "give the unit back after the push"
-/// half (see `Executor::run`'s pinned-push block and
-/// `ExecutionPlan::seed_extra_usage`'s doc).
+/// A pinned output with zero real consumers and a non-RAM cache mode is reclaimed
+/// immediately after delivery because the reader column starts drained.
 #[tokio::test]
 async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
@@ -430,10 +428,8 @@ async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
     p.set_cache(a, CacheMode::None); // not Ram — retain[] must not be why it survives
     p.set_output_pinned(a, 0, true);
 
-    // Real `Planner::plan` output for "zero real consumers, individually
-    // pinned": the seed floors straight to 1 (see `seed_extra_usage`), not
-    // `straight_plan`'s blanket "everyone reads once" default.
-    let plan = plan_with_usage(&p.program, vec![1]);
+    let mut plan = plan_with_readers(&p.program, vec![0]);
+    demand_output(&p.program, &mut plan, a, 0);
     let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1, "the value was still pushed");
@@ -450,7 +446,7 @@ async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
 #[tokio::test]
 async fn pinned_root_pushes_every_output() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
         outputs[1] = DynamicValue::Static(StaticValue::Int(2));
         Ok(())
@@ -477,7 +473,7 @@ async fn pinned_root_pushes_every_output() {
 #[tokio::test]
 async fn non_pinned_node_pushes_nothing() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
@@ -498,7 +494,7 @@ async fn non_pinned_node_pushes_nothing() {
 #[tokio::test]
 async fn failed_pinned_node_pushes_nothing() {
     let mut p = Prog::default();
-    let failing = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, _outputs| {
+    let failing = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, _outputs| {
         Err(anyhow::anyhow!("boom").into())
     });
     let a = p.node(&[], 1, failing);
@@ -518,11 +514,11 @@ async fn failed_pinned_node_pushes_nothing() {
 #[tokio::test]
 async fn keeps_ram_cache_output_after_all_consumers_read() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _usage, outputs| {
+    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].value.as_i64().unwrap()));
         Ok(())
     });
@@ -532,7 +528,7 @@ async fn keeps_ram_cache_output_after_all_consumers_read() {
     p.set_cache(b, CacheMode::Ram);
 
     // A has one consumer (B, which reads it) and B has none (usage 0).
-    let plan = plan_with_usage(&p.program, vec![1, 0]);
+    let plan = plan_with_readers(&p.program, vec![1, 0]);
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert_eq!(
@@ -549,11 +545,11 @@ async fn keeps_ram_cache_output_after_all_consumers_read() {
 #[tokio::test]
 async fn holds_output_until_every_counted_consumer_reads() {
     let mut p = Prog::default();
-    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+    let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
         Ok(())
     });
-    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _usage, outputs| {
+    let consumer = async_lambda!(|_ctx, _s, _ev, inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].value.as_i64().unwrap()));
         Ok(())
     });
@@ -562,7 +558,7 @@ async fn holds_output_until_every_counted_consumer_reads() {
     p.set_cache(a, CacheMode::None);
 
     // Claim A has TWO consumers though only B reads it: its count settles at 1, never 0.
-    let plan = plan_with_usage(&p.program, vec![2, 0]);
+    let plan = plan_with_readers(&p.program, vec![2, 0]);
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert_eq!(
@@ -578,7 +574,7 @@ async fn holds_output_until_every_counted_consumer_reads() {
 async fn frees_zero_consumer_output_right_after_it_runs() {
     let mut p = Prog::default();
     let producer = || {
-        async_lambda!(|_ctx, _s, _ev, _inputs, _usage, outputs| {
+        async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
             outputs[0] = DynamicValue::Static(StaticValue::Int(7));
             Ok(())
         })
@@ -589,7 +585,7 @@ async fn frees_zero_consumer_output_right_after_it_runs() {
     p.set_cache(b, CacheMode::Ram);
 
     // Neither output is consumed.
-    let plan = plan_with_usage(&p.program, vec![0, 0]);
+    let plan = plan_with_readers(&p.program, vec![0, 0]);
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert!(
@@ -612,7 +608,7 @@ async fn frees_zero_consumer_output_right_after_it_runs() {
 async fn missing_lambda_reports_error_and_skips_consumers() {
     let mut p = Prog::default();
     let a = p.node(&[], 1, FuncLambda::None);
-    let consumer = async_lambda!(|_ctx, _state, _ev, inputs, _usage, outputs| {
+    let consumer = async_lambda!(|_ctx, _state, _ev, inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].value.as_i64().unwrap()));
         Ok(())
     });
@@ -623,9 +619,11 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     cache.reconcile(&p.program.e_nodes);
     // A stale prior value on the lambda-less node must not be served as this run's result.
     cache.slots[a].value = ValueState::Resident {
-        values: vec![DynamicValue::Static(StaticValue::Int(9))],
+        snapshot: crate::execution::cache::OutputSnapshot::new(
+            vec![DynamicValue::Static(StaticValue::Int(9))],
+            crate::execution::cache::CachedOutputCoverage::all(1),
+        ),
         produced_under: None,
-        materialized: crate::execution::cache::MaterializedOutputs::all(1),
     };
     let stats = run_with(&p.program, &plan, &mut cache).await;
 
@@ -667,7 +665,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     let a = p.node(
         &[],
         1,
-        async_lambda!(|_ctx, state, _ev, _inputs, _usage, outputs| {
+        async_lambda!(|_ctx, state, _ev, _inputs, _demand, outputs| {
             if state.get::<bool>().is_some() {
                 return Err(anyhow::anyhow!("transient failure").into());
             }
@@ -677,7 +675,7 @@ async fn reuse_survives_failed_upstream_rerun() {
         }),
     );
     let consumer = || {
-        async_lambda!(|_ctx, _state, _ev, inputs, _usage, outputs| {
+        async_lambda!(|_ctx, _state, _ev, inputs, _demand, outputs| {
             let v = inputs[0].value.as_i64().unwrap();
             outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
             Ok(())
@@ -698,7 +696,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     // lets the store-time drain reclaim it — the executor harness has no end-of-run
     // eviction phase, and a `None` value left resident would serve as a reuse hit in
     // run 2 (residency is what the reuse check trusts), masking the skip under test.
-    let plan = plan_with_usage(&p.program, vec![2, 1, 0]);
+    let plan = plan_with_readers(&p.program, vec![2, 1, 0]);
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program.e_nodes);
 

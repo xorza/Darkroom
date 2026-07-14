@@ -346,9 +346,11 @@ fn bound_fs_path_folds_delivered_file_identity() {
         if let Some(value) = value {
             cache.hydrate(
                 NodeIdx(0),
-                vec![value],
+                crate::execution::cache::OutputSnapshot::new(
+                    vec![value],
+                    crate::execution::cache::CachedOutputCoverage::all(1),
+                ),
                 producer,
-                crate::execution::cache::MaterializedOutputs::all(1),
             );
         }
         (
@@ -442,9 +444,11 @@ fn custom_stamper_folds_referent_version() {
         cache.slots[NodeIdx(0)].current_digest = Some(producer);
         cache.hydrate(
             NodeIdx(0),
-            vec![StaticValue::Int(42).into()],
+            crate::execution::cache::OutputSnapshot::new(
+                vec![StaticValue::Int(42).into()],
+                crate::execution::cache::CachedOutputCoverage::all(1),
+            ),
             producer,
-            crate::execution::cache::MaterializedOutputs::all(1),
         );
         (
             node_digest(&p.program, NodeIdx(1), &cache),

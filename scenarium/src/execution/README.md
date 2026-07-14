@@ -318,7 +318,7 @@ header is the 32-byte content digest, a format version, the output count, and on
 materialization byte per output; the codec frame follows. Presence probes read only this
 header and require both a matching digest and a mask that covers the current run's
 demanded outputs. Invalidation is an **overwrite**. A same-digest frame is skipped only
-when its mask already covers the new result; if a later run materializes more outputs,
+when its coverage already contains the new result; if a later run covers more outputs,
 the frame is replaced. Writes are atomic (temp file + rename), so readers never see a
 half-written frame.
 
@@ -339,16 +339,16 @@ Each node has a `RuntimeSlot` (index-aligned to `e_nodes`):
 
 ```
 current_digest: Option<Digest>   // this run's content digest, stamped by the executor
-value:          ValueState        // Empty | Resident { values, produced_under, materialized }
-                                  //       | OnDisk { materialized }
+value:          ValueState        // Empty | Resident { snapshot, produced_under }
+                                  //       | OnDisk { coverage }
 ```
 
 `ValueState` is one enum, not the old three loosely-coupled fields — so the previously
 representable bad combos ("resident *and* flagged on disk", a stale RAM value masking a
 fresh blob) can't be built. The reuse test is **`is_resident_hit`** — the slot is
-`Resident`, its `produced_under` equals the current digest, and its materialization mask
-covers the current `OutputUsage`. A `None` `current_digest` (impure cone) never hits.
-`OnDisk` means a decodable frame exists for this digest and demand mask but is not yet
+`Resident`, its `produced_under` equals the current digest, and its snapshot coverage
+covers the current `OutputDemand`. A `None` `current_digest` (impure cone) never hits.
+`OnDisk` means a decodable frame exists for this digest and demand but is not yet
 loaded: a cheap header probe, so a disk-cached value behind another reused node is served
 without entering RAM (B.6).
 
@@ -365,9 +365,9 @@ it at reach time, serving the cache on a hit. Then, per surviving node, once its
 computed:
 
 1. **resident hit?** — reuse only when the digest matches and the resident
-   materialization mask covers every demanded output.
+   coverage contains every demanded output.
 2. **else `mark_on_disk_if_present`.** If the node's blob carries the digest and a
-   materialization mask covering current demand **and** the outputs are decodable (every custom output type has a codec —
+   coverage containing current demand **and** the outputs are decodable (every custom output type has a codec —
    predicted without reading), flag the slot `OnDisk` and reuse it — a 32-byte header
    read + codec check, **no body bytes**. The value loads only if a running consumer
    actually reads it.
@@ -380,9 +380,9 @@ computed:
    blob can't be the wrong type (the signature is in the digest, §B.2), but if it fails
    to *load* (corrupt/deleted) the bad file is deleted and the demanding consumer is
    dropped for this run; the next reopen recomputes it.
-5. **mid-run release — `reclaim_slot`.** The executor keeps the plan's per-output consumer
-   counts live and counts them *down* as each running consumer reads a bound producer
-   (`collect_inputs`). When an output reaches `Skip` (zero left) its value is cleared one output
+5. **mid-run release — `reclaim_slot`.** The executor copies the plan's binding-reader
+   counts into `RemainingOutputReads` and counts them *down* as each running consumer reads a bound producer
+   (`ExecutionFrame::collect_inputs`). When an output reaches zero its value is cleared one output
    at a time, and once *every* output of a **non-RAM** node is spent its whole slot is reclaimed
    the instant its last consumer reads it — `reclaim_slot` demotes it to `OnDisk` if a blob
    serves it (a `Disk` value), else drops it (`None`). A `Ram`/`Both` node is left resident

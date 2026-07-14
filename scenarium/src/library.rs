@@ -224,7 +224,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::node::lambda::{InvokeInput, OutputUsage};
+    use crate::node::lambda::{InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::testing::{TestFuncHooks, test_func_lib};
@@ -245,7 +245,7 @@ mod tests {
             },
         ];
         let mut outputs = vec![DynamicValue::Unbound];
-        let outputs_meta = vec![OutputUsage::Needed(1); outputs.len()];
+        let output_demand = vec![OutputDemand::Produce; outputs.len()];
         let event_state = crate::runtime::shared_any_state::SharedAnyState::default();
         library
             .by_id(&sum_id)
@@ -256,7 +256,7 @@ mod tests {
                 &mut node_state,
                 &event_state,
                 &mut inputs,
-                &outputs_meta,
+                &output_demand,
                 &mut outputs,
             )
             .await?;

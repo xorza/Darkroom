@@ -74,7 +74,7 @@ pub fn worker_events_library() -> Library {
                 }),
             )
             .lambda(FuncLambda::new(
-                move |_context_manager, _state, event_state, inputs, _output_usage, outputs| {
+                move |_context_manager, _state, event_state, inputs, _output_demand, outputs| {
                     Box::pin(async move {
                         let frequency = inputs[0].value.as_f64().unwrap_or(1.0);
                         let now = Instant::now();

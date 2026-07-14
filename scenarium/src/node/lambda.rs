@@ -9,58 +9,18 @@ use crate::{
     runtime::{any_state::AnyState, context::ContextManager, shared_any_state::SharedAnyState},
 };
 
-/// How much of a node output a run actually needs, handed to the lambda so it can
-/// skip producing values nobody reads. Derived per-run by the executor from the
-/// plan's consumer counts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OutputUsage {
+/// Whether a node output must be produced for this run. The planner marks an output
+/// demanded when a downstream binding reads it or the host requested it through a pin.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OutputDemand {
+    #[default]
     Skip,
-    /// Number of executing consumers reading this output this run (always `> 0`).
-    Needed(u32),
+    Produce,
 }
 
-impl OutputUsage {
+impl OutputDemand {
     pub fn is_skip(self) -> bool {
-        matches!(self, OutputUsage::Skip)
-    }
-
-    /// Whether this is the *last* remaining read — the one read that, once
-    /// counted, leaves nothing else owed. `Skip` (already spent) is never last.
-    pub(crate) fn is_last_read(self) -> bool {
-        matches!(self, OutputUsage::Needed(1))
-    }
-
-    /// Count one more reader against this usage, in place: `Skip` becomes the
-    /// first reader (`Needed(1)`), `Needed(n)` steps up to `Needed(n + 1)`. The
-    /// planner's backward walk uses this to fold in each consumer edge.
-    pub(crate) fn inc(&mut self) {
-        *self = match *self {
-            OutputUsage::Skip => OutputUsage::Needed(1),
-            OutputUsage::Needed(n) => OutputUsage::Needed(n + 1),
-        };
-    }
-
-    /// Count one read against this usage, in place: `Needed(n)` steps down to
-    /// `Needed(n - 1)` or `Skip`. Decrementing a `Skip` output is a planner
-    /// bug — nothing should ever read more than the plan counted.
-    pub(crate) fn dec(&mut self) {
-        *self = match *self {
-            OutputUsage::Needed(1) => OutputUsage::Skip,
-            OutputUsage::Needed(n) => OutputUsage::Needed(n - 1),
-            OutputUsage::Skip => panic!("decremented an OutputUsage the plan already marked Skip"),
-        };
-    }
-}
-
-impl From<usize> for OutputUsage {
-    /// `Skip` for a zero count, `Needed(count)` otherwise — the seed for a raw
-    /// reader count (a `bool` pinned flag as `0`/`1`, or a plan-level count).
-    fn from(count: usize) -> Self {
-        if count == 0 {
-            OutputUsage::Skip
-        } else {
-            OutputUsage::Needed(count as u32)
-        }
+        matches!(self, OutputDemand::Skip)
     }
 }
 
@@ -96,7 +56,7 @@ pub trait AsyncLambdaFn:
         &'a mut AnyState,
         &'a SharedAnyState,
         &'a mut [InvokeInput],
-        &'a [OutputUsage],
+        &'a [OutputDemand],
         &'a mut [DynamicValue],
     ) -> AsyncLambdaFuture<'a>
     + Send
@@ -111,7 +71,7 @@ impl<T> AsyncLambdaFn for T where
             &'a mut AnyState,
             &'a SharedAnyState,
             &'a mut [InvokeInput],
-            &'a [OutputUsage],
+            &'a [OutputDemand],
             &'a mut [DynamicValue],
         ) -> AsyncLambdaFuture<'a>
         + Send
@@ -147,7 +107,7 @@ impl FuncLambda {
         state: &mut AnyState,
         event_state: &SharedAnyState,
         inputs: &mut [InvokeInput],
-        output_usage: &[OutputUsage],
+        output_demand: &[OutputDemand],
         outputs: &mut [DynamicValue],
     ) -> InvokeResult<()> {
         match self {
@@ -160,7 +120,7 @@ impl FuncLambda {
                     state,
                     event_state,
                     inputs,
-                    output_usage,
+                    output_demand,
                     outputs,
                 )
                 .await

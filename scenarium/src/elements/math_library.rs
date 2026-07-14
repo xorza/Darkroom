@@ -387,7 +387,7 @@ fn random_func() -> Func {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::lambda::OutputUsage;
+    use crate::node::lambda::OutputDemand;
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;
@@ -401,7 +401,7 @@ mod tests {
             .cloned()
             .map(|value| InvokeInput { value })
             .collect::<Vec<_>>();
-        let usage = vec![OutputUsage::Needed(1); func.outputs.len()];
+        let demand = vec![OutputDemand::Produce; func.outputs.len()];
         let mut outputs = vec![DynamicValue::Unbound; func.outputs.len()];
         func.lambda
             .invoke(
@@ -409,7 +409,7 @@ mod tests {
                 &mut AnyState::default(),
                 &SharedAnyState::default(),
                 &mut inputs,
-                &usage,
+                &demand,
                 &mut outputs,
             )
             .await?;

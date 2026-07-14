@@ -6,7 +6,7 @@ use crate::execution::program::ExecutionBinding;
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::FuncBehavior;
-use crate::node::lambda::OutputUsage;
+use crate::node::lambda::OutputDemand;
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
 use common::FloatExt;
@@ -1868,23 +1868,27 @@ mod graph_structure {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("Print").unwrap();
 
-        // usage_count: get_a→sum[0], get_b→sum[1]+mult[1], sum→mult[0], mult→print[0]
+        // get_a→sum[0], get_b→sum[1]+mult[1], sum→mult[0], mult→print[0]
         assert_eq!(
-            execution_graph.node_output_usage(get_a)[0],
-            OutputUsage::Needed(1)
+            execution_graph.node_output_demand(get_a)[0],
+            OutputDemand::Produce
         );
         assert_eq!(
-            execution_graph.node_output_usage(get_b)[0],
-            OutputUsage::Needed(2)
+            execution_graph.node_output_demand(get_b)[0],
+            OutputDemand::Produce
         );
         assert_eq!(
-            execution_graph.node_output_usage(sum)[0],
-            OutputUsage::Needed(1)
+            execution_graph.node_output_demand(sum)[0],
+            OutputDemand::Produce
         );
         assert_eq!(
-            execution_graph.node_output_usage(mult)[0],
-            OutputUsage::Needed(1)
+            execution_graph.node_output_demand(mult)[0],
+            OutputDemand::Produce
         );
+        assert_eq!(execution_graph.node_output_readers(get_a), &[1]);
+        assert_eq!(execution_graph.node_output_readers(get_b), &[2]);
+        assert_eq!(execution_graph.node_output_readers(sum), &[1]);
+        assert_eq!(execution_graph.node_output_readers(mult), &[1]);
 
         assert!(print.sink);
 
@@ -1913,23 +1917,26 @@ mod graph_structure {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("Print").unwrap();
 
-        assert_eq!(execution_graph.node_output_usage(get_a).len(), 1);
-        assert_eq!(execution_graph.node_output_usage(get_b).len(), 1);
-        assert_eq!(execution_graph.node_output_usage(mult).len(), 1);
-        assert!(execution_graph.node_output_usage(print).is_empty());
+        assert_eq!(execution_graph.node_output_demand(get_a).len(), 1);
+        assert_eq!(execution_graph.node_output_demand(get_b).len(), 1);
+        assert_eq!(execution_graph.node_output_demand(mult).len(), 1);
+        assert!(execution_graph.node_output_demand(print).is_empty());
         // Now each source has exactly 1 consumer (sum is no longer in the path)
         assert_eq!(
-            execution_graph.node_output_usage(get_a)[0],
-            OutputUsage::Needed(1)
+            execution_graph.node_output_demand(get_a)[0],
+            OutputDemand::Produce
         );
         assert_eq!(
-            execution_graph.node_output_usage(get_b)[0],
-            OutputUsage::Needed(1)
+            execution_graph.node_output_demand(get_b)[0],
+            OutputDemand::Produce
         );
         assert_eq!(
-            execution_graph.node_output_usage(mult)[0],
-            OutputUsage::Needed(1)
+            execution_graph.node_output_demand(mult)[0],
+            OutputDemand::Produce
         );
+        assert_eq!(execution_graph.node_output_readers(get_a), &[1]);
+        assert_eq!(execution_graph.node_output_readers(get_b), &[1]);
+        assert_eq!(execution_graph.node_output_readers(mult), &[1]);
 
         Ok(())
     }
@@ -4057,21 +4064,19 @@ mod events {
     }
 }
 
-// === Output Usage (Skip / Needed) ===
-
-mod output_usage {
+mod output_demand {
     use super::*;
     use crate::async_lambda;
     use crate::node::definition::{Func, FuncInput, FuncOutput};
-    use crate::node::lambda::OutputUsage;
+    use crate::node::lambda::OutputDemand;
 
     const SPLIT_FUNC: FuncId = FuncId::from_u128(0x5911);
     const SINK_FUNC: FuncId = FuncId::from_u128(0x5922);
 
     #[tokio::test(flavor = "multi_thread")]
     async fn unused_output_marked_skip() -> anyhow::Result<()> {
-        let seen_usage: Arc<Mutex<Vec<OutputUsage>>> = Arc::new(Mutex::new(Vec::new()));
-        let seen_usage_l = seen_usage.clone();
+        let seen_demand: Arc<Mutex<Vec<OutputDemand>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_demand_l = seen_demand.clone();
 
         let mut library = Library::default();
         library.add(
@@ -4079,8 +4084,8 @@ mod output_usage {
                 .output(FuncOutput::new("a", DataType::Int))
                 .output(FuncOutput::new("b", DataType::Int))
                 .lambda(async_lambda!(
-                    move |_, _, _, _, usage, outputs| { seen = seen_usage_l.clone() } => {
-                        seen.lock().await.extend_from_slice(usage);
+                    move |_, _, _, _, demand, outputs| { seen = seen_demand_l.clone() } => {
+                        seen.lock().await.extend_from_slice(demand);
                         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
                         outputs[1] = DynamicValue::Static(StaticValue::Int(2));
                         Ok(())
@@ -4108,26 +4113,27 @@ mod output_usage {
         eg.execute_sinks().await?;
 
         let split = eg.by_name("split").unwrap();
-        assert_eq!(eg.node_output_usage(split)[0], OutputUsage::Needed(1));
-        assert_eq!(eg.node_output_usage(split)[1], OutputUsage::Skip);
+        assert_eq!(eg.node_output_demand(split)[0], OutputDemand::Produce);
+        assert_eq!(eg.node_output_demand(split)[1], OutputDemand::Skip);
+        assert_eq!(eg.node_output_readers(split), &[1, 0]);
 
-        // The lambda observed Needed for the consumed output, Skip for the other.
+        // The lambda observed Produce for the consumed output, Skip for the other.
         assert_eq!(
-            *seen_usage.lock().await,
-            vec![OutputUsage::Needed(1), OutputUsage::Skip]
+            *seen_demand.lock().await,
+            vec![OutputDemand::Produce, OutputDemand::Skip]
         );
 
         Ok(())
     }
 
     /// A pinned output (e.g. a GUI inspector reading a port live) makes an
-    /// otherwise-unconsumed output `Needed` too — same "split" fixture as
+    /// otherwise-unconsumed output `Produce` too — same "split" fixture as
     /// `unused_output_marked_skip`, output 1 still has no in-graph consumer, but
     /// is now flagged pinned.
     #[tokio::test(flavor = "multi_thread")]
     async fn pinned_output_is_needed_with_no_consumer() -> anyhow::Result<()> {
-        let seen_usage: Arc<Mutex<Vec<OutputUsage>>> = Arc::new(Mutex::new(Vec::new()));
-        let seen_usage_l = seen_usage.clone();
+        let seen_demand: Arc<Mutex<Vec<OutputDemand>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_demand_l = seen_demand.clone();
 
         let mut library = Library::default();
         library.add(
@@ -4135,8 +4141,8 @@ mod output_usage {
                 .output(FuncOutput::new("a", DataType::Int))
                 .output(FuncOutput::new("b", DataType::Int))
                 .lambda(async_lambda!(
-                    move |_, _, _, _, usage, outputs| { seen = seen_usage_l.clone() } => {
-                        seen.lock().await.extend_from_slice(usage);
+                    move |_, _, _, _, demand, outputs| { seen = seen_demand_l.clone() } => {
+                        seen.lock().await.extend_from_slice(demand);
                         outputs[0] = DynamicValue::Static(StaticValue::Int(1));
                         outputs[1] = DynamicValue::Static(StaticValue::Int(2));
                         Ok(())
@@ -4165,18 +4171,22 @@ mod output_usage {
         eg.execute_sinks().await?;
 
         let split = eg.by_name("split").unwrap();
-        assert_eq!(eg.node_output_usage(split)[0], OutputUsage::Needed(1));
+        assert_eq!(eg.node_output_demand(split)[0], OutputDemand::Produce);
         assert_eq!(
-            eg.node_output_usage(split)[1],
-            OutputUsage::Needed(1),
-            "the planner floors a pinned port's usage even with no in-graph \
-             consumer — plan.output_usage is the complete usage tally"
+            eg.node_output_demand(split)[1],
+            OutputDemand::Produce,
+            "the planner demands a pinned port even with no in-graph consumer"
+        );
+        assert_eq!(
+            eg.node_output_readers(split),
+            &[1, 0],
+            "the pinned output does not create a synthetic binding reader"
         );
 
         // The lambda computes both outputs instead of skipping the unconsumed one.
         assert_eq!(
-            *seen_usage.lock().await,
-            vec![OutputUsage::Needed(1), OutputUsage::Needed(1)]
+            *seen_demand.lock().await,
+            vec![OutputDemand::Produce, OutputDemand::Produce]
         );
 
         Ok(())
@@ -4197,12 +4207,12 @@ mod output_usage {
                 .output(FuncOutput::new("a", DataType::Int))
                 .output(FuncOutput::new("b", DataType::Int))
                 .lambda(async_lambda!(
-                    move |_, _, _, _, usage, outputs| { calls = split_calls_l.clone() } => {
+                    move |_, _, _, _, demand, outputs| { calls = split_calls_l.clone() } => {
                         *calls.lock().await += 1;
-                        if !usage[0].is_skip() {
+                        if !demand[0].is_skip() {
                             outputs[0] = StaticValue::Int(10).into();
                         }
-                        if !usage[1].is_skip() {
+                        if !demand[1].is_skip() {
                             outputs[1] = StaticValue::Int(20).into();
                         }
                         Ok(())
