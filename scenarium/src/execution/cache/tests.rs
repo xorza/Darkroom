@@ -123,6 +123,16 @@ fn resident_hit_requires_every_demanded_output_to_be_materialized() {
         NodeIdx(0),
         &[OutputUsage::Needed(1), OutputUsage::Needed(1)]
     ));
+
+    let mismatch = std::panic::catch_unwind(|| {
+        MaterializedOutputs::from_bytes(&[1, 0])
+            .unwrap()
+            .covers_usage(&[OutputUsage::Needed(1)]);
+    });
+    assert!(
+        mismatch.is_err(),
+        "a materialization mask with the wrong arity is corrupt internal state"
+    );
 }
 
 #[test]
