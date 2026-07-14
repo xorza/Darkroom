@@ -7,3 +7,5 @@ cleanup binary caches
 file name as argument clap
 
 try repair & broken document
+
+autoupdate image review and autorun node
