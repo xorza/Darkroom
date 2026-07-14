@@ -72,7 +72,7 @@ atomic_refcell = { version = "0.1" }
 arc-swap = { version = "1.9" }
 sysinfo = { version = "0.39" }
 bumpalo = { version = "3.20", features = ["collections", "allocator-api2"] }
-lz4_flex = { version = "0.13", features = ["std"] }
+lz4_flex = { version = "0.14", features = ["std"] }
 bitcode = { version = "0.6", features = ["serde"] }
 blake3 = { version = "1.8" }
 dark-light = { version = "2.0" }
