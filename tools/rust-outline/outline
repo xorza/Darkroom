@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# Thin wrapper: build once, then run the outline generator over any path.
-#   tools/rust-outline/outline common -o common/OUTLINE.md
-#   tools/rust-outline/outline scenarium/src/graph.rs
-set -euo pipefail
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec cargo run --release --quiet --manifest-path "$DIR/Cargo.toml" -- "$@"
