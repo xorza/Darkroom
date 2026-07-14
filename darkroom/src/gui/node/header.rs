@@ -392,8 +392,7 @@ fn draw_play_triangle(ui: &mut Ui, color: Color) {
 fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent>) {
     let shift = ui.modifiers().shift;
     let id = node_rename_wid(node.id);
-    let ev = InlineRename::new(id, node.name.clone())
-        .theme(&rcx.theme.inline_rename)
+    let ev = InlineRename::new(id, node.name.clone(), &rcx.theme.inline_rename)
         .max_chars(NODE_NAME_MAX_CHARS)
         .style(TextStyle {
             weight: FontWeight::Bold,

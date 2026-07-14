@@ -1,6 +1,5 @@
 use aperture::{
-    Background, Brush, ButtonTheme, Color, Corners, DragValueTheme, Shadow, Spacing, Stroke,
-    TextEditTheme, TextStyle, WidgetLook,
+    Brush, ButtonTheme, Color, DragValueTheme, Shadow, Spacing, Stroke, TextEditTheme, WidgetLook,
 };
 
 use crate::core::theme_pref::ThemeChoice;
@@ -49,13 +48,9 @@ const MENU_FONT_SIZE: f32 = 13.0;
 //   - `light` — `ayu-light-palette.toml`    (Zed's "Ayu Light")
 // The toml files are the hand-edited reference; the consts here are the
 // compile-time copy. Keep in sync when the palette changes.
-//
-// TODO: see `theme-review.md` §2/§4 — most of `recolour_aperture` should
-// move into aperture as a `Theme::from_palette` ctor; once that lands,
-// the `PAL_*` block in each mod (and `AperturePalette`) collapses to
-// "pick `aperture::Palette::dark()` or `::light()`".
 
 pub(crate) mod dark {
+    use super::{HoverColor, TypeColors};
     use aperture::Color;
 
     // canvas
@@ -106,17 +101,44 @@ pub(crate) mod dark {
     pub(crate) const EXEC_ERRORED_GLOW: Color = Color::hex(0xff5e44);
 
     // ports — hover variants brighten for emphasis on a dark canvas.
-    pub(crate) const INPUT_PORT: Color = Color::hex(0xdaff58);
-    pub(crate) const OUTPUT_PORT: Color = Color::hex(0xffa63d);
-    pub(crate) const INPUT_PORT_HOVER: Color = Color::hex(0xe9ff8e);
-    pub(crate) const OUTPUT_PORT_HOVER: Color = Color::hex(0xffc878);
+    pub(crate) const INPUT_PORT: HoverColor = HoverColor {
+        rest: Color::hex(0xdaff58),
+        hover: Color::hex(0xe9ff8e),
+    };
+    pub(crate) const OUTPUT_PORT: HoverColor = HoverColor {
+        rest: Color::hex(0xffa63d),
+        hover: Color::hex(0xffc878),
+    };
     // Events wear the palette's `error` red — the same swatch as the
     // sink `T` badge the subscription pin sits beside, so the trigger
     // machinery reads as one family. Shape (triangle vs. circle) keeps
     // events apart from data ports; hover lifts toward white like the
     // typed port hovers.
-    pub(crate) const EVENT_PORT: Color = Color::hex(0xff5e44);
-    pub(crate) const EVENT_PORT_HOVER: Color = Color::hex(0xff8b78);
+    pub(crate) const EVENT_PORT: HoverColor = HoverColor {
+        rest: Color::hex(0xff5e44),
+        hover: Color::hex(0xff8b78),
+    };
+
+    // data-type hues (wires + typed port circles) — hand-tuned to
+    // harmonize with the palette. The ramp deliberately carries no rose
+    // (Image owns it) and no purple (the running/impure status family),
+    // so a hash pick can't impersonate either.
+    pub(crate) const TYPE_COLORS: TypeColors = TypeColors {
+        boolean: Color::hex(0xf28779),
+        int: Color::hex(0x95e6cb),
+        float: Color::hex(0x73d0ff),
+        string: Color::hex(0xffd173),
+        path: Color::hex(0xd4bfff),
+        // Safelight rose — the photographic-darkroom hue for the image
+        // payload.
+        image: Color::hex(0xff9eb5),
+        ramp: [
+            Color::hex(0xffa759),
+            Color::hex(0x7bd88f),
+            Color::hex(0x5ccfe6),
+            Color::hex(0xe6cd8a),
+        ],
+    };
 
     // aperture sub-theme palette — values aperture's widgets normally
     // read from its own `palette::*` consts. Pushed through
@@ -131,6 +153,7 @@ pub(crate) mod dark {
 }
 
 pub(crate) mod light {
+    use super::{HoverColor, TypeColors};
     use aperture::Color;
 
     // canvas
@@ -177,14 +200,37 @@ pub(crate) mod light {
 
     // ports — input = success, output = syn_keyword. Hover variants on
     // the light canvas *darken* for emphasis (opposite to the dark theme).
-    pub(crate) const INPUT_PORT: Color = Color::hex(0x85b304);
-    pub(crate) const OUTPUT_PORT: Color = Color::hex(0xfa8d3e);
-    pub(crate) const INPUT_PORT_HOVER: Color = Color::hex(0x6f9603);
-    pub(crate) const OUTPUT_PORT_HOVER: Color = Color::hex(0xd97527);
+    pub(crate) const INPUT_PORT: HoverColor = HoverColor {
+        rest: Color::hex(0x85b304),
+        hover: Color::hex(0x6f9603),
+    };
+    pub(crate) const OUTPUT_PORT: HoverColor = HoverColor {
+        rest: Color::hex(0xfa8d3e),
+        hover: Color::hex(0xd97527),
+    };
     // Events wear the light palette's `error` red (see the dark peer's
     // rationale); hover darkens for emphasis like the light port hovers.
-    pub(crate) const EVENT_PORT: Color = Color::hex(0xef7271);
-    pub(crate) const EVENT_PORT_HOVER: Color = Color::hex(0xb35555);
+    pub(crate) const EVENT_PORT: HoverColor = HoverColor {
+        rest: Color::hex(0xef7271),
+        hover: Color::hex(0xb35555),
+    };
+
+    // data-type hues — the light peers of `dark::TYPE_COLORS` (deeper
+    // values: light surfaces need saturation, not brightness).
+    pub(crate) const TYPE_COLORS: TypeColors = TypeColors {
+        boolean: Color::hex(0xe05252),
+        int: Color::hex(0x2e9e5b),
+        float: Color::hex(0x2b8fd6),
+        string: Color::hex(0xb8860b),
+        path: Color::hex(0x7a4fd0),
+        image: Color::hex(0xc23b73),
+        ramp: [
+            Color::hex(0xd9722a),
+            Color::hex(0x1f8fb3),
+            Color::hex(0x2f9e6a),
+            Color::hex(0xa67c1a),
+        ],
+    };
 
     // aperture sub-theme palette — see `dark::PAL_*` for the contract.
     pub(crate) const PAL_TEXT: Color = Color::hex(0x5c6166);
@@ -194,21 +240,57 @@ pub(crate) mod light {
     pub(crate) const PAL_BORDER_FOCUSED: Color = Color::hex(0xc4daf6);
 }
 
-/// Declares a `Color` roster struct plus its two built-in instances
+/// Two-state colour pack for chrome that lifts under the pointer —
+/// the colour-granularity peer of aperture's `StatefulLook`: the pair
+/// is structural (a hover variant can't exist without its rest), and
+/// state → colour goes through one `pick`.
+#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HoverColor {
+    pub rest: Color,
+    pub hover: Color,
+}
+
+impl HoverColor {
+    #[inline]
+    pub fn pick(&self, hovered: bool) -> Color {
+        if hovered { self.hover } else { self.rest }
+    }
+}
+
+/// Data-type → wire/port-circle hue roster (consumed by
+/// `gui::node::port_color`). Serialized as the theme's `[type_colors]`
+/// table so a loaded theme file can restyle type hues like any other
+/// swatch. `ramp` backs the open-ended `Custom`/`Enum` families —
+/// keyed by `type_id`, so distinct custom types land on stable,
+/// distinct colors; `image` is the fixed hue the lens image type owns.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TypeColors {
+    pub boolean: Color,
+    pub int: Color,
+    pub float: Color,
+    pub string: Color,
+    pub path: Color,
+    pub image: Color,
+    pub ramp: [Color; 4],
+}
+
+/// Declares a colour-roster struct plus its two built-in instances
 /// (`DARK` / `LIGHT`, pulling `dark::CONST` / `light::CONST`) from one
-/// `field => CONST` list. One roster per struct, so a colour can't sit in
-/// the struct while a preset forgets it: the presets won't compile until
-/// every field is filled. Both the serialized [`PaletteColors`] chrome
-/// roster and the private `AperturePalette` are built this way.
+/// `field: Ty => CONST` list. One roster per struct, so a colour can't
+/// sit in the struct while a preset forgets it: the presets won't
+/// compile until every field is filled. The serialized
+/// [`PaletteColors`] chrome roster is built this way; the
+/// aperture-side rosters are plain [`aperture::Palette`] consts
+/// (`APERTURE_DARK` / `APERTURE_LIGHT`).
 macro_rules! palette_struct {
     (
         $(#[$smeta:meta])*
         $vis:vis struct $name:ident;
-        $($(#[$fmeta:meta])* $field:ident => $konst:ident),+ $(,)?
+        $($(#[$fmeta:meta])* $field:ident: $fty:ty => $konst:ident),+ $(,)?
     ) => {
         $(#[$smeta])*
         $vis struct $name {
-            $($(#[$fmeta])* $vis $field: Color,)+
+            $($(#[$fmeta])* $vis $field: $fty,)+
         }
 
         impl $name {
@@ -332,6 +414,10 @@ pub struct Theme {
     /// the `[colors]` sub-table.
     pub colors: PaletteColors,
 
+    /// Data-type → wire/port hue roster (see [`TypeColors`]),
+    /// serialized as the `[type_colors]` sub-table.
+    pub type_colors: TypeColors,
+
     /// Look + dimensions for the inline static-value editor that hugs a
     /// `Binding::Const` input port (number/string field, file-pick chip).
     pub static_value_editor: StaticValueEditorTheme,
@@ -372,54 +458,22 @@ pub struct StaticValueEditorTheme {
 }
 
 impl StaticValueEditorTheme {
-    /// Editor in the dark theme — transparent chip at rest, dark
-    /// `elem_hover`/`elem_active` fills on hover/press, palette caret+selection.
-    fn dark() -> Self {
-        Self::from_palette(
-            dark::PAL_ELEM_HOVER,
-            dark::PAL_ELEM_ACTIVE,
-            dark::PAL_TEXT,
-            dark::SELECTION_RECT,
-        )
-    }
-
-    /// Editor in the light theme — same structure as `dark`, light palette.
-    fn light() -> Self {
-        Self::from_palette(
-            light::PAL_ELEM_HOVER,
-            light::PAL_ELEM_ACTIVE,
-            light::PAL_TEXT,
-            light::SELECTION_RECT,
-        )
-    }
-
-    /// The pointer-over-node variant: the chip's hover fill, at reduced
-    /// alpha, becomes the *resting* background — const editors surface as
-    /// soon as the pointer is anywhere over the node, without waiting for a
-    /// direct hover. Fill only, so geometry is identical to the resting
-    /// look. Called once per built theme (see `Theme::build`), never per
-    /// frame. Silently a no-op if the chip's hover fill ever stops being a
-    /// solid brush — revisit the patch then.
+    /// The pointer-over-node variant of [`Self::from_palette`]: the
+    /// chip's hover fill (`elem_hover`), at reduced alpha, becomes the
+    /// *resting* background — const editors surface as soon as the
+    /// pointer is anywhere over the node, without waiting for a direct
+    /// hover. Fill only, so geometry is identical to the resting look.
+    /// Built from the same palette recipe rather than patching a
+    /// finished theme, so it can't drift from what the recipe painted.
     ///
     /// Both the resting `chip` (numeric editors, which show it at rest) and
     /// the inline `editor`'s normal state (string/`Any` editors, which are
     /// always a `TextEdit` and so show `editor.normal` at rest) get the same
     /// fill, so every field's edit affordance surfaces together.
-    fn revealed(&self) -> Self {
+    fn revealed_from_palette(p: &aperture::Palette) -> Self {
         const REVEAL_ALPHA: f32 = 0.5;
-        let mut out = self.clone();
-        let Some(Brush::Solid(c)) = self
-            .drag_value
-            .chip
-            .looks
-            .hovered
-            .background
-            .as_ref()
-            .map(|bg| bg.fill.clone())
-        else {
-            return out;
-        };
-        let reveal = Brush::Solid(c.with_alpha(REVEAL_ALPHA));
+        let mut out = Self::from_palette(p);
+        let reveal = Brush::Solid(p.elem_hover.with_alpha(REVEAL_ALPHA));
         for look in [
             out.drag_value.chip.looks.normal.background.as_mut(),
             out.drag_value.editor.looks.normal.background.as_mut(),
@@ -432,25 +486,17 @@ impl StaticValueEditorTheme {
         out
     }
 
-    /// Shared shape: aperture's `menu_button` preset (transparent at rest +
-    /// disabled, no border) recoloured for hover/press, with the inline editor
-    /// derived from that chip so both modes share one box, and caret/selection
-    /// taken from the palette so it matches the app's other text fields.
-    fn from_palette(hover: Color, pressed: Color, caret: Color, selection: Color) -> Self {
-        let mut chip = ButtonTheme::menu_button();
-        if let Some(bg) = chip.looks.hovered.background.as_mut() {
-            bg.fill = hover.into();
-        }
-        if let Some(bg) = chip.looks.active.background.as_mut() {
-            bg.fill = pressed.into();
-        }
-        let editor_colors = TextEditTheme {
-            caret,
-            selection,
-            ..TextEditTheme::default()
-        };
+    /// Shared shape: aperture's `menu_button` preset over `p` (transparent
+    /// at rest + disabled, no border) as the chip, with the inline editor
+    /// derived from that chip so both modes share one box, and
+    /// caret/selection/placeholder from the same palette's text-edit
+    /// recipe so it matches the app's other text fields.
+    fn from_palette(p: &aperture::Palette) -> Self {
         Self {
-            drag_value: DragValueTheme::from_chip(chip, &editor_colors),
+            drag_value: DragValueTheme::from_chip(
+                ButtonTheme::menu_button(p),
+                &TextEditTheme::from_palette(p),
+            ),
             width: VALUE_EDITOR_WIDTH,
             max_width: VALUE_EDITOR_MAX_WIDTH,
         }
@@ -468,30 +514,16 @@ pub struct InlineRenameTheme {
 }
 
 impl InlineRenameTheme {
-    /// Inline-rename editor in the dark theme — flat surface (no
-    /// padding/margin/border, transparent fill) plus the dark palette's
-    /// foreground/accent for the caret + selection.
-    pub(crate) fn dark() -> Self {
-        Self::with_palette_colors(dark::PAL_TEXT, dark::TEXT_MUTED, dark::SELECTION_RECT)
-    }
-
-    /// Inline-rename editor in the light theme — same flat surface,
-    /// light-palette caret + selection so it stays visible on the
-    /// light canvas.
-    fn light() -> Self {
-        Self::with_palette_colors(light::PAL_TEXT, light::TEXT_MUTED, light::SELECTION_RECT)
-    }
-
-    /// Shared shape: start from aperture's `TextEditTheme::default`,
+    /// Shared shape: start from the palette's text-edit recipe (which
+    /// already carries the right caret / placeholder / selection), then
     /// strip every visual that would reshape the row (padding, margin,
-    /// border, fill), then recolour the live-state foreground
-    /// (`caret`, `placeholder`, `selection`) from the supplied palette
-    /// so the field reads against whichever canvas hosts it.
-    fn with_palette_colors(text: Color, muted: Color, accent: Color) -> Self {
+    /// border, fill) so the field reads against whichever canvas hosts
+    /// it.
+    fn from_palette(p: &aperture::Palette) -> Self {
         let mut style = TextEditTheme {
             padding: Spacing::ZERO,
             margin: Spacing::ZERO,
-            ..TextEditTheme::default()
+            ..TextEditTheme::from_palette(p)
         };
         for look in [
             &mut style.looks.normal,
@@ -504,42 +536,50 @@ impl InlineRenameTheme {
                 bg.fill = Brush::TRANSPARENT;
             }
         }
-        style.caret = text;
-        style.placeholder = muted;
-        style.selection = accent.with_alpha(0.25);
         Self { text_edit: style }
     }
 }
 
-palette_struct! {
-    /// Palette aperture's widgets need to render correctly under a darkroom
-    /// theme. Mirrors aperture's own (private) `palette::*` consts; we hand
-    /// it in so swapping dark ⇄ light recolours every widget aperture paints,
-    /// not just darkroom-owned chrome.
-    #[derive(Debug)]
-    struct AperturePalette;
-    text => PAL_TEXT,
-    text_muted => TEXT_MUTED,
-    text_disabled => PAL_TEXT_DISABLED,
-    /// Aperture's `window_clear` slot wants the editor / terminal surface —
-    /// the same swatch as the graph canvas in both themes.
-    terminal_bg => CANVAS_BG,
-    /// Aperture's `palette::ELEM` and our `NODE_FILL` are the same swatch by
-    /// design: nodes and aperture surfaces sit on the same surface tier.
-    elem => NODE_FILL,
-    elem_hover => PAL_ELEM_HOVER,
-    elem_active => PAL_ELEM_ACTIVE,
-    border_focused => PAL_BORDER_FOCUSED,
-    accent => SELECTION_RECT,
-}
+/// The [`aperture::Palette`] each preset hands to
+/// [`aperture::Theme::from_palette`], filled from the preset's swatches
+/// so swapping dark ⇄ light recolours every widget aperture paints, not
+/// just darkroom-owned chrome. Notes on the mapping:
+/// - `terminal_bg` wants the editor / terminal surface — the same
+///   swatch as the graph canvas in both themes.
+/// - `elem` and our `NODE_FILL` are the same swatch by design: nodes
+///   and aperture surfaces sit on the same surface tier.
+const APERTURE_DARK: aperture::Palette = aperture::Palette {
+    text: dark::PAL_TEXT,
+    text_muted: dark::TEXT_MUTED,
+    text_disabled: dark::PAL_TEXT_DISABLED,
+    terminal_bg: dark::CANVAS_BG,
+    elem: dark::NODE_FILL,
+    elem_hover: dark::PAL_ELEM_HOVER,
+    elem_active: dark::PAL_ELEM_ACTIVE,
+    border_focused: dark::PAL_BORDER_FOCUSED,
+    accent: dark::SELECTION_RECT,
+};
 
-/// Aperture sub-theme for darkroom: start from aperture's defaults,
-/// recolour every widget using `p`, then apply darkroom-only tweaks
-/// (smaller menu/context-menu font; menu-bar triggers muted + transparent
-/// at rest so they read as menus, not buttons).
-fn aperture_theme_for(p: &AperturePalette, chrome_fill: Color) -> aperture::Theme {
-    let mut theme = aperture::Theme::default();
-    recolour_aperture(&mut theme, p);
+/// Light peer of [`APERTURE_DARK`] — same mapping over `light::*`.
+const APERTURE_LIGHT: aperture::Palette = aperture::Palette {
+    text: light::PAL_TEXT,
+    text_muted: light::TEXT_MUTED,
+    text_disabled: light::PAL_TEXT_DISABLED,
+    terminal_bg: light::CANVAS_BG,
+    elem: light::NODE_FILL,
+    elem_hover: light::PAL_ELEM_HOVER,
+    elem_active: light::PAL_ELEM_ACTIVE,
+    border_focused: light::PAL_BORDER_FOCUSED,
+    accent: light::SELECTION_RECT,
+};
+
+/// Aperture sub-theme for darkroom: assemble every widget recipe from
+/// the palette via [`aperture::Theme::from_palette`], then apply the
+/// darkroom-only tweaks (smaller menu/context-menu font; menu-bar
+/// triggers muted + transparent at rest so they read as menus, not
+/// buttons).
+fn aperture_theme_for(p: &aperture::Palette, chrome_fill: Color) -> aperture::Theme {
+    let mut theme = aperture::Theme::from_palette(p);
 
     // Dock splitter: the resting seam paints the chrome band that frames
     // the panes, so the gap reads as part of that surround rather than a
@@ -581,115 +621,6 @@ fn aperture_theme_for(p: &AperturePalette, chrome_fill: Color) -> aperture::Them
     theme
 }
 
-/// Walk `theme` and replace every colour aperture's defaults pulled from
-/// its (private) `palette::*` consts with the matching entry in `p`. One
-/// place so a palette swap propagates through every widget aperture
-/// paints — text, buttons, text-edits, toggles, scrollbars, menus,
-/// tooltips — not just the darkroom-owned chrome.
-fn recolour_aperture(t: &mut aperture::Theme, p: &AperturePalette) {
-    let muted_edge = p.text_muted.with_alpha(0.18);
-    let panel_edge = p.text_muted.with_alpha(0.22);
-
-    // darkroom's two standard chip shapes, both a 4 px rounded fill over
-    // aperture's `Background::rounded` primitive — `solid_bg` adds a stroke,
-    // `flat_round` is bare. Other radii (toggles, the 6 px menu panel) build
-    // on the primitive inline.
-    let solid_bg = |fill: Color, stroke: Color, stroke_w: f32| {
-        Background::rounded(fill, Corners::all(4.0)).with_stroke(Stroke::solid(stroke, stroke_w))
-    };
-    let flat_round = |fill: Color| Background::rounded(fill, Corners::all(4.0));
-    let disabled_text = Some(TextStyle::default().with_color(p.text_disabled));
-
-    // Top-level surfaces + text.
-    t.text.color = p.text;
-    t.window_clear = p.terminal_bg;
-
-    // Button — same recipe as `ButtonTheme::default`, recoloured.
-    t.button.looks.normal.background = Some(solid_bg(p.elem_hover, muted_edge, 1.0));
-    t.button.looks.hovered.background = Some(solid_bg(p.elem_active, muted_edge, 1.0));
-    t.button.looks.active.background = Some(solid_bg(p.elem_active, p.border_focused, 1.0));
-    t.button.looks.disabled.background = Some(solid_bg(p.elem, muted_edge, 1.0));
-    t.button.looks.disabled.text = disabled_text;
-
-    // Menu-button — `ButtonTheme::menu_button` recipe: transparent at
-    // rest + disabled, hover = elem_hover, pressed = elem_active. The
-    // darkroom-side `aperture_theme_for` then overlays a semi-transparent
-    // node-fill chip on the normal/disabled looks for legibility over
-    // busy nodes; we only need to recolour the hover/pressed fills here.
-    t.menu_button.looks.hovered.background = Some(flat_round(p.elem_hover));
-    t.menu_button.looks.active.background = Some(flat_round(p.elem_active));
-
-    // TextEdit — stroke-width-constant recipe from `TextEditTheme::default`.
-    let te_stroke_w = 1.5;
-    t.text_edit.looks.normal.background = Some(solid_bg(p.elem_hover, muted_edge, te_stroke_w));
-    // `hovered` mirrors `normal` — no hover feedback, matching the default.
-    t.text_edit.looks.hovered.background = Some(solid_bg(p.elem_hover, muted_edge, te_stroke_w));
-    t.text_edit.looks.active.background =
-        Some(solid_bg(p.elem_hover, p.border_focused, te_stroke_w));
-    t.text_edit.looks.disabled.background = Some(solid_bg(p.elem, muted_edge, te_stroke_w));
-    t.text_edit.looks.disabled.text = disabled_text;
-    t.text_edit.placeholder = p.text_muted;
-    t.text_edit.caret = p.text;
-    t.text_edit.selection = p.accent.with_alpha(0.25);
-
-    // Toggle (checkbox + radio) — same recipe as aperture's
-    // `ToggleTheme::with_radius`, applied separately per toggle so the
-    // corner radius (square checkbox vs pill radio) stays correct.
-    let recolour_toggle = |toggle: &mut aperture::ToggleTheme, corner: f32| {
-        let edge = p.text_muted.with_alpha(0.35);
-        let make = |fill: Color, stroke: Stroke| {
-            Some(Background::rounded(fill, Corners::all(corner)).with_stroke(stroke))
-        };
-        toggle.unchecked.normal.background = make(p.elem_hover, Stroke::solid(edge, 1.0));
-        toggle.unchecked.hovered.background = make(p.elem_active, Stroke::solid(edge, 1.0));
-        toggle.unchecked.active.background =
-            make(p.elem_active, Stroke::solid(p.border_focused, 1.0));
-        toggle.unchecked.disabled.background =
-            make(p.elem, Stroke::solid(edge.with_alpha(0.18), 1.0));
-        toggle.unchecked.disabled.text = disabled_text;
-        toggle.checked.normal.background = make(p.accent, Stroke::ZERO);
-        toggle.checked.hovered.background = make(p.accent, Stroke::ZERO);
-        toggle.checked.active.background = make(p.accent, Stroke::solid(p.border_focused, 1.0));
-        toggle.checked.disabled.background = make(p.accent.with_alpha(0.45), Stroke::ZERO);
-        toggle.checked.disabled.text = disabled_text;
-        toggle.indicator = p.terminal_bg;
-    };
-    recolour_toggle(&mut t.checkbox, 3.0);
-    let radio_radius = t.radio.box_size * 0.5;
-    recolour_toggle(&mut t.radio, radio_radius);
-
-    // Scrollbar — transparent track, thumb tiers via text_muted alpha
-    // (matches `ScrollbarTheme::default`).
-    t.scrollbar.track = Color::TRANSPARENT;
-    t.scrollbar.thumb = p.text_muted.with_alpha(0.45);
-    t.scrollbar.thumb_hover = p.text_muted.with_alpha(0.65);
-    t.scrollbar.thumb_active = p.text_muted.with_alpha(0.85);
-
-    // Context menu — panel + item rows + shortcut + separator.
-    // (`ContextMenuTheme::default` recipe.)
-    t.context_menu.panel =
-        Background::rounded(p.elem, Corners::all(6.0)).with_stroke(Stroke::solid(panel_edge, 1.0));
-    t.context_menu.item.looks.normal.background = None;
-    t.context_menu.item.looks.hovered.background = Some(flat_round(p.elem_hover));
-    // `active` (pressed) mirrors `hovered` — the click closes the menu.
-    t.context_menu.item.looks.active.background = Some(flat_round(p.elem_hover));
-    t.context_menu.item.looks.disabled.background = None;
-    t.context_menu.item.looks.disabled.text = disabled_text;
-    t.context_menu.item.shortcut = p.text_muted;
-    t.context_menu.separator = p.text_muted.with_alpha(0.18);
-
-    // Tooltip — `TooltipTheme::default` recipe; the panel keeps its
-    // drop shadow so the bubble lifts off whatever it overlaps.
-    t.tooltip.panel = Background::rounded(p.elem, Corners::all(4.0))
-        .with_stroke(Stroke::solid(panel_edge, 1.0))
-        .with_shadow(Shadow::drop(
-            Color::linear_rgba(0.0, 0.0, 0.0, 0.6),
-            glam::Vec2::new(2.0, 2.0),
-            5.0,
-        ));
-    t.tooltip.text.color = p.text;
-}
-
 palette_struct! {
     /// Every darkroom chrome colour — the palette half of a [`Theme`]
     /// (the other half is layout dimensions). Serialized as the theme's
@@ -697,73 +628,93 @@ palette_struct! {
     /// not silently bit-copied.
     #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
     pub struct PaletteColors;
-    canvas_bg => CANVAS_BG,
+    canvas_bg: Color => CANVAS_BG,
     /// The selection accent: the rubber-band rectangle (translucent fill +
     /// near-opaque 1px border, both derived from this) *and* the selected-
     /// node border, so "in the selection" reads as one color from sweep to
     /// committed halo (palette accent).
-    selection_rect => SELECTION_RECT,
+    selection_rect: Color => SELECTION_RECT,
     /// Dotted backdrop grid dot color. Spacing + radius are layout
     /// dimensions on `Theme` (`canvas_dot_spacing` / `canvas_dot_radius`).
-    canvas_dot => CANVAS_DOT,
-    connection_broken => CONNECTION_BROKEN,
-    breaker_stroke => BREAKER_STROKE,
-    node_fill => NODE_FILL,
-    node_border => NODE_BORDER,
-    header_fill => HEADER_FILL,
+    canvas_dot: Color => CANVAS_DOT,
+    connection_broken: Color => CONNECTION_BROKEN,
+    breaker_stroke: Color => BREAKER_STROKE,
+    node_fill: Color => NODE_FILL,
+    node_border: Color => NODE_BORDER,
+    header_fill: Color => HEADER_FILL,
     /// Muted secondary foreground (palette `text_muted`, `#aaaaa8`). The
     /// de-emphasized accent shared across chrome: inactive/disabled header
     /// chips, the pinned-inspector outline, and active-tab text — visible
     /// without competing with the bright accent (`badge_subgraph`) or
     /// full-strength text.
-    text_muted => TEXT_MUTED,
+    text_muted: Color => TEXT_MUTED,
     /// Port + event label ink — de-emphasized against the full-strength
     /// value/editor text so each port row has one strong element. Its own
     /// slot (not `text_muted`) because the light palette needs a darker
     /// value for legibility on the node fill.
-    port_label => PORT_LABEL,
+    port_label: Color => PORT_LABEL,
     /// Ambient elevation shadow cast by nodes and floating panels (the
     /// inspector) when no status glow claims the slot — one swatch so
     /// every elevated surface casts the same kind of shadow.
-    node_ambient_shadow => NODE_AMBIENT_SHADOW,
+    node_ambient_shadow: Color => NODE_AMBIENT_SHADOW,
     /// Top-chrome fill behind the menu bar + tab strip. A notch darker
     /// than the node surface, sitting between the graph (`canvas_bg`)
     /// and the nodes, so the chrome recedes and the active tab (which
     /// uses `canvas_bg`) reads as continuous with the graph below it.
-    chrome_fill => CHROME_FILL,
+    chrome_fill: Color => CHROME_FILL,
     /// Inactive tab-strip chip. A notch above `chrome_fill` toward the node
     /// surface, so an unselected tab reads as a resting chip rather than a
     /// bare label; the active tab uses `canvas_bg` + a `selection_rect`
     /// accent top-line instead.
-    tab_inactive => TAB_INACTIVE,
+    tab_inactive: Color => TAB_INACTIVE,
     /// Subgraph (composite instance) chip — accent cyan.
-    badge_subgraph => BADGE_SUBGRAPH,
+    badge_subgraph: Color => BADGE_SUBGRAPH,
     /// Sink chip — error red.
-    badge_sink => BADGE_SINK,
+    badge_sink: Color => BADGE_SINK,
     /// RuntimeCache (persist-to-disk) chip — warning yellow.
-    badge_cache => BADGE_CACHE,
+    badge_cache: Color => BADGE_CACHE,
     /// Impure marker — `constant` purple. A read-only descriptor (the node
     /// recomputes every run and is never cached), not an interactive toggle.
-    badge_impure => BADGE_IMPURE,
+    badge_impure: Color => BADGE_IMPURE,
     /// Soft glow behind a node computed this run — palette `success` (green).
-    exec_executed_glow => EXEC_EXECUTED_GLOW,
+    exec_executed_glow: Color => EXEC_EXECUTED_GLOW,
     /// Node reused its cached result — palette `accent` (cyan).
-    exec_cached_glow => EXEC_CACHED_GLOW,
+    exec_cached_glow: Color => EXEC_CACHED_GLOW,
     /// Node is computing this run (live) — palette `constant` (purple).
-    exec_running_glow => EXEC_RUNNING_GLOW,
+    exec_running_glow: Color => EXEC_RUNNING_GLOW,
     /// Node has unfilled required inputs — palette `syn_keyword` (orange).
-    exec_missing_glow => EXEC_MISSING_GLOW,
+    exec_missing_glow: Color => EXEC_MISSING_GLOW,
     /// Node errored — palette `error` (red).
-    exec_errored_glow => EXEC_ERRORED_GLOW,
-    input_port => INPUT_PORT,
-    output_port => OUTPUT_PORT,
-    input_port_hover => INPUT_PORT_HOVER,
-    output_port_hover => OUTPUT_PORT_HOVER,
+    exec_errored_glow: Color => EXEC_ERRORED_GLOW,
+    /// Positional swatch for untyped input ports (typed ports use
+    /// [`TypeColors`]); hover lifts for emphasis.
+    input_port: HoverColor => INPUT_PORT,
+    /// Positional swatch for untyped output ports.
+    output_port: HoverColor => OUTPUT_PORT,
     /// Event emitter glyphs, subscription pins, and event wires (neutral,
-    /// distinct from the type-colored data ports). `_hover` lifts it like
-    /// the positional port colors do.
-    event_port => EVENT_PORT,
-    event_port_hover => EVENT_PORT_HOVER,
+    /// distinct from the type-colored data ports); hover lifts it like
+    /// the positional port colors.
+    event_port: HoverColor => EVENT_PORT,
+}
+
+impl PaletteColors {
+    /// Rubber-band interior wash — `selection_rect` at 12%, pairing
+    /// with [`Self::selection_border`] (the derivation the
+    /// `selection_rect` doc promises lives in one place).
+    pub fn selection_fill(&self) -> Color {
+        self.selection_rect.with_alpha(0.12)
+    }
+
+    /// Rubber-band outline — `selection_rect` near-opaque.
+    pub fn selection_border(&self) -> Color {
+        self.selection_rect.with_alpha(0.85)
+    }
+
+    /// Soft hairline rule — `text_muted` at 18%, the peer of
+    /// aperture's `Palette::border_soft`.
+    pub fn border_soft(&self) -> Color {
+        self.text_muted.with_alpha(0.18)
+    }
 }
 
 /// Result of [`Theme::card_border`]: the resolved outline color plus the
@@ -877,9 +828,8 @@ impl Theme {
         Self::build(
             ThemePreset::Dark,
             PaletteColors::DARK,
-            &AperturePalette::DARK,
-            StaticValueEditorTheme::dark(),
-            InlineRenameTheme::dark(),
+            dark::TYPE_COLORS,
+            &APERTURE_DARK,
         )
     }
 
@@ -889,27 +839,25 @@ impl Theme {
         Self::build(
             ThemePreset::Light,
             PaletteColors::LIGHT,
-            &AperturePalette::LIGHT,
-            StaticValueEditorTheme::light(),
-            InlineRenameTheme::light(),
+            light::TYPE_COLORS,
+            &APERTURE_LIGHT,
         )
     }
 
-    /// Shared assembly path: dimensions are palette-independent; `colors`
-    /// (moved in, not copied) drives darkroom chrome, `p` drives the
-    /// aperture widget recolouring, and `sve` / `inline_rename` are the
-    /// per-palette per-widget bundles (handed in rather than rebuilt here
-    /// so their hex values stay alongside the rest of the palette).
-    /// `preset` tags which built-in produced this theme so the toggle
-    /// command doesn't have to guess.
+    /// Shared assembly path — the darkroom peer of
+    /// `aperture::Theme::from_palette`: dimensions are
+    /// palette-independent; `colors` / `type_colors` (moved in, not
+    /// copied) drive darkroom chrome, and every sub-recipe (the
+    /// aperture widget theme, the static-value editor, inline rename)
+    /// cascades from `p` here rather than being hand-assembled per
+    /// preset. `preset` tags which built-in produced this theme so the
+    /// toggle command doesn't have to guess.
     fn build(
         preset: ThemePreset,
         colors: PaletteColors,
-        p: &AperturePalette,
-        sve: StaticValueEditorTheme,
-        inline_rename: InlineRenameTheme,
+        type_colors: TypeColors,
+        p: &aperture::Palette,
     ) -> Self {
-        let static_value_editor_revealed = sve.revealed();
         let chrome_fill = colors.chrome_fill;
         Self {
             preset,
@@ -930,9 +878,10 @@ impl Theme {
             floating_widget_gap: FLOATING_WIDGET_GAP,
             new_node_popup_max_height: NEW_NODE_POPUP_MAX_HEIGHT,
             colors,
-            static_value_editor: sve,
-            static_value_editor_revealed,
-            inline_rename,
+            type_colors,
+            static_value_editor: StaticValueEditorTheme::from_palette(p),
+            static_value_editor_revealed: StaticValueEditorTheme::revealed_from_palette(p),
+            inline_rename: InlineRenameTheme::from_palette(p),
             aperture_theme: aperture_theme_for(p, chrome_fill),
         }
     }
@@ -1003,8 +952,8 @@ mod tests {
     fn default_palette_and_menu_tweak() {
         let theme = Theme::default();
         assert_eq!(theme.colors.canvas_bg, Color::hex(0x1a1a1a));
-        assert_eq!(theme.colors.input_port, Color::hex(0xdaff58));
-        assert_eq!(theme.colors.output_port, Color::hex(0xffa63d));
+        assert_eq!(theme.colors.input_port.rest, Color::hex(0xdaff58));
+        assert_eq!(theme.colors.output_port.rest, Color::hex(0xffa63d));
         // RuntimeCache (persist-to-disk) chip is the palette `warning` yellow.
         assert_eq!(theme.colors.badge_cache, Color::hex(0xffd44a));
         // Impure marker is the palette `constant` purple.

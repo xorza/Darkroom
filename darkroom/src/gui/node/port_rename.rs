@@ -71,8 +71,7 @@ pub(crate) fn port_label(
         BoundarySide::Input => HAlign::Right,
         BoundarySide::Output => HAlign::Left,
     };
-    let ev = InlineRename::new(id, name)
-        .theme(&rcx.theme.inline_rename)
+    let ev = InlineRename::new(id, name, &rcx.theme.inline_rename)
         .max_chars(PORT_NAME_MAX_CHARS)
         .halign(halign)
         .show(ui);

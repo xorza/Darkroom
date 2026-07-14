@@ -8,13 +8,18 @@
 //! stable, distinct colors without enumerating them here. `Any` (the
 //! default / untyped boundary placeholder) has no type identity, so it
 //! falls back to the positional input/output port colors from the theme.
+//!
+//! The hue rosters themselves live on the theme
+//! ([`TypeColors`](crate::gui::theme::TypeColors), serialized like every
+//! other swatch); this module owns only the type → slot mapping and the
+//! hover emphasis.
 
 use aperture::Color;
 use scenarium::data::DataType;
 
 use crate::core::document::PortKind;
 use crate::gui::canvas::wire::toward;
-use crate::gui::theme::{Theme, ThemePreset};
+use crate::gui::theme::{Theme, ThemePreset, TypeColors};
 
 /// Color for a port of type `ty` on the given side. `hovered` lightens
 /// (dark theme) or darkens (light theme) the typed hue for emphasis;
@@ -24,7 +29,7 @@ pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: 
     if matches!(ty, DataType::Any) {
         return fallback(theme, kind, hovered);
     }
-    let base = type_hue(theme.preset, ty);
+    let base = type_hue(&theme.type_colors, ty);
     if hovered {
         emphasize(base, theme.preset)
     } else {
@@ -36,49 +41,38 @@ pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: 
 /// Events carry no data type, so they use the theme's neutral event swatch
 /// (not a type hue); `hovered` lifts it like the positional port colors.
 pub(crate) fn event_color(theme: &Theme, hovered: bool) -> Color {
-    if hovered {
-        theme.colors.event_port_hover
-    } else {
-        theme.colors.event_port
-    }
+    theme.colors.event_port.pick(hovered)
 }
 
 /// Positional color for an untyped port — the theme's input/output port
 /// swatch, hover variant included.
 fn fallback(theme: &Theme, kind: PortKind, hovered: bool) -> Color {
-    match (kind, hovered) {
-        (PortKind::Input, false) => theme.colors.input_port,
-        (PortKind::Input, true) => theme.colors.input_port_hover,
-        (PortKind::Output, false) => theme.colors.output_port,
-        (PortKind::Output, true) => theme.colors.output_port_hover,
+    match kind {
+        PortKind::Input => theme.colors.input_port.pick(hovered),
+        PortKind::Output => theme.colors.output_port.pick(hovered),
     }
 }
 
-/// The base hue for a non-`Any` type under the given palette.
-fn type_hue(preset: ThemePreset, ty: &DataType) -> Color {
-    let p = match preset {
-        ThemePreset::Dark => &DARK,
-        ThemePreset::Light => &LIGHT,
-    };
-    let hex = match ty {
-        DataType::Bool => p.boolean,
-        DataType::Int => p.int,
-        DataType::Float => p.float,
-        DataType::String => p.string,
-        DataType::FsPath(_) => p.path,
+/// The base hue for a non-`Any` type under the theme's roster.
+fn type_hue(t: &TypeColors, ty: &DataType) -> Color {
+    match ty {
+        DataType::Bool => t.boolean,
+        DataType::Int => t.int,
+        DataType::Float => t.float,
+        DataType::String => t.string,
+        DataType::FsPath(_) => t.path,
         // Image is the dominant type on a darkroom canvas — it owns a fixed
         // hue instead of a hash pick, so its wires read as one deliberate
         // color (and can't land next to Float or the status purples).
-        DataType::Custom(id) if *id == *lens::IMAGE_TYPE_ID => p.image,
-        DataType::Custom(id) | DataType::Enum(id) => ramp_pick(p.ramp, id.as_u128()),
+        DataType::Custom(id) if *id == *lens::IMAGE_TYPE_ID => t.image,
+        DataType::Custom(id) | DataType::Enum(id) => ramp_pick(&t.ramp, id.as_u128()),
         DataType::Any => unreachable!("Any handled by fallback in port_color"),
-    };
-    Color::hex(hex)
+    }
 }
 
 /// Pick a ramp entry from a type id so a given custom/enum type always
 /// lands on the same color.
-fn ramp_pick(ramp: &[u32], key: u128) -> u32 {
+fn ramp_pick(ramp: &[Color], key: u128) -> Color {
     ramp[(key % ramp.len() as u128) as usize]
 }
 
@@ -91,44 +85,6 @@ fn emphasize(c: Color, preset: ThemePreset) -> Color {
         ThemePreset::Light => toward(c, Color::BLACK, T),
     }
 }
-
-/// A per-palette data-type color set. Hand-tuned to harmonize with the
-/// Ayu palettes; centralized here so retuning is a one-line edit. `ramp`
-/// backs the open-ended `Custom`/`Enum` families; `image` is the fixed
-/// hue the lens image type owns (see `type_hue`). The ramp deliberately
-/// carries no rose (Image owns it) and no purple (the running/impure
-/// status family), so a hash pick can't impersonate either.
-#[derive(Debug)]
-struct TypePalette {
-    boolean: u32,
-    int: u32,
-    float: u32,
-    string: u32,
-    path: u32,
-    image: u32,
-    ramp: &'static [u32],
-}
-
-const DARK: TypePalette = TypePalette {
-    boolean: 0xf28779,
-    int: 0x95e6cb,
-    float: 0x73d0ff,
-    string: 0xffd173,
-    path: 0xd4bfff,
-    // Safelight rose — the photographic-darkroom hue for the image payload.
-    image: 0xff9eb5,
-    ramp: &[0xffa759, 0x7bd88f, 0x5ccfe6, 0xe6cd8a],
-};
-
-const LIGHT: TypePalette = TypePalette {
-    boolean: 0xe05252,
-    int: 0x2e9e5b,
-    float: 0x2b8fd6,
-    string: 0xb8860b,
-    path: 0x7a4fd0,
-    image: 0xc23b73,
-    ramp: &[0xd9722a, 0x1f8fb3, 0x2f9e6a, 0xa67c1a],
-};
 
 #[cfg(test)]
 mod tests {
@@ -167,19 +123,19 @@ mod tests {
         let t = Theme::dark();
         assert_eq!(
             port_color(&t, &DataType::Any, PortKind::Input, false),
-            t.colors.input_port
+            t.colors.input_port.rest
         );
         assert_eq!(
             port_color(&t, &DataType::Any, PortKind::Output, false),
-            t.colors.output_port
+            t.colors.output_port.rest
         );
         assert_eq!(
             port_color(&t, &DataType::Any, PortKind::Input, true),
-            t.colors.input_port_hover
+            t.colors.input_port.hover
         );
         assert_eq!(
             port_color(&t, &DataType::Any, PortKind::Output, true),
-            t.colors.output_port_hover
+            t.colors.output_port.hover
         );
     }
 
@@ -211,14 +167,15 @@ mod tests {
         let image_ty = DataType::Custom(*lens::IMAGE_TYPE_ID);
         assert_eq!(
             port_color(&t, &image_ty, PortKind::Input, false),
-            Color::hex(DARK.image)
+            t.type_colors.image
         );
+        let light = Theme::light();
         assert_eq!(
-            port_color(&Theme::light(), &image_ty, PortKind::Input, false),
-            Color::hex(LIGHT.image)
+            port_color(&light, &image_ty, PortKind::Input, false),
+            light.type_colors.image
         );
-        for p in [&DARK, &LIGHT] {
-            assert!(!p.ramp.contains(&p.image));
+        for tc in [&t.type_colors, &light.type_colors] {
+            assert!(!tc.ramp.contains(&tc.image));
         }
     }
 
@@ -229,8 +186,8 @@ mod tests {
         for t in [Theme::dark(), Theme::light()] {
             let rest = event_color(&t, false);
             let hov = event_color(&t, true);
-            assert_eq!(rest, t.colors.event_port);
-            assert_eq!(hov, t.colors.event_port_hover);
+            assert_eq!(rest, t.colors.event_port.rest);
+            assert_eq!(hov, t.colors.event_port.hover);
             assert_ne!(rest, hov, "hover must visibly differ from rest");
         }
     }

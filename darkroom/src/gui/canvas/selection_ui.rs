@@ -159,11 +159,10 @@ impl SelectionUI {
         if rect.area() <= f32::EPSILON {
             return;
         }
-        let tint = ctx.theme.colors.selection_rect;
         ui.add_shape(
             Shape::rect(rect)
-                .fill(tint.with_alpha(0.12))
-                .stroke(Stroke::solid(tint.with_alpha(0.85), 1.0)),
+                .fill(ctx.theme.colors.selection_fill())
+                .stroke(Stroke::solid(ctx.theme.colors.selection_border(), 1.0)),
         );
     }
 }

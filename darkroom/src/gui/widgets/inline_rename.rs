@@ -55,32 +55,26 @@ const DEFAULT_MAX_CHARS: usize = 64;
 pub(crate) struct InlineRename<'a> {
     id: WidgetId,
     name: SmolStr,
-    /// Borrowed when the caller supplied one via [`Self::theme`];
-    /// otherwise `show()` falls back to `InlineRenameTheme::default()`
-    /// (the built-in flat editor).
-    theme: Option<&'a InlineRenameTheme>,
+    theme: &'a InlineRenameTheme,
     max_chars: usize,
     style: Option<TextStyle>,
     halign: HAlign,
 }
 
 impl<'a> InlineRename<'a> {
-    pub(crate) fn new(id: WidgetId, name: impl Into<SmolStr>) -> Self {
+    pub(crate) fn new(
+        id: WidgetId,
+        name: impl Into<SmolStr>,
+        theme: &'a InlineRenameTheme,
+    ) -> Self {
         Self {
             id,
+            theme,
             name: name.into(),
-            theme: None,
             max_chars: DEFAULT_MAX_CHARS,
             style: None,
             halign: HAlign::Left,
         }
-    }
-
-    /// Borrow a darkroom [`InlineRenameTheme`] for the editor look.
-    /// Optional — without it, `show()` uses the type's `Default`.
-    pub(crate) fn theme(mut self, theme: &'a InlineRenameTheme) -> Self {
-        self.theme = Some(theme);
-        self
     }
 
     /// Override the character cap applied to the active `TextEdit`.
@@ -139,15 +133,7 @@ impl<'a> InlineRename<'a> {
         // this, the panel grows by `caret_width` (and right-aligned
         // glyphs shift left by the same amount) on the swap to edit
         // mode, twitching the label one or two pixels.
-        let owned_default;
-        let theme_ref: &InlineRenameTheme = match theme {
-            Some(t) => t,
-            None => {
-                owned_default = InlineRenameTheme::dark();
-                &owned_default
-            }
-        };
-        let caret_room = theme_ref.text_edit.caret_width.max(0.0);
+        let caret_room = theme.text_edit.caret_width.max(0.0);
         // TextEdit's Hug single-line floor sets `min_size.w = text +
         // padding_horiz + 2 * caret_room` (see aperture
         // `text_edit/mod.rs::show`), reserving caret slack on *both*
@@ -214,7 +200,7 @@ impl<'a> InlineRename<'a> {
         let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).edit.text);
         TextEdit::new(&mut draft)
             .id(id)
-            .style(edit_style(theme_ref, style))
+            .style(edit_style(theme, style))
             .max_chars(max_chars)
             .size((Sizing::Hug, Sizing::Hug))
             .min_size((MIN_EDIT_WIDTH, line_h))

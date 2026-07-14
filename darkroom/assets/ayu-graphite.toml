@@ -39,12 +39,27 @@ exec_cached_glow = "#9adbfb"
 exec_running_glow = "#d4bfff"
 exec_missing_glow = "#ffa63d"
 exec_errored_glow = "#ff5e44"
-input_port = "#daff58"
-output_port = "#ffa63d"
-input_port_hover = "#e9ff8e"
-output_port_hover = "#ffc878"
-event_port = "#ff5e44"
-event_port_hover = "#ff8b78"
+
+[colors.input_port]
+rest = "#daff58"
+hover = "#e9ff8e"
+
+[colors.output_port]
+rest = "#ffa63d"
+hover = "#ffc878"
+
+[colors.event_port]
+rest = "#ff5e44"
+hover = "#ff8b78"
+
+[type_colors]
+boolean = "#f28779"
+int = "#95e6cb"
+float = "#73d0ff"
+string = "#ffd173"
+path = "#d4bfff"
+image = "#ff9eb5"
+ramp = ["#ffa759", "#7bd88f", "#5ccfe6", "#e6cd8a"]
 
 [static_value_editor]
 width = 100.0
@@ -82,7 +97,7 @@ Solid = "#00000000"
 placeholder = "#aaaaa8"
 caret = "#e2dfd3"
 caret_width = 1.5
-selection = "#9adbfb"
+selection = "#9adbfb40"
 padding = [8.0, 4.0]
 margin = 0.0
 
@@ -146,7 +161,7 @@ Solid = "#00000000"
 placeholder = "#aaaaa8"
 caret = "#e2dfd3"
 caret_width = 1.5
-selection = "#9adbfb"
+selection = "#9adbfb40"
 padding = [8.0, 4.0]
 margin = 0.0
 
@@ -531,7 +546,7 @@ family = "Sans"
 weight = "Regular"
 
 [aperture_theme.switch]
-indicator = "#ffffff"
+indicator = "#e2dfd3"
 box_size = 20.0
 indicator_stroke = 2.0
 indicator_inset = 3.0
@@ -768,7 +783,7 @@ weight = "Regular"
 
 [aperture_theme.drag_value.editor]
 placeholder = "#aaaaa8"
-caret = "#ffffff"
+caret = "#e2dfd3"
 caret_width = 1.5
 selection = "#9adbfb40"
 padding = [12.0, 6.0]
@@ -954,7 +969,7 @@ thickness = 1.0
 [aperture_theme.slider]
 rail = "#3e3e3e"
 fill = "#9adbfb"
-knob = "#ffffff"
+knob = "#e2dfd3"
 knob_size = 18.0
 rail_thickness = 4.0
 

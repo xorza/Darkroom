@@ -269,11 +269,14 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
                         // switch to the post-record drain, landing the new tab
                         // in Pass B with no measured layouts and dropping its
                         // connections for a frame.
-                        let ev = InlineRename::new(tab_rename_wid(sub_id), label.text.clone())
-                            .theme(&theme.inline_rename)
-                            .max_chars(SUBGRAPH_NAME_MAX_CHARS)
-                            .style(label_style)
-                            .show(ui);
+                        let ev = InlineRename::new(
+                            tab_rename_wid(sub_id),
+                            label.text.clone(),
+                            &theme.inline_rename,
+                        )
+                        .max_chars(SUBGRAPH_NAME_MAX_CHARS)
+                        .style(label_style)
+                        .show(ui);
                         if let Some(to) = ev.committed {
                             s.out.push(Intent::RenameSubgraph { id: sub_id, to });
                         }

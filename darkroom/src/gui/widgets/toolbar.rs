@@ -61,7 +61,7 @@ pub(crate) fn pill(ui: &mut Ui, theme: &Theme, panel: Panel, body: impl FnOnce(&
 pub(crate) fn pill_rule(ui: &mut Ui, theme: &Theme) {
     const INSET: f32 = 5.0;
     Separator::horizontal()
-        .color(theme.colors.text_muted.with_alpha(0.18))
+        .color(theme.colors.border_soft())
         .margin(Spacing::new(INSET, 0.0, INSET, 0.0))
         .show(ui);
 }
