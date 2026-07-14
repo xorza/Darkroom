@@ -62,15 +62,15 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
     // The stamped digest is probed off the header alone; any other digest — or a
     // missing file — is not a hit.
     assert_eq!(
-        target(&file.0, d_a).coverage(3),
+        target(&file.0, d_a).coverage(),
         Some(CachedOutputCoverage::from_bytes(&[0, 1, 1]).unwrap())
     );
     assert!(
-        target(&file.0, d_b).coverage(3).is_none(),
+        target(&file.0, d_b).coverage().is_none(),
         "another digest means the blob is superseded, not present"
     );
     let absent = temp_file("absent");
-    assert!(target(&absent.0, d_a).coverage(3).is_none());
+    assert!(target(&absent.0, d_a).coverage().is_none());
     assert!(store.read(&target(&absent.0, d_a)).await.is_none());
 
     let back = store.read(&target(&file.0, d_a)).await.expect("hit");
@@ -97,7 +97,7 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
         )
         .await;
     assert_eq!(
-        target(&file.0, d_b).coverage(1),
+        target(&file.0, d_b).coverage(),
         Some(CachedOutputCoverage { ports: vec![true] }),
         "blob re-stamped D_B"
     );
