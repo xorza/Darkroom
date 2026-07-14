@@ -5,7 +5,7 @@
 //! [`RuntimeCache`](crate::execution::cache::RuntimeCache) that owns it and drives the
 //! reuse/eviction policy. A disk-backed (`Disk`/`Both`) node's outputs live at
 //! `<disk_root>/<hex(node id)>` — **one blob per node** — as `[content digest — 32
-//! bytes][blob version][output count][output-coverage bytes][codec frame]`, written
+//! bytes][blob version][output count][output-coverage bytes][codec body]`, written
 //! atomically. A digest change overwrites the node's blob in
 //! place, so a superseded configuration's bytes never linger as an orphan; the header keeps
 //! it correct — every presence probe and read checks it, so a blob carrying a digest other
@@ -49,7 +49,7 @@ pub(crate) struct BlobTarget {
     pub(crate) digest: Digest,
 }
 
-const BLOB_FORMAT_VERSION: u32 = 3;
+const BLOB_FORMAT_VERSION: u32 = 4;
 const COVERAGE_OFFSET: u64 = 32 + 4 + 4;
 
 impl BlobTarget {

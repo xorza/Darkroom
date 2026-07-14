@@ -1,5 +1,6 @@
 use super::*;
 use crate::StaticValue;
+use crate::execution::cache::test_support::hydrate;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
@@ -344,7 +345,8 @@ fn bound_fs_path_folds_delivered_file_identity() {
         let producer = node_digest(&p.program, NodeIdx(0), &cache).unwrap();
         cache.slots[NodeIdx(0)].current_digest = Some(producer);
         if let Some(value) = value {
-            cache.hydrate(
+            hydrate(
+                &mut cache,
                 NodeIdx(0),
                 crate::execution::cache::OutputSnapshot::new(
                     vec![value],
@@ -442,7 +444,8 @@ fn custom_stamper_folds_referent_version() {
         cache.reconcile(&p.program.e_nodes);
         let producer = node_digest(&p.program, NodeIdx(0), &cache).unwrap();
         cache.slots[NodeIdx(0)].current_digest = Some(producer);
-        cache.hydrate(
+        hydrate(
+            &mut cache,
             NodeIdx(0),
             crate::execution::cache::OutputSnapshot::new(
                 vec![StaticValue::Int(42).into()],

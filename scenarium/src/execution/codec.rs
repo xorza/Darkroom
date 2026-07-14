@@ -64,14 +64,6 @@ pub(crate) enum Error {
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
-/// Version of the cache *blob* framing (the [`CachedValue`] mirror serialized below),
-/// prefixed to every blob as 4 little-endian bytes. Bitcode isn't self-describing, so a
-/// change to `CachedValue`'s shape would silently mis-decode old blobs; bumping this
-/// makes [`deserialize_outputs`] reject them as a miss (→ recompute) instead. It does
-/// **not** cover a custom codec's opaque `blob` bytes — that's the codec's own
-/// responsibility (see [`CustomValueCodec::decode`]).
-const FORMAT_VERSION: u32 = 1;
-
 /// Serializable mirror of one [`DynamicValue`]. `Custom` carries the producer's
 /// type id so the loader can pick the right codec.
 #[derive(Serialize, Deserialize)]
@@ -106,31 +98,14 @@ pub(crate) async fn serialize_outputs(
             }
         });
     }
-    // In-memory encode of known-serializable types: failure is a logic bug.
-    let body = serialize(&cached, SerdeFormat::Bitcode).expect("cache output serialization");
-    let mut bytes = Vec::with_capacity(4 + body.len());
-    bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
-    bytes.extend_from_slice(&body);
-    Ok(bytes)
+    Ok(serialize(&cached, SerdeFormat::Bitcode).expect("cache output serialization"))
 }
 
 /// Decode outputs previously written by [`serialize_outputs`], rebuilding custom
 /// values through `registry`. Errors on malformed bytes or an unregistered type.
 pub(crate) fn deserialize_outputs(bytes: &[u8], library: &Library) -> Result<Vec<DynamicValue>> {
-    if bytes.len() < 4 {
-        return Err(Error::Frame(
-            "cache blob too short for a version header".into(),
-        ));
-    }
-    let (header, body) = bytes.split_at(4);
-    let version = u32::from_le_bytes(header.try_into().expect("4-byte header"));
-    if version != FORMAT_VERSION {
-        return Err(Error::Frame(format!(
-            "unsupported cache format version {version} (expected {FORMAT_VERSION})"
-        )));
-    }
     let cached: Vec<CachedValue> =
-        deserialize(body, SerdeFormat::Bitcode).map_err(|e| Error::Frame(e.to_string()))?;
+        deserialize(bytes, SerdeFormat::Bitcode).map_err(|e| Error::Frame(e.to_string()))?;
     cached
         .into_iter()
         .map(|value| {

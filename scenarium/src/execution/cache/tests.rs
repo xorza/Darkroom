@@ -91,7 +91,7 @@ fn hydrate_turns_a_miss_into_a_hit() {
         "empty slot misses"
     );
 
-    cache.hydrate(NodeIdx(0), complete_snapshot(out()), d);
+    test_support::hydrate(&mut cache, NodeIdx(0), complete_snapshot(out()), d);
     assert!(
         cache.is_resident_hit(NodeIdx(0), DEMANDED),
         "a slot hydrated under its current digest hits"

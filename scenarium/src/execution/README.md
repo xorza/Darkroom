@@ -315,7 +315,7 @@ live filesystem state and could drift mid-run), not `update`: only then are its 
 
 A node's blob lives at `<disk_root>/<hex(node id)>` — **one file per node**. Its outer
 header is the 32-byte content digest, a format version, the output count, and one
-materialization byte per output; the codec frame follows. Presence probes read only this
+materialization byte per output; the codec body follows. Presence probes read only this
 header and require both a matching digest and a mask that covers the current run's
 demanded outputs. Invalidation is an **overwrite**. A same-digest frame is skipped only
 when its coverage already contains the new result; if a later run covers more outputs,

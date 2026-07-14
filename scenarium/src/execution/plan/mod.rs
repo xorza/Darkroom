@@ -65,11 +65,6 @@ pub(crate) struct PlannedOutputs {
 }
 
 impl PlannedOutputs {
-    fn clear(&mut self) {
-        self.demand.clear();
-        self.readers.clear();
-    }
-
     fn reset(&mut self, output_count: usize) {
         self.demand.reset(output_count, OutputDemand::Skip);
         self.readers.reset(output_count, 0);
@@ -130,8 +125,9 @@ pub(crate) struct ExecutionPlan {
 impl ExecutionPlan {
     pub(crate) fn clear(&mut self) {
         self.process_order.clear();
-        self.verdicts.clear();
-        self.outputs.clear();
+        self.verdicts.values.clear();
+        self.outputs.demand.values.clear();
+        self.outputs.readers.values.clear();
         self.roots.clear();
         self.pinned.clear();
     }
@@ -156,20 +152,10 @@ enum Color {
     Black,
 }
 
-/// Why a node sits on the DFS stack. `Discover` means "reach this node" — as a walk root
-/// or as a producer reached from a consumer, handled identically. `Done` is the post-order
-/// marker pushed under a node's children. Output readers are counted at push time (per consumer
-/// edge), so the discovery carries no port.
 #[derive(Debug)]
-enum VisitCause {
-    Discover,
-    Done,
-}
-
-#[derive(Debug)]
-struct Visit {
-    e_node_idx: NodeIdx,
-    cause: VisitCause,
+enum Visit {
+    Discover(NodeIdx),
+    Done(NodeIdx),
 }
 
 /// Reusable per-run scheduling scratch, kept across runs so a repeated plan on
@@ -227,17 +213,13 @@ impl Planner {
         self.color.reset(program.e_nodes.len(), Color::White);
 
         for e_node_idx in plan.roots.iter().copied() {
-            self.stack.push(Visit {
-                e_node_idx,
-                cause: VisitCause::Discover,
-            });
+            self.stack.push(Visit::Discover(e_node_idx));
         }
 
         while let Some(visit) = self.stack.pop() {
-            match visit.cause {
-                VisitCause::Discover => {}
-                VisitCause::Done => {
-                    let idx = visit.e_node_idx;
+            let idx = match visit {
+                Visit::Discover(idx) => idx,
+                Visit::Done(idx) => {
                     assert_eq!(self.color[idx], Color::Gray);
                     self.color[idx] = Color::Black;
                     plan.process_order.push(idx);
@@ -256,9 +238,8 @@ impl Planner {
                     };
                     continue;
                 }
-            }
+            };
 
-            let idx = visit.e_node_idx;
             match self.color[idx] {
                 Color::Gray => {
                     return Err(Error::CycleDetected {
@@ -270,20 +251,14 @@ impl Planner {
             }
 
             self.color[idx] = Color::Gray;
-            self.stack.push(Visit {
-                e_node_idx: idx,
-                cause: VisitCause::Done,
-            });
+            self.stack.push(Visit::Done(idx));
 
             let span = program.e_nodes[idx].inputs;
             for e_input in &program.inputs[span.range()] {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
                     let output_idx = program.output_idx(addr.target_idx, addr.port_idx);
                     plan.outputs.add_reader(output_idx);
-                    self.stack.push(Visit {
-                        e_node_idx: addr.target_idx,
-                        cause: VisitCause::Discover,
-                    });
+                    self.stack.push(Visit::Discover(addr.target_idx));
                 }
             }
         }

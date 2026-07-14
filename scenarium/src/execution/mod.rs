@@ -18,6 +18,7 @@
 //! cross-run cache, and executor) and exposes `install` (phase 1's artifact)
 //! and `execute` (phases 2–3, run back-to-back).
 
+use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
 use common::{CancelToken, Span};
@@ -63,117 +64,82 @@ use program::ExecutionNode;
 use program::{NodeIdx, OutputIdx};
 use resolve::Resolver;
 
-/// A per-node column: a `Vec<T>` addressable *only* by [`NodeIdx`], never a raw
-/// `usize`. The per-run/per-update columns that aren't part of a keyed structure —
-/// the plan's verdicts, the executor's outcome column, the planner's DFS scratch —
-/// use this so they can't be indexed by an output-pool index or a port number, and so
-/// [`reset`](Self::reset) ties their length to the node count.
+trait ColumnIndex {
+    fn idx(self) -> usize;
+}
+
+impl ColumnIndex for NodeIdx {
+    fn idx(self) -> usize {
+        self.idx()
+    }
+}
+
+impl ColumnIndex for OutputIdx {
+    fn idx(self) -> usize {
+        self.idx()
+    }
+}
+
+/// A `Vec<T>` addressable only by one typed program index.
 #[derive(Debug, Clone)]
-pub(crate) struct NodeColumn<T> {
-    values: Vec<T>,
+pub(crate) struct Column<I, T> {
+    pub(crate) values: Vec<T>,
+    index: PhantomData<fn(I)>,
 }
 
-// Manual (not derived): `#[derive(Default)]` would add a spurious `T: Default` bound,
-// but an empty column needs none — the element type is only ever supplied by `reset`.
-impl<T> Default for NodeColumn<T> {
+impl<I, T> Default for Column<I, T> {
     fn default() -> Self {
-        NodeColumn { values: Vec::new() }
+        Self {
+            values: Vec::new(),
+            index: PhantomData,
+        }
     }
 }
 
-impl<T> NodeColumn<T> {
-    pub(crate) fn clear(&mut self) {
-        self.values.clear();
-    }
-
-    /// Node count. Only the test-only `Executor::ran` reads it (to treat a pre-run empty
-    /// column as "all ran"); production indexes columns by a valid `NodeIdx`.
-    #[cfg(test)]
-    pub(crate) fn len(&self) -> usize {
-        self.values.len()
-    }
-}
-
-impl<T: Clone> NodeColumn<T> {
-    /// Resize to exactly `len` nodes, every entry `value` — sizing the column to the
-    /// node count at the start of a pass. The one supported way to grow it, so its
-    /// length always equals the node count it was reset to.
+impl<I, T: Clone> Column<I, T> {
     pub(crate) fn reset(&mut self, len: usize, value: T) {
         self.values.clear();
         self.values.resize(len, value);
     }
 }
 
-impl<T> From<Vec<T>> for NodeColumn<T> {
+impl<I, T> From<Vec<T>> for Column<I, T> {
     fn from(values: Vec<T>) -> Self {
-        NodeColumn { values }
+        Self {
+            values,
+            index: PhantomData,
+        }
     }
 }
 
-impl<T> Index<NodeIdx> for NodeColumn<T> {
+impl<I: ColumnIndex, T> Index<I> for Column<I, T> {
     type Output = T;
-    fn index(&self, i: NodeIdx) -> &T {
+
+    fn index(&self, i: I) -> &T {
         &self.values[i.idx()]
     }
 }
 
-impl<T> IndexMut<NodeIdx> for NodeColumn<T> {
-    fn index_mut(&mut self, i: NodeIdx) -> &mut T {
+impl<I: ColumnIndex, T> IndexMut<I> for Column<I, T> {
+    fn index_mut(&mut self, i: I) -> &mut T {
         &mut self.values[i.idx()]
     }
 }
 
+/// A column aligned to the program's flat node table.
+pub(crate) type NodeColumn<T> = Column<NodeIdx, T>;
+
 /// A column aligned to the program's flat output pool. Node-local views are sliced by
 /// their compiled output span, while individual entries require an [`OutputIdx`].
-#[derive(Debug, Clone)]
-pub(crate) struct OutputColumn<T> {
-    values: Vec<T>,
-}
+pub(crate) type OutputColumn<T> = Column<OutputIdx, T>;
 
-impl<T> Default for OutputColumn<T> {
-    fn default() -> Self {
-        Self { values: Vec::new() }
-    }
-}
-
-impl<T> OutputColumn<T> {
-    pub(crate) fn clear(&mut self) {
-        self.values.clear();
-    }
-
+impl<T> Column<OutputIdx, T> {
     pub(crate) fn slice(&self, outputs: Span) -> &[T] {
         &self.values[outputs.range()]
     }
 
     pub(crate) fn slice_mut(&mut self, outputs: Span) -> &mut [T] {
         &mut self.values[outputs.range()]
-    }
-}
-
-impl<T: Clone> OutputColumn<T> {
-    pub(crate) fn reset(&mut self, len: usize, value: T) {
-        self.values.clear();
-        self.values.resize(len, value);
-    }
-}
-
-impl<T> From<Vec<T>> for OutputColumn<T> {
-    fn from(values: Vec<T>) -> Self {
-        Self { values }
-    }
-}
-
-impl<T> Index<OutputIdx> for OutputColumn<T> {
-    type Output = T;
-
-    fn index(&self, i: OutputIdx) -> &T {
-        &self.values[i.idx()]
-    }
-}
-
-impl<T> IndexMut<OutputIdx> for OutputColumn<T> {
-    fn index_mut(&mut self, i: OutputIdx) -> &mut T {
-        &mut self.values[i.idx()]
     }
 }
 

@@ -838,7 +838,7 @@ mod cache_persistence {
     /// A corrupt / incompatible cache blob must be *deleted* on a failed load, so the
     /// recompute that follows writes a fresh one. Without the delete, `store_node`'s
     /// skip-if-exists keeps the broken file and the node recomputes on *every* run
-    /// (the regression: an old-format blob rejected by `FORMAT_VERSION` was never
+    /// (the regression: an old-format blob rejected by `BLOB_FORMAT_VERSION` was never
     /// replaced). Each "session" is a fresh engine, so the disk cache is the only source.
     #[tokio::test]
     async fn corrupt_blob_is_replaced_so_the_next_reopen_is_a_hit() {

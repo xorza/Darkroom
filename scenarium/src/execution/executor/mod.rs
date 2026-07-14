@@ -225,7 +225,7 @@ impl Executor {
     /// plan-only introspection still sees the full schedule. Test introspection only.
     #[cfg(test)]
     pub(crate) fn ran(&self, idx: NodeIdx) -> bool {
-        idx.idx() >= self.outcomes.len()
+        idx.idx() >= self.outcomes.values.len()
             || matches!(
                 self.outcomes[idx],
                 NodeOutcome::Ran { .. } | NodeOutcome::Failed { .. }

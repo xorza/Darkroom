@@ -385,28 +385,7 @@ impl RuntimeCache {
     /// reused, so it never ran) is still reported as *cached* when its value can be served —
     /// while a pruned memory-only node with no value reports `false`.
     pub(crate) fn has_available_value(&self, idx: NodeIdx) -> bool {
-        self.is_resident_current(idx) || self.is_on_disk(idx)
-    }
-
-    /// Whether slot `idx` is flagged [`ValueState::OnDisk`] — a blob stat'd this run but not yet
-    /// loaded into RAM.
-    pub(crate) fn is_on_disk(&self, idx: NodeIdx) -> bool {
-        matches!(self.slots[idx].value, ValueState::OnDisk { .. })
-    }
-
-    /// Install a disk-loaded output into a slot under `digest` (the node's current
-    /// digest), turning a later reuse check into a plain RAM hit.
-    pub(crate) fn hydrate(&mut self, idx: NodeIdx, snapshot: OutputSnapshot, digest: Digest) {
-        self.slots[idx].value = ValueState::Resident {
-            snapshot,
-            produced_under: Some(digest),
-        };
-    }
-
-    /// Flag slot `idx` as `OnDisk` — its value lives only in a blob now. Used by the reuse
-    /// check when a blob is found and by [`reclaim_slot`](Self::reclaim_slot)'s demote path.
-    pub(crate) fn flag_on_disk(&mut self, idx: NodeIdx, coverage: CachedOutputCoverage) {
-        self.slots[idx].value = ValueState::OnDisk { coverage };
+        self.is_resident_current(idx) || matches!(self.slots[idx].value, ValueState::OnDisk { .. })
     }
 
     /// Read producer `idx`'s output `port` for a consumer: a clone of the value, or — with
@@ -437,15 +416,14 @@ impl RuntimeCache {
 
     /// Clear a single output value of a resident slot (to `Unbound`), keeping its siblings — the
     /// mid-run per-output release for a non-RAM producer whose one output just went spent while
-    /// others are still owed to other consumers. No-op if the slot isn't resident or `port` is
-    /// out of range.
+    /// others are still owed to other consumers.
     pub(crate) fn clear_output_port(&mut self, idx: NodeIdx, port: usize) {
-        if let ValueState::Resident { snapshot, .. } = &mut self.slots[idx].value
-            && let Some(slot) = snapshot.values.get_mut(port)
-        {
-            *slot = DynamicValue::Unbound;
-            snapshot.coverage.ports[port] = false;
-        }
+        let ValueState::Resident { snapshot, .. } = &mut self.slots[idx].value else {
+            panic!("an output can only be released from a resident slot");
+        };
+        assert!(port < snapshot.values.len(), "output port must be in range");
+        snapshot.values[port] = DynamicValue::Unbound;
+        snapshot.coverage.ports[port] = false;
     }
 
     // === Caching policy (over the RAM slots + the owned `disk_store`) ===
@@ -502,7 +480,7 @@ impl RuntimeCache {
             && coverage.ports.len() == demand.len()
             && coverage.covers_demand(demand)
         {
-            self.flag_on_disk(idx, coverage);
+            self.slots[idx].value = ValueState::OnDisk { coverage };
             true
         } else {
             false
@@ -523,12 +501,9 @@ impl RuntimeCache {
         if self.is_resident_current(idx) {
             return true;
         }
-        if !self.is_on_disk(idx) {
-            return false;
-        }
         let required = match &self.slots[idx].value {
             ValueState::OnDisk { coverage } => coverage.clone(),
-            _ => unreachable!("is_on_disk checked above"),
+            _ => return false,
         };
         // The slot claimed an on-disk blob. Load it; on success it's resident.
         if let Some(target) = self
@@ -545,7 +520,10 @@ impl RuntimeCache {
                         && snapshot.coverage.ports.len() == arity
                         && snapshot.coverage.covers(&required) =>
                 {
-                    self.hydrate(idx, snapshot, target.digest);
+                    self.slots[idx].value = ValueState::Resident {
+                        snapshot,
+                        produced_under: Some(target.digest),
+                    };
                     return true;
                 }
                 Some(snapshot) => {
@@ -620,7 +598,7 @@ impl RuntimeCache {
                 coverage.ports.len() == required.ports.len() && coverage.covers(&required)
             });
         if let Some(coverage) = stored {
-            self.flag_on_disk(idx, coverage);
+            self.slots[idx].value = ValueState::OnDisk { coverage };
         } else if !program.e_nodes[idx].cache.caches_in_ram() {
             self.slots[idx].clear_output();
         }
@@ -659,6 +637,23 @@ impl RuntimeCache {
             }
             self.reclaim_slot(program, idx);
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    pub(crate) fn hydrate(
+        cache: &mut RuntimeCache,
+        idx: NodeIdx,
+        snapshot: OutputSnapshot,
+        digest: Digest,
+    ) {
+        cache.slots[idx].value = ValueState::Resident {
+            snapshot,
+            produced_under: Some(digest),
+        };
     }
 }
 

@@ -44,7 +44,7 @@ impl Fix {
 
 /// Run the backward cut over `fix` with the given roots and per-node resolution,
 /// returning each node's merged [`Disposition`].
-fn dispositions_of(fix: &Fix, roots: &[NodeIdx], resolved: &[Resolved]) -> Vec<Disposition> {
+fn dispositions_of(fix: &Fix, roots: &[NodeIdx], reused: &[bool]) -> Vec<Disposition> {
     let plan = ExecutionPlan {
         // Producer-first order for these fixtures is just index order (a producer is always
         // added before its consumer), matching the planner's post-order.
@@ -57,9 +57,9 @@ fn dispositions_of(fix: &Fix, roots: &[NodeIdx], resolved: &[Resolved]) -> Vec<D
         roots: roots.to_vec(),
         pinned: Vec::new(),
     };
-    let resolved: NodeColumn<Resolved> = resolved.to_vec().into();
+    let reused: NodeColumn<bool> = reused.to_vec().into();
     let mut disposition = NodeColumn::default();
-    compute_disposition(&fix.program, &plan, &resolved, &mut disposition);
+    compute_disposition(&fix.program, &plan, &reused, &mut disposition);
     (0..fix.program.e_nodes.len())
         .map(|i| disposition[NodeIdx::from(i)])
         .collect()
@@ -74,11 +74,7 @@ fn reuse_hit_prunes_its_whole_upstream_cone() {
     let mid = f.node(&[src]);
     let sink = f.node(&[mid]);
 
-    let dispositions = dispositions_of(
-        &f,
-        &[sink],
-        &[Resolved::Run, Resolved::Reuse, Resolved::Run],
-    );
+    let dispositions = dispositions_of(&f, &[sink], &[false, true, false]);
     assert_eq!(
         dispositions,
         vec![Disposition::Cut, Disposition::Reuse, Disposition::Run],
@@ -100,10 +96,9 @@ fn shared_producer_survives_when_one_consumer_runs() {
         &f,
         &[sink],
         &[
-            Resolved::Run,
-            Resolved::Reuse, // cached: won't read src
-            Resolved::Run,   // live: reads src
-            Resolved::Run,
+            false, true,  // cached: won't read src
+            false, // live: reads src
+            false,
         ],
     );
     assert_eq!(
@@ -127,11 +122,7 @@ fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
     let cached = f.node(&[src]);
     let sink = f.node(&[cached]);
 
-    let dispositions = dispositions_of(
-        &f,
-        &[sink],
-        &[Resolved::Run, Resolved::Run, Resolved::Reuse, Resolved::Run],
-    );
+    let dispositions = dispositions_of(&f, &[sink], &[false, false, true, false]);
     assert_eq!(
         dispositions,
         vec![
