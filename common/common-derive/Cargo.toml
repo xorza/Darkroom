@@ -2,6 +2,7 @@
 name = "common-derive"
 version.workspace = true
 edition.workspace = true
+exclude = ["AGENTS.md", "CLAUDE.md"]
 
 [lib]
 proc-macro = true

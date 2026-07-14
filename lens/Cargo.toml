@@ -2,6 +2,7 @@
 name = "lens"
 version.workspace = true
 edition.workspace = true
+exclude = ["AGENTS.md", "CLAUDE.md"]
 
 [dependencies]
 common = { workspace = true }

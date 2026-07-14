@@ -3,6 +3,7 @@ name = "scenarium"
 version.workspace = true
 edition.workspace = true
 description = "A graph library for Scenarium"
+exclude = ["AGENTS.md", "CLAUDE.md"]
 
 [dependencies]
 common = { workspace = true }

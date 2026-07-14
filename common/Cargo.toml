@@ -2,6 +2,7 @@
 name = "common"
 version.workspace = true
 edition.workspace = true
+exclude = ["AGENTS.md", "CLAUDE.md"]
 
 [features]
 # Exposes test-only helpers (e.g. `SerdeFormat::all_formats_for_testing`) to
