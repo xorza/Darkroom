@@ -11,6 +11,7 @@ use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::PrefsCommand;
 use crate::gui::canvas::GraphUI;
+use crate::gui::canvas::pin_ui::emit_pin_image_opens;
 use crate::gui::dock::DockUi;
 use crate::gui::graph_toolbar;
 use crate::gui::image_viewer::ImageViewer;
@@ -31,8 +32,8 @@ pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
     /// One full-resolution image-viewer pane per open viewer tab
     /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Fed by
-    /// `Editor` (preview clicks + after-run refreshes), which also prunes
-    /// entries whose tab closed — dropping one frees its texture.
+    /// `Editor` on preview clicks, which also prunes entries whose tab
+    /// closed — dropping one frees its texture.
     pub(crate) image_viewers: HashMap<PortRef, ImageViewer>,
     dock: DockUi,
     first_frame: bool,
@@ -54,6 +55,7 @@ impl MainWindow {
     ) {
         self.dock.scan(ui, doc, actions);
         emit_subgraph_opens(ui, scene, actions);
+        emit_pin_image_opens(ui, scene, actions);
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the
@@ -148,7 +150,7 @@ impl MainWindow {
 
     /// The viewer pane for `port`, created empty on first access — a
     /// restored/undo-reopened tab has no state yet; it shows the hint
-    /// until the after-run refresh fills it.
+    /// until its pinned preview is clicked.
     pub(crate) fn viewer_mut(&mut self, port: PortRef) -> &mut ImageViewer {
         self.image_viewers
             .entry(port)

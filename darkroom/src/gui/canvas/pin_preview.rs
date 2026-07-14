@@ -18,9 +18,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aperture::{
-    Align, Background, Color, Configure, Corners, FontWeight, ImageFilter, ImageFit, ImageHandle,
-    Panel, Response, Sense, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, VAlign,
-    WidgetId,
+    Align, Background, Color, Configure, Corners, CursorIcon, FontWeight, ImageFilter, ImageFit,
+    ImageHandle, Panel, Response, Sense, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap,
+    Ui, VAlign, WidgetId,
 };
 use glam::{UVec2, Vec2};
 use imaginarium::ColorFormat;
@@ -175,6 +175,13 @@ pub(crate) fn refresh_badge_wid(port: OutputPort) -> WidgetId {
     WidgetId::from_hash(("graph.node.pin_refresh_badge", port.node_id, port.port_idx))
 }
 
+/// Stable id for the card's image viewport. It senses hover without
+/// capturing presses, leaving the parent card's click/drag gesture intact;
+/// the navigation scan combines its hover with the parent's click.
+pub(crate) fn preview_image_wid(port: OutputPort) -> WidgetId {
+    WidgetId::from_hash(("graph.node.pin_preview_image", port.node_id, port.port_idx))
+}
+
 /// The header's refresh chip: re-run to the node this pin's output came
 /// from and refresh the value it's showing — the pin's own version of a
 /// node's play chip ([`crate::gui::node::header::play_chip`]), same
@@ -270,9 +277,14 @@ pub(crate) fn draw_widget<'ui>(
                         .text_wrap(TextWrap::Wrap)
                         .show(ui);
                 });
-            Panel::vstack()
-                .id_salt("content")
+            let content = Panel::vstack()
+                .id(preview_image_wid(port))
                 .size((Sizing::FILL, Sizing::FILL))
+                .sense(if image.is_some() {
+                    Sense::HOVER
+                } else {
+                    Sense::NONE
+                })
                 .show(ui, |ui| {
                     if let Some(image) = image {
                         // Content sits between the header and the info
@@ -297,7 +309,12 @@ pub(crate) fn draw_widget<'ui>(
                                     .show(ui);
                             });
                     }
-                });
+                })
+                .response
+                .snapshot();
+            if content.hovered {
+                ui.set_cursor(CursorIcon::Pointer);
+            }
             if let Some(image) = image {
                 info_row(ui, theme, inner_r, image);
             }

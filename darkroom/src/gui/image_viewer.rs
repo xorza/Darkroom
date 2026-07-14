@@ -1,17 +1,9 @@
-//! Full-resolution viewers for ports' cached runtime images, one editor
-//! tab per port ([`TabRef::ImageViewer`], deduped on open). Clicking an
-//! inspector-panel thumbnail hands the port's held [`DynamicValue`] over
-//! (the full value the worker already delivered for the open panel — an
-//! `Arc` clone, so no recompute and no worker round-trip) and focuses the
-//! port's tab; if the value is gone (superseded run), the pane says so.
-//!
-//! **Content follows the graph**: each viewer remembers the run epoch its
-//! image came from, and `Editor::sync_image_viewers` re-presents the
-//! port's freshly fetched value after every run (viewer-tab nodes ride the
-//! same worker value-fetch as open inspector panels), keeping the user's
-//! pan/zoom when the dimensions are unchanged. A value the run reused
-//! (same `Arc`) skips the re-render entirely. A restored (or undo-
-//! reopened) tab starts empty and fills itself the same way.
+//! Full-resolution viewers for pinned ports' runtime images, one editor
+//! tab per port ([`TabRef::ImageViewer`], deduped on open). Clicking a pin
+//! card's image hands the viewer the full [`DynamicValue`] retained beside
+//! its thumbnail — an `Arc` clone, so no recompute or worker round-trip —
+//! and focuses the port's tab. Clicking the refreshed card presents the
+//! latest value; a restored tab starts empty until the card is clicked.
 //!
 //! The heavy work — RGBA8 conversion of the full buffer and the texture
 //! upload — happens lazily on the first draw after a (re)present, since
@@ -36,7 +28,6 @@ use scenarium::graph::NodeSearch;
 
 use crate::core::document::{Document, PortKind, PortRef, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
-use crate::core::worker::RunId;
 use crate::gui::canvas::pan_zoom::{PanAnchor, fold_scroll_zoom, zoom_about};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, filled_rect, muted_text, stroked_rect};
@@ -70,22 +61,14 @@ pub(crate) struct ImageViewer {
     port: PortRef,
     /// Header label (node name + port tag), refreshed on each present.
     title: String,
-    /// Value handed over by present/refresh, converted + uploaded on the
+    /// Value handed over by `present`, converted + uploaded on the
     /// next draw (which has the `Ui` to register the texture).
     pending: Option<DynamicValue>,
-    /// The value currently shown (or converting), kept so a refresh with
-    /// the same `Arc` (node reused its cache across the run) can skip the
-    /// re-render.
-    shown: Option<DynamicValue>,
     /// The uploaded texture plus the source facts the header reports —
     /// present exactly while the pane shows an image.
     image: Option<ShownImage>,
     /// Why the pane is empty, when it is.
     message: Option<String>,
-    /// Run epoch of the current content (`shown`/message), `None` while
-    /// nothing from any run is shown — so the first fetched value always
-    /// fills the pane (e.g. a tab restored from a saved document).
-    content_epoch: Option<RunId>,
     /// Explicit viewport once the user pans/zooms; `None` = fit-to-pane
     /// (recomputed each frame, so it tracks pane resizes). The image's
     /// top-left offset in pane-local px plus the zoom (pane px per
@@ -128,10 +111,8 @@ impl ImageViewer {
             port,
             title: String::new(),
             pending: None,
-            shown: None,
             image: None,
             message: None,
-            content_epoch: None,
             view: None,
             pan_anchor: PanAnchor::default(),
             checker: None,
@@ -153,63 +134,17 @@ impl ImageViewer {
         self.view.unwrap_or_else(|| fit_viewport(img, pane))
     }
 
-    /// Show `value` as this viewer's content, resetting the framing to
-    /// fit — the preview-click path. `value` is the port's held runtime
-    /// value from `epoch` (`None` when it's no longer cached, which shows
-    /// a message and leaves the epoch unset so the next run's value still
-    /// fills the pane).
-    pub(crate) fn present(&mut self, title: String, value: Option<DynamicValue>, epoch: RunId) {
+    /// Show `value` as this viewer's content, resetting the framing to fit.
+    pub(crate) fn present(&mut self, title: String, value: Option<DynamicValue>) {
         self.reset_framing();
-        self.set_content(title, value, epoch);
-        // A missing value on an explicit click is a transient condition
-        // (mid-run, superseded epoch): stay epoch-less so the run's
-        // arriving value refreshes the pane.
-        if self.shown.is_none() {
-            self.content_epoch = None;
-            self.message =
-                Some("value is no longer cached — it will appear after the next run".to_owned());
-        }
-    }
-
-    /// Update the content to `epoch`'s fetched `value`, keeping the user's
-    /// framing — the after-run path. No-op when this epoch is already
-    /// shown; a value that is the same `Arc` as the current one (the node
-    /// reused its cache) just adopts the epoch without re-rendering.
-    /// `value` is `None` when the port has no image value this run.
-    ///
-    /// Currently unreachable — its only caller (`Editor::sync_image_viewers`,
-    /// which fed it from the removed on-demand value-fetch pipeline) was
-    /// simplified to just pruning closed tabs. Kept (with its tests) for
-    /// whatever feeds the viewer next.
-    #[allow(dead_code)]
-    pub(crate) fn refresh(&mut self, title: String, value: Option<DynamicValue>, epoch: RunId) {
-        if self.content_epoch == Some(epoch) {
-            return;
-        }
-        if let (Some(shown), Some(new)) = (&self.shown, &value)
-            && same_custom_value(shown, new)
-        {
-            self.title = title;
-            self.content_epoch = Some(epoch);
-            return;
-        }
-        self.set_content(title, value, epoch);
-    }
-
-    /// Shared present/refresh core: stage `value` for the next draw (or a
-    /// "no image" message) and stamp the epoch. Framing is the caller's
-    /// business.
-    fn set_content(&mut self, title: String, value: Option<DynamicValue>, epoch: RunId) {
         self.title = title;
-        self.content_epoch = Some(epoch);
         self.message = None;
-        self.shown = value.clone();
         match value {
-            Some(_) => self.pending = value,
+            Some(value) => self.pending = Some(value),
             None => {
                 self.pending = None;
                 self.image = None;
-                self.message = Some("port has no image value".to_owned());
+                self.message = Some("pinned output has no image value".to_owned());
             }
         }
     }
@@ -690,16 +625,6 @@ fn draw_swatch(ui: &mut Ui, s: f32, theme: &Theme, mode: ViewerBackground, selec
     stroked_rect(ui, rect, 2.0, ring, width);
 }
 
-/// Whether two dynamic values share the same custom payload (`Arc`
-/// identity) — a run that reuses a node's cache re-delivers the same
-/// allocation, so the viewer can skip an identical re-render.
-fn same_custom_value(a: &DynamicValue, b: &DynamicValue) -> bool {
-    match (a, b) {
-        (DynamicValue::Custom(a), DynamicValue::Custom(b)) => std::sync::Arc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 /// The pane-local rect a viewport paints the texture into.
 fn draw_rect(img: Vec2, v: Viewport) -> Rect {
     Rect {
@@ -791,6 +716,23 @@ fn rgba8_image(image: RawImage) -> Option<AptImage> {
         desc.height as u32,
         pixels,
     ))
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    pub(crate) fn assert_presented_custom_value(viewer: &ImageViewer, expected: &DynamicValue) {
+        let pending = viewer
+            .pending
+            .as_ref()
+            .expect("viewer staged the full render");
+        let (DynamicValue::Custom(pending), DynamicValue::Custom(expected)) = (pending, expected)
+        else {
+            panic!("expected custom image values");
+        };
+        assert!(std::sync::Arc::ptr_eq(pending, expected));
+    }
 }
 
 #[cfg(test)]
@@ -901,59 +843,23 @@ mod tests {
     }
 
     #[test]
-    fn refresh_updates_epoch_and_skips_identical_content() {
-        let mut viewer = ImageViewer::new(port());
-        let value = image_value(2, 2);
-
-        // First refresh (restored tab, epoch never set): stages the value.
-        viewer.refresh("stack · out 0".to_owned(), Some(value.clone()), 3);
-        assert_eq!(viewer.content_epoch, Some(3));
-        assert!(viewer.pending.is_some(), "first value stages a render");
-
-        // Same epoch again: no-op even with a different value.
-        viewer.pending = None;
-        viewer.refresh("stack · out 0".to_owned(), Some(image_value(2, 2)), 3);
-        assert!(viewer.pending.is_none(), "same epoch does not re-stage");
-
-        // New epoch, same Arc (cache-reused node): adopts the epoch
-        // without re-staging a render.
-        viewer.refresh("stack · out 0".to_owned(), Some(value), 4);
-        assert_eq!(viewer.content_epoch, Some(4));
-        assert!(viewer.pending.is_none(), "identical Arc skips the render");
-
-        // New epoch, new value: stages a render and keeps the framing.
-        viewer.view = Some(Viewport {
-            pan: Vec2::new(5.0, 6.0),
-            zoom: 2.0,
-        });
-        viewer.refresh("stack · out 0".to_owned(), Some(image_value(2, 2)), 5);
-        assert_eq!(viewer.content_epoch, Some(5));
-        assert!(viewer.pending.is_some(), "new value re-stages");
-        assert!(viewer.view.is_some(), "refresh keeps the user's framing");
-    }
-
-    #[test]
-    fn present_resets_framing_and_missing_value_stays_epochless() {
+    fn present_resets_framing_and_stages_the_value() {
         let mut viewer = ImageViewer::new(port());
         viewer.view = Some(Viewport {
             pan: Vec2::ZERO,
             zoom: 3.0,
         });
 
-        // A click with a live value resets framing and stamps the epoch.
-        viewer.present("n · out 0".to_owned(), Some(image_value(2, 2)), 7);
+        viewer.present("n · out 0".to_owned(), Some(image_value(2, 2)));
         assert!(viewer.view.is_none(), "present refits");
-        assert_eq!(viewer.content_epoch, Some(7));
+        assert!(viewer.pending.is_some(), "full value is staged");
 
-        // A click with no cached value shows a message but leaves the
-        // epoch unset, so the next run's value still fills the pane.
-        viewer.present("n · out 0".to_owned(), None, 7);
-        assert_eq!(viewer.content_epoch, None);
-        assert!(viewer.message.as_deref().unwrap().contains("next run"));
-        // ...and a later refresh at any epoch takes.
-        viewer.refresh("n · out 0".to_owned(), Some(image_value(2, 2)), 7);
-        assert_eq!(viewer.content_epoch, Some(7));
-        assert!(viewer.pending.is_some());
+        viewer.present("n · out 0".to_owned(), None);
+        assert!(viewer.pending.is_none());
+        assert_eq!(
+            viewer.message.as_deref(),
+            Some("pinned output has no image value")
+        );
     }
 
     #[test]
@@ -990,15 +896,5 @@ mod tests {
             D, D, D, 255,  L, L, L, 255,
         ];
         assert_eq!(img.pixels, expected);
-    }
-
-    #[test]
-    fn same_custom_value_is_arc_identity() {
-        let a = image_value(1, 1);
-        let clone = a.clone();
-        let b = image_value(1, 1);
-        assert!(same_custom_value(&a, &clone), "clone shares the Arc");
-        assert!(!same_custom_value(&a, &b), "equal content, different Arc");
-        assert!(!same_custom_value(&a, &DynamicValue::from(1i64)));
     }
 }

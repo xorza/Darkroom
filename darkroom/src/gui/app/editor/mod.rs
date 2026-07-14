@@ -12,11 +12,12 @@
 //! [`App`]: crate::gui::app::App
 
 use aperture::Ui;
+use scenarium::graph::OutputPort;
 use scenarium::graph::subgraph::SubgraphDef;
 use scenarium::library::Library;
 
 use crate::core::document::dock::{DockOp, TabAddress};
-use crate::core::document::{Document, GraphRef, PortRef, TabRef};
+use crate::core::document::{Document, GraphRef, PortKind, PortRef, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::apply::commit_intent_cascading;
 use crate::core::edit::intent::duplicate::{
@@ -224,9 +225,7 @@ impl Editor {
         // this frame's rebuild. After it, the active tab is fixed.
         self.navigate(ui, library);
 
-        // Tabs are settled: drop viewer state for closed tabs and fold the
-        // latest run's fetched values into the open viewers (values landed
-        // in `App`'s pre-frame drain, so a finished run shows this frame).
+        // Tabs are settled: drop viewer state for closed tabs.
         self.sync_image_viewers();
         // `Some` for a graph pane, `None` for a non-graph view (Preferences):
         // the scene projection + canvas edit pipeline run only when a graph
@@ -478,17 +477,15 @@ impl Editor {
     /// Open `port`'s image-viewer tab and focus it — one tab per port,
     /// deduped. Mirrors [`Self::open_preferences`]: adding the tab is the
     /// non-undoable part, focus routes through a recorded activation.
-    ///
-    /// The viewer has no value source right now (the on-demand runtime-value
-    /// fetch pipeline was removed pending a redesign) — it opens empty and
-    /// stays that way until [`sync_image_viewers`](Self::sync_image_viewers)
-    /// grows a new way to feed it.
     fn open_image_viewer(&mut self, port: PortRef) {
-        self.main_window.viewer_mut(port).present(
-            image_viewer::port_label(&self.document, port),
-            None,
-            self.run_state.run_id,
-        );
+        assert_eq!(port.kind, PortKind::Output);
+        let value = self
+            .run_state
+            .pinned_output(OutputPort::new(port.node_id, port.port_idx))
+            .map(|pinned| pinned.value.clone());
+        self.main_window
+            .viewer_mut(port)
+            .present(image_viewer::port_label(&self.document, port), value);
         let group = self.document.layout.focused;
         let addr = self
             .document
@@ -641,11 +638,16 @@ mod tests {
     #[test]
     fn image_viewer_tabs_dedupe_per_port_and_prune_on_close() {
         use glam::Vec2;
+        use imaginarium::{ColorFormat, Image as RawImage, ImageBuffer, ImageDesc};
+        use lens::Image as LensImage;
+        use scenarium::data::DynamicValue;
+        use scenarium::execution::stats::PinnedOutputs;
         use scenarium::graph::{Node, NodeKind};
         use scenarium::node::function::FuncId;
 
         use crate::core::document::PortKind;
         use crate::core::document::view_item::ViewItem;
+        use crate::gui::image_viewer::test_support::assert_presented_custom_value;
 
         let lib = Library::default();
         let mut editor = Editor::new(Document::default());
@@ -670,13 +672,26 @@ mod tests {
         let tabs = |editor: &Editor| editor.document.layout.all_tabs().collect::<Vec<_>>();
         let active = |editor: &Editor| editor.document.layout.primary().active;
 
-        // First open adds + focuses the port's tab.
+        let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_U8);
+        let raw = RawImage::new_with_data(desc, vec![128; 2 * 4]).unwrap();
+        let full = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
+        editor.run_state.set_pinned_values(PinnedOutputs {
+            node_id: id,
+            values: vec![(0, full.clone())],
+        });
+
+        // First open adds + focuses the port's tab and presents the full
+        // worker-pushed value rather than the card's prepared thumbnail.
         open(&mut editor, port(0));
         assert_eq!(
             tabs(&editor),
             vec![TabRef::Graph(GraphRef::Main), TabRef::ImageViewer(port(0))]
         );
         assert_eq!(active(&editor), 1);
+        assert_presented_custom_value(
+            editor.main_window.image_viewers.get(&port(0)).unwrap(),
+            &full,
+        );
 
         // Re-clicking the same port reuses its tab; a different port of
         // the same node gets its own.

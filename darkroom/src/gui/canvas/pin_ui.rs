@@ -36,6 +36,7 @@ use scenarium::graph::{NodeId, OutputPort};
 
 use crate::core::document::{ItemRef, PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
+use crate::gui::UiAction;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
@@ -44,7 +45,7 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::node_ports;
 use crate::gui::canvas::pin_preview::{
     self, PREVIEW_HEIGHT, PREVIEW_WIDTH, PreviewCache, is_image_type, pin_preview_wid,
-    preview_title, refresh_badge_wid,
+    preview_image_wid, preview_title, refresh_badge_wid,
 };
 use crate::gui::canvas::wire::{CubicHandles, WireEmphasis, add_cubic_wire, cubic_handles};
 use crate::gui::node::port_color::port_color;
@@ -100,6 +101,24 @@ pub(crate) fn emit_pin_refresh_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> 
         .pinned_outputs()
         .find(|pin| ui.response_for(refresh_badge_wid(pin.port)).left.clicked())
         .map(|pin| pin.port.node_id)
+}
+
+/// Surface a click on a pinned card's image viewport as a viewer-open
+/// request. The hover-only child does not capture the press, so the parent
+/// still owns card selection and dragging; combining both responses narrows
+/// an ordinary card click to the image area.
+pub(crate) fn emit_pin_image_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
+    let Some(port) = scene.pinned_outputs().map(|pin| pin.port).find(|&port| {
+        ui.response_for(pin_preview_wid(port)).left.clicked()
+            && ui.response_for(preview_image_wid(port)).hovered
+    }) else {
+        return;
+    };
+    actions.push(UiAction::OpenImageViewer(PortRef {
+        node_id: port.node_id,
+        kind: PortKind::Output,
+        port_idx: port.port_idx,
+    }));
 }
 
 /// The pin (or brand-new pin) a drag latched onto, and every member moving
