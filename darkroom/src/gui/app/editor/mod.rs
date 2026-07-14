@@ -13,8 +13,6 @@
 
 use aperture::Ui;
 use scenarium::Library;
-use scenarium::OutputPort;
-use scenarium::PinnedOutputs;
 use scenarium::SubgraphDef;
 
 use crate::core::document::dock::{DockOp, TabAddress};
@@ -29,7 +27,6 @@ use crate::core::io::preferences::Preferences;
 use crate::gui::UiAction;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
-use crate::gui::image_viewer;
 use crate::gui::main_window::MainWindow;
 use crate::gui::run_state::RunState;
 use crate::gui::scene::Scene;
@@ -132,42 +129,6 @@ impl Editor {
             intents: Vec::new(),
             actions: Vec::new(),
             run_state: RunState::default(),
-        }
-    }
-
-    /// Store a worker-pushed pinned output and stage the full value on every
-    /// viewer tab already bound to one of the pushed ports.
-    pub(crate) fn set_pinned_values(&mut self, pinned: PinnedOutputs) {
-        let node_id = pinned.node.node_id;
-        let port_indices = pinned
-            .values
-            .iter()
-            .map(|output| output.port_idx)
-            .collect::<Vec<_>>();
-        self.run_state.set_pinned_values(pinned);
-
-        for port_idx in port_indices {
-            let port = PortRef {
-                node_id,
-                kind: PortKind::Output,
-                port_idx,
-            };
-            let is_open = self
-                .document
-                .layout
-                .all_tabs()
-                .any(|tab| tab == TabRef::ImageViewer(port));
-            if !is_open {
-                continue;
-            }
-            let value = self
-                .run_state
-                .representative_pinned_output(OutputPort::new(node_id, port_idx))
-                .unwrap()
-                .value
-                .clone();
-            let title = image_viewer::port_label(&self.document, port);
-            self.main_window.viewer_mut(port).refresh(title, value);
         }
     }
 
@@ -516,13 +477,6 @@ impl Editor {
     /// non-undoable part, focus routes through a recorded activation.
     fn open_image_viewer(&mut self, port: PortRef) {
         assert_eq!(port.kind, PortKind::Output);
-        let value = self
-            .run_state
-            .representative_pinned_output(OutputPort::new(port.node_id, port.port_idx))
-            .map(|pinned| pinned.value.clone());
-        self.main_window
-            .viewer_mut(port)
-            .present(image_viewer::port_label(&self.document, port), value);
         let group = self.document.layout.focused;
         let addr = self
             .document
@@ -673,20 +627,14 @@ mod tests {
     }
 
     #[test]
-    fn image_viewer_tabs_refresh_on_push_dedupe_per_port_and_prune_on_close() {
+    fn image_viewer_tabs_dedupe_per_port_and_prune_state_on_close() {
         use glam::Vec2;
-        use imaginarium::{ColorFormat, Image as RawImage, ImageBuffer, ImageDesc};
-        use lens::Image as LensImage;
-        use scenarium::DynamicValue;
         use scenarium::FuncId;
         use scenarium::{Node, NodeKind};
-        use scenarium::{PinnedOutput, PinnedOutputs};
 
         use crate::core::document::PortKind;
         use crate::core::document::view_item::ViewItem;
-        use crate::gui::image_viewer::test_support::{
-            assert_presented_custom_value, consume_presented_custom_value,
-        };
+        use crate::gui::image_viewer::ImageViewer;
 
         let lib = Library::default();
         let mut editor = Editor::new(Document::default());
@@ -711,53 +659,34 @@ mod tests {
         let tabs = |editor: &Editor| editor.document.layout.all_tabs().collect::<Vec<_>>();
         let active = |editor: &Editor| editor.document.layout.primary().active;
 
-        let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_U8);
-        let raw = RawImage::new_with_data(desc, vec![128; 2 * 4]).unwrap();
-        let full = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
-        editor.set_pinned_values(PinnedOutputs {
-            node: scenarium::NodeAddress::root(id),
-            values: vec![PinnedOutput {
-                port_idx: 0,
-                value: full.clone(),
-            }],
-        });
-
-        // First open adds + focuses the port's tab and presents the full
-        // worker-pushed value rather than the card's prepared thumbnail.
+        // Opening only changes the layout. Viewer state is created by the
+        // renderer when it draws the tab and pulls from `RunState`.
         open(&mut editor, port(0));
         assert_eq!(
             tabs(&editor),
             vec![TabRef::Graph(GraphRef::Main), TabRef::ImageViewer(port(0))]
         );
         assert_eq!(active(&editor), 1);
-        consume_presented_custom_value(
-            editor.main_window.image_viewers.get_mut(&port(0)).unwrap(),
-            &full,
+        assert!(
+            editor.main_window.image_viewers.is_empty(),
+            "the editor does not create or populate view state"
         );
+        editor
+            .main_window
+            .image_viewers
+            .insert(port(0), ImageViewer::new(port(0)));
 
-        let desc = ImageDesc::new(3, 1, ColorFormat::RGBA_U8);
-        let raw = RawImage::new_with_data(desc, vec![64; 3 * 4]).unwrap();
-        let refreshed = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
-        editor.set_pinned_values(PinnedOutputs {
-            node: scenarium::NodeAddress::root(id),
-            values: vec![PinnedOutput {
-                port_idx: 0,
-                value: refreshed.clone(),
-            }],
-        });
-        assert_presented_custom_value(
-            editor.main_window.image_viewers.get(&port(0)).unwrap(),
-            &refreshed,
-        );
-        assert_eq!(tabs(&editor).len(), 2, "refresh adds no tab");
-
-        // Re-clicking the same port reuses its tab; a different port of
-        // the same node gets its own.
+        // Re-clicking the same port reuses its tab; a different port gets
+        // its own renderer-owned state.
         open(&mut editor, port(0));
         assert_eq!(tabs(&editor).len(), 2, "same port dedupes");
         open(&mut editor, port(1));
         assert_eq!(tabs(&editor).len(), 3, "distinct port adds a tab");
         assert_eq!(active(&editor), 2);
+        editor
+            .main_window
+            .image_viewers
+            .insert(port(1), ImageViewer::new(port(1)));
         assert!(editor.main_window.image_viewers.contains_key(&port(0)));
         assert!(editor.main_window.image_viewers.contains_key(&port(1)));
 

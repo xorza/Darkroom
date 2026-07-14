@@ -1,6 +1,6 @@
-//! Last graph run's per-node state, keyed by authoring `NodeId`: the
-//! execution outcome (status glow + header time) and the run's log lines.
-//! One [`RunState`] per [`Editor`], rebuilt each run.
+//! Last graph run's centralized runtime state: per-node execution outcomes
+//! and logs, plus the latest worker-pushed values for pinned outputs. One
+//! [`RunState`] per [`Editor`], updated as worker reports arrive.
 //!
 //! Execution dissolves subgraphs and remaps interior node ids, so a run's
 //! raw `ExecutionStats` are keyed by *flattened* ids. [`RunState::set_results`]
@@ -99,15 +99,20 @@ pub(crate) struct NodeRunState {
 /// conversion happens on receipt, before the canvas record pass.
 #[derive(Debug)]
 pub(crate) struct PinnedOutputValue {
+    /// Monotonically increasing identity of the worker push that supplied
+    /// this value. Views use it to refresh derived textures without retaining
+    /// a clone of the source value.
+    pub(crate) revision: u64,
     pub(crate) value: DynamicValue,
     pub(crate) preview: Option<RenderedImage>,
 }
 
-/// The last run's per-node state. Off the serialized state; rebuilt each run.
+/// Central runtime state for the current editor. Off the serialized state.
 #[derive(Default, Debug)]
 pub(crate) struct RunState {
     nodes: HashMap<NodeId, NodeRunState>,
     pinned_outputs: BTreeMap<OutputAddress, PinnedOutputValue>,
+    pinned_revision: u64,
     /// A run is in flight (`begin_run` → its `ExecutionFinished`). Drives the
     /// live repaint tick and whether the Cancel affordance shows.
     running: bool,
@@ -176,6 +181,14 @@ impl RunState {
     /// shows its last value until a whole-run failure [`clear`](Self::clear)s
     /// it.
     pub(crate) fn set_pinned_values(&mut self, pinned: PinnedOutputs) {
+        if pinned.values.is_empty() {
+            return;
+        }
+        self.pinned_revision = self
+            .pinned_revision
+            .checked_add(1)
+            .expect("pinned-output revision overflow");
+        let revision = self.pinned_revision;
         for output in pinned.values {
             let port_idx = output.port_idx;
             let value = output.value;
@@ -187,7 +200,11 @@ impl RunState {
                     node: pinned.node.clone(),
                     port_idx,
                 },
-                PinnedOutputValue { value, preview },
+                PinnedOutputValue {
+                    revision,
+                    value,
+                    preview,
+                },
             );
         }
     }
@@ -289,9 +306,9 @@ impl RunState {
         }
     }
 
-    /// Drop everything (a failed run paints no glow and shows no logs /
-    /// values). Pair with a `ValueRequests::reset` (see `Editor::clear_run_state`)
-    /// so pending request bookkeeping doesn't outlive this epoch.
+    /// Drop everything visible from a failed run: no glow, logs, or pinned
+    /// values. The pinned revision stays monotonic so surviving derived view
+    /// caches cannot mistake a later value for the cleared one.
     pub(crate) fn clear(&mut self) {
         self.running = false;
         self.nodes.clear();
@@ -574,14 +591,11 @@ mod tests {
                 value: DynamicValue::Static(StaticValue::Int(7)),
             }],
         });
-        assert_eq!(
-            rs.representative_pinned_output(OutputPort::new(node, 0))
-                .unwrap()
-                .value
-                .as_i64(),
-            Some(7),
-            "first push is stored"
-        );
+        let first = rs
+            .representative_pinned_output(OutputPort::new(node, 0))
+            .unwrap();
+        assert_eq!(first.value.as_i64(), Some(7), "first push is stored");
+        let first_revision = first.revision;
 
         rs.set_pinned_values(PinnedOutputs {
             node: NodeAddress::root(node),
@@ -590,13 +604,17 @@ mod tests {
                 value: DynamicValue::Static(StaticValue::Int(8)),
             }],
         });
+        let replacement = rs
+            .representative_pinned_output(OutputPort::new(node, 0))
+            .unwrap();
         assert_eq!(
-            rs.representative_pinned_output(OutputPort::new(node, 0))
-                .unwrap()
-                .value
-                .as_i64(),
+            replacement.value.as_i64(),
             Some(8),
             "a fresh push for the same port replaces it, not appends"
+        );
+        assert!(
+            replacement.revision > first_revision,
+            "a fresh push advances the view-facing revision"
         );
 
         let desc = imaginarium::ImageDesc::new(512, 256, imaginarium::ColorFormat::RGBA_U8);
@@ -689,10 +707,29 @@ mod tests {
                 value: DynamicValue::Static(StaticValue::Int(7)),
             }],
         });
+        let revision = rs
+            .representative_pinned_output(OutputPort::new(node, 0))
+            .unwrap()
+            .revision;
         rs.clear();
         assert!(
             rs.representative_pinned_output(OutputPort::new(node, 0))
                 .is_none()
+        );
+
+        rs.set_pinned_values(PinnedOutputs {
+            node: NodeAddress::root(node),
+            values: vec![PinnedOutput {
+                port_idx: 0,
+                value: DynamicValue::Static(StaticValue::Int(8)),
+            }],
+        });
+        assert!(
+            rs.representative_pinned_output(OutputPort::new(node, 0))
+                .unwrap()
+                .revision
+                > revision,
+            "clear does not recycle a revision a surviving view may cache"
         );
     }
 

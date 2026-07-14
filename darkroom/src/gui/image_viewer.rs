@@ -1,17 +1,16 @@
-//! Full-resolution viewers for pinned ports' runtime images, one editor
-//! tab per port ([`TabRef::ImageViewer`], deduped on open). Clicking a pin
-//! card's image hands the viewer the full [`DynamicValue`] retained beside
-//! its thumbnail — an `Arc` clone, so no recompute or worker round-trip —
-//! and focuses the port's tab. Later worker pushes automatically refresh an
-//! open viewer for the same port; a restored tab starts empty until a push or
-//! preview click supplies its value.
+//! Full-resolution viewers for pinned ports' runtime images, one editor tab
+//! per port ([`TabRef::ImageViewer`], deduped on open). Each visible viewer
+//! reads its port's latest [`DynamicValue`] from the centralized [`RunState`]
+//! and keeps only derived texture and navigation state. Opening or restoring
+//! a tab therefore shows an already-received value without an editor-driven
+//! notification path.
 //!
-//! The heavy work — RGBA8 conversion of the full buffer and the texture
-//! upload — happens lazily on the first draw after a (re)present, since
-//! only the record pass holds the `Ui`. The buffer is CPU-resident by
+//! The full RGBA8 conversion and texture upload happen lazily when a visible
+//! viewer observes a new source revision. The buffer is CPU-resident by
 //! construction: pinned-output receipt already prepared a thumbnail and
 //! pulled it to the CPU in place (`ImageBuffer` interior mutability).
 //!
+//! [`RunState`]: crate::gui::run_state::RunState
 //! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
 
 use std::fmt::Write as _;
@@ -60,11 +59,8 @@ pub(crate) struct ImageViewer {
     /// The port this viewer shows — keys the pane's widget id so two
     /// viewer tabs never share gesture responses.
     port: PortRef,
-    /// Header label (node name + port tag), refreshed on each present.
-    title: String,
-    /// Value handed over by `present`, converted + uploaded on the
-    /// next draw (which has the `Ui` to register the texture).
-    pending: Option<DynamicValue>,
+    /// Revision of the centralized source reflected by `image` or `message`.
+    source_revision: Option<u64>,
     /// The uploaded texture plus the source facts the header reports —
     /// present exactly while the pane shows an image.
     image: Option<ShownImage>,
@@ -83,6 +79,13 @@ pub(crate) struct ImageViewer {
     /// [`ViewerPreferences`] — one persisted setting shared by every
     /// viewer tab, threaded into [`Self::show`] each frame.
     checker: Option<ImageHandle>,
+}
+
+/// The centralized source value a viewer borrows for one frame.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ImageSource<'a> {
+    pub(crate) revision: u64,
+    pub(crate) value: &'a DynamicValue,
 }
 
 /// A capped RGBA8 render of an image value, ready to register, plus the
@@ -110,8 +113,7 @@ impl ImageViewer {
     pub(crate) fn new(port: PortRef) -> Self {
         Self {
             port,
-            title: String::new(),
-            pending: None,
+            source_revision: None,
             image: None,
             message: None,
             view: None,
@@ -120,9 +122,8 @@ impl ImageViewer {
         }
     }
 
-    /// Back to fit-to-pane framing (and cancel any pan in progress) —
-    /// shared by present, the fit button, double-click, and a
-    /// dimensions-changed refresh.
+    /// Back to fit-to-pane framing (and cancel any pan in progress) for a
+    /// source change, the fit button, or a double-click.
     fn reset_framing(&mut self) {
         self.view = None;
         self.pan_anchor.clear();
@@ -135,65 +136,61 @@ impl ImageViewer {
         self.view.unwrap_or_else(|| fit_viewport(img, pane))
     }
 
-    /// Show `value` as this viewer's content, resetting the framing to fit.
-    pub(crate) fn present(&mut self, title: String, value: Option<DynamicValue>) {
-        self.reset_framing();
-        self.title = title;
+    /// Refresh derived content when the centralized source changes. The
+    /// source itself is borrowed only for conversion and never retained by
+    /// the view.
+    fn sync_source(&mut self, source: Option<ImageSource<'_>>) -> Option<RenderedImage> {
+        let revision = source.map(|source| source.revision);
+        if revision == self.source_revision {
+            return None;
+        }
+        self.source_revision = revision;
         self.message = None;
-        match value {
-            Some(value) => self.pending = Some(value),
+        match source {
+            Some(source) => match render_full(source.value) {
+                Ok(rendered) => Some(rendered),
+                Err(message) => {
+                    self.image = None;
+                    self.message = Some(message);
+                    None
+                }
+            },
             None => {
-                self.pending = None;
                 self.image = None;
                 self.message = Some("pinned output has no image value".to_owned());
+                self.reset_framing();
+                None
             }
         }
     }
 
-    /// Stage a fresh worker value while preserving the user's framing when
-    /// its dimensions are unchanged; [`Self::show`] refits changed dimensions.
-    pub(crate) fn refresh(&mut self, title: String, value: DynamicValue) {
-        self.title = title;
-        self.message = None;
-        self.pending = Some(value);
-    }
-
-    /// Draw the viewer pane (the whole tab content). Converts + uploads a
-    /// pending value first, then applies last frame's pan/zoom gestures,
-    /// then paints image (or message), the header readout, and the
-    /// control panel. `prefs` carries the shared backdrop/sampling
-    /// choices; returns `true` when the panel edited them (the caller
-    /// persists).
+    /// Draw the viewer pane (the whole tab content). Synchronizes from the
+    /// borrowed source, uploads a newly derived raster, applies last frame's
+    /// pan/zoom gestures, then paints the image (or message), header, and
+    /// controls. Returns `true` when the shared viewer preferences changed.
     pub(crate) fn show(
         &mut self,
         ui: &mut Ui,
         theme: &Theme,
         prefs: &mut ViewerPreferences,
+        title: &str,
+        source: Option<ImageSource<'_>>,
     ) -> bool {
-        if let Some(value) = self.pending.take() {
-            match render_full(&value) {
-                Ok(rendered) => {
-                    // Keep the user's framing across a same-size refresh
-                    // (A/B-ing a parameter tweak); refit when dimensions
-                    // changed — the old viewport frames nothing sensible.
-                    let dims_changed = self
-                        .image
-                        .as_ref()
-                        .is_none_or(|old| old.handle.size() != rendered.image_size());
-                    if dims_changed {
-                        self.reset_framing();
-                    }
-                    self.image = Some(ShownImage {
-                        native_size: rendered.native_size,
-                        native_format: rendered.native_format,
-                        handle: ui.register_image(rendered.image),
-                    });
-                }
-                Err(message) => {
-                    self.image = None;
-                    self.message = Some(message);
-                }
+        if let Some(rendered) = self.sync_source(source) {
+            // Keep the user's framing across a same-size refresh (A/B-ing a
+            // parameter tweak); refit when the dimensions changed.
+            let dims_changed = self
+                .image
+                .as_ref()
+                .is_none_or(|old| old.handle.size() != rendered.image_size());
+            if dims_changed {
+                self.reset_framing();
             }
+            self.image = Some(ShownImage {
+                native_size: rendered.native_size,
+                native_format: rendered.native_format,
+                handle: ui.register_image(rendered.image),
+            });
         }
         self.apply_gestures(ui);
 
@@ -251,7 +248,7 @@ impl ImageViewer {
                         );
                     }
                 }
-                self.header(ui, theme, pane);
+                self.header(ui, theme, pane, title);
                 if self.image.is_some() {
                     prefs_changed = self.controls(ui, theme, pane, prefs);
                 }
@@ -281,13 +278,13 @@ impl ImageViewer {
     /// The top-left readout: source port, native dimensions and pixel
     /// format, whether the view is texture-capped, and the current zoom.
     /// (`title` is never empty — `port_label` supplies the fallback.)
-    fn header(&self, ui: &mut Ui, theme: &Theme, pane: Option<Vec2>) {
+    fn header(&self, ui: &mut Ui, theme: &Theme, pane: Option<Vec2>, title: &str) {
         let Some(shown) = &self.image else {
             return;
         };
         let mut text = format!(
             "{} · {} × {} · {}",
-            self.title, shown.native_size.x, shown.native_size.y, shown.native_format,
+            title, shown.native_size.x, shown.native_size.y, shown.native_format,
         );
         if shown.handle.size() != shown.native_size {
             text.push_str(" · downscaled view");
@@ -728,31 +725,6 @@ fn rgba8_image(image: RawImage) -> Option<AptImage> {
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
-    use super::*;
-
-    pub(crate) fn assert_presented_custom_value(viewer: &ImageViewer, expected: &DynamicValue) {
-        let pending = viewer
-            .pending
-            .as_ref()
-            .expect("viewer staged the full render");
-        let (DynamicValue::Custom(pending), DynamicValue::Custom(expected)) = (pending, expected)
-        else {
-            panic!("expected custom image values");
-        };
-        assert!(std::sync::Arc::ptr_eq(pending, expected));
-    }
-
-    pub(crate) fn consume_presented_custom_value(
-        viewer: &mut ImageViewer,
-        expected: &DynamicValue,
-    ) {
-        assert_presented_custom_value(viewer, expected);
-        viewer.pending = None;
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use imaginarium::{ColorFormat, Image as RawImage, ImageBuffer, ImageDesc};
@@ -860,36 +832,57 @@ mod tests {
     }
 
     #[test]
-    fn present_resets_framing_and_stages_the_value() {
+    fn sync_source_tracks_revisions_without_retaining_values() {
         let mut viewer = ImageViewer::new(port());
         viewer.view = Some(Viewport {
             pan: Vec2::ZERO,
             zoom: 3.0,
         });
+        let first = image_value(2, 2);
 
-        viewer.present("n · out 0".to_owned(), Some(image_value(2, 2)));
-        assert!(viewer.view.is_none(), "present refits");
-        assert!(viewer.pending.is_some(), "full value is staged");
+        let rendered = viewer
+            .sync_source(Some(ImageSource {
+                revision: 1,
+                value: &first,
+            }))
+            .expect("a fresh source is rendered");
+        assert_eq!(rendered.image_size(), UVec2::new(2, 2));
+        assert_eq!(viewer.source_revision, Some(1));
+        assert_eq!(
+            viewer.view,
+            Some(Viewport {
+                pan: Vec2::ZERO,
+                zoom: 3.0,
+            }),
+            "conversion defers any refit until the raster is uploaded"
+        );
 
-        viewer.present("n · out 0".to_owned(), None);
-        assert!(viewer.pending.is_none());
+        let same_revision = image_value(3, 1);
+        let rendered = viewer.sync_source(Some(ImageSource {
+            revision: 1,
+            value: &same_revision,
+        }));
+        assert!(
+            rendered.is_none(),
+            "an unchanged revision is not reconverted"
+        );
+
+        let rendered = viewer
+            .sync_source(Some(ImageSource {
+                revision: 2,
+                value: &same_revision,
+            }))
+            .expect("a newer revision is converted");
+        assert_eq!(rendered.image_size(), UVec2::new(3, 1));
+
+        assert!(viewer.sync_source(None).is_none());
+        assert_eq!(viewer.source_revision, None);
+        assert!(viewer.image.is_none());
+        assert!(viewer.view.is_none(), "removing the source clears framing");
         assert_eq!(
             viewer.message.as_deref(),
             Some("pinned output has no image value")
         );
-
-        let view = Viewport {
-            pan: Vec2::new(10.0, 20.0),
-            zoom: 3.0,
-        };
-        viewer.view = Some(view);
-        viewer.refresh("n · out 0".to_owned(), image_value(2, 2));
-        assert_eq!(
-            viewer.view,
-            Some(view),
-            "refresh defers any refit until dimensions are known"
-        );
-        assert!(viewer.pending.is_some(), "refreshed value is staged");
     }
 
     #[test]

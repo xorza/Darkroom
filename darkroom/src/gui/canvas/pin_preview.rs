@@ -15,7 +15,6 @@
 //! over-decorated.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use aperture::{
     Align, Background, Color, Configure, Corners, CursorIcon, FontWeight, ImageFilter, ImageFit,
@@ -25,7 +24,7 @@ use aperture::{
 use glam::{UVec2, Vec2};
 use imaginarium::ColorFormat;
 use scenarium::OutputPort;
-use scenarium::{CustomValue, DataType, DynamicValue, RamUsage};
+use scenarium::{DataType, DynamicValue, RamUsage};
 
 use crate::gui::format::fmt_bytes;
 use crate::gui::node::header::Badge;
@@ -78,21 +77,10 @@ pub(crate) struct ImagePreview {
 /// An uploaded preview texture, kept alive across frames (an `ImageHandle`
 /// frees its GPU texture when its last clone drops) and re-uploaded only
 /// when the pinned value it came from actually changed.
+#[derive(Debug)]
 struct CachedPreview {
-    /// Identity of the pinned value this texture was converted from — an
-    /// `Arc::ptr_eq` hit against a fresh push skips a redundant
-    /// upload.
-    source: Arc<dyn CustomValue>,
+    revision: u64,
     preview: ImagePreview,
-}
-
-impl std::fmt::Debug for CachedPreview {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CachedPreview")
-            .field("source_type", &self.source.type_id())
-            .field("preview", &self.preview)
-            .finish()
-    }
 }
 
 /// Uploaded thumbnail textures for every pinned output currently showing
@@ -104,9 +92,9 @@ pub(crate) struct PreviewCache {
 
 impl PreviewCache {
     /// The current thumbnail for `port`'s pinned image value, uploading the
-    /// already-prepared raster only when the value changed since last time
-    /// (an `Arc` identity miss) or nothing's cached yet. `None` when `value`
-    /// isn't a decodable image — the caller falls back to text.
+    /// already-prepared raster only when the centralized value's revision
+    /// changed or nothing's cached yet. `None` when `value` isn't a decodable
+    /// image — the caller falls back to text.
     pub(crate) fn resolve(
         &mut self,
         ui: &Ui,
@@ -119,7 +107,7 @@ impl PreviewCache {
         };
         let ram = data.ram_bytes();
         if let Some(cached) = self.textures.get(&port)
-            && Arc::ptr_eq(&cached.source, data)
+            && cached.revision == value.revision
         {
             return Some(ImagePreview {
                 ram,
@@ -145,7 +133,7 @@ impl PreviewCache {
         self.textures.insert(
             port,
             CachedPreview {
-                source: Arc::clone(data),
+                revision: value.revision,
                 preview: preview.clone(),
             },
         );

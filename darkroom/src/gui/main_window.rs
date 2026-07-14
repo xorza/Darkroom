@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::mem::take;
 
 use aperture::{Align, Background, Configure, Panel, Sizing, Ui, VAlign};
+use scenarium::OutputPort;
 
 use crate::core::document::{Document, PortRef, TabRef};
 use crate::core::edit::intent::types::Intent;
@@ -14,7 +15,7 @@ use crate::gui::canvas::GraphUI;
 use crate::gui::canvas::pin_ui::emit_pin_image_opens;
 use crate::gui::dock::DockUi;
 use crate::gui::graph_toolbar;
-use crate::gui::image_viewer::ImageViewer;
+use crate::gui::image_viewer::{self, ImageSource, ImageViewer};
 use crate::gui::menu_bar;
 use crate::gui::node::prepass::emit_subgraph_opens;
 use crate::gui::preferences_view;
@@ -30,10 +31,10 @@ use crate::gui::status_bar;
 #[derive(Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
-    /// One full-resolution image-viewer pane per open viewer tab
-    /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Fed by
-    /// `Editor` on preview clicks and later pinned-output pushes; the editor
-    /// also prunes entries whose tab closed, dropping its texture.
+    /// One full-resolution image-viewer pane per rendered viewer tab
+    /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Each pane pulls
+    /// its source from `RunState`; the editor prunes state whose tab closed,
+    /// dropping its texture.
     pub(crate) image_viewers: HashMap<PortRef, ImageViewer>,
     dock: DockUi,
     first_frame: bool,
@@ -120,12 +121,23 @@ impl MainWindow {
                         }
                     }
                     TabRef::ImageViewer(port) => {
+                        let title = image_viewer::port_label(doc, port);
+                        let source = ctx
+                            .run_state
+                            .representative_pinned_output(OutputPort::new(
+                                port.node_id,
+                                port.port_idx,
+                            ))
+                            .map(|value| ImageSource {
+                                revision: value.revision,
+                                value: &value.value,
+                            });
                         let viewer = image_viewers
                             .entry(port)
                             .or_insert_with(|| ImageViewer::new(port));
                         // Viewer-toolbar edits ride the same in-place
                         // prefs path as the Preferences tab.
-                        if viewer.show(ui, ctx.theme, &mut prefs.viewer) {
+                        if viewer.show(ui, ctx.theme, &mut prefs.viewer, &title, source) {
                             command = Some(AppCommand::Prefs(PrefsCommand::Changed));
                         }
                     }
@@ -146,15 +158,6 @@ impl MainWindow {
     /// cache so the newly-shown graph's connections render immediately.
     pub(crate) fn reset_transient(&mut self) {
         self.graph_ui.clear_gestures();
-    }
-
-    /// The viewer pane for `port`, created empty on first access — a
-    /// restored/undo-reopened tab has no state yet; it shows the hint until
-    /// its pinned preview is clicked or the worker pushes a fresh value.
-    pub(crate) fn viewer_mut(&mut self, port: PortRef) -> &mut ImageViewer {
-        self.image_viewers
-            .entry(port)
-            .or_insert_with(|| ImageViewer::new(port))
     }
 }
 

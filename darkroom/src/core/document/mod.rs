@@ -94,8 +94,8 @@ pub enum TabRef {
     Preferences,
     /// A full-resolution viewer of one port's runtime image — one tab per
     /// port, deduped on open. Content is runtime-only
-    /// (`crate::gui::image_viewer`): a restored tab opens empty and fills
-    /// itself after the next run. Pruned when its node is deleted, like a
+    /// (`crate::gui::image_viewer`): a restored tab pulls any current value
+    /// from `RunState` when drawn. Pruned when its node is deleted, like a
     /// subgraph tab whose def vanished.
     ImageViewer(PortRef),
 }
