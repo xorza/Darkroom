@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use aperture::{
     Align, Background, Color, Configure, Corners, CursorIcon, FontWeight, ImageFilter, ImageFit,
-    ImageHandle, Panel, Response, Sense, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap,
-    Ui, VAlign, WidgetId,
+    ImageHandle, Justify, Panel, Response, Sense, Shape, Sizing, Spacing, Stroke, Text, TextStyle,
+    TextWrap, Ui, VAlign, WidgetId,
 };
 use glam::{UVec2, Vec2};
 use imaginarium::ColorFormat;
@@ -302,6 +302,8 @@ pub(crate) fn draw_widget<'ui>(
                             .id_salt("text")
                             .size((Sizing::FILL, Sizing::FILL))
                             .padding(Spacing::all(8.0))
+                            .child_align(Align::CENTER)
+                            .justify(Justify::Center)
                             .show(ui, |ui| {
                                 Text::new(text.to_owned())
                                     .style(sized_text(ui, 11.0))
