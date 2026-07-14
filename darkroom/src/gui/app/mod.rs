@@ -143,8 +143,9 @@ impl App {
     /// reprojects per-node `ExecStatus` (the status glow) and per-node
     /// logs (the inspector's Log section); a failed run clears both and
     /// surfaces in the status bar. A pinned output's live push lands on
-    /// `run_state` independent of the final stats. Drained before the
-    /// editor's scene rebuild so they reflect the latest run.
+    /// `run_state`, which prepares its small image preview immediately,
+    /// independent of the final stats. Drained before the editor's scene
+    /// rebuild so they reflect the latest run.
     fn drain_worker_events(&mut self) {
         // Collect to drop the channel borrow before the status writes below
         // (both live on `self.engine`).

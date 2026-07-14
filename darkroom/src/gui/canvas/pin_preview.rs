@@ -28,8 +28,8 @@ use scenarium::data::{CustomValue, DataType, DynamicValue, RamUsage};
 use scenarium::graph::OutputPort;
 
 use crate::gui::format::fmt_bytes;
-use crate::gui::image_viewer::convert_image_value;
 use crate::gui::node::header::Badge;
+use crate::gui::run_state::PinnedOutputValue;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{
     CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, footer_background,
@@ -42,10 +42,6 @@ use crate::gui::widgets::support::{
 /// `Contain`; a non-image value's formatted text centers in the same frame.
 pub(crate) const PREVIEW_WIDTH: f32 = 280.0;
 pub(crate) const PREVIEW_HEIGHT: f32 = 200.0;
-
-/// Longest side, in pixels, an image-typed pinned value is downscaled to
-/// before upload — small enough to stay cheap with many simultaneous pins.
-const PREVIEW_TEXTURE_DIM: u32 = 256;
 
 /// Whether `ty` is an image value — the pinned output's preview widget
 /// shows a thumbnail for these, and its formatted text for everything else.
@@ -74,18 +70,18 @@ pub(crate) struct ImagePreview {
     native_format: ColorFormat,
     /// This value's resident memory, refreshed every [`PreviewCache::resolve`]
     /// call regardless of whether the texture itself was cached — cheap
-    /// (`CustomValue::ram_bytes` just reads a stored size) and can't go stale
-    /// the way a cached texture's *pixels* would if it weren't reconverted.
+    /// (`CustomValue::ram_bytes` just reads a stored size) and independent
+    /// of the prepared raster's metadata.
     ram: RamUsage,
 }
 
 /// An uploaded preview texture, kept alive across frames (an `ImageHandle`
-/// frees its GPU texture when its last clone drops) and reconverted only
+/// frees its GPU texture when its last clone drops) and re-uploaded only
 /// when the pinned value it came from actually changed.
 struct CachedPreview {
     /// Identity of the pinned value this texture was converted from — an
     /// `Arc::ptr_eq` hit against a fresh push skips a redundant
-    /// reconvert+reupload.
+    /// upload.
     source: Arc<dyn CustomValue>,
     preview: ImagePreview,
 }
@@ -107,17 +103,17 @@ pub(crate) struct PreviewCache {
 }
 
 impl PreviewCache {
-    /// The current thumbnail for `port`'s pinned image value, converting +
-    /// uploading fresh only when the value changed since last time (an
-    /// `Arc` identity miss) or nothing's cached yet. `None` when `value`
-    /// isn't a (decodable) image — the caller falls back to text.
+    /// The current thumbnail for `port`'s pinned image value, uploading the
+    /// already-prepared raster only when the value changed since last time
+    /// (an `Arc` identity miss) or nothing's cached yet. `None` when `value`
+    /// isn't a decodable image — the caller falls back to text.
     pub(crate) fn resolve(
         &mut self,
         ui: &Ui,
         port: OutputPort,
-        value: &DynamicValue,
+        value: &PinnedOutputValue,
     ) -> Option<ImagePreview> {
-        let DynamicValue::Custom(data) = value else {
+        let DynamicValue::Custom(data) = &value.value else {
             self.textures.remove(&port);
             return None;
         };
@@ -130,13 +126,20 @@ impl PreviewCache {
                 ..cached.preview.clone()
             });
         }
-        let (image, native_size, native_format) =
-            convert_image_value(value, PREVIEW_TEXTURE_DIM).ok()?;
+        let Some(rendered) = &value.preview else {
+            self.textures.remove(&port);
+            return None;
+        };
+        let image = aperture::Image::from_rgba8(
+            rendered.image.width,
+            rendered.image.height,
+            rendered.image.pixels.clone(),
+        );
         let handle = ui.register_image(image);
         let preview = ImagePreview {
             handle,
-            native_size,
-            native_format,
+            native_size: rendered.native_size,
+            native_format: rendered.native_format,
             ram,
         };
         self.textures.insert(

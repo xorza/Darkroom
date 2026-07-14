@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use lens::Image as LensImage;
 use scenarium::data::{DynamicValue, RamUsage};
 use scenarium::execution::RunError;
 use scenarium::execution::stats::{
@@ -25,6 +26,10 @@ use scenarium::graph::NodeId;
 use scenarium::graph::OutputPort;
 
 use crate::core::worker::RunId;
+use crate::gui::image_viewer::{RenderedImage, convert_image_value};
+
+/// Longest side of the RGBA8 raster prepared for a pinned-output card.
+const PIN_PREVIEW_TEXTURE_DIM: u32 = 256;
 
 /// Per-node execution outcome of the last run. Ordered low→high so a
 /// higher-severity status wins when several fold onto one node
@@ -92,7 +97,16 @@ pub(crate) struct NodeRunState {
     /// mid-run, independent of [`RunState::set_results`]'s reprojection. A
     /// value isn't reset each run; it simply sits until a fresh push for
     /// that port replaces it, or the whole run state is [`cleared`](RunState::clear).
-    pub(crate) pinned_values: HashMap<usize, DynamicValue>,
+    pub(crate) pinned_values: HashMap<usize, PinnedOutputValue>,
+}
+
+/// One pushed pinned output plus its eagerly prepared image thumbnail.
+/// The full value remains available for text and memory metadata; image
+/// conversion happens on receipt, before the canvas record pass.
+#[derive(Debug)]
+pub(crate) struct PinnedOutputValue {
+    pub(crate) value: DynamicValue,
+    pub(crate) preview: Option<RenderedImage>,
 }
 
 /// The last run's per-node state. Off the serialized state; rebuilt each run.
@@ -151,7 +165,7 @@ impl RunState {
     /// (not pinned, or pinned but not yet run). Read by the canvas pin-
     /// preview widget ([`crate::gui::canvas::pin_ui::PinUi::draw`]) every
     /// frame.
-    pub(crate) fn pinned_value(&self, port: OutputPort) -> Option<&DynamicValue> {
+    pub(crate) fn pinned_output(&self, port: OutputPort) -> Option<&PinnedOutputValue> {
         self.nodes
             .get(&port.node_id)?
             .pinned_values
@@ -167,7 +181,11 @@ impl RunState {
     pub(crate) fn set_pinned_values(&mut self, pinned: PinnedOutputs) {
         let slot = self.nodes.entry(pinned.node_id).or_default();
         for (port_idx, value) in pinned.values {
-            slot.pinned_values.insert(port_idx, value);
+            let preview = value
+                .as_custom::<LensImage>()
+                .and_then(|_| convert_image_value(&value, PIN_PREVIEW_TEXTURE_DIM).ok());
+            slot.pinned_values
+                .insert(port_idx, PinnedOutputValue { value, preview });
         }
     }
 
@@ -553,7 +571,7 @@ mod tests {
         let node = nid(1);
         let mut rs = RunState::default();
         assert!(
-            rs.pinned_value(OutputPort::new(node, 0)).is_none(),
+            rs.pinned_output(OutputPort::new(node, 0)).is_none(),
             "nothing pushed yet"
         );
 
@@ -562,7 +580,10 @@ mod tests {
             values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
         });
         assert_eq!(
-            rs.pinned_value(OutputPort::new(node, 0)).unwrap().as_i64(),
+            rs.pinned_output(OutputPort::new(node, 0))
+                .unwrap()
+                .value
+                .as_i64(),
             Some(7),
             "first push is stored"
         );
@@ -572,10 +593,34 @@ mod tests {
             values: vec![(0, DynamicValue::Static(StaticValue::Int(8)))],
         });
         assert_eq!(
-            rs.pinned_value(OutputPort::new(node, 0)).unwrap().as_i64(),
+            rs.pinned_output(OutputPort::new(node, 0))
+                .unwrap()
+                .value
+                .as_i64(),
             Some(8),
             "a fresh push for the same port replaces it, not appends"
         );
+
+        let desc = imaginarium::ImageDesc::new(512, 256, imaginarium::ColorFormat::RGBA_U8);
+        let raw = imaginarium::Image::new_with_data(desc, vec![128; 512 * 256 * 4]).unwrap();
+        let value =
+            DynamicValue::from_custom(LensImage::new(imaginarium::ImageBuffer::from_cpu(raw)));
+        rs.set_pinned_values(PinnedOutputs {
+            node_id: node,
+            values: vec![(1, value)],
+        });
+
+        let image = rs
+            .pinned_output(OutputPort::new(node, 1))
+            .unwrap()
+            .preview
+            .as_ref()
+            .expect("image preview is prepared while ingesting the push");
+        assert_eq!(image.native_size, glam::UVec2::new(512, 256));
+        assert_eq!(image.native_format, imaginarium::ColorFormat::RGBA_U8);
+        assert_eq!(image.image.width, 256);
+        assert_eq!(image.image.height, 128);
+        assert_eq!(image.image.pixels, vec![128; 256 * 128 * 4]);
     }
 
     /// `clear` (a whole-run failure) drops pinned values along with
@@ -591,7 +636,7 @@ mod tests {
             values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
         });
         rs.clear();
-        assert!(rs.pinned_value(OutputPort::new(node, 0)).is_none());
+        assert!(rs.pinned_output(OutputPort::new(node, 0)).is_none());
     }
 
     /// A new epoch keeps a pinned value alive even when its node carries no
@@ -612,7 +657,10 @@ mod tests {
         rs.begin_run();
 
         assert_eq!(
-            rs.pinned_value(OutputPort::new(node, 0)).unwrap().as_i64(),
+            rs.pinned_output(OutputPort::new(node, 0))
+                .unwrap()
+                .value
+                .as_i64(),
             Some(7),
             "pinned value survives an epoch bump with nothing else to anchor it"
         );
@@ -637,7 +685,10 @@ mod tests {
         rs.set_results(&stats(&[], &[]), &FlattenMap::default());
 
         assert_eq!(
-            rs.pinned_value(OutputPort::new(node, 0)).unwrap().as_i64(),
+            rs.pinned_output(OutputPort::new(node, 0))
+                .unwrap()
+                .value
+                .as_i64(),
             Some(7),
             "pinned value isn't dropped just because this run didn't mention the node"
         );

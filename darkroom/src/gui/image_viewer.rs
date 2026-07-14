@@ -16,8 +16,8 @@
 //! The heavy work — RGBA8 conversion of the full buffer and the texture
 //! upload — happens lazily on the first draw after a (re)present, since
 //! only the record pass holds the `Ui`. The buffer is CPU-resident by
-//! construction: the worker's thumbnail generation already pulled it to
-//! the CPU in place (`ImageBuffer` interior mutability).
+//! construction: pinned-output receipt already prepared a thumbnail and
+//! pulled it to the CPU in place (`ImageBuffer` interior mutability).
 //!
 //! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
 
@@ -101,13 +101,13 @@ pub(crate) struct ImageViewer {
     checker: Option<ImageHandle>,
 }
 
-/// An RGBA8 render of a full image value, ready to register, plus the
+/// A capped RGBA8 render of an image value, ready to register, plus the
 /// source dimensions and pixel format it was derived from.
 #[derive(Debug)]
-struct RenderedImage {
-    image: aperture::Image,
-    native_size: UVec2,
-    native_format: ColorFormat,
+pub(crate) struct RenderedImage {
+    pub(crate) image: aperture::Image,
+    pub(crate) native_size: UVec2,
+    pub(crate) native_format: ColorFormat,
 }
 
 /// [`RenderedImage`] after upload: the texture handle plus the source
@@ -732,16 +732,16 @@ fn capped_target(native: UVec2, max_dim: u32) -> UVec2 {
 /// Convert a held image value to an uploadable RGBA8 raster capped to
 /// `max_dim` on its longest side, plus the source's native size/format
 /// before that cap: downcast to the lens [`Image`](LensImage), read its CPU
-/// pixels (resident by construction — the worker's thumbnail pass pulled
-/// the shared buffer to the CPU; the `cpu_only` context is only a formality
-/// for `make_cpu`'s signature), then cap + convert in one fused pass. `Err`
+/// pixels (resident by construction — pinned-output preview preparation pulls
+/// the shared buffer to the CPU; the `cpu_only` context is only a formality for
+/// `make_cpu`'s signature), then cap + convert in one fused pass. `Err`
 /// carries the user-facing reason. Shared by the viewer's full-resolution
 /// render (capped to [`MAX_TEXTURE_DIM`]) and the canvas pin-preview
 /// thumbnail (capped much smaller).
 pub(crate) fn convert_image_value(
     value: &DynamicValue,
     max_dim: u32,
-) -> Result<(aperture::Image, UVec2, ColorFormat), String> {
+) -> Result<RenderedImage, String> {
     let image = value
         .as_custom::<LensImage>()
         .ok_or_else(|| "value is not an image".to_owned())?;
@@ -759,19 +759,18 @@ pub(crate) fn convert_image_value(
     // 1:1 passes through as a plain RGBA8 convert (Preview never upscales).
     let rgba = Preview::new(target.x as usize, target.y as usize).to_rgba8(&cpu);
     let image = rgba8_image(rgba).expect("Preview::to_rgba8 yields packed RGBA_U8");
-    Ok((image, native_size, native_format))
+    Ok(RenderedImage {
+        image,
+        native_size,
+        native_format,
+    })
 }
 
 /// Convert a held image value to an uploadable RGBA8 raster capped to
 /// [`MAX_TEXTURE_DIM`], plus the source dimensions and pixel format it was
 /// derived from.
 fn render_full(value: &DynamicValue) -> Result<RenderedImage, String> {
-    let (image, native_size, native_format) = convert_image_value(value, MAX_TEXTURE_DIM as u32)?;
-    Ok(RenderedImage {
-        image,
-        native_size,
-        native_format,
-    })
+    convert_image_value(value, MAX_TEXTURE_DIM as u32)
 }
 
 /// Reinterpret a packed `RGBA_U8` imaginarium image as an uploadable

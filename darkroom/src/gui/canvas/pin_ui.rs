@@ -332,7 +332,7 @@ impl PinUi {
         // visual language across nodes and pin previews.
         let is_selected = rcx.selected.contains(&ItemRef::Pin(g.out_port));
         let border = theme.card_border(g.broken, is_selected);
-        let value = rcx.run_state.pinned_value(g.out_port);
+        let value = rcx.run_state.pinned_output(g.out_port);
         let image = if is_image_type(&output.ty) {
             value.and_then(|v| self.previews.resolve(ui, g.out_port, v))
         } else {
@@ -340,7 +340,7 @@ impl PinUi {
         };
         let text = image.is_none().then(|| {
             value
-                .map(ToString::to_string)
+                .map(|value| value.value.to_string())
                 .unwrap_or_else(|| "not yet run".to_owned())
         });
         let response = pin_preview::draw_widget(
