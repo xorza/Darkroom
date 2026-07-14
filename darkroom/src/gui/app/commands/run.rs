@@ -37,7 +37,7 @@ impl App {
     /// Compile the document graph and execute its sinks once on the
     /// worker. A compile error is reported to the engine's status log
     /// synchronously — no run starts, so the prior run's status stays
-    /// untouched. On success, opens a fresh run epoch. The worker's `Update`
+    /// untouched. On success, marks a fresh run in flight. The worker's `Update`
     /// tears down any running event loop, so the toggle drops in lockstep.
     pub(crate) fn run_graph(&mut self) {
         if !self.engine.run_once(&self.editor.document.graph) {
@@ -48,8 +48,8 @@ impl App {
     }
 
     /// Like [`Self::run_graph`], but seeds the run at one node: only its
-    /// upstream cone executes, and its outputs stay resident. Same epoch and
-    /// event-loop bookkeeping as a full run.
+    /// upstream cone executes, and its outputs stay resident. Same run-state
+    /// and event-loop bookkeeping as a full run.
     pub(crate) fn run_node(&mut self, node_id: NodeId) {
         if !self.engine.run_node(&self.editor.document.graph, node_id) {
             return;

@@ -2,8 +2,9 @@
 //! tab per port ([`TabRef::ImageViewer`], deduped on open). Clicking a pin
 //! card's image hands the viewer the full [`DynamicValue`] retained beside
 //! its thumbnail — an `Arc` clone, so no recompute or worker round-trip —
-//! and focuses the port's tab. Clicking the refreshed card presents the
-//! latest value; a restored tab starts empty until the card is clicked.
+//! and focuses the port's tab. Later worker pushes automatically refresh an
+//! open viewer for the same port; a restored tab starts empty until a push or
+//! preview click supplies its value.
 //!
 //! The heavy work — RGBA8 conversion of the full buffer and the texture
 //! upload — happens lazily on the first draw after a (re)present, since
@@ -147,6 +148,14 @@ impl ImageViewer {
                 self.message = Some("pinned output has no image value".to_owned());
             }
         }
+    }
+
+    /// Stage a fresh worker value while preserving the user's framing when
+    /// its dimensions are unchanged; [`Self::show`] refits changed dimensions.
+    pub(crate) fn refresh(&mut self, title: String, value: DynamicValue) {
+        self.title = title;
+        self.message = None;
+        self.pending = Some(value);
     }
 
     /// Draw the viewer pane (the whole tab content). Converts + uploads a
@@ -733,6 +742,14 @@ pub(crate) mod test_support {
         };
         assert!(std::sync::Arc::ptr_eq(pending, expected));
     }
+
+    pub(crate) fn consume_presented_custom_value(
+        viewer: &mut ImageViewer,
+        expected: &DynamicValue,
+    ) {
+        assert_presented_custom_value(viewer, expected);
+        viewer.pending = None;
+    }
 }
 
 #[cfg(test)]
@@ -860,6 +877,19 @@ mod tests {
             viewer.message.as_deref(),
             Some("pinned output has no image value")
         );
+
+        let view = Viewport {
+            pan: Vec2::new(10.0, 20.0),
+            zoom: 3.0,
+        };
+        viewer.view = Some(view);
+        viewer.refresh("n · out 0".to_owned(), image_value(2, 2));
+        assert_eq!(
+            viewer.view,
+            Some(view),
+            "refresh defers any refit until dimensions are known"
+        );
+        assert!(viewer.pending.is_some(), "refreshed value is staged");
     }
 
     #[test]

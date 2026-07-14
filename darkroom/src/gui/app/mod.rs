@@ -143,9 +143,10 @@ impl App {
     /// reprojects per-node `ExecStatus` (the status glow) and per-node
     /// logs (the inspector's Log section); a failed run clears both and
     /// surfaces in the status bar. A pinned output's live push lands on
-    /// `run_state`, which prepares its small image preview immediately,
-    /// independent of the final stats. Drained before the editor's scene
-    /// rebuild so they reflect the latest run.
+    /// the editor, which prepares its small image preview and refreshes any
+    /// viewer already open for that port immediately, independent of the
+    /// final stats. Drained before the editor's scene rebuild so they reflect
+    /// the latest run.
     fn drain_worker_events(&mut self) {
         // Collect to drop the channel borrow before the status writes below
         // (both live on `self.engine`).
@@ -177,9 +178,7 @@ impl App {
                     .editor
                     .run_state
                     .apply_progress(&progress, &self.engine.flatten_map),
-                WorkerEvent::PinnedOutputs(pinned) => {
-                    self.editor.run_state.set_pinned_values(pinned)
-                }
+                WorkerEvent::PinnedOutputs(pinned) => self.editor.set_pinned_values(pinned),
             }
         }
     }

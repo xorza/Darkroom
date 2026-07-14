@@ -32,8 +32,8 @@ pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
     /// One full-resolution image-viewer pane per open viewer tab
     /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Fed by
-    /// `Editor` on preview clicks, which also prunes entries whose tab
-    /// closed — dropping one frees its texture.
+    /// `Editor` on preview clicks and later pinned-output pushes; the editor
+    /// also prunes entries whose tab closed, dropping its texture.
     pub(crate) image_viewers: HashMap<PortRef, ImageViewer>,
     dock: DockUi,
     first_frame: bool,
@@ -149,8 +149,8 @@ impl MainWindow {
     }
 
     /// The viewer pane for `port`, created empty on first access — a
-    /// restored/undo-reopened tab has no state yet; it shows the hint
-    /// until its pinned preview is clicked.
+    /// restored/undo-reopened tab has no state yet; it shows the hint until
+    /// its pinned preview is clicked or the worker pushes a fresh value.
     pub(crate) fn viewer_mut(&mut self, port: PortRef) -> &mut ImageViewer {
         self.image_viewers
             .entry(port)

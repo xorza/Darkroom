@@ -25,7 +25,6 @@ use scenarium::execution::stats::{
 use scenarium::graph::NodeId;
 use scenarium::graph::OutputPort;
 
-use crate::core::worker::RunId;
 use crate::gui::image_viewer::{RenderedImage, convert_image_value};
 
 /// Longest side of the RGBA8 raster prepared for a pinned-output card.
@@ -116,9 +115,6 @@ pub(crate) struct RunState {
     /// A run is in flight (`begin_run` → its `ExecutionFinished`). Drives the
     /// live repaint tick and whether the Cancel affordance shows.
     running: bool,
-    /// Current run epoch, bumped by [`Self::begin_run`]. Read by the
-    /// image-viewer refresh to tell which run its content came from.
-    pub(crate) run_id: RunId,
     /// RAM held by the worker's runtime cache after the last finished run
     /// (system RAM vs GPU VRAM), mirrored from its `ExecutionStats`. Drives the
     /// status bar's memory readout.
@@ -298,13 +294,11 @@ impl RunState {
         self.nodes.clear();
     }
 
-    /// Open a new run epoch: bumps `run_id` (so image-viewer content tagged
-    /// with a superseded run can be told apart) while keeping status/logs/
-    /// pinned values so the glow (and a pinned preview) doesn't blank during
-    /// compute (the new run's stats/pushes replace them).
+    /// Mark a fresh run in flight while keeping status/logs/pinned values so
+    /// the glow and pinned previews don't blank during compute; the new run's
+    /// stats and pushes replace them as they arrive.
     pub(crate) fn begin_run(&mut self) {
         self.running = true;
-        self.run_id = self.run_id.wrapping_add(1);
         self.nodes.retain(|_, n| {
             n.status != ExecStatus::None || !n.logs.is_empty() || !n.pinned_values.is_empty()
         });
@@ -538,10 +532,9 @@ mod tests {
         assert_eq!(n[0].node_id, inst, "re-keyed to the instance");
     }
 
-    /// A new epoch bumps the id but keeps status/logs so the glow survives
-    /// a recompute.
+    /// A fresh run keeps status/logs so the glow survives a recompute.
     #[test]
-    fn begin_run_bumps_id_keeps_status() {
+    fn begin_run_keeps_status() {
         let node = nid(1);
         let mut map = FlattenMap::default();
         map.reset();
@@ -554,7 +547,6 @@ mod tests {
         rs.begin_run();
 
         assert!(rs.is_running(), "running once a run is kicked");
-        assert_eq!(rs.run_id, 1);
         assert_eq!(rs.status(node), ExecStatus::Executed(1.0), "status lingers");
 
         // The finishing run clears the in-flight flag.

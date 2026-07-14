@@ -12,6 +12,7 @@
 //! [`App`]: crate::gui::app::App
 
 use aperture::Ui;
+use scenarium::execution::stats::PinnedOutputs;
 use scenarium::graph::OutputPort;
 use scenarium::graph::subgraph::SubgraphDef;
 use scenarium::library::Library;
@@ -131,6 +132,42 @@ impl Editor {
             intents: Vec::new(),
             actions: Vec::new(),
             run_state: RunState::default(),
+        }
+    }
+
+    /// Store a worker-pushed pinned output and stage the full value on every
+    /// viewer tab already bound to one of the pushed ports.
+    pub(crate) fn set_pinned_values(&mut self, pinned: PinnedOutputs) {
+        let node_id = pinned.node_id;
+        let port_indices = pinned
+            .values
+            .iter()
+            .map(|(port_idx, _)| *port_idx)
+            .collect::<Vec<_>>();
+        self.run_state.set_pinned_values(pinned);
+
+        for port_idx in port_indices {
+            let port = PortRef {
+                node_id,
+                kind: PortKind::Output,
+                port_idx,
+            };
+            let is_open = self
+                .document
+                .layout
+                .all_tabs()
+                .any(|tab| tab == TabRef::ImageViewer(port));
+            if !is_open {
+                continue;
+            }
+            let value = self
+                .run_state
+                .pinned_output(OutputPort::new(node_id, port_idx))
+                .unwrap()
+                .value
+                .clone();
+            let title = image_viewer::port_label(&self.document, port);
+            self.main_window.viewer_mut(port).refresh(title, value);
         }
     }
 
@@ -636,7 +673,7 @@ mod tests {
     }
 
     #[test]
-    fn image_viewer_tabs_dedupe_per_port_and_prune_on_close() {
+    fn image_viewer_tabs_refresh_on_push_dedupe_per_port_and_prune_on_close() {
         use glam::Vec2;
         use imaginarium::{ColorFormat, Image as RawImage, ImageBuffer, ImageDesc};
         use lens::Image as LensImage;
@@ -647,7 +684,9 @@ mod tests {
 
         use crate::core::document::PortKind;
         use crate::core::document::view_item::ViewItem;
-        use crate::gui::image_viewer::test_support::assert_presented_custom_value;
+        use crate::gui::image_viewer::test_support::{
+            assert_presented_custom_value, consume_presented_custom_value,
+        };
 
         let lib = Library::default();
         let mut editor = Editor::new(Document::default());
@@ -675,7 +714,7 @@ mod tests {
         let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_U8);
         let raw = RawImage::new_with_data(desc, vec![128; 2 * 4]).unwrap();
         let full = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
-        editor.run_state.set_pinned_values(PinnedOutputs {
+        editor.set_pinned_values(PinnedOutputs {
             node_id: id,
             values: vec![(0, full.clone())],
         });
@@ -688,10 +727,23 @@ mod tests {
             vec![TabRef::Graph(GraphRef::Main), TabRef::ImageViewer(port(0))]
         );
         assert_eq!(active(&editor), 1);
-        assert_presented_custom_value(
-            editor.main_window.image_viewers.get(&port(0)).unwrap(),
+        consume_presented_custom_value(
+            editor.main_window.image_viewers.get_mut(&port(0)).unwrap(),
             &full,
         );
+
+        let desc = ImageDesc::new(3, 1, ColorFormat::RGBA_U8);
+        let raw = RawImage::new_with_data(desc, vec![64; 3 * 4]).unwrap();
+        let refreshed = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
+        editor.set_pinned_values(PinnedOutputs {
+            node_id: id,
+            values: vec![(0, refreshed.clone())],
+        });
+        assert_presented_custom_value(
+            editor.main_window.image_viewers.get(&port(0)).unwrap(),
+            &refreshed,
+        );
+        assert_eq!(tabs(&editor).len(), 2, "refresh adds no tab");
 
         // Re-clicking the same port reuses its tab; a different port of
         // the same node gets its own.

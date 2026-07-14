@@ -21,10 +21,6 @@ use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
 use crate::core::background_runtime::BackgroundRuntime;
 use crate::core::wake::Wake;
 
-/// Run epoch. Bumped each time a frontend kicks a fresh run so values from
-/// a superseded run can be dropped on arrival.
-pub(crate) type RunId = u64;
-
 /// A result delivered from the worker thread back to the frame loop.
 /// Mirrors the worker's callback surface.
 #[derive(Debug)]
