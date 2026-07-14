@@ -2,7 +2,7 @@
 //! it. The planner runs one backward post-order DFS from the run's roots (sinks,
 //! event subscribers, event-trigger owners — plus every sink when a fired event
 //! reaches a [`RunSinks`](crate::node::special::SpecialNode::RunSinks) sink),
-//! producing `process_order` (deps before consumers), per-output usage counts, and each
+//! producing `process_order` (deps before consumers), output demand + reader counts, and each
 //! node's [`NodeVerdict`] (runnable vs blocked on inputs) — purely structural, no
 //! cache/digest state. The
 //! [`Executor`](crate::execution::executor::Executor) consumes the plan; the plan is
@@ -10,10 +10,12 @@
 //! repeated plan on an unchanged graph allocates nothing.
 
 use crate::execution::compile::CompiledGraph;
-use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram, NodeIdx};
+use crate::execution::program::{
+    ExecutionBinding, ExecutionInput, ExecutionProgram, NodeIdx, OutputIdx,
+};
 use crate::execution::query::resolve_node_idx;
-use crate::execution::{Error, NodeColumn, Result, RunSeeds, validate};
-use crate::node::lambda::OutputUsage;
+use crate::execution::{Error, NodeColumn, OutputColumn, Result, RunSeeds, validate};
+use crate::node::lambda::OutputDemand;
 use crate::node::special::SpecialNode;
 
 /// The planner's structural verdict for one node this run, indexed by `e_node_idx`.
@@ -55,6 +57,49 @@ pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeColumn<NodeVe
 }
 
 #[derive(Debug, Default)]
+pub(crate) struct PlannedOutputs {
+    /// Whether each output must be produced for an in-graph reader or a host pin.
+    pub(crate) demand: OutputColumn<OutputDemand>,
+    /// Structural downstream binding count. Pins do not create readers.
+    pub(crate) readers: OutputColumn<u32>,
+}
+
+impl PlannedOutputs {
+    fn clear(&mut self) {
+        self.demand.clear();
+        self.readers.clear();
+    }
+
+    fn reset(&mut self, output_count: usize) {
+        self.demand.reset(output_count, OutputDemand::Skip);
+        self.readers.reset(output_count, 0);
+    }
+
+    fn seed_external_demand(&mut self, program: &ExecutionProgram, pinned: &[NodeIdx]) {
+        assert_eq!(
+            program.output_pinned.len(),
+            program.n_outputs(),
+            "output_pinned must have exactly one entry per pooled output port"
+        );
+        for output_idx in program.pinned_output_indices() {
+            self.demand[output_idx] = OutputDemand::Produce;
+        }
+        for &idx in pinned {
+            self.demand
+                .slice_mut(program.e_nodes[idx].outputs)
+                .fill(OutputDemand::Produce);
+        }
+    }
+
+    fn add_reader(&mut self, output_idx: OutputIdx) {
+        self.readers[output_idx] = self.readers[output_idx]
+            .checked_add(1)
+            .expect("output reader count overflowed u32");
+        self.demand[output_idx] = OutputDemand::Produce;
+    }
+}
+
+#[derive(Debug, Default)]
 pub(crate) struct ExecutionPlan {
     /// The schedule: post-order DFS over the dependency graph (deps before consumers),
     /// seeded from the sinks — every reachable node, producer-first. The executor
@@ -62,23 +107,9 @@ pub(crate) struct ExecutionPlan {
     pub(crate) process_order: Vec<NodeIdx>,
     /// Per-node verdict (execute / missing-inputs), indexed by node position.
     pub(crate) verdicts: NodeColumn<NodeVerdict>,
-    /// Per-output usage, indexed by output-pool index: in-graph consumer counts from
-    /// the backward walk, plus one extra unit for a port with a reader outside the
-    /// schedule — a port the compiled program flags pinned (its value is pushed to
-    /// the host right after the node runs — see `Executor::run`), or one belonging
-    /// to a pinned *root* (`self.pinned` below — same push, but for every output) —
-    /// folded in here (see [`Planner::plan`]) so this is the single, complete source
-    /// of truth: the executor copies it verbatim as its own live per-run counter,
-    /// never touching the compiled program's or plan's own pools again. The extra
-    /// unit is exactly one regardless of *why* a port qualifies (individually
-    /// pinned, a pinned root's output, or both at once) — a port with `n` real
-    /// consumers lands at `Needed(n + 1)`, never `n + 2`, so the executor's
-    /// move-on-last-use optimization doesn't take the value out from under the
-    /// pinned push on the last *real* read (it only fires when a read leaves the
-    /// count at exactly zero). The push itself gives its unit back the instant it's
-    /// cloned the value (`OutputUsage::dec`), so a port with zero real consumers is
-    /// reclaimable right away rather than lingering to end-of-run eviction.
-    pub(crate) output_usage: Vec<OutputUsage>,
+    /// Per-output production demand and structural binding-reader counts. The plan owns
+    /// both immutable templates; the executor copies only `readers` into live state.
+    pub(crate) outputs: PlannedOutputs,
     /// The nodes the backward walk started from — sinks, event subscribers,
     /// event-trigger owners, and node seeds (a node seeding via several categories may
     /// repeat; harmless). The schedule's "must be available" set: the executor's pre-run
@@ -88,10 +119,8 @@ pub(crate) struct ExecutionPlan {
     /// The node-seeded roots (on-demand preview targets) — a *pinned root*, a subset of
     /// `roots`. Distinct from a pinned *output port* (a graph-authored, persisted flag —
     /// see [`Graph::pinned_outputs`](crate::graph::Graph)): this is a per-run seed with
-    /// no persisted counterpart. Drives two things: `plan.output_usage` is floored to
-    /// `1` for each pinned root's outputs (above — not added on top of a port that's
-    /// also individually pinned, so the overlap still lands at exactly `1`), and the
-    /// executor's per-run retention policy (`Executor::retain`) keeps the node's
+    /// no persisted counterpart. Drives two things: every output is demanded from the
+    /// lambda, and the executor's per-run retention policy (`Executor::retain`) keeps the node's
     /// outputs resident through every release/eviction site whatever its cache mode.
     /// Retention is all it takes for a repeated run to be a RAM hit: the reuse check
     /// serves any resident digest-valid value.
@@ -102,77 +131,19 @@ impl ExecutionPlan {
     pub(crate) fn clear(&mut self) {
         self.process_order.clear();
         self.verdicts.clear();
-        self.output_usage.clear();
+        self.outputs.clear();
         self.roots.clear();
         self.pinned.clear();
     }
 
     /// Clear the order and reset every per-node verdict to default at the given pool
     /// sizes. Called at the start of each planning pass.
-    pub(crate) fn reset(&mut self, n_nodes: usize) {
+    pub(crate) fn reset(&mut self, n_nodes: usize, n_outputs: usize) {
         self.process_order.clear();
         self.verdicts.reset(n_nodes, NodeVerdict::default());
-        self.output_usage.clear();
+        self.outputs.reset(n_outputs);
         self.roots.clear();
         self.pinned.clear();
-    }
-
-    /// Seed `output_usage` with every unit of usage that comes from outside the
-    /// schedule itself, before [`Planner::plan`]'s backward walk adds each in-graph
-    /// consumer's own count on top: one unit for a pinned output port (the compiled
-    /// program's `output_pinned` flag), and a floor to `1` for each output of a pinned
-    /// *root* (`self.pinned`, already populated by `collect_roots` by the time this
-    /// runs). Both units back the same mechanism: the executor pushes a pinned port's
-    /// (or pinned root's) value to the host right after the node runs (see
-    /// `Executor::run`), and the value needs to survive at least that long. One extra
-    /// unit is enough regardless of *why* a port qualifies, so a port that's both a
-    /// pinned root's output and itself individually pinned still lands at exactly `1`,
-    /// not `2` — the pinned-root loop floors rather than adding on top of what the
-    /// pinned-output seed already contributed. A port with `n` real consumers lands
-    /// at `n + 1`, so the executor's move-on-last-use optimization (`collect_inputs`)
-    /// doesn't take the value out of its slot on the last *real* read (it only fires
-    /// when a read leaves the usage at exactly zero) — and the push itself gives its
-    /// unit back once it's cloned the value, so a port with zero real consumers is
-    /// reclaimable right away instead of lingering to end-of-run eviction. Folding
-    /// both in here, once, makes `output_usage` the single, complete source of truth
-    /// — the executor maps it straight to `OutputUsage` and never cross-references
-    /// the compiled program's pool or `self.pinned` again for this.
-    ///
-    /// Called right after `reset` cleared `output_usage` (nothing has run the
-    /// backward walk yet); must run on an *empty* column — see the assert below.
-    pub(crate) fn seed_extra_usage(&mut self, program: &ExecutionProgram) {
-        // `output_usage`'s length comes from the `extend` below, not a separate resize
-        // in `reset` — so what actually needs checking isn't "these two already agree"
-        // (they can't yet: nothing has sized `output_usage` before this runs), it's that
-        // the compiled program's own pool has exactly one entry per pooled output port.
-        // `Flattener::build` asserts this for a real compile; `Fix::node` keeps it true
-        // for this module's hand-built tests.
-        assert_eq!(
-            program.output_pinned.len(),
-            program.n_outputs(),
-            "output_pinned must have exactly one entry per pooled output port"
-        );
-        // `extend` below appends rather than overwrites, so a double call (or one
-        // against a column some other pass already sized) would silently misalign
-        // every following index against the compiled program's output-pool
-        // positions — fail loudly instead, the contract this fn and `Planner::plan`'s
-        // call site rely on.
-        assert!(
-            self.output_usage.is_empty(),
-            "seed_extra_usage must run on a freshly reset output_usage column"
-        );
-        self.output_usage.extend(
-            program
-                .output_pinned
-                .iter()
-                .map(|&b| OutputUsage::from(b as usize)),
-        );
-
-        for &idx in &self.pinned {
-            for usage in &mut self.output_usage[program.e_nodes[idx].outputs.range()] {
-                *usage = OutputUsage::Needed(1);
-            }
-        }
     }
 }
 
@@ -187,7 +158,7 @@ enum Color {
 
 /// Why a node sits on the DFS stack. `Discover` means "reach this node" — as a walk root
 /// or as a producer reached from a consumer, handled identically. `Done` is the post-order
-/// marker pushed under a node's children. Output-usage is counted at push time (per consumer
+/// marker pushed under a node's children. Output readers are counted at push time (per consumer
 /// edge), so the discovery carries no port.
 #[derive(Debug)]
 enum VisitCause {
@@ -223,18 +194,14 @@ impl Planner {
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
         let program = &compiled.program;
-        plan.reset(program.e_nodes.len());
+        plan.reset(program.e_nodes.len(), program.n_outputs());
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
-        // Must run *before* `seed_extra_usage`: that's what populates `plan.pinned`, which
-        // `seed_extra_usage`'s pinned fold reads.
+        // Must run before external demand is seeded because pinned roots are collected here.
         collect_roots(compiled, seeds, plan)?;
 
-        // Both non-schedule usage sources (pinned output ports, pinned roots) are
-        // folded in together here, before the walk below adds each in-graph
-        // consumer's own count on top.
-        plan.seed_extra_usage(program);
+        plan.outputs.seed_external_demand(program, &plan.pinned);
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
@@ -244,7 +211,7 @@ impl Planner {
     }
 
     /// Backward post-order DFS from the roots: builds `process_order` (deps before
-    /// consumers), counts per-output usage, detects cycles, and — folded in here
+    /// consumers), records output demand and readers, detects cycles, and — folded in here
     /// rather than a separate forward pass — resolves each node's [`NodeVerdict`].
     /// The verdict is set in the `Done` arm, i.e. in post-order, so every Bind dep is
     /// already `Black` with its own verdict set when a consumer reads it (what the old
@@ -311,12 +278,8 @@ impl Planner {
             let span = program.e_nodes[idx].inputs;
             for e_input in &program.inputs[span.range()] {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                    // Count this consumer's read of the producer's port (drives the
-                    // executor's per-output Skip/Needed); once per consumer edge,
-                    // counted at push so the visit cause needs no payload.
-                    let outputs = program.e_nodes[addr.target_idx].outputs;
-                    let out_idx = outputs.start as usize + addr.port_idx;
-                    plan.output_usage[out_idx].inc();
+                    let output_idx = program.output_idx(addr.target_idx, addr.port_idx);
+                    plan.outputs.add_reader(output_idx);
                     self.stack.push(Visit {
                         e_node_idx: addr.target_idx,
                         cause: VisitCause::Discover,
