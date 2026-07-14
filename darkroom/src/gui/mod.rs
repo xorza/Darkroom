@@ -59,6 +59,6 @@ pub(crate) enum UiAction {
 /// glyph's `WidgetId` (`event_glyph_wid`) without a cache.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct EventRef {
-    pub(crate) node_id: scenarium::graph::NodeId,
+    pub(crate) node_id: scenarium::NodeId,
     pub(crate) event_idx: usize,
 }

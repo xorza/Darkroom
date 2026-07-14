@@ -24,8 +24,8 @@ use aperture::{
 };
 use glam::{UVec2, Vec2};
 use imaginarium::ColorFormat;
-use scenarium::data::{CustomValue, DataType, DynamicValue, RamUsage};
-use scenarium::graph::OutputPort;
+use scenarium::OutputPort;
+use scenarium::{CustomValue, DataType, DynamicValue, RamUsage};
 
 use crate::gui::format::fmt_bytes;
 use crate::gui::node::header::Badge;

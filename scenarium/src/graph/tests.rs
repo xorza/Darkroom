@@ -1,11 +1,10 @@
-use crate::data::DataType;
 use crate::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
 use crate::graph::{
     Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
-    Subscription, closes_data_cycle,
 };
-use crate::node::function::{Func, FuncId, FuncInput, FuncOutput};
+use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
+use crate::{BindingEntry, DataType, closes_data_cycle};
 use common::SerdeFormat;
 
 /// A passthrough func — one `Any` input, one wildcard output mirroring it. The
@@ -32,6 +31,21 @@ fn roundtrip_serialization() -> anyhow::Result<()> {
     assert_eq!(graph, deserialized);
 
     Ok(())
+}
+
+#[test]
+fn check_rejects_node_ids_reused_across_graph_levels() {
+    let node = Node::new(NodeKind::Func(FuncId::unique()));
+    let mut interior = Graph::default();
+    interior.add(node.clone());
+    let def = SubgraphDef::new(SubgraphId::unique(), "duplicate id").graph(interior);
+
+    let mut graph = Graph::default();
+    graph.add(node);
+    graph.subgraphs.add(def);
+
+    let error = graph.check().unwrap_err().to_string();
+    assert!(error.contains("occurs in more than one authoring graph"));
 }
 
 #[test]
@@ -165,7 +179,7 @@ fn check_rejects_dangling_binding() {
 #[test]
 fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
     use crate::library::Library;
-    use crate::node::function::FuncId;
+    use crate::node::definition::FuncId;
 
     // One Int-in / Int-out func, so a wire between two instances is otherwise
     // valid — only the `const_only` flag decides whether check accepts it.
@@ -198,8 +212,8 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 
 #[test]
 fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
-    use crate::data::{DataType, StaticValue};
     use crate::library::Library;
+    use crate::{DataType, StaticValue};
 
     // Int and String never coerce (numerics coerce among themselves, but a
     // string is a distinct kind), so this pair exercises a real rejection.
@@ -306,8 +320,8 @@ fn check_with_rejects_out_of_range_pinned_output() {
 
 #[test]
 fn resolve_output_type_follows_passthrough_chain() {
-    use crate::data::{DataType, StaticValue};
     use crate::library::Library;
+    use crate::{DataType, StaticValue};
 
     // Int-out producer → pass1 → pass2. Both passthroughs declare a `Any`
     // (wildcard) output, but the resolved type must be the producer's `Int`.
@@ -383,8 +397,8 @@ fn resolve_output_type_follows_passthrough_chain() {
 
 #[test]
 fn resolve_output_type_uses_declared_type_for_typed_const_input() {
-    use crate::data::{DataType, FsPathConfig, FsPathMode, StaticValue, TypeId};
     use crate::library::Library;
+    use crate::{DataType, FsPathConfig, FsPathMode, StaticValue, TypeId};
     use std::sync::Arc;
 
     // A reroute func with *typed* inputs, each mirrored by a wildcard output.
@@ -424,7 +438,7 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
 
 #[test]
 fn edges_invalidated_by_follows_wildcard_chains() {
-    use crate::data::DataType;
+    use crate::DataType;
     use crate::library::Library;
 
     let float_src =
@@ -516,7 +530,7 @@ fn would_create_cycle_detects_direct_and_transitive_loops() {
 
 #[test]
 fn resolve_output_type_breaks_a_binding_cycle() {
-    use crate::data::DataType;
+    use crate::DataType;
     use crate::library::Library;
     // A passthrough whose value input binds to its own output — a cycle the
     // editor can momentarily hold. Resolution must terminate as `Any`.
@@ -535,7 +549,7 @@ fn resolve_output_type_breaks_a_binding_cycle() {
 
 #[test]
 fn input_type_resolves_declared_types_and_skips_boundaries() {
-    use crate::data::DataType;
+    use crate::DataType;
     use crate::library::Library;
 
     let consumer = Func::new(FuncId::unique(), "dst")
@@ -581,7 +595,7 @@ fn node_remove_test() -> anyhow::Result<()> {
 
     let node_id = graph.by_name("sum").unwrap().id;
     graph.set_output_pinned(OutputPort::new(node_id, 0), true);
-    graph.remove_by_id(node_id);
+    graph.detach_node(node_id);
 
     assert!(graph.by_name("sum").is_none());
     assert_eq!(graph.len(), 4);
@@ -670,9 +684,18 @@ fn node_bindings_yields_ports_in_order_with_none_gaps() {
     assert_eq!(
         bindings,
         vec![
-            (0, Binding::bind(get_a_id, 0)),
-            (1, Binding::bind(get_b_id, 0)),
-            (2, Binding::None),
+            BindingEntry {
+                port: InputPort::new(sum_id, 0),
+                binding: Binding::bind(get_a_id, 0),
+            },
+            BindingEntry {
+                port: InputPort::new(sum_id, 1),
+                binding: Binding::bind(get_b_id, 0),
+            },
+            BindingEntry {
+                port: InputPort::new(sum_id, 2),
+                binding: Binding::None,
+            },
         ]
     );
 }
@@ -773,32 +796,17 @@ fn wiring_snapshot_round_trips_through_restore() {
     // Add a subscription that touches `sum` so both arms are exercised.
     graph.subscribe(get_a_id, 0, sum_id);
 
-    let node = graph
-        .find_node(&sum_id, NodeSearch::TopLevel)
-        .unwrap()
-        .clone();
     let bindings = graph.bindings_touching(sum_id);
-    let subs = graph.subscriptions_touching(sum_id);
 
-    // sum touches: its own inputs (sum,0),(sum,1) + the edge (mult,0)<-sum.
     assert_eq!(bindings.len(), 3);
-    assert_eq!(
-        subs,
-        vec![Subscription {
-            emitter: get_a_id,
-            event_idx: 0,
-            subscriber: sum_id
-        }]
-    );
 
     let edges_before = graph.edges().count();
-    graph.remove_by_id(sum_id);
+    let detached = graph.detach_node(sum_id);
+    assert_eq!(detached.node.id, sum_id);
     assert_eq!(graph.edges().count(), edges_before - 3);
-    assert!(graph.subscriptions_touching(sum_id).is_empty());
+    assert!(!graph.is_subscribed(get_a_id, 0, sum_id));
 
-    // Undo: re-add the node, then re-apply its wiring.
-    graph.add(node);
-    graph.restore_wiring(&bindings, &subs);
+    graph.attach_node(detached);
 
     assert_eq!(graph.edges().count(), edges_before);
     assert!(graph.is_subscribed(get_a_id, 0, sum_id));
@@ -965,7 +973,7 @@ fn resolve_def_picks_local_or_linked_source() {
 #[test]
 fn prune_subscriptions_drops_out_of_range_and_missing_emitter() {
     use crate::library::Library;
-    use crate::node::event_lambda::EventLambda;
+    use crate::node::event::EventLambda;
 
     // A func exposing exactly one event: idx 0 is valid, idx 1+ are not.
     let func_id = FuncId::from_u128(0xe0e0);
@@ -1060,7 +1068,7 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
     // Const bindings are never structurally dangling — kept regardless.
     graph.set_input_binding(
         InputPort::new(b, 0),
-        Binding::Const(crate::data::StaticValue::from(1i64)),
+        Binding::Const(crate::StaticValue::from(1i64)),
     );
     assert_eq!(graph.prune_dangling_wiring(&library), 0);
 

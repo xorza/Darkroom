@@ -4308,7 +4308,6 @@ dependencies = [
  "rand 0.10.2",
  "serde",
  "strum",
- "strum_macros",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

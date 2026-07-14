@@ -8,7 +8,7 @@ use aperture::{Align, Background, Color, Configure, Corners, Panel, Sizing, Spac
 use crate::gui::widgets::support::{
     CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, footer_background, labeled_value,
 };
-use scenarium::data::RamUsage;
+use scenarium::RamUsage;
 
 use crate::gui::format::fmt_bytes;
 use crate::gui::node::RecordCtx;

@@ -32,7 +32,7 @@ use std::collections::BTreeSet;
 
 use aperture::{Brush, Rect, Ui};
 use glam::Vec2;
-use scenarium::graph::{NodeId, OutputPort};
+use scenarium::{NodeId, OutputPort};
 
 use crate::core::document::{ItemRef, PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
@@ -351,7 +351,7 @@ impl PinUi {
         // visual language across nodes and pin previews.
         let is_selected = rcx.selected.contains(&ItemRef::Pin(g.out_port));
         let border = theme.card_border(g.broken, is_selected);
-        let value = rcx.run_state.pinned_output(g.out_port);
+        let value = rcx.run_state.representative_pinned_output(g.out_port);
         let image = if is_image_type(&output.ty) {
             value.and_then(|v| self.previews.resolve(ui, g.out_port, v))
         } else {

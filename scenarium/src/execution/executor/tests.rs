@@ -2,15 +2,15 @@ use std::sync::Arc;
 
 use super::*;
 use crate::async_lambda;
-use crate::data::{DataType, StaticValue};
 use crate::execution::cache::{RuntimeCache, ValueState};
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
 use crate::execution::resolve::Resolver;
 use crate::graph::CacheMode;
 use crate::graph::NodeId;
-use crate::node::func_lambda::FuncLambda;
-use crate::node::function::{FuncBehavior, FuncId};
+use crate::node::definition::{FuncBehavior, FuncId};
+use crate::node::lambda::FuncLambda;
+use crate::{DataType, StaticValue};
 use common::Span;
 
 /// Hand-built program with real lambdas. Node `idx` gets id `from_u128(idx+1)`,
@@ -349,7 +349,7 @@ async fn extra_usage_unit_survives_the_last_real_consumer_read() {
 /// itself is no longer the executor's concern (see `ExecutionPlan::output_usage`).
 #[tokio::test]
 async fn pinned_root_sees_needed_usage_and_survives_drain() {
-    use crate::node::func_lambda::OutputUsage;
+    use crate::node::lambda::OutputUsage;
     use std::sync::Mutex;
 
     let seen: Arc<Mutex<Option<OutputUsage>>> = Arc::new(Mutex::new(None));
@@ -408,10 +408,10 @@ async fn pinned_output_pushes_right_after_it_runs() {
     let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1, "one push for the one finished node");
-    assert_eq!(pushes[0].node_id, NodeId::from_u128(a as u128 + 1));
+    assert_eq!(pushes[0].node.node_id, NodeId::from_u128(a as u128 + 1));
     assert_eq!(pushes[0].values.len(), 1);
-    assert_eq!(pushes[0].values[0].0, 0);
-    assert_eq!(pushes[0].values[0].1.as_i64(), Some(7));
+    assert_eq!(pushes[0].values[0].port_idx, 0);
+    assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
 }
 
 /// A pinned output with zero real consumers and a non-RAM cache mode is
@@ -464,12 +464,12 @@ async fn pinned_root_pushes_every_output() {
     let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1);
-    assert_eq!(pushes[0].node_id, NodeId::from_u128(a as u128 + 1));
+    assert_eq!(pushes[0].node.node_id, NodeId::from_u128(a as u128 + 1));
     assert_eq!(pushes[0].values.len(), 2);
-    assert_eq!(pushes[0].values[0].0, 0);
-    assert_eq!(pushes[0].values[0].1.as_i64(), Some(1));
-    assert_eq!(pushes[0].values[1].0, 1);
-    assert_eq!(pushes[0].values[1].1.as_i64(), Some(2));
+    assert_eq!(pushes[0].values[0].port_idx, 0);
+    assert_eq!(pushes[0].values[0].value.as_i64(), Some(1));
+    assert_eq!(pushes[0].values[1].port_idx, 1);
+    assert_eq!(pushes[0].values[1].value.as_i64(), Some(2));
 }
 
 /// Neither an individually-pinned port nor a pinned root: no push at all,
@@ -625,6 +625,7 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     cache.slots[a].value = ValueState::Resident {
         values: vec![DynamicValue::Static(StaticValue::Int(9))],
         produced_under: None,
+        materialized: crate::execution::cache::MaterializedOutputs::all(1),
     };
     let stats = run_with(&p.program, &plan, &mut cache).await;
 

@@ -5,21 +5,24 @@ use common::PauseGate;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
-use crate::data::StaticValue;
+use crate::StaticValue;
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::Result as ExecResult;
 use crate::execution::compile::Compiler;
-use crate::execution::stats::{ExecutionStats, RunPhase};
+use crate::execution::identity::NodeAddress;
+use crate::execution::report::RunPhase;
+use crate::execution::stats::ExecutionStats;
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeSearch};
 use crate::library::Library;
-use crate::node::event_lambda::EventLambda;
+use crate::node::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
 
-use crate::worker::{
-    EventLoopHandle, EventRef, EventTrigger, Worker, WorkerMessage, WorkerReport, scan,
-    start_event_loop,
-};
+use crate::execution::event::{EventRef, EventTrigger};
+use crate::worker::Worker;
+use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand, scan};
+use crate::worker::event_loop::ActiveEventLoop;
+use crate::worker::protocol::{WorkerMessage, WorkerReport};
 
 /// Print messages a run logged, in order — `print` now logs via
 /// `ContextManager::info`, surfaced in `ExecutionStats.logs`.
@@ -146,9 +149,9 @@ fn print_literal_graph(library: &Library, message: &str) -> (Graph, NodeId) {
 async fn start_single_event_loop(
     lambda: EventLambda,
     pause_gate: PauseGate,
-) -> (EventLoopHandle, mpsc::Receiver<EventRef>, NodeId) {
+) -> (ActiveEventLoop, NodeId) {
     let node_id = NodeId::unique();
-    let (handle, rx) = start_event_loop(
+    let active = ActiveEventLoop::start(
         vec![EventTrigger {
             event: EventRef {
                 node_id,
@@ -160,7 +163,7 @@ async fn start_single_event_loop(
         pause_gate,
     )
     .await;
-    (handle, rx, node_id)
+    (active, node_id)
 }
 
 /// A worker whose callback forwards only `Finished` reports into a fresh
@@ -240,10 +243,13 @@ async fn test_worker() -> anyhow::Result<()> {
 #[tokio::test]
 async fn start_event_loop_forwards_events() {
     let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-    let (mut handle, mut event_rx, node_id) =
-        start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
-    let event = event_rx.recv().await.expect("Expected event loop event");
+    let event = active
+        .events
+        .recv()
+        .await
+        .expect("Expected event loop event");
     assert_eq!(
         event,
         EventRef {
@@ -252,7 +258,7 @@ async fn start_event_loop_forwards_events() {
         }
     );
 
-    handle.stop().await;
+    active.stop().await;
 }
 
 #[tokio::test]
@@ -268,12 +274,11 @@ async fn start_event_loop_waits_for_callback() {
 
     let notify_for_callback = Arc::clone(&notify);
 
-    let (mut handle, mut event_rx, node_id) =
-        start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     notify_for_callback.notify_waiters();
 
-    let event = timeout(Duration::from_millis(200), event_rx.recv())
+    let event = timeout(Duration::from_millis(200), active.events.recv())
         .await
         .expect("Expected event")
         .expect("Event channel closed");
@@ -285,7 +290,7 @@ async fn start_event_loop_waits_for_callback() {
         }
     );
 
-    handle.stop().await;
+    active.stop().await;
 }
 
 #[tokio::test]
@@ -304,11 +309,10 @@ async fn pause_gate_blocks_event_loop_iterations() {
 
     let pause_gate = PauseGate::default();
 
-    let (mut handle, mut event_rx, _node_id) =
-        start_single_event_loop(event_lambda, pause_gate.clone()).await;
+    let (mut active, _node_id) = start_single_event_loop(event_lambda, pause_gate.clone()).await;
 
     // Wait for first event to arrive
-    let _ = timeout(Duration::from_millis(100), event_rx.recv())
+    let _ = timeout(Duration::from_millis(100), active.events.recv())
         .await
         .expect("Expected first event");
 
@@ -345,7 +349,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
         count_after_reopen
     );
 
-    handle.stop().await;
+    active.stop().await;
 }
 
 #[tokio::test]
@@ -354,18 +358,17 @@ async fn lambda_panic_is_captured_not_unwound() {
     // (attributed to its node) and returns it, rather than unwinding into the
     // worker loop — which would kill the worker.
     let event_lambda = EventLambda::new(|_state| Box::pin(async { panic!("boom in lambda") }));
-    let (mut handle, mut event_rx, node_id) =
-        start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     // The lambda panics on its first invoke and never sends; its sole sender
     // drops, closing the channel. Awaiting that close ensures the panic has
     // landed before we stop.
     assert!(
-        event_rx.recv().await.is_none(),
+        active.events.recv().await.is_none(),
         "panicking lambda should close the event channel without sending"
     );
 
-    let panics = handle.stop().await;
+    let panics = active.stop().await;
     assert_eq!(panics.len(), 1, "the lambda panic should be captured");
     assert_eq!(panics[0].node_id, node_id, "panic attributed to its node");
     assert!(
@@ -563,7 +566,7 @@ async fn execute_nodes_runs_only_the_seeded_cone() {
                 compiled: Compiler::default().compile(&graph, &library).unwrap(),
             },
             WorkerMessage::ExecuteNodes {
-                nodes: vec![sum_id],
+                nodes: vec![NodeAddress::root(sum_id)],
             },
         ])
         .unwrap();
@@ -610,17 +613,16 @@ async fn update_restarts_event_loop_if_running() {
 #[tokio::test]
 async fn stopped_event_loop_channel_is_closed() {
     let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-    let (mut handle, mut event_rx, _node_id) =
-        start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let (mut active, _node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
-    handle.stop().await;
+    active.stop().await;
 
     // After stop, all lambda tasks (the sole senders) are aborted →
     // the Receiver must observe channel closure. Drain under a
     // bounded per-recv timeout so a regression that stops closing
     // the channel fails fast instead of wedging the test.
     loop {
-        let item = timeout(Duration::from_millis(500), event_rx.recv())
+        let item = timeout(Duration::from_millis(500), active.events.recv())
             .await
             .expect("recv must complete — channel must eventually close after handle.stop()");
         if item.is_none() {
@@ -867,32 +869,31 @@ fn scan_accumulates_simple_flags() {
             events: vec![event],
         },
         WorkerMessage::ExecuteNodes {
-            nodes: vec![node_id],
+            nodes: vec![NodeAddress::root(node_id)],
         },
         WorkerMessage::ExecuteNodes {
-            nodes: vec![node_id],
+            nodes: vec![NodeAddress::root(node_id)],
         },
         WorkerMessage::Sync { reply: reply_ack },
     ]);
 
-    assert!(matches!(
-        intent.graph_state,
-        Some(crate::worker::GraphOp::Clear)
-    ));
-    assert!(matches!(
-        intent.loop_request,
-        Some(crate::worker::LoopCommand::Start)
-    ));
+    assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
+    assert!(matches!(intent.loop_request, Some(LoopCommand::Start)));
     assert!(intent.execute_sinks);
     assert!(!intent.exit);
-    assert_eq!(intent.events.len(), 1);
-    assert!(intent.events.contains(&event));
+    assert_eq!(intent.events.values.len(), 1);
+    assert!(intent.events.seen.contains(&event));
     assert_eq!(
-        intent.execute_nodes.len(),
+        intent.execute_nodes.values.len(),
         1,
         "duplicate node seeds union to one"
     );
-    assert!(intent.execute_nodes.contains(&node_id));
+    assert!(
+        intent
+            .execute_nodes
+            .seen
+            .contains(&NodeAddress::root(node_id))
+    );
     assert_eq!(intent.syncs.len(), 1);
 }
 
@@ -917,7 +918,7 @@ fn scan_deduplicates_events() {
     ]);
 
     assert_eq!(
-        intent.events.len(),
+        intent.events.values.len(),
         1,
         "duplicate events must collapse to one"
     );
@@ -958,7 +959,7 @@ fn scan_exit_dominates_entire_batch() {
         !intent.execute_sinks,
         "pre-Exit execute_sinks must be discarded"
     );
-    assert!(intent.events.is_empty());
+    assert!(intent.events.values.is_empty());
     assert!(intent.syncs.is_empty());
 }
 
@@ -976,18 +977,13 @@ fn scan_update_overwrites_earlier_update_in_same_batch() {
         },
     ]);
 
-    assert!(matches!(
-        intent.graph_state,
-        Some(crate::worker::GraphOp::Replace(_))
-    ));
+    assert!(matches!(intent.graph_state, Some(GraphOp::Replace(_))));
 }
 
 // Slot reduction: last-write-wins for graph_state and loop_request.
 
 #[test]
 fn scan_last_write_wins_per_slot() {
-    use crate::worker::BatchIntent;
-
     type Expect = fn(&BatchIntent) -> bool;
     let cases: [(&str, Vec<WorkerMessage>, Expect); 4] = [
         (
@@ -998,7 +994,7 @@ fn scan_last_write_wins_per_slot() {
                     compiled: empty_compiled(),
                 },
             ],
-            |intent| matches!(intent.graph_state, Some(crate::worker::GraphOp::Replace(_))),
+            |intent| matches!(intent.graph_state, Some(GraphOp::Replace(_))),
         ),
         (
             "Update then Clear -> last write (Clear) wins",
@@ -1008,17 +1004,17 @@ fn scan_last_write_wins_per_slot() {
                 },
                 WorkerMessage::Clear,
             ],
-            |intent| matches!(intent.graph_state, Some(crate::worker::GraphOp::Clear)),
+            |intent| matches!(intent.graph_state, Some(GraphOp::Clear)),
         ),
         (
             "Start then Stop -> last write (Stop) wins",
             vec![WorkerMessage::StartEventLoop, WorkerMessage::StopEventLoop],
-            |intent| matches!(intent.loop_request, Some(crate::worker::LoopCommand::Stop)),
+            |intent| matches!(intent.loop_request, Some(LoopCommand::Stop)),
         ),
         (
             "Stop then Start -> last write (Start) wins",
             vec![WorkerMessage::StopEventLoop, WorkerMessage::StartEventLoop],
-            |intent| matches!(intent.loop_request, Some(crate::worker::LoopCommand::Start)),
+            |intent| matches!(intent.loop_request, Some(LoopCommand::Start)),
         ),
     ];
 

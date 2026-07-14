@@ -8,11 +8,11 @@
 use std::sync::Arc;
 
 use aperture::Ui;
-use scenarium::data::{DataType, FsPathConfig, StaticValue};
-use scenarium::graph::Binding;
-use scenarium::graph::InputPort;
-use scenarium::graph::NodeId;
-use scenarium::graph::subgraph::SubgraphRef;
+use scenarium::Binding;
+use scenarium::InputPort;
+use scenarium::NodeId;
+use scenarium::SubgraphRef;
+use scenarium::{DataType, FsPathConfig, StaticValue};
 
 use crate::core::document::GraphRef;
 use crate::core::document::{PortKind, PortRef};

@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use aperture::Ui;
-use scenarium::data::{FsPathConfig, FsPathMode};
+use scenarium::{FsPathConfig, FsPathMode};
 
 use crate::gui::app::App;
 use crate::gui::dialogs;

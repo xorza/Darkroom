@@ -26,11 +26,11 @@ use aperture::{
     Background, Color, Configure, Corners, Panel, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };
 use glam::Vec2;
-use scenarium::graph::Binding;
-use scenarium::graph::InputPort;
-use scenarium::graph::NodeId;
-use scenarium::graph::OutputPort;
-use scenarium::library::Library;
+use scenarium::Binding;
+use scenarium::InputPort;
+use scenarium::Library;
+use scenarium::NodeId;
+use scenarium::OutputPort;
 use std::collections::BTreeSet;
 
 /// Read-only context the node-draw chain threads top to bottom: the
@@ -498,7 +498,7 @@ mod tests {
     fn click_intents_raises_a_pin_like_a_node() {
         // A pin preview owns a slot in the same paint stack as node
         // bodies — clicking it selects it *and* lifts it to the front.
-        let port = scenarium::graph::OutputPort::new(NodeId::unique(), 0);
+        let port = scenarium::OutputPort::new(NodeId::unique(), 0);
         let key = ItemRef::Pin(port);
         let mut out = Vec::new();
         click_intents(false, &Scene::default(), key, &mut out);

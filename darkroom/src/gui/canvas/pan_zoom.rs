@@ -301,7 +301,7 @@ fn fit_target(bounds: Rect, pane: Vec2) -> Viewport {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::graph::NodeId;
+    use scenarium::NodeId;
 
     use super::*;
     use crate::gui::scene::test_support::scene_node_stub;

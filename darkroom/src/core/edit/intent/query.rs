@@ -3,7 +3,7 @@
 //! relayout or a reconcile pass, whether it dirties the document, and its
 //! undo-coalescing identity (`gesture_key` + `coalesce`).
 
-use scenarium::graph::Binding;
+use scenarium::Binding;
 
 use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::{DocStep, GestureKey, GraphStep, UndoStep};

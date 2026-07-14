@@ -15,3 +15,6 @@ strum_macros = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
+
+[dev-dependencies]
+scenarium = { workspace = true, features = ["internals"] }

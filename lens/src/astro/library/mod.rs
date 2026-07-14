@@ -18,10 +18,10 @@ use lumos::{
     MlError, NeutralizeBackground, OpError, Reference, StackConfig, TiledOnnxConfig,
     calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only, stack_cfa_master,
 };
-use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
-use scenarium::library::{Library, TypeEntry};
-use scenarium::node::func_lambda::{FuncLambda, InvokeError, InvokeResult};
-use scenarium::node::function::{Func, FuncInput, FuncOutput, ValueVariant};
+use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode};
+use scenarium::{Func, FuncInput, FuncOutput, ValueVariant};
+use scenarium::{FuncLambda, InvokeError, InvokeResult};
+use scenarium::{Library, TypeEntry};
 
 use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,

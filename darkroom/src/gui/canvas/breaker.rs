@@ -1,7 +1,7 @@
 use aperture::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui};
 use glam::Vec2;
-use scenarium::graph::NodeId;
-use scenarium::graph::{Binding, InputPort, OutputPort, Subscription};
+use scenarium::NodeId;
+use scenarium::{Binding, InputPort, OutputPort, Subscription};
 
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;

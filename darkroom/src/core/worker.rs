@@ -11,12 +11,12 @@
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use scenarium::execution::Error as ExecError;
-use scenarium::execution::compile::CompiledGraph;
-use scenarium::execution::disk_store::DiskStore;
-use scenarium::execution::stats::{ExecutionStats, PinnedOutputs, RunProgress};
-use scenarium::graph::NodeId;
-use scenarium::worker::{Worker, WorkerMessage, WorkerReport};
+use scenarium::CompiledGraph;
+use scenarium::DiskStore;
+use scenarium::Error as ExecError;
+use scenarium::NodeAddress;
+use scenarium::{ExecutionStats, PinnedOutputs, RunProgress};
+use scenarium::{Worker, WorkerMessage, WorkerReport};
 
 use crate::core::background_runtime::BackgroundRuntime;
 use crate::core::wake::Wake;
@@ -92,12 +92,10 @@ impl WorkerBridge {
     /// execute with the node as seed, keeping its outputs resident. One
     /// batched send so the seed always targets the program it was compiled
     /// against.
-    pub(crate) fn run_node(&self, compiled: CompiledGraph, node_id: NodeId) {
+    pub(crate) fn run_node(&self, compiled: CompiledGraph, node: NodeAddress) {
         let _ = self.worker.send_many([
             WorkerMessage::Update { compiled },
-            WorkerMessage::ExecuteNodes {
-                nodes: vec![node_id],
-            },
+            WorkerMessage::ExecuteNodes { nodes: vec![node] },
         ]);
     }
 

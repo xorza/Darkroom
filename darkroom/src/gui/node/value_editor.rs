@@ -36,9 +36,9 @@ use aperture::{
     Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextEditTheme, TextWrap,
     Ui, WidgetId,
 };
-use scenarium::data::{DataType, StaticValue};
-use scenarium::library::Library;
-use scenarium::node::function::ValueVariant;
+use scenarium::Library;
+use scenarium::ValueVariant;
+use scenarium::{DataType, StaticValue};
 
 use crate::gui::theme::StaticValueEditorTheme;
 use crate::gui::widgets::buffered_edit::EditBuffer;

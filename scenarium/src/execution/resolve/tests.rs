@@ -1,10 +1,10 @@
 use super::*;
-use crate::data::DataType;
+use crate::DataType;
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
 use crate::graph::NodeId;
-use crate::node::func_lambda::OutputUsage;
-use crate::node::function::FuncId;
+use crate::node::definition::FuncId;
+use crate::node::lambda::OutputUsage;
 use common::Span;
 
 /// Hand-built program for cut tests: each node is `(sink, &[producer_idx])` — an edge

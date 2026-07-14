@@ -7,12 +7,12 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::Notify;
 use tokio::time::timeout;
 
-use crate::data::{DataType, FsPathConfig, FsPathMode, StaticValue};
 use crate::library::Library;
-use crate::node::event_lambda::EventLambda;
-use crate::node::func_lambda::FuncLambda;
-use crate::node::function::FuncId;
-use crate::node::function::{Func, FuncInput, FuncOutput};
+use crate::node::definition::FuncId;
+use crate::node::definition::{Func, FuncInput, FuncOutput};
+use crate::node::event::EventLambda;
+use crate::node::lambda::FuncLambda;
+use crate::{DataType, FsPathConfig, FsPathMode, StaticValue};
 
 pub(crate) const WATCH_DIRECTORY_FUNC_ID: FuncId =
     FuncId::from_u128(0x1318c24c2ac74a9aa454281bdbdc4ffc);
@@ -205,12 +205,12 @@ pub fn fs_watch_library() -> Library {
 #[cfg(test)]
 mod tests {
     use super::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
-    use crate::data::{DynamicValue, StaticValue};
-    use crate::node::func_lambda::{FuncLambda, InvokeInput, OutputUsage};
-    use crate::node::function::FuncBehavior;
+    use crate::node::definition::FuncBehavior;
+    use crate::node::lambda::{FuncLambda, InvokeInput, OutputUsage};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;
+    use crate::{DynamicValue, StaticValue};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Instant;

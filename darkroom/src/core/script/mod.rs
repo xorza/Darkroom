@@ -32,7 +32,7 @@ use rhai::{Dynamic, Engine};
 use crate::core::background_runtime::BackgroundRuntime;
 use crate::core::edit::intent::types::Intent;
 use crate::core::wake::Wake;
-use scenarium::library::Library;
+use scenarium::Library;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;

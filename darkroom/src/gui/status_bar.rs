@@ -8,7 +8,7 @@
 //! strip.
 
 use aperture::{Align, Background, Configure, HAlign, Panel, Sizing, Spacing, Text, Ui, VAlign};
-use scenarium::data::RamUsage;
+use scenarium::RamUsage;
 
 use crate::gui::app::AppContext;
 use crate::gui::format::fmt_bytes;

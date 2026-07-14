@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aperture::Ui;
-use scenarium::graph::Graph as CoreGraph;
-use scenarium::library::Library;
+use scenarium::Graph as CoreGraph;
+use scenarium::Library;
 
 use crate::core::document::Document;
 use crate::core::engine::Engine;

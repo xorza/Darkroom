@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use imaginarium::{ALL_FORMATS, ImageDesc};
-use scenarium::data::CustomValue;
-use scenarium::data::CustomValueCodec;
-use scenarium::library::TypeEntry;
-use scenarium::runtime::context::ContextManager;
+use scenarium::ContextManager;
+use scenarium::CustomValue;
+use scenarium::CustomValueCodec;
+use scenarium::TypeEntry;
 
 use super::Image;
 use super::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
@@ -128,11 +128,12 @@ mod tests {
     /// the GPU (the lazy default ctor would call `ProcessingContext::new`).
     fn cpu_ctx() -> ContextManager {
         let mut ctx = ContextManager::default();
-        ctx.store.insert(
-            VISION_CTX_TYPE.clone(),
-            Box::new(VisionCtx {
+        scenarium::insert_context(
+            &mut ctx,
+            &VISION_CTX_TYPE,
+            VisionCtx {
                 processing_ctx: ProcessingContext::cpu_only(),
-            }),
+            },
         );
         ctx
     }
@@ -181,7 +182,7 @@ mod tests {
 
     #[test]
     fn register_image_type_wires_the_codec() {
-        use scenarium::library::Library;
+        use scenarium::Library;
         let id = *crate::image::IMAGE_TYPE_ID;
         let mut library = Library::default();
         library.register_type(id, image_type_entry());

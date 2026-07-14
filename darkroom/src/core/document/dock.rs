@@ -656,7 +656,7 @@ impl DockLayout {
 mod tests {
     use super::*;
     use crate::core::document::{PortKind, PortRef};
-    use scenarium::graph::NodeId;
+    use scenarium::NodeId;
 
     fn viewer(n: u128) -> TabRef {
         TabRef::ImageViewer(PortRef {
@@ -1107,7 +1107,7 @@ mod tests {
 
     #[test]
     fn check_rejects_each_corruption() {
-        use scenarium::graph::subgraph::SubgraphId;
+        use scenarium::SubgraphId;
 
         // Base: a valid two-pane layout — [split, primary(Main, Prefs),
         // viewer-pane(viewer 1)] — corrupted one invariant at a time via

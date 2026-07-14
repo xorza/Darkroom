@@ -5,7 +5,7 @@
 //! which owns persisting the library file and refreshing the worker's
 //! library snapshot.
 
-use scenarium::graph::NodeId;
+use scenarium::NodeId;
 
 use crate::core::edit::publish;
 use crate::core::io::persistence;

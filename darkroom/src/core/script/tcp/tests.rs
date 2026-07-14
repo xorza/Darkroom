@@ -19,7 +19,7 @@ async fn spawn_executor_with_transport(
     let executor = ScriptExecutor::new(
         transport,
         action_tx,
-        Arc::new(scenarium::library::Library::default()),
+        Arc::new(scenarium::Library::default()),
         Arc::new(|| {}),
     );
     (addr, executor, action_rx)

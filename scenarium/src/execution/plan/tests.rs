@@ -1,9 +1,11 @@
 use super::*;
-use crate::data::DataType;
+use crate::DataType;
+use crate::execution::identity::NodeAddress;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::graph::NodeId;
-use crate::node::function::FuncId;
+use crate::node::definition::FuncId;
 use common::Span;
+use std::sync::Arc;
 
 /// Hand-built compile artifact for planner tests (an empty flatten map — every
 /// node is "top-level", so seed ids resolve directly). Node `idx` gets id
@@ -16,6 +18,11 @@ struct Fix {
 impl Fix {
     fn node(&mut self, sink: bool, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> NodeIdx {
         let program = &mut self.compiled.program;
+        if program.e_nodes.is_empty() {
+            Arc::get_mut(&mut self.compiled.flatten_map)
+                .unwrap()
+                .reset();
+        }
         let inputs_start = program.inputs.len() as u32;
         for (required, binding) in inputs {
             program.inputs.push(ExecutionInput {
@@ -36,14 +43,18 @@ impl Fix {
             .output_pinned
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = program.e_nodes.len();
+        let id = NodeId::from_u128(idx as u128 + 1);
         program.e_nodes.add(ExecutionNode {
-            id: NodeId::from_u128(idx as u128 + 1),
+            id,
             sink,
             func_id: FuncId::from_u128(idx as u128 + 1),
             inputs: Span::new(inputs_start, inputs.len() as u32),
             outputs: Span::new(outputs_start, outputs),
             ..Default::default()
         });
+        Arc::get_mut(&mut self.compiled.flatten_map)
+            .unwrap()
+            .set_leaf(id, 0, id);
         idx.into()
     }
 }
@@ -168,7 +179,7 @@ fn overlapping_pin_sources_still_floor_to_one() {
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
     let seeds = RunSeeds {
-        nodes: vec![f.compiled.program.e_nodes[a].id],
+        nodes: vec![NodeAddress::root(f.compiled.program.e_nodes[a].id)],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -213,7 +224,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
     let seeds = RunSeeds {
-        nodes: vec![f.compiled.program.e_nodes[b].id],
+        nodes: vec![NodeAddress::root(f.compiled.program.e_nodes[b].id)],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -237,7 +248,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // everything, and B stays pinned.
     let seeds = RunSeeds {
         sinks: true,
-        nodes: vec![f.compiled.program.e_nodes[b].id],
+        nodes: vec![NodeAddress::root(f.compiled.program.e_nodes[b].id)],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -255,9 +266,11 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // not a silent skip.
     let bogus = NodeId::from_u128(0xdead_beef);
     let seeds = RunSeeds {
-        nodes: vec![bogus],
+        nodes: vec![NodeAddress::root(bogus)],
         ..Default::default()
     };
     let err = planner.plan(&f.compiled, &seeds, &mut p).unwrap_err();
-    assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
+    assert!(
+        matches!(err, Error::NodeSeedNotFound { address } if address == NodeAddress::root(bogus))
+    );
 }

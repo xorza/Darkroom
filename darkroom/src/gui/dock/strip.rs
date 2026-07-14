@@ -11,7 +11,7 @@ use aperture::{
     Align, Background, Configure, ContextMenu, Corners, MenuItem, Panel, Sense, Sizing, SmolStr,
     Spacing, Text, TextStyle, Ui, VAlign, WidgetId,
 };
-use scenarium::graph::subgraph::SubgraphId;
+use scenarium::SubgraphId;
 
 use crate::core::document::dock::{DockDrop, DockOp, SplitSide, TabGroup, TabGroupId};
 use crate::core::document::{GraphRef, TabRef};

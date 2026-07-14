@@ -2,8 +2,8 @@ use super::*;
 use crate::core::document::ItemRef;
 use glam::Vec2;
 use rhai::Array;
-use scenarium::graph::{Binding, InputPort, NodeId, NodeKind, OutputPort};
-use scenarium::library::Library;
+use scenarium::Library;
+use scenarium::{Binding, InputPort, NodeId, NodeKind, OutputPort};
 
 /// Build an `InboundSender` paired with the receiver tests assert on.
 /// `notify` is a no-op — tests don't drive a real host loop.
@@ -29,7 +29,7 @@ fn expect_apply(rx: &mut mpsc::UnboundedReceiver<ScriptMessage>) -> Vec<Intent> 
 
 #[test]
 fn list_funcs_returns_full_func_objects_in_insertion_order() {
-    use scenarium::node::function::{Func, FuncId};
+    use scenarium::{Func, FuncId};
 
     let mut lib = Library::default();
     lib.add(Func::new(FuncId::unique(), "alpha").category("math"));
@@ -102,7 +102,7 @@ fn create_node_unknown_id_returns_rhai_error_and_no_action() {
 
 #[test]
 fn create_node_known_id_enqueues_add_node() {
-    use scenarium::node::function::{Func, FuncId};
+    use scenarium::{Func, FuncId};
 
     let alpha_id = FuncId::unique();
     let mut lib = Library::default();

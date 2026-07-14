@@ -3,7 +3,7 @@
 //! plus the `events_running` flag `App` mirrors so the toolbar toggle can't
 //! lag the worker's real state.
 
-use scenarium::graph::NodeId;
+use scenarium::NodeId;
 
 use crate::gui::app::App;
 

@@ -10,7 +10,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use common::{SerdeFormat, deserialize, serialize};
-use scenarium::graph::subgraph::SubgraphDef;
+use scenarium::SubgraphDef;
 
 use crate::core::document::Document;
 
@@ -69,8 +69,8 @@ fn save_typed(path: &Path, encode: impl FnOnce(SerdeFormat) -> Result<Vec<u8>>) 
 #[cfg(test)]
 mod tests {
     use common::test_utils::test_output_path;
-    use scenarium::graph::NodeId;
-    use scenarium::graph::subgraph::{SubgraphEvent, SubgraphId};
+    use scenarium::NodeId;
+    use scenarium::{SubgraphEvent, SubgraphId};
 
     use super::*;
 

@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use glam::Vec2;
-use scenarium::graph::{Graph as CoreGraph, NodeId};
+use scenarium::{Graph as CoreGraph, NodeId};
 
 use crate::core::document::{GraphView, ItemRef};
 
@@ -81,8 +81,8 @@ impl GraphView {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::graph::{Binding, InputPort, Node, NodeKind, OutputPort};
-    use scenarium::node::function::FuncId;
+    use scenarium::FuncId;
+    use scenarium::{Binding, InputPort, Node, NodeKind, OutputPort};
 
     use super::*;
 

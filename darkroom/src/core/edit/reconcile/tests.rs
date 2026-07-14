@@ -1,10 +1,10 @@
 use super::*;
-use scenarium::data::StaticValue;
-use scenarium::graph::Graph;
-use scenarium::graph::Node;
-use scenarium::graph::subgraph::SubgraphRef;
-use scenarium::node::function::{Func, FuncId};
+use scenarium::Graph;
+use scenarium::Node;
+use scenarium::StaticValue;
+use scenarium::SubgraphRef;
 use scenarium::testing::{TestFuncHooks, test_func_lib};
+use scenarium::{Func, FuncId};
 
 fn lib() -> Library {
     test_func_lib(TestFuncHooks::default())

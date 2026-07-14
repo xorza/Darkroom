@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::execution::compile::CompileError;
-use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::program::ExecutionBinding;
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeSearch, OutputPort};
 use crate::library::Library;
-use crate::node::func_lambda::OutputUsage;
-use crate::node::function::FuncBehavior;
+use crate::node::definition::FuncBehavior;
+use crate::node::lambda::OutputUsage;
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
-use common::{FloatExt, SerdeFormat};
+use crate::{DataType, DynamicValue, StaticValue};
+use common::FloatExt;
 use tokio::sync::Mutex;
 
 // === Shared Helpers ===
@@ -336,7 +336,7 @@ mod cache_persistence {
             .is_some();
         let sum_on_disk = matches!(
             engine.runtime_slot(engine.by_name("sum").unwrap()).value,
-            ValueState::OnDisk
+            ValueState::OnDisk { .. }
         );
         assert!(
             !sum_resident,
@@ -409,7 +409,7 @@ mod cache_persistence {
             .is_some();
         let sum_disk = matches!(
             engine.runtime_slot(engine.by_name("sum").unwrap()).value,
-            ValueState::OnDisk
+            ValueState::OnDisk { .. }
         );
         let mult_resident = engine
             .runtime_slot(engine.by_name("mult").unwrap())
@@ -509,7 +509,7 @@ mod cache_persistence {
                 slot.value
             ),
             CacheMode::Disk => assert!(
-                matches!(slot.value, ValueState::OnDisk),
+                matches!(slot.value, ValueState::OnDisk { .. }),
                 "Disk demotes its RAM copy to disk-only after the run: {:?}",
                 slot.value
             ),
@@ -684,7 +684,7 @@ mod cache_persistence {
         // reclaimed to its on-disk blob once `Print` finished reading it this
         // run — hydrate it back to inspect the served bytes.
         use crate::execution::query::resolve_node_idx;
-        let idx = resolve_node_idx(&engine.compiled, &mult_id).unwrap();
+        let idx = resolve_node_idx(&engine.compiled, &NodeAddress::root(mult_id)).unwrap();
         engine
             .cache
             .hydrate_slot(&engine.compiled.program, idx)
@@ -892,7 +892,8 @@ mod cache_persistence {
             .unwrap()
             .path();
         let mut bytes = std::fs::read(&blob).unwrap();
-        bytes.truncate(32);
+        let output_count = u32::from_le_bytes(bytes[36..40].try_into().unwrap()) as usize;
+        bytes.truncate(40 + output_count);
         bytes.extend_from_slice(b"garbage");
         std::fs::write(&blob, &bytes).unwrap();
 
@@ -1016,7 +1017,7 @@ mod cache_persistence {
         use crate::async_lambda;
         use crate::execution::disk_store::DiskStore;
         use crate::library::Library;
-        use crate::node::function::{Func, FuncInput, FuncOutput};
+        use crate::node::definition::{Func, FuncInput, FuncOutput};
 
         const PRODUCE: &str = "63b7a83c-d7fc-46f4-805a-4bf2695e3763";
         const CONSUME: &str = "39bbd6b3-b919-4095-b3d0-79a4515de75e";
@@ -1204,12 +1205,12 @@ mod cache_persistence {
 
         use async_trait::async_trait;
 
+        use crate::CustomValueCodec;
         use crate::async_lambda;
-        use crate::data::CustomValueCodec;
-        use crate::data::{CustomValue, TypeId};
         use crate::library::{Library, TypeEntry};
-        use crate::node::function::{Func, FuncOutput};
+        use crate::node::definition::{Func, FuncOutput};
         use crate::runtime::context::ContextManager;
+        use crate::{CustomValue, TypeId};
 
         type CodecError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -1360,11 +1361,9 @@ mod resource_binds {
 
     use super::*;
     use crate::async_lambda;
-    use crate::data::{
-        CustomValue, FsPathConfig, FsPathMode, ResourceStamp, ResourceStamper, TypeId,
-    };
     use crate::library::TypeEntry;
-    use crate::node::function::{Func, FuncInput, FuncOutput};
+    use crate::node::definition::{Func, FuncInput, FuncOutput};
+    use crate::{CustomValue, FsPathConfig, FsPathMode, ResourceStamp, ResourceStamper, TypeId};
 
     const MAKE_PATH: &str = "be2c3976-3a4f-4ed3-bfe6-8eafb35f084a";
     const LOAD_TEXT: &str = "5abcd2e7-f023-4122-8215-f6305c8b4a7e";
@@ -1959,49 +1958,6 @@ mod graph_structure {
         // left intact rather than torn down.
         assert_eq!(execution_graph.compiled.program.e_nodes.len(), 5);
     }
-
-    #[test]
-    fn roundtrip_serialization() -> anyhow::Result<()> {
-        let graph = test_graph();
-        let library = test_func_lib(TestFuncHooks::default());
-
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-
-        // The compiled `ExecutionProgram` is the serializable artifact; the
-        // engine itself is not serializable.
-        let program = &execution_graph.compiled.program;
-        for format in SerdeFormat::all_formats_for_testing() {
-            let serialized = common::serialize(program, format)?;
-            let deserialized: ExecutionProgram = common::deserialize(&serialized, format)?;
-            let serialized_again = common::serialize(&deserialized, format)?;
-            assert_eq!(serialized, serialized_again);
-
-            // Structural fields survive the round-trip (lambdas/state/output
-            // values are #[serde(skip)], but ids/names/bindings must persist).
-            assert_eq!(deserialized.e_nodes.len(), program.e_nodes.len());
-            for original in program.e_nodes.iter() {
-                let restored = deserialized.e_nodes.by_key(&original.id).unwrap();
-                assert_eq!(restored.name, original.name);
-                assert_eq!(restored.func_id, original.func_id);
-                assert_eq!(restored.behavior, original.behavior);
-                assert_eq!(restored.inputs.len, original.inputs.len);
-                assert_eq!(restored.outputs.len, original.outputs.len);
-            }
-            // mult's Bind to sum survives with its port address intact.
-            let mult = deserialized
-                .e_nodes
-                .iter()
-                .find(|n| n.name == "mult")
-                .unwrap();
-            assert!(matches!(
-                &deserialized.inputs[mult.inputs.range()][0].binding,
-                ExecutionBinding::Bind(_)
-            ));
-        }
-
-        Ok(())
-    }
 }
 
 // === Missing Inputs ===
@@ -2477,7 +2433,7 @@ mod behavior {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_emits_started_then_finished_progress_per_node() -> anyhow::Result<()> {
-        use crate::execution::stats::{RunEvent, RunPhase};
+        use crate::execution::report::{RunEvent, RunPhase};
         use tokio::sync::mpsc::unbounded_channel;
 
         let graph = test_graph();
@@ -2605,7 +2561,7 @@ mod behavior {
         use crate::execution::stats::NodeError;
         use crate::graph::{Graph, NodeId};
         use crate::library::Library;
-        use crate::node::function::{Func, FuncOutput};
+        use crate::node::definition::{Func, FuncOutput};
 
         // Trips the cancel on its first invoke only, so the re-run completes.
         let cancel_first = Arc::new(AtomicBool::new(true));
@@ -2699,8 +2655,8 @@ mod behavior {
         use crate::execution::stats::NodeError;
         use crate::graph::{Graph, NodeId};
         use crate::library::Library;
-        use crate::node::func_lambda::InvokeError;
-        use crate::node::function::{Func, FuncOutput};
+        use crate::node::definition::{Func, FuncOutput};
+        use crate::node::lambda::InvokeError;
 
         let library: Library = [
             Func::new("8003e30b-0417-474d-a77f-1d3ea71ac6b3", "always_cancel")
@@ -2806,7 +2762,7 @@ mod composite_behavior {
     use super::*;
     use crate::graph::NodeKind;
     use crate::graph::subgraph::{SubgraphDef, SubgraphRef};
-    use crate::node::function::FuncOutput;
+    use crate::node::definition::FuncOutput;
 
     fn func_node(library: &Library, func_name: &str, node_name: &str) -> Node {
         let id = library.by_name(func_name).unwrap().id;
@@ -2895,7 +2851,6 @@ mod composite_behavior {
             "inner",
         );
         let graph = main_with(&library, def);
-
         // A `Local` def resolves from the graph itself, so the walk reaches
         // the interior even with an empty library — and flags its `get_b`.
         let mut eg = ExecutionEngine::default();
@@ -2970,11 +2925,22 @@ mod composite_behavior {
             .graph(interior)
             .output(int_output("Out"));
         let graph = main_with(&library, def);
+        let instance_id = graph
+            .iter()
+            .find(|node| matches!(node.kind, NodeKind::Subgraph(_)))
+            .unwrap()
+            .id;
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let stats = eg.execute_nodes([inner_id]).await.unwrap();
+        let stats = eg
+            .execute_nodes([NodeAddress {
+                instances: vec![instance_id],
+                node_id: inner_id,
+            }])
+            .await
+            .unwrap();
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
         assert_eq!(stats.executed_nodes.len(), 1);
         assert_eq!(
@@ -3208,13 +3174,13 @@ mod execution {
     /// (re-runs each time): run 1 writes both ports, run 2 writes only port 0, so
     /// port 1 keeps the `20` from run 1.
     #[tokio::test(flavor = "multi_thread")]
-    async fn unwritten_output_port_retains_prior_value() -> anyhow::Result<()> {
+    async fn unwritten_output_port_is_cleared_before_reexecution() -> anyhow::Result<()> {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         use crate::async_lambda;
         use crate::graph::Graph;
         use crate::library::Library;
-        use crate::node::function::{Func, FuncOutput};
+        use crate::node::definition::{Func, FuncOutput};
 
         let invocations = Arc::new(AtomicUsize::new(0));
         let library: Library = [Func::new(
@@ -3263,8 +3229,8 @@ mod execution {
             "run 1 writes both ports: {outputs:?}"
         );
 
-        // Run 2: only port 0 is written. With no pre-run wipe the lambda reuses the
-        // slot's buffer in place, so port 1 keeps run 1's `20`.
+        // Run 2: only port 0 is written. The reused buffer is cleared before invoke,
+        // so port 1 cannot masquerade as a value produced by this run.
         eg.execute_sinks().await?;
         let outputs = eg
             .runtime_slot(eg.by_name("partial_writer").unwrap())
@@ -3276,8 +3242,8 @@ mod execution {
             "run 2 rewrites port 0: {outputs:?}"
         );
         assert!(
-            matches!(outputs[1], DynamicValue::Static(StaticValue::Int(20))),
-            "the unwritten port retains its prior value (no wipe): {outputs:?}"
+            matches!(outputs[1], DynamicValue::Unbound),
+            "the unwritten port is cleared before invoke: {outputs:?}"
         );
 
         Ok(())
@@ -3317,7 +3283,7 @@ mod node_seeds {
         eg.update(&graph, &library).unwrap();
 
         let sum_id = graph.by_name("sum").unwrap().id;
-        let stats = eg.execute_nodes([sum_id]).await.unwrap();
+        let stats = eg.execute_nodes([NodeAddress::root(sum_id)]).await.unwrap();
         assert_eq!(stats.executed_nodes.len(), 3);
 
         let mut ran = execution_node_names_in_order(&eg);
@@ -3366,11 +3332,11 @@ mod node_seeds {
         eg.update(&graph, &library).unwrap();
 
         let sum_id = graph.by_name("sum").unwrap().id;
-        eg.execute_nodes([sum_id]).await.unwrap();
+        eg.execute_nodes([NodeAddress::root(sum_id)]).await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::Relaxed), 1);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
 
-        let stats = eg.execute_nodes([sum_id]).await.unwrap();
+        let stats = eg.execute_nodes([NodeAddress::root(sum_id)]).await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::Relaxed), 1, "cone not re-run");
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1, "cone not re-run");
         assert!(stats.executed_nodes.is_empty());
@@ -3405,7 +3371,7 @@ mod node_seeds {
         eg.execute(
             RunSeeds {
                 sinks: true,
-                nodes: vec![sum_id],
+                nodes: vec![NodeAddress::root(sum_id)],
                 ..Default::default()
             },
             None,
@@ -3439,8 +3405,9 @@ mod node_seeds {
         eg.update(&graph, &library).unwrap();
 
         let bogus: NodeId = NodeId::from_u128(0xdead_beef);
-        let err = eg.execute_nodes([bogus]).await.unwrap_err();
-        assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
+        let address = NodeAddress::root(bogus);
+        let err = eg.execute_nodes([address.clone()]).await.unwrap_err();
+        assert!(matches!(err, Error::NodeSeedNotFound { address: missing } if missing == address));
     }
 }
 
@@ -3756,8 +3723,8 @@ mod events {
     use super::*;
     use crate::async_lambda;
     use crate::execution::event::EventRef;
-    use crate::node::event_lambda::EventLambda;
-    use crate::node::function::{Func, FuncInput, FuncOutput};
+    use crate::node::definition::{Func, FuncInput, FuncOutput};
+    use crate::node::event::EventLambda;
 
     const EMIT_FUNC: FuncId = FuncId::from_u128(0xE311);
     const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);
@@ -4095,8 +4062,8 @@ mod events {
 mod output_usage {
     use super::*;
     use crate::async_lambda;
-    use crate::node::func_lambda::OutputUsage;
-    use crate::node::function::{Func, FuncInput, FuncOutput};
+    use crate::node::definition::{Func, FuncInput, FuncOutput};
+    use crate::node::lambda::OutputUsage;
 
     const SPLIT_FUNC: FuncId = FuncId::from_u128(0x5911);
     const SINK_FUNC: FuncId = FuncId::from_u128(0x5922);
@@ -4214,6 +4181,71 @@ mod output_usage {
 
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed()
+    -> anyhow::Result<()> {
+        let split_calls = Arc::new(Mutex::new(0));
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let split_calls_l = split_calls.clone();
+        let received_l = received.clone();
+
+        let mut library = Library::default();
+        library.add(
+            Func::new(SPLIT_FUNC, "split")
+                .pure()
+                .output(FuncOutput::new("a", DataType::Int))
+                .output(FuncOutput::new("b", DataType::Int))
+                .lambda(async_lambda!(
+                    move |_, _, _, _, usage, outputs| { calls = split_calls_l.clone() } => {
+                        *calls.lock().await += 1;
+                        if !usage[0].is_skip() {
+                            outputs[0] = StaticValue::Int(10).into();
+                        }
+                        if !usage[1].is_skip() {
+                            outputs[1] = StaticValue::Int(20).into();
+                        }
+                        Ok(())
+                    }
+                )),
+        );
+        library.add(
+            Func::new(SINK_FUNC, "sink")
+                .sink()
+                .input(FuncInput::required("in", DataType::Int))
+                .lambda(async_lambda!(
+                    move |_, _, _, inputs, _, _| { received = received_l.clone() } => {
+                        received.lock().await.push(inputs[0].value.as_i64().unwrap());
+                        Ok(())
+                    }
+                )),
+        );
+
+        let split_id = NodeId::unique();
+        let sink_a_id = NodeId::unique();
+        let sink_b_id = NodeId::unique();
+        let mut split = node(&library, "split", split_id);
+        split.cache = CacheMode::Ram;
+        let mut graph = Graph::default();
+        graph.add(split);
+        graph.add(node(&library, "sink", sink_a_id));
+        graph.set_input_binding(InputPort::new(sink_a_id, 0), Binding::bind(split_id, 0));
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &library)?;
+        engine.execute_sinks().await?;
+
+        graph.add(node(&library, "sink", sink_b_id));
+        graph.set_input_binding(InputPort::new(sink_b_id, 0), Binding::bind(split_id, 1));
+        engine.update(&graph, &library)?;
+        engine.execute_sinks().await?;
+
+        assert_eq!(*split_calls.lock().await, 2);
+        let mut received = received.lock().await.clone();
+        received.sort_unstable();
+        assert_eq!(received, vec![10, 10, 20]);
+        Ok(())
+    }
 }
 
 // === Topology Edge Cases ===
@@ -4240,7 +4272,7 @@ mod topology {
         // Remove get_b — a middle node feeding sum[1] and mult[1] (both optional).
         // Forces compaction and target_idx remapping for the survivors.
         let get_b_id = graph.by_name("get_b").unwrap().id;
-        graph.remove_by_id(get_b_id);
+        graph.detach_node(get_b_id);
         graph.validate();
 
         eg.update(&graph, &library).unwrap();
@@ -4364,8 +4396,8 @@ mod topology {
         let idx_before = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
 
         // Remove get_b's chain — get_a's slot compacts toward the front.
-        graph.remove_by_id(get_b_id);
-        graph.remove_by_id(print_b_id);
+        graph.detach_node(get_b_id);
+        graph.detach_node(print_b_id);
         graph.validate();
 
         eg.update(&graph, &library).unwrap();
@@ -4428,8 +4460,8 @@ mod topology {
             assert_eq!(got, vec![2, 5], "round {round} grow values");
 
             // Remove it again.
-            graph.remove_by_id(gb);
-            graph.remove_by_id(pb);
+            graph.detach_node(gb);
+            graph.detach_node(pb);
             graph.validate();
             eg.update(&graph, &library).unwrap();
             assert_eq!(eg.compiled.program.e_nodes.len(), 2, "round {round} shrink");
@@ -4452,8 +4484,8 @@ mod subgraph {
     use super::*;
     use crate::graph::NodeKind;
     use crate::graph::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
-    use crate::node::event_lambda::EventLambda;
-    use crate::node::function::{Func, FuncId, FuncInput, FuncOutput};
+    use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
+    use crate::node::event::EventLambda;
     use std::sync::Mutex as StdMutex;
 
     fn fnode(library: &Library, name: &str) -> Node {
@@ -5017,9 +5049,9 @@ mod mid_run_release {
 
     use super::*;
     use crate::async_lambda;
-    use crate::data::{CustomValue, TypeId};
     use crate::library::{Library, TypeEntry};
-    use crate::node::function::{Func, FuncInput, FuncOutput};
+    use crate::node::definition::{Func, FuncInput, FuncOutput};
+    use crate::{CustomValue, TypeId};
 
     const TRACKED_TYPE: &str = "7266406a-8083-4e46-b661-de4308bcec96";
     const RELAY_FUNC: &str = "2b16e013-11fb-49cf-89b1-a9cb54c06be3";
@@ -5265,7 +5297,7 @@ mod compile_regressions {
     use crate::async_lambda;
     use crate::graph::NodeKind;
     use crate::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
-    use crate::node::function::{Func, FuncInput, FuncOutput};
+    use crate::node::definition::{Func, FuncInput, FuncOutput};
     use std::sync::Mutex as StdMutex;
 
     /// The output-type pool is span-addressed: when a consumer precedes its producer

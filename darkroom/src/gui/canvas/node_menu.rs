@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use aperture::{MenuItem, Ui};
-use scenarium::graph::NodeId;
+use scenarium::NodeId;
 
 use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::Intent;

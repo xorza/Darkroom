@@ -13,17 +13,18 @@
 //!
 //! [`Editor`]: crate::gui::app::editor::Editor
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
 
 use lens::Image as LensImage;
-use scenarium::data::{DynamicValue, RamUsage};
-use scenarium::execution::RunError;
-use scenarium::execution::stats::{
-    ExecutionStats, FlattenMap, LogEntry, PinnedOutputs, RunPhase, RunProgress,
-};
-use scenarium::graph::NodeId;
-use scenarium::graph::OutputPort;
+#[cfg(test)]
+use scenarium::NodeAddress;
+use scenarium::NodeId;
+use scenarium::OutputAddress;
+use scenarium::OutputPort;
+use scenarium::RunError;
+use scenarium::{DynamicValue, RamUsage};
+use scenarium::{ExecutionStats, FlattenMap, LogEntry, PinnedOutputs, RunPhase, RunProgress};
 
 use crate::gui::image_viewer::{RenderedImage, convert_image_value};
 
@@ -91,12 +92,6 @@ pub(crate) struct NodeRunState {
     /// its interior. Zero unless the node retains a value; drives the node body's
     /// memory readout.
     pub(crate) ram: RamUsage,
-    /// This node's pinned outputs' latest values, keyed by node-local port
-    /// index — populated by [`RunState::set_pinned_values`] as pushes arrive
-    /// mid-run, independent of [`RunState::set_results`]'s reprojection. A
-    /// value isn't reset each run; it simply sits until a fresh push for
-    /// that port replaces it, or the whole run state is [`cleared`](RunState::clear).
-    pub(crate) pinned_values: HashMap<usize, PinnedOutputValue>,
 }
 
 /// One pushed pinned output plus its eagerly prepared image thumbnail.
@@ -112,6 +107,7 @@ pub(crate) struct PinnedOutputValue {
 #[derive(Default, Debug)]
 pub(crate) struct RunState {
     nodes: HashMap<NodeId, NodeRunState>,
+    pinned_outputs: BTreeMap<OutputAddress, PinnedOutputValue>,
     /// A run is in flight (`begin_run` → its `ExecutionFinished`). Drives the
     /// live repaint tick and whether the Cancel affordance shows.
     running: bool,
@@ -161,11 +157,16 @@ impl RunState {
     /// (not pinned, or pinned but not yet run). Read by the canvas pin-
     /// preview widget ([`crate::gui::canvas::pin_ui::PinUi::draw`]) every
     /// frame.
-    pub(crate) fn pinned_output(&self, port: OutputPort) -> Option<&PinnedOutputValue> {
-        self.nodes
-            .get(&port.node_id)?
-            .pinned_values
-            .get(&port.port_idx)
+    pub(crate) fn representative_pinned_output(
+        &self,
+        port: OutputPort,
+    ) -> Option<&PinnedOutputValue> {
+        self.pinned_outputs
+            .iter()
+            .find(|(address, _)| {
+                address.node.node_id == port.node_id && address.port_idx == port.port_idx
+            })
+            .map(|(_, value)| value)
     }
 
     /// Fold a just-arrived pinned-output push onto its node: each pushed
@@ -175,13 +176,19 @@ impl RunState {
     /// shows its last value until a whole-run failure [`clear`](Self::clear)s
     /// it.
     pub(crate) fn set_pinned_values(&mut self, pinned: PinnedOutputs) {
-        let slot = self.nodes.entry(pinned.node_id).or_default();
-        for (port_idx, value) in pinned.values {
+        for output in pinned.values {
+            let port_idx = output.port_idx;
+            let value = output.value;
             let preview = value
                 .as_custom::<LensImage>()
                 .and_then(|_| convert_image_value(&value, PIN_PREVIEW_TEXTURE_DIM).ok());
-            slot.pinned_values
-                .insert(port_idx, PinnedOutputValue { value, preview });
+            self.pinned_outputs.insert(
+                OutputAddress {
+                    node: pinned.node.clone(),
+                    port_idx,
+                },
+                PinnedOutputValue { value, preview },
+            );
         }
     }
 
@@ -230,17 +237,13 @@ impl RunState {
         // Per-node RAM folds like elapsed time: a flattened node's footprint adds
         // onto its authoring node and every enclosing composite instance, so an
         // instance aggregates its interior's memory.
-        for (flat_id, usage) in &stats.node_ram {
-            for node_id in flatten.attribution(*flat_id) {
-                self.nodes.entry(node_id).or_default().ram += *usage;
+        for node_ram in &stats.node_ram {
+            for node_id in flatten.attribution(node_ram.node_id) {
+                self.nodes.entry(node_id).or_default().ram += node_ram.usage;
             }
         }
-        self.nodes.retain(|_, n| {
-            n.status != ExecStatus::None
-                || !n.logs.is_empty()
-                || n.ram.total() > 0
-                || !n.pinned_values.is_empty()
-        });
+        self.nodes
+            .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty() || n.ram.total() > 0);
     }
 
     /// Fold one flattened stat's `status` onto the node itself and every
@@ -292,6 +295,7 @@ impl RunState {
     pub(crate) fn clear(&mut self) {
         self.running = false;
         self.nodes.clear();
+        self.pinned_outputs.clear();
     }
 
     /// Mark a fresh run in flight while keeping status/logs/pinned values so
@@ -299,9 +303,8 @@ impl RunState {
     /// stats and pushes replace them as they arrive.
     pub(crate) fn begin_run(&mut self) {
         self.running = true;
-        self.nodes.retain(|_, n| {
-            n.status != ExecStatus::None || !n.logs.is_empty() || !n.pinned_values.is_empty()
-        });
+        self.nodes
+            .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty());
     }
 }
 
@@ -309,8 +312,10 @@ impl RunState {
 mod tests {
     use super::*;
 
-    use scenarium::execution::stats::{ExecutedNodeStats, LogLevel, NodeError};
-    use scenarium::node::function::FuncId;
+    use scenarium::FlattenMapBuilder;
+    use scenarium::FuncId;
+    use scenarium::PinnedOutput;
+    use scenarium::{ExecutedNodeStats, LogLevel, NodeError};
 
     fn nid(n: u128) -> NodeId {
         NodeId::from_u128(n)
@@ -349,14 +354,19 @@ mod tests {
         }
     }
 
+    fn flatten_map(leaves: impl IntoIterator<Item = (NodeId, Vec<NodeId>, NodeId)>) -> FlattenMap {
+        let mut builder = FlattenMapBuilder::new();
+        for (flat_id, instances, node_id) in leaves {
+            builder.insert_leaf(flat_id, instances, node_id);
+        }
+        builder.build()
+    }
+
     #[test]
     fn apply_progress_marks_all_attributed_nodes_running_then_executed() {
         let (interior, instance) = (nid(1), nid(2));
         let flat = nid(100);
-        let mut map = FlattenMap::default();
-        map.reset();
-        let scope = map.push_scope(instance, 0);
-        map.set_leaf(flat, scope, interior);
+        let map = flatten_map([(flat, vec![instance], interior)]);
 
         let mut rs = RunState::default();
 
@@ -397,12 +407,10 @@ mod tests {
         let (inst_a, inst_b) = (nid(10), nid(20));
         let (flat_a, flat_b) = (nid(101), nid(102));
 
-        let mut map = FlattenMap::default();
-        map.reset();
-        let scope_a = map.push_scope(inst_a, 0);
-        let scope_b = map.push_scope(inst_b, 0);
-        map.set_leaf(flat_a, scope_a, interior);
-        map.set_leaf(flat_b, scope_b, interior);
+        let map = flatten_map([
+            (flat_a, vec![inst_a], interior),
+            (flat_b, vec![inst_b], interior),
+        ]);
 
         let mut rs = RunState::default();
         rs.set_results(&stats(&[(flat_a, 2.0), (flat_b, 3.0)], &[]), &map);
@@ -422,11 +430,7 @@ mod tests {
         let (outer, inner) = (nid(10), nid(20));
         let flat = nid(100);
 
-        let mut map = FlattenMap::default();
-        map.reset();
-        let scope_outer = map.push_scope(outer, 0);
-        let scope_inner = map.push_scope(inner, scope_outer);
-        map.set_leaf(flat, scope_inner, interior);
+        let map = flatten_map([(flat, vec![outer, inner], interior)]);
 
         let mut rs = RunState::default();
         rs.set_results(&stats(&[(flat, 4.0)], &[]), &map);
@@ -441,9 +445,7 @@ mod tests {
     #[test]
     fn errored_beats_executed_on_same_node() {
         let interior = nid(1); // top-level: flattened id == interior
-        let mut map = FlattenMap::default();
-        map.reset();
-        map.set_leaf(interior, 0, interior);
+        let map = flatten_map([(interior, vec![], interior)]);
 
         let mut rs = RunState::default();
         rs.set_results(&stats(&[(interior, 1.0)], &[interior]), &map);
@@ -460,13 +462,13 @@ mod tests {
     #[test]
     fn error_messages_attribute_to_instance_and_skip_cancelled() {
         let interior = nid(1);
+        let cancelled_interior = nid(2);
         let inst = nid(10);
         let (fail_flat, cancel_flat) = (nid(100), nid(101));
-        let mut map = FlattenMap::default();
-        map.reset();
-        let scope = map.push_scope(inst, 0);
-        map.set_leaf(fail_flat, scope, interior);
-        map.set_leaf(cancel_flat, scope, interior);
+        let map = flatten_map([
+            (fail_flat, vec![inst], interior),
+            (cancel_flat, vec![inst], cancelled_interior),
+        ]);
 
         let node_err = |node_id, error| NodeError { node_id, error };
         let mut s = stats(&[], &[]);
@@ -497,6 +499,8 @@ mod tests {
         // The cancelled node contributes no extra status/message (only the one
         // real failure's message is present, not a second entry for the cancel).
         assert_eq!(rs.errors(interior).len(), 1, "cancel adds no message");
+        assert_eq!(rs.status(cancelled_interior), ExecStatus::None);
+        assert!(rs.errors(cancelled_interior).is_empty());
     }
 
     /// A log line emitted inside a subgraph instance attributes to both
@@ -507,10 +511,7 @@ mod tests {
         let interior = nid(1);
         let inst = nid(10);
         let flat = nid(100);
-        let mut map = FlattenMap::default();
-        map.reset();
-        let scope = map.push_scope(inst, 0);
-        map.set_leaf(flat, scope, interior);
+        let map = flatten_map([(flat, vec![inst], interior)]);
 
         let mut s = stats(&[], &[]);
         s.logs.push(LogEntry {
@@ -536,9 +537,7 @@ mod tests {
     #[test]
     fn begin_run_keeps_status() {
         let node = nid(1);
-        let mut map = FlattenMap::default();
-        map.reset();
-        map.set_leaf(node, 0, node);
+        let map = flatten_map([(node, vec![], node)]);
 
         let mut rs = RunState::default();
         rs.set_results(&stats(&[(node, 1.0)], &[]), &map);
@@ -558,21 +557,25 @@ mod tests {
     /// for the same port replaces the first rather than appending.
     #[test]
     fn set_pinned_values_stores_and_replaces_per_port() {
-        use scenarium::data::StaticValue;
+        use scenarium::StaticValue;
 
         let node = nid(1);
         let mut rs = RunState::default();
         assert!(
-            rs.pinned_output(OutputPort::new(node, 0)).is_none(),
+            rs.representative_pinned_output(OutputPort::new(node, 0))
+                .is_none(),
             "nothing pushed yet"
         );
 
         rs.set_pinned_values(PinnedOutputs {
-            node_id: node,
-            values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
+            node: NodeAddress::root(node),
+            values: vec![PinnedOutput {
+                port_idx: 0,
+                value: DynamicValue::Static(StaticValue::Int(7)),
+            }],
         });
         assert_eq!(
-            rs.pinned_output(OutputPort::new(node, 0))
+            rs.representative_pinned_output(OutputPort::new(node, 0))
                 .unwrap()
                 .value
                 .as_i64(),
@@ -581,11 +584,14 @@ mod tests {
         );
 
         rs.set_pinned_values(PinnedOutputs {
-            node_id: node,
-            values: vec![(0, DynamicValue::Static(StaticValue::Int(8)))],
+            node: NodeAddress::root(node),
+            values: vec![PinnedOutput {
+                port_idx: 0,
+                value: DynamicValue::Static(StaticValue::Int(8)),
+            }],
         });
         assert_eq!(
-            rs.pinned_output(OutputPort::new(node, 0))
+            rs.representative_pinned_output(OutputPort::new(node, 0))
                 .unwrap()
                 .value
                 .as_i64(),
@@ -598,12 +604,12 @@ mod tests {
         let value =
             DynamicValue::from_custom(LensImage::new(imaginarium::ImageBuffer::from_cpu(raw)));
         rs.set_pinned_values(PinnedOutputs {
-            node_id: node,
-            values: vec![(1, value)],
+            node: NodeAddress::root(node),
+            values: vec![PinnedOutput { port_idx: 1, value }],
         });
 
         let image = rs
-            .pinned_output(OutputPort::new(node, 1))
+            .representative_pinned_output(OutputPort::new(node, 1))
             .unwrap()
             .preview
             .as_ref()
@@ -615,20 +621,79 @@ mod tests {
         assert_eq!(image.image.pixels, vec![128; 256 * 128 * 4]);
     }
 
+    #[test]
+    fn set_pinned_values_keeps_subgraph_instances_separate() {
+        use scenarium::StaticValue;
+
+        let node = nid(1);
+        let instance_a = nid(2);
+        let instance_b = nid(3);
+        let address_a = NodeAddress {
+            instances: vec![instance_a],
+            node_id: node,
+        };
+        let address_b = NodeAddress {
+            instances: vec![instance_b],
+            node_id: node,
+        };
+        let mut rs = RunState::default();
+
+        rs.set_pinned_values(PinnedOutputs {
+            node: address_a.clone(),
+            values: vec![PinnedOutput {
+                port_idx: 0,
+                value: DynamicValue::Static(StaticValue::Int(7)),
+            }],
+        });
+        rs.set_pinned_values(PinnedOutputs {
+            node: address_b.clone(),
+            values: vec![PinnedOutput {
+                port_idx: 0,
+                value: DynamicValue::Static(StaticValue::Int(8)),
+            }],
+        });
+
+        assert_eq!(rs.pinned_outputs.len(), 2);
+        assert_eq!(
+            rs.pinned_outputs[&OutputAddress {
+                node: address_a,
+                port_idx: 0,
+            }]
+                .value
+                .as_i64(),
+            Some(7)
+        );
+        assert_eq!(
+            rs.pinned_outputs[&OutputAddress {
+                node: address_b,
+                port_idx: 0,
+            }]
+                .value
+                .as_i64(),
+            Some(8)
+        );
+    }
+
     /// `clear` (a whole-run failure) drops pinned values along with
     /// everything else.
     #[test]
     fn clear_drops_pinned_values() {
-        use scenarium::data::StaticValue;
+        use scenarium::StaticValue;
 
         let node = nid(1);
         let mut rs = RunState::default();
         rs.set_pinned_values(PinnedOutputs {
-            node_id: node,
-            values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
+            node: NodeAddress::root(node),
+            values: vec![PinnedOutput {
+                port_idx: 0,
+                value: DynamicValue::Static(StaticValue::Int(7)),
+            }],
         });
         rs.clear();
-        assert!(rs.pinned_output(OutputPort::new(node, 0)).is_none());
+        assert!(
+            rs.representative_pinned_output(OutputPort::new(node, 0))
+                .is_none()
+        );
     }
 
     /// A new epoch keeps a pinned value alive even when its node carries no
@@ -636,20 +701,23 @@ mod tests {
     /// `begin_run` already gives status/logs.
     #[test]
     fn begin_run_keeps_pinned_values_with_no_other_state() {
-        use scenarium::data::StaticValue;
+        use scenarium::StaticValue;
 
         let node = nid(1);
         let mut rs = RunState::default();
         rs.set_pinned_values(PinnedOutputs {
-            node_id: node,
-            values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
+            node: NodeAddress::root(node),
+            values: vec![PinnedOutput {
+                port_idx: 0,
+                value: DynamicValue::Static(StaticValue::Int(7)),
+            }],
         });
         assert_eq!(rs.status(node), ExecStatus::None, "no status ever set");
 
         rs.begin_run();
 
         assert_eq!(
-            rs.pinned_output(OutputPort::new(node, 0))
+            rs.representative_pinned_output(OutputPort::new(node, 0))
                 .unwrap()
                 .value
                 .as_i64(),
@@ -663,13 +731,16 @@ mod tests {
     /// contributes to none of the run's stat lists).
     #[test]
     fn set_results_keeps_a_node_holding_only_a_pinned_value() {
-        use scenarium::data::StaticValue;
+        use scenarium::StaticValue;
 
         let node = nid(1);
         let mut rs = RunState::default();
         rs.set_pinned_values(PinnedOutputs {
-            node_id: node,
-            values: vec![(0, DynamicValue::Static(StaticValue::Int(7)))],
+            node: NodeAddress::root(node),
+            values: vec![PinnedOutput {
+                port_idx: 0,
+                value: DynamicValue::Static(StaticValue::Int(7)),
+            }],
         });
 
         // A run that says nothing at all about `node` (no executed/cached/
@@ -677,7 +748,7 @@ mod tests {
         rs.set_results(&stats(&[], &[]), &FlattenMap::default());
 
         assert_eq!(
-            rs.pinned_output(OutputPort::new(node, 0))
+            rs.representative_pinned_output(OutputPort::new(node, 0))
                 .unwrap()
                 .value
                 .as_i64(),

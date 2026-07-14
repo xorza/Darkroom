@@ -14,8 +14,8 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
-use scenarium::graph::{Binding, CacheMode, InputPort, Node, NodeId, OutputPort, Subscription};
+use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, OutputPort, Subscription};
+use scenarium::{DetachedNode, SubgraphDef, SubgraphId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::dock::{DockLayout, DockOp, DockPath};
@@ -240,18 +240,13 @@ pub(crate) enum GraphStep {
     /// Pre-removal state lives entirely on the step: every reference
     /// into the doomed node, so undo can fully restore it.
     RemoveNode {
-        node: Node,
+        detached: DetachedNode,
         /// The node's own view item and every pinned output's, each with
         /// the paint-stack slot it occupied, in ascending slot order —
         /// undo restores positions, pins, *and* stacking exactly
         /// (re-inserting in ascending order reproduces the original
         /// interleaving).
         view_items: Vec<(usize, ViewItem)>,
-        /// All bindings `remove_by_id` drops (the node's own inputs + edges
-        /// into it), captured so undo can fully restore the wiring.
-        bindings: Vec<(InputPort, Binding)>,
-        /// All subscriptions touching the node (as emitter or subscriber).
-        subscriptions: Vec<Subscription>,
         /// The selection members that lived on this node (its own key +
         /// any pinned-output keys) — removal prunes them, undo re-adds.
         selected: Vec<ItemRef>,

@@ -24,8 +24,8 @@ use aperture::{
 use glam::{UVec2, Vec2};
 use imaginarium::{ColorFormat, Image as RawImage, Preview, ProcessingContext};
 use lens::Image as LensImage;
-use scenarium::data::DynamicValue;
-use scenarium::graph::NodeSearch;
+use scenarium::DynamicValue;
+use scenarium::NodeSearch;
 
 use crate::core::document::{Document, PortKind, PortRef, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
@@ -756,7 +756,7 @@ pub(crate) mod test_support {
 mod tests {
     use super::*;
     use imaginarium::{ColorFormat, Image as RawImage, ImageBuffer, ImageDesc};
-    use scenarium::graph::NodeId;
+    use scenarium::NodeId;
 
     fn port() -> PortRef {
         PortRef {

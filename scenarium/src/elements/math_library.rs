@@ -1,15 +1,25 @@
+#[cfg(feature = "builtin-random")]
 use rand::{RngExt, SeedableRng};
 
+use crate::DataType;
 use crate::async_lambda;
-use crate::data::DataType;
 use crate::library::Library;
-use crate::node::func_lambda::{InvokeError, InvokeInput};
-use crate::node::function::{Func, FuncInput, FuncOutput};
+use crate::node::definition::{Func, FuncInput, FuncOutput};
+use crate::node::lambda::{InvokeError, InvokeInput};
 
-/// A lambda input coerced to `f64`, failing the invoke instead of panicking: a
-/// non-numeric value can legally reach a Float port through an `Any`-typed
-/// subgraph boundary, which compile-time validation can't see through — and a
-/// lambda panic would take down the whole worker task.
+#[derive(Debug, Clone, Copy)]
+struct FloatInputSpec {
+    name: &'static str,
+    description: &'static str,
+    default: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FloatOutputSpec {
+    name: &'static str,
+    description: &'static str,
+}
+
 fn float_input(inputs: &[InvokeInput], idx: usize) -> Result<f64, InvokeError> {
     inputs[idx].value.as_f64().ok_or_else(|| {
         InvokeError::External(anyhow::anyhow!(
@@ -20,423 +30,377 @@ fn float_input(inputs: &[InvokeInput], idx: usize) -> Result<f64, InvokeError> {
     })
 }
 
-/// The built-in math nodes.
+fn declared_input(spec: FloatInputSpec) -> FuncInput {
+    FuncInput::required(spec.name, DataType::Float)
+        .description(spec.description)
+        .default(spec.default)
+}
+
+fn declared_output(spec: FloatOutputSpec) -> FuncOutput {
+    FuncOutput::new(spec.name, DataType::Float).description(spec.description)
+}
+
+fn unary_float_func(
+    id: &'static str,
+    name: &'static str,
+    description: &'static str,
+    input: FloatInputSpec,
+    output: FloatOutputSpec,
+    operation: fn(f64) -> f64,
+) -> Func {
+    Func::new(id, name)
+        .description(description)
+        .category("Math")
+        .pure()
+        .input(declared_input(input))
+        .output(declared_output(output))
+        .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
+            assert_eq!(inputs.len(), 1);
+            assert_eq!(outputs.len(), 1);
+            outputs[0] = operation(float_input(inputs, 0)?).into();
+            Ok(())
+        }))
+}
+
+fn binary_float_func(
+    id: &'static str,
+    name: &'static str,
+    description: &'static str,
+    inputs: [FloatInputSpec; 2],
+    output: FloatOutputSpec,
+    operation: fn(f64, f64) -> f64,
+) -> Func {
+    Func::new(id, name)
+        .description(description)
+        .category("Math")
+        .pure()
+        .input(declared_input(inputs[0]))
+        .input(declared_input(inputs[1]))
+        .output(declared_output(output))
+        .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
+            assert_eq!(inputs.len(), 2);
+            assert_eq!(outputs.len(), 1);
+            outputs[0] = operation(float_input(inputs, 0)?, float_input(inputs, 1)?).into();
+            Ok(())
+        }))
+}
+
 pub fn math_library() -> Library {
     let mut library = Library::default();
 
-    // random
-    library.add(
-        Func::new("01897928-66cd-52cb-abeb-a5bfd7f3763e", "Random")
-            .description("Generates a random float between min and max values.")
-            .category("Math")
-            .input(
-                FuncInput::required("Min", DataType::Float)
-                    .description("Lower bound (inclusive).")
-                    .default(0.0),
-            )
-            .input(
-                FuncInput::required("Max", DataType::Float)
-                    .description("Upper bound (exclusive).")
-                    .default(1.0),
-            )
-            .output(
-                FuncOutput::new("Value", DataType::Float)
-                    .description("A random number in [Min, Max)."),
-            )
-            .lambda(async_lambda!(move |_, cache, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
+    #[cfg(feature = "builtin-random")]
+    library.add(random_func());
 
-                let rng =
-                    cache.get_or_default_with(|| rand::rngs::StdRng::from_rng(&mut rand::rng()));
+    library.add(binary_float_func(
+        "01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee",
+        "Add",
+        "Adds two float values (A + B).",
+        [
+            FloatInputSpec {
+                name: "A",
+                description: "First addend.",
+                default: 0.0,
+            },
+            FloatInputSpec {
+                name: "B",
+                description: "Second addend.",
+                default: 1.0,
+            },
+        ],
+        FloatOutputSpec {
+            name: "Sum",
+            description: "A + B.",
+        },
+        |a, b| a + b,
+    ));
+    library.add(binary_float_func(
+        "01897c50-229e-f5e4-1c60-7f1e14531da2",
+        "Subtract",
+        "Subtracts the second value from the first (A − B).",
+        [
+            FloatInputSpec {
+                name: "A",
+                description: "Minuend.",
+                default: 0.0,
+            },
+            FloatInputSpec {
+                name: "B",
+                description: "Subtrahend.",
+                default: 1.0,
+            },
+        ],
+        FloatOutputSpec {
+            name: "Difference",
+            description: "A − B.",
+        },
+        |a, b| a - b,
+    ));
+    library.add(binary_float_func(
+        "01897c50-d510-55bf-8cb9-545a62cc76cc",
+        "Multiply",
+        "Multiplies two float values (A × B).",
+        [
+            FloatInputSpec {
+                name: "A",
+                description: "First factor.",
+                default: 0.0,
+            },
+            FloatInputSpec {
+                name: "B",
+                description: "Second factor.",
+                default: 1.0,
+            },
+        ],
+        FloatOutputSpec {
+            name: "Product",
+            description: "A × B.",
+        },
+        |a, b| a * b,
+    ));
+    library.add(divide_func());
+    library.add(binary_float_func(
+        "01897c52-ac50-733e-aeeb-7018fd84c264",
+        "Power",
+        "Raises the first value to the power of the second (Base^Exponent).",
+        [
+            FloatInputSpec {
+                name: "Base",
+                description: "The base.",
+                default: 0.0,
+            },
+            FloatInputSpec {
+                name: "Exponent",
+                description: "The exponent.",
+                default: 1.0,
+            },
+        ],
+        FloatOutputSpec {
+            name: "Result",
+            description: "Base raised to Exponent.",
+        },
+        f64::powf,
+    ));
+    library.add(unary_float_func(
+        "01897c53-a3d7-e716-b80a-0ba98661413a",
+        "Square Root",
+        "Calculates the square root of a value.",
+        FloatInputSpec {
+            name: "Value",
+            description: "Number to take the square root of.",
+            default: 0.0,
+        },
+        FloatOutputSpec {
+            name: "Root",
+            description: "√Value.",
+        },
+        f64::sqrt,
+    ));
 
-                let min: f64 = float_input(inputs, 0)?;
-                let max: f64 = float_input(inputs, 1)?;
-                let random = rng.random::<f64>();
-                let result = min + (max - min) * random;
+    for function in trigonometry_funcs() {
+        library.add(function);
+    }
 
-                outputs[0] = result.into();
-                Ok(())
-            })),
-    );
-
-    // add
-    library.add(
-        Func::new("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee", "Add")
-            .description("Adds two float values (A + B).")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("A", DataType::Float)
-                    .description("First addend.")
-                    .default(0.0),
-            )
-            .input(
-                FuncInput::required("B", DataType::Float)
-                    .description("Second addend.")
-                    .default(1.0),
-            )
-            .output(FuncOutput::new("Sum", DataType::Float).description("A + B."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
-
-                let a: f64 = float_input(inputs, 0)?;
-                let b: f64 = float_input(inputs, 1)?;
-                let result = a + b;
-
-                outputs[0] = result.into();
-                Ok(())
-            })),
-    );
-
-    // subtract
-    library.add(
-        Func::new("01897c50-229e-f5e4-1c60-7f1e14531da2", "Subtract")
-            .description("Subtracts the second value from the first (A − B).")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("A", DataType::Float)
-                    .description("Minuend.")
-                    .default(0.0),
-            )
-            .input(
-                FuncInput::required("B", DataType::Float)
-                    .description("Subtrahend.")
-                    .default(1.0),
-            )
-            .output(FuncOutput::new("Difference", DataType::Float).description("A − B."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
-
-                let a: f64 = float_input(inputs, 0)?;
-                let b: f64 = float_input(inputs, 1)?;
-                let result = a - b;
-
-                outputs[0] = result.into();
-                Ok(())
-            })),
-    );
-
-    // multiply
-    library.add(
-        Func::new("01897c50-d510-55bf-8cb9-545a62cc76cc", "Multiply")
-            .description("Multiplies two float values (A × B).")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("A", DataType::Float)
-                    .description("First factor.")
-                    .default(0.0),
-            )
-            .input(
-                FuncInput::required("B", DataType::Float)
-                    .description("Second factor.")
-                    .default(1.0),
-            )
-            .output(FuncOutput::new("Product", DataType::Float).description("A × B."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
-
-                let a: f64 = float_input(inputs, 0)?;
-                let b: f64 = float_input(inputs, 1)?;
-                let result = a * b;
-
-                outputs[0] = result.into();
-                Ok(())
-            })),
-    );
-
-    // divide
-    library.add(
-        Func::new("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b", "Divide")
-            .description(
-                "Divides the first value by the second, outputs both quotient and remainder.",
-            )
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("A", DataType::Float)
-                    .description("Dividend.")
-                    .default(0.0),
-            )
-            .input(
-                FuncInput::required("B", DataType::Float)
-                    .description("Divisor.")
-                    .default(1.0),
-            )
-            .output(FuncOutput::new("Quotient", DataType::Float).description("A ÷ B."))
-            .output(FuncOutput::new("Remainder", DataType::Float).description("A mod B."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 2);
-
-                let a: f64 = float_input(inputs, 0)?;
-                let b: f64 = float_input(inputs, 1)?;
-                let divide = a / b;
-                let modulo = a % b;
-
-                outputs[0] = divide.into();
-                outputs[1] = modulo.into();
-                Ok(())
-            })),
-    );
-
-    // power
-    library.add(
-        Func::new("01897c52-ac50-733e-aeeb-7018fd84c264", "Power")
-            .description("Raises the first value to the power of the second (Base^Exponent).")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("Base", DataType::Float)
-                    .description("The base.")
-                    .default(0.0),
-            )
-            .input(
-                FuncInput::required("Exponent", DataType::Float)
-                    .description("The exponent.")
-                    .default(1.0),
-            )
-            .output(
-                FuncOutput::new("Result", DataType::Float).description("Base raised to Exponent."),
-            )
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
-
-                let a: f64 = float_input(inputs, 0)?;
-                let b: f64 = float_input(inputs, 1)?;
-                let power = a.powf(b);
-
-                outputs[0] = power.into();
-                Ok(())
-            })),
-    );
-
-    // sqrt
-    library.add(
-        Func::new("01897c53-a3d7-e716-b80a-0ba98661413a", "Square Root")
-            .description("Calculates the square root of a value.")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("Value", DataType::Float)
-                    .description("Number to take the square root of.")
-                    .default(0.0),
-            )
-            .output(FuncOutput::new("Root", DataType::Float).description("√Value."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 1);
-                assert_eq!(outputs.len(), 1);
-
-                let a: f64 = float_input(inputs, 0)?;
-                let sqrt = a.sqrt();
-
-                outputs[0] = sqrt.into();
-                Ok(())
-            })),
-    );
-
-    // sin
-    library.add(
-        Func::new("01897c54-8671-5d7c-db4c-aca72865a5a6", "Sine")
-            .description("Calculates the sine of an angle in radians.")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("Angle", DataType::Float)
-                    .description("Angle in radians.")
-                    .default(0.0),
-            )
-            .output(FuncOutput::new("Sine", DataType::Float).description("sin(Angle)."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 1);
-                assert_eq!(outputs.len(), 1);
-
-                let a: f64 = float_input(inputs, 0)?;
-                let sin = a.sin();
-
-                outputs[0] = sin.into();
-                Ok(())
-            })),
-    );
-
-    // cos
-    library.add(
-        Func::new("01897c54-ceb5-e603-ebde-c6904a8ef6e5", "Cosine")
-            .description("Calculates the cosine of an angle in radians.")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("Angle", DataType::Float)
-                    .description("Angle in radians.")
-                    .default(0.0),
-            )
-            .output(FuncOutput::new("Cosine", DataType::Float).description("cos(Angle)."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 1);
-                assert_eq!(outputs.len(), 1);
-
-                let a: f64 = float_input(inputs, 0)?;
-                let cos = a.cos();
-
-                outputs[0] = cos.into();
-                Ok(())
-            })),
-    );
-
-    // tan
-    library.add(
-        Func::new("01897c55-1fda-2837-f4bd-75bea812a70e", "Tangent")
-            .description("Calculates the tangent of an angle in radians.")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("Angle", DataType::Float)
-                    .description("Angle in radians.")
-                    .default(0.0),
-            )
-            .output(FuncOutput::new("Tangent", DataType::Float).description("tan(Angle)."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 1);
-                assert_eq!(outputs.len(), 1);
-
-                let a: f64 = float_input(inputs, 0)?;
-                let tan = a.tan();
-
-                outputs[0] = tan.into();
-                Ok(())
-            })),
-    );
-
-    // asin
-    library.add(
-        Func::new("01897c55-6920-1641-593c-5a1d91c033cb", "Arcsine")
-            .description("Calculates the arc sine (inverse sine), returns angle in radians.")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("Sine", DataType::Float)
-                    .description("Sine value in [−1, 1].")
-                    .default(0.0),
-            )
-            .output(FuncOutput::new("Angle", DataType::Float).description("Angle in radians."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 1);
-                assert_eq!(outputs.len(), 1);
-
-                let sin: f64 = float_input(inputs, 0)?;
-                let asin = sin.asin();
-
-                outputs[0] = asin.into();
-                Ok(())
-            })),
-    );
-
-    // acos
-    library.add(
-        Func::new("01897c55-a3ef-681e-6fbb-5133c96f720c", "Arccosine")
-            .description("Calculates the arc cosine (inverse cosine), returns angle in radians.")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("Cosine", DataType::Float)
-                    .description("Cosine value in [−1, 1].")
-                    .default(1.0),
-            )
-            .output(FuncOutput::new("Angle", DataType::Float).description("Angle in radians."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 1);
-                assert_eq!(outputs.len(), 1);
-
-                let cos: f64 = float_input(inputs, 0)?;
-                let acos = cos.acos();
-
-                outputs[0] = acos.into();
-                Ok(())
-            })),
-    );
-
-    // atan
-    library.add(
-        Func::new("01897c55-e6f4-726c-5d4e-a2f90c4fc43b", "Arctangent")
-            .description("Calculates the arc tangent (inverse tangent), returns angle in radians.")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("Tangent", DataType::Float)
-                    .description("Tangent value.")
-                    .default(0.0),
-            )
-            .output(FuncOutput::new("Angle", DataType::Float).description("Angle in radians."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 1);
-                assert_eq!(outputs.len(), 1);
-
-                let tan: f64 = float_input(inputs, 0)?;
-                let atan = tan.atan();
-
-                outputs[0] = atan.into();
-                Ok(())
-            })),
-    );
-
-    // log
-    library.add(
-        Func::new("01897c56-8dde-c5f3-a389-f326fdf81b3a", "Logarithm")
-            .description("Calculates the logarithm of a value with the given base.")
-            .category("Math")
-            .pure()
-            .input(
-                FuncInput::required("Value", DataType::Float)
-                    .description("Number to take the logarithm of.")
-                    .default(1.0),
-            )
-            .input(
-                FuncInput::required("Base", DataType::Float)
-                    .description("Logarithm base.")
-                    .default(10.0),
-            )
-            .output(FuncOutput::new("Result", DataType::Float).description("log_Base(Value)."))
-            .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
-
-                let value: f64 = float_input(inputs, 0)?;
-                let base: f64 = float_input(inputs, 1)?;
-                let log = value.log(base);
-
-                outputs[0] = log.into();
-                Ok(())
-            })),
-    );
+    library.add(binary_float_func(
+        "01897c56-8dde-c5f3-a389-f326fdf81b3a",
+        "Logarithm",
+        "Calculates the logarithm of a value with the given base.",
+        [
+            FloatInputSpec {
+                name: "Value",
+                description: "Number to take the logarithm of.",
+                default: 1.0,
+            },
+            FloatInputSpec {
+                name: "Base",
+                description: "Logarithm base.",
+                default: 10.0,
+            },
+        ],
+        FloatOutputSpec {
+            name: "Result",
+            description: "log_Base(Value).",
+        },
+        f64::log,
+    ));
 
     library
+}
+
+fn trigonometry_funcs() -> [Func; 6] {
+    [
+        unary_float_func(
+            "01897c54-8671-5d7c-db4c-aca72865a5a6",
+            "Sine",
+            "Calculates the sine of an angle in radians.",
+            FloatInputSpec {
+                name: "Angle",
+                description: "Angle in radians.",
+                default: 0.0,
+            },
+            FloatOutputSpec {
+                name: "Sine",
+                description: "sin(Angle).",
+            },
+            f64::sin,
+        ),
+        unary_float_func(
+            "01897c54-ceb5-e603-ebde-c6904a8ef6e5",
+            "Cosine",
+            "Calculates the cosine of an angle in radians.",
+            FloatInputSpec {
+                name: "Angle",
+                description: "Angle in radians.",
+                default: 0.0,
+            },
+            FloatOutputSpec {
+                name: "Cosine",
+                description: "cos(Angle).",
+            },
+            f64::cos,
+        ),
+        unary_float_func(
+            "01897c55-1fda-2837-f4bd-75bea812a70e",
+            "Tangent",
+            "Calculates the tangent of an angle in radians.",
+            FloatInputSpec {
+                name: "Angle",
+                description: "Angle in radians.",
+                default: 0.0,
+            },
+            FloatOutputSpec {
+                name: "Tangent",
+                description: "tan(Angle).",
+            },
+            f64::tan,
+        ),
+        unary_float_func(
+            "01897c55-6920-1641-593c-5a1d91c033cb",
+            "Arcsine",
+            "Calculates the arc sine (inverse sine), returns angle in radians.",
+            FloatInputSpec {
+                name: "Sine",
+                description: "Sine value in [−1, 1].",
+                default: 0.0,
+            },
+            FloatOutputSpec {
+                name: "Angle",
+                description: "Angle in radians.",
+            },
+            f64::asin,
+        ),
+        unary_float_func(
+            "01897c55-a3ef-681e-6fbb-5133c96f720c",
+            "Arccosine",
+            "Calculates the arc cosine (inverse cosine), returns angle in radians.",
+            FloatInputSpec {
+                name: "Cosine",
+                description: "Cosine value in [−1, 1].",
+                default: 1.0,
+            },
+            FloatOutputSpec {
+                name: "Angle",
+                description: "Angle in radians.",
+            },
+            f64::acos,
+        ),
+        unary_float_func(
+            "01897c55-e6f4-726c-5d4e-a2f90c4fc43b",
+            "Arctangent",
+            "Calculates the arc tangent (inverse tangent), returns angle in radians.",
+            FloatInputSpec {
+                name: "Tangent",
+                description: "Tangent value.",
+                default: 0.0,
+            },
+            FloatOutputSpec {
+                name: "Angle",
+                description: "Angle in radians.",
+            },
+            f64::atan,
+        ),
+    ]
+}
+
+fn divide_func() -> Func {
+    Func::new("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b", "Divide")
+        .description("Divides the first value by the second, outputs both quotient and remainder.")
+        .category("Math")
+        .pure()
+        .input(declared_input(FloatInputSpec {
+            name: "A",
+            description: "Dividend.",
+            default: 0.0,
+        }))
+        .input(declared_input(FloatInputSpec {
+            name: "B",
+            description: "Divisor.",
+            default: 1.0,
+        }))
+        .output(declared_output(FloatOutputSpec {
+            name: "Quotient",
+            description: "A ÷ B.",
+        }))
+        .output(declared_output(FloatOutputSpec {
+            name: "Remainder",
+            description: "A mod B.",
+        }))
+        .lambda(async_lambda!(move |_, _, _, inputs, _, outputs| {
+            assert_eq!(inputs.len(), 2);
+            assert_eq!(outputs.len(), 2);
+            let dividend = float_input(inputs, 0)?;
+            let divisor = float_input(inputs, 1)?;
+            outputs[0] = (dividend / divisor).into();
+            outputs[1] = (dividend % divisor).into();
+            Ok(())
+        }))
+}
+
+#[cfg(feature = "builtin-random")]
+fn random_func() -> Func {
+    Func::new("01897928-66cd-52cb-abeb-a5bfd7f3763e", "Random")
+        .description("Generates a random float between min and max values.")
+        .category("Math")
+        .input(
+            FuncInput::required("Min", DataType::Float)
+                .description("Lower bound (inclusive).")
+                .default(0.0),
+        )
+        .input(
+            FuncInput::required("Max", DataType::Float)
+                .description("Upper bound (exclusive).")
+                .default(1.0),
+        )
+        .output(
+            FuncOutput::new("Value", DataType::Float).description("A random number in [Min, Max)."),
+        )
+        .lambda(async_lambda!(move |_, cache, _, inputs, _, outputs| {
+            assert_eq!(inputs.len(), 2);
+            assert_eq!(outputs.len(), 1);
+            let rng = cache.get_or_default_with(|| rand::rngs::StdRng::from_rng(&mut rand::rng()));
+            let min = float_input(inputs, 0)?;
+            let max = float_input(inputs, 1)?;
+            outputs[0] = (min + (max - min) * rng.random::<f64>()).into();
+            Ok(())
+        }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::{DynamicValue, StaticValue};
-    use crate::node::func_lambda::OutputUsage;
+    use crate::node::lambda::OutputUsage;
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;
+    use crate::{DynamicValue, StaticValue};
 
-    async fn invoke(
-        name: &str,
-        input_values: &[DynamicValue],
-    ) -> Result<DynamicValue, InvokeError> {
-        let lib = math_library();
-        let func = lib.by_name(name).unwrap();
-        let mut inputs: Vec<InvokeInput> = input_values
+    async fn invoke(name: &str, values: &[DynamicValue]) -> Result<Vec<DynamicValue>, InvokeError> {
+        let library = math_library();
+        let func = library.by_name(name).unwrap();
+        let mut inputs = values
             .iter()
-            .map(|v| InvokeInput { value: v.clone() })
-            .collect();
+            .cloned()
+            .map(|value| InvokeInput { value })
+            .collect::<Vec<_>>();
         let usage = vec![OutputUsage::Needed(1); func.outputs.len()];
         let mut outputs = vec![DynamicValue::Unbound; func.outputs.len()];
         func.lambda
@@ -449,41 +413,33 @@ mod tests {
                 &mut outputs,
             )
             .await?;
-        Ok(outputs[0].clone())
+        Ok(outputs)
     }
 
-    fn float(v: f64) -> DynamicValue {
-        StaticValue::Float(v).into()
+    fn float(value: f64) -> DynamicValue {
+        StaticValue::Float(value).into()
     }
 
-    /// The binary ops compute their hand-checked results, and a non-numeric input —
-    /// reachable at runtime through an `Any`-typed subgraph boundary — is an invoke
-    /// *error*, never a panic (a panic would kill the whole worker task).
     #[tokio::test]
-    async fn ops_compute_and_reject_non_numeric_inputs() {
-        // a=2, b=3: 2+3=5, 2−3=−1, 2×3=6, 2³=8.
+    async fn operations_compute_exact_results_and_reject_text() {
         for (name, expected) in [
             ("Add", 5.0),
             ("Subtract", -1.0),
             ("Multiply", 6.0),
             ("Power", 8.0),
+            ("Logarithm", 0.630_929_753_571_457_4),
         ] {
-            let out = invoke(name, &[float(2.0), float(3.0)]).await.unwrap();
-            assert_eq!(out.as_f64(), Some(expected), "{name}(2, 3)");
+            let outputs = invoke(name, &[float(2.0), float(3.0)]).await.unwrap();
+            assert_eq!(outputs[0].as_f64(), Some(expected), "{name}(2, 3)");
         }
 
+        let divide = invoke("Divide", &[float(7.0), float(3.0)]).await.unwrap();
+        assert_eq!(divide[0].as_f64(), Some(7.0 / 3.0));
+        assert_eq!(divide[1].as_f64(), Some(1.0));
+
         let text = DynamicValue::Static(StaticValue::String("not a number".into()));
-        assert!(
-            invoke("Add", &[text.clone(), float(3.0)]).await.is_err(),
-            "a String left operand errors instead of panicking"
-        );
-        assert!(
-            invoke("Add", &[float(2.0), text.clone()]).await.is_err(),
-            "a String right operand errors instead of panicking"
-        );
-        assert!(
-            invoke("Sine", &[text]).await.is_err(),
-            "unary ops error the same way"
-        );
+        assert!(invoke("Add", &[text.clone(), float(3.0)]).await.is_err());
+        assert!(invoke("Add", &[float(2.0), text.clone()]).await.is_err());
+        assert!(invoke("Sine", &[text]).await.is_err());
     }
 }
