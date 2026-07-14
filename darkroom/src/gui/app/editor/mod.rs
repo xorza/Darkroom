@@ -12,10 +12,10 @@
 //! [`App`]: crate::gui::app::App
 
 use aperture::Ui;
-use scenarium::execution::stats::PinnedOutputs;
-use scenarium::graph::OutputPort;
-use scenarium::graph::subgraph::SubgraphDef;
-use scenarium::library::Library;
+use scenarium::Library;
+use scenarium::OutputPort;
+use scenarium::PinnedOutputs;
+use scenarium::SubgraphDef;
 
 use crate::core::document::dock::{DockOp, TabAddress};
 use crate::core::document::{Document, GraphRef, PortKind, PortRef, TabRef};
@@ -138,11 +138,11 @@ impl Editor {
     /// Store a worker-pushed pinned output and stage the full value on every
     /// viewer tab already bound to one of the pushed ports.
     pub(crate) fn set_pinned_values(&mut self, pinned: PinnedOutputs) {
-        let node_id = pinned.node_id;
+        let node_id = pinned.node.node_id;
         let port_indices = pinned
             .values
             .iter()
-            .map(|(port_idx, _)| *port_idx)
+            .map(|output| output.port_idx)
             .collect::<Vec<_>>();
         self.run_state.set_pinned_values(pinned);
 
@@ -162,7 +162,7 @@ impl Editor {
             }
             let value = self
                 .run_state
-                .pinned_output(OutputPort::new(node_id, port_idx))
+                .representative_pinned_output(OutputPort::new(node_id, port_idx))
                 .unwrap()
                 .value
                 .clone();
@@ -518,7 +518,7 @@ impl Editor {
         assert_eq!(port.kind, PortKind::Output);
         let value = self
             .run_state
-            .pinned_output(OutputPort::new(port.node_id, port.port_idx))
+            .representative_pinned_output(OutputPort::new(port.node_id, port.port_idx))
             .map(|pinned| pinned.value.clone());
         self.main_window
             .viewer_mut(port)
@@ -619,8 +619,8 @@ mod tests {
         use std::collections::BTreeSet;
 
         use glam::Vec2;
-        use scenarium::graph::{Node, NodeKind};
-        use scenarium::node::function::FuncId;
+        use scenarium::FuncId;
+        use scenarium::{Node, NodeKind};
 
         use crate::core::document::view_item::ViewItem;
 
@@ -677,10 +677,10 @@ mod tests {
         use glam::Vec2;
         use imaginarium::{ColorFormat, Image as RawImage, ImageBuffer, ImageDesc};
         use lens::Image as LensImage;
-        use scenarium::data::DynamicValue;
-        use scenarium::execution::stats::PinnedOutputs;
-        use scenarium::graph::{Node, NodeKind};
-        use scenarium::node::function::FuncId;
+        use scenarium::DynamicValue;
+        use scenarium::FuncId;
+        use scenarium::{Node, NodeKind};
+        use scenarium::{PinnedOutput, PinnedOutputs};
 
         use crate::core::document::PortKind;
         use crate::core::document::view_item::ViewItem;
@@ -715,8 +715,11 @@ mod tests {
         let raw = RawImage::new_with_data(desc, vec![128; 2 * 4]).unwrap();
         let full = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
         editor.set_pinned_values(PinnedOutputs {
-            node_id: id,
-            values: vec![(0, full.clone())],
+            node: scenarium::NodeAddress::root(id),
+            values: vec![PinnedOutput {
+                port_idx: 0,
+                value: full.clone(),
+            }],
         });
 
         // First open adds + focuses the port's tab and presents the full
@@ -736,8 +739,11 @@ mod tests {
         let raw = RawImage::new_with_data(desc, vec![64; 3 * 4]).unwrap();
         let refreshed = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
         editor.set_pinned_values(PinnedOutputs {
-            node_id: id,
-            values: vec![(0, refreshed.clone())],
+            node: scenarium::NodeAddress::root(id),
+            values: vec![PinnedOutput {
+                port_idx: 0,
+                value: refreshed.clone(),
+            }],
         });
         assert_presented_custom_value(
             editor.main_window.image_viewers.get(&port(0)).unwrap(),
@@ -822,10 +828,10 @@ mod tests {
 
     #[test]
     fn undo_of_a_passthrough_rewire_restores_the_severed_edge() {
-        use scenarium::data::DataType;
-        use scenarium::graph::{Binding, Graph, InputPort};
-        use scenarium::library::Library;
-        use scenarium::node::function::{Func, FuncId, FuncInput, FuncOutput};
+        use scenarium::DataType;
+        use scenarium::Library;
+        use scenarium::{Binding, Graph, InputPort};
+        use scenarium::{Func, FuncId, FuncInput, FuncOutput};
 
         let float_src =
             Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float));

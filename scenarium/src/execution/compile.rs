@@ -10,9 +10,9 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::execution::flatten::{Flattener, Pools};
-use crate::execution::identity::FlattenMap;
+use crate::execution::identity::{FlattenMap, NodeAddress};
 use crate::execution::program::ExecutionProgram;
-use crate::graph::Graph;
+use crate::graph::{Graph, NodeId};
 use crate::library::Library;
 
 /// The graph won't compile against the library: a document can be stale
@@ -40,6 +40,18 @@ pub struct CompiledGraph {
     /// run stats come back keyed by flat ids with no map of their own, so
     /// projecting them onto authoring nodes uses the compile-phase map.
     pub flatten_map: Arc<FlattenMap>,
+}
+
+impl CompiledGraph {
+    /// Choose an execution address when a host has only a bare authoring node id.
+    /// Interior ids use the map's stable representative; an unknown id remains a
+    /// root address so execution reports the inconsistent seed.
+    pub fn node_address(&self, node_id: NodeId) -> NodeAddress {
+        self.flatten_map
+            .representative(&node_id)
+            .cloned()
+            .unwrap_or_else(|| NodeAddress::root(node_id))
+    }
 }
 
 /// The compile entry point, owning the reusable [`Flattener`] scratch so the
@@ -100,5 +112,34 @@ impl Compiler {
         };
         compiled.validate(library);
         Ok(compiled)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::identity::test_support::FlattenMapBuilder;
+
+    #[test]
+    fn node_address_chooses_a_representative_and_preserves_unknown_ids() {
+        let instance = NodeId::from_u128(1);
+        let interior = NodeId::from_u128(2);
+        let flat = NodeId::from_u128(3);
+        let unknown = NodeId::from_u128(4);
+        let mut builder = FlattenMapBuilder::new();
+        builder.insert_leaf(flat, [instance], interior);
+        let compiled = CompiledGraph {
+            program: ExecutionProgram::default(),
+            flatten_map: Arc::new(builder.build()),
+        };
+
+        assert_eq!(
+            compiled.node_address(interior),
+            NodeAddress {
+                instances: vec![instance],
+                node_id: interior,
+            }
+        );
+        assert_eq!(compiled.node_address(unknown), NodeAddress::root(unknown));
     }
 }

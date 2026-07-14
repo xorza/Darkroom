@@ -22,14 +22,13 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use common::CancelToken;
 
-use crate::data::{DynamicValue, RamUsage};
-use crate::execution::stats::{
-    ExecutedNodeStats, ExecutionStats, FlattenMap, NodeError, PinnedOutputs, RunEvent, RunPhase,
-    RunProgress,
-};
+use crate::execution::identity::FlattenMap;
+use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
+use crate::execution::stats::{ExecutedNodeStats, ExecutionStats, NodeError};
 use crate::graph::InputPort;
-use crate::node::func_lambda::{InvokeError, InvokeInput, OutputUsage};
+use crate::node::lambda::{InvokeError, InvokeInput, OutputUsage};
 use crate::runtime::context::ContextManager;
+use crate::{DynamicValue, RamUsage};
 
 use crate::execution::cache::RuntimeCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
@@ -228,7 +227,8 @@ impl Executor {
                 Disposition::Reuse => true,
                 Disposition::Run if cache.slots[e_node_idx].current_digest.is_none() => {
                     hydrate_resource_producers(program, cache, e_node_idx).await;
-                    cache.stamp_and_check_reuse(program, e_node_idx)
+                    let usage = &self.output_usage[e_node.outputs.range()];
+                    cache.stamp_and_check_reuse(program, e_node_idx, usage)
                 }
                 _ => false,
             };
@@ -332,7 +332,7 @@ impl Executor {
                 // The fresh output now corresponds to this node's current digest; record
                 // it so the next run's reuse check is a RAM hit.
                 Ok(()) => {
-                    slot.stamp_produced();
+                    slot.stamp_produced(usage);
                     self.outcomes[e_node_idx] = NodeOutcome::Ran { secs: run_time };
                     true
                 }
@@ -374,8 +374,8 @@ impl Executor {
                 // A port with no real consumers left now reads `Skip`, so the
                 // drained check right below can reclaim it immediately instead
                 // of holding it to end-of-run eviction.
-                for &(local_port, _) in &payload.values {
-                    let out_idx = e_node.outputs.start as usize + local_port;
+                for output in &payload.values {
+                    let out_idx = e_node.outputs.start as usize + output.port_idx;
                     self.output_usage[out_idx].dec();
                 }
                 events
@@ -453,16 +453,20 @@ fn collect_pinned_values(
             let value = cache
                 .read_output_port(program, e_node_idx, local_port, false)
                 .expect("a node's output is resident immediately after it succeeds");
-            values.push((local_port, value));
+            values.push(PinnedOutput {
+                port_idx: local_port,
+                value,
+            });
         }
     }
     if values.is_empty() {
         return None;
     }
-    let node_id = flatten
-        .interior(e_node.id)
-        .expect("a node that just ran must have an interior authoring id");
-    Some(PinnedOutputs { node_id, values })
+    let node = flatten
+        .address(e_node.id)
+        .expect("a node that just ran must have an authoring address")
+        .clone();
+    Some(PinnedOutputs { node, values })
 }
 
 /// Drop node `idx` from this run: clear any stale cached output so it isn't served as
