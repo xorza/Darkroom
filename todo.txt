@@ -4,8 +4,6 @@ darkroom string interning
 
 cleanup binary caches
 
-tooltip near the edge of screen overflows
-
 file name as argument clap
 
 try repair & broken document
