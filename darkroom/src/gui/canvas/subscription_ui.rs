@@ -1,4 +1,4 @@
-use aperture::{Brush, Rect, Ui};
+use aperture::{Brush, Ui};
 use glam::Vec2;
 use scenarium::graph::NodeId;
 
@@ -6,7 +6,7 @@ use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
-use crate::gui::canvas::cull::wire_visible;
+use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pointer_world;
 use crate::gui::canvas::wire::{CubicHandles, MIN_HANDLE, WireEmphasis, add_cubic_wire};
@@ -169,8 +169,8 @@ impl SubscriptionUI {
         }
     }
 
-    /// Paint every committed subscription wire on the current scene that
-    /// can intersect `visible`, marking those the active breaker crosses as
+    /// Paint every committed subscription wire on the current scene retained
+    /// by `cull`, marking those the active breaker crosses as
     /// broken via `probe.mark_broken_subscription` for the breaker's
     /// release-frame drain. A culled wire skips the breaker probe too — the
     /// scribble is always on-screen, so it can't cross an off-screen curve.
@@ -181,7 +181,7 @@ impl SubscriptionUI {
         ctx: &AppContext<'_>,
         scene: &Scene,
         geometry: &CanvasGeometry,
-        visible: Option<Rect>,
+        cull: CullRegion,
         probe: &mut BreakerProbe<'_>,
         emphasis: &WireEmphasis,
     ) {
@@ -198,7 +198,7 @@ impl SubscriptionUI {
                 continue;
             };
             let handles = event_handles(p0, p3);
-            if !wire_visible(visible, p0, &handles, p3) {
+            if !cull.keeps_wire(p0, &handles, p3) {
                 continue;
             }
             let broken = probe.crosses_cubic(p0, handles.p1, handles.p2, p3);

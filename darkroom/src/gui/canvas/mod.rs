@@ -17,7 +17,7 @@ pub(crate) mod subscription_ui;
 pub(crate) mod wire;
 
 use aperture::{
-    Background, Configure, Panel, PointerButton, Rect, Sense, Sizing, TranslateScale, Ui, WidgetId,
+    Background, Configure, Panel, PointerButton, Sense, Sizing, TranslateScale, Ui, WidgetId,
 };
 use glam::Vec2;
 use std::collections::BTreeSet;
@@ -32,6 +32,7 @@ use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
+use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
@@ -332,20 +333,11 @@ impl GraphUI {
                             .layout_rect
                             .map(|r| r.min)
                             .unwrap_or(Vec2::ZERO);
-                        // The world rect on screen, for record-time culling:
-                        // only nodes and wires intersecting it are recorded.
-                        // `None` until the outer canvas measures (first
-                        // frame) — everything records.
-                        let visible =
-                            ui.response_for(outer_canvas_widget_id())
-                                .layout_rect
-                                .map(|r| {
-                                    let outer_local = Rect {
-                                        min: r.min - canvas_origin,
-                                        size: r.size,
-                                    };
-                                    cull::visible_world_rect(outer_local, &scene.viewport)
-                                });
+                        let cull = CullRegion::from_canvas(
+                            ui.response_for(outer_canvas_widget_id()).layout_rect,
+                            canvas_origin,
+                            &scene.viewport,
+                        );
                         // Painted first so it sits beneath the
                         // connections and node bodies.
                         selection_ui.draw(ui, ctx);
@@ -361,18 +353,16 @@ impl GraphUI {
                             let emphasis =
                                 WireEmphasis::resolve(ctx.theme.colors.canvas_bg, fading);
                             connection_ui
-                                .draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
+                                .draw(ui, ctx, scene, geometry, cull, &mut probe, &emphasis);
                             // Subscription wires sit under the node bodies
                             // like data wires (drawn before `draw_all`), and
                             // share the breaker probe so they're cuttable too.
                             subscription_ui
-                                .draw(ui, ctx, scene, geometry, visible, &mut probe, &emphasis);
+                                .draw(ui, ctx, scene, geometry, cull, &mut probe, &emphasis);
                             // Pin wires too — same z-order as every other
                             // wire, so one passing behind an unrelated node
                             // goes under it rather than drawing on top.
-                            pin_ui.draw_wire(
-                                ui, ctx, scene, geometry, visible, &mut probe, &emphasis,
-                            );
+                            pin_ui.draw_wire(ui, ctx, scene, geometry, cull, &mut probe, &emphasis);
                             let rcx = RecordCtx {
                                 theme: ctx.theme,
                                 library: ctx.library,
@@ -388,7 +378,7 @@ impl GraphUI {
                             // other and clicking raises it. Only the pin
                             // wire (above) shares the other wires' z-order.
                             pin_ui.prune_previews(scene);
-                            node_ui.draw_all(ui, rcx, visible, &mut probe, pin_ui, out);
+                            node_ui.draw_all(ui, rcx, cull, &mut probe, pin_ui, out);
                         }
                         // Inspection panels paint after the node bodies so
                         // they sit on top and win clicks over the nodes

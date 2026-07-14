@@ -1,6 +1,4 @@
-use aperture::{
-    Brush, Color, LinearGradient, PointerButton, PointerEvent, PointerSense, Rect, Stop, Ui,
-};
+use aperture::{Brush, Color, LinearGradient, PointerButton, PointerEvent, PointerSense, Stop, Ui};
 use glam::Vec2;
 use scenarium::data::DataType;
 use scenarium::graph::{Binding, InputPort, closes_data_cycle};
@@ -9,7 +7,7 @@ use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
-use crate::gui::canvas::cull::wire_visible;
+use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::wire::{WireEmphasis, add_cubic_wire, cubic_handles};
 use crate::gui::canvas::{node_ports, outer_canvas_widget_id, pointer_world};
@@ -250,8 +248,8 @@ impl ConnectionUI {
         self.state.and_then(|s| s.snap_end)
     }
 
-    /// Paint every permanent connection on the current scene that can
-    /// intersect `visible`, marking those the active breaker crosses as
+    /// Paint every permanent connection on the current scene retained by
+    /// `cull`, marking those the active breaker crosses as
     /// broken via `probe.mark_broken_input` for the breaker's
     /// release-frame drain. A culled wire skips the breaker probe too —
     /// the scribble is always on-screen, so it can't cross an off-screen
@@ -263,7 +261,7 @@ impl ConnectionUI {
         ctx: &AppContext<'_>,
         scene: &Scene,
         geometry: &CanvasGeometry,
-        visible: Option<Rect>,
+        cull: CullRegion,
         probe: &mut BreakerProbe<'_>,
         emphasis: &WireEmphasis,
     ) {
@@ -286,7 +284,7 @@ impl ConnectionUI {
                 continue;
             };
             let handles = cubic_handles(p0, p3);
-            if !wire_visible(visible, p0, &handles, p3) {
+            if !cull.keeps_wire(p0, &handles, p3) {
                 continue;
             }
             let broken = probe.crosses_cubic(p0, handles.p1, handles.p2, p3);

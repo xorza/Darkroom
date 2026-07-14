@@ -10,7 +10,7 @@ use crate::core::document::ItemRef;
 use crate::core::document::PortRef;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::canvas::breaker::BreakerProbe;
-use crate::gui::canvas::cull::node_visible;
+use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::drag_anchor::GroupDragAnchor;
 use crate::gui::canvas::drag_anchor::selected_group_positions;
 use crate::gui::canvas::geometry::CanvasGeometry;
@@ -23,7 +23,7 @@ use crate::gui::run_state::{ExecStatus, RunState};
 use crate::gui::scene::{Scene, SceneNode};
 use crate::gui::theme::Theme;
 use aperture::{
-    Background, Color, Configure, Corners, Panel, Rect, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
+    Background, Color, Configure, Corners, Panel, Sense, Shadow, Sizing, Stroke, Ui, WidgetId,
 };
 use glam::Vec2;
 use scenarium::graph::Binding;
@@ -92,8 +92,8 @@ type DragAnchor = GroupDragAnchor<NodeId>;
 
 impl NodeUI {
     /// Record the widget tree of every scene item — node bodies and
-    /// pinned-output preview widgets interleaved — that can intersect
-    /// `visible` (plus the focus-owning node — see the loop comment),
+    /// pinned-output preview widgets interleaved — retained by `cull`
+    /// (plus the focus-owning node — see the loop comment),
     /// skipping off-screen ones entirely. Emits selection/raise intents
     /// for body clicks and latches the drag anchor for a body/title drag
     /// (port circles capture their own presses via `Sense::CLICK`, so
@@ -103,7 +103,7 @@ impl NodeUI {
         &mut self,
         ui: &mut Ui,
         rcx: RecordCtx<'_>,
-        visible: Option<Rect>,
+        cull: CullRegion,
         probe: &mut BreakerProbe<'_>,
         pin_ui: &mut PinUi,
         out: &mut Vec<Intent>,
@@ -116,7 +116,7 @@ impl NodeUI {
         // to the end. `RecordCtx` is `Copy`, so the `&scene` borrows held
         // by the loop coexist with copying `rcx` into the draw calls.
         //
-        // Off-`visible` nodes are skipped entirely — no measure, arrange, or
+        // Culled nodes are skipped entirely — no measure, arrange, or
         // paint. Every widget id in a node's subtree derives from its
         // `NodeId` (explicit `from_hash` ids, and aperture resolves auto ids
         // parent-scoped under them), so culling a sibling can't re-key
@@ -133,9 +133,8 @@ impl NodeUI {
             let id = match *key {
                 ItemRef::Node(id) => id,
                 ItemRef::Pin(port) => {
-                    // Pin previews cull on their own wire hull inside
-                    // `draw_pin`, and hold no keyboard focus.
-                    pin_ui.draw_pin(ui, rcx, port, visible, probe, out);
+                    // Pin previews hold no keyboard focus, so they need no cull exemption.
+                    pin_ui.draw_pin(ui, rcx, port, cull, probe, out);
                     continue;
                 }
             };
@@ -146,7 +145,7 @@ impl NodeUI {
             if keeps_focus {
                 focus_kept = Some(n.id);
             }
-            if !node_visible(visible, rcx.geometry.node_world_rect(n))
+            if !cull.keeps_node(rcx.geometry.node_world_rect(n))
                 && !keeps_focus
                 && self.focus_kept_last != Some(n.id)
             {

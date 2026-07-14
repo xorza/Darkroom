@@ -38,7 +38,7 @@ use crate::core::document::{ItemRef, PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::breaker::BreakerProbe;
-use crate::gui::canvas::cull::wire_visible;
+use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::drag_anchor::{GroupDragAnchor, selected_group_positions};
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::node_ports;
@@ -229,14 +229,13 @@ impl PinUi {
         ctx: &AppContext<'_>,
         scene: &Scene,
         geometry: &CanvasGeometry,
-        visible: Option<Rect>,
+        cull: CullRegion,
         probe: &mut BreakerProbe<'_>,
         emphasis: &WireEmphasis,
     ) {
         let theme = ctx.theme;
         for pin in scene.pinned_outputs() {
-            let Some(g) = resolve_pin_geometry(ui, geometry, probe, visible, pin.port, pin.pos)
-            else {
+            let Some(g) = resolve_pin_geometry(ui, geometry, probe, cull, pin.port, pin.pos) else {
                 continue;
             };
             let port_ref = PortRef {
@@ -288,7 +287,7 @@ impl PinUi {
         ui: &mut Ui,
         rcx: RecordCtx<'_>,
         port: OutputPort,
-        visible: Option<Rect>,
+        cull: CullRegion,
         probe: &mut BreakerProbe<'_>,
         out: &mut Vec<Intent>,
     ) {
@@ -306,7 +305,7 @@ impl PinUi {
         let Some(pin_position) = output.pin_position else {
             return;
         };
-        let Some(g) = resolve_pin_geometry(ui, rcx.geometry, probe, visible, port, pin_position)
+        let Some(g) = resolve_pin_geometry(ui, rcx.geometry, probe, cull, port, pin_position)
         else {
             return;
         };
@@ -371,8 +370,8 @@ impl PinUi {
 /// frame — computed once, fed to both [`PinUi::draw_wire`] (the bezier,
 /// pre-node-body) and [`PinUi::draw_pin`] (the port circle + card,
 /// post-node-body) so a pin drawn in two passes still agrees on `broken`
-/// and hover within the same frame. `None` when the wire's control hull
-/// misses the visible rect entirely (culled).
+/// and hover within the same frame.
+#[derive(Debug)]
 struct PinGeometry {
     out_port: OutputPort,
     port_center: Vec2,
@@ -393,7 +392,7 @@ fn resolve_pin_geometry(
     ui: &Ui,
     geometry: &CanvasGeometry,
     probe: &mut BreakerProbe<'_>,
-    visible: Option<Rect>,
+    cull: CullRegion,
     out_port: OutputPort,
     top_left: Vec2,
 ) -> Option<PinGeometry> {
@@ -404,10 +403,10 @@ fn resolve_pin_geometry(
     };
     let port_center = geometry.ports.center(port_ref)?;
     let handles = cubic_handles(port_center, top_left);
-    if !wire_visible(visible, port_center, &handles, top_left) {
+    let box_rect = pin_preview_rect(top_left);
+    if !cull.keeps_pin(box_rect, port_center, &handles, top_left) {
         return None;
     }
-    let box_rect = pin_preview_rect(top_left);
     let broken = pin_targeted(probe, port_center, &handles, top_left, box_rect);
     if broken {
         probe.mark_broken_pin(out_port);
