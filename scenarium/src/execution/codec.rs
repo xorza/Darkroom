@@ -16,13 +16,28 @@
 //! set. The [`DiskStore`](crate::execution::disk_store::DiskStore) is the one
 //! consumer. See `execution/README.md` Part B.
 
+use std::sync::Arc;
+
 use common::{SerdeFormat, deserialize, serialize};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::data::{CodecError, DynamicValue, StaticValue, TypeId};
 use crate::library::Library;
 use crate::runtime::context::ContextManager;
+use crate::{CustomValue, DynamicValue, StaticValue, TypeId};
+
+pub type CodecError = Box<dyn std::error::Error + Send + Sync>;
+
+#[async_trait::async_trait]
+pub trait CustomValueCodec: Send + Sync + std::fmt::Debug {
+    async fn encode(
+        &self,
+        value: &dyn CustomValue,
+        ctx: &mut ContextManager,
+    ) -> std::result::Result<Vec<u8>, CodecError>;
+
+    fn decode(&self, bytes: Vec<u8>) -> std::result::Result<Arc<dyn CustomValue>, CodecError>;
+}
 
 /// Failure encoding outputs to, or rebuilding them from, the cache. Each variant
 /// is an *expected* condition (a GPU readback error, or a blob that outlived the
@@ -137,7 +152,6 @@ pub(crate) fn deserialize_outputs(bytes: &[u8], library: &Library) -> Result<Vec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::{CustomValue, CustomValueCodec};
     use crate::library::TypeEntry;
     use async_trait::async_trait;
     use std::any::Any;

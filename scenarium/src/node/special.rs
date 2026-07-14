@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::elements::run_sinks::run_sinks_func;
-use crate::node::function::Func;
+use crate::node::definition::Func;
 
 /// A built-in node identified by *kind*, not by a `FuncId`. Its ports + lambda
 /// come from [`func`](SpecialNode::func); the engine gives it special behavior.
@@ -27,7 +27,7 @@ pub enum SpecialNode {
 }
 
 /// Every special node (default config), for the editor's node-add menu.
-pub const ALL: &[SpecialNode] = &[SpecialNode::RunSinks];
+pub const SPECIAL_NODES: &[SpecialNode] = &[SpecialNode::RunSinks];
 
 impl SpecialNode {
     /// This node's hardcoded interface + lambda. Used by flatten (ports, lambda,

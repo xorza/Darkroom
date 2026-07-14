@@ -1,5 +1,5 @@
-pub mod event_lambda;
-pub mod func_lambda;
-pub mod function;
-pub mod macros;
-pub mod special;
+pub(crate) mod definition;
+pub(crate) mod event;
+pub(crate) mod lambda;
+mod macros;
+pub(crate) mod special;

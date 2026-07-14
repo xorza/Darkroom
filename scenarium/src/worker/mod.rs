@@ -1,119 +1,33 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tokio::sync::mpsc::{Receiver, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
-use tokio::sync::oneshot;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 
-use common::CancelToken;
-use common::PauseGate;
-use common::ReadyState;
+use common::{CancelToken, PauseGate};
 
-use crate::execution::compile::CompiledGraph;
-use crate::execution::disk_store::DiskStore;
-use crate::execution::event::{EventRef, EventTrigger};
-use crate::execution::stats::{ExecutionStats, PinnedOutputs, RunEvent, RunProgress};
+use crate::execution::report::RunEvent;
+use crate::execution::stats::ExecutionStats;
 use crate::execution::{Error, ExecutionEngine, Result, RunSeeds};
-use crate::graph::NodeId;
+use crate::worker::batch::{GraphOp, LoopCommand, scan};
+use crate::worker::event_loop::{
+    ActiveEventLoop, EVENT_LOOP_BACKPRESSURE, LambdaPanic, StopOutcome, stop_event_loop,
+};
+use crate::worker::protocol::{WorkerExited, WorkerMessage, WorkerReport};
 
-/// What the worker reports back to its host: live per-node [`RunProgress`]
-/// and [`PinnedOutputs`] pushes during a run, then a single
-/// [`WorkerReport::Finished`] with the run's full stats (or error). Progress
-/// and pinned-output events always precede the matching `Finished`.
-#[derive(Debug)]
-pub enum WorkerReport {
-    Progress(RunProgress),
-    /// A pinned output (or pinned-root node) just produced a fresh value —
-    /// see [`PinnedOutputs`] for the guarantee about when this arrives
-    /// relative to usage bookkeeping.
-    PinnedOutputs(PinnedOutputs),
-    Finished(Result<ExecutionStats>),
-}
+pub(crate) mod batch;
+pub(crate) mod event_loop;
+pub(crate) mod protocol;
 
-/// Capacity of the bounded channel each event-lambda task writes into.
-/// The worker reads this channel directly and applies backpressure to
-/// lambdas when it can't keep up.
-const EVENT_LOOP_BACKPRESSURE: usize = 10;
-
-/// Command enum sent into the worker loop.
-///
-/// Cancel-safety: `Update`, `Clear`, `StopEventLoop`, and `Exit` tear
-/// down the currently-running event loop, which aborts every lambda
-/// task at its next `.await`. Lambda authors must therefore write
-/// cancel-safe code — any state held across `.await` can be dropped
-/// without cleanup. See [`EventLoopHandle::stop`].
-#[derive(Debug)]
-pub enum WorkerMessage {
-    Exit,
-    /// External event injection side-door (scripting, replay, tests).
-    /// Events produced by running lambdas reach the worker on the
-    /// internal bounded channel, not through this variant.
-    InjectEvents {
-        events: Vec<EventRef>,
-    },
-
-    /// Install a host-compiled program as current. Infallible on the worker:
-    /// compile errors surfaced synchronously at the host's `compile` call, so
-    /// a graph that doesn't compile is never sent.
-    Update {
-        compiled: CompiledGraph,
-    },
-    /// Make the program current (like `Update`, so a just-toggled `persist` flag is
-    /// reflected) and flush any resident cache value to disk — but **don't run the
-    /// graph**. For "I enabled disk caching on a node; persist its RAM value now"
-    /// without paying for a full re-execution. A cache-hit node never re-executes, so
-    /// its value would otherwise reach disk only on an unrelated input change.
-    SaveCaches {
-        compiled: CompiledGraph,
-    },
-    Clear,
-    /// Swap the engine's output cache (codec registry + store root). Applied
-    /// before any graph op in the same batch, so the next `Update`
-    /// hydrates from the new config — e.g. repointing at a per-document store dir.
-    SetDiskStore(DiskStore),
-    ExecuteSinks,
-    /// Execute the cones of these specific nodes (authoring ids), retaining their
-    /// outputs in RAM for read-back — the editor's "run to this node" trigger.
-    /// Combines with a same-batch `ExecuteSinks` into one run.
-    ExecuteNodes {
-        nodes: Vec<NodeId>,
-    },
-    StartEventLoop,
-    StopEventLoop,
-    /// Reserved external sync primitive: the oneshot fires after every
-    /// command sent before this one has committed. No current prod
-    /// caller — anticipated use is the script transport.
-    Sync {
-        reply: oneshot::Sender<()>,
-    },
-}
-
-/// Returned when a send target a worker whose task has already exited
-/// (via `Exit` message or abort). Callers can treat this as a
-/// harmless no-op on shutdown paths.
-#[derive(Debug, thiserror::Error)]
-#[error("worker task has exited")]
-pub struct WorkerExited;
-
-/// The wire format is `Vec<WorkerMessage>`: one send = one commit unit.
-/// Batch atomicity is type-enforced — the worker cannot split a batch
-/// across two scan/commit cycles.
 #[derive(Debug)]
 pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
     tx: UnboundedSender<Vec<WorkerMessage>>,
     event_loop_started: Arc<AtomicBool>,
-    /// Cooperative cancel for the in-flight run: the executor polls it
-    /// between nodes, and long ops (via `ContextManager::cancel_flag`) poll it
-    /// too. Set via [`Worker::request_cancel`]; cleared at each run's start.
     cancel: CancelToken,
 }
 
 impl Worker {
-    /// Spin up a worker. The engine starts memory-only; the host configures its
-    /// output cache via [`WorkerMessage::SetDiskStore`] (e.g. per active
-    /// document).
     pub fn new<ExecutionCallback>(callback: ExecutionCallback) -> Self
     where
         ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
@@ -121,7 +35,7 @@ impl Worker {
         let (tx, rx) = unbounded_channel::<Vec<WorkerMessage>>();
         let event_loop_started = Arc::new(AtomicBool::new(false));
         let cancel = CancelToken::new();
-        let thread_handle: JoinHandle<()> = tokio::spawn({
+        let thread_handle = tokio::spawn({
             let event_loop_started = event_loop_started.clone();
             let cancel = cancel.clone();
             async move {
@@ -141,23 +55,19 @@ impl Worker {
         self.event_loop_started.load(Ordering::Relaxed)
     }
 
-    /// Request cancellation of the currently-running graph. Coarse: the
-    /// in-flight node still finishes, but no further nodes are scheduled and
-    /// the run reports `cancelled`. A no-op when nothing is running (cleared
-    /// at the next run's start).
     pub fn request_cancel(&self) {
         self.cancel.cancel();
     }
 
     pub fn send(&self, msg: WorkerMessage) -> std::result::Result<(), WorkerExited> {
-        self.tx.send(vec![msg]).map_err(|_| WorkerExited)
+        self.send_many([msg])
     }
 
     pub fn send_many<T: IntoIterator<Item = WorkerMessage>>(
         &self,
         msgs: T,
     ) -> std::result::Result<(), WorkerExited> {
-        let msgs: Vec<WorkerMessage> = msgs.into_iter().collect();
+        let msgs = msgs.into_iter().collect::<Vec<_>>();
         if msgs.is_empty() {
             return Ok(());
         }
@@ -166,11 +76,6 @@ impl Worker {
 
     pub fn exit(&mut self) {
         self.tx.send(vec![WorkerMessage::Exit]).ok();
-        // The abort below fires almost immediately (the loop is normally
-        // parked at a `.await`), racing out the graceful `Exit` message above
-        // before the loop ever gets to observe it — so signal the same
-        // cooperative stop the executor polls between nodes, in case the
-        // task happens to get a chance to notice it first.
         self.request_cancel();
 
         if let Some(thread_handle) = self.thread_handle.take() {
@@ -185,57 +90,6 @@ impl Drop for Worker {
     }
 }
 
-/// A lambda task that ended by panicking, paired with the node it ran for so
-/// the worker can attribute the report.
-#[derive(Debug)]
-struct LambdaPanic {
-    node_id: NodeId,
-    message: String,
-}
-
-/// Best-effort message extraction from a caught panic payload.
-fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
-    if let Some(s) = payload.downcast_ref::<&str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        "unknown panic".to_string()
-    }
-}
-
-#[derive(Debug)]
-struct EventLoopHandle {
-    join_handles: Vec<(EventRef, JoinHandle<()>)>,
-}
-
-impl EventLoopHandle {
-    /// Cancels every spawned lambda task and joins it. A task that ended by
-    /// panicking is **isolated** — its panic is captured and returned (the
-    /// worker reports it via the execution callback) rather than unwound into
-    /// the worker loop, which would kill the worker. Cancellations (from
-    /// `abort`) are expected; any other join error is a bug. Lambda authors
-    /// must still write cancel-safe code (aborts happen at the next `.await`).
-    async fn stop(&mut self) -> Vec<LambdaPanic> {
-        let mut panics = Vec::new();
-        for (event, ah) in self.join_handles.drain(..) {
-            ah.abort();
-            if let Err(err) = ah.await {
-                if err.is_panic() {
-                    panics.push(LambdaPanic {
-                        node_id: event.node_id,
-                        message: panic_message(err.into_panic()),
-                    });
-                } else {
-                    assert!(err.is_cancelled(), "event task join error: {err}");
-                }
-            }
-        }
-        panics
-    }
-}
-
-/// Forwards captured lambda panics to the execution callback as `Err`s.
 fn report_lambda_panics<C>(panics: Vec<LambdaPanic>, callback: &C)
 where
     C: Fn(WorkerReport),
@@ -248,106 +102,6 @@ where
     }
 }
 
-/// Graph-state intent after a batch is scanned.
-///
-/// Reduction rule: last-write-wins. Whichever of `Clear` / `Replace`
-/// appears last in send order is the final value.
-#[derive(Debug)]
-enum GraphOp {
-    Clear,
-    Replace(CompiledGraph),
-}
-
-/// Event-loop intent after a batch is scanned.
-///
-/// Reduction rule: last-write-wins. Absence means "leave running
-/// state as-is."
-#[derive(Debug)]
-enum LoopCommand {
-    Start,
-    Stop,
-}
-
-/// Per-iteration accumulator for the worker loop's scan phase. Every
-/// command goes into a field here; side effects (stop loop, execute,
-/// start loop, run callbacks) happen in the commit phase below.
-///
-/// Reduction table — when multiple commands in one batch target the
-/// same slot, `scan()` collapses them per-slot. Add a row here
-/// before adding a new variant that can conflict with an existing
-/// one.
-///
-/// Exit is special: it dominates the entire batch. If Exit appears
-/// anywhere in the batch, the scanned intent is pure Exit and every
-/// other command in the same batch is discarded — whether sent
-/// before or after Exit.
-///
-/// | Slot                  | Variants that write it      | Rule          |
-/// | --------------------- | --------------------------- | ------------- |
-/// | `graph_state`         | Update, Clear, SaveCaches   | last-write-wins |
-/// | `disk_store`        | SetDiskStore              | last-write-wins, applied pre-graph-op |
-/// | `save_caches`         | SaveCaches                  | idempotent flag (persist, no run) |
-/// | `loop_request`        | StartEventLoop, StopEventLoop | last-write-wins |
-/// | `execute_sinks`       | ExecuteSinks                | idempotent flag |
-/// | `execute_nodes`       | ExecuteNodes                | set union (dedup) |
-/// | `events`              | InjectEvents                | set union (dedup) |
-/// | `syncs`               | Sync                        | all fire      |
-/// | `exit`                | Exit                        | dominates entire batch |
-#[derive(Debug, Default)]
-struct BatchIntent {
-    graph_state: Option<GraphOp>,
-    /// `Some` = a `SetDiskStore` was in this batch (the new cache). Applied
-    /// before `graph_state`, so a same-batch `Update` hydrates from it.
-    disk_store: Option<DiskStore>,
-    /// A `SaveCaches` was in this batch: after the graph update, flush resident cache
-    /// values to disk without running the graph.
-    save_caches: bool,
-    loop_request: Option<LoopCommand>,
-    execute_sinks: bool,
-    execute_nodes: HashSet<NodeId>,
-    exit: bool,
-    events: HashSet<EventRef>,
-    syncs: Vec<oneshot::Sender<()>>,
-}
-
-/// Pure scan: folds a command batch into a `BatchIntent`. Exit
-/// dominates the entire batch: if Exit appears anywhere, the returned
-/// intent is pure Exit — every other command in the same batch is
-/// discarded (including those before Exit). Oneshot senders in
-/// dropped variants close silently; waiters get "sender dropped,"
-/// which is the right signal on shutdown.
-fn scan(msgs: Vec<WorkerMessage>) -> BatchIntent {
-    let mut intent = BatchIntent::default();
-    for msg in msgs {
-        match msg {
-            WorkerMessage::Exit => {
-                return BatchIntent {
-                    exit: true,
-                    ..BatchIntent::default()
-                };
-            }
-            WorkerMessage::InjectEvents { events } => intent.events.extend(events),
-            WorkerMessage::Update { compiled } => {
-                intent.graph_state = Some(GraphOp::Replace(compiled));
-            }
-            WorkerMessage::SaveCaches { compiled } => {
-                intent.graph_state = Some(GraphOp::Replace(compiled));
-                intent.save_caches = true;
-            }
-            WorkerMessage::Clear => intent.graph_state = Some(GraphOp::Clear),
-            WorkerMessage::SetDiskStore(cache) => intent.disk_store = Some(cache),
-            WorkerMessage::ExecuteSinks => intent.execute_sinks = true,
-            WorkerMessage::ExecuteNodes { nodes } => intent.execute_nodes.extend(nodes),
-            WorkerMessage::StartEventLoop => intent.loop_request = Some(LoopCommand::Start),
-            WorkerMessage::StopEventLoop => intent.loop_request = Some(LoopCommand::Stop),
-            WorkerMessage::Sync { reply } => {
-                intent.syncs.push(reply);
-            }
-        }
-    }
-    intent
-}
-
 async fn worker_loop<ExecutionCallback>(
     mut worker_message_rx: UnboundedReceiver<Vec<WorkerMessage>>,
     execution_callback: ExecutionCallback,
@@ -357,57 +111,41 @@ async fn worker_loop<ExecutionCallback>(
     ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
 {
     let mut execution_engine = ExecutionEngine::default();
-
-    let mut cmd_batch: Vec<WorkerMessage> = Vec::new();
-    let mut ev_buf: Vec<EventRef> = Vec::with_capacity(EVENT_LOOP_BACKPRESSURE);
-
-    let mut event_loop: Option<(EventLoopHandle, Receiver<EventRef>)> = None;
+    let mut cmd_batch = Vec::new();
+    let mut event_buffer = Vec::with_capacity(EVENT_LOOP_BACKPRESSURE);
+    let mut event_loop: Option<ActiveEventLoop> = None;
     let event_loop_pause_gate = PauseGate::default();
 
     loop {
         event_loop_started.store(event_loop.is_some(), Ordering::Relaxed);
+        event_buffer.clear();
 
-        ev_buf.clear();
-
-        // `biased`: commands take priority so Stop/Exit/Clear can't be
-        // starved by a torrent of lambda events.
         tokio::select! {
             biased;
             batch = worker_message_rx.recv() => {
                 match batch {
-                    Some(b) => cmd_batch = b,
+                    Some(batch) => cmd_batch = batch,
                     None => return,
                 }
-                // Opportunistically fold any additional batches that
-                // queued up during the prior commit. Per-slot
-                // reduction in `BatchIntent` handles the merge.
                 while let Ok(more) = worker_message_rx.try_recv() {
                     cmd_batch.extend(more);
                 }
             }
-            n = async {
-                event_loop.as_mut().unwrap().1
-                    .recv_many(&mut ev_buf, EVENT_LOOP_BACKPRESSURE).await
+            count = async {
+                event_loop.as_mut().unwrap().events
+                    .recv_many(&mut event_buffer, EVENT_LOOP_BACKPRESSURE).await
             }, if event_loop.is_some() => {
-                if n == 0 {
-                    // Event channel closed with loop still nominally
-                    // running — lambdas all died (returned or panicked).
-                    // Tear down, report any panics, and keep going.
-                    if let Some((mut handle, _)) = event_loop.take() {
-                        let panics = handle.stop().await;
-                        report_lambda_panics(panics, &execution_callback);
-                    }
+                if count == 0 {
+                    let mut active = event_loop.take().unwrap();
+                    report_lambda_panics(active.stop().await, &execution_callback);
                     continue;
                 }
             }
         }
 
-        // --- Scan
         let mut intent = scan(std::mem::take(&mut cmd_batch));
-        intent.events.extend(ev_buf.drain(..));
+        intent.events.extend(event_buffer.drain(..));
 
-        // --- Commit: stop the loop once if anything touches it, then
-        // apply graph op → execute → start loop in stable order.
         let needs_stop =
             intent.graph_state.is_some() || intent.loop_request.is_some() || intent.exit;
         let stop_outcome = if needs_stop {
@@ -422,14 +160,8 @@ async fn worker_loop<ExecutionCallback>(
             return;
         }
 
-        // Swap the output cache before any graph op, so a same-batch `Update`
-        // hydrates from the new config rather than the old.
         if let Some(cache) = intent.disk_store.take() {
             execution_engine.set_disk_store(cache);
-            // Flush resident disk-backed values into the just-attached store: a value
-            // computed while no store root was configured (an unsaved document) has no
-            // blob anywhere, and its later runs are RAM hits that never store — without
-            // this it would silently recompute on reopen despite its `Both` mode.
             execution_engine.store_resident_caches().await;
         }
 
@@ -442,8 +174,6 @@ async fn worker_loop<ExecutionCallback>(
             None => {}
         }
 
-        // `SaveCaches`: flush resident cache values to disk after the update, without
-        // running the graph (a cache-hit node won't re-execute to store itself).
         if intent.save_caches && !execution_engine.is_empty() {
             execution_engine.store_resident_caches().await;
         }
@@ -451,43 +181,23 @@ async fn worker_loop<ExecutionCallback>(
         let should_start_event_loop = match intent.loop_request {
             Some(LoopCommand::Start) => true,
             Some(LoopCommand::Stop) => false,
-            // No explicit request: preserve the prior running state.
-            // Combined with "Update forces a reset," this is what
-            // makes an Update restart a running loop on the new graph.
             None => loop_was_running_before_stop,
         };
 
         let needs_execute = intent.execute_sinks
-            || !intent.execute_nodes.is_empty()
-            || !intent.events.is_empty()
+            || !intent.execute_nodes.values.is_empty()
+            || !intent.events.values.is_empty()
             || should_start_event_loop;
 
-        // Empty graph is a normal state, not a failure: skip execute
-        // silently. Events/sinks/StartEventLoop are no-ops until
-        // a graph is loaded.
         if needs_execute && !execution_engine.is_empty() {
-            // Quiesce the event loop around execute(): closing the gate
-            // stops lambdas from *starting a new iteration*. It does NOT
-            // pause a lambda already inside `invoke()`, so this is not an
-            // atomic cross-node snapshot — execute can still observe
-            // per-node `SharedAnyState` that an in-flight lambda is mid-
-            // update on another node. Per-node mutexes keep each node's
-            // state un-torn; the gate just bounds how much churn races
-            // execute. No-op when the loop was torn down above
-            // (needs_stop path) or wasn't running.
             let _pause_guard = event_loop_pause_gate.close();
-
             let in_loop = should_start_event_loop || event_loop.is_some();
-            // Fresh run: clear any cancel left set while idle — a cancel only
-            // applies to the run in flight when it was requested. The host
-            // sets `cancel` directly (a shared token), so no command-channel
-            // round-trip is needed for it to be observed mid-run.
             cancel.reset();
             let seeds = RunSeeds {
                 sinks: intent.execute_sinks,
                 event_triggers: in_loop,
-                events: intent.events.drain().collect(),
-                nodes: intent.execute_nodes.drain().collect(),
+                events: intent.events.take(),
+                nodes: intent.execute_nodes.take(),
             };
             let result = run_and_forward(
                 &mut execution_engine,
@@ -498,42 +208,26 @@ async fn worker_loop<ExecutionCallback>(
             .await;
 
             if should_start_event_loop && let Ok(stats) = &result {
-                // Every path that can make `should_start_event_loop` true also
-                // sets `intent.loop_request` or `intent.graph_state`, which
-                // trips `needs_stop` above and tears down any prior loop —
-                // so there's never one still standing here to leak.
                 assert!(event_loop.is_none());
                 let triggers = execution_engine.active_event_triggers(stats);
                 if !triggers.is_empty() {
                     event_loop =
-                        Some(start_event_loop(triggers, event_loop_pause_gate.clone()).await);
+                        Some(ActiveEventLoop::start(triggers, event_loop_pause_gate.clone()).await);
                     tracing::info!("Event loop started");
                 }
             }
 
-            (execution_callback)(WorkerReport::Finished(result));
+            execution_callback(WorkerReport::Finished(result));
         }
 
-        // Refresh the atomic so callers racing a Sync reply see the
-        // post-commit state.
         event_loop_started.store(event_loop.is_some(), Ordering::Relaxed);
-
         for reply in intent.syncs.drain(..) {
             let _ = reply.send(());
         }
-
         tokio::task::yield_now().await;
     }
 }
 
-/// Run `seeds` against `engine`, forwarding each [`RunEvent`] (live progress,
-/// pinned-output pushes) to `callback` as it arrives rather than only at the
-/// end. The executor sends on a fresh channel scoped to this one run;
-/// `recv_many` batches each wake to keep select churn down. The post-run
-/// drain flushes anything buffered between the last poll and completion (the
-/// dropped sender lets `recv_many` return everything remaining at once)
-/// before this returns, so every `Progress`/`PinnedOutputs` reaches
-/// `callback` strictly before the caller's own `Finished` report.
 async fn run_and_forward<C>(
     engine: &mut ExecutionEngine,
     seeds: RunSeeds,
@@ -544,10 +238,10 @@ where
     C: Fn(WorkerReport) + Sync,
 {
     let (event_tx, mut event_rx) = unbounded_channel::<RunEvent>();
-    let mut event_buf: Vec<RunEvent> = Vec::new();
+    let mut event_buf = Vec::new();
     let report_of = |event: RunEvent| match event {
-        RunEvent::Progress(p) => WorkerReport::Progress(p),
-        RunEvent::PinnedOutputs(p) => WorkerReport::PinnedOutputs(p),
+        RunEvent::Progress(progress) => WorkerReport::Progress(progress),
+        RunEvent::PinnedOutputs(outputs) => WorkerReport::PinnedOutputs(outputs),
     };
     let result = {
         let run = engine.execute(seeds, Some(&event_tx), cancel);
@@ -555,98 +249,21 @@ where
         loop {
             tokio::select! {
                 biased;
-                r = &mut run => break r,
+                result = &mut run => break result,
                 _ = event_rx.recv_many(&mut event_buf, 64) => {
-                    for e in event_buf.drain(..) {
-                        callback(report_of(e));
+                    for event in event_buf.drain(..) {
+                        callback(report_of(event));
                     }
                 }
             }
         }
     };
-    // Flush anything buffered between the last poll and completion; the
-    // dropped sender lets `recv_many` return all remaining at once.
     drop(event_tx);
     event_rx.recv_many(&mut event_buf, usize::MAX).await;
-    for e in event_buf.drain(..) {
-        callback(report_of(e));
+    for event in event_buf.drain(..) {
+        callback(report_of(event));
     }
     result
-}
-
-/// Outcome of a teardown: whether a loop was running, and any lambda panics
-/// captured while joining (for the worker to report).
-#[derive(Debug, Default)]
-struct StopOutcome {
-    was_running: bool,
-    panics: Vec<LambdaPanic>,
-}
-
-/// Tears down any running event loop. Dropping the `Receiver` alongside
-/// the handle guarantees that any events still in flight die with the
-/// old channel — there's no way for them to re-enter the worker.
-async fn stop_event_loop(
-    event_loop: &mut Option<(EventLoopHandle, Receiver<EventRef>)>,
-) -> StopOutcome {
-    match event_loop.take() {
-        Some((mut handle, _rx)) => {
-            let panics = handle.stop().await;
-            tracing::info!("Event loop stopped");
-            StopOutcome {
-                was_running: true,
-                panics,
-            }
-        }
-        None => StopOutcome::default(),
-    }
-}
-
-/// Spawns one task per `EventTrigger`, each looping
-/// `lambda → send → pause-gate-wait → yield`. Returns the handle plus
-/// the receiving half of the bounded event channel — the worker reads
-/// events from it directly, no forwarder in between.
-async fn start_event_loop(
-    event_triggers: Vec<EventTrigger>,
-    pause_gate: PauseGate,
-) -> (EventLoopHandle, Receiver<EventRef>) {
-    assert!(!event_triggers.is_empty());
-
-    let (event_tx, event_rx) = channel::<EventRef>(EVENT_LOOP_BACKPRESSURE);
-    let ready = ReadyState::new(event_triggers.len());
-    let mut join_handles: Vec<(EventRef, JoinHandle<()>)> = Vec::default();
-
-    for EventTrigger {
-        event,
-        lambda,
-        state,
-    } in event_triggers
-    {
-        let join_handle = tokio::spawn({
-            let event_tx = event_tx.clone();
-            let ready = ready.clone();
-            let pause_gate = pause_gate.clone();
-
-            async move {
-                ready.signal();
-
-                loop {
-                    lambda.invoke(state.clone()).await;
-                    if event_tx.send(event).await.is_err() {
-                        return;
-                    }
-                    pause_gate.wait().await;
-                    tokio::task::yield_now().await;
-                }
-            }
-        });
-        // `event` is `Copy`, so the spawned task and this pairing each keep one.
-        join_handles.push((event, join_handle));
-    }
-
-    ready.wait().await;
-    tokio::task::yield_now().await;
-
-    (EventLoopHandle { join_handles }, event_rx)
 }
 
 #[cfg(test)]

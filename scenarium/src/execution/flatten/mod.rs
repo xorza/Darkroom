@@ -12,25 +12,22 @@
 //!
 //! See `README.md` Part A §5.
 
-use std::hash::Hasher;
-
-use common::FnvHasher;
 use common::{CompactInsert, KeyIndexVec, Span};
 use hashbrown::HashSet;
 
-use crate::data::{DataType, StaticValue};
+use crate::execution::identity::FlattenMap;
 use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
     InputStamper,
 };
-use crate::execution::stats::FlattenMap;
 use crate::graph::subgraph::SubgraphId;
 use crate::graph::{
     Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
 };
 use crate::library::Library;
-use crate::node::function::Func;
+use crate::node::definition::Func;
 use crate::node::special::SpecialNode;
+use crate::{DataType, StaticValue};
 
 /// Hard cap on nesting depth — a release backstop for the output-resolution
 /// walk (which follows composite edges and isn't covered by the emit-descent
@@ -66,6 +63,7 @@ pub(crate) struct Flattener {
 /// is the one output-indexed pool filled *during* that build (a plain lookup
 /// against the authoring graph, unlike `output_types`, which needs a second
 /// pass to follow wildcard mirrors).
+#[derive(Debug)]
 pub(crate) struct Pools<'a> {
     pub inputs: &'a mut Vec<ExecutionInput>,
     pub events: &'a mut Vec<ExecutionEvent>,
@@ -192,16 +190,16 @@ fn flatten_id(path: &[NodeId], interior: NodeId) -> NodeId {
     if path.is_empty() {
         return interior;
     }
-    let mix = |seed: &[u8]| -> u64 {
-        let mut h = FnvHasher::new();
-        h.write(seed);
-        for id in path {
-            h.write(&id.as_u128().to_le_bytes());
-        }
-        h.write(&interior.as_u128().to_le_bytes());
-        h.finish()
-    };
-    NodeId::from_u128(((mix(b"hi") as u128) << 64) | mix(b"lo") as u128)
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"scenarium.flatten.v1");
+    for id in path {
+        hasher.update(&id.as_u128().to_le_bytes());
+    }
+    hasher.update(&interior.as_u128().to_le_bytes());
+    let digest = hasher.finalize();
+    NodeId::from_u128(u128::from_le_bytes(
+        digest.as_bytes()[..16].try_into().unwrap(),
+    ))
 }
 
 /// Where an output reference resolves once boundaries are followed through.
@@ -213,6 +211,7 @@ enum Source {
 
 /// One flattening pass. Borrows the reusable `path` buffer from `Flattener`;
 /// the current graph at each level is `graph_at(root, library, path)`.
+#[derive(Debug)]
 struct Run<'a> {
     root: &'a Graph,
     library: &'a Library,
@@ -365,13 +364,13 @@ impl<'a> Run<'a> {
 
             self.cur_idx = idx;
 
-            for (input_idx, binding) in graph.node_bindings(node.id, input_count) {
-                let source = match binding {
+            for binding_entry in graph.node_bindings(node.id, input_count) {
+                let source = match binding_entry.binding {
                     Binding::None => Source::None,
                     Binding::Const(v) => Source::Const(v),
                     Binding::Bind(op) => self.resolve(op),
                 };
-                self.set_input(input_idx, source);
+                self.set_input(binding_entry.port.port_idx, source);
             }
         }
 

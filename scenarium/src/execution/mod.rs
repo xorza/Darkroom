@@ -25,25 +25,30 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::data::DynamicValue;
+#[cfg(test)]
+use crate::DynamicValue;
 use crate::execution::compile::CompiledGraph;
-use crate::execution::stats::{ExecutionStats, RunEvent};
+use crate::execution::identity::NodeAddress;
+use crate::execution::report::RunEvent;
+use crate::execution::stats::ExecutionStats;
 use crate::graph::NodeId;
-use crate::node::function::FuncId;
+use crate::node::definition::FuncId;
 
 pub(crate) mod cache;
 pub(crate) mod codec;
-pub mod compile;
+pub(crate) mod compile;
 pub(crate) mod digest;
-pub mod disk_store;
-pub mod event;
+pub(crate) mod disk_store;
+pub(crate) mod event;
 pub(crate) mod executor;
 mod flatten;
+pub(crate) mod identity;
 pub(crate) mod plan;
 pub(crate) mod program;
 mod query;
+pub(crate) mod report;
 pub(crate) mod resolve;
-pub mod stats;
+pub(crate) mod stats;
 #[cfg(test)]
 mod tests;
 pub(crate) mod validate;
@@ -136,8 +141,8 @@ pub enum Error {
     /// A node seed didn't resolve against the compiled program. Seeds are batched with
     /// the graph they target, so a miss means inconsistent caller state (or a disabled
     /// target) — the run fails rather than silently skipping the seed.
-    #[error("node seed {node_id:?} not found in the compiled program")]
-    NodeSeedNotFound { node_id: NodeId },
+    #[error("node seed {address:?} not found in the compiled program")]
+    NodeSeedNotFound { address: NodeAddress },
     #[error("event lambda for node {node_id:?} panicked: {message}")]
     EventLambdaPanic { node_id: NodeId, message: String },
 }
@@ -155,7 +160,7 @@ pub enum RunError {
     // is already paired with its `NodeId` in `node_errors`, so these surface to
     // the editor attributed to the node — a raw id in the text would be noise.
     /// The node's func was registered without an implementation
-    /// ([`FuncLambda::None`](crate::node::func_lambda::FuncLambda)), so the node
+    /// ([`FuncLambda::None`](crate::node::lambda::FuncLambda)), so the node
     /// can't execute. A host/library configuration error, reported per-node
     /// (its consumers skip as errored-upstream) rather than crashing the run.
     #[error("the node's function has no implementation attached")]
@@ -174,14 +179,6 @@ pub enum RunError {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-// === Value Types ===
-
-#[derive(Debug, Default)]
-pub struct ArgumentValues {
-    pub inputs: Vec<Option<DynamicValue>>,
-    pub outputs: Vec<DynamicValue>,
-}
-
 /// What seeds a run's schedule — the roots the planner walks back from. The four
 /// are independent and combine: a run can target sink nodes, the event loop's
 /// triggerable events, a set of injected events, and/or specific nodes, all at once.
@@ -198,7 +195,7 @@ pub(crate) struct RunSeeds {
     /// worker batches these with the graph they target, so an id that doesn't resolve
     /// against the compiled program (deleted, disabled, stale) fails the run with
     /// [`Error::NodeSeedNotFound`] — inconsistent caller state, never silently skipped.
-    pub nodes: Vec<NodeId>,
+    pub nodes: Vec<NodeAddress>,
 }
 
 // === Execution Engine ===
@@ -404,7 +401,7 @@ impl ExecutionEngine {
         .await
     }
 
-    pub(crate) async fn execute_nodes<T: IntoIterator<Item = NodeId>>(
+    pub(crate) async fn execute_nodes<T: IntoIterator<Item = NodeAddress>>(
         &mut self,
         nodes: T,
     ) -> Result<ExecutionStats> {
@@ -469,7 +466,7 @@ impl ExecutionEngine {
     pub(crate) fn node_output_usage(
         &self,
         e_node: &ExecutionNode,
-    ) -> &[crate::node::func_lambda::OutputUsage] {
+    ) -> &[crate::node::lambda::OutputUsage] {
         &self.plan.output_usage[e_node.outputs.range()]
     }
 
@@ -493,6 +490,7 @@ impl ExecutionEngine {
         let idx = idx.unwrap();
         let slot = &mut self.cache.slots[idx];
         slot.value = cache::ValueState::Resident {
+            materialized: cache::MaterializedOutputs::all(values.len()),
             values,
             produced_under: slot.current_digest,
         };

@@ -10,8 +10,8 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::execution::flatten::{Flattener, Pools};
+use crate::execution::identity::FlattenMap;
 use crate::execution::program::ExecutionProgram;
-use crate::execution::stats::FlattenMap;
 use crate::graph::Graph;
 use crate::library::Library;
 

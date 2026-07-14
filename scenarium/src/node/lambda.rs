@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    data::DynamicValue,
+    DynamicValue,
     runtime::{any_state::AnyState, context::ContextManager, shared_any_state::SharedAnyState},
 };
 

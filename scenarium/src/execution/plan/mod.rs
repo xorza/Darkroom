@@ -13,7 +13,7 @@ use crate::execution::compile::CompiledGraph;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram, NodeIdx};
 use crate::execution::query::resolve_node_idx;
 use crate::execution::{Error, NodeColumn, Result, RunSeeds, validate};
-use crate::node::func_lambda::OutputUsage;
+use crate::node::lambda::OutputUsage;
 use crate::node::special::SpecialNode;
 
 /// The planner's structural verdict for one node this run, indexed by `e_node_idx`.
@@ -351,8 +351,10 @@ fn collect_roots(
     // are computed and retained (see `ExecutionPlan::pinned`). Seeds are batched with the
     // program they target, so an id that doesn't resolve (deleted, disabled, or stale) is
     // inconsistent caller state — fail the run rather than silently skip the seed.
-    for &id in &seeds.nodes {
-        let idx = resolve_node_idx(compiled, &id).ok_or(Error::NodeSeedNotFound { node_id: id })?;
+    for address in &seeds.nodes {
+        let idx = resolve_node_idx(compiled, address).ok_or_else(|| Error::NodeSeedNotFound {
+            address: address.clone(),
+        })?;
         plan.roots.push(idx);
         plan.pinned.push(idx);
     }

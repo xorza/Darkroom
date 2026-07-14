@@ -22,7 +22,7 @@ pub struct ContextType {
 
 #[derive(Debug, Default)]
 pub struct ContextManager {
-    pub store: HashMap<ContextType, Box<dyn Any + Send>>,
+    store: HashMap<ContextType, Box<dyn Any + Send>>,
     /// Node currently being invoked, set by the executor before each
     /// lambda call so `log` can attribute lines. `None` outside a run.
     pub(crate) current_node: Option<NodeId>,
@@ -135,6 +135,18 @@ impl ContextManager {
         boxed
             .downcast_mut::<T>()
             .expect("ContextManager has unexpected type")
+    }
+}
+
+#[cfg(any(test, feature = "internals"))]
+pub mod test_support {
+    use super::*;
+
+    pub fn insert_context<T>(manager: &mut ContextManager, ctx_type: &ContextType, value: T)
+    where
+        T: Any + Send + Sync + 'static,
+    {
+        manager.store.insert(ctx_type.clone(), Box::new(value));
     }
 }
 

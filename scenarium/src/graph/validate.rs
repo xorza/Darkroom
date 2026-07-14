@@ -8,10 +8,10 @@ use common::{Result, is_debug};
 use hashbrown::HashSet;
 
 use super::*;
-use crate::data::{DataType, StaticValue};
 use crate::graph::subgraph::{SubgraphDef, SubgraphId};
 use crate::library::Library;
-use crate::node::function::FuncInput;
+use crate::node::definition::FuncInput;
+use crate::{DataType, StaticValue};
 
 impl Graph {
     /// Debug-only internal-invariant gate (compiled out in release, so the
@@ -47,6 +47,7 @@ impl Graph {
     /// panic. With this passing, flattening resolves every reference infallibly.
     pub fn check_with(&self, library: &Library) -> Result<()> {
         self.check()?;
+        self.check_unique_node_ids(Some(library))?;
         let mut visited: HashSet<SubgraphId> = HashSet::new();
         self.check_level(library, None, &mut visited)
     }

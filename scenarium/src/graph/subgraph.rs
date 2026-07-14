@@ -11,7 +11,7 @@ use common::{Result, id_type};
 use serde::{Deserialize, Serialize};
 
 use crate::graph::{Graph, NodeId, NodeSearch};
-use crate::node::function::{FuncInput, FuncOutput};
+use crate::node::definition::{FuncInput, FuncOutput};
 
 id_type!(SubgraphId);
 
@@ -167,6 +167,7 @@ impl SubgraphDef {
             self.name
         );
         self.graph.check_impl(true)?;
+        self.graph.check_unique_node_ids(None)?;
         for event in &self.events {
             ensure!(
                 self.graph
@@ -232,10 +233,10 @@ impl KeyIndexKey<SubgraphId> for SubgraphDef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::DataType;
+    use crate::DataType;
     use crate::graph::{Binding, Graph, InputPort, Node, NodeKind};
     use crate::library::Library;
-    use crate::node::function::FuncId;
+    use crate::node::definition::FuncId;
     use crate::testing::{TestFuncHooks, test_func_lib};
     use common::SerdeFormat;
 
@@ -511,8 +512,8 @@ mod tests {
 
     /// A func with one event and no I/O, for exposed-event tests.
     fn ticker_func_lib() -> (Library, FuncId) {
-        use crate::node::event_lambda::EventLambda;
-        use crate::node::function::Func;
+        use crate::node::definition::Func;
+        use crate::node::event::EventLambda;
 
         let id = FuncId::unique();
         let mut lib = Library::default();

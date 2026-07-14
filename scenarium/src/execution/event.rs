@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::graph::NodeId;
-use crate::node::event_lambda::EventLambda;
+use crate::node::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
