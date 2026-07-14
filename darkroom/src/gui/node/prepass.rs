@@ -35,7 +35,7 @@ pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAc
         // Instances are always `Local` (library subgraphs are localized on
         // instance), so the "S" chip opens the interior directly.
         if let Some(SubgraphRef::Local(id)) = n.subgraph
-            && ui.response_for(subgraph_badge_wid(n.id)).clicked
+            && ui.response_for(subgraph_badge_wid(n.id)).left.clicked()
         {
             actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
         }
@@ -51,7 +51,7 @@ pub(crate) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
     scene
         .nodes
         .iter()
-        .find(|n| n.runnable() && ui.response_for(play_badge_wid(n.id)).clicked)
+        .find(|n| n.runnable() && ui.response_for(play_badge_wid(n.id)).left.clicked())
         .map(|n| n.id)
 }
 
@@ -78,7 +78,7 @@ pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest>
             let port = InputPort::new(node.id, port_idx);
             if let InputBindingView::Const(StaticValue::FsPath(_)) = &input.binding
                 && let DataType::FsPath(config) = &input.ty
-                && ui.response_for(const_editor_wid(port)).clicked
+                && ui.response_for(const_editor_wid(port)).left.clicked()
             {
                 return Some(PathPickRequest {
                     port,
@@ -111,8 +111,8 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>)
                 port_idx: i,
             };
             // The circle intercepts its own rect; the cell catches the label.
-            let dbl = ui.response_for(port_circle_wid(port)).double_clicked()
-                || ui.response_for(input_cell_wid(port)).double_clicked();
+            let dbl = ui.response_for(port_circle_wid(port)).left.double_clicked()
+                || ui.response_for(input_cell_wid(port)).left.double_clicked();
             if !dbl {
                 continue;
             }
@@ -129,7 +129,7 @@ pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>)
             }
         }
         for port in node_ports(node, PortKind::Output) {
-            if ui.response_for(port_circle_wid(port)).double_clicked() {
+            if ui.response_for(port_circle_wid(port)).left.double_clicked() {
                 // An output may feed many inputs — clear each consumer.
                 for c in &scene.connections {
                     if c.src.node_id == port.node_id && c.src.port_idx == port.port_idx {

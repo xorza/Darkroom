@@ -4,7 +4,7 @@
 //! viewport algebra. The gesture emits `Intent::SetViewport`, so pan/zoom
 //! rides the same undo path as every other edit.
 
-use aperture::{PointerButton, Rect, ResponseState, Size, Ui};
+use aperture::{Rect, ResponseState, Size, Ui};
 use common::FloatExt;
 use glam::Vec2;
 
@@ -58,10 +58,10 @@ pub(crate) fn fold_scroll_zoom(
     min_zoom: f32,
     max_zoom: f32,
 ) {
-    if resp.scroll_pixels != Vec2::ZERO {
-        v.pan -= resp.scroll_pixels;
+    if resp.scroll.pixels != Vec2::ZERO {
+        v.pan -= resp.scroll.pixels;
     }
-    if resp.scroll_lines.y.abs() > f32::EPSILON
+    if resp.scroll.lines.y.abs() > f32::EPSILON
         && let Some(pivot) = resp.pointer_local
     {
         let line_px = ui.theme.text.line_height_for(ui.theme.text.font_size_px);
@@ -69,19 +69,19 @@ pub(crate) fn fold_scroll_zoom(
             &mut v.pan,
             &mut v.zoom,
             pivot,
-            scroll_to_zoom_factor(resp.scroll_lines.y * line_px),
+            scroll_to_zoom_factor(resp.scroll.lines.y * line_px),
             min_zoom,
             max_zoom,
         );
     }
-    if (resp.zoom_factor - 1.0).abs() > f32::EPSILON
+    if (resp.scroll.zoom - 1.0).abs() > f32::EPSILON
         && let Some(pivot) = resp.pointer_local
     {
         zoom_about(
             &mut v.pan,
             &mut v.zoom,
             pivot,
-            resp.zoom_factor,
+            resp.scroll.zoom,
             min_zoom,
             max_zoom,
         );
@@ -139,7 +139,7 @@ pub(crate) fn emit_pan_zoom(
     if gesture == Some(CanvasGesture::Pan) {
         pan_anchor.latch(scene.viewport.pan);
     }
-    pan_anchor.apply(resp.drag_delta_by(PointerButton::Middle), &mut v.pan);
+    pan_anchor.apply(resp.middle.drag.delta(), &mut v.pan);
     fold_scroll_zoom(&mut v, ui, &resp, MIN_ZOOM, MAX_ZOOM);
     // Only emit when the gesture actually moved the viewport
     // (approx compare — exact float `!=` would emit on sub-epsilon

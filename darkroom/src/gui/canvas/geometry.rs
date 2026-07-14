@@ -241,8 +241,8 @@ fn snapshot<K: Eq + Hash + Copy>(
         layout_center,
         screen_rect: r.rect,
         hovered: r.hovered,
-        drag_started: r.drag_started(),
-        dragging: r.drag_started() || r.drag_delta().is_some(),
+        drag_started: r.left.drag.started(),
+        dragging: r.left.drag.started() || r.left.drag.delta().is_some(),
     }
 }
 

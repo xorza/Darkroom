@@ -261,10 +261,10 @@ fn input_label_cell(
             port_label(ui, rcx, port, input.name.clone(), &tip, rename, out);
         });
     // Open on right-click anywhere on the cell — circle or label.
-    let menu_id = cell.response.widget_id();
-    let cell_secondary = cell.response.secondary_clicked();
+    let menu_id = cell.response.id;
+    let cell_secondary = cell.response.right.clicked();
     let circle_state = ui.response_for(wid);
-    open_port_context_menu(ui, menu_id, cell_secondary, circle_state.secondary_clicked);
+    open_port_context_menu(ui, menu_id, cell_secondary, circle_state.right.clicked());
     // Double-click on the circle or label toggles the binding (clear, or seed
     // the default const when unbound) — handled in `emit_port_dblclicks`
     // (prepass), since adding/removing a `Const` resizes the node and the
@@ -278,6 +278,7 @@ fn input_label_cell(
             if MenuItem::new("Set constant")
                 .enabled(can_set)
                 .show(ui, popup)
+                .left
                 .clicked()
                 && let Some(value) = input.default.clone()
             {
@@ -286,6 +287,7 @@ fn input_label_cell(
             if MenuItem::new("Clear binding")
                 .enabled(!matches!(input.binding, InputBindingView::None))
                 .show(ui, popup)
+                .left
                 .clicked()
             {
                 out.push(set_input(port, Binding::None));
@@ -387,19 +389,19 @@ fn output_cell(
 
     // Right-click anywhere on the cell (circle or label) opens the same
     // toggle as a menu item — mirrors the input side's binding menu.
-    let menu_id = cell.response.widget_id();
-    let cell_secondary = cell.response.secondary_clicked();
+    let menu_id = cell.response.id;
+    let cell_secondary = cell.response.right.clicked();
     let circle_state = ui.response_for(wid);
     // Creating a pin is a Cmd+drag from the circle, repositioning one is a
     // plain drag off its satellite (see `PinUi`) — neither is a click, so
     // the menu item below and the drag are the only ways to pin/unpin.
-    open_port_context_menu(ui, menu_id, cell_secondary, circle_state.secondary_clicked);
+    open_port_context_menu(ui, menu_id, cell_secondary, circle_state.right.clicked());
     ContextMenu::for_id(menu_id)
         .size((Sizing::Hug, Sizing::Hug))
         .show(ui, |ui, popup| {
             let pinned = output.pin_position.is_some();
             let label = if pinned { "Unpin output" } else { "Pin output" };
-            if MenuItem::new(label).show(ui, popup).clicked() {
+            if MenuItem::new(label).show(ui, popup).left.clicked() {
                 let pinning = !pinned;
                 out.push(set_output_pinned(port, pinning));
                 // Unlike Cmd+drag (which places a fresh pin via its own

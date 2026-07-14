@@ -62,7 +62,7 @@ impl NodeMenuUi {
         // chosen action always targets a coherent set ("select then act").
         for n in &scene.nodes {
             if !n.boundary
-                && ui.response_for(node_widget_id(n.id)).secondary_clicked
+                && ui.response_for(node_widget_id(n.id)).right.clicked()
                 && let Some(p) = ui.pointer_pos()
             {
                 if !scene.selected.contains(&ItemRef::Node(n.id)) {
@@ -86,22 +86,27 @@ impl NodeMenuUi {
                 .filter(|n| n.runnable())
                 .map(|n| n.id);
             if let Some(node_id) = run_target {
-                if MenuItem::new("Run to this node").show(ui, popup).clicked() {
+                if MenuItem::new("Run to this node")
+                    .show(ui, popup)
+                    .left
+                    .clicked()
+                {
                     chosen = Some(MenuChoice::Run(node_id));
                 }
                 MenuItem::separator(ui);
             }
-            if MenuItem::new("Duplicate").show(ui, popup).clicked() {
+            if MenuItem::new("Duplicate").show(ui, popup).left.clicked() {
                 chosen = Some(MenuChoice::Action(NodeMenuAction::Duplicate));
             }
             if MenuItem::new("Duplicate with incoming connections")
                 .show(ui, popup)
+                .left
                 .clicked()
             {
                 chosen = Some(MenuChoice::Action(NodeMenuAction::DuplicateWithIncoming));
             }
             MenuItem::separator(ui);
-            if MenuItem::new("Remove").show(ui, popup).clicked() {
+            if MenuItem::new("Remove").show(ui, popup).left.clicked() {
                 chosen = Some(MenuChoice::Action(NodeMenuAction::Remove));
             }
             chosen

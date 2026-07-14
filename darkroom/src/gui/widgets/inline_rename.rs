@@ -196,8 +196,8 @@ impl<'a> InlineRename<'a> {
                     t.show(ui);
                 })
                 .response;
-            let clicked = resp.clicked();
-            let double_clicked = resp.double_clicked();
+            let clicked = resp.left.clicked();
+            let double_clicked = resp.left.double_clicked();
             if double_clicked {
                 let st = ui.state_mut::<RenameState>(id);
                 st.active = true;

@@ -33,7 +33,7 @@ impl SubgraphMenuUi {
         // read from last frame's response (same timing as the open).
         for n in &scene.nodes {
             if matches!(n.subgraph, Some(SubgraphRef::Local(_)))
-                && ui.response_for(subgraph_badge_wid(n.id)).secondary_clicked
+                && ui.response_for(subgraph_badge_wid(n.id)).right.clicked()
                 && let Some(p) = ui.pointer_pos()
             {
                 self.node_id = Some(n.id);
@@ -45,11 +45,12 @@ impl SubgraphMenuUi {
             let mut chosen = None;
             if MenuItem::new("Publish to library")
                 .show(ui, popup)
+                .left
                 .clicked()
             {
                 chosen = Some(MenuChoice::Publish);
             }
-            if MenuItem::new("Detach copy").show(ui, popup).clicked() {
+            if MenuItem::new("Detach copy").show(ui, popup).left.clicked() {
                 chosen = Some(MenuChoice::Detach);
             }
             chosen

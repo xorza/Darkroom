@@ -98,7 +98,7 @@ pub(crate) fn seed_pin_position_intent(port: OutputPort, position: Vec2) -> Inte
 pub(crate) fn emit_pin_refresh_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
     scene
         .pinned_outputs()
-        .find(|pin| ui.response_for(refresh_badge_wid(pin.port)).clicked)
+        .find(|pin| ui.response_for(refresh_badge_wid(pin.port)).left.clicked())
         .map(|pin| pin.port.node_id)
 }
 
@@ -152,11 +152,11 @@ impl PinUi {
                 self.drag = None;
             } else {
                 let resp = ui.response_for(anchor.widget_id);
-                if resp.drag_started() {
+                if resp.left.drag.started() {
                     // A fresh gesture just replaced this one on the same
                     // widget; drop rather than fire with stale start data.
                     self.drag = None;
-                } else if let Some(delta) = resp.drag_delta() {
+                } else if let Some(delta) = resp.left.drag.delta() {
                     let offset = delta / scene.viewport.safe_zoom();
                     out.push(anchor.resolve(offset, ItemRef::Pin(anchor.key)));
                     return;
@@ -360,7 +360,7 @@ impl PinUi {
         // click (plain replaces the selection, Shift toggles this
         // pin's membership); a drag repositions instead (handled by
         // `PinUi::apply`).
-        if response.clicked() {
+        if response.left.clicked() {
             let shift = ui.modifiers().shift;
             click_intents(shift, scene, ItemRef::Pin(g.out_port), out);
         }
@@ -454,7 +454,12 @@ fn scan_port_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<Port
 fn scan_widget_drag_start(ui: &Ui, scene: &Scene) -> Option<(OutputPort, Vec2)> {
     scene
         .pinned_outputs()
-        .find(|pin| ui.response_for(pin_preview_wid(pin.port)).drag_started())
+        .find(|pin| {
+            ui.response_for(pin_preview_wid(pin.port))
+                .left
+                .drag
+                .started()
+        })
         .map(|pin| (pin.port, pin.pos))
 }
 

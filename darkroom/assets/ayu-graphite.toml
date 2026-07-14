@@ -892,12 +892,20 @@ track = "#3e3e3e"
 fill = "#9adbfb"
 height = 6.0
 
+[aperture_theme.separator]
+color = "#aaaaa82e"
+thickness = 1.0
+
 [aperture_theme.slider]
 rail = "#3e3e3e"
 fill = "#9adbfb"
 knob = "#ffffff"
 knob_size = 18.0
 rail_thickness = 4.0
+
+[aperture_theme.spinner]
+color = "#9adbfb"
+size = 24.0
 
 [aperture_theme.splitter]
 thickness = 6.0

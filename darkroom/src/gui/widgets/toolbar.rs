@@ -145,7 +145,7 @@ impl Chip {
         // Take the owned snapshot + click result so the button's `ui`
         // borrow ends before the tooltip records into `ui`.
         let snapshot = button.response.snapshot();
-        let clicked = button.response.clicked();
+        let clicked = button.response.left.clicked();
         tooltip_after(ui, &snapshot, self.tip);
         clicked
     }

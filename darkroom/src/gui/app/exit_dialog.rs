@@ -65,6 +65,7 @@ pub(crate) fn show(ui: &mut Ui, file_name: Option<&str>) -> ExitOutcome {
                                 .id_salt(("exit_dialog", "save"))
                                 .label("Save")
                                 .show(ui)
+                                .left
                                 .clicked()
                             {
                                 choice = ExitChoice::Save;
@@ -73,6 +74,7 @@ pub(crate) fn show(ui: &mut Ui, file_name: Option<&str>) -> ExitOutcome {
                                 .id_salt(("exit_dialog", "discard"))
                                 .label("Don't Save")
                                 .show(ui)
+                                .left
                                 .clicked()
                             {
                                 choice = ExitChoice::Discard;
@@ -81,6 +83,7 @@ pub(crate) fn show(ui: &mut Ui, file_name: Option<&str>) -> ExitOutcome {
                                 .id_salt(("exit_dialog", "cancel"))
                                 .label("Cancel")
                                 .show(ui)
+                                .left
                                 .clicked()
                             {
                                 choice = ExitChoice::Cancel;

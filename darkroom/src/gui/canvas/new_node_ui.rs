@@ -302,7 +302,7 @@ fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
 /// declared input defaults. Hovering shows the func's description.
 fn func_entry(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> Option<ChosenNode> {
     let resp = MenuItem::new(func.name.clone()).show(ui, popup);
-    let clicked = resp.clicked();
+    let clicked = resp.left.clicked();
     if let Some(desc) = &func.description {
         Tooltip::on(&resp.snapshot()).text(desc.clone()).show(ui);
     }
@@ -321,7 +321,11 @@ fn func_entry(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> Option<ChosenNod
 /// editable `Local` copy of the def that records its library `origin`, so the
 /// instance localizes rather than staying linked to the library entry.
 fn subgraph_entry(ui: &mut Ui, popup: &PopupHandle, def: &SubgraphDef) -> Option<ChosenNode> {
-    if !MenuItem::new(def.name.clone()).show(ui, popup).clicked() {
+    if !MenuItem::new(def.name.clone())
+        .show(ui, popup)
+        .left
+        .clicked()
+    {
         return None;
     }
     let mut local = def.fresh_copy();
@@ -342,7 +346,7 @@ fn subgraph_entry(ui: &mut Ui, popup: &PopupHandle, def: &SubgraphDef) -> Option
 fn special_entry(ui: &mut Ui, popup: &PopupHandle, special: SpecialNode) -> Option<ChosenNode> {
     let func = special.func();
     let resp = MenuItem::new(func.name.clone()).show(ui, popup);
-    let clicked = resp.clicked();
+    let clicked = resp.left.clicked();
     if let Some(desc) = &func.description {
         Tooltip::on(&resp.snapshot()).text(desc.clone()).show(ui);
     }

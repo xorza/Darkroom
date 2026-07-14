@@ -25,8 +25,8 @@ use std::fmt::Write as _;
 
 use aperture::{
     Align, Background, Color, Configure, HAlign, Image as AptImage, ImageFilter, ImageFit,
-    ImageHandle, InternedStr, Panel, PointerButton, Rect, Sense, Shape, Size, Sizing, Spacing,
-    Text, Ui, VAlign, WidgetId,
+    ImageHandle, InternedStr, Panel, Rect, Sense, Shape, Size, Sizing, Spacing, Text, Ui, VAlign,
+    WidgetId,
 };
 use glam::{UVec2, Vec2};
 use imaginarium::{ColorFormat, Image as RawImage, Preview, ProcessingContext};
@@ -442,27 +442,24 @@ impl ImageViewer {
         let Some(pane) = pane_size(ui, self.port) else {
             return;
         };
-        if resp.double_clicked() {
+        if resp.left.double_clicked() {
             self.reset_framing();
             return;
         }
-        let adjusting = resp.drag_started_by(PointerButton::Left)
-            || resp.drag_started_by(PointerButton::Middle)
-            || resp.scroll_pixels != Vec2::ZERO
-            || resp.scroll_lines.y.abs() > f32::EPSILON
-            || (resp.zoom_factor - 1.0).abs() > f32::EPSILON;
+        let adjusting = resp.left.drag.started()
+            || resp.middle.drag.started()
+            || resp.scroll.pixels != Vec2::ZERO
+            || resp.scroll.lines.y.abs() > f32::EPSILON
+            || (resp.scroll.zoom - 1.0).abs() > f32::EPSILON;
         if self.view.is_none() && !adjusting {
             return;
         }
         let mut v = self.effective_view(img, pane);
 
-        if resp.drag_started_by(PointerButton::Left) || resp.drag_started_by(PointerButton::Middle)
-        {
+        if resp.left.drag.started() || resp.middle.drag.started() {
             self.pan_anchor.latch(v.pan);
         }
-        let drag = resp
-            .drag_delta_by(PointerButton::Left)
-            .or_else(|| resp.drag_delta_by(PointerButton::Middle));
+        let drag = resp.left.drag.delta().or_else(|| resp.middle.drag.delta());
         self.pan_anchor.apply(drag, &mut v.pan);
         fold_scroll_zoom(&mut v, ui, &resp, MIN_ZOOM, MAX_ZOOM);
         self.view = Some(v);

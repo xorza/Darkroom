@@ -83,7 +83,8 @@ impl DockUi {
                 if strip::closable(tab)
                     && ui
                         .response_for(strip::tab_close_wid(group.id, index))
-                        .clicked
+                        .left
+                        .clicked()
                 {
                     actions.push(UiAction::Dock(DockOp::CloseTab {
                         group: group.id,
@@ -92,11 +93,12 @@ impl DockUi {
                     continue;
                 }
                 let label_clicked = strip::renamable_subgraph(tab)
-                    .is_some_and(|id| ui.response_for(strip::tab_rename_wid(id)).clicked);
+                    .is_some_and(|id| ui.response_for(strip::tab_rename_wid(id)).left.clicked());
                 if label_clicked
                     || ui
                         .response_for(strip::tab_chip_wid(group.id, index))
-                        .clicked
+                        .left
+                        .clicked()
                 {
                     actions.push(UiAction::Dock(DockOp::ActivateTab {
                         group: group.id,
@@ -107,7 +109,9 @@ impl DockUi {
                     && strip::movable(tab)
                     && ui
                         .response_for(strip::tab_chip_wid(group.id, index))
-                        .drag_started()
+                        .left
+                        .drag
+                        .started()
                 {
                     self.tab_drag = Some(TabDrag {
                         tab,
@@ -117,7 +121,7 @@ impl DockUi {
                 }
             }
         }
-        if ui.response_for(strip::tab_new_wid()).clicked {
+        if ui.response_for(strip::tab_new_wid()).left.clicked() {
             actions.push(UiAction::NewSubgraph);
         }
 
@@ -131,7 +135,9 @@ impl DockUi {
         }
         if ui
             .response_for(strip::tab_chip_wid(src_group, src_index))
-            .drag_stopped()
+            .left
+            .drag
+            .stopped()
         {
             if let Some(target) = drop_target(ui, doc) {
                 actions.push(UiAction::Dock(DockOp::MoveTab {

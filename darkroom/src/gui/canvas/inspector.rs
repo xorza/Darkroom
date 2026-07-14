@@ -102,7 +102,7 @@ impl Inspectors {
     /// action — the click lands on the chip, not the canvas or a body.
     pub(crate) fn apply(&mut self, ui: &Ui, scene: &Scene) {
         for n in &scene.nodes {
-            if ui.response_for(inspect_badge_wid(n.id)).clicked {
+            if ui.response_for(inspect_badge_wid(n.id)).left.clicked() {
                 match cycle(self.modes.get(&n.id).copied()) {
                     Some(m) => {
                         self.modes.insert(n.id, m);
@@ -317,14 +317,18 @@ fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
 /// capture the press, so neither the canvas nor a body sees it).
 fn outside_action(ui: &Ui, scene: &Scene) -> bool {
     let oc = ui.response_for(outer_canvas_widget_id());
-    let canvas_acted = oc.clicked
-        || oc.drag_delta().is_some()
-        || oc.scroll_lines != Vec2::ZERO
-        || oc.scroll_pixels != Vec2::ZERO
-        || (oc.zoom_factor - 1.0).abs() > f32::EPSILON;
+    // Any-button drag: left rubber-bands, middle pans, right scribbles
+    // the breaker — all of them count as "acted on the canvas".
+    let canvas_dragged =
+        oc.left.drag.dragging() || oc.middle.drag.dragging() || oc.right.drag.dragging();
+    let canvas_acted = oc.left.clicked()
+        || canvas_dragged
+        || oc.scroll.lines != Vec2::ZERO
+        || oc.scroll.pixels != Vec2::ZERO
+        || (oc.scroll.zoom - 1.0).abs() > f32::EPSILON;
     let node_acted = scene.nodes.iter().any(|n| {
         let r = ui.response_for(node_widget_id(n.id));
-        r.clicked || r.drag_started()
+        r.left.clicked() || r.left.drag.started()
     });
     canvas_acted || node_acted
 }

@@ -592,7 +592,7 @@ impl Badge {
         // Take the owned snapshot + click result so the chip's `ui` borrow
         // ends before the tooltip records into `ui`.
         let snapshot = chip.response.snapshot();
-        let clicked = chip.response.clicked();
+        let clicked = chip.response.left.clicked();
         tooltip_after(ui, &snapshot, tip);
         clicked
     }

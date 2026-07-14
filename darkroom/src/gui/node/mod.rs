@@ -242,9 +242,9 @@ impl NodeUI {
         // Pull the body response's flags into locals so its `&mut ui`
         // borrow ends before the `response_for(title)` peek below.
         let response = panel.response;
-        let body_clicked = response.clicked();
-        let body_drag_started = response.drag_started();
-        let body_wid = response.widget_id();
+        let body_clicked = response.left.clicked();
+        let body_drag_started = response.left.drag.started();
+        let body_wid = response.id;
 
         // Click without drag → select. Plain click selects only this
         // node; Shift-click toggles its membership in the current
@@ -261,7 +261,7 @@ impl NodeUI {
         // the delta. While renaming the title is a `TextEdit` (no `DRAG`),
         // so this can't fire mid-edit.
         let title_wid = node_rename_wid(node.id);
-        let title_drag = ui.response_for(title_wid).drag_started();
+        let title_drag = ui.response_for(title_wid).left.drag.started();
 
         // Latch the anchor on the press-frame edge; subsequent frames'
         // `prepass` peeks `response_for(widget_id)` before record runs
@@ -315,14 +315,14 @@ impl NodeUI {
         // just latched on the same widget — `record` will replace the
         // anchor this frame; emitting now with the stale start positions
         // makes the nodes snap to the previous gesture's start point.
-        if resp.drag_started() {
+        if resp.left.drag.started() {
             self.drag_anchor = None;
             return;
         }
         // No `drag_delta` means the drag isn't latched anymore (release
         // or pointer-left-surface). Drop the anchor so the next gesture
         // starts fresh.
-        let Some(delta) = resp.drag_delta() else {
+        let Some(delta) = resp.left.drag.delta() else {
             self.drag_anchor = None;
             return;
         };

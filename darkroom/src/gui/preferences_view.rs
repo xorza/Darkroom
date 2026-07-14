@@ -84,6 +84,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                         if Checkbox::new(&mut prefs.load_last_document)
                             .label("Load last document on startup")
                             .show(ui)
+                            .left
                             .clicked()
                         {
                             command = Some(AppCommand::Prefs(PrefsCommand::Changed));
@@ -91,6 +92,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                         if Checkbox::new(&mut prefs.confirm_unsaved_on_exit)
                             .label("Ask to save changes before quitting")
                             .show(ui)
+                            .left
                             .clicked()
                         {
                             command = Some(AppCommand::Prefs(PrefsCommand::Changed));
@@ -283,6 +285,7 @@ fn model_row(
                         .id_salt("browse")
                         .label("Browse…")
                         .show(ui)
+                        .left
                         .clicked()
                     {
                         command = Some(AppCommand::Prefs(PrefsCommand::PickMlModel(kind)));
@@ -344,7 +347,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
                     .show(ui);
             });
         let snapshot = link.response.snapshot();
-        if link.response.clicked() {
+        if link.response.left.clicked() {
             dialogs::open_url(url);
         }
         // Surface the destination on hover so the user sees where the

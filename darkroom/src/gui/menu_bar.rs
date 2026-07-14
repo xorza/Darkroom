@@ -37,13 +37,13 @@ fn dropdown(
         .style(ui.theme.menu_button.clone())
         .show(ui)
         .snapshot();
-    if trigger.clicked()
-        && let Some(rect) = trigger.rect()
+    if trigger.left.clicked()
+        && let Some(rect) = trigger.rect
     {
-        ContextMenu::open(ui, trigger.widget_id(), Vec2::new(rect.min.x, rect.max().y));
+        ContextMenu::open(ui, trigger.id, Vec2::new(rect.min.x, rect.max().y));
     }
     let mut command = None;
-    ContextMenu::for_id(trigger.widget_id()).show(ui, |ui, popup| {
+    ContextMenu::for_id(trigger.id).show(ui, |ui, popup| {
         command = build(ui, popup);
     });
     command
@@ -52,24 +52,24 @@ fn dropdown(
 fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
     dropdown(ui, "File", |ui, popup| {
         let mut command = None;
-        if MenuItem::new("New").show(ui, popup).clicked() {
+        if MenuItem::new("New").show(ui, popup).left.clicked() {
             command = Some(AppCommand::File(FileCommand::New));
         }
-        if MenuItem::new("Load…").show(ui, popup).clicked() {
+        if MenuItem::new("Load…").show(ui, popup).left.clicked() {
             command = Some(AppCommand::File(FileCommand::Load));
         }
-        if MenuItem::new("Save").show(ui, popup).clicked() {
+        if MenuItem::new("Save").show(ui, popup).left.clicked() {
             command = Some(AppCommand::File(FileCommand::Save));
         }
-        if MenuItem::new("Save As…").show(ui, popup).clicked() {
+        if MenuItem::new("Save As…").show(ui, popup).left.clicked() {
             command = Some(AppCommand::File(FileCommand::SaveAs));
         }
         MenuItem::separator(ui);
-        if MenuItem::new("Preferences").show(ui, popup).clicked() {
+        if MenuItem::new("Preferences").show(ui, popup).left.clicked() {
             command = Some(AppCommand::Shell(ShellCommand::OpenPreferences));
         }
         MenuItem::separator(ui);
-        if MenuItem::new("Quit").show(ui, popup).clicked() {
+        if MenuItem::new("Quit").show(ui, popup).left.clicked() {
             command = Some(AppCommand::Shell(ShellCommand::Quit));
         }
         command
@@ -82,14 +82,15 @@ fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
 fn subgraph_menu(ui: &mut Ui) -> Option<AppCommand> {
     dropdown(ui, "Subgraph", |ui, popup| {
         let mut command = None;
-        if MenuItem::new("Export…").show(ui, popup).clicked() {
+        if MenuItem::new("Export…").show(ui, popup).left.clicked() {
             command = Some(AppCommand::Subgraph(SubgraphCommand::Export));
         }
-        if MenuItem::new("Import…").show(ui, popup).clicked() {
+        if MenuItem::new("Import…").show(ui, popup).left.clicked() {
             command = Some(AppCommand::Subgraph(SubgraphCommand::Import));
         }
         if MenuItem::new("Promote to Library…")
             .show(ui, popup)
+            .left
             .clicked()
         {
             command = Some(AppCommand::Subgraph(SubgraphCommand::Promote));

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use aperture::{PointerButton, Rect, Shape, Stroke, Ui};
+use aperture::{Rect, Shape, Stroke, Ui};
 use glam::Vec2;
 
 use crate::core::document::ItemRef;
@@ -132,7 +132,7 @@ impl SelectionUI {
         // Still dragging → stash the updated corner + the swept preview
         // (node draw reads it via `preview()` for live highlight) and
         // wait. A `None` delta is the release edge that commits.
-        if resp.drag_delta_by(PointerButton::Left).is_some() {
+        if resp.left.drag.delta().is_some() {
             self.band = Some(band);
             self.preview = Some(selected);
             return;

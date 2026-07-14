@@ -304,7 +304,7 @@ impl BreakerUI {
         let button = self.state.as_ref().map(|b| b.button);
         match (
             self.state.as_mut(),
-            button.and_then(|b| resp.drag_delta_by(b)),
+            button.and_then(|b| resp.button(b).drag.delta()),
         ) {
             (Some(b), Some(_)) => {
                 if let Some(p) = resp.pointer_local {

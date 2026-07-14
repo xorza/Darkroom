@@ -329,7 +329,8 @@ fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef, index: usize) {
     let menu_wid = tab_menu_wid(s.group, index);
     if ui
         .response_for(tab_chip_wid(s.group, index))
-        .secondary_clicked
+        .right
+        .clicked()
         && let Some(p) = ui.pointer_pos()
     {
         ContextMenu::open(ui, menu_wid, p);
@@ -338,10 +339,10 @@ fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef, index: usize) {
         .size((Sizing::Hug, Sizing::Hug))
         .show(ui, |ui, popup| {
             let mut side = None;
-            if MenuItem::new("Split right").show(ui, popup).clicked() {
+            if MenuItem::new("Split right").show(ui, popup).left.clicked() {
                 side = Some(SplitSide::Right);
             }
-            if MenuItem::new("Split down").show(ui, popup).clicked() {
+            if MenuItem::new("Split down").show(ui, popup).left.clicked() {
                 side = Some(SplitSide::Bottom);
             }
             if let Some(side) = side {

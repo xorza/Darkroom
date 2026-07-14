@@ -448,13 +448,13 @@ pub(crate) enum CanvasGesture {
 /// `NewNode` is therefore right-click-on-*empty*-canvas by construction.
 pub(crate) fn classify_canvas_gesture(ui: &Ui) -> Option<CanvasGesture> {
     let resp = ui.response_for(outer_canvas_widget_id());
-    if resp.drag_started_by(PointerButton::Middle) {
+    if resp.middle.drag.started() {
         return Some(CanvasGesture::Pan);
     }
-    if resp.drag_started_by(PointerButton::Right) {
+    if resp.right.drag.started() {
         return Some(CanvasGesture::Breaker(PointerButton::Right));
     }
-    if resp.drag_started_by(PointerButton::Left) {
+    if resp.left.drag.started() {
         return Some(if ui.modifiers().ctrl {
             CanvasGesture::Breaker(PointerButton::Left)
         } else {
@@ -465,10 +465,10 @@ pub(crate) fn classify_canvas_gesture(ui: &Ui) -> Option<CanvasGesture> {
     // so this must precede the plain-click `Deselect` arm to win. The first
     // click of the pair already ran its own `Deselect`, so the selection is
     // clear by the time the popup opens.
-    if resp.secondary_clicked || resp.double_clicked_by(PointerButton::Left) {
+    if resp.right.clicked() || resp.left.double_clicked() {
         return Some(CanvasGesture::NewNode);
     }
-    if resp.clicked {
+    if resp.left.clicked() {
         return Some(CanvasGesture::Deselect);
     }
     None
