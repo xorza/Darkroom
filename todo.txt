@@ -11,7 +11,3 @@ tooltip near the edge of screen overflows
 file name as argument clap
 
 try repair & broken document
-
-separator min size bug
-
-  crate::input::response::
