@@ -372,8 +372,9 @@ computed:
    read + codec check, **no body bytes**. The value loads only if a running consumer
    actually reads it.
 3. **else run.** The output buffer is cleared before invocation, and the successful
-   result is stamped with the run's demand mask. `store_node` skips an existing frame
-   only when both digest and coverage match; a broader result overwrites it.
+   result's coverage is derived from its non-`Unbound` values. Returning `Unbound` for a
+   demanded output fails the node; skipped outputs may remain `Unbound`. `store_node` skips
+   an existing frame only when both digest and coverage match; a broader result overwrites it.
 4. **Lazy load — `hydrate_slot`.** When a *running* node reads a bound input whose
    producer is `OnDisk`, `collect_inputs` pulls that one blob into RAM. Producers behind
    a *reused* consumer are never read, so a disk-cached chain loads only its frontier — a

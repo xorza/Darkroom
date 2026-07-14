@@ -109,18 +109,19 @@ fn hydrate_turns_a_miss_into_a_hit() {
 fn resident_hit_requires_coverage_for_every_demanded_output() {
     let digest = Digest([5; 32]);
     let mut cache = RuntimeCache::default();
-    cache.slots.add(RuntimeSlot {
+    let mut slot = RuntimeSlot {
         id: NodeId::from_u128(1),
         current_digest: Some(digest),
-        value: ValueState::Resident {
-            snapshot: OutputSnapshot::new(
-                vec![StaticValue::Int(10).into(), DynamicValue::Unbound],
-                CachedOutputCoverage::from_bytes(&[1, 0]).unwrap(),
-            ),
-            produced_under: Some(digest),
-        },
         ..Default::default()
-    });
+    };
+    slot.invoke_slot(2).outputs[0] = StaticValue::Int(10).into();
+    slot.stamp_produced();
+    cache.slots.add(slot);
+
+    let ValueState::Resident { snapshot, .. } = &cache.slots[0].value else {
+        panic!("the invocation result was stamped resident");
+    };
+    assert_eq!(snapshot.coverage.ports, [true, false]);
 
     assert!(cache.is_resident_hit(NodeIdx(0), &[OutputDemand::Produce, OutputDemand::Skip]));
     assert!(!cache.is_resident_hit(NodeIdx(0), &[OutputDemand::Produce, OutputDemand::Produce]));
@@ -141,6 +142,25 @@ fn resident_hit_requires_coverage_for_every_demanded_output() {
     assert!(
         mismatch.is_err(),
         "a snapshot cannot pair values with coverage of another arity"
+    );
+
+    let invalid = std::panic::catch_unwind(|| {
+        OutputSnapshot::new(
+            vec![DynamicValue::Unbound],
+            CachedOutputCoverage::all(1),
+        );
+    });
+    assert!(
+        invalid.is_err(),
+        "coverage cannot claim that an unbound value was produced"
+    );
+    assert!(
+        OutputSnapshot::try_new(
+            vec![DynamicValue::Unbound],
+            CachedOutputCoverage::all(1),
+        )
+        .is_none(),
+        "invalid persisted coverage is rejected as a cache miss"
     );
 }
 

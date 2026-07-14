@@ -3173,13 +3173,9 @@ mod execution {
         Ok(())
     }
 
-    /// Output buffers are **not** wiped between runs — a re-running node reuses its
-    /// slot's buffer in place, so an output port a lambda leaves unwritten this run
-    /// retains its prior value. This is the contract the reuse model rests on
-    /// (a skipped node keeps its whole prior output); the flip side is that a lambda
-    /// must write *all* the outputs it means to produce each run. The node is impure
-    /// (re-runs each time): run 1 writes both ports, run 2 writes only port 0, so
-    /// port 1 keeps the `20` from run 1.
+    /// Output buffers are wiped before a re-running node is invoked, so an unwritten
+    /// output cannot retain a prior run's value. This sink has no demanded outputs,
+    /// therefore leaving one port `Unbound` is valid.
     #[tokio::test(flavor = "multi_thread")]
     async fn unwritten_output_port_is_cleared_before_reexecution() -> anyhow::Result<()> {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -3224,7 +3220,8 @@ mod execution {
         eg.update(&graph, &library).unwrap();
 
         // Run 1: both ports written.
-        eg.execute_sinks().await?;
+        let stats = eg.execute_sinks().await?;
+        assert!(stats.node_errors.is_empty());
         let outputs = eg
             .runtime_slot(eg.by_name("partial_writer").unwrap())
             .output_values()

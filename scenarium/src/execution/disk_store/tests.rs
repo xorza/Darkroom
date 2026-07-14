@@ -43,11 +43,14 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
     let d_b = Digest([8u8; 32]);
 
     // Config A: three plain values, stamped D_A.
-    let snapshot_a = complete_snapshot(vec![
-        DynamicValue::Unbound,
-        DynamicValue::Static(StaticValue::Int(7)),
-        DynamicValue::Static(StaticValue::String("x".into())),
-    ]);
+    let snapshot_a = OutputSnapshot::new(
+        vec![
+            DynamicValue::Unbound,
+            DynamicValue::Static(StaticValue::Int(7)),
+            DynamicValue::Static(StaticValue::String("x".into())),
+        ],
+        CachedOutputCoverage::from_bytes(&[0, 1, 1]).unwrap(),
+    );
     store
         .store(
             &target(&file.0, d_a),
@@ -60,7 +63,7 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
     // missing file — is not a hit.
     assert_eq!(
         target(&file.0, d_a).coverage(3),
-        Some(CachedOutputCoverage::all(3))
+        Some(CachedOutputCoverage::from_bytes(&[0, 1, 1]).unwrap())
     );
     assert!(
         target(&file.0, d_b).coverage(3).is_none(),
@@ -72,7 +75,10 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
 
     let back = store.read(&target(&file.0, d_a)).await.expect("hit");
     assert_eq!(back.values.len(), 3);
-    assert_eq!(back.coverage, CachedOutputCoverage::all(3));
+    assert_eq!(
+        back.coverage,
+        CachedOutputCoverage::from_bytes(&[0, 1, 1]).unwrap()
+    );
     assert!(matches!(back.values[0], DynamicValue::Unbound));
     assert_eq!(back.values[1].as_i64(), Some(7));
     assert_eq!(back.values[2].as_string(), Some("x"));

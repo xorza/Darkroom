@@ -46,7 +46,7 @@ Choosing a representative instance is an explicit host-side policy.
 | `execution/plan/` | Structural scheduling and output demand |
 | `execution/resolve/` | Demand-aware cache reuse and cone pruning |
 | `execution/executor/` | Invocation, delivery, reclamation, and stats |
-| `execution/cache/` | Cross-run values and materialization masks |
+| `execution/cache/` | Cross-run values and output coverage |
 | `execution/codec.rs` | Cache framing plus downstream custom-value codec API |
 | `execution/disk_store/` | On-disk cache persistence |
 | `execution/report.rs` | Live progress and pinned-output transport |

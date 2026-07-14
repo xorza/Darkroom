@@ -281,6 +281,54 @@ async fn upstream_error_skips_dependents_and_clears_output() {
     assert!(error_of(b).unwrap().contains("upstream"));
 }
 
+#[tokio::test]
+async fn unbound_output_errors_only_when_demanded() {
+    let mut p = Prog::default();
+    let producer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| { Ok(()) });
+    let consumer = async_lambda!(|_ctx, _state, _ev, _inputs, _demand, outputs| {
+        outputs[0] = DynamicValue::Static(StaticValue::Int(1));
+        Ok(())
+    });
+    let a = p.node(&[], 2, producer);
+    let b = p.node(&[bind(a, 1)], 1, consumer);
+
+    let plan = plan_with_readers(&p.program, vec![0, 1, 0]);
+    let (cache, stats) = run(&p.program, &plan).await;
+    let error_of = |idx: usize| {
+        stats
+            .node_errors
+            .iter()
+            .find(|error| error.node_id == p.program.e_nodes[idx].id)
+            .map(|error| &error.error)
+    };
+
+    assert!(cache.slots[a].output_values().is_none());
+    assert!(cache.slots[b].output_values().is_none());
+    assert!(matches!(
+        error_of(a),
+        Some(RunError::OutputNotProduced { output: 1, .. })
+    ));
+    assert!(matches!(
+        error_of(b),
+        Some(RunError::SkippedUpstream { .. })
+    ));
+
+    let mut p = Prog::default();
+    let skipped = p.node(
+        &[],
+        1,
+        async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| { Ok(()) }),
+    );
+    let plan = plan_with_readers(&p.program, vec![0]);
+    let (cache, stats) = run(&p.program, &plan).await;
+
+    assert!(stats.node_errors.is_empty());
+    assert!(matches!(
+        cache.slots[skipped].output_values().unwrap().as_slice(),
+        [DynamicValue::Unbound]
+    ));
+}
+
 /// A `None`-cache producer's RAM output is dropped the moment its last consumer reads it.
 /// `Executor::run` does no end-of-run eviction, so an emptied slot here is the *mid-run*
 /// release and nothing else. A(None) → B(Ram): once B has read A, A is `Empty` while B keeps
