@@ -5,24 +5,17 @@
 use crate::execution::ExecutionEngine;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::event::{EventRef, EventTrigger};
+use crate::execution::identity::NodeAddress;
 use crate::execution::program::NodeIdx;
 use crate::execution::stats::ExecutionStats;
-use crate::graph::NodeId;
 
-/// The flat execution node backing authoring id `node_id`. A top-level node keeps its
-/// authoring id; a subgraph-interior node's flat id is hashed from the descent path, so
-/// the authoring id misses the key lookup — resolve it through the artifact's flatten
-/// map instead. A def instanced more than once has several flat nodes per interior id;
-/// the first (lowest index) is returned, an arbitrary-but-stable representative for
-/// inspection and node seeding.
-pub(crate) fn resolve_node_idx(compiled: &CompiledGraph, node_id: &NodeId) -> Option<NodeIdx> {
-    let program = &compiled.program;
-    if let Some(idx) = program.e_nodes.index_of_key(node_id) {
-        return Some(idx.into());
-    }
-    program
-        .node_indices()
-        .find(|&idx| compiled.flatten_map.interior(program.e_nodes[idx].id) == Some(*node_id))
+pub(crate) fn resolve_node_idx(compiled: &CompiledGraph, address: &NodeAddress) -> Option<NodeIdx> {
+    let flat_id = compiled.flatten_map.flat_node(address)?;
+    compiled
+        .program
+        .e_nodes
+        .index_of_key(&flat_id)
+        .map(Into::into)
 }
 
 impl ExecutionEngine {
@@ -67,15 +60,22 @@ impl ExecutionEngine {
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
-    use crate::data::DynamicValue;
-    use crate::execution::ArgumentValues;
+    use crate::DynamicValue;
     use crate::execution::program::ExecutionBinding;
+    use crate::graph::NodeId;
+
+    #[derive(Debug, Default)]
+    pub(crate) struct ArgumentValues {
+        pub(crate) inputs: Vec<Option<DynamicValue>>,
+        pub(crate) outputs: Vec<DynamicValue>,
+    }
 
     impl ExecutionEngine {
         /// Resident-only argument values, test inspection only: reads whatever is
         /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
         pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-            let idx = resolve_node_idx(&self.compiled, node_id)?;
+            let address = self.compiled.flatten_map.representative(node_id)?;
+            let idx = resolve_node_idx(&self.compiled, address)?;
             Some(self.argument_values_at(idx))
         }
 
