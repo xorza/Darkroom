@@ -27,7 +27,7 @@ use crate::math::statistics::{ClippedStats, sigma_clipped_median_mad_arrayvec};
 use crate::math::{FWHM_TO_SIGMA, sigma_to_fwhm};
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::{
-    CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
+    CentroidMethod, LocalBackgroundMethod, MeasurementConfig, NoiseModel,
 };
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::star::Star;
@@ -469,41 +469,25 @@ pub fn measure_star(
     };
 
     // Compute quality metrics (flux, SNR, sharpness, roundness always from moments)
-    let (gain, read_noise) = config
-        .noise_model
-        .as_ref()
-        .map(|nm| (Some(nm.gain), Some(nm.read_noise)))
-        .unwrap_or((None, None));
-
-    let mut metrics = compute_metrics(
+    let mut star = compute_star(
         pixels,
         background,
         pos,
+        region.peak_value,
         stamp_radius,
         annulus_background,
-        gain,
-        read_noise,
+        config.noise_model.as_ref(),
     )?;
 
     // Override FWHM and eccentricity with fit-derived values when available
     if let Some(fwhm) = fit_fwhm {
-        metrics.fwhm = fwhm;
+        star.fwhm = fwhm;
     }
     if let Some(ecc) = fit_eccentricity {
-        metrics.eccentricity = ecc;
+        star.eccentricity = ecc;
     }
 
-    Some(Star {
-        pos: pos.as_dvec2(),
-        flux: metrics.flux,
-        fwhm: metrics.fwhm,
-        eccentricity: metrics.eccentricity,
-        snr: metrics.snr,
-        peak: region.peak_value,
-        sharpness: metrics.sharpness,
-        roundness1: metrics.roundness1,
-        roundness2: metrics.roundness2,
-    })
+    Some(star)
 }
 
 /// Single iteration of centroid refinement using Gaussian-weighted moments.
@@ -627,7 +611,7 @@ const MAX_SIGMA_SQ: f64 = 100.0;
 /// positive-definite estimate (caller falls back to the plain moments).
 ///
 /// `background_override` replaces the per-pixel map with a flat stamp-level sky,
-/// exactly as in [`compute_metrics`] — both must subtract the same background or
+/// exactly as in [`compute_star`] — both must subtract the same background or
 /// FWHM/eccentricity and flux/SNR would come from different sky conventions.
 fn windowed_covariance(
     pixels: &Buffer2<f32>,
@@ -710,25 +694,11 @@ fn windowed_covariance(
     best
 }
 
-/// Quality metrics for a star.
-#[derive(Debug)]
-pub(crate) struct StarMetrics {
-    pub flux: f32,
-    pub fwhm: f32,
-    pub eccentricity: f32,
-    pub snr: f32,
-    pub sharpness: f32,
-    /// GROUND: roundness from marginal Gaussian fits
-    pub roundness1: f32,
-    /// SROUND: roundness from symmetry analysis
-    pub roundness2: f32,
-}
-
-/// Compute quality metrics for a star at the given position.
+/// Construct a star and compute its quality metrics at the given position.
 ///
 /// Uses f64 accumulators for numerical stability.
 ///
-/// If `gain` and `read_noise` are provided, uses the full CCD noise equation:
+/// If `noise_model` is provided, uses the full CCD noise equation:
 /// `SNR = flux / sqrt(flux/gain + npix × (σ_sky² + σ_read²/gain²))`
 ///
 /// Otherwise, uses the simplified background-dominated formula:
@@ -741,15 +711,15 @@ pub(crate) struct StarMetrics {
 /// interpolated per pixel like the tiled map. It applies to every background
 /// consumer here — flux/marginals, the windowed covariance behind FWHM/eccentricity,
 /// and the SNR noise — so all metrics share one sky convention.
-pub(crate) fn compute_metrics(
+fn compute_star(
     pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
     pos: Vec2,
+    peak: f32,
     stamp_radius: usize,
     background_override: Option<LocalBackground>,
-    gain: Option<f32>,
-    read_noise: Option<f32>,
-) -> Option<StarMetrics> {
+    noise_model: Option<&NoiseModel>,
+) -> Option<Star> {
     let width = pixels.width();
     let height = pixels.height();
 
@@ -875,7 +845,7 @@ pub(crate) fn compute_metrics(
     let npix = (2 * stamp_radius + 1).pow(2) as f32;
     let flux_f32 = flux as f32;
 
-    let snr = compute_snr(flux_f32, avg_noise, npix, gain, read_noise);
+    let snr = compute_snr(flux_f32, avg_noise, npix, noise_model);
 
     // Sharpness = peak / core_flux
     let sharpness = if core_flux > f64::EPSILON {
@@ -888,11 +858,13 @@ pub(crate) fn compute_metrics(
     let (roundness1, roundness2) =
         compute_roundness(&marginal_x[..stamp_size], &marginal_y[..stamp_size]);
 
-    Some(StarMetrics {
+    Some(Star {
+        pos: pos.as_dvec2(),
         flux: flux_f32,
         fwhm,
         eccentricity,
         snr,
+        peak,
         sharpness,
         roundness1,
         roundness2,
@@ -947,35 +919,24 @@ fn safe_ratio(numerator: f64, denominator: f64) -> f64 {
     }
 }
 
-/// Compute SNR using appropriate noise model based on available parameters.
+/// Compute SNR using the configured sensor noise model when available.
 ///
-/// Uses full CCD noise equation when gain is provided:
+/// Uses the full CCD noise equation when the model is provided:
 /// `SNR = flux / sqrt(flux/gain + npix × (σ_sky² + σ_read²/gain²))`
 ///
 /// Otherwise, uses simplified background-dominated formula:
 /// `SNR = flux / (σ_sky × sqrt(npix))`
-fn compute_snr(
-    flux: f32,
-    sky_noise: f32,
-    npix: f32,
-    gain: Option<f32>,
-    read_noise: Option<f32>,
-) -> f32 {
+fn compute_snr(flux: f32, sky_noise: f32, npix: f32, noise_model: Option<&NoiseModel>) -> f32 {
     let sky_var = sky_noise * sky_noise;
 
-    let total_var = match (gain, read_noise) {
-        (Some(g), Some(rn)) if g > f32::EPSILON => {
+    let total_var = match noise_model {
+        Some(noise) if noise.gain > f32::EPSILON => {
             // Full CCD noise model: shot + sky + read noise
-            flux / g + npix * (sky_var + (rn * rn) / (g * g))
+            flux / noise.gain
+                + npix
+                    * (sky_var + (noise.read_noise * noise.read_noise) / (noise.gain * noise.gain))
         }
-        (Some(g), None) if g > f32::EPSILON => {
-            // Shot noise + sky noise (no read noise)
-            flux / g + npix * sky_var
-        }
-        _ => {
-            // Background-dominated: npix × sky_var
-            npix * sky_var
-        }
+        _ => npix * sky_var,
     };
 
     if total_var > f32::EPSILON {

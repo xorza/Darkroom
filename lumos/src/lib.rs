@@ -52,7 +52,8 @@ pub use stacking::star_detection::config::{
     LocalBackgroundMethod, MeasurementConfig as StarDetectionMeasurementConfig, NoiseModel,
 };
 pub use stacking::star_detection::detector::{
-    DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics, StarDetector,
+    DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics,
+    QualityFilterDiagnostics as StarDetectionQualityFilterDiagnostics, StarDetector,
 };
 pub use stacking::star_detection::error::StarDetectionConfigError;
 pub use stacking::star_detection::star::Star;

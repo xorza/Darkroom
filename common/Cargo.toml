@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
+[lints]
+workspace = true
+
 [features]
 # Exposes test-only helpers (e.g. `SerdeFormat::all_formats_for_testing`) to
 # downstream crates' test targets without putting them in the released surface.

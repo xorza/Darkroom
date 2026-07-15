@@ -439,7 +439,7 @@ Results are rejected if:
 
 ```
 centroid/
-├── mod.rs           # Main API: compute_centroid(), refine_centroid(), compute_metrics()
+├── mod.rs           # Main API: compute_centroid(), refine_centroid(), compute_star()
 ├── gaussian_fit.rs  # 2D Gaussian fitting with L-M optimization
 ├── moffat_fit.rs    # 2D Moffat fitting with L-M optimization
 ├── lm_optimizer.rs  # Shared Levenberg-Marquardt optimizer (with weighted variants)

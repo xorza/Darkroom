@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
+[lints]
+workspace = true
+
 [lib]
 proc-macro = true
 

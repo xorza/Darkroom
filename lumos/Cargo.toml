@@ -5,6 +5,9 @@ edition.workspace = true
 description = "Astronomical image-processing pipeline: RAW/FITS decode, calibration, star detection, registration, stacking, and drizzle."
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
+[lints]
+workspace = true
+
 [features]
 real-data = []
 ml = ["dep:ort"]

@@ -96,7 +96,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 ## stacking/star_detection — detection pipeline
 
-`StarDetector` (`detector/mod.rs:76`) holds a reusable `BufferPool` (`buffer_pool.rs:14`); fallible `from_config` validates once through `StarDetectionConfigError`, then `detect(&AstroImage)` → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`). Alignment pipelines propagate invalid detection configuration through `AlignStackError` before doing useful work.
+`StarDetector` holds a reusable `BufferPool`; fallible `from_config` validates once through `StarDetectionConfigError`, then `detect(&AstroImage)` → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`). Measurement constructs `Star` directly, while filtering produces the `QualityFilterDiagnostics` component stored unchanged in `Diagnostics`. Alignment pipelines propagate invalid detection configuration through `AlignStackError` before doing useful work.
 
 `Star` (`star.rs:8`): `pos: DVec2`, `flux`, `fwhm`, `eccentricity`, `snr`, `peak`, `sharpness`, `roundness1`/`roundness2` (DAOFIND GROUND/SROUND), with `is_saturated`/`is_cosmic_ray`/`is_round`.
 

@@ -55,7 +55,7 @@
 | `quicksort::partition` | 1.14% | - | Sorting |
 | `centroid::refine_centroid` | 0.92% | 2.02% | Weighted moments seed |
 | `linear_solver::solve` | 0.81% | - | Gaussian elimination (6x6) |
-| `centroid::compute_metrics` | 0.68% | - | Star quality metrics |
+| `centroid::compute_star` | 0.68% | - | Star quality metrics |
 
 ### Grouped by Pipeline Stage (pre-optimization)
 
@@ -66,7 +66,7 @@
 | **Deblending** | **~11%** | bfs_region (5.3%) + deblend_multi_threshold (5.1%) + PixelGrid (0.7%) |
 | **Threshold mask** | **~7%** | process_words_sse (5.9%) + filtered_sse (1.3%) |
 | Convolution | ~1.5% | convolve_row_avx2 |
-| Centroid (non-fitting) | ~3% | refine_centroid (0.9%) + compute_metrics (0.7%) + measure_star |
+| Centroid (non-fitting) | ~3% | refine_centroid (0.9%) + compute_star (0.7%) + measure_star |
 | Rayon/sorting | ~3% | rayon overhead + quicksort |
 
 ### Key Observation: `exp` Dominated (pre-optimization)
@@ -126,7 +126,7 @@ half-integer beta, there is no algebraic shortcut for `exp()`.
 | `deblend::deblend_multi_threshold` | 1,961 | **6.0%** | Multi-threshold deblend loop |
 | `gaussian_fit::fit_gaussian_2d` | 1,139 | 3.5% | L-M outer loop |
 | `convolution::neon::convolve_cols_neon` | 456 | 1.4% | Column convolution (NEON) |
-| `centroid::compute_metrics` | 430 | 1.3% | Star quality metrics |
+| `centroid::compute_star` | 430 | 1.3% | Star quality metrics |
 | `centroid::linear_solver::solve` | 427 | 1.3% | 6x6 Gaussian elimination |
 | `quicksort::partition` (combined) | 663 | 2.0% | Sorting (multiple monomorphizations) |
 | `centroid::measure_star` | 274 | 0.8% | Per-star measurement dispatch |
@@ -143,7 +143,7 @@ half-integer beta, there is no algebraic shortcut for `exp()`.
 | **Centroid fitting (L-M + exp)** | **~63%** | batch_build (31.3%) + exp (23.4%+2.6%) + fit_gaussian (3.5%) + solve (1.3%) + measure_star (0.8%) |
 | **Deblending** | **~15%** | bfs_region (8.2%) + deblend_multi_threshold (6.0%) + PixelGrid (0.7%) |
 | **Convolution** | **~2.2%** | convolve_cols_neon (1.4%) + convolve_row_neon (0.8%) |
-| **Centroid (non-fitting)** | **~2.3%** | compute_metrics (1.3%) + refine_centroid (0.5%) + extract_stamp (0.2%) |
+| **Centroid (non-fitting)** | **~2.3%** | compute_star (1.3%) + refine_centroid (0.5%) + extract_stamp (0.2%) |
 | **Sorting** | ~2.0% | quicksort partitions |
 | **Memory ops** | ~1.4% | memmove |
 | **Statistics** | ~0.5% | sigma_clip_iteration |

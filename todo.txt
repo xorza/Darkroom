@@ -20,3 +20,5 @@ diskcached pinned outputs arent shown
 stacking frames (outer, inner, reference)
 
 auto chosen reference  and manually specified
+
+visual node groups

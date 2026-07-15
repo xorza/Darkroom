@@ -163,7 +163,7 @@ Contains `StarDetector`, the main entry point that coordinates all pipeline stag
 **Key Types:**
 - `StarDetector` - Main detector with buffer pool for efficient batch processing
 - `DetectionResult` - Final output with stars and diagnostics
-- `Diagnostics` - Per-stage statistics for debugging and tuning
+- `Diagnostics` - Per-stage statistics with one nested `QualityFilterDiagnostics` rejection record
 
 **Submodule `detector/stages/`:**
 - `prepare.rs` - Image preparation (grayscale, CFA filter)

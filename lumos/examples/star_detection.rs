@@ -108,11 +108,14 @@ fn print_diagnostics(diag: &lumos::StarDetectionDiagnostics) {
     println!("    Deblended components: {}", diag.deblended_components);
     println!("    After centroiding: {}", diag.stars_after_centroid);
     println!("  Rejections:");
-    println!("    Low SNR: {}", diag.rejected_low_snr);
-    println!("    High eccentricity: {}", diag.rejected_high_eccentricity);
-    println!("    Cosmic rays: {}", diag.rejected_cosmic_rays);
-    println!("    Saturated: {}", diag.rejected_saturated);
-    println!("    Roundness: {}", diag.rejected_roundness);
-    println!("    FWHM outliers: {}", diag.rejected_fwhm_outliers);
-    println!("    Duplicates: {}", diag.rejected_duplicates);
+    println!("    Low SNR: {}", diag.quality_filter.low_snr);
+    println!(
+        "    High eccentricity: {}",
+        diag.quality_filter.high_eccentricity
+    );
+    println!("    Cosmic rays: {}", diag.quality_filter.cosmic_rays);
+    println!("    Saturated: {}", diag.quality_filter.saturated);
+    println!("    Roundness: {}", diag.quality_filter.roundness);
+    println!("    FWHM outliers: {}", diag.quality_filter.fwhm_outliers);
+    println!("    Duplicates: {}", diag.quality_filter.duplicates);
 }

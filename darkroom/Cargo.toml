@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
+[lints]
+workspace = true
+
 [dependencies]
 aperture = { workspace = true }
 scenarium = { workspace = true, features = ["builtin-fs-watch", "builtin-random"] }

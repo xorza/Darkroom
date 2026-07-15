@@ -5,6 +5,9 @@ edition.workspace = true
 description = "A graph library for Scenarium"
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
+[lints]
+workspace = true
+
 [dependencies]
 common = { workspace = true }
 serde = { workspace = true }

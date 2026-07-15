@@ -19,6 +19,9 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 
+[workspace.lints.clippy]
+items_after_test_module = "deny"
+
 
 [workspace.dependencies]
 common = { path = "common" }

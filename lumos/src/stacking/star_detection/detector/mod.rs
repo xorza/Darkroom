@@ -33,6 +33,25 @@ pub struct DetectionResult {
     pub diagnostics: Diagnostics,
 }
 
+/// Rejection counts produced by the quality-filtering stage.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualityFilterDiagnostics {
+    /// Number of stars rejected as saturated.
+    pub saturated: usize,
+    /// Number of stars rejected for low SNR.
+    pub low_snr: usize,
+    /// Number of stars rejected for high eccentricity.
+    pub high_eccentricity: usize,
+    /// Number of stars rejected as cosmic rays.
+    pub cosmic_rays: usize,
+    /// Number of stars rejected for non-circular shape.
+    pub roundness: usize,
+    /// Number of stars rejected for abnormal FWHM.
+    pub fwhm_outliers: usize,
+    /// Number of duplicate detections removed.
+    pub duplicates: usize,
+}
+
 /// Diagnostic information from star detection.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Diagnostics {
@@ -46,20 +65,8 @@ pub struct Diagnostics {
     pub deblended_components: usize,
     /// Number of stars after centroid computation (before quality filtering).
     pub stars_after_centroid: usize,
-    /// Number of stars rejected for low SNR.
-    pub rejected_low_snr: usize,
-    /// Number of stars rejected for high eccentricity.
-    pub rejected_high_eccentricity: usize,
-    /// Number of stars rejected as cosmic rays (high sharpness).
-    pub rejected_cosmic_rays: usize,
-    /// Number of stars rejected as saturated.
-    pub rejected_saturated: usize,
-    /// Number of stars rejected for non-circular shape (roundness).
-    pub rejected_roundness: usize,
-    /// Number of stars rejected for abnormal FWHM.
-    pub rejected_fwhm_outliers: usize,
-    /// Number of duplicate detections removed.
-    pub rejected_duplicates: usize,
+    /// Rejections produced by the quality-filtering stage.
+    pub quality_filter: QualityFilterDiagnostics,
     /// Final number of stars returned.
     pub final_star_count: usize,
     /// Median FWHM of detected stars (pixels).
@@ -183,17 +190,23 @@ impl StarDetector {
         pool.release_f32(grayscale_image);
 
         // Step 6: Apply quality filters, sort, and remove duplicates
-        let FilterOutcome { stars, stats } = stages::filter::filter(stars, &self.config.filter);
-        stats.apply_to(&mut diagnostics);
+        let FilterOutcome {
+            stars,
+            diagnostics: quality_filter,
+        } = stages::filter::filter(stars, &self.config.filter);
+        diagnostics.quality_filter = quality_filter;
 
-        if stats.fwhm_outliers > 0 {
+        if diagnostics.quality_filter.fwhm_outliers > 0 {
             tracing::debug!(
                 "Removed {} stars with abnormally large FWHM",
-                stats.fwhm_outliers
+                diagnostics.quality_filter.fwhm_outliers
             );
         }
-        if stats.duplicates > 0 {
-            tracing::debug!("Removed {} duplicate star detections", stats.duplicates);
+        if diagnostics.quality_filter.duplicates > 0 {
+            tracing::debug!(
+                "Removed {} duplicate star detections",
+                diagnostics.quality_filter.duplicates
+            );
         }
 
         // Compute final statistics

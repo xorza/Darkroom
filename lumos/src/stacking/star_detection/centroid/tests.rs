@@ -531,24 +531,27 @@ fn test_refine_centroid_iterative_convergence() {
 }
 
 #[test]
-fn test_compute_metrics_valid_star() {
+fn test_compute_star_valid_star() {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(
+    let peak = 0.73;
+    let star = compute_star(
         &pixels,
         &bg,
         Vec2::splat(32.0),
+        peak,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     );
 
-    assert!(metrics.is_some());
-    let m = metrics.unwrap();
+    assert!(star.is_some());
+    let m = star.unwrap();
+    assert_eq!(m.pos, Vec2::splat(32.0).as_dvec2());
+    assert_eq!(m.peak, peak);
     assert!(m.flux > 0.0, "Flux should be positive");
     assert!(m.fwhm > 0.0, "FWHM should be positive");
     assert!(
@@ -559,7 +562,7 @@ fn test_compute_metrics_valid_star() {
 }
 
 #[test]
-fn test_compute_metrics_background_override_replaces_global_map() {
+fn test_compute_star_background_override_replaces_global_map() {
     // Star (sigma 2.5, amplitude 0.8) on an exact 0.1 pedestal, with a global map matching
     // the truth (bg 0.1, noise 0.01). An override of bg 0.05 under-subtracts every stamp
     // pixel by exactly 0.05 (every pixel stays above both bg values, so `.max(0)` never
@@ -578,14 +581,14 @@ fn test_compute_metrics_background_override_replaces_global_map() {
         noise: 0.05,
     };
 
-    let global = compute_metrics(&pixels, &bg, pos, TEST_STAMP_RADIUS, None, None, None).unwrap();
-    let local = compute_metrics(
+    let global = compute_star(&pixels, &bg, pos, 0.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let local = compute_star(
         &pixels,
         &bg,
         pos,
+        0.0,
         TEST_STAMP_RADIUS,
         Some(local_bg),
-        None,
         None,
     )
     .unwrap();
@@ -615,19 +618,19 @@ fn test_compute_metrics_background_override_replaces_global_map() {
 }
 
 #[test]
-fn test_compute_metrics_invalid_position_returns_none() {
+fn test_compute_star_invalid_position_returns_none() {
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Position too close to edge
-    let metrics = compute_metrics(
+    let metrics = compute_star(
         &pixels,
         &bg,
         Vec2::new(3.0, 32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     );
@@ -635,19 +638,19 @@ fn test_compute_metrics_invalid_position_returns_none() {
 }
 
 #[test]
-fn test_compute_metrics_zero_flux_returns_none() {
+fn test_compute_star_zero_flux_returns_none() {
     let width = 64;
     let height = 64;
     // All pixels equal to or below background
     let pixels = Buffer2::new_filled(width, height, 0.05f32);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(
+    let metrics = compute_star(
         &pixels,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     );
@@ -655,7 +658,7 @@ fn test_compute_metrics_zero_flux_returns_none() {
 }
 
 #[test]
-fn test_compute_metrics_fwhm_scales_with_sigma() {
+fn test_compute_star_fwhm_scales_with_sigma() {
     let width = 128;
     let height = 128;
 
@@ -667,22 +670,22 @@ fn test_compute_metrics_fwhm_scales_with_sigma() {
     let pixels_large = make_gaussian_star(width, height, Vec2::splat(64.0), sigma_large, 0.8, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_small = compute_metrics(
+    let metrics_small = compute_star(
         &pixels_small,
         &bg,
         Vec2::splat(64.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap();
-    let metrics_large = compute_metrics(
+    let metrics_large = compute_star(
         &pixels_large,
         &bg,
         Vec2::splat(64.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -698,7 +701,7 @@ fn test_compute_metrics_fwhm_scales_with_sigma() {
 }
 
 #[test]
-fn test_compute_metrics_snr_scales_with_amplitude() {
+fn test_compute_star_snr_scales_with_amplitude() {
     let width = 64;
     let height = 64;
 
@@ -706,22 +709,22 @@ fn test_compute_metrics_snr_scales_with_amplitude() {
     let pixels_bright = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_dim = compute_metrics(
+    let metrics_dim = compute_star(
         &pixels_dim,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap();
-    let metrics_bright = compute_metrics(
+    let metrics_bright = compute_star(
         &pixels_bright,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -744,12 +747,12 @@ fn test_elongated_star_high_eccentricity() {
     let pixels = make_elliptical_star(width, height, Vec2::splat(32.0), 4.0, 1.5, 0.8, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(
+    let metrics = compute_star(
         &pixels,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -772,22 +775,22 @@ fn test_circular_vs_elongated_eccentricity() {
     let elongated = make_elliptical_star(width, height, Vec2::splat(32.0), 4.0, 2.0, 0.8, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_circular = compute_metrics(
+    let metrics_circular = compute_star(
         &circular,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap();
-    let metrics_elongated = compute_metrics(
+    let metrics_elongated = compute_star(
         &elongated,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -850,22 +853,22 @@ fn test_snr_decreases_with_higher_noise() {
     let bg_low_noise = make_uniform_background(width, height, 0.1, 0.01);
     let bg_high_noise = make_uniform_background(width, height, 0.1, 0.1);
 
-    let metrics_low = compute_metrics(
+    let metrics_low = compute_star(
         &pixels,
         &bg_low_noise,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap();
-    let metrics_high = compute_metrics(
+    let metrics_high = compute_star(
         &pixels,
         &bg_high_noise,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -890,12 +893,12 @@ fn test_fwhm_formula_for_known_gaussian() {
     let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), sigma, 0.8, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.001); // Very low noise
 
-    let metrics = compute_metrics(
+    let metrics = compute_star(
         &pixels,
         &bg,
         Vec2::splat(64.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -921,22 +924,22 @@ fn test_flux_proportional_to_amplitude() {
     let pixels_amp2 = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics1 = compute_metrics(
+    let metrics1 = compute_star(
         &pixels_amp1,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap();
-    let metrics2 = compute_metrics(
+    let metrics2 = compute_star(
         &pixels_amp2,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -971,12 +974,12 @@ fn test_eccentricity_bounds() {
         ("elongated_x", elongated_x),
         ("elongated_y", elongated_y),
     ] {
-        let metrics = compute_metrics(
+        let metrics = compute_star(
             &pixels,
             &bg,
             Vec2::splat(32.0),
+            0.0,
             TEST_STAMP_RADIUS,
-            None,
             None,
             None,
         )
@@ -1000,22 +1003,22 @@ fn test_eccentricity_orientation_invariant() {
     let elongated_x = make_elliptical_star(width, height, Vec2::splat(32.0), 4.0, 2.0, 0.8, 0.1);
     let elongated_y = make_elliptical_star(width, height, Vec2::splat(32.0), 2.0, 4.0, 0.8, 0.1);
 
-    let metrics_x = compute_metrics(
+    let metrics_x = compute_star(
         &elongated_x,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap();
-    let metrics_y = compute_metrics(
+    let metrics_y = compute_star(
         &elongated_y,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -1046,22 +1049,22 @@ fn test_snr_formula_consistency() {
     let bg1 = make_uniform_background(width, height, 0.1, noise1);
     let bg2 = make_uniform_background(width, height, 0.1, noise2);
 
-    let metrics1 = compute_metrics(
+    let metrics1 = compute_star(
         &pixels,
         &bg1,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap();
-    let metrics2 = compute_metrics(
+    let metrics2 = compute_star(
         &pixels,
         &bg2,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -1099,12 +1102,12 @@ fn test_metrics_with_high_background() {
     let pixels = Buffer2::new(width, height, pixels);
 
     let bg = make_uniform_background(width, height, 0.5, 0.02);
-    let metrics = compute_metrics(
+    let metrics = compute_star(
         &pixels,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     );
@@ -1129,22 +1132,22 @@ fn test_fwhm_independent_of_amplitude() {
     let pixels_bright = make_gaussian_star(width, height, Vec2::splat(32.0), sigma, 0.9, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_dim = compute_metrics(
+    let metrics_dim = compute_star(
         &pixels_dim,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap();
-    let metrics_bright = compute_metrics(
+    let metrics_bright = compute_star(
         &pixels_bright,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -1172,34 +1175,34 @@ fn test_eccentricity_increases_with_elongation() {
     let ratio_2_1 = make_elliptical_star(width, height, Vec2::splat(32.0), 4.0, 2.0, 0.8, 0.1);
     let ratio_3_1 = make_elliptical_star(width, height, Vec2::splat(32.0), 6.0, 2.0, 0.8, 0.1);
 
-    let ecc_1 = compute_metrics(
+    let ecc_1 = compute_star(
         &ratio_1_1,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap()
     .eccentricity;
-    let ecc_2 = compute_metrics(
+    let ecc_2 = compute_star(
         &ratio_2_1,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap()
     .eccentricity;
-    let ecc_3 = compute_metrics(
+    let ecc_3 = compute_star(
         &ratio_3_1,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -1730,12 +1733,12 @@ fn test_fwhm_estimation_accuracy() {
         let expected_fwhm = FWHM_TO_SIGMA * sigma;
         let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), sigma, 1.0, 0.1);
 
-        let metrics = compute_metrics(
+        let metrics = compute_star(
             &pixels,
             &bg,
             Vec2::splat(64.0),
+            0.0,
             TEST_STAMP_RADIUS,
-            None,
             None,
             None,
         )
@@ -1778,12 +1781,12 @@ fn test_eccentricity_calculation_accuracy() {
             0.8,
             0.1,
         );
-        let metrics = compute_metrics(
+        let metrics = compute_star(
             &pixels,
             &bg,
             Vec2::splat(32.0),
+            0.0,
             TEST_STAMP_RADIUS,
-            None,
             None,
             None,
         )
@@ -1812,31 +1815,32 @@ fn test_snr_calculation_with_gain() {
     let sky_noise = 0.02f32;
     let gain = 2.0f32; // e-/ADU
     let read_noise = 5.0f32; // electrons
+    let noise_model = NoiseModel { gain, read_noise };
 
     let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), sigma, amplitude, 0.1);
     let bg = make_uniform_background(width, height, 0.1, sky_noise);
 
     // Without gain (simplified formula)
-    let metrics_no_gain = compute_metrics(
+    let metrics_no_gain = compute_star(
         &pixels,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap();
 
     // With gain (full CCD equation)
-    let metrics_with_gain = compute_metrics(
+    let metrics_with_gain = compute_star(
         &pixels,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
         None,
-        Some(gain),
-        Some(read_noise),
+        Some(&noise_model),
     )
     .unwrap();
 
@@ -1874,12 +1878,12 @@ fn test_sharpness_point_vs_extended() {
 
     // Compact star (small sigma) - high sharpness
     let compact = make_gaussian_star(width, height, Vec2::splat(32.0), 1.5, 0.8, 0.1);
-    let metrics_compact = compute_metrics(
+    let metrics_compact = compute_star(
         &compact,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -1887,12 +1891,12 @@ fn test_sharpness_point_vs_extended() {
 
     // Extended star (large sigma) - lower sharpness
     let extended = make_gaussian_star(width, height, Vec2::splat(32.0), 4.0, 0.8, 0.1);
-    let metrics_extended = compute_metrics(
+    let metrics_extended = compute_star(
         &extended,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -2106,12 +2110,12 @@ fn test_roundness1_circular_source() {
     let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(
+    let metrics = compute_star(
         &pixels,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -2133,12 +2137,12 @@ fn test_roundness1_x_elongated() {
     let pixels = make_elliptical_star(width, height, Vec2::splat(32.0), 4.0, 2.0, 0.8, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(
+    let metrics = compute_star(
         &pixels,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -2161,12 +2165,12 @@ fn test_roundness2_symmetric_source() {
     let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(
+    let metrics = compute_star(
         &pixels,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -3402,7 +3406,7 @@ fn test_metrics_small_fwhm() {
     let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), sigma, 0.9, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(&pixels, &bg, Vec2::splat(32.0), 5, None, None, None);
+    let metrics = compute_star(&pixels, &bg, Vec2::splat(32.0), 0.0, 5, None, None);
 
     assert!(metrics.is_some(), "Should compute metrics for small FWHM");
     let m = metrics.unwrap();
@@ -3419,12 +3423,12 @@ fn test_metrics_large_fwhm() {
     let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), sigma, 0.8, 0.1);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(
+    let metrics = compute_star(
         &pixels,
         &bg,
         Vec2::splat(64.0),
+        0.0,
         MAX_STAMP_RADIUS,
-        None,
         None,
         None,
     );
@@ -3628,23 +3632,23 @@ fn test_eccentricity_with_contamination() {
 
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_single = compute_metrics(
+    let metrics_single = compute_star(
         &single_star,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
     .unwrap();
 
-    let metrics_contaminated = compute_metrics(
+    let metrics_contaminated = compute_star(
         &contaminated,
         &bg,
         Vec2::splat(32.0),
+        0.0,
         TEST_STAMP_RADIUS,
-        None,
         None,
         None,
     )
@@ -3785,8 +3789,7 @@ fn test_eccentricity_rotation_invariant() {
         let angle_rad = (angle_deg as f32).to_radians();
         let pixels = make_rotated_elliptical_star(width, height, pos, 4.0, 2.0, angle_rad, 0.8);
 
-        let metrics =
-            compute_metrics(&pixels, &bg, pos, TEST_STAMP_RADIUS, None, None, None).unwrap();
+        let metrics = compute_star(&pixels, &bg, pos, 0.0, TEST_STAMP_RADIUS, None, None).unwrap();
         eccentricities.push((angle_deg, metrics.eccentricity));
     }
 

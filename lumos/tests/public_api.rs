@@ -9,9 +9,10 @@ use lumos::{
     RansacConfig, RegistrationConfig, RegistrationMatchingConfig, Rejection, SigmaClipConfig,
     SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
     StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
-    StarDetectionConfigError, StarDetectionFilterConfig, StarDetectionFwhmConfig,
-    StarDetectionMeasurementConfig, StarDetector, StarMatch, Transform, TransformType,
-    TriangleConfig, WarpParams, Weighting, WinsorizedClipConfig,
+    StarDetectionConfigError, StarDetectionDiagnostics, StarDetectionFilterConfig,
+    StarDetectionFwhmConfig, StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics,
+    StarDetector, StarMatch, Transform, TransformType, TriangleConfig, WarpParams, Weighting,
+    WinsorizedClipConfig,
 };
 
 #[test]
@@ -187,6 +188,25 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
             value: 0.0
         })
     ));
+}
+
+#[test]
+fn star_detection_filter_diagnostics_are_one_nested_component() {
+    let quality_filter = StarDetectionQualityFilterDiagnostics {
+        saturated: 1,
+        low_snr: 2,
+        high_eccentricity: 3,
+        cosmic_rays: 4,
+        roundness: 5,
+        fwhm_outliers: 6,
+        duplicates: 7,
+    };
+    let diagnostics = StarDetectionDiagnostics {
+        quality_filter,
+        ..Default::default()
+    };
+
+    assert_eq!(diagnostics.quality_filter, quality_filter);
 }
 
 #[test]

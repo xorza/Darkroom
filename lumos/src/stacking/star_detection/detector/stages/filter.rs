@@ -11,7 +11,7 @@ use smallvec::SmallVec;
 
 use crate::math::statistics::{mad_floored, median_and_mad_f32_mut};
 use crate::stacking::star_detection::config::FilterConfig;
-use crate::stacking::star_detection::detector::Diagnostics;
+use crate::stacking::star_detection::detector::QualityFilterDiagnostics;
 use crate::stacking::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
 use crate::stacking::star_detection::star::{SATURATION_PEAK, Star};
 
@@ -20,37 +20,12 @@ use crate::stacking::star_detection::star::{SATURATION_PEAK, Star};
 /// crossover is conservative — the spatial hash is O(stars) and competitive well below this.
 const SPATIAL_HASH_CROSSOVER: usize = 100;
 
-/// Statistics from quality filtering (for diagnostics).
-#[derive(Debug, Default)]
-pub(crate) struct QualityFilterStats {
-    pub saturated: usize,
-    pub low_snr: usize,
-    pub high_eccentricity: usize,
-    pub cosmic_rays: usize,
-    pub roundness: usize,
-    pub fwhm_outliers: usize,
-    pub duplicates: usize,
-}
-
-impl QualityFilterStats {
-    /// Write rejection counts into the corresponding Diagnostics fields.
-    pub fn apply_to(&self, d: &mut Diagnostics) {
-        d.rejected_saturated = self.saturated;
-        d.rejected_low_snr = self.low_snr;
-        d.rejected_high_eccentricity = self.high_eccentricity;
-        d.rejected_cosmic_rays = self.cosmic_rays;
-        d.rejected_roundness = self.roundness;
-        d.rejected_fwhm_outliers = self.fwhm_outliers;
-        d.rejected_duplicates = self.duplicates;
-    }
-}
-
 /// Result of the filter stage: the surviving stars plus rejection statistics.
 #[derive(Debug)]
 pub(crate) struct FilterOutcome {
     /// Filtered stars, sorted by flux (brightest first).
     pub stars: Vec<Star>,
-    pub stats: QualityFilterStats,
+    pub diagnostics: QualityFilterDiagnostics,
 }
 
 /// Filter stars by quality metrics, remove duplicates, and sort by flux.
@@ -58,24 +33,24 @@ pub(crate) struct FilterOutcome {
 /// Returns the filtered stars and rejection statistics. Stars are returned
 /// sorted by flux (brightest first).
 pub(crate) fn filter(mut stars: Vec<Star>, config: &FilterConfig) -> FilterOutcome {
-    let mut stats = QualityFilterStats::default();
+    let mut diagnostics = QualityFilterDiagnostics::default();
 
     // Apply quality filters
     stars.retain(|star| {
         if star.is_saturated(SATURATION_PEAK) {
-            stats.saturated += 1;
+            diagnostics.saturated += 1;
             false
         } else if star.snr < config.min_snr {
-            stats.low_snr += 1;
+            diagnostics.low_snr += 1;
             false
         } else if star.eccentricity > config.max_eccentricity {
-            stats.high_eccentricity += 1;
+            diagnostics.high_eccentricity += 1;
             false
         } else if star.is_cosmic_ray(config.max_sharpness) {
-            stats.cosmic_rays += 1;
+            diagnostics.cosmic_rays += 1;
             false
         } else if !star.is_round(config.max_roundness) {
-            stats.roundness += 1;
+            diagnostics.roundness += 1;
             false
         } else {
             true
@@ -86,12 +61,12 @@ pub(crate) fn filter(mut stars: Vec<Star>, config: &FilterConfig) -> FilterOutco
     sort_by_flux(&mut stars);
 
     // Filter FWHM outliers
-    stats.fwhm_outliers = filter_fwhm_outliers(&mut stars, config.max_fwhm_deviation);
+    diagnostics.fwhm_outliers = filter_fwhm_outliers(&mut stars, config.max_fwhm_deviation);
 
     // Remove duplicates
-    stats.duplicates = remove_duplicate_stars(&mut stars, config.duplicate_min_separation);
+    diagnostics.duplicates = remove_duplicate_stars(&mut stars, config.duplicate_min_separation);
 
-    FilterOutcome { stars, stats }
+    FilterOutcome { stars, diagnostics }
 }
 
 /// Sort stars by flux (brightest first).
@@ -252,6 +227,65 @@ mod tests {
             roundness1: 0.0,
             roundness2: 0.0,
         }
+    }
+
+    #[test]
+    fn filter_returns_the_diagnostics_stored_by_the_detector() {
+        let stars = vec![
+            make_star_at(10.0, 10.0, 200.0),
+            make_star_at(11.0, 11.0, 190.0),
+            make_star_at(50.0, 10.0, 180.0),
+            make_star_at(90.0, 10.0, 170.0),
+            make_star_at(130.0, 10.0, 160.0),
+            make_star_at(170.0, 10.0, 150.0),
+            Star {
+                fwhm: 20.0,
+                ..make_star_at(210.0, 10.0, 140.0)
+            },
+            Star {
+                peak: 0.96,
+                ..make_star_at(250.0, 10.0, 130.0)
+            },
+            Star {
+                snr: 5.0,
+                ..make_star_at(290.0, 10.0, 120.0)
+            },
+            Star {
+                eccentricity: 0.7,
+                ..make_star_at(330.0, 10.0, 110.0)
+            },
+            Star {
+                sharpness: 0.8,
+                ..make_star_at(370.0, 10.0, 100.0)
+            },
+            Star {
+                roundness1: 0.6,
+                ..make_star_at(410.0, 10.0, 90.0)
+            },
+        ];
+
+        let outcome = filter(stars, &FilterConfig::default());
+
+        assert_eq!(
+            outcome
+                .stars
+                .iter()
+                .map(|star| star.flux)
+                .collect::<Vec<_>>(),
+            vec![200.0, 180.0, 170.0, 160.0, 150.0]
+        );
+        assert_eq!(
+            outcome.diagnostics,
+            QualityFilterDiagnostics {
+                saturated: 1,
+                low_snr: 1,
+                high_eccentricity: 1,
+                cosmic_rays: 1,
+                roundness: 1,
+                fwhm_outliers: 1,
+                duplicates: 1,
+            }
+        );
     }
 
     #[test]

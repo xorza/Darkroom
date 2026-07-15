@@ -543,7 +543,7 @@ the object (SExtractor `FLUX_ISO`; `analyse.c` `rv += cval`). Threshold-dependen
 (faint wings below threshold are lost). **Aperture** and **PSF-fit (PSF_FLUX)**
 fluxes are less biased but need a model/aperture. For detection-stage catalogs,
 isophotal or fixed-stamp summed flux is standard. lumos sums
-`(I − sky).max(0)` over the measurement stamp (`compute_metrics`,
+`(I − sky).max(0)` over the measurement stamp (`compute_star`,
 `centroid/mod.rs:574-577`). Note: clamping negatives to 0 biases faint-source
 flux slightly *high* (it discards negative noise excursions) — acceptable for
 detection, wrong for precise photometry.
@@ -696,7 +696,7 @@ Gaussian *central heights* — equivalent to convolving the data `D` with a
 >   *ad-hoc 1D-marginal asymmetry RMS*, not Stetson/IRAF's quadrant `2·sum2/sum4`
 >   ratio. It is clamped to `[0, 1]`, so it can never go negative and cannot encode
 >   the directional sign that SROUND carries.
-> - **Both are computed on the *unconvolved* stamp** — `compute_metrics` is handed
+> - **Both are computed on the *unconvolved* stamp** — `compute_star` is handed
 >   the raw `pixels` plane (`centroid/mod.rs:528-535`, called from `measure.rs`),
 >   never the matched-filter output. photutils computes sharpness and SROUND on the
 >   **convolved** cutout (only GROUND uses the unconvolved image), so lumos diverges
