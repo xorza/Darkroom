@@ -7,7 +7,7 @@
 //!    via [`ExecutionEngine::install`], which cannot fail.
 //! 2. **plan** — the [`Planner`](plan::Planner) turns the program into an
 //!    [`ExecutionPlan`](plan::ExecutionPlan) (the schedule). Purely structural —
-//!    reachability + topological order + output usage, no cache/digest state.
+//!    reachability + topological order + output demand/readers, no cache/digest state.
 //! 3. **execute** — the [`Executor`](executor::Executor) first resolves which
 //!    pure-structural nodes reuse a cache and cuts every cone that feeds only
 //!    reuse hits (so a cached node's stale upstream isn't recomputed on reopen),
@@ -18,32 +18,38 @@
 //! cross-run cache, and executor) and exposes `install` (phase 1's artifact)
 //! and `execute` (phases 2–3, run back-to-back).
 
+use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
-use common::CancelToken;
+use common::{CancelToken, Span};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::data::DynamicValue;
+#[cfg(test)]
+use crate::DynamicValue;
 use crate::execution::compile::CompiledGraph;
-use crate::execution::stats::{ExecutionStats, RunEvent};
+use crate::execution::identity::NodeAddress;
+use crate::execution::report::RunEvent;
+use crate::execution::stats::ExecutionStats;
 use crate::graph::NodeId;
-use crate::node::function::FuncId;
+use crate::node::definition::FuncId;
 
 pub(crate) mod cache;
 pub(crate) mod codec;
-pub mod compile;
+pub(crate) mod compile;
 pub(crate) mod digest;
-pub mod disk_store;
-pub mod event;
+pub(crate) mod disk_store;
+pub(crate) mod event;
 pub(crate) mod executor;
 mod flatten;
+pub(crate) mod identity;
 pub(crate) mod plan;
 pub(crate) mod program;
 mod query;
+pub(crate) mod report;
 pub(crate) mod resolve;
-pub mod stats;
+pub(crate) mod stats;
 #[cfg(test)]
 mod tests;
 pub(crate) mod validate;
@@ -55,66 +61,85 @@ use executor::Executor;
 use plan::{ExecutionPlan, Planner};
 #[cfg(test)]
 use program::ExecutionNode;
-use program::NodeIdx;
+use program::{NodeIdx, OutputIdx};
 use resolve::Resolver;
 
-/// A per-node column: a `Vec<T>` addressable *only* by [`NodeIdx`], never a raw
-/// `usize`. The per-run/per-update columns that aren't part of a keyed structure —
-/// the plan's verdicts, the executor's outcome column, the planner's DFS scratch —
-/// use this so they can't be indexed by an output-pool index or a port number, and so
-/// [`reset`](Self::reset) ties their length to the node count.
+trait ColumnIndex {
+    fn idx(self) -> usize;
+}
+
+impl ColumnIndex for NodeIdx {
+    fn idx(self) -> usize {
+        self.idx()
+    }
+}
+
+impl ColumnIndex for OutputIdx {
+    fn idx(self) -> usize {
+        self.idx()
+    }
+}
+
+/// A `Vec<T>` addressable only by one typed program index.
 #[derive(Debug, Clone)]
-pub(crate) struct NodeColumn<T> {
-    values: Vec<T>,
+pub(crate) struct Column<I, T> {
+    pub(crate) values: Vec<T>,
+    index: PhantomData<fn(I)>,
 }
 
-// Manual (not derived): `#[derive(Default)]` would add a spurious `T: Default` bound,
-// but an empty column needs none — the element type is only ever supplied by `reset`.
-impl<T> Default for NodeColumn<T> {
+impl<I, T> Default for Column<I, T> {
     fn default() -> Self {
-        NodeColumn { values: Vec::new() }
+        Self {
+            values: Vec::new(),
+            index: PhantomData,
+        }
     }
 }
 
-impl<T> NodeColumn<T> {
-    pub(crate) fn clear(&mut self) {
-        self.values.clear();
-    }
-
-    /// Node count. Only the test-only `Executor::ran` reads it (to treat a pre-run empty
-    /// column as "all ran"); production indexes columns by a valid `NodeIdx`.
-    #[cfg(test)]
-    pub(crate) fn len(&self) -> usize {
-        self.values.len()
-    }
-}
-
-impl<T: Clone> NodeColumn<T> {
-    /// Resize to exactly `len` nodes, every entry `value` — sizing the column to the
-    /// node count at the start of a pass. The one supported way to grow it, so its
-    /// length always equals the node count it was reset to.
+impl<I, T: Clone> Column<I, T> {
     pub(crate) fn reset(&mut self, len: usize, value: T) {
         self.values.clear();
         self.values.resize(len, value);
     }
 }
 
-impl<T> From<Vec<T>> for NodeColumn<T> {
+impl<I, T> From<Vec<T>> for Column<I, T> {
     fn from(values: Vec<T>) -> Self {
-        NodeColumn { values }
+        Self {
+            values,
+            index: PhantomData,
+        }
     }
 }
 
-impl<T> Index<NodeIdx> for NodeColumn<T> {
+impl<I: ColumnIndex, T> Index<I> for Column<I, T> {
     type Output = T;
-    fn index(&self, i: NodeIdx) -> &T {
+
+    fn index(&self, i: I) -> &T {
         &self.values[i.idx()]
     }
 }
 
-impl<T> IndexMut<NodeIdx> for NodeColumn<T> {
-    fn index_mut(&mut self, i: NodeIdx) -> &mut T {
+impl<I: ColumnIndex, T> IndexMut<I> for Column<I, T> {
+    fn index_mut(&mut self, i: I) -> &mut T {
         &mut self.values[i.idx()]
+    }
+}
+
+/// A column aligned to the program's flat node table.
+pub(crate) type NodeColumn<T> = Column<NodeIdx, T>;
+
+/// A column aligned to the program's flat output pool. Node-local views are sliced by
+/// their compiled output span, while individual entries require an [`OutputIdx`].
+pub(crate) type OutputColumn<T> = Column<OutputIdx, T>;
+
+impl<T> Column<OutputIdx, T> {
+    pub(crate) fn slice(&self, outputs: Span) -> &[T] {
+        &self.values[outputs.range()]
+    }
+
+    pub(crate) fn slice_mut(&mut self, outputs: Span) -> &mut [T] {
+        &mut self.values[outputs.range()]
     }
 }
 
@@ -136,8 +161,8 @@ pub enum Error {
     /// A node seed didn't resolve against the compiled program. Seeds are batched with
     /// the graph they target, so a miss means inconsistent caller state (or a disabled
     /// target) — the run fails rather than silently skipping the seed.
-    #[error("node seed {node_id:?} not found in the compiled program")]
-    NodeSeedNotFound { node_id: NodeId },
+    #[error("node seed {address:?} not found in the compiled program")]
+    NodeSeedNotFound { address: NodeAddress },
     #[error("event lambda for node {node_id:?} panicked: {message}")]
     EventLambdaPanic { node_id: NodeId, message: String },
 }
@@ -155,7 +180,7 @@ pub enum RunError {
     // is already paired with its `NodeId` in `node_errors`, so these surface to
     // the editor attributed to the node — a raw id in the text would be noise.
     /// The node's func was registered without an implementation
-    /// ([`FuncLambda::None`](crate::node::func_lambda::FuncLambda)), so the node
+    /// ([`FuncLambda::None`](crate::node::lambda::FuncLambda)), so the node
     /// can't execute. A host/library configuration error, reported per-node
     /// (its consumers skip as errored-upstream) rather than crashing the run.
     #[error("the node's function has no implementation attached")]
@@ -168,19 +193,16 @@ pub enum RunError {
     /// the producer recomputes next run. `input` is the consumer's input position.
     #[error("skipped: a cached input failed to load from disk (recomputes next run)")]
     InputLoadFailed { func_id: FuncId, input: usize },
+    #[error("demanded outputs {outputs:?} were left unbound")]
+    OutputsNotProduced {
+        func_id: FuncId,
+        outputs: Vec<usize>,
+    },
     #[error("cancelled before completing")]
     Cancelled { func_id: FuncId },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-// === Value Types ===
-
-#[derive(Debug, Default)]
-pub struct ArgumentValues {
-    pub inputs: Vec<Option<DynamicValue>>,
-    pub outputs: Vec<DynamicValue>,
-}
 
 /// What seeds a run's schedule — the roots the planner walks back from. The four
 /// are independent and combine: a run can target sink nodes, the event loop's
@@ -198,7 +220,7 @@ pub(crate) struct RunSeeds {
     /// worker batches these with the graph they target, so an id that doesn't resolve
     /// against the compiled program (deleted, disabled, stale) fails the run with
     /// [`Error::NodeSeedNotFound`] — inconsistent caller state, never silently skipped.
-    pub nodes: Vec<NodeId>,
+    pub nodes: Vec<NodeAddress>,
 }
 
 // === Execution Engine ===
@@ -290,7 +312,7 @@ impl ExecutionEngine {
         cancel: CancelToken,
     ) -> Result<ExecutionStats> {
         // Phase 2: schedule into the reusable plan buffer. Purely structural —
-        // reachability + topological order + output usage + the walk roots, no cache/digest
+        // reachability + topological order + output demand/readers + the walk roots, no cache/digest
         // state. The artifact's flatten map resolves node seeds (authoring ids) to flat roots.
         self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
 
@@ -404,7 +426,7 @@ impl ExecutionEngine {
         .await
     }
 
-    pub(crate) async fn execute_nodes<T: IntoIterator<Item = NodeId>>(
+    pub(crate) async fn execute_nodes<T: IntoIterator<Item = NodeAddress>>(
         &mut self,
         nodes: T,
     ) -> Result<ExecutionStats> {
@@ -466,11 +488,15 @@ impl ExecutionEngine {
         self.plan.verdicts[idx.into()]
     }
 
-    pub(crate) fn node_output_usage(
+    pub(crate) fn node_output_demand(
         &self,
         e_node: &ExecutionNode,
-    ) -> &[crate::node::func_lambda::OutputUsage] {
-        &self.plan.output_usage[e_node.outputs.range()]
+    ) -> &[crate::node::lambda::OutputDemand] {
+        self.plan.outputs.demand.slice(e_node.outputs)
+    }
+
+    pub(crate) fn node_output_readers(&self, e_node: &ExecutionNode) -> &[u32] {
+        self.plan.outputs.readers.slice(e_node.outputs)
     }
 
     /// Whether node `idx` recomputed (rather than reused a cache) in the last run.
@@ -492,8 +518,9 @@ impl ExecutionEngine {
             .index_of_key(&self.by_name(node_name).unwrap().id);
         let idx = idx.unwrap();
         let slot = &mut self.cache.slots[idx];
+        let coverage = cache::CachedOutputCoverage::from_values(&values);
         slot.value = cache::ValueState::Resident {
-            values,
+            snapshot: cache::OutputSnapshot::new(values, coverage),
             produced_under: slot.current_digest,
         };
     }

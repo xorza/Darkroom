@@ -3,7 +3,7 @@ use std::hash::Hash;
 
 use aperture::{Rect, ResponseState, Size, Ui};
 use glam::Vec2;
-use scenarium::graph::NodeId;
+use scenarium::NodeId;
 
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::EventRef;

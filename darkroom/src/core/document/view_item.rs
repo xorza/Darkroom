@@ -1,6 +1,6 @@
 use common::KeyIndexKey;
 use glam::Vec2;
-use scenarium::graph::{NodeId, OutputPort};
+use scenarium::{NodeId, OutputPort};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::ItemRef;

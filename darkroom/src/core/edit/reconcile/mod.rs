@@ -19,12 +19,12 @@
 
 use std::collections::HashMap;
 
-use scenarium::data::DataType;
-use scenarium::graph::NodeId;
-use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
-use scenarium::graph::{Binding, Graph, InputPort, NodeKind};
-use scenarium::library::Library;
-use scenarium::node::function::{FuncInput, FuncOutput};
+use scenarium::DataType;
+use scenarium::Library;
+use scenarium::NodeId;
+use scenarium::{Binding, Graph, InputPort, NodeKind};
+use scenarium::{FuncInput, FuncOutput};
+use scenarium::{SubgraphDef, SubgraphId};
 
 use crate::core::document::{Document, GraphRef};
 
@@ -140,7 +140,7 @@ fn plan_outputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncOut
         interior
             .bindings_touching(boundary)
             .into_iter()
-            .filter_map(|(port, _)| (port.node_id == boundary).then_some(port.port_idx)),
+            .filter_map(|entry| (entry.port.node_id == boundary).then_some(entry.port.port_idx)),
     );
     let mut remap = HashMap::with_capacity(used.len());
     let mut interface = Vec::with_capacity(used.len());
@@ -191,8 +191,8 @@ fn remap_target_bindings(graph: &mut Graph, node: NodeId, remap: &HashMap<usize,
     let current: Vec<(usize, Binding)> = graph
         .bindings_touching(node)
         .into_iter()
-        .filter(|(port, _)| port.node_id == node)
-        .map(|(port, b)| (port.port_idx, b))
+        .filter(|entry| entry.port.node_id == node)
+        .map(|entry| (entry.port.port_idx, entry.binding))
         .collect();
     if current.is_empty() {
         return;
@@ -270,8 +270,10 @@ fn infer_used_output_type(
     interior
         .bindings_touching(boundary)
         .into_iter()
-        .find_map(|(port, binding)| match binding {
-            Binding::Bind(src) if port.node_id == boundary && port.port_idx == old => Some(src),
+        .find_map(|entry| match entry.binding {
+            Binding::Bind(src) if entry.port.node_id == boundary && entry.port.port_idx == old => {
+                Some(src)
+            }
             _ => None,
         })
         .map(|src| interior.resolve_output_type(library, src))

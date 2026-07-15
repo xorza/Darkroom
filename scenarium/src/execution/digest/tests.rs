@@ -1,8 +1,9 @@
 use super::*;
-use crate::data::StaticValue;
+use crate::StaticValue;
+use crate::execution::cache::test_support::hydrate;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::graph::NodeId;
-use crate::node::function::FuncId;
+use crate::node::definition::FuncId;
 use common::Span;
 
 /// A folder-input node stays `Pure` and cacheable, but its digest tracks the
@@ -320,7 +321,7 @@ fn fs_path_folds_file_identity_and_path() {
 /// the taint the run loop's reach-time re-stamp resolves).
 #[test]
 fn bound_fs_path_folds_delivered_file_identity() {
-    use crate::data::DynamicValue;
+    use crate::DynamicValue;
 
     let file = std::env::temp_dir().join(format!(
         "scenarium-digest-bound-fs-{}.bin",
@@ -344,7 +345,15 @@ fn bound_fs_path_folds_delivered_file_identity() {
         let producer = node_digest(&p.program, NodeIdx(0), &cache).unwrap();
         cache.slots[NodeIdx(0)].current_digest = Some(producer);
         if let Some(value) = value {
-            cache.hydrate(NodeIdx(0), vec![value], producer);
+            hydrate(
+                &mut cache,
+                NodeIdx(0),
+                crate::execution::cache::OutputSnapshot::new(
+                    vec![value],
+                    crate::execution::cache::CachedOutputCoverage { ports: vec![true] },
+                ),
+                producer,
+            );
         }
         (
             node_digest(&p.program, NodeIdx(1), &cache),
@@ -405,7 +414,7 @@ fn custom_stamper_folds_referent_version() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use crate::data::{DynamicValue, ResourceStamp, ResourceStamper};
+    use crate::{DynamicValue, ResourceStamp, ResourceStamper};
 
     #[derive(Debug)]
     struct VersionStamper(Arc<AtomicU64>);
@@ -435,7 +444,15 @@ fn custom_stamper_folds_referent_version() {
         cache.reconcile(&p.program.e_nodes);
         let producer = node_digest(&p.program, NodeIdx(0), &cache).unwrap();
         cache.slots[NodeIdx(0)].current_digest = Some(producer);
-        cache.hydrate(NodeIdx(0), vec![StaticValue::Int(42).into()], producer);
+        hydrate(
+            &mut cache,
+            NodeIdx(0),
+            crate::execution::cache::OutputSnapshot::new(
+                vec![StaticValue::Int(42).into()],
+                crate::execution::cache::CachedOutputCoverage { ports: vec![true] },
+            ),
+            producer,
+        );
         (
             node_digest(&p.program, NodeIdx(1), &cache),
             node_digest(&p.program, NodeIdx(2), &cache),
@@ -483,7 +500,7 @@ fn output_ports_are_disambiguated() {
 /// type without a version bump.
 #[test]
 fn output_signature_folds_into_digest_and_propagates() {
-    use crate::data::TypeId;
+    use crate::TypeId;
 
     // A flipped output type re-keys.
     let mut flip = Prog::default();

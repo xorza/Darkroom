@@ -1,7 +1,7 @@
 use aperture::{Brush, Color, LinearGradient, PointerButton, PointerEvent, PointerSense, Stop, Ui};
 use glam::Vec2;
-use scenarium::data::DataType;
-use scenarium::graph::{Binding, InputPort, closes_data_cycle};
+use scenarium::DataType;
+use scenarium::{Binding, InputPort, closes_data_cycle};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;

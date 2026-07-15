@@ -5,8 +5,8 @@ use crate::core::document::{Document, ItemRef, TabRef};
 use crate::core::edit::intent::apply::apply_step;
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::Intent;
-use scenarium::graph::NodeSearch;
-use scenarium::graph::subgraph::SubgraphId;
+use scenarium::NodeSearch;
+use scenarium::SubgraphId;
 use scenarium::testing::test_graph;
 
 /// Three tabs with distinct `Local` targets in the primary group so an
@@ -281,7 +281,7 @@ fn moves_of_different_nodes_do_not_coalesce() {
 
 #[test]
 fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
-    use scenarium::graph::{Binding, InputPort};
+    use scenarium::{Binding, InputPort};
 
     let mut doc: Document = test_graph().into();
     let a = doc.graph.iter().next().unwrap().id;
@@ -323,7 +323,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
 #[test]
 fn group_drag_moves_all_and_undoes_as_one() {
     use glam::Vec2;
-    use scenarium::graph::OutputPort;
+    use scenarium::OutputPort;
 
     let mut doc: Document = test_graph().into();
     let a = doc.graph.iter().next().unwrap().id;
@@ -472,9 +472,9 @@ fn history_bounded_by_byte_budget() {
 /// A document carrying a subgraph def "S" with interface inputs
 /// `[A]` and outputs `[R]`, plus that `Local` target.
 fn doc_with_def() -> (Document, GraphRef) {
-    use scenarium::data::DataType;
-    use scenarium::graph::subgraph::SubgraphDef;
-    use scenarium::node::function::{FuncInput, FuncOutput};
+    use scenarium::DataType;
+    use scenarium::SubgraphDef;
+    use scenarium::{FuncInput, FuncOutput};
 
     let mut doc: Document = test_graph().into();
     let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000bb", "S")
@@ -582,9 +582,9 @@ fn rename_boundary_port_dropped_off_local_target_or_oob() {
 fn rename_undo_survives_interface_compaction() {
     use crate::core::document::BoundarySide;
     use crate::core::edit::intent::apply::revert_step;
-    use scenarium::data::DataType;
-    use scenarium::graph::subgraph::SubgraphDef;
-    use scenarium::node::function::FuncInput;
+    use scenarium::DataType;
+    use scenarium::FuncInput;
+    use scenarium::SubgraphDef;
 
     let finput = |n: &str| FuncInput::optional(n, DataType::Int);
     let mut doc: Document = test_graph().into();

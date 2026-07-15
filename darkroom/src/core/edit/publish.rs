@@ -7,9 +7,9 @@
 //! through `Engine::edit_library` — the one place that persists the library
 //! file and propagates the grown library to its downstream copies.
 
-use scenarium::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
-use scenarium::graph::{NodeId, NodeKind, NodeSearch};
-use scenarium::library::Library;
+use scenarium::Library;
+use scenarium::{NodeId, NodeKind, NodeSearch};
+use scenarium::{SubgraphDef, SubgraphId, SubgraphRef};
 
 use crate::core::document::{Document, GraphRef, ItemRef};
 
@@ -193,8 +193,8 @@ fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotab
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::graph::Node;
-    use scenarium::graph::subgraph::SubgraphDef;
+    use scenarium::Node;
+    use scenarium::SubgraphDef;
 
     /// Add a local subgraph def `def` to `doc`'s root graph plus an
     /// instance node referencing it; return the node id.
@@ -315,10 +315,10 @@ mod tests {
 
     #[test]
     fn publish_non_subgraph_node_is_a_noop() {
-        use scenarium::node::function::FuncId;
+        use scenarium::FuncId;
         let mut library = Library::default();
         let mut doc = Document::default();
-        let node = Node::new(scenarium::graph::NodeKind::Func(FuncId::unique()));
+        let node = Node::new(scenarium::NodeKind::Func(FuncId::unique()));
         let node_id = node.id;
         doc.graph.add(node);
 

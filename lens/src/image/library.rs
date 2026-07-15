@@ -12,10 +12,10 @@ use crate::image::{IMAGE_DATA_TYPE, IMAGE_TYPE_ID, Image};
 use imaginarium::{
     Blend, BlendMode, ColorFormat, ContrastBrightness, SUPPORTED_EXTENSIONS, Transform, Vec2,
 };
-use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode, StaticValue};
-use scenarium::library::{Library, TypeEntry};
-use scenarium::node::func_lambda::FuncLambda;
-use scenarium::node::function::{Func, FuncInput, FuncOutput};
+use scenarium::FuncLambda;
+use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode, StaticValue};
+use scenarium::{Func, FuncInput, FuncOutput};
+use scenarium::{Library, TypeEntry};
 
 /// The imaginarium image-processing nodes (category `image`).
 pub fn image_library() -> Library {

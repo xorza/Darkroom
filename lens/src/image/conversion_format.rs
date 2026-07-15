@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use imaginarium::ColorFormat;
-use scenarium::data::{DataType, EnumVariants, TypeId};
+use scenarium::{DataType, EnumVariants, TypeId};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 

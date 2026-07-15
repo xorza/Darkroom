@@ -1,7 +1,7 @@
+use crate::DataType;
 use crate::async_lambda;
-use crate::data::DataType;
 use crate::library::Library;
-use crate::node::function::{Func, FuncInput, FuncOutput};
+use crate::node::definition::{Func, FuncInput, FuncOutput};
 
 /// The built-in system / utility nodes: logging and value-to-text conversion.
 pub fn system_library() -> Library {
@@ -84,8 +84,8 @@ pub fn system_library() -> Library {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::DynamicValue;
-    use crate::node::func_lambda::{InvokeInput, OutputUsage};
+    use crate::DynamicValue;
+    use crate::node::lambda::{InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;
@@ -107,7 +107,7 @@ mod tests {
                 &mut state,
                 &event_state,
                 &mut inputs,
-                &[OutputUsage::Needed(1)],
+                &[OutputDemand::Produce],
                 &mut outputs,
             )
             .await

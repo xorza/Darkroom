@@ -1,9 +1,9 @@
 use crate::runtime::context::ContextType;
 
-use crate::data::*;
 use crate::graph::CacheMode;
-use crate::node::event_lambda::EventLambda;
-use crate::node::func_lambda::FuncLambda;
+use crate::node::event::EventLambda;
+use crate::node::lambda::FuncLambda;
+use crate::{DataType, StaticValue};
 use common::KeyIndexKey;
 use common::id_type;
 use serde::{Deserialize, Serialize};
@@ -174,17 +174,15 @@ impl FuncOutput {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct FuncEvent {
     pub name: String,
-
-    #[serde(skip, default)]
     pub event_lambda: EventLambda,
 }
 
 id_type!(FuncId);
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug)]
 pub struct Func {
     pub id: FuncId,
     pub name: String,
@@ -194,7 +192,6 @@ pub struct Func {
     /// Node manages its own output caching, so the editor's disk-cache (persist)
     /// toggle is meaningless on it and hidden.
     /// `false` (the default) means a normal node that offers the toggle.
-    #[serde(default)]
     pub uncacheable: bool,
 
     /// The [`CacheMode`] a freshly created node of this func copies into its
@@ -202,7 +199,6 @@ pub struct Func {
     /// [`default_cache_mode`](Func::default_cache_mode) builder for funcs worth
     /// caching out of the box. Only a policy for *new* nodes — existing nodes
     /// keep whatever mode they were authored/saved with.
-    #[serde(default)]
     pub default_cache_mode: CacheMode,
 
     pub behavior: FuncBehavior,
@@ -211,21 +207,13 @@ pub struct Func {
     /// implementation invalidates results computed by an older binary. Bump it
     /// whenever the func's output for identical inputs changes. Pure cache
     /// metadata — execution never reads it.
-    #[serde(default)]
     pub version: u64,
 
-    #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
     pub inputs: Vec<FuncInput>,
-    #[serde(default)]
     pub outputs: Vec<FuncOutput>,
-    #[serde(default)]
     pub events: Vec<FuncEvent>,
-    #[serde(skip, default)]
     pub required_contexts: Vec<ContextType>,
-
-    #[serde(skip, default)]
     pub lambda: FuncLambda,
 }
 
@@ -352,23 +340,7 @@ impl Func {
 #[cfg(test)]
 mod tests {
     use crate::graph::CacheMode;
-    use crate::node::function::{Func, FuncId};
-    use common::{SerdeFormat, deserialize};
-
-    #[test]
-    fn version_defaults_to_zero_for_legacy_documents() -> anyhow::Result<()> {
-        // A document authored before `version` existed carries no such field;
-        // `#[serde(default)]` must fill it with 0 rather than fail to parse.
-        let legacy = r#"{ "id": "00000000-0000-0000-0000-000000000001", "name": "legacy",
-            "category": "", "sink": false, "behavior": "Impure" }"#;
-        let func: Func = deserialize(legacy.as_bytes(), SerdeFormat::Json)?;
-        assert_eq!(func.version, 0);
-        assert_eq!(Func::default().version, 0);
-        // The `default_cache_mode` field postdates `version`, so a legacy func
-        // omits it too — `#[serde(default)]` must fill it with `None`.
-        assert_eq!(func.default_cache_mode, CacheMode::None);
-        Ok(())
-    }
+    use crate::node::definition::{Func, FuncId};
 
     #[test]
     fn default_cache_mode_defaults_to_none_and_builder_overrides() {

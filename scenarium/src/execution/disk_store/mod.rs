@@ -5,7 +5,8 @@
 //! [`RuntimeCache`](crate::execution::cache::RuntimeCache) that owns it and drives the
 //! reuse/eviction policy. A disk-backed (`Disk`/`Both`) node's outputs live at
 //! `<disk_root>/<hex(node id)>` — **one blob per node** — as `[content digest — 32
-//! bytes][codec frame]`, written atomically. A digest change overwrites the node's blob in
+//! bytes][blob version][output count][output-coverage bytes][codec body]`, written
+//! atomically. A digest change overwrites the node's blob in
 //! place, so a superseded configuration's bytes never linger as an orphan; the header keeps
 //! it correct — every presence probe and read checks it, so a blob carrying a digest other
 //! than the node's current one is a miss, never a stale hit.
@@ -15,7 +16,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::data::{DataType, DynamicValue};
+use crate::DataType;
+use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot};
 use crate::execution::codec::{self, deserialize_outputs, serialize_outputs};
 use crate::execution::digest::Digest;
 use crate::execution::program::ExecutionNode;
@@ -47,12 +49,15 @@ pub(crate) struct BlobTarget {
     pub(crate) digest: Digest,
 }
 
+const BLOB_FORMAT_VERSION: u32 = 4;
+const COVERAGE_OFFSET: u64 = 32 + 4 + 4;
+
 impl BlobTarget {
     /// Whether a blob stamped with this target's digest sits at its path — the "would a
     /// read hit?" probe, answered from the 32-byte header without touching the body. A
     /// file carrying another digest is a superseded write, not a hit.
-    pub(crate) fn is_current(&self) -> bool {
-        stored_digest(&self.path) == Some(self.digest)
+    pub(crate) fn coverage(&self) -> Option<CachedOutputCoverage> {
+        stored_coverage(&self.path, self.digest)
     }
 
     /// Delete the blob — used to clear a file that failed to decode, so the recompute
@@ -112,7 +117,7 @@ impl DiskStore {
     /// Mirrors [`store`](Self::store): the fs read + decode of a possibly huge blob runs on
     /// the blocking pool so it doesn't stall the async worker thread (progress events, cancel
     /// polling, other event-loop tasks).
-    pub(crate) async fn read(&self, target: &BlobTarget) -> Option<Vec<DynamicValue>> {
+    pub(crate) async fn read(&self, target: &BlobTarget) -> Option<OutputSnapshot> {
         let path = target.path.clone();
         let digest = target.digest;
         let library = self.library.clone();
@@ -121,10 +126,10 @@ impl DiskStore {
             .expect("cache read task panicked")
     }
 
-    /// Serialize `outputs` to `target`, stamped with its digest. A blob already carrying that
-    /// digest is the same bytes → skipped, avoiding a redundant, possibly costly serialize; a
-    /// blob under any *other* digest is superseded and overwritten — this is where a stale
-    /// cache dies instead of orphaning. An output whose custom type has no registered codec
+    /// Serialize `outputs` to `target`, stamped with its digest and output coverage. A
+    /// blob is skipped only when that digest matches and its mask covers this result; broader
+    /// materialization replaces a narrower same-digest frame. A blob under any other digest
+    /// is superseded and overwritten. An output whose custom type has no registered codec
     /// makes the node uncacheable — a silent skip, not a failure. The outputs are
     /// **borrowed**, not cloned — the write future captures only the value slice (which is
     /// `Sync`), never the whole (non-`Sync`) cache, so the borrow can safely cross the
@@ -132,13 +137,15 @@ impl DiskStore {
     pub(crate) async fn store(
         &self,
         target: &BlobTarget,
-        outputs: &[DynamicValue],
+        snapshot: &OutputSnapshot,
         ctx: &mut ContextManager,
     ) {
-        if target.is_current() {
+        if target.coverage().is_some_and(|stored| {
+            stored.ports.len() == snapshot.coverage.ports.len() && stored.covers(&snapshot.coverage)
+        }) {
             return;
         }
-        let bytes = match serialize_outputs(outputs, &self.library, ctx).await {
+        let bytes = match serialize_outputs(&snapshot.values, &self.library, ctx).await {
             Ok(bytes) => bytes,
             Err(codec::Error::UnknownType(_)) => return,
             Err(e) => {
@@ -151,26 +158,44 @@ impl DiskStore {
         // other event-loop tasks). `serialize_outputs` above already did the heavy encode.
         let path = target.path.clone();
         let digest = target.digest;
-        let result = tokio::task::spawn_blocking(move || atomic_write(&path, digest, &bytes))
-            .await
-            .expect("cache write task panicked");
+        let coverage = snapshot.coverage.clone();
+        let result =
+            tokio::task::spawn_blocking(move || atomic_write(&path, digest, &coverage, &bytes))
+                .await
+                .expect("cache write task panicked");
         if let Err(e) = result {
             tracing::warn!(path = %target.path.display(), error = %e, "failed to write output cache");
         }
     }
 }
 
-/// The content digest stamped in a blob's leading 32 bytes, or `None` when the file
-/// is absent, unreadable, or too short to carry one. The cheap presence/validity
-/// probe behind [`BlobTarget::is_current`], answered without touching the body.
-fn stored_digest(path: &Path) -> Option<Digest> {
+fn stored_coverage(path: &Path, digest: Digest) -> Option<CachedOutputCoverage> {
     let mut file = std::fs::File::open(path).ok()?;
-    let mut buf = [0u8; 32];
-    file.read_exact(&mut buf).ok()?;
-    Some(Digest(buf))
+    let mut stored_digest = [0u8; 32];
+    file.read_exact(&mut stored_digest).ok()?;
+    if stored_digest != digest.0 {
+        return None;
+    }
+    let mut number = [0u8; 4];
+    file.read_exact(&mut number).ok()?;
+    if u32::from_le_bytes(number) != BLOB_FORMAT_VERSION {
+        return None;
+    }
+    file.read_exact(&mut number).ok()?;
+    let output_count = usize::try_from(u32::from_le_bytes(number)).ok()?;
+    let remaining_file_bytes =
+        usize::try_from(file.metadata().ok()?.len().checked_sub(COVERAGE_OFFSET)?).ok()?;
+    if output_count > remaining_file_bytes {
+        return None;
+    }
+    let mut ports = Vec::new();
+    ports.try_reserve_exact(output_count).ok()?;
+    ports.resize(output_count, 0);
+    file.read_exact(&mut ports).ok()?;
+    CachedOutputCoverage::from_bytes(&ports)
 }
 
-fn read_blocking(path: &Path, digest: Digest, library: &Library) -> Option<Vec<DynamicValue>> {
+fn read_blocking(path: &Path, digest: Digest, library: &Library) -> Option<OutputSnapshot> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return None,
@@ -179,14 +204,38 @@ fn read_blocking(path: &Path, digest: Digest, library: &Library) -> Option<Vec<D
             return None;
         }
     };
-    let Some(body) = bytes.strip_prefix(digest.0.as_slice()) else {
+    let Some(frame) = bytes.strip_prefix(digest.0.as_slice()) else {
         // The presence check saw this digest, so the file changed underfoot (a
         // concurrent writer landed a newer configuration). Not an error — a miss.
         tracing::warn!(path = %path.display(), "cache blob carries a different digest; treating as miss");
         return None;
     };
+    let version = frame.get(..4)?;
+    if u32::from_le_bytes(version.try_into().expect("4-byte version")) != BLOB_FORMAT_VERSION {
+        return None;
+    }
+    let count = frame.get(4..8)?;
+    let output_count = u32::from_le_bytes(count.try_into().expect("4-byte output count")) as usize;
+    let coverage_bytes = frame.get(8..8 + output_count)?;
+    let coverage = CachedOutputCoverage::from_bytes(coverage_bytes)?;
+    let body = &frame[8 + output_count..];
     match deserialize_outputs(body, library) {
-        Ok(values) => Some(values),
+        Ok(values) if values.len() == output_count => {
+            let snapshot = OutputSnapshot::try_new(values, coverage);
+            if snapshot.is_none() {
+                tracing::warn!(path = %path.display(), "cached coverage does not match output values; recomputing");
+            }
+            snapshot
+        }
+        Ok(values) => {
+            tracing::warn!(
+                path = %path.display(),
+                expected = output_count,
+                values = values.len(),
+                "cached outputs have the wrong count; recomputing"
+            );
+            None
+        }
         Err(e) => {
             tracing::warn!(path = %path.display(), error = %e, "cached outputs failed to decode; recomputing");
             None
@@ -204,7 +253,15 @@ fn read_blocking(path: &Path, digest: Digest, library: &Library) -> Option<Vec<D
 /// to a concurrent writer is tolerated only when the survivor carries **our** digest
 /// (same bytes); a survivor under any other digest means this store failed and the
 /// caller must hear about it.
-fn atomic_write(path: &Path, digest: Digest, body: &[u8]) -> io::Result<()> {
+fn atomic_write(
+    path: &Path,
+    digest: Digest,
+    coverage: &CachedOutputCoverage,
+    body: &[u8],
+) -> io::Result<()> {
+    let output_count = u32::try_from(coverage.ports.len())
+        .expect("a node output count must fit in the cache header");
+    let coverage_bytes = coverage.as_bytes();
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
@@ -212,6 +269,9 @@ fn atomic_write(path: &Path, digest: Digest, body: &[u8]) -> io::Result<()> {
     let write_tmp = || -> io::Result<()> {
         let mut file = std::fs::File::create(&tmp)?;
         file.write_all(&digest.0)?;
+        file.write_all(&BLOB_FORMAT_VERSION.to_le_bytes())?;
+        file.write_all(&output_count.to_le_bytes())?;
+        file.write_all(&coverage_bytes)?;
         file.write_all(body)
     };
     let result = write_tmp().and_then(|()| std::fs::rename(&tmp, path));
@@ -221,7 +281,9 @@ fn atomic_write(path: &Path, digest: Digest, body: &[u8]) -> io::Result<()> {
             // Don't leave the temp file behind — a disk-full store would otherwise
             // leak a fresh uniquely-named leftover on every failed attempt.
             let _ = std::fs::remove_file(&tmp);
-            if stored_digest(path) == Some(digest) {
+            if stored_coverage(path, digest).is_some_and(|stored| {
+                stored.ports.len() == coverage.ports.len() && stored.covers(coverage)
+            }) {
                 Ok(())
             } else {
                 Err(e)

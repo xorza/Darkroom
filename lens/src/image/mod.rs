@@ -12,7 +12,7 @@ use std::any::Any;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, LazyLock};
 
-use scenarium::data::{CustomValue, DataType, RamUsage, TypeId};
+use scenarium::{CustomValue, DataType, RamUsage, TypeId};
 
 pub static IMAGE_TYPE_ID: LazyLock<TypeId> =
     LazyLock::new(|| "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into());

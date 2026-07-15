@@ -14,12 +14,12 @@ use aperture::{
     Align, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, Sense, Sizing, Spacing, Text,
     TextStyle, Track, Ui, VAlign, WidgetId,
 };
-use scenarium::data::{DataType, FsPathMode};
-use scenarium::graph::Binding;
-use scenarium::graph::InputPort;
-use scenarium::graph::NodeId;
-use scenarium::graph::OutputPort;
-use scenarium::library::Library;
+use scenarium::Binding;
+use scenarium::InputPort;
+use scenarium::Library;
+use scenarium::NodeId;
+use scenarium::OutputPort;
+use scenarium::{DataType, FsPathMode};
 
 use crate::core::document::BoundarySide;
 use crate::core::document::{PortKind, PortRef};

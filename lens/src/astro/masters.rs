@@ -7,7 +7,7 @@ use std::any::Any;
 use std::sync::{Arc, LazyLock};
 
 use lumos::CalibrationMasters;
-use scenarium::data::{CustomValue, DataType, RamUsage, TypeId};
+use scenarium::{CustomValue, DataType, RamUsage, TypeId};
 
 pub static MASTERS_TYPE_ID: LazyLock<TypeId> =
     LazyLock::new(|| "db1bc978-1d0b-4ffc-9a74-6220eff8908e".into());

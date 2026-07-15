@@ -2,20 +2,17 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
-
-use crate::data::{CustomValueCodec, ResourceStamper};
-use crate::data::{DataType, EnumVariants, TypeId};
 use crate::graph::subgraph::{SubgraphDef, SubgraphId};
-use crate::node::function::{Func, FuncId};
+use crate::node::definition::{Func, FuncId};
+use crate::{CustomValueCodec, ResourceStamper};
+use crate::{DataType, EnumVariants, TypeId};
 use common::KeyIndexVec;
-use common::{SerdeFormat, deserialize, serialize};
 
-/// The serializable metadata of a registered nominal type — a `Custom`
+/// The metadata of a registered nominal type — a `Custom`
 /// app-extension type or an `Enum`. Identity is the [`TypeId`] it's keyed by in
 /// [`Library::types`]; this is everything else the editor needs to render and
 /// validate it.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeDecl {
     Custom {
         display_name: String,
@@ -42,19 +39,16 @@ impl TypeDecl {
     }
 }
 
-/// A registered type: its serializable [`TypeDecl`] plus the optional runtime
+/// A registered type declaration plus its optional runtime
 /// attachments — the [`CustomValueCodec`] that makes its values disk-cacheable, and the
 /// [`ResourceStamper`] that marks it a resource-reference type (its values name external
 /// state whose identity folds into consumers' digests — see `execution/digest`). Both are
-/// `#[serde(skip)]` and re-attached when the library is assembled in-process — the same
-/// split [`Func`] uses for its [`lambda`](Func::lambda). An `Enum` never carries either
-/// (enum values serialize directly as `StaticValue`).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// attachments. An `Enum` never carries either; enum values serialize directly as
+/// [`crate::StaticValue`] inside authored graphs.
+#[derive(Clone, Debug)]
 pub struct TypeEntry {
     pub decl: TypeDecl,
-    #[serde(skip, default)]
     pub codec: Option<Arc<dyn CustomValueCodec>>,
-    #[serde(skip, default)]
     pub stamper: Option<Arc<dyn ResourceStamper>>,
 }
 
@@ -108,35 +102,26 @@ impl TypeEntry {
 
 /// The runtime registry every frontend resolves against: the [`Func`]s nodes
 /// instantiate, the shared subgraph definitions, and the nominal types (with
-/// their disk codecs). The single serializable artifact that says "what this app
-/// knows how to do"; the runtime-only bits ([`Func::lambda`], [`TypeEntry::codec`])
-/// are `#[serde(skip)]` and re-attached when assembled in-process.
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+/// their disk codecs). This is runtime registry state, not a persistence format;
+/// authored graphs serialize function and type ids and resolve them against a
+/// process-assembled library.
+#[derive(Default, Debug, Clone)]
 pub struct Library {
     pub funcs: KeyIndexVec<FuncId, Func>,
 
     /// Shared (linked) subgraph definitions. A node with
     /// `NodeKind::Subgraph(SubgraphRef::Linked(id))` resolves here; editing a
     /// def propagates to every linked instance. See `execution/README.md` Part A.
-    #[serde(default)]
     pub subgraphs: KeyIndexVec<SubgraphId, SubgraphDef>,
 
     /// Registered nominal types (`Custom`/`Enum`), keyed by [`TypeId`]. The home
     /// for type metadata and the disk codecs the output cache dispatches through.
     /// Lookup-only (never iterated in order), so a plain map rather than a
     /// `KeyIndexVec`.
-    #[serde(default)]
     pub types: HashMap<TypeId, TypeEntry>,
 }
 
 impl Library {
-    pub fn deserialize(serialized: &[u8], format: SerdeFormat) -> anyhow::Result<Self> {
-        deserialize(serialized, format)
-    }
-    pub fn serialize(&self, format: SerdeFormat) -> anyhow::Result<Vec<u8>> {
-        serialize(&self, format)
-    }
-
     pub fn by_id(&self, id: &FuncId) -> Option<&Func> {
         assert!(!id.is_nil());
         self.funcs.by_key(id)
@@ -239,32 +224,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::Library;
-    use crate::data::{DynamicValue, StaticValue};
-    use crate::node::func_lambda::{InvokeInput, OutputUsage};
+    use crate::node::lambda::{InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::testing::{TestFuncHooks, test_func_lib};
-    use common::SerdeFormat;
-
-    #[test]
-    fn roundtrip_serialization() -> anyhow::Result<()> {
-        let mut library = test_func_lib(TestFuncHooks::default());
-        // Stamp a non-default version so the round-trip actually exercises the
-        // field rather than always serializing the `0` default.
-        library.by_name_mut("sum").unwrap().version = 7;
-
-        for format in SerdeFormat::all_formats_for_testing() {
-            let serialized = library.serialize(format)?;
-            let deserialized = Library::deserialize(&serialized, format)?;
-            assert_eq!(deserialized.by_name("sum").unwrap().version, 7);
-            let serialized_again = deserialized.serialize(format)?;
-            assert_eq!(serialized, serialized_again);
-        }
-
-        Ok(())
-    }
-
+    use crate::{DynamicValue, StaticValue};
     #[tokio::test]
     async fn invoke_by_id_and_index() -> anyhow::Result<()> {
         let library = test_func_lib(TestFuncHooks::default());
@@ -281,7 +245,7 @@ mod tests {
             },
         ];
         let mut outputs = vec![DynamicValue::Unbound];
-        let outputs_meta = vec![OutputUsage::Needed(1); outputs.len()];
+        let output_demand = vec![OutputDemand::Produce; outputs.len()];
         let event_state = crate::runtime::shared_any_state::SharedAnyState::default();
         library
             .by_id(&sum_id)
@@ -292,7 +256,7 @@ mod tests {
                 &mut node_state,
                 &event_state,
                 &mut inputs,
-                &outputs_meta,
+                &output_demand,
                 &mut outputs,
             )
             .await?;
@@ -314,7 +278,7 @@ mod tests {
                 &mut node_state,
                 &event_state,
                 &mut inputs,
-                &outputs_meta,
+                &output_demand,
                 &mut outputs,
             )
             .await?;

@@ -12,7 +12,7 @@ use aperture::{
     Sizing, Spacing, Spinner, Stroke, Text, TextStyle, Ui, VAlign, WidgetId,
 };
 use glam::Vec2;
-use scenarium::graph::{CacheMode, NodeId};
+use scenarium::{CacheMode, NodeId};
 
 use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::{Intent, NodeProperty};

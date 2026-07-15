@@ -18,10 +18,10 @@ use lumos::{
     MlError, NeutralizeBackground, OpError, Reference, StackConfig, TiledOnnxConfig,
     calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only, stack_cfa_master,
 };
-use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
-use scenarium::library::{Library, TypeEntry};
-use scenarium::node::func_lambda::{FuncLambda, InvokeError, InvokeResult};
-use scenarium::node::function::{Func, FuncInput, FuncOutput, ValueVariant};
+use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode};
+use scenarium::{Func, FuncInput, FuncOutput, ValueVariant};
+use scenarium::{FuncLambda, InvokeError, InvokeResult};
+use scenarium::{Library, TypeEntry};
 
 use crate::astro::configs::{
     BackgroundConfigDef, CombineConfigDef, DenoiseConfigDef, DetectionConfigDef, HdrConfigDef,
@@ -712,10 +712,10 @@ pub fn astro_library() -> Library {
                     .description("The recovered star layer."),
             )
             .lambda(FuncLambda::new(
-                move |_, _, _, inputs, output_usage, outputs| {
+                move |_, _, _, inputs, output_demand, outputs| {
                     // The unscreen pass that recovers "Stars" is a whole-image pixel loop on
                     // top of the ONNX inference — skip it when nothing reads that output.
-                    let need_stars = !output_usage[1].is_skip();
+                    let need_stars = !output_demand[1].is_skip();
                     Box::pin(async move {
                         let model = ml_model_paths().star_removal;
                         if need_stars {

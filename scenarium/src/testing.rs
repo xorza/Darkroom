@@ -1,16 +1,14 @@
 //! Shared test fixtures: a 5-func sample library and a small graph that
-//! wires it together. Kept out of production modules so `function.rs` /
-//! `graph.rs` don't cross-import from the prelude for fixture code.
-//! Darkroom's `session.rs` also uses `test_func_lib` as a demo/sample func
-//! set on startup — keep that in mind before renaming.
+//! wires it together. This module is available only for in-tree tests or the
+//! downstream `internals` dev feature.
 
 use std::sync::Arc;
 
+use crate::DataType;
 use crate::async_lambda;
-use crate::data::DataType;
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeId};
 use crate::library::Library;
-use crate::node::function::{Func, FuncInput, FuncOutput};
+use crate::node::definition::{Func, FuncInput, FuncOutput};
 
 pub struct TestFuncHooks {
     pub get_a: Arc<dyn Fn() -> anyhow::Result<i64> + Send + Sync + 'static>,

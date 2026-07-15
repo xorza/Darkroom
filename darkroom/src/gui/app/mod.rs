@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aperture::Ui;
-use scenarium::graph::Graph as CoreGraph;
-use scenarium::library::Library;
+use scenarium::Graph as CoreGraph;
+use scenarium::Library;
 
 use crate::core::document::Document;
 use crate::core::engine::Engine;
@@ -31,8 +31,8 @@ use exit_dialog::ExitChoice;
 pub(crate) struct AppContext<'a> {
     pub(crate) theme: &'a Theme,
     pub(crate) library: &'a Library,
-    /// Last run's per-node state (status, logs), keyed by authoring `NodeId`.
-    /// Read by the inspection panel's Log section.
+    /// Last run's centralized runtime state: per-node status/logs and the
+    /// latest pinned-output values read by previews and viewers.
     pub(crate) run_state: &'a RunState,
     /// Whether the worker's event loop is running — drives the events
     /// toggle's on/off look. App-side intent rather than the worker's atomic,
@@ -142,11 +142,11 @@ impl App {
     /// Consume worker results posted since the last frame. A finished run
     /// reprojects per-node `ExecStatus` (the status glow) and per-node
     /// logs (the inspector's Log section); a failed run clears both and
-    /// surfaces in the status bar. A pinned output's live push lands on
-    /// the editor, which prepares its small image preview and refreshes any
-    /// viewer already open for that port immediately, independent of the
-    /// final stats. Drained before the editor's scene rebuild so they reflect
-    /// the latest run.
+    /// surfaces in the status bar. A pinned output's live push lands in the
+    /// centralized `RunState`, which prepares its small image preview; visible
+    /// previews and viewers read the new revision during the frame already
+    /// scheduled by the worker's wake callback. Drained before the editor's
+    /// scene rebuild so they reflect the latest run.
     fn drain_worker_events(&mut self) {
         // Collect to drop the channel borrow before the status writes below
         // (both live on `self.engine`).
@@ -178,7 +178,9 @@ impl App {
                     .editor
                     .run_state
                     .apply_progress(&progress, &self.engine.flatten_map),
-                WorkerEvent::PinnedOutputs(pinned) => self.editor.set_pinned_values(pinned),
+                WorkerEvent::PinnedOutputs(pinned) => {
+                    self.editor.run_state.set_pinned_values(pinned);
+                }
             }
         }
     }

@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use scenarium::data::{FsPathConfig, FsPathMode};
+use scenarium::{FsPathConfig, FsPathMode};
 
 /// File-dialog extension filters. First entry is the default — Rhai is the
 /// canonical on-disk format for scenarium graphs.

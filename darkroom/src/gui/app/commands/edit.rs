@@ -2,8 +2,8 @@
 //! inline `FsPath` const-input picker. The dialog runs outside the record,
 //! then the chosen path lands as an ordinary undoable `SetInput` edit.
 
-use scenarium::data::StaticValue;
-use scenarium::graph::Binding;
+use scenarium::Binding;
+use scenarium::StaticValue;
 
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::App;

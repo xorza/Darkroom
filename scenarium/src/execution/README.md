@@ -4,7 +4,7 @@ The compile→plan→execute pipeline and its caches. This README is the long-fo
 design home that the module's `//!` docs point at. Two parts:
 
 - **A. Subgraphs** — how composite nodes are authored and flattened away
-  (`flatten.rs`; authoring types in `subgraph.rs`/`graph.rs`).
+  (`flatten/`; authoring types in `graph/subgraph.rs` and `graph/`).
 - **B. Disk cache** — the node-keyed, digest-stamped output cache for disk-backed (`Disk`/`Both`) nodes
   (`digest.rs`, `cache.rs`, `disk_store.rs`, `codec.rs`). The `RuntimeCache`
   (`cache.rs`) owns the RAM slots *and* the `DiskStore` (`disk_store.rs`, pure blob I/O) and runs
@@ -26,7 +26,7 @@ in the authoring model** and are dissolved before execution.
 
 ## A.2 Two representations
 
-- **Authoring graph** (`Graph`, `graph.rs`) — what the editor edits. Holds composite
+- **Authoring graph** (`Graph`, `graph/`) — what the editor edits. Holds composite
   instances (`NodeKind::Subgraph`), boundary nodes, and nested definitions.
   Serializable.
 - **Execution program** (`ExecutionProgram`, `program.rs`) — the compiled, flattened,
@@ -37,7 +37,7 @@ compile boundary is composite-agnostic.
 
 ## A.3 Authoring representation
 
-A **`SubgraphDef`** (`subgraph.rs`) is a reusable definition: an interior `Graph` plus
+A **`SubgraphDef`** (`graph/subgraph.rs`) is a reusable definition: an interior `Graph` plus
 the interface it exposes.
 
 ```
@@ -178,10 +178,11 @@ Each emitted node gets a deterministic flat `NodeId`:
 
 - **Top-level** nodes (empty descent path) keep their **own id verbatim** — so a
   func-only graph maps to itself and per-node caches survive edits elsewhere.
-- **Nested** nodes get `hash(descent-path ids, interior id)`. This is stable across
-  builds, distinct from the bare interior id, and sensitive to both the path and the
-  interior id — so two instances of one composite, or two interior nodes, never
-  collide on a flat id (and thus never share a cache slot).
+- **Nested** nodes get the first 128 bits of a domain-separated BLAKE3 digest over
+  the descent-path ids and interior id. This is stable across builds, distinct from
+  the bare interior id, and sensitive to both the path and the interior id. Every
+  insertion into `FlattenMap` asserts that the flat id and scoped authoring address
+  are both unique, so a collision is a hard logic failure rather than silent aliasing.
 
 ### §5.3 Resolving data bindings across boundaries
 
@@ -312,18 +313,14 @@ live filesystem state and could drift mid-run), not `update`: only then are its 
 
 ## B.3 Storage (`disk_store.rs`)
 
-A node's blob lives at `<disk_root>/<hex(node id)>` — **one file per node** — with the
-content digest it was produced under as the file's first 32 bytes. The digest header is
-the validity check: a presence probe (`stored_digest`) and every read compare it against
-the node's current digest, so a blob stamped with a superseded digest is a miss, never a
-stale hit. Invalidation is an **overwrite**: when the node recomputes under a new digest
-its one blob is replaced in place, so a superseded configuration's bytes can't linger as
-an unreachable orphan (the failure mode of keying files by digest: every digest change
-stranded the old file forever). The trade: flipping inputs back to an earlier
-configuration recomputes (its blob was overwritten), and two nodes with identical
-computations store two blobs. Writes are **atomic** (temp file + rename), so a reader
-never sees a half-written blob. A blob already stamped with the current digest is the
-same bytes, so the store skips re-serializing it.
+A node's blob lives at `<disk_root>/<hex(node id)>` — **one file per node**. Its outer
+header is the 32-byte content digest, a format version, the output count, and one
+materialization byte per output; the codec body follows. Presence probes read only this
+header and require both a matching digest and a mask that covers the current run's
+demanded outputs. Invalidation is an **overwrite**. A same-digest frame is skipped only
+when its coverage already contains the new result; if a later run covers more outputs,
+the frame is replaced. Writes are atomic (temp file + rename), so readers never see a
+half-written frame.
 
 ## B.4 Values ↔ bytes (`codec.rs`)
 
@@ -342,17 +339,18 @@ Each node has a `RuntimeSlot` (index-aligned to `e_nodes`):
 
 ```
 current_digest: Option<Digest>   // this run's content digest, stamped by the executor
-value:          ValueState        // Empty | Resident { values, produced_under } | OnDisk
+value:          ValueState        // Empty | Resident { snapshot, produced_under }
+                                  //       | OnDisk { coverage }
 ```
 
 `ValueState` is one enum, not the old three loosely-coupled fields — so the previously
 representable bad combos ("resident *and* flagged on disk", a stale RAM value masking a
 fresh blob) can't be built. The reuse test is **`is_resident_hit`** — the slot is
-`Resident` *and* its `produced_under` equals the current digest — the true "bytes are
-here for this key" predicate the executor's input read and disk store rely on. A `None`
-`current_digest` (impure cone) never hits. `OnDisk` means "a decodable blob exists for
-this digest, not yet loaded": a cheap header probe, so a disk-cached value behind
-another reused node is served without entering RAM (B.6).
+`Resident`, its `produced_under` equals the current digest, and its snapshot coverage
+covers the current `OutputDemand`. A `None` `current_digest` (impure cone) never hits.
+`OnDisk` means a decodable frame exists for this digest and demand but is not yet
+loaded: a cheap header probe, so a disk-cached value behind another reused node is served
+without entering RAM (B.6).
 
 ## B.6 Execution-time lifecycle (`cache.rs` policy over `disk_store.rs` I/O)
 
@@ -366,24 +364,26 @@ resource inputs) stamps `None` — resolved `Run`, cone kept alive — and the r
 it at reach time, serving the cache on a hit. Then, per surviving node, once its digest is
 computed:
 
-1. **`is_resident_hit`?** — reuse the RAM value, done.
-2. **else `mark_on_disk_if_present`.** If the node's blob carries the digest in its
-   header **and** the outputs are decodable (every custom output type has a codec —
+1. **resident hit?** — reuse only when the digest matches and the resident
+   coverage contains every demanded output.
+2. **else `mark_on_disk_if_present`.** If the node's blob carries the digest and a
+   coverage containing current demand **and** the outputs are decodable (every custom output type has a codec —
    predicted without reading), flag the slot `OnDisk` and reuse it — a 32-byte header
    read + codec check, **no body bytes**. The value loads only if a running consumer
    actually reads it.
-3. **else run**, then **`store_node`** writes the fresh blob (a blob already stamped
-   with the current digest is the same bytes → skipped; any other digest is superseded
-   → overwritten).
+3. **else run.** The output buffer is cleared before invocation, and the successful
+   result's coverage is derived from its non-`Unbound` values. Returning `Unbound` for a
+   demanded output fails the node; skipped outputs may remain `Unbound`. `store_node` skips
+   an existing frame only when both digest and coverage match; a broader result overwrites it.
 4. **Lazy load — `hydrate_slot`.** When a *running* node reads a bound input whose
    producer is `OnDisk`, `collect_inputs` pulls that one blob into RAM. Producers behind
    a *reused* consumer are never read, so a disk-cached chain loads only its frontier — a
    blob can't be the wrong type (the signature is in the digest, §B.2), but if it fails
    to *load* (corrupt/deleted) the bad file is deleted and the demanding consumer is
    dropped for this run; the next reopen recomputes it.
-5. **mid-run release — `reclaim_slot`.** The executor keeps the plan's per-output consumer
-   counts live and counts them *down* as each running consumer reads a bound producer
-   (`collect_inputs`). When an output reaches `Skip` (zero left) its value is cleared one output
+5. **mid-run release — `reclaim_slot`.** The executor copies the plan's binding-reader
+   counts into `RemainingOutputReads` and counts them *down* as each running consumer reads a bound producer
+   (`ExecutionFrame::collect_inputs`). When an output reaches zero its value is cleared one output
    at a time, and once *every* output of a **non-RAM** node is spent its whole slot is reclaimed
    the instant its last consumer reads it — `reclaim_slot` demotes it to `OnDisk` if a blob
    serves it (a `Disk` value), else drops it (`None`). A `Ram`/`Both` node is left resident
@@ -396,16 +396,10 @@ computed:
    run executed or read stays resident — as does a node-seeded preview root (`plan.pinned`),
    whose retained value is the point of its run; every other resident value goes through
    `reclaim_slot`:
-   demoted to `OnDisk` **iff** a blob can serve it again (lossless — a later run or inspection
+   demoted to `OnDisk` **iff** a blob can serve it again (lossless — a later run
    reloads), else a **non-RAM** value (`None`, or a `Disk` value whose blob is missing) is
    dropped outright and a `Ram`/`Both` leftover with no blob is kept — so eviction never forces
    a recompute of a value a mode promised to retain.
-
-**Off-run path — inspection.** `get_argument_values_with_previews` loads on demand via
-`hydrate_for_inspection`, so a disk-cached node no run touched still shows its value when
-the editor selects it. Hydrated values simply stay resident until a later run's eviction
-demotes them — sound to serve as reuse hits, since a content digest attests the value
-produced under it (B.0).
 
 ### Worked example
 

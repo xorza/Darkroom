@@ -5,7 +5,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use glam::Vec2;
-use scenarium::graph::{Binding, InputPort, NodeId, NodeSearch, Subscription};
+use scenarium::{Binding, InputPort, NodeId, NodeSearch, Subscription};
 
 use crate::core::document::{Document, EditScopeRef, GraphRef, GraphView, ItemRef};
 use crate::core::edit::intent::types::Intent;
@@ -88,7 +88,9 @@ pub(crate) fn build_duplicate_intent_for(
     // the clone keeps the wire to the original producer.
     let mut bindings = Vec::new();
     for old_id in node_ids {
-        for (port, binding) in graph.bindings_touching(*old_id) {
+        for entry in graph.bindings_touching(*old_id) {
+            let port = entry.port;
+            let binding = entry.binding;
             if port.node_id != *old_id {
                 continue;
             }

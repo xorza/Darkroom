@@ -27,10 +27,10 @@ use aperture::{
     Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
 };
 use glam::Vec2;
-use scenarium::data::DataType;
-use scenarium::execution::stats::LogLevel;
-use scenarium::graph::NodeId;
-use scenarium::library::Library;
+use scenarium::DataType;
+use scenarium::Library;
+use scenarium::LogLevel;
+use scenarium::NodeId;
 
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::outer_canvas_widget_id;
@@ -440,7 +440,7 @@ mod tests {
 
     #[test]
     fn port_label_text_dedups_type_repeating_the_name() {
-        use scenarium::data::FsPathConfig;
+        use scenarium::FsPathConfig;
         use std::sync::Arc;
         let lib = Library::default();
         // Type repeats the name (case-insensitive) → the name alone, no

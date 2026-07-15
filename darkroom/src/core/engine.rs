@@ -7,11 +7,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use scenarium::execution::compile::{CompiledGraph, Compiler};
-use scenarium::execution::disk_store::DiskStore;
-use scenarium::execution::stats::FlattenMap;
-use scenarium::graph::{Graph, NodeId};
-use scenarium::library::Library;
+use scenarium::DiskStore;
+use scenarium::FlattenMap;
+use scenarium::Library;
+use scenarium::{CompiledGraph, Compiler};
+use scenarium::{Graph, NodeId};
 
 use crate::core::io::cache::prepare_document_cache_root;
 use crate::core::io::library::{load_library, save_library};
@@ -179,7 +179,8 @@ impl Engine {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
-        self.worker.run_node(compiled, node_id);
+        let address = compiled.node_address(node_id);
+        self.worker.run_node(compiled, address);
         true
     }
 

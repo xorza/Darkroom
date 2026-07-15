@@ -8,8 +8,8 @@
 use std::str::FromStr;
 
 use lumos::{BackgroundMode, RegistrationConfig, Scnr, StackConfig, StarDetectionConfig, Stretch};
-use scenarium::data::{EnumVariants, StaticValue};
-use scenarium::node::function::ValueVariant;
+use scenarium::ValueVariant;
+use scenarium::{EnumVariants, StaticValue};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 

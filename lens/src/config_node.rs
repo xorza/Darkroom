@@ -18,10 +18,10 @@ use std::fmt;
 use std::sync::{Arc, LazyLock};
 
 use common::{FieldKind, FieldValue, Introspect};
-use scenarium::data::{CustomValue, DataType, DynamicValue, EnumVariants, StaticValue, TypeId};
-use scenarium::library::{Library, TypeEntry};
-use scenarium::node::func_lambda::FuncLambda;
-use scenarium::node::function::{Func, FuncInput, FuncOutput};
+use scenarium::FuncLambda;
+use scenarium::{CustomValue, DataType, DynamicValue, EnumVariants, StaticValue, TypeId};
+use scenarium::{Func, FuncInput, FuncOutput};
+use scenarium::{Library, TypeEntry};
 
 /// A config type that can back a config-builder node: introspectable, plus a
 /// stable identity for the value it travels on.

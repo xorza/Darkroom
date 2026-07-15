@@ -1,6 +1,6 @@
 use aperture::{MenuItem, Ui};
-use scenarium::graph::NodeId;
-use scenarium::graph::subgraph::SubgraphRef;
+use scenarium::NodeId;
+use scenarium::SubgraphRef;
 
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::commands::AppCommand;

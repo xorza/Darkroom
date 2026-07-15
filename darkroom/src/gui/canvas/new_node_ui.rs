@@ -3,11 +3,11 @@ use aperture::{
     WidgetId,
 };
 use glam::Vec2;
-use scenarium::graph::NodeId;
-use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
-use scenarium::graph::{Binding, InputPort, Node, NodeKind};
-use scenarium::node::function::{Func, FuncInput};
-use scenarium::node::special::{ALL as SPECIAL_NODES, SpecialNode};
+use scenarium::NodeId;
+use scenarium::{Binding, InputPort, Node, NodeKind};
+use scenarium::{Func, FuncInput};
+use scenarium::{SPECIAL_NODES, SpecialNode};
+use scenarium::{SubgraphDef, SubgraphRef};
 
 use crate::core::document::PortRef;
 use crate::core::edit::intent::types::Intent;
@@ -383,7 +383,7 @@ fn default_bindings(node_id: NodeId, inputs: &[FuncInput]) -> Vec<(InputPort, Bi
 
 #[cfg(test)]
 mod tests {
-    use scenarium::data::{DataType, StaticValue};
+    use scenarium::{DataType, StaticValue};
 
     use super::*;
 

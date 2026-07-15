@@ -13,8 +13,8 @@
 
 use std::path::PathBuf;
 
-use scenarium::graph::Graph as CoreGraph;
-use scenarium::library::Library;
+use scenarium::Graph as CoreGraph;
+use scenarium::Library;
 
 use crate::core::document::{Document, GraphRef};
 use crate::core::edit::intent::apply::commit_intent_cascading;

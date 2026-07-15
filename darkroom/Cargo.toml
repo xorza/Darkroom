@@ -6,7 +6,7 @@ exclude = ["AGENTS.md", "CLAUDE.md"]
 
 [dependencies]
 aperture = { workspace = true }
-scenarium = { workspace = true }
+scenarium = { workspace = true, features = ["builtin-fs-watch", "builtin-random"] }
 common = { workspace = true }
 lens = { workspace = true }
 imaginarium = { workspace = true }
@@ -36,6 +36,7 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 common = { workspace = true, features = ["test-support"] }
+scenarium = { workspace = true, features = ["internals"] }
 
 [features]
 # Forward aperture's tracy backend so `cargo run -p darkroom --features

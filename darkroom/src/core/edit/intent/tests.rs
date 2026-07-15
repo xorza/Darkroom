@@ -1,11 +1,9 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::data::StaticValue;
-use scenarium::graph::{
-    Binding, CacheMode, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
-};
-use scenarium::node::function::FuncId;
+use scenarium::FuncId;
+use scenarium::StaticValue;
+use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort};
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::view_item::ViewItem;
@@ -52,7 +50,7 @@ fn stack_order(doc: &Document) -> Vec<ItemRef> {
 fn dirties_document_splits_edits_from_navigation() {
     use crate::core::document::TabRef;
     use crate::core::document::dock::{DockDrop, SplitSide};
-    use scenarium::graph::subgraph::SubgraphId;
+    use scenarium::SubgraphId;
 
     // A doc with a movable Preferences tab, for the dock steps below
     // (both built through the real `build_step` pipeline so the

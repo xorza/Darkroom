@@ -5,11 +5,11 @@ pub mod view_item;
 use anyhow::{Context, Result, bail, ensure};
 use common::{KeyIndexVec, SerdeFormat, is_debug};
 use glam::Vec2;
-use scenarium::graph::subgraph::SubgraphRef;
-use scenarium::graph::subgraph::{SubgraphDef, SubgraphId};
-use scenarium::graph::{Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
-use scenarium::graph::{Node, NodeKind};
-use scenarium::library::Library;
+use scenarium::Library;
+use scenarium::SubgraphRef;
+use scenarium::{DetachedNode, Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
+use scenarium::{Node, NodeKind};
+use scenarium::{SubgraphDef, SubgraphId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use thiserror::Error;
@@ -94,8 +94,8 @@ pub enum TabRef {
     Preferences,
     /// A full-resolution viewer of one port's runtime image — one tab per
     /// port, deduped on open. Content is runtime-only
-    /// (`crate::gui::image_viewer`): a restored tab opens empty and fills
-    /// itself after the next run. Pruned when its node is deleted, like a
+    /// (`crate::gui::image_viewer`): a restored tab pulls any current value
+    /// from `RunState` when drawn. Pruned when its node is deleted, like a
     /// subgraph tab whose def vanished.
     ImageViewer(PortRef),
 }
@@ -301,12 +301,13 @@ impl EditScope<'_> {
     /// Drop a node from both the graph and its view (its own item, its
     /// pinned outputs' items, and any selection membership). Mirrors the
     /// old `Document::remove_node`.
-    pub fn remove_node(&mut self, node_id: &NodeId) {
+    pub fn remove_node(&mut self, node_id: &NodeId) -> DetachedNode {
         self.view
             .view_items
             .retain(|item| !item.key.belongs_to(*node_id));
-        self.graph.remove_by_id(*node_id);
+        let detached = self.graph.detach_node(*node_id);
         self.view.selected.retain(|k| !k.belongs_to(*node_id));
+        detached
     }
 }
 
@@ -734,7 +735,7 @@ impl From<CoreGraph> for Document {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::node::function::FuncId;
+    use scenarium::FuncId;
     use scenarium::testing::test_graph as core_test_graph;
 
     /// A childless local def with the given id/name.
@@ -816,7 +817,8 @@ mod tests {
 
         let err = doc.check().unwrap_err();
         assert!(
-            err.message.contains("appears in more than one graph"),
+            err.message
+                .contains("occurs in more than one authoring graph"),
             "unexpected check error: {err}"
         );
     }

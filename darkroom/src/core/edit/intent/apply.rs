@@ -6,9 +6,9 @@
 //! undo-stack redo, which applies a *stored* step without rebuilding it.
 
 use glam::Vec2;
-use scenarium::graph::subgraph::SubgraphRef;
-use scenarium::graph::{Binding, NodeId, NodeKind, NodeSearch, OutputPort};
-use scenarium::library::Library;
+use scenarium::Library;
+use scenarium::SubgraphRef;
+use scenarium::{Binding, NodeId, NodeKind, NodeSearch, OutputPort};
 
 use crate::core::document::view_item::ViewItem;
 use crate::core::document::{Document, EditScope, GraphRef, ItemRef};
@@ -180,15 +180,16 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             }
             scope.view.selected = to_selection.clone();
         }
-        GraphStep::RemoveNode { node, .. } => {
+        GraphStep::RemoveNode { detached, .. } => {
             assert!(
                 scope
                     .graph
-                    .find_node(&node.id, NodeSearch::TopLevel)
+                    .find_node(&detached.node.id, NodeSearch::TopLevel)
                     .is_some(),
                 "apply RemoveNode expects node to be present"
             );
-            scope.remove_node(&node.id);
+            let removed = scope.remove_node(&detached.node.id);
+            assert_eq!(&removed, detached, "removal snapshot changed before apply");
         }
         GraphStep::MoveSelection { moves, .. } => {
             for (key, _, to) in moves {
@@ -357,26 +358,23 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.view.selected = from_selection.clone();
         }
         GraphStep::RemoveNode {
-            node,
+            detached,
             view_items,
-            bindings,
-            subscriptions,
             selected,
         } => {
             assert!(
                 scope
                     .graph
-                    .find_node(&node.id, NodeSearch::TopLevel)
+                    .find_node(&detached.node.id, NodeSearch::TopLevel)
                     .is_none(),
                 "revert RemoveNode expects removed node to be absent"
             );
-            scope.graph.add(node.clone());
-            scope.graph.restore_wiring(bindings, subscriptions);
+            scope.graph.attach_node(detached.clone());
             // Ascending slot order (captured that way), so each insert
             // lands among already-restored earlier slots and the original
             // interleaving comes back exactly. A pin item goes through
             // `set_output_pinned` — it also re-pins the graph port
-            // (`remove_by_id` cleared the pinned set too).
+            // (`detach_node` cleared the pinned set too).
             for (slot, item) in view_items {
                 match item.key {
                     ItemRef::Pin(port) => {

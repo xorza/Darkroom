@@ -1,8 +1,16 @@
 use super::*;
-use crate::data::StaticValue;
+use crate::StaticValue;
+use crate::node::lambda::OutputDemand;
 
 fn out() -> Vec<DynamicValue> {
     vec![DynamicValue::Static(StaticValue::Int(1))]
+}
+
+const DEMANDED: &[OutputDemand] = &[OutputDemand::Produce];
+
+fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
+    let coverage = CachedOutputCoverage::from_values(&values);
+    OutputSnapshot::new(values, coverage)
 }
 
 /// `is_resident_hit` is the resident-cache definition: a slot hits iff it has a
@@ -18,7 +26,7 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     cache.slots.add(RuntimeSlot {
         id: NodeId::from_u128(1),
         value: ValueState::Resident {
-            values: out(),
+            snapshot: complete_snapshot(out()),
             produced_under: Some(d),
         },
         current_digest: None,
@@ -35,7 +43,7 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
         id: NodeId::from_u128(3),
         current_digest: Some(d),
         value: ValueState::Resident {
-            values: out(),
+            snapshot: complete_snapshot(out()),
             produced_under: Some(other),
         },
         ..Default::default()
@@ -45,23 +53,26 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
         id: NodeId::from_u128(4),
         current_digest: Some(d),
         value: ValueState::Resident {
-            values: out(),
+            snapshot: complete_snapshot(out()),
             produced_under: Some(d),
         },
         ..Default::default()
     });
 
-    assert!(!cache.is_resident_hit(NodeIdx(0)), "impure cone never hits");
     assert!(
-        !cache.is_resident_hit(NodeIdx(1)),
+        !cache.is_resident_hit(NodeIdx(0), DEMANDED),
+        "impure cone never hits"
+    );
+    assert!(
+        !cache.is_resident_hit(NodeIdx(1), DEMANDED),
         "no cached values is a miss"
     );
     assert!(
-        !cache.is_resident_hit(NodeIdx(2)),
+        !cache.is_resident_hit(NodeIdx(2), DEMANDED),
         "values under a stale digest is a miss"
     );
     assert!(
-        cache.is_resident_hit(NodeIdx(3)),
+        cache.is_resident_hit(NodeIdx(3), DEMANDED),
         "values under the current digest is a hit"
     );
 }
@@ -75,19 +86,107 @@ fn hydrate_turns_a_miss_into_a_hit() {
         current_digest: Some(d),
         ..Default::default()
     });
-    assert!(!cache.is_resident_hit(NodeIdx(0)), "empty slot misses");
-
-    cache.hydrate(NodeIdx(0), out(), d);
     assert!(
-        cache.is_resident_hit(NodeIdx(0)),
+        !cache.is_resident_hit(NodeIdx(0), DEMANDED),
+        "empty slot misses"
+    );
+
+    test_support::hydrate(&mut cache, NodeIdx(0), complete_snapshot(out()), d);
+    assert!(
+        cache.is_resident_hit(NodeIdx(0), DEMANDED),
         "a slot hydrated under its current digest hits"
     );
 
     // Hydrating under a digest that is no longer current does not hit.
     cache.slots[0].current_digest = Some(Digest([9u8; 32]));
     assert!(
-        !cache.is_resident_hit(NodeIdx(0)),
+        !cache.is_resident_hit(NodeIdx(0), DEMANDED),
         "current digest moved on ⇒ miss"
+    );
+}
+
+#[test]
+fn resident_hit_requires_coverage_for_every_demanded_output() {
+    let digest = Digest([5; 32]);
+    let mut cache = RuntimeCache::default();
+    let mut slot = RuntimeSlot {
+        id: NodeId::from_u128(1),
+        current_digest: Some(digest),
+        ..Default::default()
+    };
+    slot.invoke_slot(2).outputs[0] = StaticValue::Int(10).into();
+    slot.stamp_produced();
+    cache.slots.add(slot);
+
+    let ValueState::Resident { snapshot, .. } = &cache.slots[0].value else {
+        panic!("the invocation result was stamped resident");
+    };
+    assert_eq!(snapshot.coverage.ports, [true, false]);
+
+    assert!(cache.is_resident_hit(NodeIdx(0), &[OutputDemand::Produce, OutputDemand::Skip]));
+    assert!(!cache.is_resident_hit(NodeIdx(0), &[OutputDemand::Produce, OutputDemand::Produce]));
+
+    cache.clear_output_port(NodeIdx(0), 0);
+    let ValueState::Resident { snapshot, .. } = &cache.slots[0].value else {
+        panic!("clearing one output keeps the snapshot resident");
+    };
+    assert_eq!(snapshot.coverage.ports, [false, false]);
+    assert!(matches!(
+        snapshot.values.as_slice(),
+        [DynamicValue::Unbound, DynamicValue::Unbound]
+    ));
+
+    let mismatch = std::panic::catch_unwind(|| {
+        CachedOutputCoverage::from_bytes(&[1, 0])
+            .unwrap()
+            .covers_demand(&[OutputDemand::Produce]);
+    });
+    assert!(
+        mismatch.is_err(),
+        "a coverage mask with the wrong arity is corrupt internal state"
+    );
+
+    let mismatch = std::panic::catch_unwind(|| {
+        OutputSnapshot::new(vec![DynamicValue::Unbound], CachedOutputCoverage::none(2));
+    });
+    assert!(
+        mismatch.is_err(),
+        "a snapshot cannot pair values with coverage of another arity"
+    );
+
+    let invalid = std::panic::catch_unwind(|| {
+        OutputSnapshot::new(
+            vec![DynamicValue::Unbound],
+            CachedOutputCoverage { ports: vec![true] },
+        );
+    });
+    assert!(
+        invalid.is_err(),
+        "coverage cannot claim that an unbound value was produced"
+    );
+    assert!(
+        OutputSnapshot::try_new(
+            vec![DynamicValue::Unbound],
+            CachedOutputCoverage { ports: vec![true] },
+        )
+        .is_none(),
+        "invalid persisted coverage is rejected as a cache miss"
+    );
+    assert!(
+        OutputSnapshot::try_new(
+            vec![DynamicValue::Static(StaticValue::Int(1))],
+            CachedOutputCoverage::none(1),
+        )
+        .is_none(),
+        "coverage cannot omit a bound cached value"
+    );
+
+    let missing_invocation = std::panic::catch_unwind(|| {
+        RuntimeSlot::default().stamp_produced();
+    });
+    assert!(
+        missing_invocation.is_err(),
+        "only an invoked resident output can be stamped produced"
     );
 }
 
@@ -96,7 +195,7 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
     use std::any::Any;
     use std::fmt;
 
-    use crate::data::{CustomValue, TypeId};
+    use crate::{CustomValue, TypeId};
 
     #[derive(Debug)]
     struct Payload {
@@ -136,11 +235,11 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
         id: NodeId::from_u128(1),
         current_digest: Some(d),
         value: ValueState::Resident {
-            values: vec![
+            snapshot: complete_snapshot(vec![
                 DynamicValue::Custom(shared.clone()),
                 DynamicValue::Custom(Arc::new(Payload { cpu: 5, gpu: 0 })),
                 DynamicValue::Static(StaticValue::Int(9)),
-            ],
+            ]),
             produced_under: Some(d),
         },
         ..Default::default()
@@ -150,7 +249,7 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
         id: NodeId::from_u128(2),
         current_digest: Some(d),
         value: ValueState::Resident {
-            values: vec![DynamicValue::Custom(shared.clone())],
+            snapshot: complete_snapshot(vec![DynamicValue::Custom(shared.clone())]),
             produced_under: Some(d),
         },
         ..Default::default()
@@ -159,7 +258,9 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
     cache.slots.add(RuntimeSlot {
         id: NodeId::from_u128(3),
         current_digest: Some(d),
-        value: ValueState::OnDisk,
+        value: ValueState::OnDisk {
+            coverage: CachedOutputCoverage { ports: vec![true] },
+        },
         ..Default::default()
     });
 
@@ -175,8 +276,14 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
     assert_eq!(
         by_node,
         vec![
-            (NodeId::from_u128(1), RamUsage { cpu: 105, gpu: 10 }),
-            (NodeId::from_u128(2), RamUsage { cpu: 100, gpu: 10 }),
+            NodeRamUsage {
+                node_id: NodeId::from_u128(1),
+                usage: RamUsage { cpu: 105, gpu: 10 },
+            },
+            NodeRamUsage {
+                node_id: NodeId::from_u128(2),
+                usage: RamUsage { cpu: 100, gpu: 10 },
+            },
         ]
     );
 }

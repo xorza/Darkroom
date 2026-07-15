@@ -14,16 +14,127 @@ use std::sync::Arc;
 
 use common::{KeyIndexKey, KeyIndexVec};
 
-use crate::data::{DynamicValue, RamUsage};
 use crate::execution::NodeColumn;
 use crate::execution::digest::{Digest, node_digest};
 use crate::execution::disk_store::DiskStore;
 use crate::execution::program::{ExecutionNode, ExecutionProgram, NodeIdx};
 use crate::execution::resolve::Disposition;
+use crate::execution::stats::NodeRamUsage;
 use crate::graph::NodeId;
+use crate::node::lambda::OutputDemand;
 use crate::runtime::any_state::AnyState;
 use crate::runtime::context::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
+use crate::{DynamicValue, RamUsage};
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct CachedOutputCoverage {
+    pub(crate) ports: Vec<bool>,
+}
+
+impl CachedOutputCoverage {
+    pub(crate) fn none(output_count: usize) -> Self {
+        Self {
+            ports: vec![false; output_count],
+        }
+    }
+
+    pub(crate) fn from_values(values: &[DynamicValue]) -> Self {
+        Self {
+            ports: values
+                .iter()
+                .map(|value| !matches!(value, DynamicValue::Unbound))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        bytes
+            .iter()
+            .all(|byte| matches!(byte, 0 | 1))
+            .then(|| Self {
+                ports: bytes.iter().map(|byte| *byte == 1).collect(),
+            })
+    }
+
+    pub(crate) fn as_bytes(&self) -> Vec<u8> {
+        self.ports.iter().map(|port| u8::from(*port)).collect()
+    }
+
+    pub(crate) fn covers_demand(&self, demand: &[OutputDemand]) -> bool {
+        assert_eq!(
+            self.ports.len(),
+            demand.len(),
+            "cached output coverage must match output demand arity"
+        );
+        self.ports
+            .iter()
+            .zip(demand)
+            .all(|(covered, demand)| *covered || demand.is_skip())
+    }
+
+    pub(crate) fn covers(&self, required: &Self) -> bool {
+        assert_eq!(
+            self.ports.len(),
+            required.ports.len(),
+            "cached output coverage masks must have equal arity"
+        );
+        self.ports
+            .iter()
+            .zip(&required.ports)
+            .all(|(covered, required)| *covered || !*required)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct OutputSnapshot {
+    pub(crate) values: Vec<DynamicValue>,
+    pub(crate) coverage: CachedOutputCoverage,
+}
+
+impl OutputSnapshot {
+    pub(crate) fn new(values: Vec<DynamicValue>, coverage: CachedOutputCoverage) -> Self {
+        assert_eq!(
+            values.len(),
+            coverage.ports.len(),
+            "cached values and coverage must have equal arity"
+        );
+        assert!(
+            Self::coverage_matches_values(&values, &coverage),
+            "cached output coverage must match bound output values"
+        );
+        Self { values, coverage }
+    }
+
+    pub(crate) fn try_new(
+        values: Vec<DynamicValue>,
+        coverage: CachedOutputCoverage,
+    ) -> Option<Self> {
+        (values.len() == coverage.ports.len() && Self::coverage_matches_values(&values, &coverage))
+            .then_some(Self { values, coverage })
+    }
+
+    fn empty(output_count: usize) -> Self {
+        Self::new(
+            vec![DynamicValue::Unbound; output_count],
+            CachedOutputCoverage::none(output_count),
+        )
+    }
+
+    fn reset(&mut self, output_count: usize) {
+        self.values.clear();
+        self.values.resize(output_count, DynamicValue::Unbound);
+        self.coverage = CachedOutputCoverage::none(output_count);
+    }
+
+    fn coverage_matches_values(values: &[DynamicValue], coverage: &CachedOutputCoverage) -> bool {
+        coverage
+            .ports
+            .iter()
+            .zip(values)
+            .all(|(covered, value)| *covered == !matches!(value, DynamicValue::Unbound))
+    }
+}
 
 /// One node's cached output as an explicit three-state machine. The states are mutually
 /// exclusive, so the bad combinations — "resident *and* flagged on disk", "value present
@@ -38,15 +149,15 @@ pub(crate) enum ValueState {
     /// Values resident in RAM. `produced_under` is the digest they were computed
     /// under — `None` for an impure node, which holds a value but is never a hit.
     Resident {
-        values: Vec<DynamicValue>,
+        snapshot: OutputSnapshot,
         produced_under: Option<Digest>,
     },
     /// Not in RAM, but a decodable blob exists on disk for the slot's *current* digest —
     /// flagged during the run by [`mark_on_disk_if_present`](RuntimeCache::mark_on_disk_if_present)
     /// (or demoted here from a resident value by `evict_unused`) without loading,
-    /// deserialized on demand (a running consumer's `collect_inputs`, or an inspection).
+    /// deserialized on demand by a running consumer's `collect_inputs`.
     /// Lets a disk-cached value behind another disk-cached value never enter RAM.
-    OnDisk,
+    OnDisk { coverage: CachedOutputCoverage },
 }
 
 /// One node's cross-run runtime state, index-aligned to the program's `e_nodes`:
@@ -93,7 +204,7 @@ impl RuntimeSlot {
     /// The resident output values, or `None` when the slot isn't `Resident`.
     pub(crate) fn output_values(&self) -> Option<&Vec<DynamicValue>> {
         match &self.value {
-            ValueState::Resident { values, .. } => Some(values),
+            ValueState::Resident { snapshot, .. } => Some(&snapshot.values),
             _ => None,
         }
     }
@@ -101,40 +212,63 @@ impl RuntimeSlot {
     /// Prepare the slot for a lambda invocation and hand back *disjoint* mutable
     /// borrows of `state` and the output buffer — the lambda writes both at once,
     /// which a single whole-slot borrow couldn't allow. A resident buffer is reused
-    /// **in place** (its prior values kept — a re-running lambda overwrites all its
-    /// outputs; a future skip can reuse them), `resize`d to the current arity so a
-    /// func-version change that altered output count can't leave a stale-length
-    /// buffer. `produced_under` stays as-is until [`stamp_produced`](Self::stamp_produced)
+    /// **in place**, cleared to `Unbound`, and `resize`d to the current arity. Clearing
+    /// prevents a skipped output from retaining a value produced by an earlier run.
+    /// `produced_under` stays as-is until [`stamp_produced`](Self::stamp_produced)
     /// updates it on success.
     pub(crate) fn invoke_slot(&mut self, output_count: usize) -> InvokeSlot<'_> {
         match &mut self.value {
-            ValueState::Resident { values, .. } => {
-                values.resize(output_count, DynamicValue::Unbound);
-            }
+            ValueState::Resident { snapshot, .. } => snapshot.reset(output_count),
             _ => {
                 self.value = ValueState::Resident {
-                    values: vec![DynamicValue::Unbound; output_count],
+                    snapshot: OutputSnapshot::empty(output_count),
                     produced_under: None,
                 };
             }
         }
-        let ValueState::Resident { values, .. } = &mut self.value else {
+        let ValueState::Resident { snapshot, .. } = &mut self.value else {
             unreachable!("set to Resident just above");
         };
         InvokeSlot {
             state: &mut self.state,
-            outputs: values,
+            outputs: &mut snapshot.values,
         }
+    }
+
+    pub(crate) fn unbound_demanded_outputs(&self, demand: &[OutputDemand]) -> Vec<usize> {
+        let ValueState::Resident { snapshot, .. } = &self.value else {
+            panic!("a node's output must be resident immediately after invocation");
+        };
+        assert_eq!(
+            snapshot.values.len(),
+            demand.len(),
+            "node output values must match output demand arity"
+        );
+        demand
+            .iter()
+            .zip(&snapshot.values)
+            .enumerate()
+            .filter_map(|(output, (demand, value))| {
+                (!demand.is_skip() && matches!(value, DynamicValue::Unbound)).then_some(output)
+            })
+            .collect()
     }
 
     /// Stamp the resident value with the node's current content digest on a successful
     /// run: `produced_under` turns it into a cache hit for the next run (RAM) and the
-    /// key its disk blob is stored under. No-op if not `Resident`.
+    /// key its disk blob is stored under.
     pub(crate) fn stamp_produced(&mut self) {
         let digest = self.current_digest;
-        if let ValueState::Resident { produced_under, .. } = &mut self.value {
-            *produced_under = digest;
-        }
+        let ValueState::Resident {
+            produced_under,
+            snapshot,
+            ..
+        } = &mut self.value
+        else {
+            panic!("a node's output must be resident when it is stamped produced");
+        };
+        *produced_under = digest;
+        snapshot.coverage = CachedOutputCoverage::from_values(&snapshot.values);
     }
 }
 
@@ -163,10 +297,10 @@ impl RuntimeCache {
         let mut seen: HashSet<*const ()> = HashSet::new();
         let mut total = RamUsage::default();
         for slot in self.slots.iter() {
-            let ValueState::Resident { values, .. } = &slot.value else {
+            let ValueState::Resident { snapshot, .. } = &slot.value else {
                 continue;
             };
-            for value in values {
+            for value in &snapshot.values {
                 if let DynamicValue::Custom(arc) = value
                     && !seen.insert(Arc::as_ptr(arc) as *const ())
                 {
@@ -185,18 +319,21 @@ impl RuntimeCache {
     /// `Arc`s — each node reports the size of the value it holds, even when another
     /// node references the same `Arc`. `OnDisk`/`Empty` slots and zero-byte values are
     /// omitted, so only nodes actually holding memory appear.
-    pub(crate) fn resident_ram_by_node(&self) -> Vec<(NodeId, RamUsage)> {
+    pub(crate) fn resident_ram_by_node(&self) -> Vec<NodeRamUsage> {
         let mut out = Vec::new();
         for slot in self.slots.iter() {
-            let ValueState::Resident { values, .. } = &slot.value else {
+            let ValueState::Resident { snapshot, .. } = &slot.value else {
                 continue;
             };
             let mut usage = RamUsage::default();
-            for value in values {
+            for value in &snapshot.values {
                 usage += value.ram_usage();
             }
             if usage.total() > 0 {
-                out.push((slot.id, usage));
+                out.push(NodeRamUsage {
+                    node_id: slot.id,
+                    usage,
+                });
             }
         }
         out
@@ -220,9 +357,23 @@ impl RuntimeCache {
     /// digest (impure cone) never hits, and a value produced under a *different*
     /// digest (a changed input) misses too. The executor's input read and the
     /// disk-store rely on this being the true "bytes are here" predicate.
-    pub(crate) fn is_resident_hit(&self, idx: NodeIdx) -> bool {
+    fn is_resident_current(&self, idx: NodeIdx) -> bool {
         match (&self.slots[idx].value, self.slots[idx].current_digest) {
             (ValueState::Resident { produced_under, .. }, Some(d)) => *produced_under == Some(d),
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_resident_hit(&self, idx: NodeIdx, demand: &[OutputDemand]) -> bool {
+        match (&self.slots[idx].value, self.slots[idx].current_digest) {
+            (
+                ValueState::Resident {
+                    produced_under,
+                    snapshot,
+                    ..
+                },
+                Some(d),
+            ) => *produced_under == Some(d) && snapshot.coverage.covers_demand(demand),
             _ => false,
         }
     }
@@ -234,28 +385,7 @@ impl RuntimeCache {
     /// reused, so it never ran) is still reported as *cached* when its value can be served —
     /// while a pruned memory-only node with no value reports `false`.
     pub(crate) fn has_available_value(&self, idx: NodeIdx) -> bool {
-        self.is_resident_hit(idx) || self.is_on_disk(idx)
-    }
-
-    /// Whether slot `idx` is flagged [`ValueState::OnDisk`] — a blob stat'd this run but not yet
-    /// loaded into RAM.
-    pub(crate) fn is_on_disk(&self, idx: NodeIdx) -> bool {
-        matches!(self.slots[idx].value, ValueState::OnDisk)
-    }
-
-    /// Install a disk-loaded output into a slot under `digest` (the node's current
-    /// digest), turning a later reuse check into a plain RAM hit.
-    pub(crate) fn hydrate(&mut self, idx: NodeIdx, values: Vec<DynamicValue>, digest: Digest) {
-        self.slots[idx].value = ValueState::Resident {
-            values,
-            produced_under: Some(digest),
-        };
-    }
-
-    /// Flag slot `idx` as `OnDisk` — its value lives only in a blob now. Used by the reuse
-    /// check when a blob is found and by [`reclaim_slot`](Self::reclaim_slot)'s demote path.
-    pub(crate) fn flag_on_disk(&mut self, idx: NodeIdx) {
-        self.slots[idx].value = ValueState::OnDisk;
+        self.is_resident_current(idx) || matches!(self.slots[idx].value, ValueState::OnDisk { .. })
     }
 
     /// Read producer `idx`'s output `port` for a consumer: a clone of the value, or — with
@@ -272,27 +402,28 @@ impl RuntimeCache {
         take: bool,
     ) -> Option<DynamicValue> {
         let arity = program.e_nodes[idx].outputs.len as usize;
-        let ValueState::Resident { values, .. } = &mut self.slots[idx].value else {
+        let ValueState::Resident { snapshot, .. } = &mut self.slots[idx].value else {
             return None;
         };
-        assert_eq!(values.len(), arity);
+        assert_eq!(snapshot.values.len(), arity);
         Some(if take {
-            std::mem::take(&mut values[port])
+            snapshot.coverage.ports[port] = false;
+            std::mem::take(&mut snapshot.values[port])
         } else {
-            values[port].clone()
+            snapshot.values[port].clone()
         })
     }
 
     /// Clear a single output value of a resident slot (to `Unbound`), keeping its siblings — the
     /// mid-run per-output release for a non-RAM producer whose one output just went spent while
-    /// others are still owed to other consumers. No-op if the slot isn't resident or `port` is
-    /// out of range.
+    /// others are still owed to other consumers.
     pub(crate) fn clear_output_port(&mut self, idx: NodeIdx, port: usize) {
-        if let ValueState::Resident { values, .. } = &mut self.slots[idx].value
-            && let Some(slot) = values.get_mut(port)
-        {
-            *slot = DynamicValue::Unbound;
-        }
+        let ValueState::Resident { snapshot, .. } = &mut self.slots[idx].value else {
+            panic!("an output can only be released from a resident slot");
+        };
+        assert!(port < snapshot.values.len(), "output port must be in range");
+        snapshot.values[port] = DynamicValue::Unbound;
+        snapshot.coverage.ports[port] = false;
     }
 
     // === Caching policy (over the RAM slots + the owned `disk_store`) ===
@@ -308,18 +439,20 @@ impl RuntimeCache {
     ///
     /// RAM reuse trusts residency ([`is_resident_hit`](Self::is_resident_hit)): a resident
     /// digest-valid value is served, because a content digest attests the value produced
-    /// under it — however the value came to be resident (mode retention, a preview pin, or
-    /// an inspection hydrating a blob). Disk reuse stays gated on `persists_to_disk`
+    /// under it — however the value came to be resident (mode retention or a preview pin).
+    /// Disk reuse stays gated on `persists_to_disk`
     /// (`Disk`/`Both`, enforced in [`DiskStore::blob_target`]).
     pub(crate) fn stamp_and_check_reuse(
         &mut self,
         program: &ExecutionProgram,
         idx: NodeIdx,
+        demand: &[OutputDemand],
     ) -> bool {
         let digest = node_digest(program, idx, self);
         self.slots[idx].current_digest = digest;
         digest.is_some()
-            && (self.is_resident_hit(idx) || self.mark_on_disk_if_present(program, idx))
+            && (self.is_resident_hit(idx, demand)
+                || self.mark_on_disk_if_present(program, idx, demand))
     }
 
     /// The per-node "reuse from disk?" check, run once a node's digest is computed: if a
@@ -332,6 +465,7 @@ impl RuntimeCache {
         &mut self,
         program: &ExecutionProgram,
         idx: NodeIdx,
+        demand: &[OutputDemand],
     ) -> bool {
         let Some(target) = self
             .disk_store
@@ -342,9 +476,11 @@ impl RuntimeCache {
         if self
             .disk_store
             .outputs_decodable(program.node_output_types(&program.e_nodes[idx]))
-            && target.is_current()
+            && let Some(coverage) = target.coverage()
+            && coverage.ports.len() == demand.len()
+            && coverage.covers_demand(demand)
         {
-            self.flag_on_disk(idx);
+            self.slots[idx].value = ValueState::OnDisk { coverage };
             true
         } else {
             false
@@ -362,12 +498,13 @@ impl RuntimeCache {
         // A fresh value already in RAM needs no load. A *stale* resident value can't reach here:
         // `mark_on_disk_if_present` demotes "stale + blob on disk" to `OnDisk` (dropping the
         // stale value) before a consumer would read it.
-        if self.is_resident_hit(idx) {
+        if self.is_resident_current(idx) {
             return true;
         }
-        if !self.is_on_disk(idx) {
-            return false;
-        }
+        let required = match &self.slots[idx].value {
+            ValueState::OnDisk { coverage } => coverage.clone(),
+            _ => return false,
+        };
         // The slot claimed an on-disk blob. Load it; on success it's resident.
         if let Some(target) = self
             .disk_store
@@ -378,15 +515,23 @@ impl RuntimeCache {
             // consumer's arity assert panic.
             let arity = program.e_nodes[idx].outputs.len as usize;
             match self.disk_store.read(&target).await {
-                Some(values) if values.len() == arity => {
-                    self.hydrate(idx, values, target.digest);
+                Some(snapshot)
+                    if snapshot.values.len() == arity
+                        && snapshot.coverage.ports.len() == arity
+                        && snapshot.coverage.covers(&required) =>
+                {
+                    self.slots[idx].value = ValueState::Resident {
+                        snapshot,
+                        produced_under: Some(target.digest),
+                    };
                     return true;
                 }
-                Some(values) => {
+                Some(snapshot) => {
                     tracing::warn!(
                         path = %target.path.display(),
                         expected = arity,
-                        got = values.len(),
+                        values = snapshot.values.len(),
+                        coverage = snapshot.coverage.ports.len(),
                         "cached outputs have the wrong count; ignoring blob"
                     );
                 }
@@ -418,16 +563,18 @@ impl RuntimeCache {
         let target = self
             .disk_store
             .blob_target(&program.e_nodes[idx], self.slots[idx].current_digest);
-        let outputs = self
-            .is_resident_hit(idx)
-            .then(|| self.slots[idx].output_values())
-            .flatten();
+        let resident = self.is_resident_current(idx).then(|| {
+            let ValueState::Resident { snapshot, .. } = &self.slots[idx].value else {
+                unreachable!("a current resident slot must contain resident values")
+            };
+            snapshot
+        });
         let disk = &self.disk_store;
         async move {
-            let (Some(target), Some(outputs)) = (target, outputs) else {
+            let (Some(target), Some(snapshot)) = (target, resident) else {
                 return;
             };
-            disk.store(&target, outputs, ctx).await;
+            disk.store(&target, snapshot, ctx).await;
         }
     }
 
@@ -439,12 +586,19 @@ impl RuntimeCache {
     /// executor, once a non-RAM node's every output is read) and the end-of-run
     /// [`evict_unused`](Self::evict_unused) sweep. The *caller* decides eligibility.
     pub(crate) fn reclaim_slot(&mut self, program: &ExecutionProgram, idx: NodeIdx) {
-        let reloadable = self
+        let required = match &self.slots[idx].value {
+            ValueState::Resident { snapshot, .. } => snapshot.coverage.clone(),
+            _ => return,
+        };
+        let stored = self
             .disk_store
             .blob_target(&program.e_nodes[idx], self.slots[idx].current_digest)
-            .is_some_and(|target| target.is_current());
-        if reloadable {
-            self.flag_on_disk(idx);
+            .and_then(|target| target.coverage())
+            .filter(|coverage| {
+                coverage.ports.len() == required.ports.len() && coverage.covers(&required)
+            });
+        if let Some(coverage) = stored {
+            self.slots[idx].value = ValueState::OnDisk { coverage };
         } else if !program.e_nodes[idx].cache.caches_in_ram() {
             self.slots[idx].clear_output();
         }
@@ -483,6 +637,23 @@ impl RuntimeCache {
             }
             self.reclaim_slot(program, idx);
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    pub(crate) fn hydrate(
+        cache: &mut RuntimeCache,
+        idx: NodeIdx,
+        snapshot: OutputSnapshot,
+        digest: Digest,
+    ) {
+        cache.slots[idx].value = ValueState::Resident {
+            snapshot,
+            produced_under: Some(digest),
+        };
     }
 }
 

@@ -10,6 +10,7 @@ pub struct SharedAnyState {
     inner: Shared<AnyState>,
 }
 
+#[derive(Debug)]
 pub struct EventStateGuard<'a> {
     guard: MutexGuard<'a, AnyState>,
 }

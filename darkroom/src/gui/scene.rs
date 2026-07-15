@@ -4,13 +4,13 @@ use std::collections::BTreeSet;
 use aperture::SmolStr;
 use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
-use scenarium::data::{DataType, RamUsage, StaticValue};
-use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
-use scenarium::graph::{
+use scenarium::Library;
+use scenarium::{
     Binding, CacheMode, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
 };
-use scenarium::library::Library;
-use scenarium::node::function::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
+use scenarium::{DataType, RamUsage, StaticValue};
+use scenarium::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
+use scenarium::{SubgraphDef, SubgraphRef};
 
 use crate::core::document::{GraphView, ItemRef, Viewport};
 use crate::gui::run_state::{ExecStatus, RunState};
@@ -124,7 +124,7 @@ pub struct SceneOutput {
     /// The pinned preview widget's top-left corner in absolute
     /// canvas-world coordinates — `Some` iff this output is pinned
     /// (kept computed and read even with no in-graph consumer — see
-    /// [`scenarium::graph::Graph::is_output_pinned`]). Mirrors the port's
+    /// [`scenarium::Graph::is_output_pinned`]). Mirrors the port's
     /// `GraphView::view_items` entry, which exists exactly while pinned,
     /// so pinned-ness and position can't desync.
     pub pin_position: Option<Vec2>,
@@ -401,7 +401,7 @@ impl Scene {
             // input's value_variants are flattened into one pool, the input
             // recording its span (empty for the common no-options case).
             let inputs_start = self.inputs.len();
-            for (input, (_, binding)) in interface
+            for (input, node_binding) in interface
                 .inputs
                 .iter()
                 .zip(graph.node_bindings(node.id, interface.inputs.len()))
@@ -414,7 +414,7 @@ impl Scene {
                     name: input.name.clone().into(),
                     description: input.description.clone().unwrap_or_default().into(),
                     ty: input.data_type.clone(),
-                    binding: InputBindingView::from(&binding),
+                    binding: InputBindingView::from(&node_binding.binding),
                     default: default_static_value(library, input),
                     required: input.required,
                     const_only: input.const_only,
@@ -670,9 +670,9 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::data::DataType;
-    use scenarium::graph::subgraph::SubgraphDef;
-    use scenarium::graph::{InputPort, Node, OutputPort};
+    use scenarium::DataType;
+    use scenarium::SubgraphDef;
+    use scenarium::{InputPort, Node, OutputPort};
 
     fn finput(name: &str, ty: DataType) -> FuncInput {
         FuncInput::optional(name, ty)
@@ -798,8 +798,8 @@ mod tests {
 
     #[test]
     fn missing_func_and_subgraph_render_as_deletable_stubs() {
-        use scenarium::elements::math_library::math_library;
-        use scenarium::graph::subgraph::SubgraphRef;
+        use scenarium::SubgraphRef;
+        use scenarium::math_library;
 
         // A resolvable func, plus two unresolvable nodes (e.g. a document
         // saved against an older library): a func id and a linked subgraph
@@ -867,9 +867,7 @@ mod tests {
 
     #[test]
     fn func_events_project_in_order_alongside_outputs() {
-        use scenarium::elements::worker_events_library::{
-            FRAME_EVENT_FUNC_ID, worker_events_library,
-        };
+        use scenarium::{FRAME_EVENT_FUNC_ID, worker_events_library};
 
         // The `frame event` func declares two events ("Always", "FPS") and two
         // data outputs ("Delta", "Frame #"); the projection must surface both
@@ -906,9 +904,7 @@ mod tests {
 
     #[test]
     fn pinned_output_projects_per_output_port_and_shares_the_z_order() {
-        use scenarium::elements::worker_events_library::{
-            FRAME_EVENT_FUNC_ID, worker_events_library,
-        };
+        use scenarium::{FRAME_EVENT_FUNC_ID, worker_events_library};
 
         // "frame event" has two data outputs (Delta, Frame #); pin only the
         // second and confirm the flag lands on the right pooled entry, not
@@ -959,9 +955,7 @@ mod tests {
 
     #[test]
     fn subscriptions_project_from_graph() {
-        use scenarium::elements::worker_events_library::{
-            FRAME_EVENT_FUNC_ID, worker_events_library,
-        };
+        use scenarium::{FRAME_EVENT_FUNC_ID, worker_events_library};
 
         // Two frame-event nodes; subscribe the second to the first's "FPS"
         // event (event_idx 1). The projection must mirror that one edge.
@@ -988,7 +982,7 @@ mod tests {
 
     #[test]
     fn cache_mode_projects_verbatim_per_node() {
-        use scenarium::elements::math_library::math_library;
+        use scenarium::math_library;
 
         // One `Add` node per cache mode; each `SceneNode.cache` must mirror its source
         // node's mode exactly (the header reads the two bits off it).
@@ -1019,7 +1013,7 @@ mod tests {
 
     #[test]
     fn impure_flag_projects_from_func_behavior() {
-        use scenarium::node::function::Func;
+        use scenarium::Func;
 
         // Two funcs identical but for behavior: a `Pure` one (offers the disk-cache
         // toggle) and an `Impure` one (has no content digest, so the toggle is hidden).

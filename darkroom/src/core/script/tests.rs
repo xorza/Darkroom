@@ -2,8 +2,8 @@ use super::*;
 use crate::core::document::ItemRef;
 use glam::Vec2;
 use rhai::Array;
-use scenarium::graph::{Binding, InputPort, NodeId, NodeKind, OutputPort};
-use scenarium::library::Library;
+use scenarium::Library;
+use scenarium::{Binding, InputPort, NodeId, NodeKind, OutputPort};
 
 /// Build an `InboundSender` paired with the receiver tests assert on.
 /// `notify` is a no-op — tests don't drive a real host loop.
@@ -29,10 +29,14 @@ fn expect_apply(rx: &mut mpsc::UnboundedReceiver<ScriptMessage>) -> Vec<Intent> 
 
 #[test]
 fn list_funcs_returns_full_func_objects_in_insertion_order() {
-    use scenarium::node::function::{Func, FuncId};
+    use scenarium::{EventLambda, Func, FuncId};
 
     let mut lib = Library::default();
-    lib.add(Func::new(FuncId::unique(), "alpha").category("math"));
+    lib.add(
+        Func::new(FuncId::unique(), "alpha")
+            .category("math")
+            .event("changed", EventLambda::default()),
+    );
     lib.add(Func::new(FuncId::unique(), "beta").category("io"));
 
     let state = Arc::new(Mutex::new(String::new()));
@@ -58,6 +62,17 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
     // `inputs` / `outputs` round-trip as arrays even when empty.
     let inputs_len: i64 = engine.eval("list_funcs()[0].inputs.len").unwrap();
     assert_eq!(inputs_len, 0);
+
+    let events: Array = engine
+        .eval("list_funcs()[0].events.map(|event| event.name)")
+        .unwrap();
+    let events: Vec<String> = events
+        .into_iter()
+        .map(|event| event.into_string().unwrap())
+        .collect();
+    assert_eq!(events, ["changed"]);
+    let beta_events_len: i64 = engine.eval("list_funcs()[1].events.len").unwrap();
+    assert_eq!(beta_events_len, 0);
 }
 
 #[test]
@@ -102,7 +117,7 @@ fn create_node_unknown_id_returns_rhai_error_and_no_action() {
 
 #[test]
 fn create_node_known_id_enqueues_add_node() {
-    use scenarium::node::function::{Func, FuncId};
+    use scenarium::{Func, FuncId};
 
     let alpha_id = FuncId::unique();
     let mut lib = Library::default();

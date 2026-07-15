@@ -39,30 +39,29 @@ default look just run the tests and commit the asset diff (see `theme.rs`).
 
 ## Module layout (`src/`)
 
-Root holds the entry point plus the central projection/theme/run-state types;
-everything else is grouped by responsibility:
+Root holds the entry point; implementation is grouped by responsibility:
 
 - **`main.rs`** — module decls + `WinitHost` bootstrap.
-- **`scene.rs`** — the render projection (see below).
-- **`theme.rs`** — the visual/layout `Theme` bundle, code-defined (see below).
-- **`run_state.rs`** — per-node execution status + logs + on-demand runtime
-  values (`RunState`, `NodeRunState`, `ExecStatus`, `RunId`).
-- **`node_values.rs`** — render-side value views: formats worker-returned
-  values to text and uploads image previews as aperture textures
-  (`NodeValueView`, `PortValueView`).
-- **`app/`** — `mod.rs` (the `App`: runtime owner + per-frame entry +
+- **`gui/scene.rs`** — the render projection (see below).
+- **`gui/theme.rs`** — the visual/layout `Theme` bundle, code-defined (see below).
+- **`gui/run_state.rs`** — centralized runtime state: per-node execution
+  status/logs and the latest worker-pushed pinned-output values.
+- **`gui/image_viewer.rs`** — render-side full-image conversion, textures,
+  and pan/zoom state; source values are borrowed from `RunState` each frame.
+- **`gui/app/`** — `mod.rs` (the `App`: runtime owner + per-frame entry +
   `AppContext`), `editor/` (the `Editor`: document + undo + scene + UI tree +
   the edit pipeline; `shortcuts.rs` maps chords → intents/commands),
-  `worker.rs` (`WorkerBridge`: tokio worker + result channel), `commands/`
+  `commands/`
   (`AppCommand` side effects, run *outside* the record — grouped into nested
   sub-enums with one handler submodule each: `file` / `subgraph` / `run` /
   `prefs` / `edit` / `shell`; `mod.rs` is the dispatcher).
-- **`document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
-  `EditScope`), `view_node.rs` (per-node position record).
-- **`edit/`** — the mutation machinery: `intent.rs` (intents + undo steps),
+- **`core/worker.rs`** — `WorkerBridge`: tokio worker + result channel.
+- **`core/document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
+  `EditScope`), `view_item.rs` (node/pin position and paint-stack records).
+- **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
   `action_stack/` (packed undo history), `reconcile/` (derived subgraph-
   interface reconciliation).
-- **`io/`** — `persistence.rs` (file-dialog + serde I/O), `preferences.rs`
+- **`core/io/`** — `persistence.rs` (file-dialog + serde I/O), `preferences.rs`
   (`Preferences` session state), `library.rs` (shared subgraph library file),
   `cache.rs` (per-document disk-cache root: `<stem>.darkroom-cache/` beside the
   file, with a self-ignoring `.gitignore`).
@@ -87,17 +86,15 @@ everything else is grouped by responsibility:
 
 `App::frame` is thin — it wires the runtime to the editor each frame:
 
-1. **drain worker events** (`drain_worker_events`) — pull `ExecutionStats` and
-   `ArgumentValues` off the worker channel into `editor.run_state`.
-2. **editor frame** (`editor.frame`) — the full edit pipeline; returns an
-   optional `MenuCommand`.
-3. **request watched values** (`request_watched_values`) — drain the run
-   state's per-frame watch registry (open inspector panels + image-viewer
-   tabs registered their nodes during the editor frame) into worker value
-   requests (deduped per run epoch).
-4. **handle menu command** (`handle_menu_command`) — file/theme dialogs +
-   `Run` execute *last*, outside the record, so the blocking dialog holds no
-   frame borrows. `Run` calls `App::run_graph`.
+1. **drain worker events** (`drain_worker_events`) — fold progress/stats and
+   pinned-output pushes into `editor.run_state`.
+2. **handle script inbound** (`handle_script_inbound`) — apply queued graph
+   edits and run/quit requests before rebuilding the scene.
+3. **editor frame** (`editor.frame`) — the full edit pipeline; returns an
+   optional `AppCommand`.
+4. **handle command** (`handle_command`) — file/theme dialogs and run commands
+   execute last, outside the record, so blocking side effects hold no frame
+   borrows.
 
 `AppContext<'a>` (`app/mod.rs`) threads `&Theme`, `&Library`, and `&RunState`
 down the UI tree so child widgets don't grow a parameter fan-out.
@@ -248,7 +245,7 @@ per-node allocation in steady state). Each `SceneNode` carries its
 label. Scene is read-only mirror state — viewport/selection are copied *from*
 the active `GraphView` each rebuild; the gesture writes back via intents.
 
-### Graph execution: worker + run state (`app/worker.rs`, `run_state.rs`)
+### Graph execution: worker + run state (`core/worker.rs`, `gui/run_state.rs`)
 Execution is **decoupled from the UI thread**. `WorkerBridge` owns a tokio
 multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
 
@@ -291,18 +288,13 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   between nodes). The
   in-flight node still finishes (its blocking work isn't interrupted — that's
   P3), but nothing further runs and the run reports `stats.cancelled`.
-- **Status + logs persist across re-runs** (the glow doesn't blank during
-  compute); runtime *values* invalidate immediately on `begin_run` and are
-  fetched on demand.
-- **On-demand values**: every surface showing runtime values — open inspector
-  panels and image-viewer tabs — registers its nodes per frame in `RunState`'s
-  watch registry (`RunState::watch`); `App::request_watched_values` drains it
-  into `ValueRequest { node_id, run_id }` sends (the `run_id` epoch drops
-  stale replies). The worker spawns a forwarder task; its `ArgumentValues`
-  reply (`inputs`/`outputs`) lands on a later frame, where
-  `node_values::build_view` formats text + uploads image previews as aperture
-  textures into `RunState` (each image port also keeps its full value for the
-  viewer tab).
+- **Status, logs, and pinned values persist across re-runs** so the UI doesn't
+  blank during compute; fresh stats and pushes replace them as they arrive.
+- **Pinned outputs are centralized**: `WorkerEvent::PinnedOutputs` is stored
+  directly in `RunState`, with an eagerly prepared thumbnail and a monotonic
+  revision. Pin previews and image viewers read it during rendering and cache
+  only derived textures/navigation state. `WorkerBridge::deliver` requests the
+  frame that drains each report, so the editor never notifies individual views.
 
 ### GUI tree (`src/gui/`)
 Top level is the chrome: `MainWindow` (menu-bar band + status bar around

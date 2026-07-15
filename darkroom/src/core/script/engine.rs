@@ -7,9 +7,10 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use rhai::{Array, Dynamic, Engine};
-use scenarium::graph::{Node, NodeId};
-use scenarium::library::Library;
-use scenarium::node::function::FuncId;
+use scenarium::FuncId;
+use scenarium::Library;
+use scenarium::{Func, Node, NodeId};
+use serde::Serialize;
 
 use crate::core::document::ItemRef;
 use crate::core::edit::intent::types::Intent;
@@ -159,21 +160,60 @@ fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
     );
 }
 
-/// `list_funcs()` → array of object-maps mirroring `Func`'s Serialize
-/// derive (id, name, category, inputs, outputs, …; `lambda` is
-/// `#[serde(skip)]`). Lets scripts query the live Library without a
-/// separate registry on this side.
+#[derive(Debug, Serialize)]
+struct ScriptFuncEvent<'a> {
+    name: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct ScriptFunc<'a> {
+    id: scenarium::FuncId,
+    name: &'a str,
+    category: &'a str,
+    sink: bool,
+    uncacheable: bool,
+    default_cache_mode: scenarium::CacheMode,
+    behavior: scenarium::FuncBehavior,
+    version: u64,
+    description: &'a Option<String>,
+    inputs: &'a [scenarium::FuncInput],
+    outputs: &'a [scenarium::FuncOutput],
+    events: Vec<ScriptFuncEvent<'a>>,
+}
+
+impl<'a> From<&'a Func> for ScriptFunc<'a> {
+    fn from(func: &'a Func) -> Self {
+        Self {
+            id: func.id,
+            name: &func.name,
+            category: &func.category,
+            sink: func.sink,
+            uncacheable: func.uncacheable,
+            default_cache_mode: func.default_cache_mode,
+            behavior: func.behavior,
+            version: func.version,
+            description: &func.description,
+            inputs: &func.inputs,
+            outputs: &func.outputs,
+            events: func
+                .events
+                .iter()
+                .map(|event| ScriptFuncEvent { name: &event.name })
+                .collect(),
+        }
+    }
+}
+
+/// `list_funcs()` → array of script-facing function descriptors.
 fn register_introspection(engine: &mut Engine, library: Arc<Library>) {
     engine.register_fn("list_funcs", move || -> Array {
-        // The startup snapshot serves every call: the func table never
-        // changes after assembly (runtime library growth is subgraph defs,
-        // which aren't exposed here). Skip (don't panic on) any func that
-        // fails to serialize, so a bad entry can't take down the executor
-        // task mid-eval.
         library
             .funcs
             .iter()
-            .filter_map(|f| rhai::serde::to_dynamic(f).ok())
+            .map(|func| {
+                rhai::serde::to_dynamic(ScriptFunc::from(func))
+                    .expect("script function descriptor must serialize")
+            })
             .collect()
     });
 }

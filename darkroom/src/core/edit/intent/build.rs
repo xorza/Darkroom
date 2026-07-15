@@ -2,8 +2,8 @@
 //! [`Intent`] into a complete [`UndoStep`] — the diff-capture half of the
 //! intent pipeline. Pure: never writes to the graph.
 
-use scenarium::graph::subgraph::{SubgraphDef, SubgraphRef};
-use scenarium::graph::{Graph, Node, NodeKind, NodeSearch};
+use scenarium::{Graph, Node, NodeKind, NodeSearch};
+use scenarium::{SubgraphDef, SubgraphRef};
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, EditScopeRef, GraphRef, ItemRef};
@@ -95,7 +95,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             }
         }
         Intent::RemoveNode { node_id } => {
-            let node = graph.find_node(&node_id, NodeSearch::TopLevel)?.clone();
+            let detached = graph.snapshot_node(node_id)?;
             // The node's own item plus its pinned outputs', each with its
             // paint-stack slot — ascending by construction (enumerate).
             let view_items = view
@@ -112,10 +112,8 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
                 .copied()
                 .collect();
             GraphStep::RemoveNode {
-                node,
+                detached,
                 view_items,
-                bindings: graph.bindings_touching(node_id),
-                subscriptions: graph.subscriptions_touching(node_id),
                 selected,
             }
         }

@@ -16,7 +16,7 @@
 
 use std::sync::OnceLock;
 
-use crate::node::function::Func;
+use crate::node::definition::Func;
 
 /// Stable `FuncId` standing in for the run-sinks node in the flattened
 /// program (stats attribution). Not registered in any `Library`.

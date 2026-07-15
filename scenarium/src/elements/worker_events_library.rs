@@ -1,11 +1,11 @@
 use std::time::{Duration, Instant};
 
-use crate::data::DataType;
+use crate::DataType;
 use crate::library::Library;
-use crate::node::event_lambda::EventLambda;
-use crate::node::func_lambda::FuncLambda;
-use crate::node::function::FuncId;
-use crate::node::function::{Func, FuncInput, FuncOutput};
+use crate::node::definition::FuncId;
+use crate::node::definition::{Func, FuncInput, FuncOutput};
+use crate::node::event::EventLambda;
+use crate::node::lambda::FuncLambda;
 use common::FloatExt;
 use common::Slot;
 
@@ -74,7 +74,7 @@ pub fn worker_events_library() -> Library {
                 }),
             )
             .lambda(FuncLambda::new(
-                move |_context_manager, _state, event_state, inputs, _output_usage, outputs| {
+                move |_context_manager, _state, event_state, inputs, _output_demand, outputs| {
                     Box::pin(async move {
                         let frequency = inputs[0].value.as_f64().unwrap_or(1.0);
                         let now = Instant::now();

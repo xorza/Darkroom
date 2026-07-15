@@ -1,22 +1,22 @@
 //! The compiled, flattened graph: topology + code, immutable across runs.
-//! Built by the engine (subgraph flattening) and the only serializable part of
-//! the pipeline — its persistent form. All mutable execution state lives in the
-//! [`Executor`](crate::execution::executor::Executor); all per-run scheduling state in the
+//! Built by the compiler through subgraph flattening and installed as runtime
+//! state; it is deliberately not a persistence format. All mutable execution
+//! state lives in the [`Executor`](crate::execution::executor::Executor); all
+//! per-run scheduling state lives in the
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan).
 
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
 use common::{KeyIndexKey, KeyIndexVec, Span};
-use serde::{Deserialize, Serialize};
 
-use crate::data::{DataType, ResourceStamper, StaticValue};
 use crate::graph::{CacheMode, NodeId};
 use crate::library::Library;
-use crate::node::event_lambda::EventLambda;
-use crate::node::func_lambda::FuncLambda;
-use crate::node::function::{Func, FuncBehavior, FuncId, OutputType};
+use crate::node::definition::{Func, FuncBehavior, FuncId, OutputType};
+use crate::node::event::EventLambda;
+use crate::node::lambda::FuncLambda;
 use crate::node::special::SpecialNode;
+use crate::{DataType, ResourceStamper, StaticValue};
 
 /// A position into the flat node table — `e_nodes`, the cache's `slots`, and the
 /// per-node plan/cache columns are all indexed by it. Resolved at flatten and stable
@@ -25,9 +25,7 @@ use crate::node::special::SpecialNode;
 /// mixing them was previously a silent `usize` bug caught only by debug `validate`.
 /// `KeyIndexVec<NodeId, _>` indexes by it directly; plain `Vec` columns go through
 /// [`NodeIdx::idx`].
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct NodeIdx(pub(crate) u32);
 
 impl NodeIdx {
@@ -55,19 +53,36 @@ impl<V: KeyIndexKey<NodeId>> IndexMut<NodeIdx> for KeyIndexVec<NodeId, V> {
     }
 }
 
+/// A position in the program's flat output pool. It cannot be confused with a node
+/// position or a node-local port number.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct OutputIdx(pub(crate) u32);
+
+impl OutputIdx {
+    pub(crate) fn idx(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl From<usize> for OutputIdx {
+    fn from(i: usize) -> Self {
+        OutputIdx(u32::try_from(i).expect("output pool index must fit in u32"))
+    }
+}
+
 // === Execution Binding ===
 
 /// A flat output address: producer node `target_idx` (a [`NodeIdx`], resolved at
 /// flatten and stable for the program's lifetime), output `port_idx`. The producer's
 /// `NodeId` is *not* stored — it's `e_nodes[target_idx].id`; the index is the
 /// canonical key here, so there's no id/index pair to keep in sync.
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug)]
 pub(crate) struct ExecutionPortAddress {
     pub target_idx: NodeIdx,
     pub port_idx: usize,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default)]
 pub(crate) enum ExecutionBinding {
     #[default]
     None,
@@ -89,24 +104,21 @@ pub(crate) enum InputStamper {
     Custom(Arc<dyn ResourceStamper>),
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ExecutionInput {
     pub required: bool,
     /// `Some` iff this input is declared with a resource-reference type (see
-    /// [`InputStamper`]). Runtime-only, like [`ExecutionNode::lambda`]: re-resolved from
-    /// the library at every flatten, absent on a deserialized program.
-    #[serde(skip, default)]
+    /// [`InputStamper`]). Resolved from the library at every flatten.
     pub stamper: Option<InputStamper>,
     pub binding: ExecutionBinding,
 }
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug)]
 pub(crate) struct ExecutionEvent {
     /// Flat positions of the nodes subscribed to this event, resolved at flatten —
     /// like a binding's `target_idx`, so the planner seeds its walk roots without a
     /// per-plan id→index lookup. (Data and event edges now address the same way.)
     pub subscribers: Vec<NodeIdx>,
-    #[serde(skip, default)]
     pub lambda: EventLambda,
 }
 
@@ -114,7 +126,7 @@ pub(crate) struct ExecutionEvent {
 
 /// Topology + code for one flat node. Immutable across runs; all mutable
 /// per-run/cross-run state lives in the executor's slot of the same index.
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug)]
 pub(crate) struct ExecutionNode {
     pub id: NodeId,
 
@@ -130,7 +142,6 @@ pub(crate) struct ExecutionNode {
     /// the disk load/store; disk is honored only when the node has a
     /// content digest (a reproducible cone) and a disk root is configured — see `digest.rs`
     /// and `disk_store.rs`.
-    #[serde(default)]
     pub cache: CacheMode,
 
     /// `Some` for a built-in [`SpecialNode`] (flattened from
@@ -138,7 +149,6 @@ pub(crate) struct ExecutionNode {
     /// recognizes the kind for special behavior — e.g. the cache node's path-keyed
     /// load/store + input pruning, with the bypass toggle riding in the variant.
     /// See `README.md` Part C.
-    #[serde(default)]
     pub special: Option<SpecialNode>,
 
     pub inputs: Span,
@@ -147,16 +157,13 @@ pub(crate) struct ExecutionNode {
 
     pub func_id: FuncId,
 
-    /// Copied from [`Func::version`](crate::node::function::Func::version) at flatten
+    /// Copied from [`Func::version`](crate::node::definition::Func::version) at flatten
     /// time so the content digest is self-contained in the program. Bumping a
     /// func's version flows here and invalidates its disk-cached outputs.
-    #[serde(default)]
     pub func_version: u64,
 
-    #[serde(skip)]
     pub lambda: FuncLambda,
 
-    #[serde(default)]
     pub name: String,
 }
 
@@ -168,32 +175,30 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 
 // === Execution Program ===
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default)]
 pub(crate) struct ExecutionProgram {
     pub(crate) e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
     pub(crate) inputs: Vec<ExecutionInput>,
     pub(crate) events: Vec<ExecutionEvent>,
     /// The output pool: each node's resolved declared output types (wildcards
-    /// followed), flat and indexed like `output_usage` — `e_node.outputs.range()` is
+    /// followed), flat and indexed like the plan's output columns — `e_node.outputs.range()` is
     /// the node's slice. Resolved once at flatten by [`Self::resolve_output_types`]
     /// from the func library (which the program doesn't retain), so the compiled
     /// program is self-describing. Read by the digest (an output-signature change
     /// re-keys) and the disk cache's codec check. An unresolved wildcard port is
     /// `DataType::Any`. Its `len()` is the program's total output count
     /// ([`Self::n_outputs`]).
-    #[serde(default)]
     pub(crate) output_types: Vec<DataType>,
     /// Whether each pooled output port is pinned — copied from
     /// [`Graph::pinned_outputs`](crate::graph::Graph) at flatten, same
     /// indexing as `output_types`. The planner reads this to count a
     /// pinned port as used even with no in-graph binding.
-    #[serde(default)]
     pub(crate) output_pinned: Vec<bool>,
 }
 
 impl ExecutionProgram {
     /// The program's total output count: the length of the `output_types` pool and the
-    /// plan's `output_usage` column (every node's output span summed). Derived from
+    /// plan's output columns (every node's output span summed). Derived from
     /// `output_types` rather than stored, so it can't disagree with the pool it sizes.
     pub(crate) fn n_outputs(&self) -> usize {
         self.output_types.len()
@@ -203,6 +208,28 @@ impl ExecutionProgram {
     /// `for idx in 0..program.e_nodes.len()` so the loop variable is a [`NodeIdx`].
     pub(crate) fn node_indices(&self) -> impl Iterator<Item = NodeIdx> {
         (0..self.e_nodes.len()).map(NodeIdx::from)
+    }
+
+    pub(crate) fn output_idx(&self, node_idx: NodeIdx, port_idx: usize) -> OutputIdx {
+        let outputs = self.e_nodes[node_idx].outputs;
+        assert!(
+            port_idx < outputs.len as usize,
+            "output port is out of range"
+        );
+        let port_idx = u32::try_from(port_idx).expect("output port index must fit in u32");
+        OutputIdx(outputs.start + port_idx)
+    }
+
+    pub(crate) fn pinned_output_indices(&self) -> impl Iterator<Item = OutputIdx> + '_ {
+        self.output_pinned
+            .iter()
+            .enumerate()
+            .filter(|(_, pinned)| **pinned)
+            .map(|(idx, _)| OutputIdx::from(idx))
+    }
+
+    pub(crate) fn is_output_pinned(&self, output_idx: OutputIdx) -> bool {
+        self.output_pinned[output_idx.idx()]
     }
 
     /// `e_node`'s slice of the shared input pool.

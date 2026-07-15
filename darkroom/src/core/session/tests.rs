@@ -1,7 +1,7 @@
 use glam::Vec2;
-use scenarium::data::StaticValue;
-use scenarium::graph::{Binding, InputPort, Node, NodeId, NodeKind, NodeSearch};
-use scenarium::node::function::FuncId;
+use scenarium::FuncId;
+use scenarium::StaticValue;
+use scenarium::{Binding, InputPort, Node, NodeId, NodeKind, NodeSearch};
 
 use super::*;
 use crate::core::document::ItemRef;
@@ -110,9 +110,9 @@ fn apply_intents_batches_multiple() {
 
 #[test]
 fn apply_intents_severs_incompatible_passthrough_output_edges() {
-    use scenarium::data::DataType;
-    use scenarium::library::Library;
-    use scenarium::node::function::{Func, FuncInput, FuncOutput};
+    use scenarium::DataType;
+    use scenarium::Library;
+    use scenarium::{Func, FuncInput, FuncOutput};
 
     // Float producer → wildcard passthrough → Float sink, all headless.
     let float_src =
@@ -167,9 +167,9 @@ fn apply_intents_severs_incompatible_passthrough_output_edges() {
 
 #[test]
 fn apply_intents_severs_through_a_passthrough_chain() {
-    use scenarium::data::DataType;
-    use scenarium::library::Library;
-    use scenarium::node::function::{Func, FuncInput, FuncOutput};
+    use scenarium::DataType;
+    use scenarium::Library;
+    use scenarium::{Func, FuncInput, FuncOutput};
 
     // Float producer → pass1 → pass2 → Float sink: a valid two-passthrough chain.
     let float_src =

@@ -15,7 +15,7 @@
 //! hover emphasis.
 
 use aperture::Color;
-use scenarium::data::DataType;
+use scenarium::DataType;
 
 use crate::core::document::PortKind;
 use crate::gui::canvas::wire::toward;
@@ -88,7 +88,7 @@ fn emphasize(c: Color, preset: ThemePreset) -> Color {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::data::TypeId;
+    use scenarium::TypeId;
 
     use super::*;
 

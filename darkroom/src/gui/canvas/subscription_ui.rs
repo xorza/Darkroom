@@ -1,6 +1,6 @@
 use aperture::{Brush, Ui};
 use glam::Vec2;
-use scenarium::graph::NodeId;
+use scenarium::NodeId;
 
 use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;

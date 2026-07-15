@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use common::{SerdeFormat, deserialize, serialize};
-use scenarium::graph::subgraph::SubgraphDef;
+use scenarium::SubgraphDef;
 
 use crate::core::io::cwd_file;
 
@@ -118,8 +118,8 @@ fn save_library_to<'a>(
 #[cfg(test)]
 mod tests {
     use common::test_utils::test_output_path;
-    use scenarium::graph::NodeId;
-    use scenarium::graph::subgraph::{SubgraphEvent, SubgraphId};
+    use scenarium::NodeId;
+    use scenarium::{SubgraphEvent, SubgraphId};
 
     use super::*;
 

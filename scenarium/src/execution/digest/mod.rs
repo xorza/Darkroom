@@ -22,7 +22,7 @@
 //!   entries' ([`hash_fs_path_identity`]), so a folder-reading node can be `Pure` and
 //!   still re-key when its contents change. A same-size edit within mtime granularity
 //!   can slip through; a full content hash is the opt-in resolver. The same tier holds
-//!   for any registered [`ResourceStamper`](crate::data::ResourceStamper): a stamp is
+//!   for any registered [`ResourceStamper`](crate::ResourceStamper): a stamp is
 //!   cheap referent *metadata*, and stamps are machine-local (mtimes, local versions),
 //!   so resource-keyed blobs don't transfer across machines.
 //! - **A reference is dereferenced only through an input declared with its resource
@@ -35,12 +35,12 @@
 
 use blake3::Hasher;
 
-use crate::data::{DataType, StaticValue};
 use crate::execution::cache::RuntimeCache;
 use crate::execution::program::{
     ExecutionBinding, ExecutionPortAddress, ExecutionProgram, InputStamper, NodeIdx,
 };
-use crate::node::function::FuncBehavior;
+use crate::node::definition::FuncBehavior;
+use crate::{DataType, StaticValue};
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
