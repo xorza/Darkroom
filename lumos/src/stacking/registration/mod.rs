@@ -53,7 +53,7 @@ mod synthetic_tests;
 
 use config::{Config, InterpolationMethod};
 use distortion::sip::SipPolynomial;
-use result::{RansacFailureReason, RegistrationError, RegistrationResult};
+use result::{RansacFailureReason, RegistrationError, RegistrationResult, StarMatch};
 use transform::{Transform, TransformType, WarpTransform};
 
 // === Top-Level Functions ===
@@ -403,13 +403,19 @@ fn estimate_and_refine(
     let inlier_matches: Vec<_> = ransac_result
         .inliers
         .iter()
-        .map(|&i| (matches[i].ref_idx, matches[i].target_idx))
+        .map(|&i| StarMatch {
+            reference: matches[i].ref_idx,
+            target: matches[i].target_idx,
+        })
         .collect();
 
     // Effective threshold for match recovery: ~3 * max_sigma (χ² quantile)
     let effective_threshold = max_sigma * 3.03;
     let t0 = Instant::now();
-    let (transform, inlier_matches) = recover_matches(
+    let RecoveredMatches {
+        transform,
+        matches: inlier_matches,
+    } = recover_matches(
         ref_stars,
         target_stars,
         &ransac_result.transform,
@@ -421,10 +427,13 @@ fn estimate_and_refine(
 
     let t0 = Instant::now();
     let sip_fit = if config.sip_enabled {
-        let inlier_ref: Vec<DVec2> = inlier_matches.iter().map(|&(r, _)| ref_stars[r]).collect();
+        let inlier_ref: Vec<DVec2> = inlier_matches
+            .iter()
+            .map(|star_match| ref_stars[star_match.reference])
+            .collect();
         let inlier_target: Vec<DVec2> = inlier_matches
             .iter()
-            .map(|&(_, t)| target_stars[t])
+            .map(|star_match| target_stars[star_match.target])
             .collect();
 
         let sip_config = SipConfig {
@@ -442,9 +451,9 @@ fn estimate_and_refine(
 
     let residuals: Vec<f64> = inlier_matches
         .iter()
-        .map(|&(r, t)| {
-            let ref_pos = ref_stars[r];
-            let target_pos = target_stars[t];
+        .map(|star_match| {
+            let ref_pos = ref_stars[star_match.reference];
+            let target_pos = target_stars[star_match.target];
             let corrected_r = match sip_polynomial {
                 Some(sip) => sip.correct(ref_pos),
                 None => ref_pos,
@@ -472,22 +481,33 @@ fn estimate_and_refine(
 /// Convergence is typically reached in 2-3 passes; diminishing returns after that.
 const RECOVERY_MAX_ITERATIONS: usize = 5;
 
-pub(crate) fn recover_matches(
+#[derive(Debug)]
+struct RecoveredMatches {
+    transform: Transform,
+    matches: Vec<StarMatch>,
+}
+
+fn recover_matches(
     ref_stars: &[DVec2],
     target_stars: &[DVec2],
     transform: &Transform,
-    inlier_matches: &[(usize, usize)],
+    inlier_matches: &[StarMatch],
     inlier_threshold: f64,
     transform_type: TransformType,
-) -> (Transform, Vec<(usize, usize)>) {
+) -> RecoveredMatches {
     let target_tree = match KdTree::build(target_stars) {
         Some(tree) => tree,
-        None => return (*transform, inlier_matches.to_vec()),
+        None => {
+            return RecoveredMatches {
+                transform: *transform,
+                matches: inlier_matches.to_vec(),
+            };
+        }
     };
 
     let threshold_sq = inlier_threshold * inlier_threshold;
     let mut current_transform = *transform;
-    let mut current_matches: Vec<(usize, usize)> = inlier_matches.to_vec();
+    let mut current_matches = inlier_matches.to_vec();
 
     // Dense small-integer membership over [0, n) → bitmaps, not HashSets: no hashing,
     // no allocation per pass, and order-independent (deterministic).
@@ -499,13 +519,13 @@ pub(crate) fn recover_matches(
         let prev_count = current_matches.len();
 
         matched_target.fill(false);
-        for &(_, t) in &current_matches {
-            matched_target[t] = true;
+        for star_match in &current_matches {
+            matched_target[star_match.target] = true;
         }
 
         matched_ref.fill(false);
-        for &(r, _) in &current_matches {
-            matched_ref[r] = true;
+        for star_match in &current_matches {
+            matched_ref[star_match.reference] = true;
         }
 
         newly_matched_targets.fill(false);
@@ -522,15 +542,18 @@ pub(crate) fn recover_matches(
                 && !matched_target[nn.index]
                 && !newly_matched_targets[nn.index]
             {
-                current_matches.push((ref_idx, nn.index));
+                current_matches.push(StarMatch {
+                    reference: ref_idx,
+                    target: nn.index,
+                });
                 newly_matched_targets[nn.index] = true;
             }
         }
 
         // Re-validate all matches against current transform, removing outliers
-        current_matches.retain(|&(r, t)| {
-            let predicted = current_transform.apply(ref_stars[r]);
-            (predicted - target_stars[t]).length_squared() <= threshold_sq
+        current_matches.retain(|star_match| {
+            let predicted = current_transform.apply(ref_stars[star_match.reference]);
+            (predicted - target_stars[star_match.target]).length_squared() <= threshold_sq
         });
 
         // Stop if match count didn't change (converged)
@@ -539,10 +562,13 @@ pub(crate) fn recover_matches(
         }
 
         // Refit transform with updated matches
-        let all_ref: Vec<DVec2> = current_matches.iter().map(|&(r, _)| ref_stars[r]).collect();
+        let all_ref: Vec<DVec2> = current_matches
+            .iter()
+            .map(|star_match| ref_stars[star_match.reference])
+            .collect();
         let all_target: Vec<DVec2> = current_matches
             .iter()
-            .map(|&(_, t)| target_stars[t])
+            .map(|star_match| target_stars[star_match.target])
             .collect();
 
         match estimate_transform(&all_ref, &all_target, transform_type) {
@@ -553,10 +579,16 @@ pub(crate) fn recover_matches(
 
     // Ensure we never return fewer matches than we started with
     if current_matches.len() < inlier_matches.len() {
-        return (*transform, inlier_matches.to_vec());
+        return RecoveredMatches {
+            transform: *transform,
+            matches: inlier_matches.to_vec(),
+        };
     }
 
-    (current_transform, current_matches)
+    RecoveredMatches {
+        transform: current_transform,
+        matches: current_matches,
+    }
 }
 
 // === Internal Re-exports (for submodules) ===
@@ -633,6 +665,15 @@ mod recovery_tests {
     use super::*;
     use crate::testing::synthetic::transforms::generate_random_positions;
 
+    fn identity_matches(count: usize) -> Vec<StarMatch> {
+        (0..count)
+            .map(|index| StarMatch {
+                reference: index,
+                target: index,
+            })
+            .collect()
+    }
+
     /// Apply a similarity transform (rotation + translation) around a center.
     fn apply_similarity(pos: DVec2, dx: f64, dy: f64, angle: f64, center: DVec2) -> DVec2 {
         let r = pos - center;
@@ -668,10 +709,13 @@ mod recovery_tests {
         let initial_transform =
             estimate_transform(&seed_ref, &seed_target, TransformType::Euclidean).unwrap();
 
-        let seed_matches: Vec<(usize, usize)> = (0..3).map(|i| (i, i)).collect();
+        let seed_matches = identity_matches(3);
         let threshold = 3.0; // ~3px
 
-        let (refined_transform, recovered_matches) = recover_matches(
+        let RecoveredMatches {
+            transform: refined_transform,
+            matches: recovered_matches,
+        } = recover_matches(
             &ref_stars,
             &target_stars,
             &initial_transform,
@@ -689,9 +733,9 @@ mod recovery_tests {
 
         // Verify the refined transform is accurate
         let mut max_error = 0.0f64;
-        for &(r, t) in &recovered_matches {
-            let predicted = refined_transform.apply(ref_stars[r]);
-            let error = (predicted - target_stars[t]).length();
+        for star_match in &recovered_matches {
+            let predicted = refined_transform.apply(ref_stars[star_match.reference]);
+            let error = (predicted - target_stars[star_match.target]).length();
             max_error = max_error.max(error);
         }
         assert!(
@@ -715,9 +759,11 @@ mod recovery_tests {
             estimate_transform(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
         // Start with only 5 seed matches
-        let seed_matches: Vec<(usize, usize)> = (0..5).map(|i| (i, i)).collect();
+        let seed_matches = identity_matches(5);
 
-        let (_refined, recovered) = recover_matches(
+        let RecoveredMatches {
+            matches: recovered, ..
+        } = recover_matches(
             &ref_stars,
             &target_stars,
             &transform,
@@ -748,9 +794,11 @@ mod recovery_tests {
         let transform =
             estimate_transform(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
-        let seed_matches: Vec<(usize, usize)> = (0..10).map(|i| (i, i)).collect();
+        let seed_matches = identity_matches(10);
 
-        let (_, recovered) = recover_matches(
+        let RecoveredMatches {
+            matches: recovered, ..
+        } = recover_matches(
             &ref_stars,
             &target_stars,
             &transform,
@@ -781,12 +829,20 @@ mod recovery_tests {
             estimate_transform(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
         // Good matches plus 2 deliberately wrong matches
-        let mut seed_matches: Vec<(usize, usize)> = (0..8).map(|i| (i, i)).collect();
+        let mut seed_matches = identity_matches(8);
         // Wrong: ref[8] matched to target[15], ref[9] matched to target[20]
-        seed_matches.push((8, 15));
-        seed_matches.push((9, 20));
+        seed_matches.push(StarMatch {
+            reference: 8,
+            target: 15,
+        });
+        seed_matches.push(StarMatch {
+            reference: 9,
+            target: 20,
+        });
 
-        let (_, recovered) = recover_matches(
+        let RecoveredMatches {
+            matches: recovered, ..
+        } = recover_matches(
             &ref_stars,
             &target_stars,
             &transform,
@@ -796,9 +852,9 @@ mod recovery_tests {
         );
 
         // Wrong matches should be removed, correct ones kept
-        for &(r, t) in &recovered {
+        for star_match in &recovered {
             assert_eq!(
-                r, t,
+                star_match.reference, star_match.target,
                 "All recovered matches should be correct correspondences (r==t for this synthetic data)"
             );
         }

@@ -153,12 +153,12 @@ fn test_register_two_calibrated_lights() {
     let inlier_ref: Vec<glam::DVec2> = result
         .matched_stars
         .iter()
-        .map(|&(ri, _)| ref_positions[ri])
+        .map(|star_match| ref_positions[star_match.reference])
         .collect();
     let inlier_target: Vec<glam::DVec2> = result
         .matched_stars
         .iter()
-        .map(|&(_, ti)| target_positions[ti])
+        .map(|star_match| target_positions[star_match.target])
         .collect();
 
     let sip_config = SipConfig {

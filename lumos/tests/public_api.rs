@@ -5,7 +5,7 @@ use lumos::{
     DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError, GesdConfig, ImageDimensions,
     LinearFitClipConfig, Normalization, PercentileClipConfig, Rejection, SigmaClipConfig, SmallN,
     StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig,
-    StarDetectionConfigError, StarDetector, Transform, Weighting, WinsorizedClipConfig,
+    StarDetectionConfigError, StarDetector, StarMatch, Transform, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -138,7 +138,7 @@ fn calibration_master_views_are_available_from_the_crate_root() {
 }
 
 #[test]
-fn stacked_outputs_share_one_public_product_type() {
+fn stacking_outputs_and_relationships_use_named_public_types() {
     let product = StackProduct {
         image: AstroImage::from_pixels(ImageDimensions::new((2, 1), 1), vec![0.25, 0.75]),
         coverage: Buffer2::new(2, 1, vec![1.0, 0.5]),
@@ -161,4 +161,12 @@ fn stacked_outputs_share_one_public_product_type() {
     assert_eq!(result.alignment.reference, 1);
     assert_eq!(result.alignment.registered, 2);
     assert_eq!(result.alignment.dropped, vec![0, 3]);
+
+    let star_match = StarMatch {
+        reference: 4,
+        target: 9,
+    };
+    let StarMatch { reference, target } = star_match;
+    assert_eq!(reference, 4);
+    assert_eq!(target, 9);
 }

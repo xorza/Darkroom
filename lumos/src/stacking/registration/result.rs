@@ -104,6 +104,15 @@ impl std::fmt::Display for RegistrationError {
 
 impl std::error::Error for RegistrationError {}
 
+/// Indices of corresponding stars in the reference and target inputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StarMatch {
+    /// Index into the reference star slice.
+    pub reference: usize,
+    /// Index into the target star slice.
+    pub target: usize,
+}
+
 /// Result of image registration.
 #[derive(Debug, Clone)]
 pub struct RegistrationResult {
@@ -115,8 +124,8 @@ pub struct RegistrationResult {
     /// `target = transform(sip.correct(ref))`.
     pub sip_fit: Option<SipFitResult>,
 
-    /// Matched star pairs as (reference_idx, target_idx).
-    pub matched_stars: Vec<(usize, usize)>,
+    /// Corresponding reference and target stars used by the fitted transform.
+    pub matched_stars: Vec<StarMatch>,
 
     /// Per-match residuals in pixels.
     pub residuals: Vec<f64>,
@@ -139,11 +148,7 @@ pub struct RegistrationResult {
 
 impl RegistrationResult {
     /// Create a new registration result.
-    pub fn new(
-        transform: Transform,
-        matched_stars: Vec<(usize, usize)>,
-        residuals: Vec<f64>,
-    ) -> Self {
+    pub fn new(transform: Transform, matched_stars: Vec<StarMatch>, residuals: Vec<f64>) -> Self {
         let rms_error = if residuals.is_empty() {
             0.0
         } else {
@@ -203,15 +208,54 @@ mod tests {
     use super::*;
     use glam::DVec2;
 
+    fn identity_matches(count: usize) -> Vec<StarMatch> {
+        (0..count)
+            .map(|index| StarMatch {
+                reference: index,
+                target: index,
+            })
+            .collect()
+    }
+
     #[test]
     fn test_registration_result_new() {
         let transform = Transform::translation(DVec2::new(1.0, 2.0));
-        let matches = vec![(0, 0), (1, 1), (2, 2)];
+        let matches = vec![
+            StarMatch {
+                reference: 0,
+                target: 2,
+            },
+            StarMatch {
+                reference: 1,
+                target: 4,
+            },
+            StarMatch {
+                reference: 3,
+                target: 5,
+            },
+        ];
         let residuals = vec![0.1, 0.2, 0.15];
 
         let result = RegistrationResult::new(transform, matches, residuals);
 
         assert_eq!(result.num_inliers, 3);
+        assert_eq!(
+            result.matched_stars,
+            vec![
+                StarMatch {
+                    reference: 0,
+                    target: 2,
+                },
+                StarMatch {
+                    reference: 1,
+                    target: 4,
+                },
+                StarMatch {
+                    reference: 3,
+                    target: 5,
+                },
+            ]
+        );
         // rms = sqrt((0.01 + 0.04 + 0.0225) / 3) = sqrt(0.0725/3) = sqrt(0.024167)
         let expected_rms = (0.0725_f64 / 3.0).sqrt();
         assert!(
@@ -229,7 +273,7 @@ mod tests {
     #[test]
     fn test_registration_result_quality_score_with_4_inliers() {
         let transform = Transform::translation(DVec2::new(1.0, 2.0));
-        let matches = vec![(0, 0), (1, 1), (2, 2), (3, 3)];
+        let matches = identity_matches(4);
         let residuals = vec![0.1, 0.2, 0.15, 0.05];
 
         let result = RegistrationResult::new(transform, matches, residuals);
@@ -264,7 +308,7 @@ mod tests {
         // With >= 20 inliers, count_factor = min(n/20, 1) = 1.0
         let transform = Transform::identity();
         let n = 25;
-        let matches: Vec<(usize, usize)> = (0..n).map(|i| (i, i)).collect();
+        let matches = identity_matches(n);
         let residuals = vec![0.1; n];
 
         let result = RegistrationResult::new(transform, matches, residuals);
@@ -364,7 +408,7 @@ mod tests {
         let transform = Transform::translation(DVec2::new(5.0, -3.0));
         let result = RegistrationResult::new(
             transform,
-            vec![(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)],
+            identity_matches(5),
             vec![0.1, 0.2, 0.15, 0.05, 0.12],
         );
 
@@ -389,7 +433,7 @@ mod tests {
         //   quality = exp(-0.25) * 0.5
         let transform = Transform::identity();
         let n = 10;
-        let matches: Vec<(usize, usize)> = (0..n).map(|i| (i, i)).collect();
+        let matches = identity_matches(n);
         // All residuals = 0.5 => rms = 0.5
         let residuals = vec![0.5; n];
         let result = RegistrationResult::new(transform, matches, residuals);
@@ -410,7 +454,7 @@ mod tests {
         //   error_factor = exp(-1.0/2) = exp(-0.5)
         //   quality = exp(-0.5) * 1.0
         let n2 = 30;
-        let matches2: Vec<(usize, usize)> = (0..n2).map(|i| (i, i)).collect();
+        let matches2 = identity_matches(n2);
         let residuals2 = vec![1.0; n2];
         let result2 = RegistrationResult::new(transform, matches2, residuals2);
 
