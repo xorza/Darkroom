@@ -105,7 +105,7 @@ pub enum Normalization {
 /// # Examples
 ///
 /// ```ignore
-/// use lumos::stacking::{stack, StackConfig};
+/// use lumos::{CombineMethod, Normalization, Rejection, StackConfig, stack};
 ///
 /// // Simple sigma-clipped stacking (default)
 /// let result = stack(&paths, StackConfig::default())?;
