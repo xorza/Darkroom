@@ -534,7 +534,7 @@ Both paradigms benefit from carrying a per-pixel weight:
   a_xy·w_i` (the accumulated overlap-area × input-weight; **per F&H Eq. 4 there is no
   `s²` in the weight** — the `s²` lives only in the flux numerator, Eq. 5) and is what
   the flux is normalized by. Edge pixels and chip gaps get low coverage; `min_coverage`
-  masks them. lumos returns this as `DrizzleResult.coverage` normalized to [0,1]
+  masks them. lumos returns this as `StackProduct.coverage` normalized to [0,1]
   (`drizzle/mod.rs:680`); STScI returns `output_counts` (`cdrizzlebox.c`,
   `p->output_counts`).
 

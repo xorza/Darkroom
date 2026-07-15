@@ -1,7 +1,8 @@
+use imaginarium::Buffer2;
 use lumos::{
-    CacheConfig, CombineMethod, GesdConfig, LinearFitClipConfig, Normalization,
-    PercentileClipConfig, Rejection, SigmaClipConfig, SmallN, StackConfig, Weighting,
-    WinsorizedClipConfig,
+    AlignStackResult, AlignmentSummary, AstroImage, CacheConfig, CombineMethod, GesdConfig,
+    ImageDimensions, LinearFitClipConfig, Normalization, PercentileClipConfig, Rejection,
+    SigmaClipConfig, SmallN, StackConfig, StackProduct, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -54,4 +55,30 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     assert_eq!(small_n.min_frames, 3);
     assert_eq!(small_n.fallback, CombineMethod::Median);
     let _: CacheConfig = cache;
+}
+
+#[test]
+fn stacked_outputs_share_one_public_product_type() {
+    let product = StackProduct {
+        image: AstroImage::from_pixels(ImageDimensions::new((2, 1), 1), vec![0.25, 0.75]),
+        coverage: Buffer2::new(2, 1, vec![1.0, 0.5]),
+        weight: Buffer2::new(2, 1, vec![2.0, 1.0]),
+        variance: Buffer2::new(2, 1, vec![0.5, 1.0]),
+    };
+    let result = AlignStackResult {
+        product,
+        alignment: AlignmentSummary {
+            reference: 1,
+            registered: 2,
+            dropped: vec![0, 3],
+        },
+    };
+
+    assert_eq!(result.product.image.channel(0).pixels(), &[0.25, 0.75]);
+    assert_eq!(result.product.coverage.pixels(), &[1.0, 0.5]);
+    assert_eq!(result.product.weight.pixels(), &[2.0, 1.0]);
+    assert_eq!(result.product.variance.pixels(), &[0.5, 1.0]);
+    assert_eq!(result.alignment.reference, 1);
+    assert_eq!(result.alignment.registered, 2);
+    assert_eq!(result.alignment.dropped, vec![0, 3]);
 }

@@ -3,7 +3,7 @@
 //! [`align_and_stack`] runs the alignment + combine flow over calibrated frames: detect stars
 //! → choose a reference → register every other frame to it → warp the ones that solve →
 //! combine with [`stack_images`]. Frames that fail to register are dropped and reported in
-//! [`AlignStackResult::dropped`] rather than aborting the stack. [`calibrate_align_stack`]
+//! [`AlignmentSummary::dropped`] rather than aborting the stack. [`calibrate_align_stack`]
 //! prepends calibration: load each raw light, apply the calibration masters, demosaic, then
 //! hand the calibrated frames to `align_and_stack`.
 
@@ -11,11 +11,6 @@ use rayon::prelude::*;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-
-use arrayvec::ArrayVec;
-use common::CancelToken;
-use common::parallel::try_par_map_limited;
-use imaginarium::Buffer2;
 
 use crate::io::astro_image::error::ImageError;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
@@ -30,14 +25,16 @@ use crate::stacking::combine::cache_config::{compute_load_concurrency, fits_in_m
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::progress::ProgressCallback;
-use crate::stacking::combine::stack::{
-    StackFrame, StackResult, stack_images, stack_weighted_frames,
-};
+use crate::stacking::combine::stack::{StackFrame, stack_images, stack_weighted_frames};
+use crate::stacking::product::StackProduct;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::{register, warp};
 use crate::stacking::star_detection::config::Config as StarDetectionConfig;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::star::Star;
+use arrayvec::ArrayVec;
+use common::CancelToken;
+use common::parallel::try_par_map_limited;
 
 /// How the reference frame (the alignment anchor) is chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -63,17 +60,9 @@ pub struct AlignStackConfig {
     pub cosmic_ray: Option<CosmicRayConfig>,
 }
 
-/// Outcome of [`align_and_stack`].
+/// Registration bookkeeping for an aligned stack.
 #[derive(Debug)]
-pub struct AlignStackResult {
-    /// The combined image.
-    pub image: AstroImage,
-    /// Per-pixel fraction of frames that contributed, `[0,1]` — `< 1` along warped-frame borders.
-    pub coverage: Buffer2<f32>,
-    /// Per-pixel WHT (`Σ wᵢcᵢ`): each pixel's absolute statistical weight.
-    pub weight: Buffer2<f32>,
-    /// Per-pixel output variance per unit input variance (`Σwᵢ²/(Σwᵢ)²`). See [`crate::StackResult`].
-    pub variance: Buffer2<f32>,
+pub struct AlignmentSummary {
     /// Index (into the input) of the reference frame the others were aligned to.
     pub reference: usize,
     /// Number of frames that went into the stack: the reference plus every frame that
@@ -83,23 +72,31 @@ pub struct AlignStackResult {
     pub dropped: Vec<usize>,
 }
 
+/// Outcome of [`align_and_stack`].
+#[derive(Debug)]
+pub struct AlignStackResult {
+    /// The combined image and its ancillary per-pixel science planes.
+    pub product: StackProduct,
+    /// Reference selection and frame registration outcome.
+    pub alignment: AlignmentSummary,
+}
+
 impl AlignStackResult {
-    /// Wrap a combine [`StackResult`] with the alignment bookkeeping (shared by the RAM and
+    /// Wrap a [`StackProduct`] with the alignment bookkeeping (shared by the RAM and
     /// streaming paths, which build this identically).
-    fn from_stack(
-        stacked: StackResult,
+    fn from_product(
+        product: StackProduct,
         reference: usize,
         registered: usize,
         dropped: Vec<usize>,
     ) -> Self {
         Self {
-            image: stacked.image,
-            coverage: stacked.coverage,
-            weight: stacked.weight,
-            variance: stacked.variance,
-            reference,
-            registered,
-            dropped,
+            product,
+            alignment: AlignmentSummary {
+                reference,
+                registered,
+                dropped,
+            },
         }
     }
 }
@@ -134,7 +131,7 @@ pub enum Error {
 /// All frames are expected to share the same dimensions (same sensor). The reference frame is
 /// added to the stack unwarped; every other frame is aligned to it. Frames that fail to
 /// register (too few stars, RANSAC failure, accuracy gate) are dropped and listed in
-/// [`AlignStackResult::dropped`]; the stack proceeds with whatever aligned. A single
+/// [`AlignmentSummary::dropped`]; the stack proceeds with whatever aligned. A single
 /// input frame is returned as its own "stack".
 pub fn align_and_stack(
     lights: Vec<AstroImage>,
@@ -290,7 +287,7 @@ pub fn align_and_stack(
     stacked.image.metadata = ref_metadata;
     tracing::info!("Stack complete");
 
-    Ok(AlignStackResult::from_stack(
+    Ok(AlignStackResult::from_product(
         stacked, reference, registered, dropped,
     ))
 }
@@ -381,7 +378,7 @@ fn plan_memory(
 /// For each raw light (in parallel): load it as a `CfaImage`, apply `masters`
 /// (dark/flat/defect) in place, demosaic to an `AstroImage`, then hand the calibrated frames
 /// to [`align_and_stack`]. A frame that fails to **load** is a hard error (bad input); a frame
-/// that fails to **register** is dropped and reported in [`AlignStackResult::dropped`].
+/// that fails to **register** is dropped and reported in [`AlignmentSummary::dropped`].
 ///
 /// For frames that are already calibrated (e.g. pre-processed FITS), skip this and call
 /// [`align_and_stack`] directly.
@@ -690,7 +687,7 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     )
     .map_err(Error::Stack)?;
 
-    Ok(AlignStackResult::from_stack(
+    Ok(AlignStackResult::from_product(
         stacked, reference, registered, dropped,
     ))
 }
@@ -733,15 +730,22 @@ mod tests {
         };
         let result = align_and_stack(frames, &config, CancelToken::never()).expect("stack");
 
-        assert_eq!(result.reference, 0);
-        assert_eq!(result.registered, 3, "all three frames should stack");
-        assert!(result.dropped.is_empty(), "dropped: {:?}", result.dropped);
+        assert_eq!(result.alignment.reference, 0);
+        assert_eq!(
+            result.alignment.registered, 3,
+            "all three frames should stack"
+        );
+        assert!(
+            result.alignment.dropped.is_empty(),
+            "dropped: {:?}",
+            result.alignment.dropped
+        );
 
         // Alignment check: every frame was warped back to the reference, so the reference's
         // brightest star must reappear at the same place in the combined image.
         let mut det = StarDetector::from_config(StarDetectionConfig::default());
         let ref_pos = det.detect(&base).stars[0].pos;
-        let stack_stars = det.detect(&result.image).stars;
+        let stack_stars = det.detect(&result.product.image).stars;
         let nearest = stack_stars
             .iter()
             .map(|s| (s.pos - ref_pos).length())
@@ -766,8 +770,15 @@ mod tests {
         };
         let result = align_and_stack(frames, &config, CancelToken::never()).expect("stack");
 
-        assert_eq!(result.dropped, vec![2], "blank frame should be dropped");
-        assert_eq!(result.registered, 2, "reference + one aligned frame");
+        assert_eq!(
+            result.alignment.dropped,
+            vec![2],
+            "blank frame should be dropped"
+        );
+        assert_eq!(
+            result.alignment.registered, 2,
+            "reference + one aligned frame"
+        );
     }
 
     #[test]
@@ -790,9 +801,9 @@ mod tests {
         let result =
             align_and_stack(vec![f0, f1, f2], &config, CancelToken::never()).expect("stack");
 
-        assert_eq!(result.reference, 1);
+        assert_eq!(result.alignment.reference, 1);
         assert_eq!(
-            result.image.metadata.exposure_time,
+            result.product.image.metadata.exposure_time,
             Some(20.0),
             "master must inherit the reference (index 1) metadata, not frame 0's"
         );
@@ -831,11 +842,11 @@ mod tests {
         let result = align_and_stack(frames, &AlignStackConfig::default(), CancelToken::never())
             .expect("stack");
         assert_ne!(
-            result.reference, 0,
+            result.alignment.reference, 0,
             "Auto must not anchor on the near-blank frame"
         );
         assert_eq!(
-            result.dropped,
+            result.alignment.dropped,
             vec![0],
             "the near-blank frame can't register"
         );
@@ -889,9 +900,15 @@ mod tests {
         .expect("calibrate_align_stack");
 
         // A real stacked image came out, and every input frame is accounted for.
-        assert!(result.image.width() > 0 && result.image.height() > 0);
-        assert_eq!(result.registered + result.dropped.len(), lights.len());
-        assert!(result.registered >= 1, "at least the reference is stacked");
+        assert!(result.product.image.width() > 0 && result.product.image.height() > 0);
+        assert_eq!(
+            result.alignment.registered + result.alignment.dropped.len(),
+            lights.len()
+        );
+        assert!(
+            result.alignment.registered >= 1,
+            "at least the reference is stacked"
+        );
     }
 
     #[test]
@@ -939,14 +956,27 @@ mod tests {
         let disk = calibrate_align_stack(lights, &masters, &disk_cfg, CancelToken::never())
             .expect("disk-tier (streaming) stack");
 
-        assert_eq!(ram.registered, disk.registered, "same frames stacked");
-        assert_eq!(ram.dropped, disk.dropped, "same frames dropped");
-        assert_eq!(ram.reference, disk.reference, "same reference");
-        assert_eq!(ram.image.dimensions(), disk.image.dimensions());
+        assert_eq!(
+            ram.alignment.registered, disk.alignment.registered,
+            "same frames stacked"
+        );
+        assert_eq!(
+            ram.alignment.dropped, disk.alignment.dropped,
+            "same frames dropped"
+        );
+        assert_eq!(
+            ram.alignment.reference, disk.alignment.reference,
+            "same reference"
+        );
+        assert_eq!(
+            ram.product.image.dimensions(),
+            disk.product.image.dimensions()
+        );
         // Bit-identical: same frames, same (seeded) registration, same combine — only the frame
         // storage (RAM vs mmap) differs.
-        for c in 0..ram.image.channels() {
+        for c in 0..ram.product.image.channels() {
             let a: Vec<u32> = ram
+                .product
                 .image
                 .channel(c)
                 .pixels()
@@ -954,6 +984,7 @@ mod tests {
                 .map(|x| x.to_bits())
                 .collect();
             let b: Vec<u32> = disk
+                .product
                 .image
                 .channel(c)
                 .pixels()

@@ -92,7 +92,7 @@ fn main() {
     sampler.join().ok();
     println!(
         "tier={tier} N={n} registered={} peak_anon_mb={} peak_total_mb={}",
-        result.registered,
+        result.alignment.registered,
         peak_anon.load(Ordering::Relaxed) / 1024,
         peak_total.load(Ordering::Relaxed) / 1024,
     );

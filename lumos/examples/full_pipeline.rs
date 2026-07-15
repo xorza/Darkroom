@@ -57,12 +57,12 @@ fn main() {
     )
     .expect("calibrate_align_stack failed");
     tracing::info!(
-        registered = result.registered,
+        registered = result.alignment.registered,
         total = light_paths.len(),
-        reference = result.reference,
-        dropped = ?result.dropped,
-        width = result.image.width(),
-        height = result.image.height(),
+        reference = result.alignment.reference,
+        dropped = ?result.alignment.dropped,
+        width = result.product.image.width(),
+        height = result.product.image.height(),
         elapsed = elapsed(step),
         "Step 2 complete: stacked master ready"
     );
@@ -73,7 +73,7 @@ fn main() {
         .unwrap()
         .join("test_output/stacked_result.tiff");
     std::fs::create_dir_all(output.parent().unwrap()).expect("create output directory");
-    let image: imaginarium::Image = result.image.into();
+    let image: imaginarium::Image = result.product.image.into();
     image.save_file(&output).expect("save stacked master");
     tracing::info!(path = %output.display(), "Saved stacked master");
 

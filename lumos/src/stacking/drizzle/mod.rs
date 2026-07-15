@@ -33,6 +33,7 @@ use crate::ImageDimensions;
 use crate::io::astro_image::AstroImage;
 use crate::stacking::combine::progress::report_progress;
 use crate::stacking::combine::progress::{ProgressCallback, StackingStage};
+use crate::stacking::product::StackProduct;
 use crate::stacking::registration::transform::Transform;
 use error::DrizzleError;
 use imaginarium::Buffer2;
@@ -640,7 +641,7 @@ impl DrizzleAccumulator {
     /// Finalize the drizzle result: normalize flux by weight and emit the coverage, weight, and
     /// variance maps. The weight `Σwᵢ` is channel-independent (shared geometric overlap), so one
     /// map normalizes every channel and seeds the coverage/weight/variance outputs.
-    pub fn finalize(self) -> DrizzleResult {
+    pub fn finalize(self) -> StackProduct {
         let width = self.width();
         let height = self.height();
         let n_channels = self.channels();
@@ -721,36 +722,12 @@ impl DrizzleAccumulator {
             output_channels,
         );
 
-        DrizzleResult {
+        StackProduct {
             image,
             coverage,
             weight: self.weight,
             variance,
         }
-    }
-}
-
-/// Result of drizzle stacking.
-#[derive(Debug)]
-pub struct DrizzleResult {
-    /// The drizzled output image.
-    pub image: AstroImage,
-    /// Normalized coverage map (0.0 = no data, 1.0 = maximum coverage). For masking / fill gating.
-    pub coverage: Buffer2<f32>,
-    /// Absolute per-pixel drizzle weight `Σwᵢ` (the WHT map) — channel-independent. Each pixel's
-    /// relative statistical weight; downstream co-adds / inverse-variance weighting use it directly.
-    pub weight: Buffer2<f32>,
-    /// Output variance per unit input-pixel variance: `Σ(wᵢ²)/(Σwᵢ)²` (= 1 / effective number of
-    /// contributions). Multiply by the input pixel noise variance for the absolute per-pixel output
-    /// variance — the true noise the correlation-suppressed image RMS understates. `0` where
-    /// uncovered, so read it alongside `coverage`.
-    pub variance: Buffer2<f32>,
-}
-
-impl DrizzleResult {
-    /// Get coverage at a specific pixel.
-    pub fn coverage_at(&self, x: usize, y: usize) -> f32 {
-        self.coverage[(x, y)]
     }
 }
 
@@ -984,7 +961,7 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
     pixel_weight_maps: Option<&[Buffer2<f32>]>,
     config: &DrizzleConfig,
     progress: ProgressCallback,
-) -> Result<DrizzleResult, DrizzleError> {
+) -> Result<StackProduct, DrizzleError> {
     if paths.is_empty() {
         return Err(DrizzleError::NoFrames);
     }
@@ -1051,7 +1028,7 @@ pub fn drizzle_images(
     pixel_weight_maps: Option<&[Buffer2<f32>]>,
     config: &DrizzleConfig,
     progress: ProgressCallback,
-) -> Result<DrizzleResult, DrizzleError> {
+) -> Result<StackProduct, DrizzleError> {
     if images.is_empty() {
         return Err(DrizzleError::NoFrames);
     }

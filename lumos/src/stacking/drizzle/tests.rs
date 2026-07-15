@@ -315,7 +315,7 @@ fn test_drizzle_with_translation() {
 }
 
 #[test]
-fn test_coverage_at() {
+fn test_coverage_map() {
     // Point kernel with identity: covered at even coords, uncovered at odd
     let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
@@ -325,10 +325,10 @@ fn test_coverage_at() {
 
     // Output 8×8. Covered pixels at (2*ix, 2*iy) for ix,iy=0..3 (even coords).
     // Normalized coverage: max_coverage = 1.0
-    assert!((result.coverage_at(0, 0) - 1.0).abs() < f32::EPSILON); // covered
-    assert!((result.coverage_at(1, 1)).abs() < f32::EPSILON); // uncovered (odd)
-    assert!((result.coverage_at(2, 2) - 1.0).abs() < f32::EPSILON); // covered
-    assert!((result.coverage_at(3, 3)).abs() < f32::EPSILON); // uncovered (odd)
+    assert!((result.coverage[(0, 0)] - 1.0).abs() < f32::EPSILON); // covered
+    assert!((result.coverage[(1, 1)]).abs() < f32::EPSILON); // uncovered (odd)
+    assert!((result.coverage[(2, 2)] - 1.0).abs() < f32::EPSILON); // covered
+    assert!((result.coverage[(3, 3)]).abs() < f32::EPSILON); // uncovered (odd)
 }
 
 #[test]
@@ -1508,7 +1508,7 @@ fn test_square_kernel_rotation() {
     let out = result.image.channel(0);
 
     // Verify coverage exists in the interior (rotated image should still cover center)
-    let center_coverage = result.coverage_at(10, 10);
+    let center_coverage = result.coverage[(10, 10)];
     assert!(
         center_coverage > 0.0,
         "Center should have coverage, got {}",

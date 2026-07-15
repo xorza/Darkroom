@@ -70,16 +70,17 @@ pub use stacking::combine::rejection::{
     GesdConfig, LinearFitClipConfig, PercentileClipConfig, Rejection, SigmaClipConfig,
     WinsorizedClipConfig,
 };
-pub use stacking::combine::stack::{StackFrame, StackResult, stack, stack_images};
+pub use stacking::combine::stack::{StackFrame, stack, stack_images};
+pub use stacking::product::StackProduct;
 
 pub use stacking::pipeline::{
-    AlignStackConfig, AlignStackResult, Error as AlignStackError, Reference, align_and_stack,
-    calibrate_align_stack,
+    AlignStackConfig, AlignStackResult, AlignmentSummary, Error as AlignStackError, Reference,
+    align_and_stack, calibrate_align_stack,
 };
 
 pub use stacking::drizzle::error::DrizzleError;
 pub use stacking::drizzle::{
-    DrizzleAccumulator, DrizzleConfig, DrizzleKernel, DrizzleResult, drizzle_images, drizzle_stack,
+    DrizzleAccumulator, DrizzleConfig, DrizzleKernel, drizzle_images, drizzle_stack,
 };
 
 pub use image_ops::stretching::{ColorMode, Stretch, StretchMethod};

@@ -16,11 +16,12 @@ use imaginarium::Buffer2;
 use crate::math;
 use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::cache::{
-    CfaCache, FrameStats, GeometryPlanes, LightCache, StackableImage, WeightedFrame,
+    CfaCache, FrameStats, LightCache, StackableImage, WeightedFrame,
 };
 use crate::stacking::combine::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::progress::ProgressCallback;
+use crate::stacking::product::StackProduct;
 
 /// Per-frame, per-channel affine normalization parameters.
 ///
@@ -66,25 +67,6 @@ impl From<AstroImage> for StackFrame {
     }
 }
 
-/// A stacked light-frame result: the combined `image` plus the ancillary per-pixel science quality
-/// planes. The planes are geometric and channel-independent, matching the maps drizzle's
-/// [`crate::DrizzleResult`] reports, so a downstream tool reads the same data regardless of which
-/// combine backend produced the master.
-///
-/// - `coverage` — fraction of frames that contributed at each pixel, `[0,1]` (for masking / fill
-///   gating). `< 1` along warped-frame borders, `1` in the fully-overlapping interior.
-/// - `weight` — the WHT, `Σ wᵢcᵢ` (per-frame weight × per-pixel coverage); each pixel's absolute
-///   statistical weight.
-/// - `variance` — `Σ(wᵢcᵢ)² / (Σ wᵢcᵢ)²`, the output variance per unit input variance (effective
-///   `1/N`). Pre-rejection — see [`crate::stacking::combine::cache::LightCache::geometry_planes`].
-#[derive(Debug)]
-pub struct StackResult {
-    pub image: AstroImage,
-    pub coverage: Buffer2<f32>,
-    pub weight: Buffer2<f32>,
-    pub variance: Buffer2<f32>,
-}
-
 /// Stack multiple images from disk into a single result.
 ///
 /// This is the main entry point for stacking frames stored as files. To stack
@@ -97,7 +79,8 @@ pub struct StackResult {
 ///
 /// # Returns
 ///
-/// The stacked result as an `AstroImage`.
+/// A [`StackProduct`] whose coverage is the fraction of frames contributing at each pixel. Its
+/// weight and variance planes are computed before per-channel outlier rejection.
 ///
 /// # Panics
 ///
@@ -127,7 +110,7 @@ pub fn stack<P: AsRef<Path> + Sync>(
     config: StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<StackResult, Error> {
+) -> Result<StackProduct, Error> {
     if paths.is_empty() {
         return Err(Error::NoFrames);
     }
@@ -175,7 +158,7 @@ pub fn stack_images(
     config: StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<StackResult, Error> {
+) -> Result<StackProduct, Error> {
     if frames.is_empty() {
         return Err(Error::NoFrames);
     }
@@ -216,7 +199,7 @@ pub(crate) fn stack_weighted_frames(
     config: StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<StackResult, Error> {
+) -> Result<StackProduct, Error> {
     if frames.is_empty() {
         return Err(Error::NoFrames);
     }
@@ -458,7 +441,7 @@ pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
 
 /// Coverage-weighted counterpart to [`run_stacking`] for a [`LightCache`]: identical combine math,
 /// but each frame contributes only where it covers (`process_chunked_weighted`).
-pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) -> StackResult {
+pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) -> StackProduct {
     let stats = &cache.core.channel_stats;
     let method = config.small_n.resolve(config.method, stats.len());
     warn_if_weights_ignored(method, &config.weighting);
@@ -486,18 +469,9 @@ pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) ->
     } else {
         None
     };
-    let GeometryPlanes {
-        coverage,
-        weight,
-        variance,
-    } = cache.geometry_planes(geometry_weights);
-
-    StackResult {
-        image: AstroImage::from_stacked(pixels, cache.core.metadata.clone(), cache.core.dimensions),
-        coverage,
-        weight,
-        variance,
-    }
+    let image =
+        AstroImage::from_stacked(pixels, cache.core.metadata.clone(), cache.core.dimensions);
+    cache.finish_product(image, geometry_weights)
 }
 
 #[cfg(test)]
@@ -974,8 +948,8 @@ mod tests {
     }
 
     #[test]
-    fn stack_result_carries_geometry_planes() {
-        // End-to-end: stack_images threads the geometry planes onto StackResult. 2 frames, 2 px;
+    fn stack_product_carries_geometry_planes() {
+        // End-to-end: stack_images threads the geometry planes onto StackProduct. 2 frames, 2 px;
         // frame B doesn't cover px1. Equal weights, mean combine.
         //   px0: both cover → coverage 2/2 = 1.0, weight 2,   variance (1+1)/2² = 0.5
         //   px1: A only     → coverage 1/2 = 0.5, weight 1,   variance 1/1²     = 1.0

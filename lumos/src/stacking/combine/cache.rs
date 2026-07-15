@@ -10,7 +10,7 @@
 //! - [`CfaCache`] — `CfaImage` calibration frames, [`Frame`]s with **no coverage at all**, plain
 //!   combine → `CfaImage`.
 //! - [`LightCache`] — `AstroImage` light frames, [`WeightedFrame`]s with optional per-pixel
-//!   coverage, coverage-weighted combine → `AstroImage`.
+//!   coverage, coverage-weighted combine → [`StackProduct`].
 //!
 //! Coverage is type-true: it exists only on [`WeightedFrame`] (so [`CfaCache`] cannot carry it),
 //! and a frame's planes always share a tier, so coverage is memory-mapped exactly when its
@@ -42,6 +42,7 @@ use crate::stacking::combine::cache_config::{
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::progress::{ProgressCallback, StackingStage, report_progress};
 use crate::stacking::combine::stack::{FrameNorm, StackFrame};
+use crate::stacking::product::StackProduct;
 
 /// Per-frame statistics: one `ChannelStats` per channel.
 #[derive(Debug, Clone)]
@@ -769,17 +770,6 @@ impl CfaCache {
     }
 }
 
-/// Geometric per-pixel quality planes produced by [`LightCache::geometry_planes`]: `coverage`
-/// (fraction of frames contributing, `[0,1]`), `weight` (the WHT, `Σ wᵢcᵢ`), and `variance`
-/// (`Σ(wᵢcᵢ)²/(Σ wᵢcᵢ)²`). Channel-independent and pre-rejection — the same `Σwᵢ`/`Σwᵢ²` maps
-/// drizzle reports, so a downstream tool reads identical ancillary data from either combine backend.
-#[derive(Debug)]
-pub(crate) struct GeometryPlanes {
-    pub(crate) coverage: Buffer2<f32>,
-    pub(crate) weight: Buffer2<f32>,
-    pub(crate) variance: Buffer2<f32>,
-}
-
 impl LightCache {
     /// Build a cache from pre-tiered [`WeightedFrame`]s and their stats — the streaming pipeline
     /// produces these directly (spilling to disk or keeping in RAM as it warps), so the whole frame
@@ -887,7 +877,11 @@ impl LightCache {
     /// is a slight under-estimate (see the per-channel follow-up in `docs/pipeline/roadmap.md`).
     ///
     /// `weights` are the same per-frame weights the combine used (`None` = equal, e.g. median).
-    pub(crate) fn geometry_planes(&self, weights: Option<&[f32]>) -> GeometryPlanes {
+    pub(crate) fn finish_product(
+        &self,
+        image: AstroImage,
+        weights: Option<&[f32]>,
+    ) -> StackProduct {
         let frame_count = self.frames.len();
         if let Some(w) = weights {
             assert_eq!(w.len(), frame_count, "weight count must match frame count");
@@ -903,7 +897,8 @@ impl LightCache {
             let wsum: f32 = (0..frame_count).map(frame_weight).sum();
             let wsq: f32 = (0..frame_count).map(|f| frame_weight(f).powi(2)).sum();
             let variance = if wsum > 0.0 { wsq / (wsum * wsum) } else { 0.0 };
-            return GeometryPlanes {
+            return StackProduct {
+                image,
                 coverage: Buffer2::new_filled(width, height, 1.0),
                 weight: Buffer2::new_filled(width, height, wsum),
                 variance: Buffer2::new_filled(width, height, variance),
@@ -974,7 +969,8 @@ impl LightCache {
             start_row = end_row;
         }
 
-        GeometryPlanes {
+        StackProduct {
+            image,
             coverage,
             weight,
             variance,
@@ -1382,42 +1378,47 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn geometry_planes_uniform_equal_weights() {
+    fn finish_product_uniform_equal_weights() {
         // 4 frames, no coverage maps → fast path. Equal weights: every pixel sees all 4 frames at
         // weight 1, so weight = Σw = 4, variance = Σw²/(Σw)² = 4/16 = 0.25, coverage = 4/4 = 1.
         let dims = ImageDimensions::new((3, 2), 1);
         let images: Vec<AstroImage> = (0..4)
             .map(|i| AstroImage::from_pixels(dims, vec![i as f32; 6]))
             .collect();
-        let g = make_test_cache(images).geometry_planes(None);
+        let product = make_test_cache(images)
+            .finish_product(AstroImage::from_pixels(dims, vec![0.25; 6]), None);
+        assert_eq!(product.image.channel(0).pixels(), &[0.25; 6]);
         for p in 0..6 {
-            assert_eq!(g.coverage[p], 1.0);
-            assert_eq!(g.weight[p], 4.0);
-            assert_eq!(g.variance[p], 0.25);
+            assert_eq!(product.coverage[p], 1.0);
+            assert_eq!(product.weight[p], 4.0);
+            assert_eq!(product.variance[p], 0.25);
         }
     }
 
     #[test]
-    fn geometry_planes_uniform_manual_weights() {
+    fn finish_product_uniform_manual_weights() {
         // weights [1,2,3,4], full coverage: weight = 10, Σw² = 1+4+9+16 = 30, variance = 30/100 = 0.30.
         let dims = ImageDimensions::new((2, 1), 1);
         let images: Vec<AstroImage> = (0..4)
             .map(|_| AstroImage::from_pixels(dims, vec![0.5; 2]))
             .collect();
-        let g = make_test_cache(images).geometry_planes(Some(&[1.0, 2.0, 3.0, 4.0]));
+        let product = make_test_cache(images).finish_product(
+            AstroImage::from_pixels(dims, vec![0.25; 2]),
+            Some(&[1.0, 2.0, 3.0, 4.0]),
+        );
         for p in 0..2 {
-            assert_eq!(g.coverage[p], 1.0);
-            assert_eq!(g.weight[p], 10.0);
+            assert_eq!(product.coverage[p], 1.0);
+            assert_eq!(product.weight[p], 10.0);
             assert!(
-                (g.variance[p] - 0.30).abs() < 1e-6,
+                (product.variance[p] - 0.30).abs() < 1e-6,
                 "variance = {}",
-                g.variance[p]
+                product.variance[p]
             );
         }
     }
 
     #[test]
-    fn geometry_planes_partial_coverage() {
+    fn finish_product_partial_coverage() {
         // width-2 frames; px0 fully covered by all 4, px1 covered by f0(1.0), f1(0.5), f3(1.0) and
         // dropped by f2 (coverage 0 < ε). Equal weights. Exercises the per-pixel (non-fast) path.
         //   px0: count 4, Σwc = 4,   Σ(wc)² = 4    → coverage 1.0,  weight 4.0, variance 4/16  = 0.25
@@ -1437,18 +1438,18 @@ pub(crate) mod tests {
             ProgressCallback::default(),
         )
         .expect("frames are valid");
-        let g = cache.geometry_planes(None);
+        let product = cache.finish_product(AstroImage::from_pixels(dims, vec![0.25, 0.25]), None);
 
-        assert_eq!(g.coverage[0], 1.0);
-        assert_eq!(g.weight[0], 4.0);
-        assert_eq!(g.variance[0], 0.25);
+        assert_eq!(product.coverage[0], 1.0);
+        assert_eq!(product.weight[0], 4.0);
+        assert_eq!(product.variance[0], 0.25);
 
-        assert_eq!(g.coverage[1], 0.75);
-        assert_eq!(g.weight[1], 2.5);
+        assert_eq!(product.coverage[1], 0.75);
+        assert_eq!(product.weight[1], 2.5);
         assert!(
-            (g.variance[1] - 0.36).abs() < 1e-6,
+            (product.variance[1] - 0.36).abs() < 1e-6,
             "variance = {}",
-            g.variance[1]
+            product.variance[1]
         );
     }
 

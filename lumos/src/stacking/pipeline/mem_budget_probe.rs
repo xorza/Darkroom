@@ -246,11 +246,11 @@ fn align_stack_memory_probe() {
     println!("=== result ===");
     println!(
         "stacked       {}×{} × {} ch, {} registered, {} dropped",
-        result.image.width(),
-        result.image.height(),
-        result.image.channels(),
-        result.registered,
-        result.dropped.len()
+        result.product.image.width(),
+        result.product.image.height(),
+        result.product.image.channels(),
+        result.alignment.registered,
+        result.alignment.dropped.len()
     );
     println!(
         "time          {total_secs:.2}s  ({:.0} Mpix/s over the stream)",
@@ -273,9 +273,9 @@ fn align_stack_memory_probe() {
     let ceiling_mb = two_x_ceiling_mb(resident_planes * frame_bytes, working_planes * frame_bytes);
 
     assert!(
-        result.registered >= 2,
+        result.alignment.registered >= 2,
         "expected the dithered frames to register; only {} stacked (probe misconfigured?)",
-        result.registered
+        result.alignment.registered
     );
     if measured(anon_mb, "ceiling check") {
         assert!(

@@ -12,5 +12,6 @@ pub(crate) mod calibration_masters;
 pub(crate) mod combine;
 pub(crate) mod drizzle;
 pub(crate) mod pipeline;
+pub(crate) mod product;
 pub(crate) mod registration;
 pub(crate) mod star_detection;
