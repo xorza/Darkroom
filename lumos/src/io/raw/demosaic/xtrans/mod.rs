@@ -27,7 +27,7 @@ use crate::io::raw::demosaic::Cancelled;
 ///
 /// Returns planar `[R, G, B]` channels, each `width * height`.
 #[allow(clippy::too_many_arguments)]
-pub fn process_xtrans(
+pub(crate) fn process_xtrans(
     raw_data: &[u16],
     raw_width: usize,
     raw_height: usize,
@@ -77,7 +77,7 @@ pub fn process_xtrans(
 /// Takes f32 data already in [0,1] range (e.g., from CfaImage after calibration).
 /// Avoids the lossy f32->u16->f32 roundtrip of converting to u16 for `process_xtrans`.
 #[allow(clippy::too_many_arguments)]
-pub fn process_xtrans_f32(
+pub(crate) fn process_xtrans_f32(
     data: &[f32],
     raw_width: usize,
     raw_height: usize,

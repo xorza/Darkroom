@@ -3,7 +3,7 @@
 //! history, and the derived-state [`reconcile`] pass that keeps each
 //! subgraph's interface in sync with its interior wiring.
 
-pub mod action_stack;
-pub mod intent;
-pub mod publish;
-pub mod reconcile;
+pub(crate) mod action_stack;
+pub(crate) mod intent;
+pub(crate) mod publish;
+pub(crate) mod reconcile;

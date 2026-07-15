@@ -22,7 +22,7 @@ fn fits_unsupported(path: &Path, reason: impl Into<String>) -> ImageError {
 }
 
 /// Load an astronomical image from a FITS file.
-pub fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
+pub(crate) fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
     // Read the whole file once, then decode straight from the bytes: `from_bytes`
     // borrows the buffer in place, so `read_image` skips the per-data-unit staging
     // copy that the seeking `open` path pays.

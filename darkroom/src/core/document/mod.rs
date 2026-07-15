@@ -1,6 +1,6 @@
 pub(crate) mod auto_layout;
-pub mod dock;
-pub mod view_item;
+pub(crate) mod dock;
+pub(crate) mod view_item;
 
 use anyhow::{Context, Result, bail, ensure};
 use common::{KeyIndexVec, SerdeFormat, is_debug};
@@ -32,7 +32,7 @@ const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
 /// only `check` produces it.
 #[derive(Debug, Error)]
 #[error("invalid document: {message}")]
-pub struct DocumentError {
+pub(crate) struct DocumentError {
     pub message: String,
 }
 
@@ -42,7 +42,7 @@ pub struct DocumentError {
 /// library assets in the `Library` — not editable in place; to edit one
 /// you localize it (copy into the doc as a `Local` def) first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum GraphRef {
+pub(crate) enum GraphRef {
     Main,
     Local(SubgraphId),
 }
@@ -52,13 +52,13 @@ pub enum GraphRef {
 /// reintroduced. `Input` ports live in the left column, `Output` in
 /// the right; `opposite` flips between them for snap-target tests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum PortKind {
+pub(crate) enum PortKind {
     Input,
     Output,
 }
 
 impl PortKind {
-    pub fn opposite(self) -> Self {
+    pub(crate) fn opposite(self) -> Self {
         match self {
             PortKind::Input => PortKind::Output,
             PortKind::Output => PortKind::Input,
@@ -75,7 +75,7 @@ impl PortKind {
 /// def-copy boundary (import/localize/detach) and enforced by
 /// [`Document::check`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct PortRef {
+pub(crate) struct PortRef {
     pub node_id: NodeId,
     pub kind: PortKind,
     pub port_idx: usize,
@@ -87,7 +87,7 @@ pub struct PortRef {
 /// Persisted + undoable like the rest of the tab/view state, so reopening
 /// a document restores its open tabs and Ctrl+Z walks tab open/close.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum TabRef {
+pub(crate) enum TabRef {
     /// A graph pane (root or a local subgraph interior).
     Graph(GraphRef),
     /// The app-preferences / settings view — no graph, no canvas.
@@ -109,7 +109,7 @@ pub enum TabRef {
 /// *input column* edits the `Output` side and the `SubgraphInput` node's
 /// *output column* edits the `Input` side (see `gui::node::port_row`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BoundarySide {
+pub(crate) enum BoundarySide {
     Input,
     Output,
 }
@@ -123,7 +123,7 @@ pub enum BoundarySide {
 /// (`GraphView::view_items`, keyed by this — `Intent::Raise` lifts either
 /// kind), and one group-drag path (`Intent::MoveSelection`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum ItemRef {
+pub(crate) enum ItemRef {
     Node(NodeId),
     Pin(OutputPort),
 }
@@ -146,7 +146,7 @@ impl ItemRef {
 /// `Scene` projection, and the `SetViewport` edit, so the three can't
 /// drift on field names or semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Viewport {
+pub(crate) struct Viewport {
     pub pan: Vec2,
     pub zoom: f32,
 }
@@ -154,7 +154,7 @@ pub struct Viewport {
 impl Viewport {
     /// Zoom guarded against the degenerate `0` (a viewport that was
     /// never set), so inverse transforms can't divide by zero.
-    pub fn safe_zoom(&self) -> f32 {
+    pub(crate) fn safe_zoom(&self) -> f32 {
         if self.zoom > 0.0 { self.zoom } else { 1.0 }
     }
 }
@@ -181,7 +181,7 @@ impl Default for Viewport {
 /// camera/selection changes alongside structural edits (see the long
 /// note that used to live on `Document`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct GraphView {
+pub(crate) struct GraphView {
     /// Node bodies and pinned-output preview widgets in one list — the
     /// canvas's **paint stack**: the order is the shared z-order (later
     /// items draw in front), so a preview can sit above or below any
@@ -208,7 +208,7 @@ impl GraphView {
     /// A fresh view seeded with a zero-positioned item for every node in
     /// `graph` and every pinned output (callers usually `auto_layout`
     /// right after, which places both kinds).
-    pub fn for_graph(graph: &CoreGraph) -> Self {
+    pub(crate) fn for_graph(graph: &CoreGraph) -> Self {
         let mut view_items = KeyIndexVec::with_capacity(graph.len());
         for node in graph.iter() {
             view_items.add(ViewItem::node(node.id, Vec2::ZERO));
@@ -286,13 +286,13 @@ impl GraphView {
 /// methods (the borrow checker can't prove `graph` and `view` are
 /// disjoint across separate accessor calls). Mutable counterpart of
 /// [`EditScopeRef`].
-pub struct EditScope<'a> {
+pub(crate) struct EditScope<'a> {
     pub graph: &'a mut CoreGraph,
     pub view: &'a mut GraphView,
 }
 
 /// Read-only graph + view pair, for `build_step`'s pre-mutation reads.
-pub struct EditScopeRef<'a> {
+pub(crate) struct EditScopeRef<'a> {
     pub graph: &'a CoreGraph,
     pub view: &'a GraphView,
 }
@@ -301,7 +301,7 @@ impl EditScope<'_> {
     /// Drop a node from both the graph and its view (its own item, its
     /// pinned outputs' items, and any selection membership). Mirrors the
     /// old `Document::remove_node`.
-    pub fn remove_node(&mut self, node_id: &NodeId) -> DetachedNode {
+    pub(crate) fn remove_node(&mut self, node_id: &NodeId) -> DetachedNode {
         self.view
             .view_items
             .retain(|item| !item.key.belongs_to(*node_id));
@@ -317,7 +317,7 @@ impl EditScope<'_> {
 /// every opened subgraph interior in `sub_views`. The `Library` it
 /// resolves against lives one level up on `App` (runtime-owned).
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Document {
+pub(crate) struct Document {
     pub graph: CoreGraph,
     pub main_view: GraphView,
     /// View metadata for local subgraph interiors, created lazily when a
@@ -367,7 +367,7 @@ fn resolve_named_slot<T>(
 impl Document {
     /// The graph a target points at, or `None` if it no longer exists
     /// (e.g. a subgraph deleted while its tab was open).
-    pub fn graph_for(&self, target: GraphRef) -> Option<&CoreGraph> {
+    pub(crate) fn graph_for(&self, target: GraphRef) -> Option<&CoreGraph> {
         match target {
             GraphRef::Main => Some(&self.graph),
             GraphRef::Local(id) => self.graph.subgraphs.by_key(&id).map(|d| &d.graph),
@@ -375,7 +375,7 @@ impl Document {
     }
 
     /// The view metadata for a target, or `None` when unopened/missing.
-    pub fn view(&self, target: GraphRef) -> Option<&GraphView> {
+    pub(crate) fn view(&self, target: GraphRef) -> Option<&GraphView> {
         match target {
             GraphRef::Main => Some(&self.main_view),
             GraphRef::Local(id) => self.sub_views.get(&id),
@@ -387,7 +387,7 @@ impl Document {
     /// view), so callers that rewire bindings across *several* graphs in
     /// one pass (e.g. boundary reconcile remapping instance bindings) can
     /// borrow each in turn without dragging the view along.
-    pub fn graph_mut(&mut self, target: GraphRef) -> Option<&mut CoreGraph> {
+    pub(crate) fn graph_mut(&mut self, target: GraphRef) -> Option<&mut CoreGraph> {
         match target {
             GraphRef::Main => Some(&mut self.graph),
             GraphRef::Local(id) => self.graph.subgraphs.by_key_mut(&id).map(|d| &mut d.graph),
@@ -395,7 +395,7 @@ impl Document {
     }
 
     /// Graph + view borrowed together for editing the given target.
-    pub fn scope_mut(&mut self, target: GraphRef) -> Option<EditScope<'_>> {
+    pub(crate) fn scope_mut(&mut self, target: GraphRef) -> Option<EditScope<'_>> {
         match target {
             GraphRef::Main => Some(EditScope {
                 graph: &mut self.graph,
@@ -413,7 +413,7 @@ impl Document {
     }
 
     /// Read-only graph + view pair for the given target.
-    pub fn scope(&self, target: GraphRef) -> Option<EditScopeRef<'_>> {
+    pub(crate) fn scope(&self, target: GraphRef) -> Option<EditScopeRef<'_>> {
         Some(EditScopeRef {
             graph: self.graph_for(target)?,
             view: self.view(target)?,
@@ -425,7 +425,7 @@ impl Document {
     /// Independent of `layout.focused`: only the primary group hosts
     /// canvases, and its graph stays visible (and editable) while focus
     /// sits in another pane.
-    pub fn active_target(&self) -> Option<GraphRef> {
+    pub(crate) fn active_target(&self) -> Option<GraphRef> {
         match self.layout.primary().active_tab() {
             TabRef::Graph(target) => Some(target),
             TabRef::Preferences | TabRef::ImageViewer(_) => None,
@@ -435,7 +435,7 @@ impl Document {
     /// Ensure a `GraphView` exists for a local subgraph interior,
     /// auto-laying-out its nodes on first creation. Returns `false` if
     /// the subgraph no longer exists.
-    pub fn ensure_sub_view(&mut self, id: SubgraphId) -> bool {
+    pub(crate) fn ensure_sub_view(&mut self, id: SubgraphId) -> bool {
         if self.sub_views.contains_key(&id) {
             return true;
         }
@@ -462,7 +462,7 @@ impl Document {
     /// (or hand-edited) document can carry a `Local` tab with no matching
     /// `sub_views` entry. Seeding it here recovers gracefully instead of
     /// panicking on a later `view(target).expect(..)`.
-    pub fn ensure_valid_layout(&mut self) {
+    pub(crate) fn ensure_valid_layout(&mut self) {
         // Common case: every tab still resolves — touch nothing (no
         // per-frame allocation). Only when something died does the
         // retain (and its re-pack) run, against the same predicate.
@@ -502,7 +502,7 @@ impl Document {
     /// `origin` is carried over so a re-imported asset keeps its library
     /// lineage for Publish. The undo stack is unaffected: no existing
     /// history references the freshly added def.
-    pub fn import_subgraph(&mut self, def: SubgraphDef) -> SubgraphId {
+    pub(crate) fn import_subgraph(&mut self, def: SubgraphDef) -> SubgraphId {
         let mut copy = def.fresh_copy();
         copy.origin = def.origin;
         let id = copy.id;
@@ -514,7 +514,7 @@ impl Document {
     /// (`SubgraphInput`/`SubgraphOutput`), no interface yet (it's derived
     /// from interior wiring, so an unwired pair exposes nothing). Returns
     /// the new id for the caller to open in a tab.
-    pub fn create_subgraph(&mut self) -> SubgraphId {
+    pub(crate) fn create_subgraph(&mut self) -> SubgraphId {
         let mut graph = CoreGraph::default();
         let input = Node::new(NodeKind::SubgraphInput);
         let output = Node::new(NodeKind::SubgraphOutput);
@@ -559,7 +559,7 @@ impl Document {
     /// Current name of a subgraph interface port (`inputs[idx]` for
     /// `Input`, `outputs[idx]` for `Output`), or `None` if the def /
     /// side / index doesn't resolve.
-    pub fn boundary_port_name(
+    pub(crate) fn boundary_port_name(
         &self,
         sub_id: SubgraphId,
         side: BoundarySide,
@@ -581,7 +581,7 @@ impl Document {
     /// indices but *preserves names*, so the renamed slot is still found
     /// at its new index. No-op if no matching slot exists (e.g. the port
     /// was disconnected away entirely).
-    pub fn rename_boundary_port(
+    pub(crate) fn rename_boundary_port(
         &mut self,
         sub_id: SubgraphId,
         side: BoundarySide,
@@ -609,7 +609,7 @@ impl Document {
     /// against its interior wiring — derived state, recomputed like the
     /// scene rather than stored as undo steps. See `crate::core::edit::reconcile` for
     /// the per-def logic and rationale (placeholder ports, compaction).
-    pub fn reconcile_boundaries(&mut self, library: &Library) {
+    pub(crate) fn reconcile_boundaries(&mut self, library: &Library) {
         if self.graph.subgraphs.is_empty() {
             return;
         }
@@ -624,7 +624,7 @@ impl Document {
     /// port is now out of range, and event subscriptions whose event is gone.
     /// Derived-validity fixup run alongside [`Self::reconcile_boundaries`];
     /// both recurse into local subgraph defs.
-    pub fn prune_dangling_wiring(&mut self, library: &Library) {
+    pub(crate) fn prune_dangling_wiring(&mut self, library: &Library) {
         self.graph.prune_dangling_wiring(library);
     }
 
@@ -632,7 +632,7 @@ impl Document {
     /// is untrusted input, so a violation is a recoverable [`DocumentError`]
     /// the caller surfaces — not a panic. The debug-only assert form for
     /// documents the editor itself built is [`Self::validate`].
-    pub fn check(&self) -> Result<(), DocumentError> {
+    pub(crate) fn check(&self) -> Result<(), DocumentError> {
         self.check_inner().map_err(|e| DocumentError {
             message: format!("{e:#}"),
         })
@@ -692,7 +692,7 @@ impl Document {
     /// the editor itself built is our bug, caught loudly in development and
     /// free in release. Untrusted (deserialized) documents go through `check`
     /// in every build.
-    pub fn validate(&self) {
+    pub(crate) fn validate(&self) {
         if !is_debug() {
             return;
         }
@@ -701,12 +701,12 @@ impl Document {
         }
     }
 
-    pub fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {
+    pub(crate) fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {
         self.validate();
         common::serialize(self, format)
     }
 
-    pub fn deserialize(format: SerdeFormat, input: &[u8]) -> Result<Self> {
+    pub(crate) fn deserialize(format: SerdeFormat, input: &[u8]) -> Result<Self> {
         if input.is_empty() {
             bail!("document input is empty");
         }

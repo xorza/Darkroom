@@ -1,5 +1,5 @@
-pub mod cfa;
-pub mod error;
+pub(crate) mod cfa;
+pub(crate) mod error;
 mod fits;
 pub(crate) mod sensor;
 #[cfg(test)]
@@ -160,7 +160,7 @@ pub(crate) enum PixelData {
 }
 
 impl PixelData {
-    pub fn new_default(width: usize, height: usize, channels: usize) -> Self {
+    pub(crate) fn new_default(width: usize, height: usize, channels: usize) -> Self {
         match channels {
             1 => PixelData::L(DeinterleavedImageData::new_zeroed(width, height)),
             3 => PixelData::Rgb(DeinterleavedImageData::new_zeroed(width, height)),
@@ -168,7 +168,7 @@ impl PixelData {
         }
     }
 
-    pub fn channel(&self, c: usize) -> &Buffer2<f32> {
+    pub(crate) fn channel(&self, c: usize) -> &Buffer2<f32> {
         match self {
             PixelData::L(img) => {
                 assert!(c == 0, "Grayscale image only has channel 0, got {c}");
@@ -181,7 +181,7 @@ impl PixelData {
         }
     }
 
-    pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
+    pub(crate) fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
         match self {
             PixelData::L(img) => {
                 assert!(c == 0, "Grayscale image only has channel 0, got {c}");
@@ -194,14 +194,14 @@ impl PixelData {
         }
     }
 
-    pub fn channels(&self) -> usize {
+    pub(crate) fn channels(&self) -> usize {
         match self {
             PixelData::L(_) => 1,
             PixelData::Rgb(_) => 3,
         }
     }
 
-    pub fn into_l(self) -> Buffer2<f32> {
+    pub(crate) fn into_l(self) -> Buffer2<f32> {
         match self {
             PixelData::L(img) => {
                 let [data] = img.channels;

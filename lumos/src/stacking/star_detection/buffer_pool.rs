@@ -15,7 +15,7 @@ use imaginarium::Buffer2;
 /// `acquire_*` returns buffers with **unspecified contents**: a freshly allocated buffer is
 /// zeroed, but a reused one keeps its previous data. Callers must overwrite before reading.
 #[derive(Debug)]
-pub struct BufferPool {
+pub(crate) struct BufferPool {
     dimensions: Vec2us,
     /// Pool of f32 buffers (for grayscale, scratch, background, noise, etc.)
     f32_buffers: Vec<Buffer2<f32>>,
@@ -27,7 +27,7 @@ pub struct BufferPool {
 
 impl BufferPool {
     /// Create a new buffer pool for the given image dimensions.
-    pub fn new(width: usize, height: usize) -> Self {
+    pub(crate) fn new(width: usize, height: usize) -> Self {
         Self {
             dimensions: Vec2us::new(width, height),
             f32_buffers: Vec::new(),
@@ -38,18 +38,18 @@ impl BufferPool {
 
     /// Get the expected width for buffers in this pool.
     #[inline]
-    pub fn width(&self) -> usize {
+    pub(crate) fn width(&self) -> usize {
         self.dimensions.x
     }
 
     /// Get the expected height for buffers in this pool.
     #[inline]
-    pub fn height(&self) -> usize {
+    pub(crate) fn height(&self) -> usize {
         self.dimensions.y
     }
 
     /// Acquire an f32 buffer from the pool, or allocate a new one.
-    pub fn acquire_f32(&mut self) -> Buffer2<f32> {
+    pub(crate) fn acquire_f32(&mut self) -> Buffer2<f32> {
         self.f32_buffers
             .pop()
             .unwrap_or_else(|| Buffer2::new_default(self.dimensions.x, self.dimensions.y))
@@ -58,7 +58,7 @@ impl BufferPool {
     /// Return an f32 buffer to the pool for reuse.
     ///
     /// The buffer must have the correct dimensions.
-    pub fn release_f32(&mut self, buffer: Buffer2<f32>) {
+    pub(crate) fn release_f32(&mut self, buffer: Buffer2<f32>) {
         // Release asserts, not debug: a mismatched buffer handed back to acquire_f32() would be
         // silently reused by SIMD kernels elsewhere in this module that do unchecked-length
         // loads/stores off the pool's declared dimensions — out-of-bounds UB, not a wrong pixel.
@@ -69,7 +69,7 @@ impl BufferPool {
     }
 
     /// Acquire a BitBuffer2 from the pool, or allocate a new one.
-    pub fn acquire_bit(&mut self) -> BitBuffer2 {
+    pub(crate) fn acquire_bit(&mut self) -> BitBuffer2 {
         self.bit_buffers
             .pop()
             .unwrap_or_else(|| BitBuffer2::new_filled(self.dimensions.x, self.dimensions.y, false))
@@ -78,7 +78,7 @@ impl BufferPool {
     /// Return a BitBuffer2 to the pool for reuse.
     ///
     /// The buffer must have the correct dimensions.
-    pub fn release_bit(&mut self, buffer: BitBuffer2) {
+    pub(crate) fn release_bit(&mut self, buffer: BitBuffer2) {
         // See release_f32: release assert, not debug — a mismatch here is out-of-bounds UB in
         // a downstream SIMD kernel, not a wrong pixel.
         assert_eq!(buffer.width(), self.dimensions.x);
@@ -87,7 +87,7 @@ impl BufferPool {
     }
 
     /// Acquire the u32 buffer (for label map), or allocate a new one.
-    pub fn acquire_u32(&mut self) -> Buffer2<u32> {
+    pub(crate) fn acquire_u32(&mut self) -> Buffer2<u32> {
         self.u32_buffer
             .take()
             .unwrap_or_else(|| Buffer2::new_default(self.dimensions.x, self.dimensions.y))
@@ -96,7 +96,7 @@ impl BufferPool {
     /// Return the u32 buffer to the pool for reuse.
     ///
     /// The buffer must have the correct dimensions.
-    pub fn release_u32(&mut self, buffer: Buffer2<u32>) {
+    pub(crate) fn release_u32(&mut self, buffer: Buffer2<u32>) {
         // See release_f32: release assert, not debug — a mismatch here is out-of-bounds UB in
         // a downstream SIMD kernel, not a wrong pixel.
         assert_eq!(buffer.width(), self.dimensions.x);
@@ -105,14 +105,14 @@ impl BufferPool {
     }
 
     /// Clear all pooled buffers, freeing memory.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.f32_buffers.clear();
         self.bit_buffers.clear();
         self.u32_buffer = None;
     }
 
     /// Reset the pool for new dimensions, clearing all buffers.
-    pub fn reset(&mut self, width: usize, height: usize) {
+    pub(crate) fn reset(&mut self, width: usize, height: usize) {
         if self.dimensions.x != width || self.dimensions.y != height {
             self.clear();
             self.dimensions.x = width;
@@ -134,7 +134,7 @@ pub(crate) struct PoolCounts {
 /// Dimension check and pool-size introspection used only by tests to assert pool sizing/reuse.
 #[cfg(test)]
 impl BufferPool {
-    pub fn matches_dimensions(&self, width: usize, height: usize) -> bool {
+    pub(crate) fn matches_dimensions(&self, width: usize, height: usize) -> bool {
         self.dimensions.x == width && self.dimensions.y == height
     }
 

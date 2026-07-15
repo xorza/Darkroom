@@ -32,7 +32,7 @@ pub(crate) struct ChannelNorm {
 }
 
 impl ChannelNorm {
-    pub const IDENTITY: ChannelNorm = ChannelNorm {
+    pub(crate) const IDENTITY: ChannelNorm = ChannelNorm {
         gain: 1.0,
         offset: 0.0,
     };

@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use scenarium::ContextType;
 
 #[derive(Debug)]
-pub struct VisionCtx {
+pub(crate) struct VisionCtx {
     pub processing_ctx: imaginarium::ProcessingContext,
 }
 
@@ -16,7 +16,7 @@ impl Default for VisionCtx {
     }
 }
 
-pub static VISION_CTX_TYPE: LazyLock<ContextType> = LazyLock::new(|| {
+pub(crate) static VISION_CTX_TYPE: LazyLock<ContextType> = LazyLock::new(|| {
     ContextType::new(
         "46a85022-e3c7-4c80-aa90-cf1a77251286".into(),
         VisionCtx::default,

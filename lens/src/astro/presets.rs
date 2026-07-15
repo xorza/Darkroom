@@ -29,7 +29,7 @@ macro_rules! preset_enum {
     ) => {
         $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
-        pub enum $enum {
+        pub(crate) enum $enum {
             $($variant),+
         }
 
@@ -49,7 +49,7 @@ macro_rules! preset_enum {
 
             /// The picker variants: each stores the raw `label` as its bound
             /// value but shows the friendly `display_label`.
-            pub fn picker_variants() -> Vec<ValueVariant> {
+            pub(crate) fn picker_variants() -> Vec<ValueVariant> {
                 Self::iter()
                     .map(|v| {
                         ValueVariant::new(v.label(), StaticValue::Enum(v.label().to_string()))
@@ -59,7 +59,7 @@ macro_rules! preset_enum {
             }
 
             /// Expand this preset to its lumos stage config.
-            pub fn config(self) -> $config {
+            pub(crate) fn config(self) -> $config {
                 match self {
                     $(Self::$variant => $ctor),+
                 }

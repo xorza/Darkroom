@@ -53,19 +53,19 @@ const MAX_SPLIT_DEPTH: u32 = 4;
 /// structural changes; a stale path that no longer lands on a split is
 /// ignored by the ops it feeds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct DockPath(u8);
+pub(crate) struct DockPath(u8);
 
 impl DockPath {
     /// The root node's address (the empty path).
-    pub const ROOT: DockPath = DockPath(1);
+    pub(crate) const ROOT: DockPath = DockPath(1);
 
     /// The address of `self`'s first (left/top) child.
-    pub fn first(self) -> DockPath {
+    pub(crate) fn first(self) -> DockPath {
         self.child(false)
     }
 
     /// The address of `self`'s second (right/bottom) child.
-    pub fn second(self) -> DockPath {
+    pub(crate) fn second(self) -> DockPath {
         self.child(true)
     }
 
@@ -96,7 +96,7 @@ impl Default for DockPath {
 /// structural changes (normalize re-packs); long-lived references use
 /// [`TabGroupId`], and an op fed a stale index bounds-checks and no-ops.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct NodeIdx(u32);
+pub(crate) struct NodeIdx(u32);
 
 impl NodeIdx {
     fn usize(self) -> usize {
@@ -107,7 +107,7 @@ impl NodeIdx {
 /// How a [`DockSplit`] arranges its children: `Row` side by side
 /// (vertical divider), `Column` stacked (horizontal divider).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SplitDir {
+pub(crate) enum SplitDir {
     Row,
     Column,
 }
@@ -116,7 +116,7 @@ pub enum SplitDir {
 /// edge's half. `Left`/`Right` split into a [`SplitDir::Row`],
 /// `Top`/`Bottom` into a [`SplitDir::Column`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SplitSide {
+pub(crate) enum SplitSide {
     Left,
     Right,
     Top,
@@ -140,7 +140,7 @@ impl SplitSide {
 
 /// Where a moved tab lands — the payload of [`DockOp::MoveTab`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DockDrop {
+pub(crate) enum DockDrop {
     /// Join `group`'s strip at `index` (clamped to its length).
     Into { group: TabGroupId, index: usize },
     /// Split `group`'s pane; the tab becomes a fresh single-tab group on
@@ -155,7 +155,7 @@ pub enum DockDrop {
 /// stale addresses (a group or split that no longer exists) no-op, and
 /// the snapshot diff drops them.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum DockOp {
+pub(crate) enum DockOp {
     /// Make `group`'s tab at `index` visible and focus the group.
     ActivateTab { group: TabGroupId, index: usize },
     /// Close `group`'s tab at `index`. The `Main` tab never closes —
@@ -170,7 +170,7 @@ pub enum DockOp {
 
 /// One pane's tab strip: the open tabs plus which one is visible.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TabGroup {
+pub(crate) struct TabGroup {
     pub id: TabGroupId,
     /// Non-empty; a group whose last tab closes collapses out of the tree.
     pub tabs: Vec<TabRef>,
@@ -179,7 +179,7 @@ pub struct TabGroup {
 }
 
 impl TabGroup {
-    pub fn active_tab(&self) -> TabRef {
+    pub(crate) fn active_tab(&self) -> TabRef {
         self.tabs[self.active]
     }
 
@@ -196,13 +196,13 @@ impl TabGroup {
 
 /// One node of the flat tree.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum DockNode {
+pub(crate) enum DockNode {
     Split(DockSplit),
     Group(TabGroup),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DockSplit {
+pub(crate) struct DockSplit {
     pub dir: SplitDir,
     /// The first child's share of the free space, in
     /// `RATIO_MIN..=RATIO_MAX`.
@@ -215,7 +215,7 @@ pub struct DockSplit {
 /// focus (keyboard-shortcut routing + where opened tabs land). Persisted
 /// on the `Document` and snapshot into every dock undo step.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DockLayout {
+pub(crate) struct DockLayout {
     /// Canonical pre-order (see the module doc). Private so every
     /// structural mutation goes through the ops that renormalize.
     nodes: Vec<DockNode>,
@@ -241,24 +241,24 @@ impl Default for DockLayout {
 
 /// A tab's position in the tree: which group holds it and where.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TabAddress {
+pub(crate) struct TabAddress {
     pub group: TabGroupId,
     pub index: usize,
 }
 
 impl DockLayout {
     /// The root node's index — always slot 0 in the canonical order.
-    pub const ROOT: NodeIdx = NodeIdx(0);
+    pub(crate) const ROOT: NodeIdx = NodeIdx(0);
 
     /// The node at `idx` — the render walk follows [`DockSplit`]'s child
     /// indices through this.
-    pub fn node(&self, idx: NodeIdx) -> &DockNode {
+    pub(crate) fn node(&self, idx: NodeIdx) -> &DockNode {
         &self.nodes[idx.usize()]
     }
 
     /// The leaf groups in left-to-right, top-to-bottom pane order — in
     /// canonical pre-order storage that's simply vec order.
-    pub fn groups(&self) -> impl Iterator<Item = &TabGroup> {
+    pub(crate) fn groups(&self) -> impl Iterator<Item = &TabGroup> {
         self.nodes.iter().filter_map(|n| match n {
             DockNode::Group(g) => Some(g),
             DockNode::Split(_) => None,
@@ -266,15 +266,15 @@ impl DockLayout {
     }
 
     /// Every open tab across every group, in [`Self::groups`] order.
-    pub fn all_tabs(&self) -> impl Iterator<Item = TabRef> + '_ {
+    pub(crate) fn all_tabs(&self) -> impl Iterator<Item = TabRef> + '_ {
         self.groups().flat_map(|g| g.tabs.iter().copied())
     }
 
-    pub fn group(&self, id: TabGroupId) -> Option<&TabGroup> {
+    pub(crate) fn group(&self, id: TabGroupId) -> Option<&TabGroup> {
         self.groups().find(|g| g.id == id)
     }
 
-    pub fn group_mut(&mut self, id: TabGroupId) -> Option<&mut TabGroup> {
+    pub(crate) fn group_mut(&mut self, id: TabGroupId) -> Option<&mut TabGroup> {
         self.nodes.iter_mut().find_map(|n| match n {
             DockNode::Group(g) if g.id == id => Some(g),
             _ => None,
@@ -283,13 +283,13 @@ impl DockLayout {
 
     /// The group holding the `Main` graph tab — the one pane that hosts
     /// graph canvases.
-    pub fn primary(&self) -> &TabGroup {
+    pub(crate) fn primary(&self) -> &TabGroup {
         self.groups()
             .find(|g| g.tabs.contains(&TabRef::Graph(GraphRef::Main)))
             .expect("a group holds the Main tab")
     }
 
-    pub fn find_tab(&self, tab: TabRef) -> Option<TabAddress> {
+    pub(crate) fn find_tab(&self, tab: TabRef) -> Option<TabAddress> {
         self.groups().find_map(|g| {
             g.tabs
                 .iter()
@@ -300,7 +300,7 @@ impl DockLayout {
 
     /// Execute one [`DockOp`] — the dispatch behind every recorded
     /// layout mutation.
-    pub fn apply(&mut self, op: DockOp) {
+    pub(crate) fn apply(&mut self, op: DockOp) {
         match op {
             DockOp::ActivateTab { group, index } => self.activate(group, index),
             DockOp::CloseTab { group, index } => self.close_tab(group, index),
@@ -311,7 +311,7 @@ impl DockLayout {
 
     /// Focus `group` and make its `index` tab visible. Out-of-range
     /// input is ignored.
-    pub fn activate(&mut self, group: TabGroupId, index: usize) {
+    pub(crate) fn activate(&mut self, group: TabGroupId, index: usize) {
         if let Some(g) = self.group_mut(group)
             && index < g.tabs.len()
         {
@@ -326,7 +326,7 @@ impl DockLayout {
     /// intent-fed ops this is a direct call whose callers read a live
     /// group id in the same call chain, so a dead id is a logic error,
     /// not tolerable staleness.
-    pub fn find_or_insert(&mut self, tab: TabRef, group: TabGroupId) -> TabAddress {
+    pub(crate) fn find_or_insert(&mut self, tab: TabRef, group: TabGroupId) -> TabAddress {
         match self.find_tab(tab) {
             Some(addr) => addr,
             None => self.insert_tab(group, tab),
@@ -345,7 +345,7 @@ impl DockLayout {
     /// Close `group`'s tab at `index`. The `Main` tab never closes (also
     /// guarded at intent build). A group emptied by the close collapses
     /// out of the tree; a vanished focus falls back to the primary group.
-    pub fn close_tab(&mut self, group: TabGroupId, index: usize) {
+    pub(crate) fn close_tab(&mut self, group: TabGroupId, index: usize) {
         let Some(g) = self.group_mut(group) else {
             return;
         };
@@ -366,7 +366,7 @@ impl DockLayout {
     /// Degenerate moves — a split off a group that holds only this tab,
     /// targeting itself — leave the layout unchanged (the snapshot diff
     /// drops them).
-    pub fn move_tab(&mut self, tab: TabRef, drop: DockDrop) {
+    pub(crate) fn move_tab(&mut self, tab: TabRef, drop: DockDrop) {
         if matches!(tab, TabRef::Graph(_)) {
             return;
         }
@@ -432,7 +432,7 @@ impl DockLayout {
     /// Set the ratio of the split at `path`, clamped to the ratio
     /// bounds. A path that doesn't land on a split (the tree changed
     /// under a stale intent) is ignored.
-    pub fn set_ratio(&mut self, path: DockPath, ratio: f32) {
+    pub(crate) fn set_ratio(&mut self, path: DockPath, ratio: f32) {
         // A sentinel-less byte is a corrupt address, not the root —
         // ignore it like any other stale path.
         if path.0 == 0 {
@@ -452,7 +452,7 @@ impl DockLayout {
 
     /// Drop every tab failing `keep`, collapsing groups that empty —
     /// the layout half of `Document::ensure_valid_layout` pruning.
-    pub fn retain_tabs(&mut self, mut keep: impl FnMut(TabRef) -> bool) {
+    pub(crate) fn retain_tabs(&mut self, mut keep: impl FnMut(TabRef) -> bool) {
         for node in &mut self.nodes {
             if let DockNode::Group(g) = node {
                 g.tabs.retain(|t| keep(*t));
@@ -465,7 +465,7 @@ impl DockLayout {
     /// Whether `group`'s pane may still split (the [`MAX_SPLIT_DEPTH`]
     /// nesting cap) — lets the drag-drop UI skip offering edge zones
     /// that [`Self::move_tab`] would refuse anyway.
-    pub fn can_split(&self, group: TabGroupId) -> bool {
+    pub(crate) fn can_split(&self, group: TabGroupId) -> bool {
         self.group_depth(group).is_some_and(|d| d < MAX_SPLIT_DEPTH)
     }
 

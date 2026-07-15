@@ -20,7 +20,7 @@ const PREFERENCES_FILE: &str = "darkroom.preferences.toml";
 /// still deserializes.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct Preferences {
+pub(crate) struct Preferences {
     /// Theme preference to restore (`system` / `dark` / `light`).
     /// Written by the Theme menu; the default (`system`) follows the
     /// OS light/dark setting.
@@ -70,7 +70,7 @@ pub(crate) enum ViewerBackground {
 /// per-tab): every viewer pane reads and edits the same choices.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct ViewerPreferences {
+pub(crate) struct ViewerPreferences {
     pub background: ViewerBackground,
     /// Texel sampling for the shown image. Defaults to `Nearest` — hard
     /// texels for pixel peeping; `Linear` smooths.
@@ -94,7 +94,7 @@ impl Default for ViewerPreferences {
 /// serialize as `[x, y]` arrays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct WindowState {
+pub(crate) struct WindowState {
     /// Logical inner size `[w, h]`.
     pub size: UVec2,
     pub maximized: bool,
@@ -166,7 +166,7 @@ impl Preferences {
     /// file, parse error) degrades to the default rather than
     /// blocking startup — a corrupt preferences file shouldn't brick the app.
     /// Also publishes the loaded ML model paths into lens's runtime global.
-    pub fn load() -> Self {
+    pub(crate) fn load() -> Self {
         let preferences = match std::fs::read(Self::path()) {
             Ok(bytes) => deserialize(&bytes, SerdeFormat::Toml).unwrap_or_default(),
             Err(_) => Self::default(),
@@ -178,7 +178,7 @@ impl Preferences {
     /// Write the preferences to the working dir. `Err` carries the
     /// display-ready reason — the caller surfaces it (status bar); a
     /// failed persist shouldn't interrupt the user's session.
-    pub fn save(&self) -> Result<(), String> {
+    pub(crate) fn save(&self) -> Result<(), String> {
         let bytes = serialize(self, SerdeFormat::Toml)
             .map_err(|err| format!("preferences save failed: {err}"))?;
         std::fs::write(Self::path(), &bytes)

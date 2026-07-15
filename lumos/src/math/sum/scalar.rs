@@ -18,7 +18,7 @@ pub(crate) fn neumaier_add(sum: &mut f32, c: &mut f32, v: f32) {
 /// Achieves O(n·ε²) error — essentially independent of array length,
 /// vs O(n·ε) for naive summation.
 #[inline]
-pub fn sum_f32(values: &[f32]) -> f32 {
+pub(crate) fn sum_f32(values: &[f32]) -> f32 {
     let mut sum = 0.0f32;
     let mut c = 0.0f32;
     for &v in values {
@@ -29,7 +29,7 @@ pub fn sum_f32(values: &[f32]) -> f32 {
 
 /// Weighted mean using Neumaier compensated summation (scalar).
 #[inline]
-pub fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
+pub(crate) fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     let mut sum = 0.0f32;
     let mut c_sum = 0.0f32;
     let mut wsum = 0.0f32;

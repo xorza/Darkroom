@@ -314,6 +314,7 @@ impl From<&BitBuffer2> for Vec<bool> {
 }
 
 /// Iterator over bit values (row-major order, skipping padding).
+#[derive(Debug)]
 pub struct BitIter<'a> {
     buffer: &'a BitBuffer2,
     x: usize,

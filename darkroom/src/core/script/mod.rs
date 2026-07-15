@@ -40,7 +40,7 @@ use uuid::Uuid;
 
 mod engine;
 mod session;
-pub mod tcp;
+pub(crate) mod tcp;
 #[cfg(test)]
 mod tests;
 
@@ -51,7 +51,7 @@ use tcp::TcpScriptConfig;
 /// `main.rs`. `tcp.is_none()` means the TCP listener is off (no transport
 /// registered at all).
 #[derive(Debug, Clone, Default)]
-pub struct ScriptConfig {
+pub(crate) struct ScriptConfig {
     pub tcp: Option<TcpScriptConfig>,
 }
 
@@ -88,7 +88,7 @@ const REQUEST_QUEUE_DEPTH: usize = 4;
 /// receiver is dropped and `reply.send` returns `Err` — scripts still
 /// run to completion, the reply is just discarded.
 #[derive(Debug)]
-pub struct ScriptRequest {
+pub(crate) struct ScriptRequest {
     pub origin: String,
     pub session_id: Option<Uuid>,
     pub source: String,
@@ -100,7 +100,7 @@ pub struct ScriptRequest {
 /// def and a hand-built JSON payload. `Deserialize` is for test clients
 /// (and any future in-process consumer) to parse the reply symmetrically.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ScriptResult {
+pub(crate) struct ScriptResult {
     /// Session the script ran in. Echoed on success (whether resumed or
     /// freshly created). `None` only when the request failed before a
     /// session was resolvable (unknown id, store full).
@@ -122,7 +122,7 @@ pub struct ScriptResult {
 /// the executor can complete a script without round-tripping through the
 /// editor for every side effect.
 #[derive(Debug)]
-pub enum ScriptMessage {
+pub(crate) enum ScriptMessage {
     /// A `print(msg)` call from a script. The TCP client also receives
     /// this text back in `ScriptResult.print`; the local echo (stderr) is
     /// `App`'s job. Per-peer attribution is the transport's (it traces the
@@ -186,13 +186,13 @@ type StdoutBuffer = Arc<Mutex<String>>;
 /// shutdown of the whole app. Both the transport listener and the executor
 /// loop are exactly this — "a task you cancel on drop" — so they share it.
 #[derive(Debug)]
-pub struct CancellableTask {
+pub(crate) struct CancellableTask {
     cancel: CancellationToken,
     task: Option<JoinHandle<()>>,
 }
 
 impl CancellableTask {
-    pub fn new(cancel: CancellationToken, task: JoinHandle<()>) -> Self {
+    pub(crate) fn new(cancel: CancellationToken, task: JoinHandle<()>) -> Self {
         Self {
             cancel,
             task: Some(task),
@@ -213,7 +213,7 @@ impl Drop for CancellableTask {
 /// Both are [`CancellableTask`]s, so dropping this cancels + aborts each
 /// (executor first, then transport) with no hand-written `Drop`.
 #[derive(Debug)]
-pub struct ScriptExecutor {
+pub(crate) struct ScriptExecutor {
     _executor: CancellableTask,
     _transport: CancellableTask,
 }
@@ -222,7 +222,7 @@ impl ScriptExecutor {
     /// Spawn the TCP transport's listener task and the executor task that
     /// drains it. Must be called from a tokio runtime context. `action_tx`
     /// is the host-side sender for the side effects script functions emit.
-    pub fn new(
+    pub(crate) fn new(
         transport: tcp::TcpTransport,
         action_tx: mpsc::UnboundedSender<ScriptMessage>,
         library: Arc<Library>,
@@ -345,7 +345,7 @@ fn run_script(
 /// receiving end of the executor→host [`ScriptMessage`] channel the
 /// frontend drains each frame. Built only when `--script-tcp` bound the
 /// listener; dropping it cancels every task and shuts the runtime down.
-pub struct ScriptHost {
+pub(crate) struct ScriptHost {
     // `executor` and `runtime` are RAII holders, never read after
     // construction: dropping `executor` cancels + aborts the executor and
     // transport tasks, then `runtime` (declared last, so dropped last)
@@ -370,7 +370,7 @@ impl ScriptHost {
     /// `library` is the shared swappable library cell; the executor `load`s
     /// it per call, so promote/publish growth from the GUI is reflected in
     /// running scripts on their next access.
-    pub fn start(cfg: &ScriptConfig, library: Arc<Library>, wake: Wake) -> Option<Self> {
+    pub(crate) fn start(cfg: &ScriptConfig, library: Arc<Library>, wake: Wake) -> Option<Self> {
         let tcp_cfg = cfg.tcp.as_ref()?;
         let (transport, report) = match tcp::start(tcp_cfg) {
             Ok(pair) => pair,
@@ -400,7 +400,7 @@ impl ScriptHost {
 
     /// Non-blocking drain of everything scripts have pushed since the last
     /// frame. `App` applies each message on the UI thread.
-    pub fn drain(&mut self) -> Vec<ScriptMessage> {
+    pub(crate) fn drain(&mut self) -> Vec<ScriptMessage> {
         let mut out = Vec::new();
         while let Ok(inbound) = self.inbound_rx.try_recv() {
             out.push(inbound);
@@ -410,4 +410,4 @@ impl ScriptHost {
 }
 
 /// The default bind when `--script-tcp` is on with no `--script-bind`.
-pub const DEFAULT_BIND: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 34567);
+pub(crate) const DEFAULT_BIND: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 34567);

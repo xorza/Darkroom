@@ -12,7 +12,7 @@ use crate::stacking::star_detection::detector::stages::detect::detect;
 ///
 /// Creates a temporary buffer pool internally. For benchmarks, use
 /// `detect` directly with a pre-allocated pool.
-pub fn detect_stars_test(
+pub(crate) fn detect_stars_test(
     pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
     config: &DetectionConfig,

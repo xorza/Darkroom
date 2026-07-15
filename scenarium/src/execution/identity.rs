@@ -154,7 +154,7 @@ impl Iterator for Attribution<'_> {
 }
 
 #[cfg(any(test, feature = "internals"))]
-pub mod test_support {
+pub(crate) mod test_support {
     use super::*;
 
     #[derive(Debug)]

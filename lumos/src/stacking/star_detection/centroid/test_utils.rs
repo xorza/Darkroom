@@ -7,7 +7,7 @@ use imaginarium::Buffer2;
 use crate::testing::synthetic::patterns::add_gaussian_noise;
 
 /// Add Gaussian noise to pixel values using a simple LCG PRNG.
-pub fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {
+pub(crate) fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {
     add_gaussian_noise(pixels, noise_sigma, seed);
 }
 
@@ -16,7 +16,7 @@ pub fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {
 /// Uses absolute tolerance 1e-14 for values near zero,
 /// and relative tolerance 1e-10 for larger values.
 /// Suitable for comparing SIMD vs scalar results where FMA rounding differs.
-pub fn approx_eq(a: f64, b: f64) -> bool {
+pub(crate) fn approx_eq(a: f64, b: f64) -> bool {
     let abs_diff = (a - b).abs();
     // Absolute tolerance for values near zero
     if abs_diff < 1e-14 {
@@ -31,7 +31,7 @@ pub fn approx_eq(a: f64, b: f64) -> bool {
 ///
 /// Used as ground truth in SIMD-vs-scalar validation tests.
 #[allow(clippy::needless_range_loop)]
-pub fn compute_hessian_gradient<const N: usize>(
+pub(crate) fn compute_hessian_gradient<const N: usize>(
     jacobian: &[[f64; N]],
     residuals: &[f64],
 ) -> ([[f64; N]; N], [f64; N]) {
@@ -54,7 +54,7 @@ pub fn compute_hessian_gradient<const N: usize>(
 }
 
 /// Generate a circular Gaussian star stamp.
-pub fn make_gaussian_star(
+pub(crate) fn make_gaussian_star(
     width: usize,
     height: usize,
     pos: Vec2,
@@ -75,7 +75,7 @@ pub fn make_gaussian_star(
 }
 
 /// Generate an elliptical Gaussian star stamp.
-pub fn make_elliptical_star(
+pub(crate) fn make_elliptical_star(
     width: usize,
     height: usize,
     pos: Vec2,
@@ -99,7 +99,7 @@ pub fn make_elliptical_star(
 }
 
 /// Generate a Moffat profile star stamp.
-pub fn make_moffat_star(
+pub(crate) fn make_moffat_star(
     width: usize,
     height: usize,
     pos: Vec2,

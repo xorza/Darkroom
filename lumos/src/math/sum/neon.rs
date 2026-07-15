@@ -9,7 +9,7 @@ use crate::math::sum::scalar::neumaier_add;
 /// # Safety
 /// Caller must ensure NEON is available (always true on aarch64).
 #[target_feature(enable = "neon")]
-pub unsafe fn sum_f32(values: &[f32]) -> f32 {
+pub(crate) unsafe fn sum_f32(values: &[f32]) -> f32 {
     unsafe {
         let mut sum_vec = vdupq_n_f32(0.0);
         let mut c_vec = vdupq_n_f32(0.0);
@@ -60,7 +60,7 @@ unsafe fn reduce_kahan_neon(sum_vec: float32x4_t, c_vec: float32x4_t) -> (f32, f
 /// # Safety
 /// Caller must ensure NEON is available (always true on aarch64).
 #[target_feature(enable = "neon")]
-pub unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
+pub(crate) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     unsafe {
         let mut sum_vw = vdupq_n_f32(0.0);
         let mut c_vw = vdupq_n_f32(0.0);

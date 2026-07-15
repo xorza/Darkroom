@@ -75,7 +75,7 @@ impl DemosaicArena {
 /// Demosaic an X-Trans image using Markesteijn 1-pass algorithm.
 ///
 /// Returns planar channels `[R, G, B]`, each `width * height`, in 0.0-1.0 range.
-pub fn demosaic_xtrans_markesteijn(
+pub(crate) fn demosaic_xtrans_markesteijn(
     xtrans: &XTransImage,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {

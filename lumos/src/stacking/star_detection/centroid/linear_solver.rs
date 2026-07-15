@@ -12,7 +12,7 @@
 /// Works for small fixed-size systems (N <= 6).
 #[inline]
 #[allow(clippy::needless_range_loop)]
-pub fn solve<const N: usize>(a: &[[f64; N]; N], b: &[f64; N]) -> Option<[f64; N]> {
+pub(crate) fn solve<const N: usize>(a: &[[f64; N]; N], b: &[f64; N]) -> Option<[f64; N]> {
     let mut matrix = *a;
     let mut rhs = *b;
 

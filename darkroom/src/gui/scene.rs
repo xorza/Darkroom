@@ -16,7 +16,7 @@ use crate::core::document::{GraphView, ItemRef, Viewport};
 use crate::gui::run_state::{ExecStatus, RunState};
 
 #[derive(Debug, Default)]
-pub struct Scene {
+pub(crate) struct Scene {
     /// The shared paint stack, mirrored from `GraphView::view_items` order:
     /// node bodies and pinned-output previews interleaved, later entries
     /// drawn in front. The canvas draw pass iterates this and dispatches on
@@ -67,7 +67,7 @@ pub struct Scene {
 /// Per-frame snapshot of an input port's [`Binding`] for the UI tree.
 /// Variant-only for `Bind`; the address details live on `Scene::connections`.
 #[derive(Debug, Clone)]
-pub enum InputBindingView {
+pub(crate) enum InputBindingView {
     None,
     Const(StaticValue),
     Bind,
@@ -86,7 +86,7 @@ impl From<&Binding> for InputBindingView {
 /// One input port in the per-frame projection. Fields the UI reads together
 /// per port (so an AoS pool beats parallel columns here).
 #[derive(Debug)]
-pub struct SceneInput {
+pub(crate) struct SceneInput {
     pub name: SmolStr,
     /// Port tooltip from the func's [`FuncInput::description`]; empty when the
     /// port declares none.
@@ -115,7 +115,7 @@ pub struct SceneInput {
 /// itself lives on `FuncOutput`'s [`OutputType`], and re-validating downstream
 /// wires on an input change is handled at edit time, not from the projection.
 #[derive(Debug)]
-pub struct SceneOutput {
+pub(crate) struct SceneOutput {
     pub name: SmolStr,
     /// Port tooltip from the func's [`FuncOutput::description`]; empty when the
     /// port declares none.
@@ -133,12 +133,12 @@ pub struct SceneOutput {
 /// One event (emitter) port in the per-frame projection. Events carry no data
 /// type — they are pure triggers — so a name is all the UI needs to list them.
 #[derive(Debug)]
-pub struct SceneEvent {
+pub(crate) struct SceneEvent {
     pub name: SmolStr,
 }
 
 #[derive(Debug)]
-pub struct SceneNode {
+pub(crate) struct SceneNode {
     pub id: NodeId,
     pub pos: Vec2,
     pub name: SmolStr,
@@ -205,7 +205,7 @@ impl SceneNode {
     /// play chip and the context-menu item. A disabled node is flattened
     /// out of the program, an instance/boundary node has no flat identity,
     /// and a `missing` stub resolves to nothing — none makes a valid seed.
-    pub fn runnable(&self) -> bool {
+    pub(crate) fn runnable(&self) -> bool {
         !self.boundary && !self.disabled && !self.missing && self.subgraph.is_none()
     }
 }
@@ -217,7 +217,7 @@ impl KeyIndexKey<NodeId> for SceneNode {
 }
 
 #[derive(Debug)]
-pub struct SceneConnection {
+pub(crate) struct SceneConnection {
     /// Producer side — the output feeding the wire.
     pub src: OutputPort,
     /// Consumer side — the input the wire lands on.
@@ -233,7 +233,7 @@ impl Scene {
     /// subgraph interior, `None` for the root. It's the only source of
     /// port arity for the `SubgraphInput`/`SubgraphOutput` boundary nodes
     /// (they carry no func) — their ports mirror the def's interface.
-    pub fn rebuild(
+    pub(crate) fn rebuild(
         &mut self,
         graph: &Graph,
         view: &GraphView,
@@ -499,18 +499,18 @@ impl Scene {
     }
 
     /// A node's input ports, sliced by its `inputs` span.
-    pub fn inputs(&self, span: Span) -> &[SceneInput] {
+    pub(crate) fn inputs(&self, span: Span) -> &[SceneInput] {
         slice_pool(&self.inputs, span)
     }
 
     /// A node's output ports, sliced by its `outputs` span.
-    pub fn outputs(&self, span: Span) -> &[SceneOutput] {
+    pub(crate) fn outputs(&self, span: Span) -> &[SceneOutput] {
         slice_pool(&self.outputs, span)
     }
 
     /// Every pinned output in the scene — the one iteration the pin scans
     /// (drag/click polls, wire draw, rubber-band sweep) share.
-    pub fn pinned_outputs(&self) -> impl Iterator<Item = PinnedOutput<'_>> {
+    pub(crate) fn pinned_outputs(&self) -> impl Iterator<Item = PinnedOutput<'_>> {
         self.nodes.iter().flat_map(|n| {
             self.outputs(n.outputs)
                 .iter()
@@ -526,13 +526,13 @@ impl Scene {
     }
 
     /// A node's event (emitter) ports, sliced by its `events` span.
-    pub fn events(&self, span: Span) -> &[SceneEvent] {
+    pub(crate) fn events(&self, span: Span) -> &[SceneEvent] {
         slice_pool(&self.events, span)
     }
 
     /// One input's picker options, resolved from its [`SceneInput::value_variants`]
     /// span into the shared pool.
-    pub fn value_variants(&self, span: Span) -> &[ValueVariant] {
+    pub(crate) fn value_variants(&self, span: Span) -> &[ValueVariant] {
         slice_pool(&self.value_variants_pool, span)
     }
 }
@@ -541,7 +541,7 @@ impl Scene {
 /// preview widget's top-left corner (the unwrapped
 /// [`SceneOutput::pin_position`]), and the projected output.
 #[derive(Debug)]
-pub struct PinnedOutput<'a> {
+pub(crate) struct PinnedOutput<'a> {
     pub port: OutputPort,
     pub pos: Vec2,
     pub output: &'a SceneOutput,

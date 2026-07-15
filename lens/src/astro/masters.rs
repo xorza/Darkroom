@@ -9,20 +9,20 @@ use std::sync::{Arc, LazyLock};
 use lumos::CalibrationMasters;
 use scenarium::{CustomValue, DataType, RamUsage, TypeId};
 
-pub static MASTERS_TYPE_ID: LazyLock<TypeId> =
+pub(crate) static MASTERS_TYPE_ID: LazyLock<TypeId> =
     LazyLock::new(|| "db1bc978-1d0b-4ffc-9a74-6220eff8908e".into());
 
-pub static MASTERS_DATA_TYPE: LazyLock<DataType> =
+pub(crate) static MASTERS_DATA_TYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::Custom(*MASTERS_TYPE_ID));
 
 /// Calibration masters carried through the node graph.
 #[derive(Debug)]
-pub struct Masters {
+pub(crate) struct Masters {
     pub masters: CalibrationMasters,
 }
 
 impl Masters {
-    pub fn new(masters: CalibrationMasters) -> Self {
+    pub(crate) fn new(masters: CalibrationMasters) -> Self {
         Self { masters }
     }
 }

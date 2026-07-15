@@ -10,7 +10,7 @@ use crate::core::document::ItemRef;
 /// [`crate::core::document::GraphView::view_items`], whose *order* is the
 /// shared paint stack for both kinds (later = frontmost).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ViewItem {
+pub(crate) struct ViewItem {
     pub key: ItemRef,
     pub pos: Vec2,
 }
@@ -18,14 +18,14 @@ pub struct ViewItem {
 impl Eq for ViewItem {}
 
 impl ViewItem {
-    pub fn node(id: NodeId, pos: Vec2) -> Self {
+    pub(crate) fn node(id: NodeId, pos: Vec2) -> Self {
         Self {
             key: ItemRef::Node(id),
             pos,
         }
     }
 
-    pub fn pin(port: OutputPort, pos: Vec2) -> Self {
+    pub(crate) fn pin(port: OutputPort, pos: Vec2) -> Self {
         Self {
             key: ItemRef::Pin(port),
             pos,

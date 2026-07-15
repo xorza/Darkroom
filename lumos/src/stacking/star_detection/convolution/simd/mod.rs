@@ -16,7 +16,7 @@ cfg_x86_64! {
 }
 
 cfg_aarch64! {
-    pub mod neon;
+    pub(crate) mod neon;
 }
 
 #[cfg(test)]
@@ -30,7 +30,7 @@ mod tests;
 ///
 /// For indices far out of bounds, clamps to valid range after reflection.
 #[inline]
-pub fn mirror_index(i: isize, len: usize) -> usize {
+pub(crate) fn mirror_index(i: isize, len: usize) -> usize {
     debug_assert!(len > 0, "mirror_index requires len > 0");
 
     if i < 0 {
@@ -48,7 +48,7 @@ pub fn mirror_index(i: isize, len: usize) -> usize {
 
 /// Scalar convolution for a single pixel with mirror boundary handling.
 #[inline]
-pub fn convolve_pixel_scalar(
+pub(crate) fn convolve_pixel_scalar(
     input: &[f32],
     kernel: &[f32],
     radius: usize,

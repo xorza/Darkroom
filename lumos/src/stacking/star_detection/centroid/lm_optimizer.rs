@@ -7,7 +7,7 @@ use crate::stacking::star_detection::centroid::linear_solver::solve;
 
 /// Configuration for Levenberg-Marquardt optimization.
 #[derive(Debug, Clone)]
-pub struct LMConfig {
+pub(crate) struct LMConfig {
     /// Maximum iterations.
     pub max_iterations: usize,
     /// Convergence threshold for parameter changes.
@@ -41,7 +41,7 @@ impl Default for LMConfig {
 
 /// Result of L-M optimization.
 #[derive(Debug, Clone, Copy)]
-pub struct LMResult<const N: usize> {
+pub(crate) struct LMResult<const N: usize> {
     pub params: [f64; N],
     pub chi2: f64,
     pub converged: bool,
@@ -149,7 +149,7 @@ pub(crate) fn build_normal_equations_scalar<const N: usize>(
 }
 
 /// Trait for models that can be fit with L-M optimization.
-pub trait LMModel<const N: usize> {
+pub(crate) trait LMModel<const N: usize> {
     /// Evaluate the model at a point.
     fn evaluate(&self, x: f64, y: f64, params: &[f64; N]) -> f64;
 
@@ -231,7 +231,7 @@ pub trait LMModel<const N: usize> {
 }
 
 /// Run L-M optimization for N-parameter model (generic implementation).
-pub fn optimize<const N: usize, M: LMModel<N>>(
+pub(crate) fn optimize<const N: usize, M: LMModel<N>>(
     model: &M,
     data_x: &[f64],
     data_y: &[f64],

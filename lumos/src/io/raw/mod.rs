@@ -1,4 +1,4 @@
-pub mod demosaic;
+pub(crate) mod demosaic;
 mod normalize;
 
 #[cfg(test)]

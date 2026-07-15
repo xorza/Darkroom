@@ -19,8 +19,8 @@ use crate::stacking::star_detection::labeling::LabelMap;
 use common::Vec2us;
 use imaginarium::Buffer2;
 
-pub mod local_maxima;
-pub mod multi_threshold;
+pub(crate) mod local_maxima;
+pub(crate) mod multi_threshold;
 pub(crate) mod region;
 
 use region::Region;
@@ -30,11 +30,11 @@ mod tests;
 
 /// Maximum number of peaks/candidates per component.
 /// Components with more peaks than this will have excess peaks ignored.
-pub const MAX_PEAKS: usize = 8;
+pub(crate) const MAX_PEAKS: usize = 8;
 
 /// A pixel with its coordinates and value.
 #[derive(Debug, Clone, Copy)]
-pub struct Pixel {
+pub(crate) struct Pixel {
     pub pos: Vec2us,
     pub value: f32,
 }
@@ -44,7 +44,7 @@ pub struct Pixel {
 /// Instead of storing pixel coordinates, we store the component label
 /// and iterate over the bounding box on-demand, checking the labels buffer.
 #[derive(Debug, Clone, Copy)]
-pub struct ComponentData {
+pub(crate) struct ComponentData {
     /// Bounding box of the component.
     pub bbox: URect,
     /// Component label in the labels buffer.
@@ -58,7 +58,7 @@ impl ComponentData {
     ///
     /// Scans the bounding box and yields pixels that match the component label.
     #[inline]
-    pub fn iter_pixels<'a>(
+    pub(crate) fn iter_pixels<'a>(
         &'a self,
         pixels: &'a Buffer2<f32>,
         labels: &'a LabelMap,
@@ -82,7 +82,7 @@ impl ComponentData {
 
     /// Find the peak pixel (maximum value) in this component.
     #[inline]
-    pub fn find_peak(&self, pixels: &Buffer2<f32>, labels: &LabelMap) -> Pixel {
+    pub(crate) fn find_peak(&self, pixels: &Buffer2<f32>, labels: &LabelMap) -> Pixel {
         self.iter_pixels(pixels, labels)
             .max_by(|a, b| a.value.partial_cmp(&b.value).unwrap_or(Ordering::Equal))
             .expect("component must have at least one pixel")

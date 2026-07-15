@@ -187,7 +187,7 @@ fn extract_runs_from_mixed_word(
 
 /// A 2D label map from connected component analysis.
 #[derive(Debug)]
-pub struct LabelMap {
+pub(crate) struct LabelMap {
     labels: Buffer2<u32>,
     num_labels: usize,
 }
@@ -199,7 +199,11 @@ impl LabelMap {
     /// * `mask` - Binary mask of foreground pixels
     /// * `connectivity` - Four (default) or Eight connectivity
     /// * `pool` - Buffer pool to acquire the u32 buffer from
-    pub fn from_pool(mask: &BitBuffer2, connectivity: Connectivity, pool: &mut BufferPool) -> Self {
+    pub(crate) fn from_pool(
+        mask: &BitBuffer2,
+        connectivity: Connectivity,
+        pool: &mut BufferPool,
+    ) -> Self {
         assert_eq!(mask.width(), pool.width());
         assert_eq!(mask.height(), pool.height());
 
@@ -250,29 +254,29 @@ impl LabelMap {
     }
 
     /// Release this LabelMap's buffer back to the pool.
-    pub fn release_to_pool(self, pool: &mut BufferPool) {
+    pub(crate) fn release_to_pool(self, pool: &mut BufferPool) {
         pool.release_u32(self.labels);
     }
 
     /// Number of connected components (excluding background).
     #[inline]
-    pub fn num_labels(&self) -> usize {
+    pub(crate) fn num_labels(&self) -> usize {
         self.num_labels
     }
 
     #[inline]
-    pub fn width(&self) -> usize {
+    pub(crate) fn width(&self) -> usize {
         self.labels.width()
     }
 
     #[inline]
-    pub fn height(&self) -> usize {
+    pub(crate) fn height(&self) -> usize {
         self.labels.height()
     }
 
     /// Get the raw labels slice.
     #[inline]
-    pub fn labels(&self) -> &[u32] {
+    pub(crate) fn labels(&self) -> &[u32] {
         self.labels.pixels()
     }
 }

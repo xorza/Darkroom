@@ -9,7 +9,7 @@ use common::Vec2us;
 /// labeling, and optional deblending. Each region may correspond to a single
 /// star or other source.
 #[derive(Debug)]
-pub struct Region {
+pub(crate) struct Region {
     /// Bounding box of the region.
     pub bbox: URect,
     /// Peak pixel coordinates within the region.

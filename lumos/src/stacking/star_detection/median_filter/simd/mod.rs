@@ -107,7 +107,7 @@ macro_rules! median9_simd_sort {
 pub mod sse;
 
 #[cfg(target_arch = "aarch64")]
-pub mod neon;
+pub(crate) mod neon;
 
 /// Process a row of interior pixels using SIMD-accelerated median9.
 ///

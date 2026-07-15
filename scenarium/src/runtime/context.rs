@@ -139,7 +139,7 @@ impl ContextManager {
 }
 
 #[cfg(any(test, feature = "internals"))]
-pub mod test_support {
+pub(crate) mod test_support {
     use super::*;
 
     pub fn insert_context<T>(manager: &mut ContextManager, ctx_type: &ContextType, value: T)

@@ -12,7 +12,7 @@ mod avx2;
 mod sse;
 
 /// Sum f32 values using SIMD when available.
-pub fn sum_f32(values: &[f32]) -> f32 {
+pub(crate) fn sum_f32(values: &[f32]) -> f32 {
     #[cfg(target_arch = "aarch64")]
     {
         if values.len() >= 4 {
@@ -32,7 +32,7 @@ pub fn sum_f32(values: &[f32]) -> f32 {
 }
 
 /// Calculate the mean of f32 values using SIMD-accelerated sum.
-pub fn mean_f32(values: &[f32]) -> f32 {
+pub(crate) fn mean_f32(values: &[f32]) -> f32 {
     debug_assert!(!values.is_empty());
     sum_f32(values) / values.len() as f32
 }
@@ -41,7 +41,7 @@ pub fn mean_f32(values: &[f32]) -> f32 {
 ///
 /// Uses Kahan compensated summation (SIMD) or Neumaier (scalar) for both numerator
 /// and denominator. Returns 0.0 if the total weight is near zero.
-pub fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
+pub(crate) fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     // Release assert, not debug: the SIMD backends walk `weights` through a raw pointer, so a
     // shorter `weights` is an out-of-bounds read (UB) in release, not a recoverable error.
     assert_eq!(

@@ -8,16 +8,16 @@
 /// closures capture `&UnsafeSendPtr` (which is Sync) rather than the inner
 /// pointer field.
 #[derive(Debug, Clone, Copy)]
-pub struct UnsafeSendPtr<T: Copy>(T);
+pub(crate) struct UnsafeSendPtr<T: Copy>(T);
 unsafe impl<T: Copy> Send for UnsafeSendPtr<T> {}
 unsafe impl<T: Copy> Sync for UnsafeSendPtr<T> {}
 
 impl<T: Copy> UnsafeSendPtr<T> {
-    pub fn new(ptr: T) -> Self {
+    pub(crate) fn new(ptr: T) -> Self {
         Self(ptr)
     }
 
-    pub fn get(&self) -> T {
+    pub(crate) fn get(&self) -> T {
         self.0
     }
 }

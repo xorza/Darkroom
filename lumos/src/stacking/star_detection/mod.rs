@@ -51,7 +51,7 @@
 pub(crate) mod background;
 pub(crate) mod buffer_pool;
 pub(crate) mod centroid;
-pub mod config;
+pub(crate) mod config;
 mod convolution;
 pub(crate) mod deblend;
 pub(crate) mod detector;

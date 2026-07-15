@@ -17,7 +17,7 @@ use crate::stacking::star_detection::median_filter::simd::median9_scalar;
 /// - `width` must be >= 8 (4 SIMD + edges).
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
-pub unsafe fn median_filter_row_neon(
+pub(crate) unsafe fn median_filter_row_neon(
     row_above: &[f32],
     row_curr: &[f32],
     row_below: &[f32],

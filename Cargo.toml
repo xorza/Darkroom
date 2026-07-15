@@ -19,6 +19,10 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 
+[workspace.lints.rust]
+missing_debug_implementations = "deny"
+unreachable_pub = "deny"
+
 [workspace.lints.clippy]
 items_after_test_module = "deny"
 

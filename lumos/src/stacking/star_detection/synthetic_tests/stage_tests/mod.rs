@@ -7,7 +7,7 @@ use crate::testing::estimate_background;
 use imaginarium::Buffer2;
 
 /// Default tile size for background estimation.
-pub const TILE_SIZE: usize = 64;
+pub(crate) const TILE_SIZE: usize = 64;
 
 mod background_tests;
 mod centroid_tests;

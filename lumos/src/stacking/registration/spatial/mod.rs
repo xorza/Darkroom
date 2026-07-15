@@ -58,7 +58,7 @@ impl KdTree {
     ///
     /// # Returns
     /// A new k-d tree, or None if points is empty
-    pub fn build(points: &[DVec2]) -> Option<Self> {
+    pub(crate) fn build(points: &[DVec2]) -> Option<Self> {
         if points.is_empty() {
             return None;
         }
@@ -123,7 +123,7 @@ impl KdTree {
     /// Find the `k` nearest neighbors to `query`, filling `out` (cleared first) instead of
     /// allocating — for hot loops that query repeatedly (e.g. the per-star k-NN graph).
     /// Results are sorted by ascending distance.
-    pub fn k_nearest_into(&self, query: DVec2, k: usize, out: &mut Vec<Neighbor>) {
+    pub(crate) fn k_nearest_into(&self, query: DVec2, k: usize, out: &mut Vec<Neighbor>) {
         out.clear();
         if k == 0 || self.indices.is_empty() {
             return;
@@ -182,7 +182,7 @@ impl KdTree {
     ///
     /// More efficient than `k_nearest(query, 1)` — uses a scalar best-distance
     /// tracker with no heap or Vec allocation.
-    pub fn nearest_one(&self, query: DVec2) -> Option<Neighbor> {
+    pub(crate) fn nearest_one(&self, query: DVec2) -> Option<Neighbor> {
         if self.indices.is_empty() {
             return None;
         }
@@ -241,7 +241,7 @@ impl KdTree {
     ///
     /// The buffer is cleared before use. This avoids allocations when
     /// called repeatedly in a loop.
-    pub fn radius_indices_into(&self, query: DVec2, radius: f64, indices: &mut Vec<usize>) {
+    pub(crate) fn radius_indices_into(&self, query: DVec2, radius: f64, indices: &mut Vec<usize>) {
         indices.clear();
         if self.indices.is_empty() {
             return;
@@ -287,12 +287,12 @@ impl KdTree {
     }
 
     /// Get the number of points in the tree.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.points.len()
     }
 
     /// Get a point by index.
-    pub fn get_point(&self, idx: usize) -> DVec2 {
+    pub(crate) fn get_point(&self, idx: usize) -> DVec2 {
         self.points[idx]
     }
 }

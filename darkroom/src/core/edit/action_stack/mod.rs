@@ -44,7 +44,7 @@ struct Entry {
 }
 
 #[derive(Debug)]
-pub struct ActionStack {
+pub(crate) struct ActionStack {
     /// The single packed history buffer. Live entries occupy
     /// `[head, len)`; `[0, head)` is evicted-but-not-yet-reclaimed dead
     /// prefix. Entry ranges are absolute indices into this buffer.
@@ -70,7 +70,7 @@ pub struct ActionStack {
 }
 
 impl ActionStack {
-    pub fn new(max_bytes: usize) -> Self {
+    pub(crate) fn new(max_bytes: usize) -> Self {
         assert!(max_bytes > 0, "undo history needs a positive byte budget");
         Self {
             actions: Vec::new(),
@@ -85,7 +85,7 @@ impl ActionStack {
     /// Push a batch of just-applied steps that mutated `target`. `steps`
     /// is a single undo entry — undoing/redoing replays the whole batch
     /// atomically against `target`'s graph+view.
-    pub fn push_current(&mut self, target: GraphRef, steps: &[UndoStep]) {
+    pub(crate) fn push_current(&mut self, target: GraphRef, steps: &[UndoStep]) {
         if steps.is_empty() {
             return;
         }
@@ -119,7 +119,7 @@ impl ActionStack {
         self.trim_to_limit();
     }
 
-    pub fn undo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
+    pub(crate) fn undo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
         if self.cursor == 0 {
             return false;
         }
@@ -140,7 +140,7 @@ impl ActionStack {
         true
     }
 
-    pub fn redo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
+    pub(crate) fn redo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
         if self.cursor == self.entries.len() {
             return false;
         }

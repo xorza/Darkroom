@@ -16,6 +16,12 @@ pub struct TestFuncHooks {
     pub print: Arc<dyn Fn(i64) + Send + Sync + 'static>,
 }
 
+impl std::fmt::Debug for TestFuncHooks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TestFuncHooks").finish_non_exhaustive()
+    }
+}
+
 impl Default for TestFuncHooks {
     fn default() -> Self {
         Self {
@@ -177,4 +183,17 @@ pub fn test_graph() -> Graph {
     graph.validate();
 
     graph
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TestFuncHooks;
+
+    #[test]
+    fn test_func_hooks_debug_omits_opaque_callbacks() {
+        assert_eq!(
+            format!("{:?}", TestFuncHooks::default()),
+            "TestFuncHooks { .. }",
+        );
+    }
 }

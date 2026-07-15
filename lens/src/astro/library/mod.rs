@@ -86,7 +86,7 @@ pub fn ml_model_paths() -> MlModelPaths {
 /// Reusable data type for an astro image file-path input: an existing-file
 /// picker filtered to [`ASTRO_IMAGE_EXTENSIONS`]. Shared so every astro
 /// loader presents the same filter.
-pub static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
+pub(crate) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
     DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
         FsPathMode::ExistingFile,
         ASTRO_IMAGE_EXTENSIONS
@@ -100,7 +100,7 @@ pub static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
 /// picker (no extension filter). Shared by the masters / stacking nodes,
 /// which glob the directory for astro frames via
 /// [`common::file_utils::astro_image_files`].
-pub static ASTRO_DIR_DATA_TYPE: LazyLock<DataType> =
+pub(crate) static ASTRO_DIR_DATA_TYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::Directory))));
 
 /// The lumos-backed astro nodes (category `astro`).

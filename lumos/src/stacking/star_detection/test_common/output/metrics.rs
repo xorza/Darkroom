@@ -10,7 +10,7 @@ use std::path::Path;
 
 /// Comprehensive detection metrics.
 #[derive(Debug, Clone)]
-pub struct DetectionMetrics {
+pub(crate) struct DetectionMetrics {
     // Counts
     /// Number of correctly detected stars (within match radius of ground truth)
     pub true_positives: usize,
@@ -129,7 +129,7 @@ impl fmt::Display for DetectionMetrics {
 /// * `ground_truth` - True star positions and properties
 /// * `detected` - Detected stars
 /// * `match_radius` - Maximum distance for matching (typically 2 × FWHM)
-pub fn compute_detection_metrics(
+pub(crate) fn compute_detection_metrics(
     ground_truth: &[ObservedSource],
     detected: &[Star],
     match_radius: f32,
@@ -252,14 +252,14 @@ pub fn compute_detection_metrics(
 }
 
 /// Save metrics to a text file.
-pub fn save_metrics(metrics: &DetectionMetrics, path: &Path) {
+pub(crate) fn save_metrics(metrics: &DetectionMetrics, path: &Path) {
     let mut file = File::create(path).expect("Failed to create metrics file");
     write!(file, "{}", metrics).expect("Failed to write metrics");
 }
 
 /// Pass/fail criteria for visual tests.
 #[derive(Debug, Clone)]
-pub struct PassCriteria {
+pub(crate) struct PassCriteria {
     /// Minimum detection rate
     pub min_detection_rate: f32,
     /// Maximum false positive rate
@@ -282,7 +282,7 @@ impl Default for PassCriteria {
 }
 
 /// Standard test criteria.
-pub fn standard_criteria() -> PassCriteria {
+pub(crate) fn standard_criteria() -> PassCriteria {
     PassCriteria {
         min_detection_rate: 0.98,
         max_false_positive_rate: 0.02,
@@ -292,7 +292,7 @@ pub fn standard_criteria() -> PassCriteria {
 }
 
 /// Crowded field criteria (relaxed).
-pub fn crowded_criteria() -> PassCriteria {
+pub(crate) fn crowded_criteria() -> PassCriteria {
     PassCriteria {
         min_detection_rate: 0.90,
         max_false_positive_rate: 0.05,
@@ -302,7 +302,7 @@ pub fn crowded_criteria() -> PassCriteria {
 }
 
 /// Faint star criteria (relaxed).
-pub fn faint_star_criteria() -> PassCriteria {
+pub(crate) fn faint_star_criteria() -> PassCriteria {
     PassCriteria {
         min_detection_rate: 0.80,
         max_false_positive_rate: 0.10,
@@ -312,7 +312,10 @@ pub fn faint_star_criteria() -> PassCriteria {
 }
 
 /// Check if metrics pass the given criteria.
-pub fn check_pass(metrics: &DetectionMetrics, criteria: &PassCriteria) -> Result<(), Vec<String>> {
+pub(crate) fn check_pass(
+    metrics: &DetectionMetrics,
+    criteria: &PassCriteria,
+) -> Result<(), Vec<String>> {
     let mut failures = Vec::new();
 
     if metrics.detection_rate < criteria.min_detection_rate {

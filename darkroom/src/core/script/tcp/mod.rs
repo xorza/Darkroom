@@ -64,7 +64,7 @@ const MAX_CONNECTIONS: usize = 4;
 /// callers pass [`TcpTimeouts::default`] to [`TcpTransport::bind`];
 /// tests may pass short values to drive timeout paths in real time.
 #[derive(Debug, Clone, Copy)]
-pub struct TcpTimeouts {
+pub(crate) struct TcpTimeouts {
     /// Window for the initial auth token frame (16 bytes). Keep short —
     /// a legitimate client has the token ready on connect.
     pub auth: Duration,
@@ -96,7 +96,7 @@ impl Default for TcpTimeouts {
 /// caller can inspect [`local_addr`] (useful when `port = 0`) before the
 /// accept loop starts.
 #[derive(Debug)]
-pub struct TcpTransport {
+pub(crate) struct TcpTransport {
     listener: StdTcpListener,
     token: Option<Uuid>,
     timeouts: TcpTimeouts,
@@ -107,7 +107,7 @@ impl TcpTransport {
     /// port — read it back with [`Self::local_addr`]. Production
     /// callers pass `TcpTimeouts::default()`; tests may pass short
     /// values to exercise timeout paths in real time.
-    pub fn bind(
+    pub(crate) fn bind(
         addr: SocketAddr,
         token: Option<Uuid>,
         timeouts: TcpTimeouts,
@@ -122,7 +122,7 @@ impl TcpTransport {
         })
     }
 
-    pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
+    pub(crate) fn local_addr(&self) -> std::io::Result<SocketAddr> {
         self.listener.local_addr()
     }
 }
@@ -131,7 +131,7 @@ impl TcpTransport {
 /// discovery file. Built from CLI flags in `main.rs`; wrapped by
 /// [`crate::core::script::ScriptConfig`] and consumed by [`start`].
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TcpScriptConfig {
+pub(crate) struct TcpScriptConfig {
     /// Socket address to bind. Port `0` lets the OS pick a free port;
     /// a non-loopback IP widens exposure beyond the local machine and
     /// will emit a warning at startup.
@@ -150,7 +150,7 @@ pub struct TcpScriptConfig {
 /// decides how to surface it (stdout banner for CLI, status bar for GUI,
 /// log line for tests).
 #[derive(Debug, Clone)]
-pub struct TcpStartReport {
+pub(crate) struct TcpStartReport {
     pub addr: SocketAddr,
     pub token: Option<Uuid>,
     /// `None` = no discovery file requested.
@@ -162,7 +162,7 @@ pub struct TcpStartReport {
 /// Boot a TCP transport from config: binds the socket and (if requested)
 /// writes the discovery file. Returns the transport together with a
 /// pure report — no stdout I/O happens inside, so this is unit-testable.
-pub fn start(cfg: &TcpScriptConfig) -> std::io::Result<(TcpTransport, TcpStartReport)> {
+pub(crate) fn start(cfg: &TcpScriptConfig) -> std::io::Result<(TcpTransport, TcpStartReport)> {
     let transport = TcpTransport::bind(cfg.bind, cfg.token, TcpTimeouts::default())?;
     let addr = transport.local_addr()?;
 
@@ -191,7 +191,7 @@ pub fn start(cfg: &TcpScriptConfig) -> std::io::Result<(TcpTransport, TcpStartRe
 
 /// Pure rendering of the discovery-file body. Exposed so tests can
 /// byte-diff the output without touching the filesystem.
-pub fn render_token_file(port: u16, token: Option<Uuid>) -> String {
+pub(crate) fn render_token_file(port: u16, token: Option<Uuid>) -> String {
     let payload = serde_json::json!({
         "port": port,
         "token": token.map(|t| t.to_string()),
@@ -224,7 +224,7 @@ impl TcpTransport {
     /// Spawn the accept loop on the ambient runtime; the returned handle
     /// owns the task (dropping it cancels + aborts the listener). Pairs
     /// requests onto `tx` and stops cooperatively on `cancel`.
-    pub fn start(
+    pub(crate) fn start(
         self,
         tx: mpsc::Sender<ScriptRequest>,
         cancel: CancellationToken,

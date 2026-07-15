@@ -7,7 +7,7 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
-pub enum ConversionFormat {
+pub(crate) enum ConversionFormat {
     /// Keep the image's current color format (no conversion).
     AsIs,
     LU8,
@@ -26,7 +26,7 @@ impl ConversionFormat {
 
     /// The target color format, or `None` for [`ConversionFormat::AsIs`] (pass
     /// the image through unchanged).
-    pub fn to_color_format(self) -> Option<ColorFormat> {
+    pub(crate) fn to_color_format(self) -> Option<ColorFormat> {
         Some(match self {
             ConversionFormat::AsIs => return None,
             ConversionFormat::LU8 => ColorFormat::L_U8,
@@ -43,7 +43,7 @@ impl ConversionFormat {
 
     /// The dropdown label: the color-format string, or "As Is" for the
     /// pass-through variant.
-    pub fn label(self) -> String {
+    pub(crate) fn label(self) -> String {
         match self.to_color_format() {
             Some(fmt) => fmt.to_string(),
             None => Self::AS_IS_LABEL.to_string(),
@@ -73,10 +73,10 @@ impl FromStr for ConversionFormat {
     }
 }
 
-pub static CONVERSION_FORMAT_TYPE_ID: LazyLock<TypeId> =
+pub(crate) static CONVERSION_FORMAT_TYPE_ID: LazyLock<TypeId> =
     LazyLock::new(|| "6d9db73e-5c92-4332-af0d-b2eb7c95acd0".into());
 
-pub static CONVERSION_FORMAT_DATATYPE: LazyLock<DataType> =
+pub(crate) static CONVERSION_FORMAT_DATATYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::Enum(*CONVERSION_FORMAT_TYPE_ID));
 
 #[cfg(test)]

@@ -4,10 +4,10 @@
 
 use std::path::PathBuf;
 
-pub mod cache;
-pub mod library;
-pub mod persistence;
-pub mod preferences;
+pub(crate) mod cache;
+pub(crate) mod library;
+pub(crate) mod persistence;
+pub(crate) mod preferences;
 
 /// `name` resolved relative to the process working directory — the shared
 /// path resolution behind the preferences and library files, which both

@@ -2,7 +2,7 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 
 /// Sensor type detected from libraw metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SensorType {
+pub(crate) enum SensorType {
     /// Monochrome sensor (no CFA)
     Monochrome,
     /// Standard 2x2 Bayer pattern (RGGB, BGGR, GRBG, GBRG)
@@ -20,7 +20,7 @@ pub enum SensorType {
 /// - `SensorType::Bayer(pattern)` for known 2x2 Bayer patterns
 /// - `SensorType::XTrans` for Fujifilm X-Trans sensors (filters=9)
 /// - `SensorType::Unknown` for other exotic sensors
-pub fn detect_sensor_type(filters: u32, colors: i32) -> SensorType {
+pub(crate) fn detect_sensor_type(filters: u32, colors: i32) -> SensorType {
     // Monochrome: no CFA pattern or single color channel
     if filters == 0 || colors == 1 {
         return SensorType::Monochrome;
@@ -50,7 +50,7 @@ pub fn detect_sensor_type(filters: u32, colors: i32) -> SensorType {
 ///
 /// Returns None if the pattern doesn't match a known Bayer CFA pattern
 /// (e.g., for X-Trans sensors or monochrome cameras).
-pub fn cfa_pattern_from_filters(filters: u32) -> Option<CfaPattern> {
+pub(crate) fn cfa_pattern_from_filters(filters: u32) -> Option<CfaPattern> {
     // Extract color index for each position in the 2x2 pattern
     let color_at =
         |row: u32, col: u32| -> u32 { (filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3 };

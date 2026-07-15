@@ -2,4 +2,4 @@
 //!
 //! Provides image output, visualization, and comparison tools.
 
-pub mod output;
+pub(crate) mod output;

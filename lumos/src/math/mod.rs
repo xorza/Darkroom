@@ -8,24 +8,24 @@
 pub(crate) mod dmat3;
 pub(crate) mod rect;
 
-pub mod statistics;
-pub mod sum;
+pub(crate) mod statistics;
+pub(crate) mod sum;
 
 /// FWHM to Gaussian sigma conversion factor.
 ///
 /// For a Gaussian distribution, FWHM = 2√(2ln2) × σ ≈ 2.3548 × σ.
 /// This is the exact value: 2 * sqrt(2 * ln(2)).
-pub const FWHM_TO_SIGMA: f32 = 2.354_82;
+pub(crate) const FWHM_TO_SIGMA: f32 = 2.354_82;
 
 /// Convert FWHM to Gaussian sigma.
 #[inline]
-pub fn fwhm_to_sigma(fwhm: f32) -> f32 {
+pub(crate) fn fwhm_to_sigma(fwhm: f32) -> f32 {
     fwhm / FWHM_TO_SIGMA
 }
 
 /// Convert Gaussian sigma to FWHM.
 #[inline]
-pub fn sigma_to_fwhm(sigma: f32) -> f32 {
+pub(crate) fn sigma_to_fwhm(sigma: f32) -> f32 {
     sigma * FWHM_TO_SIGMA
 }
 

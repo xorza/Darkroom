@@ -19,7 +19,7 @@ pub(crate) struct BackgroundEstimate {
 
 impl BackgroundEstimate {
     /// Release buffers back to the pool.
-    pub fn release_to_pool(self, pool: &mut BufferPool) {
+    pub(crate) fn release_to_pool(self, pool: &mut BufferPool) {
         pool.release_f32(self.background);
         pool.release_f32(self.noise);
     }

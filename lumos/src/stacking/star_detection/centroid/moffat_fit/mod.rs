@@ -159,7 +159,7 @@ pub(crate) struct MoffatFixedBeta {
 }
 
 impl MoffatFixedBeta {
-    pub fn new(stamp_radius: f64, beta: f64) -> Self {
+    pub(crate) fn new(stamp_radius: f64, beta: f64) -> Self {
         Self {
             stamp_radius,
             beta,

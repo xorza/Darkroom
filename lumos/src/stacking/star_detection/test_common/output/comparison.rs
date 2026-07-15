@@ -10,14 +10,14 @@ use imaginarium::Image;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
 /// Colors for comparison images.
-pub mod colors {
+pub(crate) mod colors {
     use imaginarium::Color;
 
-    pub const GREEN: Color = Color::rgb(0.0, 1.0, 0.0); // Correctly detected
-    pub const RED: Color = Color::rgb(1.0, 0.2, 0.2); // Missed (false negative)
-    pub const YELLOW: Color = Color::rgb(1.0, 1.0, 0.0); // False positive
-    pub const CYAN: Color = Color::rgb(0.0, 1.0, 1.0); // Detected centroid
-    pub const MAGENTA: Color = Color::rgb(1.0, 0.0, 1.0); // True centroid
+    pub(crate) const GREEN: Color = Color::rgb(0.0, 1.0, 0.0); // Correctly detected
+    pub(crate) const RED: Color = Color::rgb(1.0, 0.2, 0.2); // Missed (false negative)
+    pub(crate) const YELLOW: Color = Color::rgb(1.0, 1.0, 0.0); // False positive
+    pub(crate) const CYAN: Color = Color::rgb(0.0, 1.0, 1.0); // Detected centroid
+    pub(crate) const MAGENTA: Color = Color::rgb(1.0, 0.0, 1.0); // True centroid
 }
 
 /// Create a comparison image showing ground truth and detected stars.
@@ -36,7 +36,7 @@ pub mod colors {
 /// - Red circles: missed stars
 /// - Yellow circles: false positives
 /// - Cyan crosses: detected centroids
-pub fn create_comparison_image(
+pub(crate) fn create_comparison_image(
     pixels: &[f32],
     width: usize,
     height: usize,
@@ -91,7 +91,7 @@ pub fn create_comparison_image(
 
 /// Result of matching detected stars to ground truth.
 #[derive(Debug, Clone)]
-pub struct MatchResult {
+pub(crate) struct MatchResult {
     /// Indices of matched ground truth stars
     pub matched_truth: Vec<usize>,
     /// Indices of matched detected stars
@@ -101,7 +101,7 @@ pub struct MatchResult {
 }
 
 /// Match detected stars to ground truth using nearest neighbor.
-pub fn match_stars(
+pub(crate) fn match_stars(
     ground_truth: &[ObservedSource],
     detected: &[Star],
     max_distance: f32,

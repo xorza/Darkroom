@@ -235,14 +235,14 @@ pub(crate) mod light {
 /// is structural (a hover variant can't exist without its rest), and
 /// state → colour goes through one `pick`.
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct HoverColor {
+pub(crate) struct HoverColor {
     pub rest: Color,
     pub hover: Color,
 }
 
 impl HoverColor {
     #[inline]
-    pub fn pick(&self, hovered: bool) -> Color {
+    pub(crate) fn pick(&self, hovered: bool) -> Color {
         if hovered { self.hover } else { self.rest }
     }
 }
@@ -254,7 +254,7 @@ impl HoverColor {
 /// keyed by `type_id`, so distinct custom types land on stable,
 /// distinct colors; `image` is the fixed hue the lens image type owns.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct TypeColors {
+pub(crate) struct TypeColors {
     pub boolean: Color,
     pub int: Color,
     pub float: Color,
@@ -298,7 +298,7 @@ macro_rules! palette_struct {
 /// without callers having to spell it out.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum ThemePreset {
+pub(crate) enum ThemePreset {
     #[default]
     Dark,
     Light,
@@ -308,7 +308,7 @@ impl ThemePreset {
     /// The OS's current light/dark preference, falling back to
     /// [`Dark`](Self::Dark) when the platform reports no preference or
     /// detection fails. Backs [`ThemeChoice::System`].
-    pub fn from_system() -> Self {
+    pub(crate) fn from_system() -> Self {
         match dark_light::detect() {
             Ok(dark_light::Mode::Light) => Self::Light,
             Ok(dark_light::Mode::Dark | dark_light::Mode::Unspecified) | Err(_) => Self::Dark,
@@ -320,7 +320,7 @@ impl ThemeChoice {
     /// Resolve to the concrete built-in preset to load. `System` queries
     /// the OS (falling back to dark); `Dark` / `Light` map straight
     /// through.
-    pub fn resolve(self) -> ThemePreset {
+    pub(crate) fn resolve(self) -> ThemePreset {
         match self {
             Self::System => ThemePreset::from_system(),
             Self::Dark => ThemePreset::Dark,
@@ -347,7 +347,7 @@ impl ThemeChoice {
 /// layout + colors) round-trips through Rhai for the Theme → Load /
 /// Export menu.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Theme {
+pub(crate) struct Theme {
     // Scalar fields (`preset` + the layout `f32`s) come first; the tables
     // (`colors`, the per-widget sub-themes, `aperture_theme`) follow. TOML
     // serialization requires every scalar value to precede any table at the
@@ -435,7 +435,7 @@ pub struct Theme {
 /// `Button`/`ComboBox` siblings (path pick, enum, presets) borrow via
 /// `drag_value.chip`, and the fixed field width.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct StaticValueEditorTheme {
+pub(crate) struct StaticValueEditorTheme {
     pub drag_value: DragValueTheme,
     /// Minimum logical-px width of the value column — editors fill it down to
     /// at least this.
@@ -497,7 +497,7 @@ impl StaticValueEditorTheme {
 /// border, transparent fill) so the field's `Hug` height equals its
 /// plain `Text` twin and the row doesn't reshape on a swap.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct InlineRenameTheme {
+pub(crate) struct InlineRenameTheme {
     pub text_edit: TextEditTheme,
 }
 
@@ -615,7 +615,7 @@ palette_struct! {
     /// `[colors]` table. Deliberately not `Copy` (25 colours): moved,
     /// not silently bit-copied.
     #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-    pub struct PaletteColors;
+    pub(crate) struct PaletteColors;
     canvas_bg: Color => CANVAS_BG,
     /// The selection accent: the rubber-band rectangle (translucent fill +
     /// near-opaque 1px border, both derived from this) *and* the selected-
@@ -689,18 +689,18 @@ impl PaletteColors {
     /// Rubber-band interior wash — `selection_rect` at 12%, pairing
     /// with [`Self::selection_border`] (the derivation the
     /// `selection_rect` doc promises lives in one place).
-    pub fn selection_fill(&self) -> Color {
+    pub(crate) fn selection_fill(&self) -> Color {
         self.selection_rect.with_alpha(0.12)
     }
 
     /// Rubber-band outline — `selection_rect` near-opaque.
-    pub fn selection_border(&self) -> Color {
+    pub(crate) fn selection_border(&self) -> Color {
         self.selection_rect.with_alpha(0.85)
     }
 
     /// Soft hairline rule — `text_muted` at 18%, the peer of
     /// aperture's `Palette::border_soft`.
-    pub fn border_soft(&self) -> Color {
+    pub(crate) fn border_soft(&self) -> Color {
         self.text_muted.with_alpha(0.18)
     }
 }
@@ -708,7 +708,7 @@ impl PaletteColors {
 /// Result of [`Theme::card_border`]: the resolved outline color plus the
 /// width every selectable card draws it at.
 #[derive(Clone, Copy, Debug)]
-pub struct CardBorder {
+pub(crate) struct CardBorder {
     pub color: Color,
     pub width: f32,
 }
@@ -718,7 +718,7 @@ impl Theme {
     /// a method instead of a stored field so the two can't drift if
     /// someone bumps `port_size` and forgets the radius.
     #[inline]
-    pub fn port_radius(&self) -> f32 {
+    pub(crate) fn port_radius(&self) -> f32 {
         self.port_size * 0.5
     }
 
@@ -732,14 +732,14 @@ impl Theme {
     /// straddles the edge correctly — see [`Self::port_overhang`] for the
     /// common (plain-radius) case.
     #[inline]
-    pub fn port_overhang_for(&self, radius: f32) -> f32 {
+    pub(crate) fn port_overhang_for(&self, radius: f32) -> f32 {
         radius + self.port_col_pad_x + self.card_border_width()
     }
 
     /// [`Self::port_overhang_for`] at the plain port radius. Independent of
     /// `port_size` — bigger circles keep their center on the edge.
     #[inline]
-    pub fn port_overhang(&self) -> f32 {
+    pub(crate) fn port_overhang(&self) -> f32 {
         self.port_overhang_for(self.port_radius())
     }
 
@@ -751,7 +751,7 @@ impl Theme {
     /// on it: the stroke itself, [`Self::card_inner_radius`], and
     /// [`Self::port_overhang_for`].
     #[inline]
-    pub fn card_border_width(&self) -> f32 {
+    pub(crate) fn card_border_width(&self) -> f32 {
         self.node_border_width * 2.0
     }
 
@@ -765,7 +765,7 @@ impl Theme {
     /// stub state) special-cases that tier around this call instead of
     /// forcing it in here.
     #[inline]
-    pub fn card_border(&self, broken: bool, selected: bool) -> CardBorder {
+    pub(crate) fn card_border(&self, broken: bool, selected: bool) -> CardBorder {
         let color = if broken {
             self.colors.connection_broken
         } else if selected {
@@ -785,7 +785,7 @@ impl Theme {
     /// `node_corner_radius`, else the strip's corner leaves a wedge of the
     /// card's plain fill showing between it and the (selection-lit) stroke.
     #[inline]
-    pub fn card_inner_radius(&self) -> f32 {
+    pub(crate) fn card_inner_radius(&self) -> f32 {
         (self.node_corner_radius - self.card_border_width()).max(0.0)
     }
 
@@ -794,7 +794,7 @@ impl Theme {
     /// same kind of surface. Only the blur scales with how high a surface
     /// sits; color and offset are fixed.
     #[inline]
-    pub fn elevation_shadow(&self, blur: f32) -> Shadow {
+    pub(crate) fn elevation_shadow(&self, blur: f32) -> Shadow {
         Shadow::drop(
             self.colors.node_ambient_shadow,
             glam::Vec2::new(0.0, 3.0),
@@ -804,7 +804,7 @@ impl Theme {
 
     /// Assemble the full theme for a built-in preset. One place so
     /// startup and the Theme menu share the preset → palette mapping.
-    pub fn from_preset(preset: ThemePreset) -> Self {
+    pub(crate) fn from_preset(preset: ThemePreset) -> Self {
         match preset {
             ThemePreset::Dark => Self::dark(),
             ThemePreset::Light => Self::light(),
@@ -812,7 +812,7 @@ impl Theme {
     }
 
     /// Ayu Mirage High Contrast palette — the built-in dark look.
-    pub fn dark() -> Self {
+    pub(crate) fn dark() -> Self {
         Self::build(
             ThemePreset::Dark,
             PaletteColors::DARK,
@@ -823,7 +823,7 @@ impl Theme {
 
     /// Ayu Light palette — the built-in light look (Zed's "Ayu Light"
     /// variant ported into darkroom's structure).
-    pub fn light() -> Self {
+    pub(crate) fn light() -> Self {
         Self::build(
             ThemePreset::Light,
             PaletteColors::LIGHT,

@@ -33,7 +33,7 @@ mod bench;
 /// candidates if the component contains multiple peaks.
 ///
 /// Uses `ArrayVec` to avoid heap allocation.
-pub fn deblend_local_maxima(
+pub(crate) fn deblend_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
@@ -75,7 +75,7 @@ pub fn deblend_local_maxima(
 /// A pixel is a local maximum if it's greater than all 8 neighbors.
 /// Only returns peaks that are sufficiently separated and prominent.
 /// Returns at most `MAX_PEAKS` peaks to avoid heap allocation.
-pub fn find_local_maxima(
+pub(crate) fn find_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,

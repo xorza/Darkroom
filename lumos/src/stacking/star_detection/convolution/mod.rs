@@ -27,7 +27,7 @@ use crate::math::fwhm_to_sigma;
 /// Scratch buffers for [`matched_filter`]. All three must have the same
 /// dimensions as the input image.
 #[derive(Debug)]
-pub struct MatchedFilterBuffers<'a> {
+pub(crate) struct MatchedFilterBuffers<'a> {
     /// Convolved output (the result).
     pub output: &'a mut Buffer2<f32>,
     /// Scratch space for background subtraction.
@@ -56,7 +56,7 @@ pub struct MatchedFilterBuffers<'a> {
 /// * `axis_ratio` - PSF ellipticity (1.0 = circular)
 /// * `angle` - PSF rotation angle in radians
 /// * `buffers` - Pre-allocated scratch buffers (same dimensions as input)
-pub fn matched_filter(
+pub(crate) fn matched_filter(
     pixels: &Buffer2<f32>,
     background: &Buffer2<f32>,
     fwhm: f32,

@@ -27,11 +27,11 @@ fn abs_deviation_inplace(values: &mut [f32], median: f32) {
 ///
 /// For a normal distribution, σ ≈ 1.4826 × MAD.
 /// This is the exact value: 1 / Φ⁻¹(3/4) where Φ⁻¹ is the inverse CDF.
-pub const MAD_TO_SIGMA: f32 = 1.4826022;
+pub(crate) const MAD_TO_SIGMA: f32 = 1.4826022;
 
 /// Convert MAD to standard deviation (assuming normal distribution).
 #[inline]
-pub fn mad_to_sigma(mad: f32) -> f32 {
+pub(crate) fn mad_to_sigma(mad: f32) -> f32 {
     mad * MAD_TO_SIGMA
 }
 
@@ -39,7 +39,7 @@ pub fn mad_to_sigma(mad: f32) -> f32 {
 ///
 /// Mutates the input buffer (partial sort via quickselect).
 #[inline]
-pub fn median_f32_mut(data: &mut [f32]) -> f32 {
+pub(crate) fn median_f32_mut(data: &mut [f32]) -> f32 {
     debug_assert!(!data.is_empty());
 
     let len = data.len();
@@ -92,7 +92,7 @@ pub(crate) fn mad_f32_fast(values: &[f32], median: f32, scratch: &mut Vec<f32>) 
 ///
 /// MAD = median(|x_i - median(x)|)
 #[inline]
-pub fn mad_f32_with_scratch(values: &[f32], median: f32, scratch: &mut Vec<f32>) -> f32 {
+pub(crate) fn mad_f32_with_scratch(values: &[f32], median: f32, scratch: &mut Vec<f32>) -> f32 {
     if values.is_empty() {
         return 0.0;
     }
@@ -105,7 +105,7 @@ pub fn mad_f32_with_scratch(values: &[f32], median: f32, scratch: &mut Vec<f32>)
 ///
 /// More efficient than computing separately since median is needed for MAD.
 /// Mutates the input buffer.
-pub fn median_and_mad_f32_mut(data: &mut [f32]) -> (f32, f32) {
+pub(crate) fn median_and_mad_f32_mut(data: &mut [f32]) -> (f32, f32) {
     debug_assert!(!data.is_empty());
 
     let median = median_f32_mut(data);
@@ -123,13 +123,13 @@ pub fn median_and_mad_f32_mut(data: &mut [f32]) -> (f32, f32) {
 /// collapse any MAD-scaled rejection threshold to zero. Flooring at a fraction of the
 /// center keeps a usable spread estimate. Callers pass the median as `center`.
 #[inline]
-pub fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f32 {
+pub(crate) fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f32 {
     mad.max(center * floor_fraction)
 }
 
 /// Statistics of the sigma-clip survivors, from [`sigma_clipped_median_mad`].
 #[derive(Debug, Clone, Copy)]
-pub struct ClippedStats {
+pub(crate) struct ClippedStats {
     pub median: f32,
     /// MAD-based sigma of the survivors.
     pub sigma: f32,
@@ -234,7 +234,7 @@ fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> (f32, f32)
 ///
 /// # Returns
 /// [`ClippedStats`] (median, MAD-sigma, mean) of the clip survivors.
-pub fn sigma_clipped_median_mad(
+pub(crate) fn sigma_clipped_median_mad(
     values: &mut [f32],
     deviations: &mut Vec<f32>,
     kappa: f32,
@@ -285,7 +285,7 @@ pub fn sigma_clipped_median_mad(
 ///
 /// # Returns
 /// [`ClippedStats`] (median, MAD-sigma, mean) of the clip survivors.
-pub fn sigma_clipped_median_mad_arrayvec<const N: usize>(
+pub(crate) fn sigma_clipped_median_mad_arrayvec<const N: usize>(
     values: &mut [f32],
     deviations: &mut arrayvec::ArrayVec<f32, N>,
     kappa: f32,

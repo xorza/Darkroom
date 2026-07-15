@@ -17,7 +17,8 @@ use scenarium::{CustomValue, DataType, RamUsage, TypeId};
 pub static IMAGE_TYPE_ID: LazyLock<TypeId> =
     LazyLock::new(|| "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into());
 
-pub static IMAGE_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| DataType::Custom(*IMAGE_TYPE_ID));
+pub(crate) static IMAGE_DATA_TYPE: LazyLock<DataType> =
+    LazyLock::new(|| DataType::Custom(*IMAGE_TYPE_ID));
 
 /// Wrapper around `imaginarium::ImageBuffer` that implements `CustomValue`.
 pub struct Image {

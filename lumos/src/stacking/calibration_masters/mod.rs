@@ -1,7 +1,7 @@
 //! Calibration master frame creation and management.
 
 pub(crate) mod cosmic_ray;
-pub mod defect_map;
+pub(crate) mod defect_map;
 
 #[cfg(test)]
 mod bench;

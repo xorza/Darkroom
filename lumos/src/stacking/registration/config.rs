@@ -9,7 +9,7 @@ use crate::stacking::registration::triangle::TriangleConfig;
 
 /// Default soft-clamping threshold for Lanczos deringing (PixInsight default).
 /// Lower = more aggressive. Range [0.0, 1.0]. Negative disables deringing.
-pub const DEFAULT_DERINGING_THRESHOLD: f32 = 0.3;
+pub(crate) const DEFAULT_DERINGING_THRESHOLD: f32 = 0.3;
 
 /// Interpolation method for image resampling.
 ///

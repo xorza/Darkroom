@@ -8,10 +8,10 @@
 //!
 //! All fitting and accumulation operations use f64 for numerical stability.
 
-pub mod gaussian_fit;
+pub(crate) mod gaussian_fit;
 mod linear_solver;
 mod lm_optimizer;
-pub mod moffat_fit;
+pub(crate) mod moffat_fit;
 
 #[cfg(test)]
 mod bench;
@@ -339,7 +339,7 @@ fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -
 /// - `WeightedMoments`: Iterative weighted centroid (~0.05 pixel accuracy, fast)
 /// - `GaussianFit`: 2D Gaussian fitting (~0.01 pixel accuracy, slower)
 /// - `MoffatFit`: 2D Moffat fitting (~0.01 pixel accuracy, best for atmospheric seeing)
-pub fn measure_star(
+pub(crate) fn measure_star(
     pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
     region: &Region,

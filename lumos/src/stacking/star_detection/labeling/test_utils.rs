@@ -7,12 +7,12 @@ use imaginarium::Buffer2;
 use crate::stacking::star_detection::labeling::LabelMap;
 
 /// Create a label map from pre-computed labels (for testing).
-pub fn label_map_from_raw(labels: Buffer2<u32>, num_labels: usize) -> LabelMap {
+pub(crate) fn label_map_from_raw(labels: Buffer2<u32>, num_labels: usize) -> LabelMap {
     LabelMap { labels, num_labels }
 }
 
 /// Create a label map from a mask with specified connectivity (for testing).
-pub fn label_map_from_mask_with_connectivity(
+pub(crate) fn label_map_from_mask_with_connectivity(
     mask: &BitBuffer2,
     connectivity: Connectivity,
 ) -> LabelMap {
