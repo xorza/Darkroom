@@ -814,12 +814,23 @@ impl LightCache {
         let dimensions = frames[0].image.dimensions();
         let metadata = frames[0].image.metadata().clone();
 
-        for (index, frame) in frames.iter().enumerate().skip(1) {
-            if frame.image.dimensions() != dimensions {
+        for (index, frame) in frames.iter().enumerate() {
+            if index > 0 && frame.image.dimensions() != dimensions {
                 return Err(Error::DimensionMismatch {
                     index,
                     expected: dimensions,
                     actual: frame.image.dimensions(),
+                });
+            }
+            if let Some(coverage) = &frame.coverage
+                && (coverage.width(), coverage.height()) != (dimensions.size.x, dimensions.size.y)
+            {
+                return Err(Error::CoverageDimensionMismatch {
+                    index,
+                    expected_width: dimensions.size.x,
+                    expected_height: dimensions.size.y,
+                    actual_width: coverage.width(),
+                    actual_height: coverage.height(),
                 });
             }
         }
@@ -827,26 +838,16 @@ impl LightCache {
             .par_iter()
             .map(|frame| compute_frame_stats(&frame.image))
             .collect();
-        let expected = dimensions.size.x * dimensions.size.y;
         let stored = frames
             .into_iter()
-            .map(|frame| {
-                if let Some(coverage) = &frame.coverage {
-                    assert_eq!(
-                        coverage.len(),
-                        expected,
-                        "coverage map must match frame dimensions"
-                    );
-                }
-                WeightedFrame {
-                    channels: frame
-                        .image
-                        .into_planes()
-                        .into_iter()
-                        .map(Plane::Memory)
-                        .collect(),
-                    coverage: frame.coverage.map(Plane::Memory),
-                }
+            .map(|frame| WeightedFrame {
+                channels: frame
+                    .image
+                    .into_planes()
+                    .into_iter()
+                    .map(Plane::Memory)
+                    .collect(),
+                coverage: frame.coverage.map(Plane::Memory),
             })
             .collect();
 

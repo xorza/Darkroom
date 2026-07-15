@@ -4,6 +4,7 @@
 //! parameters: combination method, pixel rejection, normalization, and memory settings.
 
 use crate::stacking::combine::cache_config::CacheConfig;
+use crate::stacking::combine::error::StackConfigError;
 use crate::stacking::combine::rejection::Rejection;
 
 /// Method for combining pixel values across frames.
@@ -151,8 +152,6 @@ impl Default for StackConfig {
 }
 
 impl StackConfig {
-    // ========== Presets ==========
-
     /// Preset: sigma-clipped mean (most common for light frames).
     pub fn sigma_clipped(sigma: f32) -> Self {
         Self {
@@ -223,8 +222,6 @@ impl StackConfig {
         }
     }
 
-    // ========== Frame-Type Presets ==========
-
     /// Preset for bias frames: Winsorized σ=3.0, no normalization.
     pub fn bias() -> Self {
         Self {
@@ -269,64 +266,109 @@ impl StackConfig {
         }
     }
 
-    // ========== Validation ==========
-
     /// Validate configuration parameters.
-    ///
-    /// # Panics
-    ///
-    /// Panics if parameters are invalid (e.g., negative sigma, invalid percentiles).
-    pub fn validate(&self) {
-        // Config structs validate in their constructors, but validate() can be
-        // called on configs built via struct literal syntax, so re-check here.
+    pub fn validate(&self) -> Result<(), StackConfigError> {
         if let CombineMethod::Mean(rejection) = &self.method {
             match rejection {
                 Rejection::None => {}
                 Rejection::SigmaClip(c) => {
-                    assert!(c.sigma_low > 0.0, "Sigma low must be positive");
-                    assert!(c.sigma_high > 0.0, "Sigma high must be positive");
-                    assert!(c.max_iterations > 0, "Iterations must be at least 1");
+                    if !c.sigma_low.is_finite() || c.sigma_low <= 0.0 {
+                        return Err(StackConfigError::InvalidSigmaLow { value: c.sigma_low });
+                    }
+                    if !c.sigma_high.is_finite() || c.sigma_high <= 0.0 {
+                        return Err(StackConfigError::InvalidSigmaHigh {
+                            value: c.sigma_high,
+                        });
+                    }
+                    if c.max_iterations == 0 {
+                        return Err(StackConfigError::ZeroMaxIterations);
+                    }
                 }
                 Rejection::Winsorized(c) => {
-                    assert!(c.sigma_low > 0.0, "Sigma low must be positive");
-                    assert!(c.sigma_high > 0.0, "Sigma high must be positive");
+                    if !c.sigma_low.is_finite() || c.sigma_low <= 0.0 {
+                        return Err(StackConfigError::InvalidSigmaLow { value: c.sigma_low });
+                    }
+                    if !c.sigma_high.is_finite() || c.sigma_high <= 0.0 {
+                        return Err(StackConfigError::InvalidSigmaHigh {
+                            value: c.sigma_high,
+                        });
+                    }
                 }
                 Rejection::LinearFit(c) => {
-                    assert!(c.sigma_low > 0.0, "Sigma low must be positive");
-                    assert!(c.sigma_high > 0.0, "Sigma high must be positive");
-                    assert!(c.max_iterations > 0, "Iterations must be at least 1");
+                    if !c.sigma_low.is_finite() || c.sigma_low <= 0.0 {
+                        return Err(StackConfigError::InvalidSigmaLow { value: c.sigma_low });
+                    }
+                    if !c.sigma_high.is_finite() || c.sigma_high <= 0.0 {
+                        return Err(StackConfigError::InvalidSigmaHigh {
+                            value: c.sigma_high,
+                        });
+                    }
+                    if c.max_iterations == 0 {
+                        return Err(StackConfigError::ZeroMaxIterations);
+                    }
                 }
                 Rejection::Percentile(c) => {
-                    assert!(
-                        (0.0..=50.0).contains(&c.low_percentile),
-                        "Low percentile must be 0-50"
-                    );
-                    assert!(
-                        (0.0..=50.0).contains(&c.high_percentile),
-                        "High percentile must be 0-50"
-                    );
-                    assert!(
-                        c.low_percentile + c.high_percentile < 100.0,
-                        "Total clipping must be < 100%"
-                    );
+                    if !c.low_percentile.is_finite() || !(0.0..=50.0).contains(&c.low_percentile) {
+                        return Err(StackConfigError::InvalidLowPercentile {
+                            value: c.low_percentile,
+                        });
+                    }
+                    if !c.high_percentile.is_finite() || !(0.0..=50.0).contains(&c.high_percentile)
+                    {
+                        return Err(StackConfigError::InvalidHighPercentile {
+                            value: c.high_percentile,
+                        });
+                    }
+                    let total = c.low_percentile + c.high_percentile;
+                    if total >= 100.0 {
+                        return Err(StackConfigError::InvalidTotalPercentile { total });
+                    }
                 }
                 Rejection::Gesd(c) => {
-                    assert!((0.0..1.0).contains(&c.alpha), "Alpha must be 0-1");
-                    assert!(c.low_relaxation >= 1.0, "Low relaxation must be >= 1.0");
+                    if !c.alpha.is_finite() || !(0.0..1.0).contains(&c.alpha) {
+                        return Err(StackConfigError::InvalidGesdAlpha { value: c.alpha });
+                    }
+                    if !c.low_relaxation.is_finite() || c.low_relaxation < 1.0 {
+                        return Err(StackConfigError::InvalidGesdLowRelaxation {
+                            value: c.low_relaxation,
+                        });
+                    }
                 }
             }
         }
 
-        if let Weighting::Manual(ref w) = self.weighting {
-            assert!(w.iter().all(|&v| v >= 0.0), "Weights must be non-negative");
+        if matches!(
+            self.small_n.fallback,
+            CombineMethod::Mean(rejection) if rejection != Rejection::None
+        ) {
+            return Err(StackConfigError::RejectingSmallNFallback);
         }
+
+        if let Weighting::Manual(weights) = &self.weighting {
+            if let Some((index, &value)) = weights
+                .iter()
+                .enumerate()
+                .find(|(_, value)| !value.is_finite() || **value < 0.0)
+            {
+                return Err(StackConfigError::InvalidManualWeight { index, value });
+            }
+            let sum: f32 = weights.iter().sum();
+            if !sum.is_finite() || sum <= 0.0 {
+                return Err(StackConfigError::InvalidManualWeightSum);
+            }
+        }
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stacking::combine::rejection::{PercentileClipConfig, SigmaClipConfig};
+    use crate::stacking::combine::rejection::{
+        GesdConfig, LinearFitClipConfig, PercentileClipConfig, SigmaClipConfig,
+        WinsorizedClipConfig,
+    };
 
     #[test]
     fn small_n_resolve_downgrades_below_min_frames() {
@@ -405,21 +447,117 @@ mod tests {
     #[test]
     fn test_validate_valid_config() {
         let config = StackConfig::sigma_clipped(2.5);
-        config.validate(); // Should not panic
+        assert_eq!(config.validate(), Ok(()));
     }
 
     #[test]
-    #[should_panic(expected = "Sigma low must be positive")]
-    fn test_validate_invalid_sigma() {
-        let config = StackConfig {
-            method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig {
-                sigma_low: -1.0,
-                sigma_high: -1.0,
-                max_iterations: 3,
-            })),
-            ..Default::default()
-        };
-        config.validate();
+    fn test_validate_invalid_config_returns_exact_errors() {
+        let cases = [
+            (
+                StackConfig::sigma_clipped(-1.0),
+                StackConfigError::InvalidSigmaLow { value: -1.0 },
+            ),
+            (
+                StackConfig {
+                    method: CombineMethod::Mean(Rejection::sigma_clip_asymmetric(
+                        2.0,
+                        f32::INFINITY,
+                    )),
+                    ..Default::default()
+                },
+                StackConfigError::InvalidSigmaHigh {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                StackConfig {
+                    method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig::new(2.0, 0))),
+                    ..Default::default()
+                },
+                StackConfigError::ZeroMaxIterations,
+            ),
+            (
+                StackConfig {
+                    method: CombineMethod::Mean(Rejection::Winsorized(WinsorizedClipConfig::new(
+                        0.0,
+                    ))),
+                    ..Default::default()
+                },
+                StackConfigError::InvalidSigmaLow { value: 0.0 },
+            ),
+            (
+                StackConfig {
+                    method: CombineMethod::Mean(Rejection::LinearFit(LinearFitClipConfig::new(
+                        2.0, 0.0, 3,
+                    ))),
+                    ..Default::default()
+                },
+                StackConfigError::InvalidSigmaHigh { value: 0.0 },
+            ),
+            (
+                StackConfig::percentile(60.0),
+                StackConfigError::InvalidLowPercentile { value: 60.0 },
+            ),
+            (
+                StackConfig {
+                    method: CombineMethod::Mean(Rejection::Percentile(PercentileClipConfig::new(
+                        10.0, 60.0,
+                    ))),
+                    ..Default::default()
+                },
+                StackConfigError::InvalidHighPercentile { value: 60.0 },
+            ),
+            (
+                StackConfig {
+                    method: CombineMethod::Mean(Rejection::Percentile(PercentileClipConfig::new(
+                        50.0, 50.0,
+                    ))),
+                    ..Default::default()
+                },
+                StackConfigError::InvalidTotalPercentile { total: 100.0 },
+            ),
+            (
+                StackConfig {
+                    method: CombineMethod::Mean(Rejection::Gesd(GesdConfig::new(1.0, None))),
+                    ..Default::default()
+                },
+                StackConfigError::InvalidGesdAlpha { value: 1.0 },
+            ),
+            (
+                StackConfig {
+                    method: CombineMethod::Mean(Rejection::Gesd(
+                        GesdConfig::new(0.05, None).with_low_relaxation(0.5),
+                    )),
+                    ..Default::default()
+                },
+                StackConfigError::InvalidGesdLowRelaxation { value: 0.5 },
+            ),
+            (
+                StackConfig::weighted(vec![1.0, -0.5]),
+                StackConfigError::InvalidManualWeight {
+                    index: 1,
+                    value: -0.5,
+                },
+            ),
+            (
+                StackConfig::weighted(vec![0.0, 0.0]),
+                StackConfigError::InvalidManualWeightSum,
+            ),
+            (
+                StackConfig {
+                    small_n: SmallN {
+                        min_frames: 5,
+                        fallback: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
+                    },
+                    ..Default::default()
+                },
+                StackConfigError::RejectingSmallNFallback,
+            ),
+        ];
+
+        for (config, expected) in cases {
+            assert_eq!(config.validate(), Err(expected));
+        }
     }
 
     #[test]
@@ -465,18 +603,5 @@ mod tests {
         ));
         assert_eq!(config.weighting, Weighting::Noise);
         assert_eq!(config.normalization, Normalization::Global);
-    }
-
-    #[test]
-    #[should_panic(expected = "Low percentile must be 0-50")]
-    fn test_validate_invalid_percentile() {
-        let config = StackConfig {
-            method: CombineMethod::Mean(Rejection::Percentile(PercentileClipConfig {
-                low_percentile: 60.0,
-                high_percentile: 10.0,
-            })),
-            ..Default::default()
-        };
-        config.validate();
     }
 }

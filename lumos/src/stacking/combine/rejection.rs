@@ -40,8 +40,6 @@ impl Default for SigmaClipConfig {
 impl SigmaClipConfig {
     /// Create symmetric sigma clipping (same threshold for low and high).
     pub fn new(sigma: f32, max_iterations: u32) -> Self {
-        assert!(sigma > 0.0, "Sigma must be positive");
-        assert!(max_iterations > 0, "Max iterations must be at least 1");
         Self {
             sigma_low: sigma,
             sigma_high: sigma,
@@ -51,9 +49,6 @@ impl SigmaClipConfig {
 
     /// Create asymmetric sigma clipping with separate low/high thresholds.
     pub fn new_asymmetric(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
-        assert!(sigma_low > 0.0, "Sigma low must be positive");
-        assert!(sigma_high > 0.0, "Sigma high must be positive");
-        assert!(max_iterations > 0, "Max iterations must be at least 1");
         Self {
             sigma_low,
             sigma_high,
@@ -246,7 +241,6 @@ impl Default for WinsorizedClipConfig {
 
 impl WinsorizedClipConfig {
     pub fn new(sigma: f32) -> Self {
-        assert!(sigma > 0.0, "Sigma must be positive");
         Self {
             sigma_low: sigma,
             sigma_high: sigma,
@@ -254,8 +248,6 @@ impl WinsorizedClipConfig {
     }
 
     pub fn new_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
-        assert!(sigma_low > 0.0, "Sigma low must be positive");
-        assert!(sigma_high > 0.0, "Sigma high must be positive");
         Self {
             sigma_low,
             sigma_high,
@@ -394,9 +386,6 @@ impl Default for LinearFitClipConfig {
 
 impl LinearFitClipConfig {
     pub fn new(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
-        assert!(sigma_low > 0.0, "Sigma low must be positive");
-        assert!(sigma_high > 0.0, "Sigma high must be positive");
-        assert!(max_iterations > 0, "Max iterations must be at least 1");
         Self {
             sigma_low,
             sigma_high,
@@ -544,18 +533,6 @@ impl Default for PercentileClipConfig {
 
 impl PercentileClipConfig {
     pub fn new(low_percentile: f32, high_percentile: f32) -> Self {
-        assert!(
-            (0.0..=50.0).contains(&low_percentile),
-            "Low percentile must be between 0 and 50"
-        );
-        assert!(
-            (0.0..=50.0).contains(&high_percentile),
-            "High percentile must be between 0 and 50"
-        );
-        assert!(
-            low_percentile + high_percentile < 100.0,
-            "Total clipping must be less than 100%"
-        );
         Self {
             low_percentile,
             high_percentile,
@@ -645,7 +622,6 @@ impl Default for GesdConfig {
 
 impl GesdConfig {
     pub fn new(alpha: f32, max_outliers: Option<usize>) -> Self {
-        assert!((0.0..1.0).contains(&alpha), "Alpha must be between 0 and 1");
         Self {
             alpha,
             max_outliers,
@@ -655,7 +631,6 @@ impl GesdConfig {
 
     /// Create GESD config with custom low relaxation factor.
     pub fn with_low_relaxation(mut self, low_relaxation: f32) -> Self {
-        assert!(low_relaxation >= 1.0, "Low relaxation must be >= 1.0");
         self.low_relaxation = low_relaxation;
         self
     }
@@ -1091,24 +1066,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Sigma must be positive")]
-    fn test_sigma_clip_config_zero_sigma() {
-        SigmaClipConfig::new(0.0, 3);
-    }
-
-    #[test]
-    #[should_panic(expected = "Sigma low must be positive")]
-    fn test_sigma_clip_config_zero_sigma_low() {
-        SigmaClipConfig::new_asymmetric(0.0, 3.0, 3);
-    }
-
-    #[test]
-    #[should_panic(expected = "Sigma high must be positive")]
-    fn test_sigma_clip_config_zero_sigma_high() {
-        SigmaClipConfig::new_asymmetric(3.0, 0.0, 3);
-    }
-
-    #[test]
     fn test_winsorized_config_default() {
         let config = WinsorizedClipConfig::default();
         assert!((config.sigma_low - 2.5).abs() < f32::EPSILON);
@@ -1127,12 +1084,6 @@ mod tests {
         let config = PercentileClipConfig::default();
         assert!((config.low_percentile - 10.0).abs() < f32::EPSILON);
         assert!((config.high_percentile - 10.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    #[should_panic(expected = "Low percentile must be between 0 and 50")]
-    fn test_percentile_config_invalid_low() {
-        PercentileClipConfig::new(60.0, 10.0);
     }
 
     #[test]
@@ -1848,12 +1799,6 @@ mod tests {
             expected_mean,
             mean
         );
-    }
-
-    #[test]
-    #[should_panic(expected = "Low relaxation must be >= 1.0")]
-    fn test_gesd_relaxation_below_one_panics() {
-        GesdConfig::new(0.05, None).with_low_relaxation(0.5);
     }
 
     #[test]

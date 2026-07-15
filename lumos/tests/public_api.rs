@@ -1,8 +1,9 @@
 use imaginarium::Buffer2;
 use lumos::{
-    AlignStackResult, AlignmentSummary, AstroImage, CacheConfig, CombineMethod, GesdConfig,
-    ImageDimensions, LinearFitClipConfig, Normalization, PercentileClipConfig, Rejection,
-    SigmaClipConfig, SmallN, StackConfig, StackProduct, Weighting, WinsorizedClipConfig,
+    AlignStackResult, AlignmentSummary, AstroImage, CacheConfig, CombineMethod, DrizzleConfig,
+    DrizzleConfigError, DrizzleError, GesdConfig, ImageDimensions, LinearFitClipConfig,
+    Normalization, PercentileClipConfig, Rejection, SigmaClipConfig, SmallN, StackConfig,
+    StackConfigError, StackError, StackProduct, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -55,6 +56,36 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     assert_eq!(small_n.min_frames, 3);
     assert_eq!(small_n.fallback, CombineMethod::Median);
     let _: CacheConfig = cache;
+}
+
+#[test]
+fn stacking_configuration_errors_are_available_from_the_crate_root() {
+    let stack_error = StackConfig::sigma_clipped(0.0).validate().unwrap_err();
+    assert_eq!(
+        stack_error,
+        StackConfigError::InvalidSigmaLow { value: 0.0 }
+    );
+    let operation_error: StackError = stack_error.into();
+    assert!(matches!(
+        operation_error,
+        StackError::Config(StackConfigError::InvalidSigmaLow { value: 0.0 })
+    ));
+
+    let drizzle_error = DrizzleConfig {
+        scale: 0.0,
+        ..Default::default()
+    }
+    .validate()
+    .unwrap_err();
+    assert_eq!(
+        drizzle_error,
+        DrizzleConfigError::InvalidScale { value: 0.0 }
+    );
+    let operation_error: DrizzleError = drizzle_error.into();
+    assert!(matches!(
+        operation_error,
+        DrizzleError::Config(DrizzleConfigError::InvalidScale { value: 0.0 })
+    ));
 }
 
 #[test]

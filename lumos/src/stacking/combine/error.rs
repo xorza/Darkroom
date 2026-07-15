@@ -7,9 +7,52 @@ use thiserror::Error;
 
 use crate::io::astro_image::ImageDimensions;
 
+/// Invalid [`crate::StackConfig`] parameters.
+#[derive(Debug, Error, Clone, PartialEq)]
+pub enum StackConfigError {
+    #[error("sigma_low must be finite and positive, got {value}")]
+    InvalidSigmaLow { value: f32 },
+
+    #[error("sigma_high must be finite and positive, got {value}")]
+    InvalidSigmaHigh { value: f32 },
+
+    #[error("max_iterations must be at least 1")]
+    ZeroMaxIterations,
+
+    #[error("low_percentile must be finite and between 0 and 50, got {value}")]
+    InvalidLowPercentile { value: f32 },
+
+    #[error("high_percentile must be finite and between 0 and 50, got {value}")]
+    InvalidHighPercentile { value: f32 },
+
+    #[error("low_percentile + high_percentile must be less than 100, got {total}")]
+    InvalidTotalPercentile { total: f32 },
+
+    #[error("GESD alpha must be finite and between 0 and 1, got {value}")]
+    InvalidGesdAlpha { value: f32 },
+
+    #[error("GESD low_relaxation must be finite and at least 1, got {value}")]
+    InvalidGesdLowRelaxation { value: f32 },
+
+    #[error("manual weight {index} must be finite and non-negative, got {value}")]
+    InvalidManualWeight { index: usize, value: f32 },
+
+    #[error("manual weights must contain at least one positive value with a finite sum")]
+    InvalidManualWeightSum,
+
+    #[error("manual weight count {actual} does not match frame count {expected}")]
+    ManualWeightCountMismatch { expected: usize, actual: usize },
+
+    #[error("small-stack fallback must not use pixel rejection")]
+    RejectingSmallNFallback,
+}
+
 /// Errors that can occur during stacking operations.
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error(transparent)]
+    Config(#[from] StackConfigError),
+
     #[error("No frames provided for stacking")]
     NoFrames,
 
@@ -28,6 +71,17 @@ pub enum Error {
         index: usize,
         expected: ImageDimensions,
         actual: ImageDimensions,
+    },
+
+    #[error(
+        "Coverage dimensions for frame {index} do not match: expected {expected_width}x{expected_height}, got {actual_width}x{actual_height}"
+    )]
+    CoverageDimensionMismatch {
+        index: usize,
+        expected_width: usize,
+        expected_height: usize,
+        actual_width: usize,
+        actual_height: usize,
     },
 
     #[error("Failed to create cache directory '{path}': {source}")]

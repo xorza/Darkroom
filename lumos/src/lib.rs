@@ -64,7 +64,7 @@ pub use stacking::registration::{WarpResult, register, warp};
 
 pub use stacking::combine::cache_config::CacheConfig;
 pub use stacking::combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};
-pub use stacking::combine::error::Error as StackError;
+pub use stacking::combine::error::{Error as StackError, StackConfigError};
 pub use stacking::combine::progress::{ProgressCallback, StackingProgress, StackingStage};
 pub use stacking::combine::rejection::{
     GesdConfig, LinearFitClipConfig, PercentileClipConfig, Rejection, SigmaClipConfig,
@@ -78,7 +78,7 @@ pub use stacking::pipeline::{
     align_and_stack, calibrate_align_stack,
 };
 
-pub use stacking::drizzle::error::DrizzleError;
+pub use stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
 pub use stacking::drizzle::{
     DrizzleAccumulator, DrizzleConfig, DrizzleKernel, drizzle_images, drizzle_stack,
 };

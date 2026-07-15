@@ -19,7 +19,7 @@ use crate::stacking::combine::cache::{
     CfaCache, FrameStats, LightCache, StackableImage, WeightedFrame,
 };
 use crate::stacking::combine::config::{CombineMethod, Normalization, StackConfig, Weighting};
-use crate::stacking::combine::error::Error;
+use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::product::StackProduct;
 
@@ -82,15 +82,11 @@ impl From<AstroImage> for StackFrame {
 /// A [`StackProduct`] whose coverage is the fraction of frames contributing at each pixel. Its
 /// weight and variance planes are computed before per-channel outlier rejection.
 ///
-/// # Panics
-///
-/// - If `config` fails validation (see [`StackConfig::validate`]).
-/// - If `config.weighting` is `Manual` and the weight count doesn't match `paths.len()`.
-///
 /// # Errors
 ///
 /// Returns an error if:
 /// - No paths are provided
+/// - The configuration is invalid or its manual-weight count doesn't match the paths
 /// - Image loading fails
 /// - Image dimensions don't match
 /// - Cache directory creation fails (for disk-backed storage)
@@ -115,8 +111,8 @@ pub fn stack<P: AsRef<Path> + Sync>(
         return Err(Error::NoFrames);
     }
 
-    config.validate();
-    validate_manual_weights(&config, paths.len());
+    config.validate()?;
+    validate_manual_weights(&config, paths.len())?;
 
     tracing::info!(
         method = ?config.method,
@@ -148,11 +144,8 @@ pub fn stack<P: AsRef<Path> + Sync>(
 /// pixel only where it actually covers, so warped-frame borders don't drag the stacked edges
 /// dark. Frames with no coverage count fully everywhere. Plain `AstroImage`s convert via `.into()`.
 ///
-/// # Panics
-///
-/// - If `config` fails validation (see [`StackConfig::validate`]).
-/// - If `config.weighting` is `Manual` and the weight count doesn't match the frame count.
-/// - If any frame's `coverage` map dimensions don't match the frames.
+/// Returns an error when the configuration is invalid, manual-weight count doesn't match the frame
+/// count, or any image/coverage dimensions differ.
 pub fn stack_images(
     frames: Vec<StackFrame>,
     config: StackConfig,
@@ -163,8 +156,8 @@ pub fn stack_images(
         return Err(Error::NoFrames);
     }
 
-    config.validate();
-    validate_manual_weights(&config, frames.len());
+    config.validate()?;
+    validate_manual_weights(&config, frames.len())?;
 
     tracing::info!(
         method = ?config.method,
@@ -203,8 +196,8 @@ pub(crate) fn stack_weighted_frames(
     if frames.is_empty() {
         return Err(Error::NoFrames);
     }
-    config.validate();
-    validate_manual_weights(&config, frames.len());
+    config.validate()?;
+    validate_manual_weights(&config, frames.len())?;
 
     tracing::info!(
         method = ?config.method,
@@ -383,17 +376,19 @@ fn resolve_weights(
     }
 }
 
-/// Panic if `Manual` weighting is configured with a count that doesn't match the frames.
-fn validate_manual_weights(config: &StackConfig, frame_count: usize) {
-    if let Weighting::Manual(ref w) = config.weighting {
-        assert_eq!(
-            w.len(),
-            frame_count,
-            "Weight count ({}) must match frame count ({})",
-            w.len(),
-            frame_count
-        );
+fn validate_manual_weights(
+    config: &StackConfig,
+    frame_count: usize,
+) -> Result<(), StackConfigError> {
+    if let Weighting::Manual(ref w) = config.weighting
+        && w.len() != frame_count
+    {
+        return Err(StackConfigError::ManualWeightCountMismatch {
+            expected: frame_count,
+            actual: w.len(),
+        });
     }
+    Ok(())
 }
 
 /// Normalize weights to sum to 1.0. Returns `None` if total weight is zero.
@@ -668,21 +663,38 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Weight count")]
-    fn test_stack_weight_mismatch() {
+    fn test_stack_rejects_invalid_config_before_loading() {
         let paths = vec![
             PathBuf::from("/a.fits"),
             PathBuf::from("/b.fits"),
             PathBuf::from("/c.fits"),
         ];
-        let mut config = StackConfig::weighted(vec![1.0, 2.0]); // Wrong count
-        config.normalization = Normalization::None; // avoid loading files for stats
-        let _ = stack(
+        let error = stack(
             &paths,
-            config,
+            StackConfig::weighted(vec![1.0, 2.0]),
             ProgressCallback::default(),
             CancelToken::never(),
-        );
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::Config(StackConfigError::ManualWeightCountMismatch {
+                expected: 3,
+                actual: 2,
+            })
+        ));
+
+        let error = stack(
+            &paths,
+            StackConfig::sigma_clipped(-1.0),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::Config(StackConfigError::InvalidSigmaLow { value: -1.0 })
+        ));
     }
 
     #[test]
@@ -714,7 +726,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stack_images_dimension_mismatch() {
+    fn test_stack_images_dimension_errors() {
         let a = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
         let b = AstroImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
         let result = stack_images(
@@ -726,6 +738,28 @@ mod tests {
         assert!(matches!(
             result.unwrap_err(),
             Error::DimensionMismatch { index: 1, .. }
+        ));
+
+        let frame = StackFrame {
+            image: AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
+            coverage: Some(Buffer2::new(2, 2, vec![1.0; 4])),
+        };
+        let error = stack_images(
+            vec![frame],
+            StackConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::CoverageDimensionMismatch {
+                index: 0,
+                expected_width: 4,
+                expected_height: 4,
+                actual_width: 2,
+                actual_height: 2,
+            }
         ));
     }
 

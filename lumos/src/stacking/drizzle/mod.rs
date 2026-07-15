@@ -35,7 +35,7 @@ use crate::stacking::combine::progress::report_progress;
 use crate::stacking::combine::progress::{ProgressCallback, StackingStage};
 use crate::stacking::product::StackProduct;
 use crate::stacking::registration::transform::Transform;
-use error::DrizzleError;
+use error::{DrizzleConfigError, DrizzleError};
 use imaginarium::Buffer2;
 
 /// Maximum number of channels (RGB = 3).
@@ -142,10 +142,6 @@ impl DrizzleConfig {
 
     /// Set pixel fraction.
     pub fn with_pixfrac(mut self, pixfrac: f32) -> Self {
-        assert!(
-            (0.0..=1.0).contains(&pixfrac),
-            "pixfrac must be between 0.0 and 1.0"
-        );
         self.pixfrac = pixfrac;
         self
     }
@@ -158,12 +154,37 @@ impl DrizzleConfig {
 
     /// Set minimum coverage threshold.
     pub fn with_min_coverage(mut self, min_coverage: f32) -> Self {
-        assert!(
-            (0.0..=1.0).contains(&min_coverage),
-            "min_coverage must be between 0.0 and 1.0"
-        );
         self.min_coverage = min_coverage;
         self
+    }
+
+    /// Validate parameters before allocating or processing an output image.
+    pub fn validate(&self) -> Result<(), DrizzleConfigError> {
+        if !self.scale.is_finite() || self.scale <= 0.0 {
+            return Err(DrizzleConfigError::InvalidScale { value: self.scale });
+        }
+        if !self.pixfrac.is_finite() || !(0.0..=1.0).contains(&self.pixfrac) {
+            return Err(DrizzleConfigError::InvalidPixfrac {
+                value: self.pixfrac,
+            });
+        }
+        if !self.fill_value.is_finite() {
+            return Err(DrizzleConfigError::InvalidFillValue {
+                value: self.fill_value,
+            });
+        }
+        if !self.min_coverage.is_finite() || !(0.0..=1.0).contains(&self.min_coverage) {
+            return Err(DrizzleConfigError::InvalidMinCoverage {
+                value: self.min_coverage,
+            });
+        }
+        if self.kernel == DrizzleKernel::Lanczos && (self.scale != 1.0 || self.pixfrac != 1.0) {
+            return Err(DrizzleConfigError::InvalidLanczosSampling {
+                scale: self.scale,
+                pixfrac: self.pixfrac,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -185,13 +206,21 @@ pub struct DrizzleAccumulator {
 
 impl DrizzleAccumulator {
     /// Create a new drizzle accumulator for the given input dimensions.
-    pub fn new(input_dims: ImageDimensions, config: DrizzleConfig) -> Self {
-        assert!(
-            input_dims.channels <= MAX_CHANNELS,
-            "channels ({}) exceeds MAX_CHANNELS ({})",
-            input_dims.channels,
-            MAX_CHANNELS
-        );
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `config` is invalid or the input dimensions are empty or have a
+    /// channel count other than one or three.
+    pub fn new(input_dims: ImageDimensions, config: DrizzleConfig) -> Result<Self, DrizzleError> {
+        config.validate()?;
+        if input_dims.size.x == 0 || input_dims.size.y == 0 || !matches!(input_dims.channels, 1 | 3)
+        {
+            return Err(DrizzleError::InvalidInputDimensions {
+                width: input_dims.size.x,
+                height: input_dims.size.y,
+                channels: input_dims.channels,
+            });
+        }
         let output_width = (input_dims.size.x as f32 * config.scale).ceil() as usize;
         let output_height = (input_dims.size.y as f32 * config.scale).ceil() as usize;
 
@@ -200,12 +229,12 @@ impl DrizzleAccumulator {
             data.push(Buffer2::new_default(output_width, output_height));
         }
 
-        Self {
+        Ok(Self {
             data,
             weight: Buffer2::new_default(output_width, output_height),
             weight_sq: Buffer2::new_default(output_width, output_height),
             config,
-        }
+        })
     }
 
     fn width(&self) -> usize {
@@ -954,6 +983,11 @@ fn accumulate_frame(
 /// # Returns
 ///
 /// The drizzled result: image plus coverage, weight (`Σwᵢ`), and variance (`Σwᵢ²/(Σwᵢ)²`) maps.
+///
+/// # Errors
+///
+/// Returns an error for invalid configuration, missing frames, image loading failures, or
+/// inconsistent image dimensions.
 pub fn drizzle_stack<P: AsRef<Path> + Sync>(
     paths: &[P],
     transforms: &[Transform],
@@ -965,6 +999,7 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
     if paths.is_empty() {
         return Err(DrizzleError::NoFrames);
     }
+    config.validate()?;
     validate_drizzle_inputs(paths.len(), transforms, weights, pixel_weight_maps);
 
     let load = |path: &Path| -> Result<AstroImage, DrizzleError> {
@@ -988,7 +1023,7 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
         "Starting drizzle stacking (from paths)"
     );
 
-    let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone());
+    let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone())?;
     accumulate_frame(
         &mut accumulator,
         first_image,
@@ -1021,6 +1056,10 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
 ///
 /// In-memory counterpart to [`drizzle_stack`]: skips the per-frame disk load when
 /// the caller already owns the decoded frames. The frames are consumed.
+///
+/// # Errors
+///
+/// Returns an error for invalid configuration, missing frames, or inconsistent image dimensions.
 pub fn drizzle_images(
     images: Vec<AstroImage>,
     transforms: &[Transform],
@@ -1032,6 +1071,7 @@ pub fn drizzle_images(
     if images.is_empty() {
         return Err(DrizzleError::NoFrames);
     }
+    config.validate()?;
     validate_drizzle_inputs(images.len(), transforms, weights, pixel_weight_maps);
 
     let frame_count = images.len();
@@ -1048,7 +1088,7 @@ pub fn drizzle_images(
         "Starting drizzle stacking (in memory)"
     );
 
-    let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone());
+    let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone())?;
     for (i, image) in images.into_iter().enumerate() {
         accumulate_frame(
             &mut accumulator,
