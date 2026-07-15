@@ -227,6 +227,7 @@ mod tests {
     use crate::node::lambda::{InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
+    use crate::runtime::shared_any_state::SharedAnyState;
     use crate::testing::{TestFuncHooks, test_func_lib};
     use crate::{DynamicValue, StaticValue};
     #[tokio::test]
@@ -246,7 +247,7 @@ mod tests {
         ];
         let mut outputs = vec![DynamicValue::Unbound];
         let output_demand = vec![OutputDemand::Produce; outputs.len()];
-        let event_state = crate::runtime::shared_any_state::SharedAnyState::default();
+        let event_state = SharedAnyState::default();
         library
             .by_id(&sum_id)
             .unwrap()

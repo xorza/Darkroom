@@ -252,10 +252,6 @@ fn test_registration_large_translation() {
     );
 }
 
-// ============================================================================
-// TransformType::Euclidean tests (translation + rotation, no scale)
-// ============================================================================
-
 #[test]
 fn test_registration_euclidean_rotation_only() {
     // Generate reference star field
@@ -355,10 +351,6 @@ fn test_registration_euclidean_translation_and_rotation() {
         angle_rad
     );
 }
-
-// ============================================================================
-// TransformType::Affine tests (6 DOF: differential scaling, shear)
-// ============================================================================
 
 #[test]
 fn test_registration_affine_differential_scale() {
@@ -502,10 +494,6 @@ fn test_registration_affine_rotation_and_differential_scale() {
     );
 }
 
-// ============================================================================
-// TransformType::Homography tests (8 DOF: perspective)
-// ============================================================================
-
 #[test]
 fn test_registration_homography_mild_perspective() {
     // Test homography with mild perspective distortion
@@ -594,10 +582,6 @@ fn test_registration_homography_with_rotation() {
     );
 }
 
-// ============================================================================
-// Cross-type validation tests
-// ============================================================================
-
 #[test]
 fn test_similarity_recovers_from_euclidean_data() {
     // When data only has rotation (no scale), Similarity should still work
@@ -680,10 +664,6 @@ fn test_affine_recovers_from_similarity_data() {
         max_error
     );
 }
-
-// ============================================================================
-// TransformType::Auto ladder: pick the simplest model that fits (T3.4)
-// ============================================================================
 
 #[test]
 fn test_auto_ladder_selects_simplest_adequate_model() {

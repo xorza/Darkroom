@@ -106,7 +106,6 @@ pub(crate) fn rcd_demosaic(
     let mut rgb_g = vec![0.0f32; npix];
     let mut rgb_b = vec![0.0f32; npix];
 
-    // ── Copy CFA values to the appropriate RGB channel ───────────────────
     // Single parallel dispatch for all 3 channels (avoids 3 rayon syncs).
     {
         let ptr_r = SendPtr(rgb_r.as_mut_ptr());
@@ -125,7 +124,6 @@ pub(crate) fn rcd_demosaic(
         });
     }
 
-    // ── Step 1: Fused V/H Direction Detection ───────────────────────────
     // Computes V-HPF², H-HPF², and VH_Dir in a single parallel pass per row.
     // Each row computes its own H-HPF² inline and reads V-HPF² from ±1 neighbor
     // rows via a full V-HPF buffer. This eliminates two extra full-image passes.
@@ -184,7 +182,6 @@ pub(crate) fn rcd_demosaic(
     // v_hpf is dead — reuse buffer for LPF (Step 2–3), then PQ-Dir (Step 4).
     let mut scratch = v_hpf;
 
-    // ── Step 2: Low-Pass Filter (LPF) ──────────────────────────────────
     // 3×3 weighted average used by Step 3 for ratio-corrected estimation.
     // Reuses scratch buffer (was v_hpf, same npix size).
 
@@ -213,8 +210,6 @@ pub(crate) fn rcd_demosaic(
                         * (cfa[i - rw - 1] + cfa[i - rw + 1] + cfa[i + rw - 1] + cfa[i + rw + 1]);
             }
         });
-
-    // ── Step 3: Green Channel Interpolation ─────────────────────────────
 
     if cancel.is_cancelled() {
         return Err(Cancelled);
@@ -280,8 +275,6 @@ pub(crate) fn rcd_demosaic(
 
     // End LPF borrow so scratch is reusable.
     let _ = lpf;
-
-    // ── Step 4: Red and Blue Channel Interpolation ───────────────────────
 
     // Step 4.0-4.1: P/Q diagonal direction detection.
     // Reuse scratch buffer for pq_dir.
@@ -377,14 +370,11 @@ pub(crate) fn rcd_demosaic(
     drop(vh_dir);
     drop(pq_dir);
 
-    // ── Step 5: Border Handling ──────────────────────────────────────────
-
     if cancel.is_cancelled() {
         return Err(Cancelled);
     }
     border_interpolate(&mut rgb_r, &mut rgb_b, &mut rgb_g, cfa, &pattern, s);
 
-    // ── Extract active area to planar RGB channels ───────────────────────
     // Per-row contiguous copy (margins cropped); cheaper than the interleaved
     // scatter and lets the caller take the buffers zero-copy.
 

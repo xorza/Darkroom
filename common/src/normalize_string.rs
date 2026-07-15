@@ -52,8 +52,6 @@ impl NormalizeString for str {
 mod tests {
     use super::*;
 
-    // === Empty and simple cases ===
-
     #[test]
     fn empty_string_becomes_single_newline() {
         assert_eq!("".normalize(), "\n");
@@ -74,8 +72,6 @@ mod tests {
         assert_eq!("a\nb\nc\n".normalize(), "a\nb\nc\n");
     }
 
-    // === Adding trailing newline ===
-
     #[test]
     fn adds_trailing_newline_when_missing() {
         assert_eq!("hello".normalize(), "hello\n");
@@ -85,8 +81,6 @@ mod tests {
     fn adds_trailing_newline_multiline() {
         assert_eq!("a\nb\nc".normalize(), "a\nb\nc\n");
     }
-
-    // === CRLF conversion ===
 
     #[test]
     fn crlf_converted_to_lf() {
@@ -103,8 +97,6 @@ mod tests {
         assert_eq!("a\r\nb".normalize(), "a\nb\n");
     }
 
-    // === Standalone CR conversion ===
-
     #[test]
     fn standalone_cr_converted_to_lf() {
         assert_eq!("hello\r".normalize(), "hello\n");
@@ -120,8 +112,6 @@ mod tests {
         assert_eq!("a\rb".normalize(), "a\nb\n");
     }
 
-    // === Mixed line endings ===
-
     #[test]
     fn mixed_lf_crlf_cr() {
         assert_eq!("a\nb\r\nc\rd".normalize(), "a\nb\nc\nd\n");
@@ -131,8 +121,6 @@ mod tests {
     fn mixed_endings_with_trailing_lf() {
         assert_eq!("a\r\nb\rc\n".normalize(), "a\nb\nc\n");
     }
-
-    // === Consecutive newlines ===
 
     #[test]
     fn consecutive_lf_preserved() {
@@ -148,8 +136,6 @@ mod tests {
     fn consecutive_cr_converted() {
         assert_eq!("a\r\r\rb".normalize(), "a\n\n\nb\n");
     }
-
-    // === Only newline characters ===
 
     #[test]
     fn just_lf() {
@@ -181,8 +167,6 @@ mod tests {
         assert_eq!("\r\r\r".normalize(), "\n\n\n");
     }
 
-    // === Edge cases ===
-
     #[test]
     fn cr_at_start() {
         assert_eq!("\rhello".normalize(), "\nhello\n");
@@ -203,8 +187,6 @@ mod tests {
         assert_eq!("\r\ntext\r\n".normalize(), "\ntext\n");
     }
 
-    // === String and &str impls ===
-
     #[test]
     fn string_type_works() {
         let s = String::from("hello\r\nworld");
@@ -216,8 +198,6 @@ mod tests {
         let s: &str = "hello\r\nworld";
         assert_eq!(s.normalize(), "hello\nworld\n");
     }
-
-    // === Unicode preservation ===
 
     #[test]
     fn unicode_preserved() {

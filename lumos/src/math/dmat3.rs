@@ -264,8 +264,6 @@ mod tests {
             .all(|(x, y)| approx_eq(*x, *y))
     }
 
-    // -- Construction ---------------------------------------------------------
-
     #[test]
     fn test_from_array() {
         let data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
@@ -289,8 +287,6 @@ mod tests {
     fn test_default_is_identity() {
         assert_eq!(DMat3::default(), DMat3::identity());
     }
-
-    // -- Access ---------------------------------------------------------------
 
     #[test]
     fn test_index() {
@@ -324,8 +320,6 @@ mod tests {
         assert_eq!(m.to_array(), data);
     }
 
-    // -- Conversions ----------------------------------------------------------
-
     #[test]
     fn test_from_array_trait() {
         let data = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
@@ -339,8 +333,6 @@ mod tests {
         let arr: [f64; 9] = m.into();
         assert_eq!(arr, [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
     }
-
-    // -- Determinant ----------------------------------------------------------
 
     #[test]
     fn test_determinant_identity() {
@@ -366,8 +358,6 @@ mod tests {
         let m = DMat3::from_rows([0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
         assert!(approx_eq(m.determinant(), -1.0));
     }
-
-    // -- Inverse --------------------------------------------------------------
 
     #[test]
     fn test_inverse_identity() {
@@ -419,8 +409,6 @@ mod tests {
         assert!(mat_approx_eq(&inv, &expected));
     }
 
-    // -- Multiplication -------------------------------------------------------
-
     #[test]
     fn test_mul_identity() {
         let m = DMat3::from_rows([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]);
@@ -461,8 +449,6 @@ mod tests {
         // A*B != B*A for these matrices
         assert!(!mat_approx_eq(&ab, &ba));
     }
-
-    // -- transform_point ------------------------------------------------------
 
     #[test]
     fn test_transform_point_identity() {
@@ -510,8 +496,6 @@ mod tests {
         assert!(approx_eq(p2.y, p.y));
     }
 
-    // -- deviation_from_identity ----------------------------------------------
-
     #[test]
     fn test_deviation_from_identity_zero() {
         assert!(approx_eq(DMat3::identity().deviation_from_identity(), 0.0));
@@ -531,16 +515,12 @@ mod tests {
         assert!(approx_eq(m.deviation_from_identity(), 3.0_f64.sqrt()));
     }
 
-    // -- Index bounds ---------------------------------------------------------
-
     #[test]
     #[should_panic]
     fn test_index_out_of_bounds() {
         let m = DMat3::identity();
         let _ = m[9];
     }
-
-    // -- Mul<f64> / f64 * DMat3 -----------------------------------------------
 
     #[test]
     fn test_mul_scalar() {

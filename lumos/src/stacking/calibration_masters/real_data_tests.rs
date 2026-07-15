@@ -21,6 +21,7 @@ use common::CancelToken;
 use common::file_utils::files_with_extensions;
 use quickbench::quick_bench;
 
+use crate::io::raw;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{
     CalibrationFrames, CalibrationMasters, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig,
@@ -62,8 +63,8 @@ fn raw_dimensions_matches_full_decode() {
         panic!("calibration frames missing — run scripts/fetch-test-data.sh");
     };
     let path = &paths.darks[0];
-    let peeked = crate::io::raw::raw_dimensions(path).expect("peek dims");
-    let loaded = crate::io::raw::load_raw_cfa(path).expect("full decode");
+    let peeked = raw::raw_dimensions(path).expect("peek dims");
+    let loaded = raw::load_raw_cfa(path).expect("full decode");
     assert_eq!(
         (peeked.x, peeked.y),
         (loaded.data.width(), loaded.data.height()),

@@ -311,8 +311,6 @@ mod tests {
         assert!((result - 0.5).abs() < 1e-6, "Expected 0.5, got {}", result);
     }
 
-    // ========== Comprehensive SIMD vs Scalar tests ==========
-
     #[test]
     fn test_median_filter_row_simd_various_widths() {
         // Test widths around SIMD thresholds (8 for SSE, 12 for AVX)

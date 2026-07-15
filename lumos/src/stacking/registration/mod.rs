@@ -56,8 +56,6 @@ use distortion::sip::SipPolynomial;
 use result::{RansacFailureReason, RegistrationError, RegistrationResult, StarMatch};
 use transform::{Transform, TransformType, WarpTransform};
 
-// === Top-Level Functions ===
-
 use std::time::Instant;
 
 use glam::DVec2;
@@ -315,8 +313,6 @@ fn renormalize_by_coverage(channel: &mut Buffer2<f32>, coverage: &Buffer2<f32>) 
         }
     }
 }
-
-// === Internal Functions ===
 
 /// Maximum RMS (px) at which an `Auto` rung is accepted before escalating to a more general model.
 const AUTO_UPGRADE_THRESHOLD: f64 = 0.5;
@@ -590,8 +586,6 @@ fn recover_matches(
         matches: current_matches,
     }
 }
-
-// === Internal Re-exports (for submodules) ===
 
 #[cfg(test)]
 mod fwhm_tests {

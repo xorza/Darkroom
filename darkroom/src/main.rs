@@ -10,6 +10,7 @@ use std::sync::Arc;
 use aperture::{WindowConfig, WindowIcon, WinitHost};
 use clap::{Parser, Subcommand};
 use common::is_debug;
+use tokio::runtime::Builder;
 use tokio::sync::Notify;
 use uuid::Uuid;
 
@@ -195,7 +196,7 @@ fn run_terminal(frontend: Frontend, script_cfg: ScriptConfig) {
 
     let notify = Arc::new(Notify::new());
     let mut session = Session::new(&script_cfg, wake::from_notify(notify.clone()));
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("build async runtime");

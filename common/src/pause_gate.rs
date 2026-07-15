@@ -1,5 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
+use std::time::Instant;
 use tokio::sync::Notify;
 
 /// A synchronization primitive that allows one side to pause waiters.
@@ -161,7 +163,7 @@ mod tests {
         );
 
         // close() should return immediately, not wait for the task
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let _guard = gate.close();
         assert!(
             start.elapsed() < Duration::from_millis(50),

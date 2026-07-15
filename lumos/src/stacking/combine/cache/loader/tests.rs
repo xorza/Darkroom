@@ -1,4 +1,6 @@
+use std::fs::OpenOptions;
 use std::path::PathBuf;
+use std::time::{Duration, UNIX_EPOCH};
 
 use super::*;
 use crate::io::astro_image::AstroImage;
@@ -161,11 +163,8 @@ fn test_source_meta_validates_mtime() {
     // Now validation should pass
     assert!(validate_source_meta(&temp_dir, base, &source));
 
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .open(&source)
-        .unwrap();
-    file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(mtime + 2))
+    let file = OpenOptions::new().write(true).open(&source).unwrap();
+    file.set_modified(UNIX_EPOCH + Duration::from_secs(mtime + 2))
         .unwrap();
 
     // Validation should fail — source changed

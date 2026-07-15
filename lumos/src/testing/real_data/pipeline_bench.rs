@@ -24,9 +24,6 @@ fn bench_full_pipeline() {
 
     let total_start = Instant::now();
 
-    // =========================================================================
-    // Step 1: Create master calibration frames from raw CFA data
-    // =========================================================================
     println!("\n--- Step 1: Creating CFA master calibration frames ---");
     let step_start = Instant::now();
 
@@ -115,9 +112,6 @@ fn bench_full_pipeline() {
     }
     println!("  Step 1 total: {:?}", step_start.elapsed());
 
-    // =========================================================================
-    // Step 2: Calibrate light frames (CFA pipeline)
-    // =========================================================================
     println!("\n--- Step 2: Calibrating light frames ---");
     let step_start = Instant::now();
 
@@ -148,9 +142,6 @@ fn bench_full_pipeline() {
         calibrated_dir.display()
     );
 
-    // =========================================================================
-    // Step 3: Detect stars
-    // =========================================================================
     println!("\n--- Step 3: Detecting stars ---");
     let step_start = Instant::now();
 
@@ -165,9 +156,6 @@ fn bench_full_pipeline() {
 
     println!("  Elapsed: {:?}", step_start.elapsed());
 
-    // =========================================================================
-    // Step 4: Register lights to reference (best precision)
-    // =========================================================================
     println!("\n--- Step 4: Registering lights (best precision) ---");
     let step_start = Instant::now();
 
@@ -219,9 +207,6 @@ fn bench_full_pipeline() {
         registered_dir.display()
     );
 
-    // =========================================================================
-    // Step 5: Stack registered lights
-    // =========================================================================
     println!("\n--- Step 5: Stacking registered lights ---");
     let step_start = Instant::now();
 

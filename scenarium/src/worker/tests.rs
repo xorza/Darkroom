@@ -9,7 +9,7 @@ use crate::StaticValue;
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::Result as ExecResult;
-use crate::execution::compile::Compiler;
+use crate::execution::compile::{CompiledGraph, Compiler};
 use crate::execution::identity::NodeAddress;
 use crate::execution::report::RunPhase;
 use crate::execution::stats::ExecutionStats;
@@ -850,8 +850,6 @@ async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
     assert!(!worker.is_event_loop_started());
 }
 
-// --- Pure scan() unit tests ------------------------------------
-
 #[test]
 fn scan_accumulates_simple_flags() {
     let (reply_ack, _ack_rx) = oneshot::channel();
@@ -926,7 +924,7 @@ fn scan_deduplicates_events() {
 
 /// A trivially-valid `Update` payload for scan tests, which only inspect the
 /// reduced intent — the program's content is irrelevant.
-fn empty_compiled() -> crate::execution::compile::CompiledGraph {
+fn empty_compiled() -> CompiledGraph {
     Compiler::default()
         .compile(&Graph::default(), &Library::default())
         .unwrap()
@@ -1036,8 +1034,6 @@ async fn update_then_clear_in_same_batch_leaves_graph_cleared() {
         .unwrap();
     assert_no_callback_within(&mut h.compute_rx, Duration::from_millis(100)).await;
 }
-
-// --- `biased` select: commands not starved by events -----------
 
 // Lambda fires as fast as it can; a Stop command must be observed
 // and acted on within a bounded time rather than being delayed

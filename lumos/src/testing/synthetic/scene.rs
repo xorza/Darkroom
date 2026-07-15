@@ -5,6 +5,8 @@
 //! [`Observation`](crate::testing::synthetic::observe::Observation) render it forward into a
 //! frame; a lumos stage runs backward and is graded against this truth.
 
+use std::f64::consts::PI;
+
 use crate::testing::TestRng;
 use crate::testing::synthetic::backgrounds::{
     NebulaConfig, add_gradient_background, add_nebula_background, add_uniform_background,
@@ -285,7 +287,7 @@ mod tests {
             .count();
         // A uniform field would put only ~π r² / (w·h) ≈ 4.5% in that disk; clustering must
         // pack far more (the 80% core inside ~1σ ⇒ well over a third).
-        let uniform_expectation = 500.0 * std::f64::consts::PI * r * r / (w * h) as f64;
+        let uniform_expectation = 500.0 * PI * r * r / (w * h) as f64;
         assert!(
             central as f64 > uniform_expectation * 4.0 && central > 150,
             "central {central} vs uniform expectation {uniform_expectation:.1}"

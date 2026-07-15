@@ -1,3 +1,5 @@
+use std::f32::consts::PI;
+
 use glam::DVec2;
 
 use crate::stacking::registration::transform::Transform;
@@ -36,7 +38,7 @@ pub(crate) fn lanczos_kernel(x: f32, a: f32) -> f32 {
     if x.abs() >= a {
         return 0.0;
     }
-    let pi_x = std::f32::consts::PI * x;
+    let pi_x = PI * x;
     let pi_x_a = pi_x / a;
     (pi_x.sin() / pi_x) * (pi_x_a.sin() / pi_x_a)
 }

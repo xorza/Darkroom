@@ -516,10 +516,6 @@ fn test_zero_floor_pixel_does_not_prevent_deblending() {
     );
 }
 
-// ========================================================================
-// Additional tests for optimized code paths
-// ========================================================================
-
 #[test]
 fn test_many_stars_max_peaks_limit() {
     // Create more stars than MAX_PEAKS to test limiting behavior
@@ -715,10 +711,6 @@ fn test_zero_threshold_level() {
     assert_eq!(result[0].area, data.area);
 }
 
-// ========================================================================
-// Unit tests for PixelGrid
-// ========================================================================
-
 #[test]
 fn test_pixel_grid_connected_regions() {
     // Test that pixel values are stored correctly by using find_connected_regions_grid
@@ -836,10 +828,6 @@ fn test_pixel_grid_single_pixel() {
     assert_eq!(regions[0].len(), 1);
     assert_eq!(regions[0][0].value, 42.0);
 }
-
-// ========================================================================
-// Unit tests for NodeGrid
-// ========================================================================
 
 #[test]
 fn test_node_grid_empty() {
@@ -973,10 +961,6 @@ fn test_node_grid_boundary() {
     // Just outside the grid
     assert!(grid.get(100, 100).is_none());
 }
-
-// ========================================================================
-// Integration tests for grid-based connected component finding
-// ========================================================================
 
 #[test]
 fn test_find_connected_regions_grid_single_region() {
@@ -1420,10 +1404,6 @@ fn test_connected_regions_two_groups_near_zero() {
     assert_eq!(regions[0].len(), 1);
     assert_eq!(regions[1].len(), 1);
 }
-
-// ========================================================================
-// Tests for find_connected_regions_grid_into (ArrayVec capacity limit)
-// ========================================================================
 
 #[test]
 fn test_connected_regions_grid_into_basic() {

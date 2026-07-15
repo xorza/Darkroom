@@ -8,7 +8,7 @@
 //! once so both owners just build one, `enter` it to construct their inner
 //! value, and store it alongside for drop order.
 
-use tokio::runtime::Runtime;
+use tokio::runtime::{Builder, Runtime};
 
 /// A dedicated background tokio runtime, held only for its `Drop`. Build
 /// one with [`BackgroundRuntime::new`], use [`BackgroundRuntime::enter`] to
@@ -23,9 +23,7 @@ pub(crate) struct BackgroundRuntime {
 impl BackgroundRuntime {
     /// Build a fresh multi-thread runtime with all drivers enabled.
     pub(crate) fn new() -> std::io::Result<Self> {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()?;
+        let runtime = Builder::new_multi_thread().enable_all().build()?;
         Ok(Self { runtime })
     }
 

@@ -157,10 +157,6 @@ fn test_gaussian_fit_edge_position() {
     assert!(result.is_none());
 }
 
-// ============================================================================
-// Additional tests for edge cases and noise
-// ============================================================================
-
 #[test]
 fn test_gaussian_fit_high_snr() {
     // High SNR case - should achieve very accurate fit
@@ -365,10 +361,6 @@ fn test_fwhm_accuracy() {
     assert!((fwhm - expected).abs() < 1e-5);
 }
 
-// ============================================================================
-// Noise and difficult data tests
-// ============================================================================
-
 #[test]
 fn test_gaussian_fit_with_gaussian_noise() {
     let width = 21;
@@ -516,10 +508,6 @@ fn test_gaussian_fit_wrong_background_estimate() {
     );
 }
 
-// ============================================================================
-// Amplitude and parameter edge cases
-// ============================================================================
-
 #[test]
 fn test_gaussian_fit_very_high_amplitude() {
     let width = 21;
@@ -570,10 +558,6 @@ fn test_gaussian_fit_narrow_psf() {
     assert!((result.pos.x - true_cx).abs() < 0.15);
     assert!((result.pos.y - true_cy).abs() < 0.15);
 }
-
-// ============================================================================
-// Convergence and iteration tests
-// ============================================================================
 
 #[test]
 fn test_gaussian_fit_converges_within_max_iterations() {
@@ -670,10 +654,6 @@ fn test_gaussian_fit_uniform_data_returns_result() {
     assert!(result.sigma.x.is_finite());
     assert!(result.sigma.y.is_finite());
 }
-
-// ============================================================================
-// Validate result edge cases
-// ============================================================================
 
 #[test]
 fn test_gaussian_fit_center_outside_stamp_rejected() {
@@ -778,10 +758,6 @@ fn test_gaussian_fit_multiple_positions() {
         );
     }
 }
-
-// ============================================================================
-// Hessian and gradient tests
-// ============================================================================
 
 #[test]
 fn test_compute_hessian_gradient_symmetry() {
@@ -1093,11 +1069,6 @@ fn test_compute_hessian_gradient_large_stamp() {
     }
 }
 
-// ============================================================================
-// ============================================================================
-// Extreme parameter boundary tests
-// ============================================================================
-
 #[test]
 fn test_gaussian_fit_sigma_at_lower_bound() {
     // Test with sigma very close to constraint minimum (0.5 px)
@@ -1266,10 +1237,6 @@ fn test_gaussian_fit_residual_distribution() {
     );
 }
 
-// ============================================================================
-// SIMD-vs-scalar batch validation tests
-// ============================================================================
-
 /// Build stamp data arrays (x, y, z) for a Gaussian profile at given params.
 fn make_gaussian_stamp_data(size: usize, params: &[f64; 6]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
@@ -1433,10 +1400,6 @@ fn test_batch_build_normal_equations_various_stamp_sizes() {
         }
     }
 }
-
-// ============================================================================
-// evaluate_and_jacobian fused method test
-// ============================================================================
 
 #[test]
 fn test_gaussian_evaluate_and_jacobian_consistency() {

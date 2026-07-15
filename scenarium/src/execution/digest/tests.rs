@@ -1,6 +1,7 @@
 use super::*;
 use crate::StaticValue;
 use crate::execution::cache::test_support::hydrate;
+use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot};
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
@@ -33,9 +34,10 @@ fn dir_fingerprint_tracks_entry_changes() {
     // turns unreadable (the sentinel-count fix in `hash_dir_entries`).
     #[cfg(unix)]
     {
+        use std::fs::Permissions;
         use std::os::unix::fs::PermissionsExt;
         let empty = fingerprint(&path);
-        let perms = |mode: u32| std::fs::Permissions::from_mode(mode);
+        let perms = |mode: u32| Permissions::from_mode(mode);
         std::fs::set_permissions(&dir, perms(0o000)).unwrap();
         let unreadable = fingerprint(&path);
         std::fs::set_permissions(&dir, perms(0o755)).unwrap();
@@ -348,10 +350,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
             hydrate(
                 &mut cache,
                 NodeIdx(0),
-                crate::execution::cache::OutputSnapshot::new(
-                    vec![value],
-                    crate::execution::cache::CachedOutputCoverage { ports: vec![true] },
-                ),
+                OutputSnapshot::new(vec![value], CachedOutputCoverage { ports: vec![true] }),
                 producer,
             );
         }
@@ -447,9 +446,9 @@ fn custom_stamper_folds_referent_version() {
         hydrate(
             &mut cache,
             NodeIdx(0),
-            crate::execution::cache::OutputSnapshot::new(
+            OutputSnapshot::new(
                 vec![StaticValue::Int(42).into()],
-                crate::execution::cache::CachedOutputCoverage { ports: vec![true] },
+                CachedOutputCoverage { ports: vec![true] },
             ),
             producer,
         );

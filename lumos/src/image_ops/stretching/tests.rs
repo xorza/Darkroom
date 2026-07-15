@@ -24,8 +24,6 @@ fn median_of(v: &[f32]) -> f32 {
     median_f32_mut(&mut c)
 }
 
-// ---- Midtones Transfer Function ----
-
 #[test]
 fn mtf_fixed_points_identity_and_direction() {
     for &m in &[0.1f32, 0.25, 0.5, 0.75, 0.9] {
@@ -73,8 +71,6 @@ fn mtf_self_inverse_identity() {
         }
     }
 }
-
-// ---- normalized arcsinh ----
 
 #[test]
 fn asinh_endpoints_and_monotonic() {
@@ -124,8 +120,6 @@ fn solve_beta_hits_target_background() {
     }
 }
 
-// ---- STF parameter derivation ----
-
 #[test]
 fn stf_params_hand_computed() {
     // median=0.1, sigma=0.02, shadow_sigmas=1.0, target=0.25:
@@ -159,8 +153,6 @@ fn stf_shadow_sigmas_lower_the_black_point() {
     assert!((b3 - 0.04).abs() < 1e-6);
     assert!(b3 < b1, "more shadow sigmas => lower black point");
 }
-
-// ---- Generalized Hyperbolic Stretch ----
 
 #[test]
 fn ghs_endpoints_and_monotonic_across_b_family() {
@@ -271,8 +263,6 @@ fn ghs_end_to_end_lifts_background_and_stays_in_range() {
     assert!(out[95] > out[0], "stars stay brighter than the background");
 }
 
-// ---- color preservation ----
-
 #[test]
 fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
     // Two pixels with a 2:1:1 R:G:B ratio; pixel 1 is bright enough to trip the highlight guard.
@@ -343,8 +333,6 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
         ug[0]
     );
 }
-
-// ---- end-to-end ----
 
 #[test]
 fn end_to_end_gray_auto_stf_brightens_background_to_target() {

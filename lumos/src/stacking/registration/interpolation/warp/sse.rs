@@ -463,11 +463,14 @@ unsafe fn hsum_ps(v: __m128) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::registration::interpolation::warp;
+    use crate::stacking::registration::transform::WarpTransform;
     use crate::testing::synthetic::patterns;
     #[cfg(target_arch = "x86_64")]
     use common::cpu_features;
     use imaginarium::Buffer2;
+
+    use super::*;
 
     /// Helper: compare SIMD output against scalar reference for a given transform.
     #[cfg(target_arch = "x86_64")]
@@ -489,14 +492,8 @@ mod tests {
         unsafe {
             warp_row_bilinear_avx2(input, &mut output_avx2, y, &inverse);
         }
-        let inverse_wt = crate::stacking::registration::transform::WarpTransform::new(inverse);
-        crate::stacking::registration::interpolation::warp::warp_row_bilinear_scalar(
-            input,
-            &mut output_scalar,
-            y,
-            &inverse_wt,
-            0.0,
-        );
+        let inverse_wt = WarpTransform::new(inverse);
+        warp::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
 
         for x in 0..width {
             assert!(
@@ -527,14 +524,8 @@ mod tests {
         unsafe {
             warp_row_bilinear_sse(input, &mut output_sse, y, &inverse);
         }
-        let inverse_wt = crate::stacking::registration::transform::WarpTransform::new(inverse);
-        crate::stacking::registration::interpolation::warp::warp_row_bilinear_scalar(
-            input,
-            &mut output_scalar,
-            y,
-            &inverse_wt,
-            0.0,
-        );
+        let inverse_wt = WarpTransform::new(inverse);
+        warp::warp_row_bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
 
         for x in 0..width {
             assert!(
@@ -624,7 +615,7 @@ mod tests {
             })
             .collect();
 
-        let lut = crate::stacking::registration::interpolation::warp::get_lanczos_lut(A);
+        let lut = warp::get_lanczos_lut(A);
         let a_minus_1 = A as i32 - 1;
 
         // Test at interior position: x0=6, y0=6, fx=0.3, fy=0.7

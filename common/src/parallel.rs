@@ -14,6 +14,10 @@
 //! starved); it isn't worth the complexity here.
 
 use rayon::prelude::*;
+#[cfg(test)]
+use std::thread;
+#[cfg(test)]
+use std::time::Duration;
 
 /// Maps `f` over `items`, running at most `max_concurrent` invocations at once.
 ///
@@ -122,7 +126,7 @@ mod tests {
         par_map_limited(&items, 3, |&x| {
             let current = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
             max_observed.fetch_max(current, Ordering::SeqCst);
-            std::thread::sleep(std::time::Duration::from_millis(5));
+            thread::sleep(Duration::from_millis(5));
             in_flight.fetch_sub(1, Ordering::SeqCst);
             x
         });

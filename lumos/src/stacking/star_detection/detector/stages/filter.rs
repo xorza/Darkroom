@@ -2,6 +2,7 @@
 //!
 //! Applies quality filters, removes duplicates, and sorts by flux.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 
@@ -95,11 +96,7 @@ pub(crate) fn filter(mut stars: Vec<Star>, config: &Config) -> FilterOutcome {
 
 /// Sort stars by flux (brightest first).
 fn sort_by_flux(stars: &mut [Star]) {
-    stars.sort_by(|a, b| {
-        b.flux
-            .partial_cmp(&a.flux)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap_or(Ordering::Equal));
 }
 
 /// Filter stars by FWHM using MAD-based outlier detection.
@@ -256,10 +253,6 @@ mod tests {
             roundness2: 0.0,
         }
     }
-
-    // =========================================================================
-    // FWHM Outlier Filtering Tests
-    // =========================================================================
 
     #[test]
     fn test_filter_fwhm_outliers_disabled_when_zero_deviation() {
@@ -457,10 +450,6 @@ mod tests {
         assert_eq!(removed, 0);
         assert_eq!(stars.len(), 10);
     }
-
-    // =========================================================================
-    // Duplicate Star Removal Tests
-    // =========================================================================
 
     #[test]
     fn test_remove_duplicate_stars_empty() {

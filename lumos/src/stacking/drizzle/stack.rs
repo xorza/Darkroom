@@ -1,3 +1,4 @@
+use std::io::Error;
 use std::path::Path;
 
 use crate::io::astro_image::AstroImage;
@@ -19,7 +20,7 @@ fn load_drizzle_frame<P: AsRef<Path>>(
     let path = source.as_ref();
     let image = AstroImage::from_file(path).map_err(|error| DrizzleError::ImageLoad {
         path: path.to_path_buf(),
-        source: std::io::Error::other(error),
+        source: Error::other(error),
     })?;
     Ok(DrizzleFrame {
         source: image,

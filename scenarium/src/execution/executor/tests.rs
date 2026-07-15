@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use tokio::sync::mpsc;
+
 use super::*;
 use crate::async_lambda;
-use crate::execution::cache::{RuntimeCache, ValueState};
+use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot, RuntimeCache, ValueState};
 use crate::execution::plan::{NodeVerdict, PlannedOutputs};
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
 use crate::execution::resolve::Resolver;
@@ -192,7 +194,7 @@ async fn run_with_pinned(
     let mut resolver = Resolver::default();
     resolver.resolve(program, plan, &mut cache);
     let flatten = self_mapped_flatten(program);
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<RunEvent>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
     let stats = executor
         .run(
             program,
@@ -667,9 +669,9 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     cache.reconcile(&p.program.e_nodes);
     // A stale prior value on the lambda-less node must not be served as this run's result.
     cache.slots[a].value = ValueState::Resident {
-        snapshot: crate::execution::cache::OutputSnapshot::new(
+        snapshot: OutputSnapshot::new(
             vec![DynamicValue::Static(StaticValue::Int(9))],
-            crate::execution::cache::CachedOutputCoverage { ports: vec![true] },
+            CachedOutputCoverage { ports: vec![true] },
         ),
         produced_under: None,
     };

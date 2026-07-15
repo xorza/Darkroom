@@ -32,6 +32,8 @@
 //! frame, whose buffer still holds the user's text to commit — and parse
 //! only when the edit commits.
 
+use std::path::Path;
+
 use aperture::{
     Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextEditTheme, TextWrap,
     Ui, WidgetId,
@@ -232,7 +234,7 @@ fn path_preview(path: &str) -> String {
     if path.is_empty() {
         return "Choose file…".to_owned();
     }
-    std::path::Path::new(path)
+    Path::new(path)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_owned())

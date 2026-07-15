@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -59,11 +59,7 @@ pub fn serialize_into<T: Serialize, W: Write>(
 
 pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: SerdeFormat) -> Result<T> {
     let mut temp_buffer = Vec::new();
-    deserialize_from(
-        &mut std::io::Cursor::new(serialized),
-        format,
-        &mut temp_buffer,
-    )
+    deserialize_from(&mut Cursor::new(serialized), format, &mut temp_buffer)
 }
 
 /// `temp_buffer` is reusable scratch (read buffer / LZ4 work area) the caller

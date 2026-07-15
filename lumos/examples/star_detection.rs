@@ -37,7 +37,6 @@ fn main() {
         if image.channels() > 1 { "s" } else { "" }
     );
 
-    // === Detection with default configuration ===
     println!("\n--- Detection with default config ---");
     let mut detector = StarDetector::default();
     let result = detector.detect(&image);
@@ -45,7 +44,6 @@ fn main() {
     println!("Stars detected: {}", result.stars.len());
     print_diagnostics(&result.diagnostics);
 
-    // === Detection with wide-field preset ===
     println!("\n--- Detection with wide-field preset ---");
     let mut config = StarDetectionConfig::wide_field();
     config.min_snr = 15.0;
@@ -55,7 +53,6 @@ fn main() {
     println!("Stars detected: {}", result.stars.len());
     print_diagnostics(&result.diagnostics);
 
-    // === Detection with high-resolution preset ===
     println!("\n--- Detection with high-resolution preset ---");
     let config = StarDetectionConfig::high_resolution();
     let mut detector = StarDetector::from_config(config).unwrap();
@@ -64,7 +61,6 @@ fn main() {
     println!("Stars detected: {}", result.stars.len());
     print_diagnostics(&result.diagnostics);
 
-    // === Detection with crowded field preset ===
     println!("\n--- Detection with crowded field preset ---");
     let mut config = StarDetectionConfig::crowded_field();
     config.min_snr = 8.0;

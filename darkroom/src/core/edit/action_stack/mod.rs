@@ -21,6 +21,7 @@
 //! captured wiring on every entry).
 
 use std::collections::VecDeque;
+use std::io::Cursor;
 use std::ops::Range;
 
 use common::SerdeFormat;
@@ -273,12 +274,8 @@ impl ActionStack {
     }
 
     fn deserialize_steps(bytes: &[u8], temp_buffer: &mut Vec<u8>) -> Vec<UndoStep> {
-        common::serde::deserialize_from(
-            &mut std::io::Cursor::new(bytes),
-            SerdeFormat::Bitcode,
-            temp_buffer,
-        )
-        .unwrap()
+        common::serde::deserialize_from(&mut Cursor::new(bytes), SerdeFormat::Bitcode, temp_buffer)
+            .unwrap()
     }
 
     fn slice_bytes<'a>(buffer: &'a [u8], range: &Range<usize>) -> &'a [u8] {

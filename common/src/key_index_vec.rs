@@ -560,8 +560,6 @@ mod tests {
         assert_ne!(left, right);
     }
 
-    // === remove_by_key tests ===
-
     #[test]
     fn remove_by_key_existing() {
         let mut vec = KeyIndexVec::<u32, TestItem>::default();
@@ -620,8 +618,6 @@ mod tests {
         assert_eq!(vec.index_of_key(&2), Some(1));
     }
 
-    // === remove_by_index tests ===
-
     #[test]
     fn remove_by_index_middle() {
         let mut vec = KeyIndexVec::<u32, TestItem>::default();
@@ -645,8 +641,6 @@ mod tests {
         vec.add(TestItem { id: 1, value: 10 });
         vec.remove_by_index(5);
     }
-
-    // === move_to_index tests ===
 
     /// Collect the current key order, and assert every stored index matches
     /// its slot — the invariant `move_to_index` must preserve.
@@ -717,8 +711,6 @@ mod tests {
         assert_eq!(order_and_check(&vec), vec![1, 2, 3, 4]);
     }
 
-    // === clear tests ===
-
     #[test]
     fn clear_empties_vec() {
         let mut vec = KeyIndexVec::<u32, TestItem>::default();
@@ -739,8 +731,6 @@ mod tests {
         vec.clear();
         assert!(vec.is_empty());
     }
-
-    // === retain tests ===
 
     #[test]
     fn retain_keeps_matching() {
@@ -785,16 +775,12 @@ mod tests {
         assert_eq!(vec.len(), 2);
     }
 
-    // === with_capacity tests ===
-
     #[test]
     fn with_capacity_creates_empty() {
         let vec = KeyIndexVec::<u32, TestItem>::with_capacity(10);
         assert!(vec.is_empty());
         assert!(vec.items.capacity() >= 10);
     }
-
-    // === len / is_empty tests ===
 
     #[test]
     fn len_and_is_empty() {
@@ -809,8 +795,6 @@ mod tests {
         vec.add(TestItem { id: 2, value: 20 });
         assert_eq!(vec.len(), 2);
     }
-
-    // === by_key / by_key_mut tests ===
 
     #[test]
     fn by_key_returns_none_for_missing() {
@@ -835,8 +819,6 @@ mod tests {
         let mut vec = KeyIndexVec::<u32, TestItem>::default();
         assert!(vec.by_key_mut(&999).is_none());
     }
-
-    // === Index / IndexMut tests ===
 
     #[test]
     fn index_access() {
@@ -865,8 +847,6 @@ mod tests {
         let _ = &vec[0];
     }
 
-    // === iter / iter_mut tests ===
-
     #[test]
     fn iter_visits_all() {
         let mut vec = KeyIndexVec::<u32, TestItem>::default();
@@ -891,8 +871,6 @@ mod tests {
         assert_eq!(vec.by_key(&1).unwrap().value, 20);
         assert_eq!(vec.by_key(&2).unwrap().value, 40);
     }
-
-    // === IntoIterator tests ===
 
     #[test]
     fn into_iter_ref() {
@@ -921,8 +899,6 @@ mod tests {
         assert_eq!(vec.by_key(&1).unwrap().value, 110);
         assert_eq!(vec.by_key(&2).unwrap().value, 120);
     }
-
-    // === Deserialization error tests ===
 
     #[test]
     fn deserialize_duplicate_key_errors() {

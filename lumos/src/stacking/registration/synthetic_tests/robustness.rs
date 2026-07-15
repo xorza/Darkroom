@@ -20,7 +20,6 @@ use crate::stacking::registration::synthetic_tests::helpers::{
     FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography,
 };
 
-// Additional FWHM values specific to robustness tests:
 const FWHM_LOOSE: f32 = 3.34; // max_sigma ~1.67
 const FWHM_SUBPIXEL: f32 = 0.66; // max_sigma ~0.33
 
@@ -45,10 +44,6 @@ fn unconstrained_config(transform_type: TransformType) -> Config {
         ..Default::default()
     }
 }
-
-// ============================================================================
-// Outlier Rejection Tests
-// ============================================================================
 
 #[test]
 fn test_outlier_rejection_spurious_stars() {
@@ -191,10 +186,6 @@ fn test_outlier_rejection_20_percent_spurious() {
     );
 }
 
-// ============================================================================
-// Partial Overlap Tests
-// ============================================================================
-
 #[test]
 fn test_partial_overlap_75_percent() {
     // 75% overlap - 25% of stars at edges won't match
@@ -320,10 +311,6 @@ fn test_partial_overlap_diagonal() {
     );
 }
 
-// ============================================================================
-// Subpixel Accuracy Tests
-// ============================================================================
-
 #[test]
 fn test_subpixel_translation_quarter_pixel() {
     // Test 0.25 pixel translation recovery
@@ -439,10 +426,6 @@ fn test_subpixel_scale() {
     );
 }
 
-// ============================================================================
-// Minimum Star Count Tests
-// ============================================================================
-
 #[test]
 fn test_minimum_stars_translation() {
     // Translation needs minimum 1 point, but for RANSAC we need more
@@ -543,10 +526,6 @@ fn test_insufficient_stars_fails() {
         "expected InsufficientStars{{found:3}}, got {result:?}"
     );
 }
-
-// ============================================================================
-// Combined Disturbances (Stress Tests)
-// ============================================================================
 
 #[test]
 fn test_stress_transform_noise_outliers() {
@@ -688,10 +667,6 @@ fn test_stress_dense_field_large_transform() {
     );
 }
 
-// ============================================================================
-// Large Rotation Tests
-// ============================================================================
-
 #[test]
 fn test_large_rotation_45_degrees() {
     // 45 degree rotation - tests trig at non-trivial angles
@@ -810,10 +785,6 @@ fn test_large_rotation_negative_45_degrees() {
         rotation_error_deg
     );
 }
-
-// ============================================================================
-// Extreme Scale Tests
-// ============================================================================
 
 #[test]
 fn test_extreme_scale_2x() {
@@ -941,10 +912,6 @@ fn test_extreme_scale_with_rotation() {
     );
 }
 
-// ============================================================================
-// Affine Robustness Tests
-// ============================================================================
-
 #[test]
 fn test_affine_with_outliers() {
     // Affine transform with differential scale + shear, plus 15% spurious stars
@@ -1016,10 +983,6 @@ fn test_affine_with_noise_and_missing() {
         result.rms_error
     );
 }
-
-// ============================================================================
-// Homography Robustness Tests
-// ============================================================================
 
 #[test]
 fn test_homography_with_outliers() {

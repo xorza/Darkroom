@@ -10,6 +10,8 @@
 //!    tree-based algorithm that uses multiple threshold levels to separate
 //!    blended sources. More accurate for crowded fields but slower.
 
+use std::cmp::Ordering;
+
 use arrayvec::ArrayVec;
 
 use crate::math::rect::URect;
@@ -82,11 +84,7 @@ impl ComponentData {
     #[inline]
     pub fn find_peak(&self, pixels: &Buffer2<f32>, labels: &LabelMap) -> Pixel {
         self.iter_pixels(pixels, labels)
-            .max_by(|a, b| {
-                a.value
-                    .partial_cmp(&b.value)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+            .max_by(|a, b| a.value.partial_cmp(&b.value).unwrap_or(Ordering::Equal))
             .expect("component must have at least one pixel")
     }
 }

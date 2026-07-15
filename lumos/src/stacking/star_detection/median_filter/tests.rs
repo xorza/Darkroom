@@ -327,8 +327,6 @@ fn test_bayer_pattern_removal() {
     );
 }
 
-// --- Tests for median_at_left_edge ---
-
 #[test]
 fn test_median_at_left_edge() {
     // 5x5 image
@@ -353,8 +351,6 @@ fn test_median_at_left_edge() {
     );
 }
 
-// --- Tests for median_at_right_edge ---
-
 #[test]
 fn test_median_at_right_edge() {
     // 5x5 image
@@ -378,8 +374,6 @@ fn test_median_at_right_edge() {
         result
     );
 }
-
-// --- Tests for median_at_edge ---
 
 #[test]
 fn test_median_at_edge_top_left_corner() {
@@ -507,8 +501,6 @@ fn test_median_at_edge_bottom_row() {
     );
 }
 
-// --- Tests for simd::median9_scalar ---
-
 #[test]
 fn test_median9_scalar() {
     // Test the SIMD module's scalar median9 function
@@ -529,8 +521,6 @@ fn test_median9_scalar_all_same() {
         result
     );
 }
-
-// --- Tests for filter_interior_row ---
 
 #[test]
 fn test_filter_interior_row() {
@@ -556,8 +546,6 @@ fn test_filter_interior_row() {
         output_row[2]
     );
 }
-
-// --- Tests for filter_edge_row ---
 
 #[test]
 fn test_filter_edge_row_top() {
@@ -606,8 +594,6 @@ fn test_filter_edge_row_bottom() {
         output_row[4]
     );
 }
-
-// --- Additional edge case tests ---
 
 #[test]
 fn test_4x4_interior_pixels() {

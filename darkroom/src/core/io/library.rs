@@ -11,6 +11,7 @@
 //! refuses to overwrite anything it can't re-read — the backstop for a
 //! failed move or corruption after startup.
 
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -56,7 +57,7 @@ fn broken_path(path: &Path) -> PathBuf {
 fn read_defs(path: &Path) -> Result<Vec<SubgraphDef>> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
         Err(err) => return Err(err).with_context(|| path.display().to_string()),
     };
     let lib = deserialize::<LibraryFile>(&bytes, SerdeFormat::Rhai)

@@ -9,6 +9,8 @@
 //! Uses `ArrayVec` for small fixed-capacity collections to avoid heap allocations
 //! in the common case (most components have ≤8 peaks).
 
+use std::cmp::Ordering;
+
 use arrayvec::ArrayVec;
 
 use crate::stacking::star_detection::deblend::region::Region;
@@ -106,11 +108,7 @@ pub fn find_local_maxima(
     }
 
     // Sort by brightness (brightest first)
-    peaks.sort_by(|a, b| {
-        b.value
-            .partial_cmp(&a.value)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    peaks.sort_by(|a, b| b.value.partial_cmp(&a.value).unwrap_or(Ordering::Equal));
 
     peaks
 }

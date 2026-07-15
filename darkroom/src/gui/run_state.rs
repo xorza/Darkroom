@@ -392,9 +392,7 @@ mod tests {
         rs.apply_progress(
             &RunProgress {
                 node_id: flat,
-                phase: RunPhase::Started {
-                    at: std::time::Instant::now(),
-                },
+                phase: RunPhase::Started { at: Instant::now() },
             },
             &map,
         );

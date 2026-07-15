@@ -1,5 +1,7 @@
 //! Statistical functions: median, MAD, sigma-clipped statistics.
 
+use std::cmp::Ordering;
+
 use serde::{Deserialize, Serialize};
 
 use crate::math::sum::mean_f32;
@@ -64,9 +66,8 @@ pub(crate) fn median_f32_fast(data: &mut [f32]) -> f32 {
     debug_assert!(!data.is_empty());
 
     let mid = data.len() / 2;
-    let (_, median, _) = data.select_nth_unstable_by(mid, |a, b| {
-        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    let (_, median, _) =
+        data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
     *median
 }
 

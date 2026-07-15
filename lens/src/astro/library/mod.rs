@@ -109,7 +109,6 @@ pub fn astro_library() -> Library {
 
     library.register_type(*MASTERS_TYPE_ID, TypeEntry::custom("Masters"));
 
-    // load_astro_image
     library.add(
         Func::new("fbcc8899-efc3-40e0-a6fd-8743f86edbd3", "Load Astro Image")
             .description("Loads a FITS/RAW/standard astronomical image.")
@@ -142,7 +141,6 @@ pub fn astro_library() -> Library {
             })),
     );
 
-    // build_masters
     library.add(
         Func::new("f2f6f1ff-5b10-409c-900f-d6b48750a529", "Build Masters")
             .description(
@@ -210,7 +208,6 @@ pub fn astro_library() -> Library {
             })),
     );
 
-    // stack_lights
     library.add(
         Func::new("b02f5c42-7bda-48f6-81dd-81338efbb126", "Stack Lights")
             .description("Calibrates, aligns, and stacks a folder of light frames into one image.")
@@ -371,7 +368,6 @@ pub fn astro_library() -> Library {
             })),
     );
 
-    // auto_stretch
     library.add(
         Func::new("c15248e0-006a-4a4a-9aae-b1fc7886dea1", "Auto Stretch")
             .description("Auto-stretches a linear frame to a viewable image (display tone curve).")
@@ -411,8 +407,6 @@ pub fn astro_library() -> Library {
                 })
             })),
     );
-
-    // --- config-builder nodes ---
 
     // build_background_config: expose every ExtractBackground field as an input,
     // output a detailed config to wire into background_extract.
@@ -481,8 +475,6 @@ pub fn astro_library() -> Library {
         "Builds a detailed SCNR (green-removal) config",
     );
 
-    // --- per-frame processing nodes (Image → Image) ---
-
     // background_extract: a quick `mode` preset, or a `config` wired from
     // build_background_config (which overrides the preset when present).
     library.add(processing_func(
@@ -522,7 +514,6 @@ pub fn astro_library() -> Library {
         }),
     ));
 
-    // denoise
     library.add(processing_func(
         "61c17dfa-8369-446b-b6e7-d91d62d344ee",
         "Denoise",
@@ -556,7 +547,6 @@ pub fn astro_library() -> Library {
         }),
     ));
 
-    // scnr
     library.add(processing_func(
         "ef0c2661-8553-4302-9251-95b2d383af19",
         "SCNR",
@@ -587,7 +577,6 @@ pub fn astro_library() -> Library {
         }),
     ));
 
-    // neutralize_background
     library.add(processing_func(
         "5a8c9043-61ca-4a5a-8e55-ce27c804e84b",
         "Neutralize Background",
@@ -602,7 +591,6 @@ pub fn astro_library() -> Library {
         }),
     ));
 
-    // hdr_compress
     library.add(processing_func(
         "300a2ec5-0ccd-47ec-b282-030eea41441c",
         "HDR Compression",
@@ -636,7 +624,6 @@ pub fn astro_library() -> Library {
         }),
     ));
 
-    // local_contrast
     library.add(processing_func(
         "6a28b732-2704-454b-8afd-0a91d385458a",
         "Local Contrast",

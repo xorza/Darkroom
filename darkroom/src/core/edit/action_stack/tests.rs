@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use super::*;
 use crate::core::document::dock::DockOp;
 use crate::core::document::view_item::ViewItem;
@@ -110,7 +112,7 @@ fn switch_does_not_merge_across_an_intervening_edit() {
 
     // Intervening selection edit (a real change, so not a no-op).
     let node_id = doc.graph.iter().next().unwrap().id;
-    let mut want = std::collections::BTreeSet::new();
+    let mut want = BTreeSet::new();
     want.insert(ItemRef::Node(node_id));
     let sel = build_step(Intent::SetSelection { to: want }, &doc, GraphRef::Main).unwrap();
     apply_step(&sel, &mut doc, GraphRef::Main);
@@ -375,8 +377,6 @@ fn group_drag_moves_all_and_undoes_as_one() {
 
 #[test]
 fn new_edit_discards_the_redo_tail() {
-    use std::collections::BTreeSet;
-
     let mut doc: Document = test_graph().into();
     let node = doc.graph.iter().next().unwrap().id;
     let mut stack = ActionStack::new(1 << 20);
@@ -422,8 +422,6 @@ fn consecutive_closes_do_not_coalesce() {
 
 #[test]
 fn history_bounded_by_byte_budget() {
-    use std::collections::BTreeSet;
-
     let mut doc: Document = test_graph().into();
     let node = doc.graph.iter().next().unwrap().id;
     // Tiny budget so a handful of small entries overflow it.

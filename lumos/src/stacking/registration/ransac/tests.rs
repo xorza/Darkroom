@@ -4,7 +4,9 @@ use super::*;
 use crate::stacking::registration::ransac::transforms::{centroid, normalize_points};
 use crate::stacking::registration::triangle::voting::PointMatch;
 use glam::DVec2;
-use std::f64::consts::PI;
+use std::f64::consts::{PI, SQRT_2};
+
+use rand::rngs::SmallRng;
 
 const TOL: f64 = 1e-6;
 
@@ -65,10 +67,6 @@ fn apply_all(transform: &Transform, points: &[DVec2]) -> Vec<DVec2> {
     points.iter().map(|&p| transform.apply(p)).collect()
 }
 
-// ============================================================================
-// centroid tests
-// ============================================================================
-
 #[test]
 fn test_centroid_empty() {
     assert_eq!(centroid(&[]), DVec2::ZERO);
@@ -110,10 +108,6 @@ fn test_centroid_asymmetric() {
     assert!((c.x - 3.0).abs() < TOL);
     assert!((c.y - 4.0).abs() < TOL);
 }
-
-// ============================================================================
-// normalize_points tests
-// ============================================================================
 
 #[test]
 fn test_normalize_points_empty() {
@@ -162,7 +156,7 @@ fn test_normalize_points_centroid_and_avg_distance() {
     // Average distance should be sqrt(2)
     let avg_dist: f64 =
         normalized.iter().map(|p| p.length()).sum::<f64>() / normalized.len() as f64;
-    assert!((avg_dist - std::f64::consts::SQRT_2).abs() < 0.001);
+    assert!((avg_dist - SQRT_2).abs() < 0.001);
 
     // Check exact normalized coordinates
     assert!((normalized[0].x - (-1.0)).abs() < TOL); // (0-5)*0.2 = -1
@@ -204,10 +198,6 @@ fn test_normalize_points_extreme_values() {
         assert!((r.y - orig.y).abs() < 1e-3, "Y: {} vs {}", r.y, orig.y);
     }
 }
-
-// ============================================================================
-// is_sample_degenerate tests
-// ============================================================================
 
 #[test]
 fn test_degenerate_empty() {
@@ -314,10 +304,6 @@ fn test_non_degenerate_quad() {
     assert!(!is_sample_degenerate(&pts));
 }
 
-// ============================================================================
-// adaptive_iterations tests
-// ============================================================================
-
 #[test]
 fn test_adaptive_iterations_edge_cases() {
     // w=0 or w=1 → returns 1
@@ -376,10 +362,6 @@ fn test_adaptive_iterations_monotonic_in_inlier_ratio() {
     assert!(low > mid);
     assert!(mid > high);
 }
-
-// ============================================================================
-// estimate_transform tests (direct, no RANSAC)
-// ============================================================================
 
 #[test]
 fn test_estimate_translation_hand_computed() {
@@ -702,10 +684,6 @@ fn test_estimate_homography_ill_conditioned() {
     }
 }
 
-// ============================================================================
-// score_hypothesis tests
-// ============================================================================
-
 #[test]
 fn test_score_hypothesis_perfect_match() {
     // All points map exactly → all residuals = 0 → loss per point = 0
@@ -794,14 +772,10 @@ fn test_score_hypothesis_early_exit() {
     assert!(inliers.len() < n);
 }
 
-// ============================================================================
-// random_sample_into tests
-// ============================================================================
-
 #[test]
 fn test_random_sample_into_produces_unique_indices() {
     use rand::SeedableRng;
-    let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
+    let mut rng = SmallRng::seed_from_u64(42);
     let n = 50;
     let k = 4;
     let mut buffer = Vec::new();
@@ -832,7 +806,7 @@ fn test_random_sample_into_produces_unique_indices() {
 fn test_random_sample_into_k_equals_n() {
     // When k == n, should return all indices (in some order)
     use rand::SeedableRng;
-    let mut rng = rand::rngs::SmallRng::seed_from_u64(99);
+    let mut rng = SmallRng::seed_from_u64(99);
     let n = 5;
     let k = 5;
     let mut buffer = Vec::new();
@@ -846,15 +820,11 @@ fn test_random_sample_into_k_equals_n() {
     assert_eq!(sorted, vec![0, 1, 2, 3, 4]);
 }
 
-// ============================================================================
-// weighted_sample_into tests
-// ============================================================================
-
 #[test]
 fn test_weighted_sample_into_pool_smaller_than_k() {
     // When pool.len() <= k, should return all pool elements
     use rand::SeedableRng;
-    let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
+    let mut rng = SmallRng::seed_from_u64(42);
     let pool = vec![5, 10, 15];
     let weights = vec![0.0; 20]; // weights indexed by pool values
     let mut buffer = Vec::new();
@@ -869,7 +839,7 @@ fn test_weighted_sample_into_pool_smaller_than_k() {
 #[test]
 fn test_weighted_sample_into_returns_k_unique() {
     use rand::SeedableRng;
-    let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
+    let mut rng = SmallRng::seed_from_u64(42);
     let pool: Vec<usize> = (0..20).collect();
     let weights: Vec<f64> = (0..20).map(|i| i as f64 + 1.0).collect();
     let k = 4;
@@ -897,10 +867,6 @@ fn test_weighted_sample_into_returns_k_unique() {
         }
     }
 }
-
-// ============================================================================
-// RANSAC full pipeline tests
-// ============================================================================
 
 #[test]
 fn test_ransac_perfect_translation() {
@@ -1196,10 +1162,6 @@ fn test_ransac_100_percent_inliers() {
     assert_eq!(result.inliers.len(), 8);
 }
 
-// ============================================================================
-// RANSAC with different transform types
-// ============================================================================
-
 #[test]
 fn test_ransac_affine() {
     let ref_points = make_grid(4, 2, 25.0);
@@ -1310,10 +1272,6 @@ fn test_ransac_homography_near_affine() {
         assert!(error < 0.5, "Error {} at point {}", error, i);
     }
 }
-
-// ============================================================================
-// Numerical Stability Tests
-// ============================================================================
 
 #[test]
 fn test_ransac_large_coordinates() {
@@ -1508,10 +1466,6 @@ fn test_similarity_near_unity_scale() {
     );
 }
 
-// ============================================================================
-// LO-RANSAC Tests
-// ============================================================================
-
 #[test]
 fn test_lo_ransac_converges_to_exact_solution() {
     let ref_points = make_grid(4, 2, 10.0);
@@ -1587,10 +1541,6 @@ fn test_lo_ransac_vs_standard_with_noisy_data() {
         result_without_lo.inliers.len()
     );
 }
-
-// ============================================================================
-// Progressive (confidence-weighted) RANSAC tests
-// ============================================================================
 
 #[test]
 fn test_progressive_ransac_basic() {
@@ -1741,10 +1691,6 @@ fn test_progressive_ransac_finds_solution_faster() {
     assert!((result.transform.scale_factor() - scale).abs() < 0.01);
 }
 
-// ============================================================================
-// PointMatch-based estimation tests
-// ============================================================================
-
 #[test]
 fn test_estimate_with_varying_confidence() {
     let ref_stars = vec![
@@ -1829,10 +1775,6 @@ fn test_estimate_rejects_outlier_with_low_confidence() {
     assert!((est.x - 50.0).abs() < 0.5);
     assert!((est.y - (-30.0)).abs() < 0.5);
 }
-
-// ============================================================================
-// Plausibility Check Tests
-// ============================================================================
 
 #[test]
 fn test_plausibility_rejects_large_rotation() {

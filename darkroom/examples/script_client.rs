@@ -19,9 +19,9 @@
 //! Bring your own running darkroom, e.g.:
 //!     cargo run -p darkroom -- --script-tcp --script-bind :34567 --script-token <uuid>
 
-use std::io::{BufRead, Read, Write};
+use std::io::{BufRead, Error, ErrorKind, Read, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -74,7 +74,7 @@ struct ScriptReply {
     error: Option<String>,
 }
 
-fn load_discovery(path: &std::path::Path) -> Result<(String, Option<Uuid>), String> {
+fn load_discovery(path: &Path) -> Result<(String, Option<Uuid>), String> {
     let body = std::fs::read_to_string(path).map_err(|e| format!("read {path:?}: {e}"))?;
     let d: Discovery = serde_json::from_str(&body).map_err(|e| format!("parse {path:?}: {e}"))?;
     let token = d
@@ -107,9 +107,8 @@ fn read_reply(stream: &mut TcpStream) -> std::io::Result<ScriptReply> {
     let mut body = vec![0u8; len];
     stream.read_exact(&mut body)?;
     let raw = lz4_flex::block::decompress_size_prepended(&body)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    serde_json::from_slice(&raw)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+        .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?;
+    serde_json::from_slice(&raw).map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))
 }
 
 fn render_reply(reply: &ScriptReply) {

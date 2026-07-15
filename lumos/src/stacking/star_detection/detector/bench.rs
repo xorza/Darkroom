@@ -98,10 +98,6 @@ fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }
 
-// ============================================================================
-// Component benchmarks
-// ============================================================================
-
 /// Benchmark remove_duplicate_stars with varying star counts.
 /// Simulates dense star field scenario similar to rho-opiuchi detection.
 #[quick_bench(warmup_iters = 5, iters = 20)]

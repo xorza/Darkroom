@@ -111,8 +111,6 @@ fn convolve_row_simd_matches_scalar_width_radius_sweep() {
     }
 }
 
-// ========== Comprehensive SIMD vs Scalar tests ==========
-
 #[test]
 fn test_convolve_row_small_input_less_than_simd_width() {
     // Test inputs smaller than SIMD register width
@@ -386,8 +384,6 @@ fn test_convolve_row_edge_only() {
     }
 }
 
-// ========== Mirror index tests ==========
-
 #[test]
 fn test_mirror_index_in_bounds() {
     // In-bounds indices should pass through unchanged
@@ -442,8 +438,6 @@ fn test_mirror_index_far_out_of_bounds() {
         );
     }
 }
-
-// ========== Column convolution tests ==========
 
 #[test]
 fn test_convolve_cols_matches_scalar() {
@@ -562,8 +556,6 @@ fn test_convolve_cols_various_sizes() {
         }
     }
 }
-
-// ========== 2D convolution tests ==========
 
 #[test]
 fn test_convolve_2d_row_matches_scalar() {

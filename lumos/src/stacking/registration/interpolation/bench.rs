@@ -35,10 +35,6 @@ fn create_test_transform() -> Transform {
     )
 }
 
-// ============================================================================
-// Single-channel warp benchmarks (what we're optimizing)
-// ============================================================================
-
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_warp_lanczos3_1k(b: quickbench::Bencher) {
     let input = create_test_image(1024, 1024);
@@ -87,10 +83,6 @@ fn bench_warp_lanczos3_4k(b: quickbench::Bencher) {
     });
 }
 
-// ============================================================================
-// Bilinear baseline for comparison
-// ============================================================================
-
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_warp_bilinear_2k(b: quickbench::Bencher) {
     let input = create_test_image(2048, 2048);
@@ -106,10 +98,6 @@ fn bench_warp_bilinear_2k(b: quickbench::Bencher) {
         );
     });
 }
-
-// ============================================================================
-// Micro-benchmarks for specific functions
-// ============================================================================
 
 /// Single-threaded 1k warp to measure per-thread throughput without rayon overhead.
 #[quick_bench(warmup_iters = 3, iters = 10)]
@@ -152,10 +140,6 @@ fn bench_warp_lanczos3_1k_no_dering(b: quickbench::Bencher) {
         }
     });
 }
-
-// ============================================================================
-// Bicubic and Lanczos4 benchmarks (generic warp loop)
-// ============================================================================
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_warp_bicubic_2k(b: quickbench::Bencher) {
@@ -204,10 +188,6 @@ fn bench_warp_lanczos2_2k(b: quickbench::Bencher) {
         );
     });
 }
-
-// ============================================================================
-// Micro-benchmarks for specific functions
-// ============================================================================
 
 #[quick_bench(warmup_iters = 3, iters = 20)]
 fn bench_lut_lookup(b: quickbench::Bencher) {

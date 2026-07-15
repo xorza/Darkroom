@@ -905,10 +905,6 @@ fn sorted_mad(sorted: &[f32], center: f32) -> f32 {
     dev
 }
 
-// ============================================================================
-// Rejection Enum — dispatches to algorithm implementations above
-// ============================================================================
-
 /// Pixel rejection algorithm applied before combining.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Rejection {
@@ -1039,8 +1035,6 @@ mod tests {
 
     use super::*;
 
-    // ========== Config Construction Tests ==========
-
     #[test]
     fn test_sigma_clip_config_default() {
         let config = SigmaClipConfig::default();
@@ -1103,8 +1097,6 @@ mod tests {
         assert_eq!(config_explicit.max_outliers_for_size(100), 10);
     }
 
-    // ========== Algorithm Tests ==========
-
     #[test]
     fn test_sigma_clip_removes_outlier() {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
@@ -1164,10 +1156,7 @@ mod tests {
         let r2 = SigmaClipConfig::new_asymmetric(sigma, sigma, 3).reject(&mut v2, &mut scratch());
 
         assert_eq!(r1, r2);
-        assert!(
-            (crate::math::sum::mean_f32(&v1[..r1]) - crate::math::sum::mean_f32(&v2[..r2])).abs()
-                < 1e-6,
-        );
+        assert!((mean_f32(&v1[..r1]) - mean_f32(&v2[..r2])).abs() < 1e-6,);
     }
 
     #[test]
@@ -1263,7 +1252,7 @@ mod tests {
         let mut values = vec![5.0, 5.0, 5.0, 5.0, 5.0];
         let remaining = LinearFitClipConfig::default().reject(&mut values, &mut scratch());
         assert_eq!(remaining, 5);
-        assert!((crate::math::sum::mean_f32(&values[..remaining]) - 5.0).abs() < 0.01);
+        assert!((mean_f32(&values[..remaining]) - 5.0).abs() < 0.01);
     }
 
     #[test]
@@ -1271,7 +1260,7 @@ mod tests {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
         let remaining = LinearFitClipConfig::new(2.0, 2.0, 3).reject(&mut values, &mut scratch());
         assert!(remaining < 6);
-        assert!(crate::math::sum::mean_f32(&values[..remaining]) < 20.0);
+        assert!(mean_f32(&values[..remaining]) < 20.0);
     }
 
     #[test]
@@ -1327,7 +1316,7 @@ mod tests {
         let remaining = PercentileClipConfig::new(20.0, 20.0).reject(&mut values, &mut scratch());
         assert_eq!(remaining, 6);
         // Mean of [3, 4, 5, 6, 7, 8] = 5.5
-        assert!((crate::math::sum::mean_f32(&values[..remaining]) - 5.5).abs() < 0.01);
+        assert!((mean_f32(&values[..remaining]) - 5.5).abs() < 0.01);
     }
 
     #[test]
@@ -1409,8 +1398,6 @@ mod tests {
         let r = GesdConfig::default().reject(&mut [1.0, 2.0], &mut scratch());
         assert_eq!(r, 2);
     }
-
-    // ========== Index Tracking Tests ==========
 
     #[test]
     fn test_sigma_clip_indices_track_survivors() {
@@ -1502,8 +1489,6 @@ mod tests {
         }
     }
 
-    // ========== Rejection Enum Tests ==========
-
     #[test]
     fn test_rejection_constructors() {
         let r = Rejection::sigma_clip(2.0);
@@ -1528,8 +1513,6 @@ mod tests {
         assert!(matches!(r, Rejection::Gesd(c)
             if (c.alpha - 0.05).abs() < f32::EPSILON && c.max_outliers.is_none()));
     }
-
-    // ========== Rejection::combine_mean Tests ==========
 
     fn scratch() -> ScratchBuffers {
         ScratchBuffers {
@@ -1607,8 +1590,6 @@ mod tests {
 
         assert!(mean < 2.5, "Should be pulled toward 1.0, got {}", mean);
     }
-
-    // ========== Weight-Value Alignment Tests ==========
 
     #[test]
     fn test_weighted_sigma_clip_weight_alignment() {
@@ -1979,8 +1960,6 @@ mod tests {
         );
     }
 
-    // ========== Winsorized Correctness Tests ==========
-
     #[test]
     fn test_winsorized_robust_estimate_uses_stddev_not_mad() {
         // With known data, verify robust_estimate returns stddev-based sigma
@@ -2079,8 +2058,6 @@ mod tests {
         );
     }
 
-    // ========== Linear Fit Correctness Tests ==========
-
     #[test]
     fn test_linear_fit_per_pixel_rejection() {
         // Construct data with a clear linear trend plus one outlier.
@@ -2144,8 +2121,6 @@ mod tests {
             assert!(v < 10.0, "Outlier should not survive, got {v}");
         }
     }
-
-    // ========== Large-N Sort Tests (introsort path, N > 64) ==========
 
     #[test]
     fn test_sort_with_indices_large_n_correctness() {
@@ -2278,8 +2253,6 @@ mod tests {
         );
     }
 
-    // ========== reset_indices tests ==========
-
     #[test]
     fn test_reset_indices_basic() {
         let mut indices = Vec::new();
@@ -2313,8 +2286,6 @@ mod tests {
         reset_indices(&mut indices, 0);
         assert!(indices.is_empty());
     }
-
-    // ========== no_outliers_possible tests ==========
 
     #[test]
     fn test_no_outliers_possible_tight_cluster() {

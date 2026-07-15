@@ -365,10 +365,6 @@ fn test_fallback_8bit_normalization() {
     }
 }
 
-// ---------------------------------------------------------------
-// consolidate_black_levels tests
-// ---------------------------------------------------------------
-
 /// Uniform black: all cblack zero, scalar black only.
 #[test]
 fn test_consolidate_black_levels_uniform() {
@@ -465,10 +461,6 @@ fn test_consolidate_black_levels_xtrans_1x1_fold() {
     assert_eq!(bl.channel_delta_norm, [0.0; 4]);
 }
 
-// ---------------------------------------------------------------
-// compute_wb_multipliers tests
-// ---------------------------------------------------------------
-
 #[test]
 fn test_compute_wb_multipliers_normal() {
     let cam_mul = [2.0, 1.0, 1.5, 1.0];
@@ -523,10 +515,6 @@ fn test_compute_wb_multipliers_nan() {
     assert!(compute_wb_multipliers(cam_mul).is_none());
 }
 
-// ---------------------------------------------------------------
-// fc (filter channel) tests
-// ---------------------------------------------------------------
-
 #[test]
 fn test_fc_rggb() {
     // RGGB Bayer pattern: 0x94949494
@@ -544,10 +532,6 @@ fn test_fc_rggb() {
     assert_eq!(fc(filters, 3, 0), 1);
     assert_eq!(fc(filters, 3, 1), 2);
 }
-
-// ---------------------------------------------------------------
-// apply_channel_corrections tests
-// ---------------------------------------------------------------
 
 #[test]
 fn test_apply_channel_corrections_identity() {

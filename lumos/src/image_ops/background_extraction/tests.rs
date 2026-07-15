@@ -37,8 +37,6 @@ fn energy(p: &[f32]) -> f64 {
     p.iter().map(|&v| (v as f64) * (v as f64)).sum()
 }
 
-// --- basis / determinacy helpers (pure) ---
-
 #[test]
 fn poly_terms_are_correct() {
     assert_eq!(poly_terms(0), vec![(0, 0)]);
@@ -57,8 +55,6 @@ fn effective_degree_fits_within_samples() {
     assert_eq!(effective_degree(2, 3), 0); // even 3 > 2
     assert_eq!(effective_degree(100, 4), 4); // capped at 4
 }
-
-// --- the operation ---
 
 #[test]
 fn subtract_removes_linear_gradient() {

@@ -2,10 +2,6 @@
 
 use super::*;
 
-// ---------------------------------------------------------------------------
-// Median tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_median_odd() {
     let mut values = [1.0f32, 3.0, 2.0, 5.0, 4.0];
@@ -35,10 +31,6 @@ fn test_median_f32_negative() {
     let mut values = [-5.0f32, -3.0, -1.0, 2.0, 4.0];
     assert!((median_f32_mut(&mut values) - (-1.0)).abs() < f32::EPSILON);
 }
-
-// ---------------------------------------------------------------------------
-// MAD tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_median_and_mad_odd() {
@@ -71,10 +63,6 @@ fn test_mad_with_scratch_empty() {
     let mad = mad_f32_with_scratch(&values, 0.0, &mut scratch);
     assert!(mad.abs() < f32::EPSILON);
 }
-
-// ---------------------------------------------------------------------------
-// Sigma-clipped median/MAD tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_sigma_clipped_empty_input() {
@@ -292,10 +280,6 @@ fn test_sigma_clipped_all_same_then_one_different() {
     assert!(sigma < 0.01);
 }
 
-// ---------------------------------------------------------------------------
-// NaN handling tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_median_with_nan_does_not_panic() {
     let mut values = [1.0f32, f32::NAN, 3.0, 2.0, 5.0];
@@ -318,10 +302,6 @@ fn test_sigma_clip_with_nan_does_not_panic() {
     } = sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 3);
     assert!(!median.is_nan());
 }
-
-// ---------------------------------------------------------------------------
-// Sigma clip index correspondence regression test
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_sigma_clip_asymmetric_outliers() {
@@ -347,10 +327,6 @@ fn test_sigma_clip_asymmetric_outliers() {
         sigma
     );
 }
-
-// ---------------------------------------------------------------------------
-// abs_deviation_inplace tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_abs_deviation_inplace_basic() {
@@ -380,19 +356,11 @@ fn test_abs_deviation_inplace_empty() {
     assert!(values.is_empty());
 }
 
-// ---------------------------------------------------------------------------
-// MAD to sigma conversion tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_mad_to_sigma_known_value() {
     let sigma = mad_to_sigma(1.0);
     assert!((sigma - MAD_TO_SIGMA).abs() < 1e-6);
 }
-
-// ---------------------------------------------------------------------------
-// mad_f32_with_scratch edge cases
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_mad_with_scratch_single() {
@@ -410,10 +378,6 @@ fn test_mad_with_scratch_two_elements() {
     let mad = mad_f32_with_scratch(&values, 5.0, &mut scratch);
     assert!((mad - 3.0).abs() < 1e-6);
 }
-
-// ---------------------------------------------------------------------------
-// sigma_clipped_median_mad_arrayvec tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_sigma_clipped_arrayvec_basic() {
@@ -503,10 +467,6 @@ fn test_sigma_clipped_arrayvec_matches_vec_version() {
     assert!((mean_vec - mean_arrayvec).abs() < 1e-6);
 }
 
-// ---------------------------------------------------------------------------
-// median_f32_fast tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_median_f32_fast_odd() {
     // Sorted: [1, 2, 3, 5, 8], mid=2, median=3
@@ -580,10 +540,6 @@ fn test_median_f32_fast_negative_values() {
     let mut values = [3.0f32, -5.0, 7.0, -10.0, -2.0];
     assert!((median_f32_fast(&mut values) - (-2.0)).abs() < f32::EPSILON);
 }
-
-// ---------------------------------------------------------------------------
-// mad_f32_fast tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_mad_f32_fast_hand_computed() {
@@ -666,10 +622,6 @@ fn test_mad_f32_fast_matches_regular_on_odd() {
     );
     assert!((mad_fast - 4.0).abs() < f32::EPSILON);
 }
-
-// ---------------------------------------------------------------------------
-// sigma_clipped_median_mad tests (moved from background/tests.rs)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_sigma_clipped_stats_empty_values() {

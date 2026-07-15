@@ -1,6 +1,6 @@
 use super::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Simple {
@@ -139,7 +139,7 @@ fn utf8_passthrough_not_escaped() {
 
 #[test]
 fn keyword_key_is_quoted() {
-    let mut m = std::collections::BTreeMap::new();
+    let mut m = BTreeMap::new();
     m.insert("fn".to_string(), 1);
     m.insert("ok".to_string(), 2);
     let s = to_string(&m).unwrap();

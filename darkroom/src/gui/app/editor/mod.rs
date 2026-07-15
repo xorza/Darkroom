@@ -216,7 +216,6 @@ impl Editor {
         self.actions.clear();
         self.needs_relayout = false;
 
-        // ── Navigation phase ─────────────────────────────────────────
         // Settle the active tab entirely from frame-top inputs (keyboard
         // undo/redo + last-frame click responses). `navigate` reads *last*
         // frame's `scene` to resolve tab/chip clicks, so it must run before
@@ -241,7 +240,6 @@ impl Editor {
             self.rebuild_scene(target, library);
             self.scene_dirty = false;
 
-            // ── Edit phase ───────────────────────────────────────────
             // Prepass emits input-derived graph mutations (drag, pan/zoom,
             // connection commit) drained *before* the record so Pass A sees
             // the settled doc. It reads everything off `Scene`.

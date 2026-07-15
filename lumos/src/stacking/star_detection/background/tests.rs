@@ -277,10 +277,6 @@ fn test_invalid_tile_sizes_return_exact_errors() {
     }
 }
 
-// =============================================================================
-// Edge Case Tests
-// =============================================================================
-
 #[test]
 fn test_single_tile_image() {
     // Image size equals tile size - exercises tx1 == tx0 branch in interpolation
@@ -392,10 +388,6 @@ fn test_interpolation_smooth_at_tile_boundaries() {
         }
     }
 }
-
-// =============================================================================
-// Iterative Background Refinement Tests
-// =============================================================================
 
 #[test]
 fn test_iterative_background_uniform() {
@@ -600,14 +592,6 @@ fn test_iterative_background_no_refinement() {
         val
     );
 }
-
-// =============================================================================
-// Sigma-Clipped Statistics Tests (tests common::sigma_clipped_median_mad)
-// =============================================================================
-
-// =============================================================================
-// Bicubic Spline Interpolation Tests
-// =============================================================================
 
 #[test]
 fn test_bicubic_reproduces_linear_gradient() {
@@ -1047,5 +1031,3 @@ fn test_bicubic_two_tile_rows() {
         bot
     );
 }
-
-// sigma_clipped_median_mad tests moved to math/statistics/tests.rs

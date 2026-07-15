@@ -11,11 +11,13 @@
 //! background gradients, and noise texture; flat/level images use `Stretch::Linear` to show
 //! true values.
 
+use std::f32::consts::FRAC_PI_4;
+use std::path::PathBuf;
+
 use common::test_utils::test_output_path;
 use glam::{DVec2, Vec2};
 use image::GrayImage;
 use imaginarium::Buffer2;
-use std::path::PathBuf;
 
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
@@ -115,7 +117,7 @@ fn gallery_backgrounds() {
             BackgroundField::Gradient {
                 start: 0.02,
                 end: 0.4,
-                angle: std::f32::consts::FRAC_PI_4,
+                angle: FRAC_PI_4,
             },
             Stretch::Linear,
         ),
@@ -186,7 +188,7 @@ fn gallery_psf_models() {
             PsfModel::Elliptical {
                 fwhm: 4.0,
                 eccentricity: 0.7,
-                angle: std::f32::consts::FRAC_PI_4,
+                angle: FRAC_PI_4,
             },
         ),
     ];

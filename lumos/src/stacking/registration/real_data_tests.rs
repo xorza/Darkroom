@@ -6,6 +6,7 @@
 
 use std::hint::black_box;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use ::quickbench::quick_bench;
 
@@ -218,7 +219,7 @@ fn test_register_two_calibrated_lights() {
     );
 
     // Warp img2 to align with img1 and measure time
-    let warp_start = std::time::Instant::now();
+    let warp_start = Instant::now();
     let warped = warp(&img2, &result.warp_transform(), &reg_config).image;
     let warp_elapsed = warp_start.elapsed();
 
@@ -324,10 +325,6 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
         );
     });
 }
-
-// ============================================================================
-// Benchmarks
-// ============================================================================
 
 #[quick_bench(warmup_iters = 3, iters = 30)]
 fn bench_register_stars(b: ::quickbench::Bencher) {

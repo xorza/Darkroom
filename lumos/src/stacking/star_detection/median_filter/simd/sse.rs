@@ -9,6 +9,8 @@
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
+use crate::stacking::star_detection::median_filter::simd;
+
 /// Process a row of interior pixels using AVX2.
 ///
 /// Processes 8 pixels in parallel by loading overlapping windows and
@@ -62,7 +64,7 @@ pub unsafe fn median_filter_row_avx2(
         // Handle remainder pixels with scalar code
         let remainder_start = 1 + chunks * 8;
         for x in remainder_start..(width - 1) {
-            output_row[x] = crate::stacking::star_detection::median_filter::simd::median9_scalar(
+            output_row[x] = simd::median9_scalar(
                 row_above[x - 1],
                 row_above[x],
                 row_above[x + 1],
@@ -126,7 +128,7 @@ pub unsafe fn median_filter_row_sse41(
         // Handle remainder pixels with scalar code
         let remainder_start = 1 + chunks * 4;
         for x in remainder_start..(width - 1) {
-            output_row[x] = crate::stacking::star_detection::median_filter::simd::median9_scalar(
+            output_row[x] = simd::median9_scalar(
                 row_above[x - 1],
                 row_above[x],
                 row_above[x + 1],
@@ -327,7 +329,7 @@ mod tests {
         let mut output_scalar = vec![0.0f32; width];
         let mut output_simd = vec![0.0f32; width];
 
-        crate::stacking::star_detection::median_filter::simd::median_filter_row_scalar(
+        simd::median_filter_row_scalar(
             &row_above,
             &row_curr,
             &row_below,
@@ -366,7 +368,7 @@ mod tests {
         let mut output_scalar = vec![0.0f32; width];
         let mut output_simd = vec![0.0f32; width];
 
-        crate::stacking::star_detection::median_filter::simd::median_filter_row_scalar(
+        simd::median_filter_row_scalar(
             &row_above,
             &row_curr,
             &row_below,

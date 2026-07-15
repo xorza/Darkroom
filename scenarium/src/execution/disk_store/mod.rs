@@ -11,6 +11,7 @@
 //! it correct — every presence probe and read checks it, so a blob carrying a digest other
 //! than the node's current one is a miss, never a stale hit.
 
+use std::fs::File;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -170,7 +171,7 @@ impl DiskStore {
 }
 
 fn stored_coverage(path: &Path, digest: Digest) -> Option<CachedOutputCoverage> {
-    let mut file = std::fs::File::open(path).ok()?;
+    let mut file = File::open(path).ok()?;
     let mut stored_digest = [0u8; 32];
     file.read_exact(&mut stored_digest).ok()?;
     if stored_digest != digest.0 {
@@ -267,7 +268,7 @@ fn atomic_write(
     }
     let tmp = temp_path(path);
     let write_tmp = || -> io::Result<()> {
-        let mut file = std::fs::File::create(&tmp)?;
+        let mut file = File::create(&tmp)?;
         file.write_all(&digest.0)?;
         file.write_all(&BLOB_FORMAT_VERSION.to_le_bytes())?;
         file.write_all(&output_count.to_le_bytes())?;

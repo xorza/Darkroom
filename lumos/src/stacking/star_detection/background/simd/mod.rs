@@ -403,8 +403,6 @@ unsafe fn interpolate_segment_cubic_neon(
 mod tests {
     use super::*;
 
-    // ========== Cubic spline interpolation SIMD tests ==========
-
     #[test]
     #[should_panic(expected = "assertion")]
     fn test_cubic_segment_simd_mismatched_lengths_panics() {

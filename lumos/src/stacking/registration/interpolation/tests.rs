@@ -13,10 +13,6 @@ fn interp(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod) -> f
 
 const TOL: f32 = 1e-5;
 
-// ============================================================================
-// Lanczos kernel and LUT tests
-// ============================================================================
-
 #[test]
 fn test_lanczos_kernel_compute_at_zero() {
     // L(0, a) = 1.0 by definition (limit of sinc(x) * sinc(x/a) as x -> 0)
@@ -151,10 +147,6 @@ fn test_lanczos_lut_special_values() {
     }
 }
 
-// ============================================================================
-// Bicubic kernel tests
-// ============================================================================
-
 #[test]
 fn test_bicubic_kernel_exact_values() {
     // Catmull-Rom with a = -0.5:
@@ -205,10 +197,6 @@ fn test_bicubic_kernel_continuity_at_one() {
     );
 }
 
-// ============================================================================
-// sample_pixel tests
-// ============================================================================
-
 #[test]
 fn test_sample_pixel_in_bounds() {
     // 3x2 image: [[10, 20, 30], [40, 50, 60]]
@@ -234,10 +222,6 @@ fn test_sample_pixel_out_of_bounds() {
     assert_eq!(sample_pixel(&data, dims, IVec2::new(0, 2), bv), bv);
     assert_eq!(sample_pixel(&data, dims, IVec2::new(100, 100), bv), bv);
 }
-
-// ============================================================================
-// Nearest interpolation tests
-// ============================================================================
 
 #[test]
 fn test_nearest_interpolation() {
@@ -278,10 +262,6 @@ fn test_nearest_at_half_rounds_away() {
         20.0
     );
 }
-
-// ============================================================================
-// Bilinear interpolation tests with hand-computed values
-// ============================================================================
 
 #[test]
 fn test_bilinear_hand_computed() {
@@ -325,10 +305,6 @@ fn test_bilinear_uniform_image() {
     assert!((interp(&data_buf, 0.99, 0.01, InterpolationMethod::Bilinear) - 7.0).abs() < TOL);
 }
 
-// ============================================================================
-// Bicubic interpolation tests
-// ============================================================================
-
 #[test]
 fn test_bicubic_at_pixel_centers() {
     // At integer pixel positions, bicubic should exactly reproduce pixel values.
@@ -355,10 +331,6 @@ fn test_bicubic_monotonicity_on_gradient() {
     assert!(v1 < v2, "v1={v1} should be < v2={v2}");
     assert!(v2 < v3, "v2={v2} should be < v3={v3}");
 }
-
-// ============================================================================
-// Lanczos interpolation tests
-// ============================================================================
 
 #[test]
 fn test_lanczos_at_pixel_centers() {
@@ -452,10 +424,6 @@ fn test_lanczos2_vs_lanczos3_different_results() {
     );
 }
 
-// ============================================================================
-// Different methods produce different results
-// ============================================================================
-
 #[test]
 fn test_different_methods_produce_different_results() {
     // At a sub-pixel position on non-trivial data, all methods should give
@@ -492,10 +460,6 @@ fn test_different_methods_produce_different_results() {
     );
 }
 
-// ============================================================================
-// Border handling
-// ============================================================================
-
 #[test]
 fn test_border_value_returned_out_of_bounds() {
     let data_buf = Buffer2::new(2, 2, vec![1.0; 4]);
@@ -523,10 +487,6 @@ fn test_custom_border_value() {
         "Expected border_value -99.0, got {val}"
     );
 }
-
-// ============================================================================
-// All methods exact at pixel centers
-// ============================================================================
 
 #[test]
 fn test_all_methods_exact_at_pixel_centers() {
@@ -567,10 +527,6 @@ fn test_all_methods_exact_at_pixel_centers() {
     }
 }
 
-// ============================================================================
-// Gradient preservation test
-// ============================================================================
-
 #[test]
 fn test_interpolation_gradient_preservation() {
     // Horizontal gradient: pixel value = x / width
@@ -607,10 +563,6 @@ fn test_interpolation_gradient_preservation() {
         }
     }
 }
-
-// ============================================================================
-// Analytic function interpolation quality test
-// ============================================================================
 
 #[test]
 fn test_bicubic_vs_lanczos_analytic_quality() {
@@ -665,10 +617,6 @@ fn test_bicubic_vs_lanczos_analytic_quality() {
     );
 }
 
-// ============================================================================
-// warp_image tests
-// ============================================================================
-
 #[test]
 fn test_warp_identity_preserves_image() {
     let input: Vec<f32> = (0..16).map(|i| i as f32).collect();
@@ -721,10 +669,6 @@ fn test_warp_integer_translation() {
         output[5]
     );
 }
-
-// ============================================================================
-// warp_image with Lanczos3 (exercises the fast dispatch path)
-// ============================================================================
 
 #[test]
 fn test_warp_image_lanczos3_identity() {
@@ -817,10 +761,6 @@ fn test_warp_image_lanczos3_matches_per_pixel() {
     }
 }
 
-// ============================================================================
-// WarpParams tests
-// ============================================================================
-
 #[test]
 fn test_warp_params_default() {
     let p = WarpParams::default();
@@ -835,16 +775,11 @@ fn test_warp_params_new() {
     assert_eq!(p.border_value, 0.0);
 }
 
-// ============================================================================
-// Generic incremental stepping tests
-//
 // The generic warp loop (used for Bicubic, Lanczos2, Lanczos4, Nearest)
 // uses incremental stepping for linear transforms. These tests verify
 // that the stepped output matches per-pixel transform.apply() exactly.
-// ============================================================================
 
-/// Reference per-pixel warp without incremental stepping.
-/// This is the old code path before the optimization.
+/// Reference per-pixel warp used to validate incremental stepping.
 fn warp_image_per_pixel_reference(
     input: &Buffer2<f32>,
     output: &mut Buffer2<f32>,

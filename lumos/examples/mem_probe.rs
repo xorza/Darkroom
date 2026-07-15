@@ -9,6 +9,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use common::CancelToken;
 use lumos::{
@@ -76,11 +78,11 @@ fn main() {
     let peak_total = Arc::new(AtomicU64::new(0));
     let sampler = {
         let (stop, peak_anon, peak_total) = (stop.clone(), peak_anon.clone(), peak_total.clone());
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             while !stop.load(Ordering::Relaxed) {
                 peak_anon.fetch_max(status_kb("RssAnon"), Ordering::Relaxed);
                 peak_total.fetch_max(status_kb("VmRSS"), Ordering::Relaxed);
-                std::thread::sleep(std::time::Duration::from_millis(2));
+                thread::sleep(Duration::from_millis(2));
             }
         })
     };

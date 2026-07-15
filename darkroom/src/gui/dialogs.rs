@@ -5,6 +5,7 @@
 //! `None`, a failed URL open logs — rather than crashing.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use scenarium::{FsPathConfig, FsPathMode};
 
@@ -61,14 +62,14 @@ pub(crate) fn pick_path(config: &FsPathConfig) -> Option<PathBuf> {
 /// there's no user-facing error surface yet.
 pub(crate) fn open_url(url: &str) {
     #[cfg(target_os = "linux")]
-    let mut cmd = std::process::Command::new("xdg-open");
+    let mut cmd = Command::new("xdg-open");
     #[cfg(target_os = "macos")]
-    let mut cmd = std::process::Command::new("open");
+    let mut cmd = Command::new("open");
     #[cfg(target_os = "windows")]
     let mut cmd = {
         // `start` treats its first quoted arg as the window title, so pass an
         // empty title before the URL.
-        let mut c = std::process::Command::new("cmd");
+        let mut c = Command::new("cmd");
         c.args(["/C", "start", ""]);
         c
     };

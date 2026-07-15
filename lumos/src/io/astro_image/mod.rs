@@ -221,10 +221,6 @@ pub struct AstroImage {
 }
 
 impl AstroImage {
-    // ------------------------------------------------------------------------
-    // Constructors
-    // ------------------------------------------------------------------------
-
     /// Load an astronomical image from a file.
     ///
     /// Supported formats:
@@ -356,10 +352,6 @@ impl AstroImage {
         }
     }
 
-    // ------------------------------------------------------------------------
-    // Dimension accessors
-    // ------------------------------------------------------------------------
-
     pub fn width(&self) -> usize {
         self.dimensions.size.x
     }
@@ -392,10 +384,6 @@ impl AstroImage {
         self.dimensions.is_rgb()
     }
 
-    // ------------------------------------------------------------------------
-    // Channel access
-    // ------------------------------------------------------------------------
-
     /// Get channel as Buffer2 reference (0=L or R, 1=G, 2=B).
     pub fn channel(&self, c: usize) -> &Buffer2<f32> {
         self.pixels.channel(c)
@@ -405,10 +393,6 @@ impl AstroImage {
     pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
         self.pixels.channel_mut(c)
     }
-
-    // ------------------------------------------------------------------------
-    // Statistics
-    // ------------------------------------------------------------------------
 
     /// Calculate mean pixel value across all channels.
     pub fn mean(&self) -> f32 {
@@ -430,10 +414,6 @@ impl AstroImage {
             }
         }
     }
-
-    // ------------------------------------------------------------------------
-    // Conversion / Export
-    // ------------------------------------------------------------------------
 
     /// Save to file (PNG, JPEG, TIFF supported).
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), ImageError> {

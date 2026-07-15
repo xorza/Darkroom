@@ -514,8 +514,6 @@ impl Graph {
         }
     }
 
-    // === Construction helpers (seed default bindings) ===
-
     /// Add a func instance and seed its inputs' default const bindings.
     /// Returns the new node id.
     pub fn add_func_node(&mut self, func: &Func) -> NodeId {

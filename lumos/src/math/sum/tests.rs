@@ -2,10 +2,6 @@
 
 use super::*;
 
-// ---------------------------------------------------------------------------
-// sum_f32 tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_sum_f32() {
     let values: Vec<f32> = (1..=16).map(|x| x as f32).collect();
@@ -44,10 +40,6 @@ fn test_sum_f32_negative() {
     assert!((sum_f32(&values) - expected).abs() < 1e-4);
 }
 
-// ---------------------------------------------------------------------------
-// mean_f32 tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_mean_f32() {
     let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
@@ -58,10 +50,6 @@ fn test_mean_f32() {
 fn test_mean_f32_single() {
     assert!((mean_f32(&[42.0]) - 42.0).abs() < f32::EPSILON);
 }
-
-// ---------------------------------------------------------------------------
-// SIMD vs scalar consistency tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_simd_vs_scalar_sum() {
@@ -75,10 +63,6 @@ fn test_simd_vs_scalar_sum() {
         simd_result
     );
 }
-
-// ---------------------------------------------------------------------------
-// SIMD boundary tests (exact chunk sizes for SSE/AVX2)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_sum_f32_simd_boundaries() {
@@ -137,10 +121,6 @@ fn test_mean_f32_two_elements() {
     assert!((mean_f32(&values) - 5.0).abs() < f32::EPSILON);
 }
 
-// ---------------------------------------------------------------------------
-// weighted_mean_f32 tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_weighted_mean_uniform_weights() {
     let values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
@@ -192,10 +172,6 @@ fn test_weighted_mean_negative_values() {
     let result = weighted_mean_f32(&values, &weights);
     assert!(result.abs() < 1e-6);
 }
-
-// ---------------------------------------------------------------------------
-// Precision tests for compensated summation
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_sum_f32_precision_large_constant() {
@@ -370,10 +346,6 @@ fn test_weighted_mean_compensation_helps() {
         "weighted mean error {error:.6} (f64 ref: {f64_mean:.6}, got: {result})"
     );
 }
-
-// ---------------------------------------------------------------------------
-// SIMD vs scalar consistency for weighted_mean_f32
-// ---------------------------------------------------------------------------
 
 /// Compute f64 reference weighted mean.
 fn weighted_mean_f64_ref(values: &[f32], weights: &[f32]) -> f64 {

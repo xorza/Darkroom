@@ -1,11 +1,9 @@
 //! Tests for thin-plate spline distortion modeling.
 
+use std::f64::consts::E;
+
 use super::*;
 use glam::DVec2;
-
-// ============================================================================
-// Helpers
-// ============================================================================
 
 /// Standard 4-corner + center source grid on [0,100]x[0,100].
 fn square_source_5() -> Vec<DVec2> {
@@ -66,10 +64,6 @@ fn assert_control_points_exact(
     }
 }
 
-// ============================================================================
-// tps_kernel tests
-// ============================================================================
-
 /// Test TPS kernel U(r) = r^2 * ln(r) at key values with hand-computed results.
 #[test]
 fn test_tps_kernel_known_values() {
@@ -87,7 +81,7 @@ fn test_tps_kernel_known_values() {
     assert!((tps_kernel(1.0)).abs() < 1e-15);
 
     // U(e) = e^2 * ln(e) = e^2 * 1 = e^2 = 7.389056098...
-    let e = std::f64::consts::E;
+    let e = E;
     let expected = e * e; // 7.38905609893065
     assert!((tps_kernel(e) - expected).abs() < 1e-12);
 
@@ -118,10 +112,6 @@ fn test_tps_kernel_sign() {
     assert!(tps_kernel(2.0) > 0.0);
     assert!(tps_kernel(100.0) > 0.0);
 }
-
-// ============================================================================
-// compute_normalization tests
-// ============================================================================
 
 /// Test normalization with a simple square bounding box.
 #[test]
@@ -173,10 +163,6 @@ fn test_compute_normalization_coincident() {
     );
 }
 
-// ============================================================================
-// solve_linear_system tests
-// ============================================================================
-
 /// Test solve_linear_system with a simple 2x2 system.
 #[test]
 fn test_solve_linear_system_2x2() {
@@ -224,10 +210,6 @@ fn test_solve_linear_system_dimension_mismatch() {
     let b = vec![1.0, 2.0, 3.0]; // 3 elements but matrix is 2x2
     assert!(solve_linear_system(&a, &b).is_none());
 }
-
-// ============================================================================
-// ThinPlateSpline::fit rejection tests
-// ============================================================================
 
 /// Empty input returns None.
 #[test]
@@ -287,10 +269,6 @@ fn test_tps_fit_collinear_returns_none() {
     );
 }
 
-// ============================================================================
-// ThinPlateSpline::fit + transform: exact interpolation
-// ============================================================================
-
 /// With zero regularization, transformed source points must exactly match targets.
 #[test]
 fn test_tps_exact_interpolation() {
@@ -322,10 +300,6 @@ fn test_tps_three_points_exact() {
     assert_control_points_exact(&tps, &source, &target, 1e-6);
     assert_eq!(tps.num_control_points(), 3);
 }
-
-// ============================================================================
-// Affine transformations (identity, translation, scaling, rotation)
-// ============================================================================
 
 /// Identity: source == target. Control points and interior points map to themselves.
 #[test]
@@ -419,10 +393,6 @@ fn test_tps_rotation() {
     assert_dvec2_near(t, expected, 1e-3, "interior rotation");
 }
 
-// ============================================================================
-// Non-affine distortion
-// ============================================================================
-
 /// Barrel distortion on a dense grid: control points exact, midpoints close.
 #[test]
 fn test_tps_barrel_distortion() {
@@ -502,10 +472,6 @@ fn test_tps_large_deformation() {
         "Deformed energy ({energy_deformed}) should exceed identity ({energy_identity})"
     );
 }
-
-// ============================================================================
-// Regularization
-// ============================================================================
 
 /// Regularized TPS has lower bending energy but higher residuals than exact.
 #[test]
@@ -595,10 +561,6 @@ fn test_tps_regularization_monotonic_energy() {
     );
 }
 
-// ============================================================================
-// Bending energy properties
-// ============================================================================
-
 /// Identity, translation, and rotation are all affine => zero bending energy.
 /// Non-affine deformation produces nonzero bending energy.
 #[test]
@@ -652,10 +614,6 @@ fn test_tps_bending_energy_affine_vs_nonaffine() {
         "Non-affine should have positive bending energy: {energy_na}"
     );
 }
-
-// ============================================================================
-// Numerical stability
-// ============================================================================
 
 /// Large coordinate offset: normalization ensures correct interpolation.
 #[test]
@@ -756,10 +714,6 @@ fn test_tps_clustered_points() {
     );
 }
 
-// ============================================================================
-// transform_points (batch)
-// ============================================================================
-
 /// Batch transform must produce identical results to single transform, and
 /// both must produce correct absolute values.
 #[test]
@@ -814,10 +768,6 @@ fn test_tps_transform_points_empty() {
     assert!(result.is_empty());
 }
 
-// ============================================================================
-// compute_residuals
-// ============================================================================
-
 /// With exact interpolation (lambda=0), all residuals should be near zero.
 #[test]
 fn test_tps_compute_residuals_exact() {
@@ -839,10 +789,6 @@ fn test_tps_compute_residuals_exact() {
     }
 }
 
-// ============================================================================
-// num_control_points and control_points accessors
-// ============================================================================
-
 #[test]
 fn test_tps_accessors() {
     let source = square_source_5();
@@ -852,10 +798,6 @@ fn test_tps_accessors() {
     assert_eq!(tps.num_control_points(), 5);
     assert_eq!(tps.control_points().len(), 5);
 }
-
-// ============================================================================
-// Many control points
-// ============================================================================
 
 /// Dense grid with deterministic perturbation: verify exact interpolation.
 #[test]
@@ -906,10 +848,6 @@ fn test_tps_many_points() {
     );
     let _ = idx; // used for documentation
 }
-
-// ============================================================================
-// DistortionMap tests
-// ============================================================================
 
 /// DistortionMap from pure translation: grid dimensions, vectors, and statistics.
 #[test]
@@ -1037,10 +975,6 @@ fn test_distortion_map_non_uniform_gradient() {
     );
 }
 
-// ============================================================================
-// Parameter sensitivity
-// ============================================================================
-
 /// Different translations produce different transforms. Verifies that the
 /// TPS model actually uses the target points and doesn't produce a fixed output.
 #[test]
@@ -1105,10 +1039,6 @@ fn test_tps_extra_control_point_changes_behavior() {
         r5.y,
     );
 }
-
-// ============================================================================
-// TpsConfig
-// ============================================================================
 
 /// Default config has zero regularization.
 #[test]

@@ -12,8 +12,6 @@ use crate::{DataType, DynamicValue, StaticValue};
 use common::FloatExt;
 use tokio::sync::Mutex;
 
-// === Shared Helpers ===
-
 /// Names of the nodes that actually recomputed in the last run, in schedule order.
 /// `process_order` now schedules every reachable node (the planner is structural), so
 /// this keeps only the *runnable* ones (`wants_execute` — never a `MissingInputs` node)
@@ -51,8 +49,6 @@ fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: Binding) {
     let id = graph.by_name(node_name).unwrap().id;
     graph.set_input_binding(InputPort::new(id, idx), binding);
 }
-
-// === Disk RuntimeCache (engine integration) ===
 
 mod cache_persistence {
     use super::*;
@@ -1350,8 +1346,6 @@ mod cache_persistence {
     }
 }
 
-// === Wired resource references (Bind-delivered referent digests) ===
-
 mod resource_binds {
     use std::any::Any;
     use std::fmt;
@@ -1826,8 +1820,6 @@ mod resource_binds {
     }
 }
 
-// === Graph Structure ===
-
 mod graph_structure {
     use super::*;
 
@@ -1966,8 +1958,6 @@ mod graph_structure {
         assert_eq!(execution_graph.compiled.program.e_nodes.len(), 5);
     }
 }
-
-// === Missing Inputs ===
 
 mod missing_inputs {
     use super::*;
@@ -2111,8 +2101,6 @@ mod missing_inputs {
     }
 }
 
-// === Disabled Nodes ===
-
 mod disabled_nodes {
     use super::*;
 
@@ -2190,8 +2178,6 @@ mod disabled_nodes {
         Ok(())
     }
 }
-
-// === Const Bindings ===
 
 mod const_bindings {
     use super::*;
@@ -2380,8 +2366,6 @@ mod const_bindings {
         Ok(())
     }
 }
-
-// === Behavior (Pure / Impure) ===
 
 mod behavior {
     use super::*;
@@ -2763,8 +2747,6 @@ mod behavior {
     }
 }
 
-// === Composite (Subgraph) Caching ===
-
 mod composite_behavior {
     use super::*;
     use crate::graph::NodeKind;
@@ -2958,8 +2940,6 @@ mod composite_behavior {
     }
 }
 
-// === Cycle Detection ===
-
 mod cycle_detection {
     use super::*;
 
@@ -2987,8 +2967,6 @@ mod cycle_detection {
     }
 }
 
-// === Invalidation & State Reset ===
-
 mod invalidation {
     use super::*;
 
@@ -3015,8 +2993,6 @@ mod invalidation {
         Ok(())
     }
 }
-
-// === Full Execution ===
 
 mod execution {
     use super::*;
@@ -3255,8 +3231,6 @@ mod execution {
     }
 }
 
-// === Node Seeds (on-demand preview runs) ===
-
 mod node_seeds {
     use super::*;
     use std::sync::Mutex as StdMutex;
@@ -3415,8 +3389,6 @@ mod node_seeds {
         assert!(matches!(err, Error::NodeSeedNotFound { address: missing } if missing == address));
     }
 }
-
-// === Argument Values ===
 
 mod argument_values {
     use super::*;
@@ -3585,8 +3557,6 @@ mod argument_values {
     }
 }
 
-// === Error Propagation ===
-
 mod error_propagation {
     use super::*;
 
@@ -3656,8 +3626,6 @@ mod error_propagation {
     }
 }
 
-// === Execution Stats ===
-
 mod stats {
     use super::*;
 
@@ -3721,8 +3689,6 @@ mod stats {
         Ok(())
     }
 }
-
-// === Events ===
 
 mod events {
     use super::*;
@@ -4256,8 +4222,6 @@ mod output_demand {
     }
 }
 
-// === Topology Edge Cases ===
-
 mod topology {
     use super::*;
     use common::FloatExt;
@@ -4485,8 +4449,6 @@ mod topology {
         Ok(())
     }
 }
-
-// === Subgraph Flattening (Stage 2) ===
 
 mod subgraph {
     use super::*;
@@ -4782,8 +4744,6 @@ mod subgraph {
         let a_attr: Vec<_> = eg.compiled.flatten_map.attribution(a_id).collect();
         assert_eq!(a_attr, vec![a_id]);
     }
-
-    // === Stage 2b: events across boundaries ===
 
     /// Add a `ticker` func (one event, no I/O) usable as an interior or parent
     /// emitter; instantiate it by name with `fnode`.
@@ -5297,8 +5257,6 @@ mod mid_run_release {
         assert_eq!(run.live_after, 0, "both probe copies dropped by run end");
     }
 }
-
-// === Compile / library-evolution regressions ===
 
 mod compile_regressions {
     use super::*;

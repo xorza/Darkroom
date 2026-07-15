@@ -1,3 +1,5 @@
+use std::f32::consts::TAU;
+
 use super::{Denoise, Threshold};
 use crate::image_ops::op::OpError;
 use crate::image_ops::test_support::channel_plane as channel;
@@ -29,7 +31,7 @@ impl Rng {
     fn next_gaussian(&mut self) -> f32 {
         let u1 = self.next_unit();
         let u2 = self.next_unit();
-        (-2.0 * u1.ln()).sqrt() * (std::f32::consts::TAU * u2).cos()
+        (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
     }
 }
 

@@ -5,6 +5,8 @@
 //! `[0,1]` normalization, and NaN/Inf sanitization. The demosaic path is exercised by building a
 //! Bayer mosaic from a known colour and demosaicing it back.
 
+use std::fs::File;
+
 use crate::io::astro_image::fits::load_fits;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::testing::make_cfa;
@@ -23,7 +25,7 @@ fn identity_scaling() -> Scaling {
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `load_fits`.
 fn write_and_load(name: &str, image: &Image) -> AstroImage {
     let path = common::test_utils::test_output_path(&format!("fits_roundtrip/{name}.fits"));
-    let mut writer = FitsWriter::new(std::fs::File::create(&path).unwrap());
+    let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_image(image).unwrap();
     writer.into_inner().sync_all().unwrap();
     load_fits(&path).unwrap()

@@ -4,6 +4,8 @@
 //! to `Star` positions for testing registration algorithms, plus helpers to
 //! synthesize random fields.
 
+use std::f64::consts::FRAC_PI_2;
+
 use crate::{stacking::star_detection::star::Star, testing::TestRng};
 use glam::DVec2;
 
@@ -255,15 +257,7 @@ mod tests {
     fn test_transform_rotate_90_degrees() {
         // 100 px right of center → 100 px above center after a 90° rotation.
         let stars = positions_to_stars(&[DVec2::new(600.0, 500.0)], 3.0);
-        let rotated = transform_star_list(
-            &stars,
-            0.0,
-            0.0,
-            std::f64::consts::FRAC_PI_2,
-            1.0,
-            500.0,
-            500.0,
-        );
+        let rotated = transform_star_list(&stars, 0.0, 0.0, FRAC_PI_2, 1.0, 500.0, 500.0);
 
         assert!((rotated[0].pos.x - 500.0).abs() < 1e-10);
         assert!((rotated[0].pos.y - 600.0).abs() < 1e-10);

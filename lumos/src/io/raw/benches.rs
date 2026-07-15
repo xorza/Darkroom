@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Instant;
 
 use quickbench::quick_bench;
@@ -191,7 +192,7 @@ fn bench_markesteijn_quality_vs_libraw() {
 fn bench_bayer_rcd_demosaic() {
     init_tracing();
 
-    let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/raw_samples");
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/raw_samples");
     let test_files = ["sample_canon.cr2", "raw-12bit-GBRG.dng", "sample.dng"];
 
     let path = test_files
@@ -281,7 +282,7 @@ fn bench_bayer_rcd_demosaic() {
 fn bench_bayer_rcd_quality_vs_libraw() {
     init_tracing();
 
-    let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/raw_samples");
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/raw_samples");
     let test_files = ["sample_canon.cr2", "raw-12bit-GBRG.dng", "sample.dng"];
 
     let path = test_files

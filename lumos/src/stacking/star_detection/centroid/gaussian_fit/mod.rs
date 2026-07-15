@@ -24,12 +24,10 @@ mod simd_neon;
 // Coefficients from Cephes library (Stephen Moshier), public domain.
 // Max relative error < 2e-13.
 
-// P coefficients (numerator)
 pub(crate) const EXP_P0: f64 = 1.261_771_930_748_105_8e-4;
 pub(crate) const EXP_P1: f64 = 3.029_944_077_074_419_5e-2;
 pub(crate) const EXP_P2: f64 = 1.0;
 
-// Q coefficients (denominator)
 pub(crate) const EXP_Q0: f64 = 3.001_985_051_386_644_6e-6;
 pub(crate) const EXP_Q1: f64 = 2.524_483_403_496_841e-3;
 pub(crate) const EXP_Q2: f64 = 2.272_655_482_081_550_3e-1;

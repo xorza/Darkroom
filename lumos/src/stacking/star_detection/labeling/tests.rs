@@ -34,7 +34,6 @@ fn single_pixel() {
 fn horizontal_line() {
     // 5x3 mask with horizontal line in middle row
     // .....
-    // ###..
     // .....
     let mut mask_data = vec![false; 15];
     mask_data[1 * 5 + 0] = true;
@@ -139,7 +138,6 @@ fn u_shape_union_find() {
     // 5x3 mask forming a U shape:
     // #...#
     // #...#
-    // #####
     let mut mask_data = vec![false; 15];
     // Left column
     mask_data[0 * 5 + 0] = true;
@@ -1004,7 +1002,6 @@ mod eight_connectivity {
     #[test]
     fn adjacent_runs_diagonal() {
         // Test diagonal adjacency between runs
-        // ###....
         // ....###
         // With 4-conn: 2 components (runs don't overlap)
         // With 8-conn: 1 component (runs touch at diagonal: run1.end=3, run2.start=4)
@@ -1138,10 +1135,6 @@ mod eight_connectivity {
         assert_eq!(label_map_8.num_labels(), 1);
     }
 }
-
-// ============================================================================
-// Strong verification tests
-// ============================================================================
 
 /// Simple flood-fill reference implementation for ground truth comparison.
 /// This is intentionally naive and slow but obviously correct.
@@ -1733,7 +1726,6 @@ mod pixel_level {
         // U-shape that requires union-find merging:
         // #.#
         // #.#
-        // ###
         let mut mask = vec![false; 9];
         mask[0] = true;
         mask[2] = true;
@@ -1768,7 +1760,6 @@ mod pixel_level {
     fn exact_labels_cross_pattern() {
         // Cross pattern:
         // .#.
-        // ###
         // .#.
         let mut mask = vec![false; 9];
         mask[1] = true;

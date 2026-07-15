@@ -1,5 +1,7 @@
 //! Tests for Moffat profile fitting.
 
+use std::f64::consts::PI;
+
 use super::*;
 use crate::stacking::star_detection::centroid::lm_optimizer::LMConfig;
 use crate::stacking::star_detection::centroid::test_utils::{
@@ -109,10 +111,6 @@ fn test_moffat_fit_edge_position() {
     let result = fit_moffat_2d(&pixels_buf, Vec2::new(2.0, 10.0), 8, 0.1, None, &config);
     assert!(result.is_none());
 }
-
-// ============================================================================
-// Noise and difficult data tests
-// ============================================================================
 
 #[test]
 fn test_moffat_fit_with_gaussian_noise() {
@@ -322,10 +320,6 @@ fn test_moffat_fit_wrong_beta_still_finds_centroid() {
     );
 }
 
-// ============================================================================
-// Amplitude and parameter edge cases
-// ============================================================================
-
 #[test]
 fn test_moffat_fit_very_high_amplitude() {
     let width = 21;
@@ -487,10 +481,6 @@ fn test_moffat_fit_various_beta_values() {
     }
 }
 
-// ============================================================================
-// Convergence and iteration tests
-// ============================================================================
-
 #[test]
 fn test_moffat_fit_converges_within_max_iterations() {
     let width = 21;
@@ -593,10 +583,6 @@ fn test_moffat_fit_uniform_data_returns_result() {
     assert!(result.debug.amplitude.is_finite());
 }
 
-// ============================================================================
-// FWHM computation tests
-// ============================================================================
-
 #[test]
 fn test_moffat_fwhm_computed_correctly() {
     let width = 21;
@@ -655,10 +641,6 @@ fn test_fwhm_decreases_with_beta() {
     assert!(fwhm_mid_beta < fwhm_low_beta);
 }
 
-// ============================================================================
-// PowStrategy and fast_pow_neg tests
-// ============================================================================
-
 #[test]
 fn test_select_pow_strategy_integers() {
     for beta in [1.0, 2.0, 3.0, 4.0, 5.0] {
@@ -683,7 +665,7 @@ fn test_select_pow_strategy_half_integers() {
 
 #[test]
 fn test_select_pow_strategy_general() {
-    for beta in [2.3, 3.7, 1.1, std::f64::consts::PI] {
+    for beta in [2.3, 3.7, 1.1, PI] {
         let strategy = select_pow_strategy(beta);
         assert!(
             matches!(strategy, PowStrategy::General { .. }),
@@ -756,10 +738,6 @@ fn test_int_pow_correctness() {
     assert!((int_pow(u, 10) - u.powi(10)).abs() < 1e-6);
 }
 
-// ============================================================================
-// evaluate_and_jacobian fused method tests
-// ============================================================================
-
 #[test]
 fn test_moffat_fixed_beta_evaluate_and_jacobian_consistency() {
     let params_list: &[[f64; 5]] = &[
@@ -793,10 +771,6 @@ fn test_moffat_fixed_beta_evaluate_and_jacobian_consistency() {
         }
     }
 }
-
-// ============================================================================
-// SIMD batch method correctness tests
-// ============================================================================
 
 /// Build stamp data arrays (x, y, z) for a Moffat profile at given params.
 fn make_stamp_data(size: usize, params: &[f64; 5], beta: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>) {

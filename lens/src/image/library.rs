@@ -21,7 +21,6 @@ use scenarium::{Library, TypeEntry};
 pub fn image_library() -> Library {
     let mut library = Library::default();
 
-    // brightness_contrast
     library.add(
         Func::new(
             "b8c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
@@ -70,7 +69,6 @@ pub fn image_library() -> Library {
         )),
     );
 
-    // load_image
     library.add(
         Func::new("a4d9bf87-9d98-44f1-a162-7483c298be3d", "Load Image")
             .description("Loads an image from a file on disk.")
@@ -96,7 +94,6 @@ pub fn image_library() -> Library {
             })),
     );
 
-    // save_image
     library.add(
         Func::new("0c17bcbe-d757-43be-b184-27b429e8b434", "Save Image")
             .description("Writes an image to a file on disk.")
@@ -144,7 +141,6 @@ pub fn image_library() -> Library {
             })),
     );
 
-    // convert
     library.add(
         Func::new("80aa1ee7-3b75-4200-b480-b9db913bd6eb", "Convert")
             .description("Converts an image to a different color format.")
@@ -207,7 +203,6 @@ pub fn image_library() -> Library {
             )),
     );
 
-    // blend
     library.add(
         Func::new("975cc74b-8412-4293-b2cb-ef8d41fdd9b3", "Blend")
             .description("Blends two images using the selected blend mode.")
@@ -263,7 +258,6 @@ pub fn image_library() -> Library {
             )),
     );
 
-    // transform
     library.add(
         Func::new("d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a", "Transform")
             .description("Applies scale, rotation, and translation to an image.")

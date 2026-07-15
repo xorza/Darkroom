@@ -1,3 +1,5 @@
+use std::io::{Error, ErrorKind};
+
 use imaginarium::Buffer2;
 use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig,
@@ -86,7 +88,7 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
 
     let storage_error = FrameStoreError::CreateDirectory {
         path: ".tmp/unwritable".into(),
-        source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        source: Error::new(ErrorKind::PermissionDenied, "denied"),
     };
     let operation_error: StackError = storage_error.into();
     assert_eq!(

@@ -1,6 +1,11 @@
-use super::*;
 use crate::core::script::{ScriptExecutor, ScriptMessage, ScriptResult};
+use std::io::ErrorKind;
 use std::net::Ipv4Addr;
+use std::time::{Duration, Instant};
+
+use tokio::time;
+
+use super::*;
 
 /// Port 0 on the loopback interface — the OS picks a free port.
 fn loopback_ephemeral() -> SocketAddr {
@@ -64,7 +69,7 @@ async fn no_auth_accepts_script_and_dual_sinks_print() {
     assert_eq!(reply.error, None);
 
     // Status sink: Session gets a tagged Print action.
-    let action = tokio::time::timeout(std::time::Duration::from_secs(2), action_rx.recv())
+    let action = time::timeout(Duration::from_secs(2), action_rx.recv())
         .await
         .expect("timed out waiting for ScriptMessage::Print")
         .expect("action channel closed");
@@ -183,7 +188,7 @@ async fn auth_rejects_wrong_token() {
     let mut buf = [0u8; 1];
     assert_eq!(s.read(&mut buf).await.unwrap(), 0, "expected clean EOF");
     let err = s.read_u32().await.unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
 }
 
 /// A `u32` length above `MAX_FRAME_BYTES` is rejected before any
@@ -271,7 +276,6 @@ async fn start_writes_discovery_file_atomically() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-// ----- Timeout tests -----
 //
 // Every timeout test sets *only* the field it probes to a short
 // value; the other three stay long (10s) so the test pins down
@@ -303,7 +307,7 @@ async fn idle_connection_closes_after_timeout() {
     let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
     let mut s = TcpStream::connect(addr).await.unwrap();
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let mut buf = [0u8; 4];
     let n = s.read(&mut buf).await.unwrap_or(0);
     assert_eq!(n, 0, "expected EOF, got {n} bytes");
@@ -333,7 +337,7 @@ async fn auth_timeout_closes_silent_client() {
     let (addr, _executor, _rx) = spawn_executor_with_transport(t).await;
 
     let mut s = TcpStream::connect(addr).await.unwrap();
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let mut buf = [0u8; 4];
     let n = s.read(&mut buf).await.unwrap_or(0);
     assert_eq!(n, 0);
@@ -358,7 +362,7 @@ async fn partial_frame_closes_after_frame_timeout() {
     let mut s = TcpStream::connect(addr).await.unwrap();
     // Send 16B nil session id, then stall (no length-prefix, no src).
     s.write_u128(0).await.unwrap();
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let mut buf = [0u8; 4];
     let n = s.read(&mut buf).await.unwrap_or(0);
     assert_eq!(n, 0);

@@ -82,6 +82,8 @@ impl MagsacScorer {
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::E;
+
     use super::*;
 
     const TOL: f64 = 1e-10;
@@ -94,7 +96,7 @@ mod tests {
         assert_eq!(gamma_k2(-100.0), 0.0);
 
         // γ(1, 1) = 1 - exp(-1) = 1 - 0.367879441... = 0.632120558...
-        let expected_1 = 1.0 - 1.0_f64 / std::f64::consts::E;
+        let expected_1 = 1.0 - 1.0_f64 / E;
         assert!((gamma_k2(1.0) - expected_1).abs() < TOL);
 
         // γ(1, 2) = 1 - exp(-2) = 1 - 0.135335283... = 0.864664716...

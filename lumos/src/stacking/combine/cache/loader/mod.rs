@@ -1,5 +1,6 @@
 //! Tier selection, frame loading, and persistent cache sidecars.
 
+use std::io::Error as IoError;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
@@ -120,7 +121,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
 fn load_image<I: StackableImage>(path: &Path) -> Result<I, Error> {
     I::load(path).map_err(|source| Error::ImageLoad {
         path: path.to_path_buf(),
-        source: std::io::Error::other(source),
+        source: IoError::other(source),
     })
 }
 

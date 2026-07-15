@@ -1,14 +1,12 @@
 //! Tests for Gaussian convolution.
 
+use std::f32::consts::{FRAC_PI_2, PI};
+
 use super::*;
 use crate::{
     math::FWHM_TO_SIGMA, stacking::star_detection::convolution::elliptical_gaussian_kernel_2d,
 };
 use imaginarium::Buffer2;
-
-// ============================================================================
-// Kernel generation tests
-// ============================================================================
 
 #[test]
 fn test_gaussian_kernel_1d_normalization() {
@@ -76,10 +74,6 @@ fn test_gaussian_kernel_1d_zero_sigma_panics() {
 fn test_gaussian_kernel_1d_negative_sigma_panics() {
     gaussian_kernel_1d(-1.0);
 }
-
-// ============================================================================
-// Convolution tests
-// ============================================================================
 
 #[test]
 fn test_gaussian_convolve_uniform_image() {
@@ -312,10 +306,6 @@ fn test_gaussian_convolve_small_image() {
     }
 }
 
-// ============================================================================
-// Matched filter tests
-// ============================================================================
-
 #[test]
 fn test_matched_filter_subtracts_background() {
     let width = 32;
@@ -505,7 +495,7 @@ fn test_matched_filter_noise_normalization() {
         let u1: f32 = rng.random_range(1e-10f32..1.0);
         let u2: f32 = rng.random_range(0.0f32..1.0);
         let r = (-2.0 * u1.ln()).sqrt() * noise_sigma;
-        let theta = 2.0 * std::f32::consts::PI * u2;
+        let theta = 2.0 * PI * u2;
         chunk[0] += r * theta.cos();
         if chunk.len() > 1 {
             chunk[1] += r * theta.sin();
@@ -559,10 +549,6 @@ fn test_matched_filter_noise_normalization() {
     );
 }
 
-// ============================================================================
-// Performance-related tests
-// ============================================================================
-
 #[test]
 fn test_separable_vs_direct_equivalence() {
     // For small images, compare separable to direct implementation
@@ -608,10 +594,6 @@ fn test_large_image_convolution() {
     assert_eq!(result.len(), width * height);
     assert!(result[0].is_finite());
 }
-
-// ============================================================================
-// Elliptical convolution tests
-// ============================================================================
 
 #[test]
 fn test_elliptical_kernel_normalization() {
@@ -785,14 +767,7 @@ fn test_elliptical_convolve_rotation_invariance() {
     let mut temp = Buffer2::new_default(width, height);
 
     elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result_0, &mut temp);
-    elliptical_gaussian_convolve(
-        &pixels,
-        2.0,
-        0.5,
-        std::f32::consts::FRAC_PI_2,
-        &mut result_90,
-        &mut temp,
-    );
+    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, FRAC_PI_2, &mut result_90, &mut temp);
 
     let sum_0: f32 = result_0.iter().sum();
     let sum_90: f32 = result_90.iter().sum();
@@ -867,10 +842,6 @@ fn test_elliptical_convolve_various_axis_ratios() {
         );
     }
 }
-
-// ============================================================================
-// Numerical precision tests
-// ============================================================================
 
 #[test]
 fn test_gaussian_kernel_known_values() {

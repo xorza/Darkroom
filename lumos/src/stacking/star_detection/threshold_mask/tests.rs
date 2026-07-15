@@ -13,10 +13,6 @@ use crate::stacking::star_detection::threshold_mask::{
 use common::BitBuffer2;
 use imaginarium::Buffer2;
 
-// ============================================================================
-// Test helpers
-// ============================================================================
-
 /// Helper to create threshold mask for tests using packed version
 fn create_threshold_mask_test(
     pixels: &[f32],
@@ -74,10 +70,6 @@ fn scalar_threshold_filtered(pixels: &[f32], noise: &[f32], sigma: f32) -> Vec<b
         .collect()
 }
 
-// ============================================================================
-// Basic threshold tests
-// ============================================================================
-
 #[test]
 fn test_threshold_mask_above() {
     let width = 10;
@@ -126,10 +118,6 @@ fn test_various_lengths() {
         assert!(mask.iter().all(|v| v), "failed for len={}", len);
     }
 }
-
-// ============================================================================
-// Edge cases: special values, boundaries
-// ============================================================================
 
 #[test]
 fn test_all_below() {
@@ -255,10 +243,6 @@ fn test_high_noise_region() {
     );
 }
 
-// ============================================================================
-// SIMD validation: remainder handling, alignment
-// ============================================================================
-
 #[test]
 fn test_remainder_handling() {
     // Test that remainder handling works correctly for all possible remainder sizes
@@ -286,10 +270,6 @@ fn test_remainder_handling() {
         }
     }
 }
-
-// ============================================================================
-// Filtered threshold tests
-// ============================================================================
 
 #[test]
 fn test_filtered_basic() {
@@ -489,10 +469,6 @@ fn test_negative_noise_clamped() {
     assert!(!mask.get(1));
 }
 
-// ============================================================================
-// SIMD vs Scalar consistency tests
-// ============================================================================
-
 #[test]
 fn test_packed_matches_scalar() {
     let width = 100;
@@ -587,10 +563,6 @@ fn test_filtered_matches_scalar() {
         );
     }
 }
-
-// ============================================================================
-// Multi-row tests: 2D patterns, row boundaries
-// ============================================================================
 
 #[test]
 fn test_multirow_checkerboard_pattern() {
@@ -759,10 +731,6 @@ fn test_row_boundary_non_aligned() {
     assert!(!mask.get(68));
     assert!(!mask.get(71));
 }
-
-// ============================================================================
-// Filtered threshold: additional coverage
-// ============================================================================
 
 #[test]
 fn test_filtered_remainder_handling() {

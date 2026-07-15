@@ -4,7 +4,6 @@ use aperture::{
 
 use crate::core::theme_pref::ThemeChoice;
 
-// ── shared dimensions ────────────────────────────────────────────────
 // Layout dimensions don't change between dark and light — they're factored
 // out so both palettes pull the same numbers and a tweak hits both at once.
 
@@ -33,10 +32,8 @@ const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// stretching the node out.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 const NEW_NODE_POPUP_MAX_HEIGHT: f32 = 400.0;
-// aperture sub-theme tweak (see `aperture_theme_for`)
 const MENU_FONT_SIZE: f32 = 13.0;
 
-// ── colour palettes ──────────────────────────────────────────────────
 // One named-const mod per built-in preset, so any builder (`Theme::dark`,
 // `StaticValueEditorTheme::dark`, future per-widget theme helpers) can
 // reach a swatch by name instead of inlining a hex literal. The two
@@ -53,16 +50,13 @@ pub(crate) mod dark {
     use super::{HoverColor, TypeColors};
     use aperture::Color;
 
-    // canvas
     pub(crate) const CANVAS_BG: Color = Color::hex(0x1a1a1a);
     pub(crate) const SELECTION_RECT: Color = Color::hex(0x9adbfb);
     pub(crate) const CANVAS_DOT: Color = Color::hex(0x363636);
 
-    // connections + breaker
     pub(crate) const CONNECTION_BROKEN: Color = Color::hex(0xff5e44);
     pub(crate) const BREAKER_STROKE: Color = Color::hex(0xff5e44);
 
-    // node chrome
     pub(crate) const NODE_FILL: Color = Color::hex(0x343434);
     // Transparent at rest: the ambient node shadow carries the edge, and the
     // stroke slot is reserved for the selection / breaker / missing colors
@@ -83,7 +77,6 @@ pub(crate) mod dark {
     // label on the band.
     pub(crate) const TAB_INACTIVE: Color = Color::hex(0x2e2e2e);
 
-    // header badges
     pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x9adbfb);
     pub(crate) const BADGE_SINK: Color = Color::hex(0xff5e44);
     // cache (persist-to-disk) chip — palette `warning` yellow.
@@ -93,7 +86,6 @@ pub(crate) mod dark {
     // marker reads at a glance.
     pub(crate) const BADGE_IMPURE: Color = Color::hex(0xc56cff);
 
-    // execution-status glow
     pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0xdaff58);
     pub(crate) const EXEC_CACHED_GLOW: Color = Color::hex(0x9adbfb);
     pub(crate) const EXEC_RUNNING_GLOW: Color = Color::hex(0xd4bfff);
@@ -156,12 +148,10 @@ pub(crate) mod light {
     use super::{HoverColor, TypeColors};
     use aperture::Color;
 
-    // canvas
     pub(crate) const CANVAS_BG: Color = Color::hex(0xfcfcfc);
     pub(crate) const SELECTION_RECT: Color = Color::hex(0x3b9ee5);
     pub(crate) const CANVAS_DOT: Color = Color::hex(0xcfd1d2);
 
-    // connections + breaker
     pub(crate) const CONNECTION_BROKEN: Color = Color::hex(0xef7271);
     pub(crate) const BREAKER_STROKE: Color = Color::hex(0xef7271);
 
@@ -367,7 +357,6 @@ pub struct Theme {
     /// behaviour the original `Theme::dark` / `light` had.
     pub preset: ThemePreset,
 
-    // ── layout dimensions ────────────────────────────────────────
     /// Dotted backdrop grid: world-space base spacing between dots, and
     /// on-screen dot radius (px). Spacing is wrapped by a power-of-2
     /// multiplier as the user zooms so the field never collapses into
@@ -409,7 +398,6 @@ pub struct Theme {
     /// overflow when the function list exceeds the cap.
     pub new_node_popup_max_height: f32,
 
-    // ── tables ───────────────────────────────────────────────────
     /// Every chrome colour — the palette half of the theme, serialized as
     /// the `[colors]` sub-table.
     pub colors: PaletteColors,

@@ -53,10 +53,6 @@ pub fn compute_hessian_gradient<const N: usize>(
     (hessian, gradient)
 }
 
-// ============================================================================
-// Stamp generators
-// ============================================================================
-
 /// Generate a circular Gaussian star stamp.
 pub fn make_gaussian_star(
     width: usize,

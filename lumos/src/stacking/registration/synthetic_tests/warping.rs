@@ -171,10 +171,6 @@ fn test_warp_identity_all_methods() {
     }
 }
 
-// ============================================================================
-// Translation tests
-// ============================================================================
-
 #[test]
 fn test_warp_translation_roundtrip() {
     assert_roundtrip(
@@ -189,10 +185,6 @@ fn test_warp_translation_roundtrip() {
         ],
     );
 }
-
-// ============================================================================
-// Euclidean (rotation) tests
-// ============================================================================
 
 #[test]
 fn test_warp_euclidean_roundtrip() {
@@ -209,10 +201,6 @@ fn test_warp_euclidean_roundtrip() {
     );
 }
 
-// ============================================================================
-// Similarity (rotation + scale) tests
-// ============================================================================
-
 #[test]
 fn test_warp_similarity_roundtrip() {
     assert_roundtrip(
@@ -227,10 +215,6 @@ fn test_warp_similarity_roundtrip() {
         ],
     );
 }
-
-// ============================================================================
-// Affine tests
-// ============================================================================
 
 #[test]
 fn test_warp_affine_roundtrip() {
@@ -260,10 +244,6 @@ fn test_warp_affine_roundtrip() {
     );
 }
 
-// ============================================================================
-// Homography tests
-// ============================================================================
-
 #[test]
 fn test_warp_homography_roundtrip() {
     // Mild perspective distortion
@@ -282,10 +262,6 @@ fn test_warp_homography_roundtrip() {
         ],
     );
 }
-
-// ============================================================================
-// End-to-end: detect, register, warp, compare
-// ============================================================================
 
 #[test]
 fn test_warp_with_detected_transform() {
@@ -375,10 +351,6 @@ fn test_warp_with_detected_transform() {
     assert!(ncc > 0.90, "End-to-end alignment NCC {} < 0.90", ncc);
 }
 
-// ============================================================================
-// Quality comparison between methods
-// ============================================================================
-
 #[test]
 fn test_interpolation_quality_ordering() {
     let ref_buf = star_field(256, 256, 30, 77777).image.channel(0).clone();
@@ -444,10 +416,6 @@ fn test_interpolation_quality_ordering() {
         bilinear_psnr
     );
 }
-
-// ============================================================================
-// Multi-channel image warping tests
-// ============================================================================
 
 #[test]
 fn test_warp_grayscale_translation() {
@@ -590,10 +558,6 @@ fn test_warp_preserves_output_metadata() {
     assert_eq!(warped.metadata.exposure_time, Some(120.0));
 }
 
-// ============================================================================
-// Helper functions
-// ============================================================================
-
 /// Extract central region of two images for comparison (avoids border artifacts).
 fn extract_central_region(
     a: &[f32],
@@ -618,10 +582,6 @@ fn extract_central_region(
 
     (central_a, central_b)
 }
-
-// ============================================================================
-// SIP distortion correction warping tests
-// ============================================================================
 
 /// Test that warp with SIP correction produces different (corrected) output
 /// compared to warp without SIP.

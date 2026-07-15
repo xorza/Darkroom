@@ -2,6 +2,8 @@
 //!
 //! Run with: `cargo test -p lumos --features real-data rho_opiuchi -- --ignored --nocapture`
 
+use std::time::Instant;
+
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
@@ -41,7 +43,7 @@ fn test_detect_rho_opiuchi() {
 
     let mut detector = StarDetector::from_config(Config::precise_ground()).unwrap();
 
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let result = detector.detect(&astro_image);
     let elapsed = start.elapsed();
 

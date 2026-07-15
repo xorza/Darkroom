@@ -1,12 +1,22 @@
 //! Testing utilities for lumos.
 
+use std::f32::consts::PI;
+use std::path::PathBuf;
+
+use common::test_utils::test_output_path;
+use imaginarium::Buffer2;
+use imaginarium::{ColorFormat, Image};
+
+use crate::AstroImage;
+use crate::io::astro_image::AstroImageMetadata;
+use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::stacking::star_detection::background::{self, estimate::BackgroundEstimate};
+use crate::stacking::star_detection::buffer_pool::BufferPool;
+use crate::stacking::star_detection::config::Config;
+
 pub mod mem_probe;
 pub mod real_data;
 pub mod synthetic;
-
-// ============================================================================
-// Deterministic test RNG
-// ============================================================================
 
 /// Deterministic LCG random number generator for reproducible test data.
 ///
@@ -49,21 +59,9 @@ impl TestRng {
     pub fn next_gaussian_f32(&mut self) -> f32 {
         let u1 = self.next_f32().max(1e-10);
         let u2 = self.next_f32();
-        (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
+        (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos()
     }
 }
-
-use std::path::PathBuf;
-
-use crate::AstroImage;
-use crate::io::astro_image::AstroImageMetadata;
-use crate::io::astro_image::cfa::{CfaImage, CfaType};
-use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::buffer_pool::BufferPool;
-use crate::stacking::star_detection::config::Config;
-use common::test_utils::test_output_path;
-use imaginarium::Buffer2;
-use imaginarium::{ColorFormat, Image};
 
 /// Convenience function to estimate background for tests.
 ///
@@ -71,7 +69,7 @@ use imaginarium::{ColorFormat, Image};
 /// Creates a temporary buffer pool internally.
 pub(crate) fn estimate_background(pixels: &Buffer2<f32>, config: &Config) -> BackgroundEstimate {
     let mut pool = BufferPool::new(pixels.width(), pixels.height());
-    crate::stacking::star_detection::background::estimate_background(pixels, config, &mut pool)
+    background::estimate_background(pixels, config, &mut pool)
 }
 
 /// Create a CfaImage from raw pixel data and CFA type.

@@ -38,8 +38,6 @@ fn new_uninit_zero_dimension_panics() {
     TileGrid::new_uninit(0, 100, 64);
 }
 
-// --- SExtractor sky estimator ---
-
 #[test]
 fn skewed_tile_sky_sits_below_median() {
     // One 32×32 tile: a symmetric ramp 0.1 + i·1e-5 (i = 0..1024) whose top 200 values get
@@ -65,8 +63,6 @@ fn skewed_tile_sky_sits_below_median() {
         "sky must sit below the median-only estimate (≈0.10512), got {sky}"
     );
 }
-
-// --- Construction ---
 
 #[test]
 fn test_tile_grid_dimensions() {
@@ -99,8 +95,6 @@ fn test_tile_grid_uniform_image() {
         }
     }
 }
-
-// --- Center computation ---
 
 #[test]
 fn test_center_x_full_tiles() {
@@ -139,8 +133,6 @@ fn test_center_y_partial_tile() {
 
     assert!((grid.center_y(3) - 98.0).abs() < 0.01);
 }
-
-// --- find_lower_tile_y ---
 
 #[test]
 fn test_find_lower_tile_y_exact_center() {
@@ -191,8 +183,6 @@ fn test_find_lower_tile_y_single_tile() {
     assert_eq!(grid.find_lower_tile_y(16.0), 0);
     assert_eq!(grid.find_lower_tile_y(100.0), 0);
 }
-
-// --- Mask handling ---
 
 #[test]
 fn test_tile_grid_with_mask_excludes_masked() {
@@ -293,8 +283,6 @@ fn test_no_mask_same_as_none() {
     }
 }
 
-// --- Median filter ---
-
 #[test]
 fn test_median_filter_uniform_unchanged() {
     let pixels = create_uniform_image(128, 128, 0.4);
@@ -338,8 +326,6 @@ fn test_median_filter_skipped_for_small_grid() {
     let stats = grid.get(0, 0);
     assert!((stats.sky - 0.5).abs() < 0.01);
 }
-
-// --- Edge cases ---
 
 #[test]
 fn test_single_tile_image() {
@@ -439,8 +425,6 @@ fn test_tile_grid_very_tall_image() {
     }
 }
 
-// --- Helper function tests ---
-
 #[test]
 fn test_tile_with_outliers_sigma_clipped() {
     let width = 64;
@@ -511,9 +495,6 @@ fn test_find_lower_tile_y_negative_pos() {
     // Negative position should return 0
     assert_eq!(grid.find_lower_tile_y(-10.0), 0);
 }
-
-// --- Algorithm correctness tests ---
-// These verify the statistical algorithms produce mathematically correct results
 
 #[test]
 fn test_median_computation_correctness() {
@@ -768,8 +749,6 @@ fn test_mask_excludes_sources_correctly() {
         br.sky
     );
 }
-
-// --- compute_y_spline_derivatives ---
 
 #[test]
 fn test_y_spline_derivatives_uniform_data() {

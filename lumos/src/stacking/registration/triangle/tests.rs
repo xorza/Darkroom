@@ -27,10 +27,6 @@ fn vote_matrix_from_entries(
     vm
 }
 
-// ============================================================================
-// Triangle::from_positions tests
-// ============================================================================
-
 #[test]
 fn test_triangle_from_positions_3_4_5() {
     // 3-4-5 right triangle:
@@ -273,10 +269,6 @@ fn test_triangle_side_ratio_filter_boundary() {
     assert!(tri_under.is_some());
 }
 
-// ============================================================================
-// Triangle::is_similar tests
-// ============================================================================
-
 #[test]
 fn test_is_similar_identical_triangles() {
     // 3-4-5 at two scales: ratios both (0.6, 0.8) → difference = (0, 0) < any tolerance
@@ -373,10 +365,6 @@ fn test_is_similar_with_exact_tolerance_boundary() {
     assert!(tri1.is_similar(&tri2, 0.5));
 }
 
-// ============================================================================
-// Vertex ordering tests
-// ============================================================================
-
 #[test]
 fn test_vertex_ordering_by_geometric_role() {
     // 3-4-5 right triangle with arbitrary indices [10, 20, 30]:
@@ -437,10 +425,6 @@ fn test_vertex_ordering_deterministic_across_input_orders() {
         assert!((tri.ratios.1 - reference.ratios.1).abs() < 1e-10);
     }
 }
-
-// ============================================================================
-// form_triangles_from_neighbors tests
-// ============================================================================
 
 #[test]
 fn test_form_triangles_from_neighbors_single_triangle() {
@@ -557,10 +541,6 @@ fn test_form_triangles_full_k_equals_brute_force() {
     assert_eq!(triangles.len(), brute_force_count);
 }
 
-// ============================================================================
-// form_triangles_kdtree tests
-// ============================================================================
-
 #[test]
 fn test_form_triangles_kdtree_empty() {
     let positions: Vec<DVec2> = vec![];
@@ -643,10 +623,6 @@ fn test_form_triangles_kdtree_ratios_in_valid_range() {
         );
     }
 }
-
-// ============================================================================
-// Invariant tree tests
-// ============================================================================
 
 #[test]
 fn test_invariant_tree_empty() {
@@ -781,10 +757,6 @@ fn test_invariant_search_clears_buffer() {
     );
 }
 
-// ============================================================================
-// VoteMatrix tests
-// ============================================================================
-
 #[test]
 fn test_vote_matrix_dense_mode() {
     // 10*10 = 100 < 250,000 → dense
@@ -905,10 +877,6 @@ fn test_vote_matrix_dense_saturating_add() {
     assert_eq!(votes, 1000);
 }
 
-// ============================================================================
-// resolve_matches tests
-// ============================================================================
-
 #[test]
 fn test_resolve_matches_one_to_one() {
     // 3 non-conflicting matches sorted by descending votes
@@ -1020,10 +988,6 @@ fn test_resolve_matches_single_entry_confidence_is_1() {
     assert_eq!(matches[0].votes, 10);
     assert!((matches[0].confidence - 1.0).abs() < 1e-10);
 }
-
-// ============================================================================
-// vote_for_correspondences tests
-// ============================================================================
 
 #[test]
 fn test_vote_for_correspondences_identical_triangles() {
@@ -1162,10 +1126,6 @@ fn test_vote_for_correspondences_orientation_filtering() {
         "Orientation filtering should reduce votes: with={total_with}, without={total_without}"
     );
 }
-
-// ============================================================================
-// match_triangles integration tests
-// ============================================================================
 
 #[test]
 fn test_match_triangles_too_few_points() {

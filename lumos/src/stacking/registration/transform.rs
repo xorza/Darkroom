@@ -506,10 +506,6 @@ mod tests {
         assert!(approx_eq(p.y, 0.0));
     }
 
-    // ========================================================================
-    // WarpTransform tests
-    // ========================================================================
-
     #[test]
     fn test_warp_transform_new() {
         let t = Transform::translation(DVec2::new(10.0, 5.0));
@@ -610,10 +606,6 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    // TransformType additional tests
-    // ========================================================================
-
     #[test]
     fn test_transform_type_degrees_of_freedom() {
         assert_eq!(TransformType::Translation.degrees_of_freedom(), 2);
@@ -638,10 +630,6 @@ mod tests {
     fn test_auto_degrees_of_freedom_panics() {
         TransformType::Auto.degrees_of_freedom();
     }
-
-    // ========================================================================
-    // Transform constructor and method tests
-    // ========================================================================
 
     #[test]
     fn test_default_is_identity() {

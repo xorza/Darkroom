@@ -7,6 +7,8 @@
 //!
 //! Reference: Bertin & Arnouts (1996), A&AS 117, 393
 
+use std::cmp::Ordering;
+
 use arrayvec::ArrayVec;
 
 use smallvec::SmallVec;
@@ -1003,11 +1005,7 @@ unsafe fn try_visit_idx(idx: usize, grid: &mut PixelGrid, queue: &mut Vec<u32>) 
 fn find_region_peak(region: &[Pixel]) -> Pixel {
     region
         .iter()
-        .max_by(|a, b| {
-            a.value
-                .partial_cmp(&b.value)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        .max_by(|a, b| a.value.partial_cmp(&b.value).unwrap_or(Ordering::Equal))
         .copied()
         .expect("region must not be empty")
 }

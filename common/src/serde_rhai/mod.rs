@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{self, Write};
 use std::sync::OnceLock;
 
 use rhai::{Dynamic, Engine};
@@ -82,8 +82,8 @@ fn write_value<W: Write>(
     // nested in-memory value errors instead of overflowing the stack.
     const MAX_DEPTH: usize = 128;
     if indent > MAX_DEPTH {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
             "serde_rhai: value nesting exceeds maximum depth",
         ));
     }

@@ -4,6 +4,8 @@
 //! and `batch_compute_chi2`. Uses a fast polynomial `exp()` approximation
 //! (Cephes-derived, ~1e-13 relative accuracy) fully vectorized in NEON.
 
+use std::f64::consts::LOG2_E;
+
 use crate::stacking::star_detection::centroid::gaussian_fit::{
     EXP_P0, EXP_P1, EXP_P2, EXP_Q0, EXP_Q1, EXP_Q2, EXP_Q3, Gaussian2D, LN2_HI, LN2_LO,
 };
@@ -12,7 +14,7 @@ use crate::stacking::star_detection::centroid::lm_optimizer::{
 };
 use std::arch::aarch64::*;
 
-const LOG2E: f64 = std::f64::consts::LOG2_E;
+const LOG2E: f64 = LOG2_E;
 
 /// Fast vectorized exp() for 2 f64 lanes using Cephes polynomial approximation.
 #[inline]
@@ -335,36 +337,16 @@ pub(crate) unsafe fn batch_compute_chi2_neon(
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::PI;
+
     use super::*;
 
     /// Test that simd_exp_fast produces results close to std exp().
     #[test]
     fn test_simd_exp_fast_accuracy() {
         let test_values: &[f64] = &[
-            0.0,
-            1.0,
-            -1.0,
-            0.5,
-            -0.5,
-            2.0,
-            -2.0,
-            5.0,
-            -5.0,
-            10.0,
-            -10.0,
-            -50.0,
-            -100.0,
-            -500.0,
-            -700.0,
-            0.001,
-            -0.001,
-            0.1,
-            -0.1,
-            std::f64::consts::PI,
-            -std::f64::consts::PI,
-            100.0,
-            500.0,
-            700.0,
+            0.0, 1.0, -1.0, 0.5, -0.5, 2.0, -2.0, 5.0, -5.0, 10.0, -10.0, -50.0, -100.0, -500.0,
+            -700.0, 0.001, -0.001, 0.1, -0.1, PI, -PI, 100.0, 500.0, 700.0,
         ];
 
         for &x in test_values {

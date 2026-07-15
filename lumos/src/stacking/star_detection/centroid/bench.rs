@@ -17,10 +17,6 @@ use crate::testing::estimate_background;
 use crate::testing::synthetic::fixtures::star_field;
 use imaginarium::Buffer2;
 
-// =============================================================================
-// Single Star Centroid Benchmarks
-// =============================================================================
-
 #[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_measure_star_single(b: ::quickbench::Bencher) {
     // Single star centroid computation with WeightedMoments
@@ -118,10 +114,6 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
     });
 }
 
-// =============================================================================
-// Batch Processing Benchmarks
-// =============================================================================
-
 #[quick_bench(warmup_iters = 5, iters = 200)]
 fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
     // 100 stars batch processing with WeightedMoments
@@ -189,10 +181,6 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     });
 }
 
-// =============================================================================
-// refine_centroid Benchmark (isolates exp() performance)
-// =============================================================================
-
 #[quick_bench(warmup_iters = 10, iters = 10000)]
 fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
     // Single refine_centroid call - isolates the exp() hot path
@@ -240,10 +228,6 @@ fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
         }
     });
 }
-
-// =============================================================================
-// Low-Level Fitting Benchmarks
-// =============================================================================
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_gaussian_fit_single(b: ::quickbench::Bencher) {

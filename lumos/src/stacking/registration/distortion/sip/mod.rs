@@ -34,10 +34,6 @@ use crate::stacking::registration::{distortion::SINGULAR_THRESHOLD, transform::T
 #[cfg(test)]
 mod tests;
 
-// ============================================================================
-// Constants
-// ============================================================================
-
 /// Maximum number of polynomial terms (order 5): (5+1)(5+2)/2 - 3 = 18.
 const MAX_TERMS: usize = 18;
 
@@ -46,10 +42,6 @@ const MAX_ATA: usize = MAX_TERMS * MAX_TERMS;
 
 /// Maximum size of the LU augmented matrix: MAX_TERMS * (MAX_TERMS + 1).
 const MAX_AUG: usize = MAX_TERMS * (MAX_TERMS + 1);
-
-// ============================================================================
-// SipConfig
-// ============================================================================
 
 /// Configuration for SIP polynomial fitting.
 #[derive(Debug, Clone)]
@@ -96,10 +88,6 @@ impl SipConfig {
         );
     }
 }
-
-// ============================================================================
-// SipPolynomial
-// ============================================================================
 
 /// SIP polynomial distortion correction.
 ///
@@ -371,10 +359,6 @@ impl SipPolynomial {
     }
 }
 
-// ============================================================================
-// Polynomial helpers
-// ============================================================================
-
 /// Generate the list of (p, q) exponent pairs for a given order.
 /// Only includes terms where 2 ≤ p+q ≤ order.
 fn term_exponents(order: usize) -> ArrayVec<(usize, usize), MAX_TERMS> {
@@ -414,10 +398,6 @@ fn avg_distance(points: &[DVec2], ref_pt: DVec2) -> f64 {
     let avg = sum / points.len() as f64;
     if avg > 1e-10 { avg } else { 1.0 }
 }
-
-// ============================================================================
-// Linear algebra: normal equations and solvers
-// ============================================================================
 
 /// Solve the SIP normal equations using only the masked-in points.
 fn solve_masked(

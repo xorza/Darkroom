@@ -176,7 +176,6 @@ const MAX_DEBLEND_N_THRESHOLDS: usize = 256;
 /// ```
 #[derive(Debug, Clone)]
 pub struct Config {
-    // -- Background estimation --
     /// Tile size for background estimation in pixels. Range: 16-256.
     pub tile_size: usize,
     /// Number of sigma-clipping iterations for tile statistics.
@@ -186,13 +185,11 @@ pub struct Config {
     /// Dilation radius for background refinement object masks (pixels).
     pub bg_mask_dilation: usize,
 
-    // -- Detection --
     /// Detection threshold in sigma above background.
     pub sigma_threshold: f32,
     /// Pixel connectivity for connected component labeling.
     pub connectivity: Connectivity,
 
-    // -- PSF / matched filter --
     /// Expected FWHM of stars in pixels. 0 = no matched filter.
     pub expected_fwhm: f32,
     /// Enable automatic FWHM estimation from bright stars.
@@ -206,7 +203,6 @@ pub struct Config {
     /// PSF position angle in radians.
     pub psf_angle: f32,
 
-    // -- Deblending --
     /// Minimum separation between peaks for deblending (pixels).
     pub deblend_min_separation: usize,
     /// Minimum peak prominence as fraction of primary peak.
@@ -217,7 +213,6 @@ pub struct Config {
     /// Minimum contrast for multi-threshold deblending.
     pub deblend_min_contrast: f32,
 
-    // -- Region filtering (applied during detection) --
     /// Minimum star area in pixels.
     pub min_area: usize,
     /// Maximum star area in pixels.
@@ -225,13 +220,11 @@ pub struct Config {
     /// Edge margin in pixels (stars too close to edge are rejected).
     pub edge_margin: usize,
 
-    // -- Centroid --
     /// Method for computing sub-pixel centroids.
     pub centroid_method: CentroidMethod,
     /// Method for computing local background during centroid refinement.
     pub local_background: LocalBackgroundMethod,
 
-    // -- Star quality filtering --
     /// Minimum SNR for a star to be considered valid.
     pub min_snr: f32,
     /// Maximum eccentricity (0-1, higher = more elongated allowed).
@@ -245,7 +238,6 @@ pub struct Config {
     /// Minimum separation between stars for duplicate removal (pixels).
     pub duplicate_min_separation: f32,
 
-    // -- Noise model --
     /// Optional camera noise model for accurate SNR calculation.
     pub noise_model: Option<NoiseModel>,
 }
@@ -428,10 +420,6 @@ impl Config {
         Ok(())
     }
 
-    // =========================================================================
-    // Preset Constructors
-    // =========================================================================
-
     /// Wide-field imaging settings (short focal length, large pixel scale).
     ///
     /// Wide-field setups produce larger stars (FWHM 5-8px) that may be slightly
@@ -548,10 +536,6 @@ impl Config {
 mod tests {
     use super::*;
 
-    // -------------------------------------------------------------------------
-    // NoiseModel tests
-    // -------------------------------------------------------------------------
-
     #[test]
     fn test_noise_model() {
         let model = NoiseModel::new(1.5, 5.0);
@@ -589,10 +573,6 @@ mod tests {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // CentroidMethod tests
-    // -------------------------------------------------------------------------
-
     #[test]
     fn test_centroid_method_validate() {
         assert_eq!(CentroidMethod::WeightedMoments.validate(), Ok(()));
@@ -609,10 +589,6 @@ mod tests {
             );
         }
     }
-
-    // -------------------------------------------------------------------------
-    // Config tests
-    // -------------------------------------------------------------------------
 
     #[test]
     fn test_config_default() {

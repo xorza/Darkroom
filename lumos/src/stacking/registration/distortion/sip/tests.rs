@@ -1,10 +1,6 @@
 use super::*;
 use crate::stacking::registration::transform::Transform;
 
-// ============================================================================
-// Test helpers
-// ============================================================================
-
 /// Generate barrel/pincushion distortion point pairs on a grid.
 ///
 /// Distortion model: target = p + (p - center) * k * |p - center|^2
@@ -34,10 +30,6 @@ fn make_radial_distortion_points(
 fn rms(residuals: &[f64]) -> f64 {
     (residuals.iter().map(|r| r * r).sum::<f64>() / residuals.len() as f64).sqrt()
 }
-
-// ============================================================================
-// term_exponents tests
-// ============================================================================
 
 #[test]
 fn test_term_exponents_order_2() {
@@ -111,10 +103,6 @@ fn test_term_exponents_all_satisfy_constraints() {
     }
 }
 
-// ============================================================================
-// monomial tests
-// ============================================================================
-
 #[test]
 fn test_monomial_hand_computed() {
     // u^2 * v^0 = u^2
@@ -158,10 +146,6 @@ fn test_monomial_negative_input() {
     assert_eq!(monomial(-2.0, -3.0, 2, 2), 36.0);
 }
 
-// ============================================================================
-// avg_distance tests
-// ============================================================================
-
 #[test]
 fn test_avg_distance_hand_computed() {
     let ref_pt = DVec2::new(0.0, 0.0);
@@ -191,10 +175,6 @@ fn test_avg_distance_single_point() {
     let points = [DVec2::new(6.0, 8.0)];
     assert!((avg_distance(&points, ref_pt) - 10.0).abs() < 1e-12);
 }
-
-// ============================================================================
-// SipPolynomial::correct with known coefficients
-// ============================================================================
 
 #[test]
 fn test_correct_at_reference_point_is_identity() {
@@ -274,10 +254,6 @@ fn test_correct_barrel_at_specific_point() {
         "Correction y should be negative (outward)"
     );
 }
-
-// ============================================================================
-// fit_from_transform tests
-// ============================================================================
 
 #[test]
 fn test_fit_barrel_distortion_with_translation() {
@@ -410,10 +386,6 @@ fn test_barrel_vs_pincushion_opposite_corrections() {
         mag_pincushion
     );
 }
-
-// ============================================================================
-// Edge cases and validation
-// ============================================================================
 
 #[test]
 fn test_too_few_points_returns_none() {
@@ -587,10 +559,6 @@ fn test_mismatched_point_counts_returns_none() {
     assert!(result.is_none());
 }
 
-// ============================================================================
-// max_correction tests
-// ============================================================================
-
 #[test]
 fn test_max_correction_at_corners() {
     // For radial distortion from center, max correction is at the corners
@@ -670,10 +638,6 @@ fn test_max_correction_zero_distortion() {
     );
 }
 
-// ============================================================================
-// compute_corrected_residuals tests
-// ============================================================================
-
 #[test]
 fn test_compute_corrected_residuals_length() {
     let center = DVec2::new(500.0, 500.0);
@@ -717,10 +681,6 @@ fn test_compute_corrected_residuals_all_small_for_fitted_data() {
         max_residual
     );
 }
-
-// ============================================================================
-// Order sensitivity tests
-// ============================================================================
 
 #[test]
 fn test_higher_order_fits_higher_order_distortion_better() {
@@ -816,10 +776,6 @@ fn test_different_k_values_produce_different_corrections() {
         ratio
     );
 }
-
-// ============================================================================
-// Reference point tests
-// ============================================================================
 
 #[test]
 fn test_reference_point_none_uses_centroid() {
@@ -934,10 +890,6 @@ fn test_crpix_vs_centroid_when_points_are_off_center() {
         rms_crpix
     );
 }
-
-// ============================================================================
-// Sigma-clipping tests
-// ============================================================================
 
 #[test]
 fn test_sigma_clipping_rejects_outliers() {
@@ -1066,10 +1018,6 @@ fn test_sigma_clipping_no_effect_on_clean_data() {
     }
 }
 
-// ============================================================================
-// Ill-conditioned system (Cholesky -> LU fallback)
-// ============================================================================
-
 #[test]
 fn test_ill_conditioned_falls_back_to_lu() {
     // Narrow strip: y spans only 100px (450..550), x spans 1000px.
@@ -1117,10 +1065,6 @@ fn test_ill_conditioned_falls_back_to_lu() {
         );
     }
 }
-
-// ============================================================================
-// Solver tests (Cholesky and LU)
-// ============================================================================
 
 #[test]
 fn test_solve_cholesky_2x2_hand_computed() {
@@ -1254,10 +1198,6 @@ fn test_cholesky_falls_back_to_lu_for_non_positive_definite() {
     assert!((x[1] - 3.0).abs() < 1e-12, "x[1] = {}, expected 3.0", x[1]);
 }
 
-// ============================================================================
-// SipConfig validation
-// ============================================================================
-
 #[test]
 fn test_sip_config_default_values() {
     let config = SipConfig::default();
@@ -1277,10 +1217,6 @@ fn test_sip_config_validate_accepts_all_valid_orders() {
         config.validate(); // Should not panic
     }
 }
-
-// ============================================================================
-// Norm scale tests
-// ============================================================================
 
 #[test]
 fn test_norm_scale_stored_correctly() {
@@ -1307,10 +1243,6 @@ fn test_norm_scale_stored_correctly() {
         expected_norm_scale
     );
 }
-
-// ============================================================================
-// SipFitResult quality metric tests
-// ============================================================================
 
 #[test]
 fn test_fit_result_zero_distortion_metrics() {

@@ -1,5 +1,7 @@
 //! Tests for centroid computation.
 
+use std::f32::consts::FRAC_PI_4;
+
 use glam::Vec2;
 
 use super::*;
@@ -176,10 +178,6 @@ fn test_snr_and_flux_values() {
     );
 }
 
-// =============================================================================
-// is_valid_stamp_position Tests
-// =============================================================================
-
 #[test]
 fn test_valid_stamp_position_center() {
     // Center of a 64x64 image should be valid
@@ -324,10 +322,6 @@ fn test_valid_stamp_position_small_image() {
         TEST_STAMP_RADIUS
     ));
 }
-
-// =============================================================================
-// refine_centroid Tests
-// =============================================================================
 
 fn make_uniform_background(
     width: usize,
@@ -506,10 +500,6 @@ fn test_refine_centroid_iterative_convergence() {
     let error = ((pos.x - true_pos.x).powi(2) + (pos.y - true_pos.y).powi(2)).sqrt();
     assert!(error < 0.2, "Failed to converge: error = {}", error);
 }
-
-// =============================================================================
-// compute_metrics Tests
-// =============================================================================
 
 #[test]
 fn test_compute_metrics_valid_star() {
@@ -717,10 +707,6 @@ fn test_compute_metrics_snr_scales_with_amplitude() {
     );
 }
 
-// =============================================================================
-// Elongated Star Tests (Eccentricity)
-// =============================================================================
-
 #[test]
 fn test_elongated_star_high_eccentricity() {
     let width = 64;
@@ -785,10 +771,6 @@ fn test_circular_vs_elongated_eccentricity() {
         metrics_circular.eccentricity
     );
 }
-
-// =============================================================================
-// Noisy Background Tests
-// =============================================================================
 
 #[test]
 fn test_centroid_with_noisy_background() {
@@ -867,10 +849,6 @@ fn test_snr_decreases_with_higher_noise() {
         metrics_high.snr
     );
 }
-
-// =============================================================================
-// Additional Quality Metrics Tests
-// =============================================================================
 
 #[test]
 fn test_fwhm_formula_for_known_gaussian() {
@@ -1208,10 +1186,6 @@ fn test_eccentricity_increases_with_elongation() {
     );
 }
 
-// =============================================================================
-// measure_star Integration Tests
-// =============================================================================
-
 #[test]
 fn test_measure_star_returns_none_for_edge_candidate() {
     let width = 64;
@@ -1313,10 +1287,6 @@ fn test_measure_star_multiple_stars_independent() {
         );
     }
 }
-
-// =============================================================================
-// Roundness Tests
-// =============================================================================
 
 #[test]
 fn test_circular_star_roundness() {
@@ -1492,10 +1462,6 @@ fn test_star_is_round() {
         "All stars should pass with max_roundness=1.0"
     );
 }
-
-// =============================================================================
-// Precision Verification Tests
-// =============================================================================
 
 /// Test that weighted centroid achieves claimed ~0.05 pixel accuracy
 /// by testing many random sub-pixel offsets.
@@ -2148,10 +2114,6 @@ fn test_roundness2_symmetric_source() {
     );
 }
 
-// =============================================================================
-// Moment-based Sigma Estimation Tests
-// =============================================================================
-
 #[test]
 fn test_estimate_sigma_from_moments_gaussian() {
     use crate::stacking::star_detection::centroid::estimate_sigma_from_moments;
@@ -2235,10 +2197,6 @@ fn test_estimate_sigma_from_moments_various_sigmas() {
     }
 }
 
-// =============================================================================
-// Adaptive Sigma Tests
-// =============================================================================
-
 #[test]
 fn test_refine_centroid_adaptive_sigma_small_fwhm() {
     let width = 64;
@@ -2306,10 +2264,6 @@ fn test_refine_centroid_adaptive_sigma_large_fwhm() {
         error
     );
 }
-
-// =============================================================================
-// extract_stamp Tests
-// =============================================================================
 
 #[test]
 fn test_extract_stamp_valid_center() {
@@ -2422,10 +2376,6 @@ fn test_extract_stamp_fractional_position() {
     assert_eq!(min_y, 31.0); // 33 - 2 = 31
     assert_eq!(max_y, 35.0); // 33 + 2 = 35
 }
-
-// =============================================================================
-// compute_annulus_background Tests (via LocalAnnulus)
-// =============================================================================
 
 #[test]
 fn test_local_annulus_background_uniform() {
@@ -2558,10 +2508,6 @@ fn test_local_annulus_near_edge_fallback() {
     }
 }
 
-// =============================================================================
-// compute_roundness Edge Case Tests
-// =============================================================================
-
 #[test]
 fn test_roundness_zero_flux() {
     // When all marginal values are zero, roundness should be 0
@@ -2666,10 +2612,6 @@ fn test_roundness_bounds() {
         );
     }
 }
-
-// =============================================================================
-// Phase 1 Iteration Behavior Tests
-// =============================================================================
 
 /// Verify that Phase 1 (weighted moments) reaches sub-pixel accuracy quickly.
 /// After 2 iterations the position should be within 0.1px of the final converged position.
@@ -2932,10 +2874,6 @@ fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
     );
 }
 
-// =============================================================================
-// compute_stamp_radius Tests
-// =============================================================================
-
 #[test]
 fn test_compute_stamp_radius_typical_fwhm() {
     use crate::stacking::star_detection::centroid::compute_stamp_radius;
@@ -2978,10 +2916,6 @@ fn test_compute_stamp_radius_various_fwhm() {
         );
     }
 }
-
-// =============================================================================
-// Pre-fit Moments Iterations Verification
-// =============================================================================
 
 /// Verifies that using only 2 pre-fit moments iterations produces equivalent
 /// centroid results compared to using 10 iterations before Gaussian/Moffat fitting.
@@ -3235,10 +3169,6 @@ fn test_prefit_moments_iterations_sufficient_moffat() {
     );
 }
 
-// =============================================================================
-// Extreme FWHM Tests (Undersampled and Large PSFs)
-// =============================================================================
-
 /// Test centroiding with undersampled PSF (FWHM < 2 pixels).
 /// This is a challenging case where the star is barely resolved.
 #[test]
@@ -3399,10 +3329,6 @@ fn test_metrics_large_fwhm() {
     let m = metrics.unwrap();
     assert!(m.fwhm > 10.0, "FWHM should be large: {}", m.fwhm);
 }
-
-// =============================================================================
-// Blended/Contaminated Star Tests
-// =============================================================================
 
 /// Create two overlapping stars.
 fn make_blended_stars(
@@ -3629,10 +3555,6 @@ fn test_eccentricity_with_contamination() {
     );
 }
 
-// =============================================================================
-// Rotated Elliptical PSF Tests
-// =============================================================================
-
 /// Create a rotated elliptical Gaussian.
 fn make_rotated_elliptical_star(
     width: usize,
@@ -3676,7 +3598,7 @@ fn test_centroid_rotated_ellipse_45deg() {
     let width = 64;
     let height = 64;
     let true_pos = Vec2::new(32.3, 32.7);
-    let angle = std::f32::consts::FRAC_PI_4; // 45 degrees
+    let angle = FRAC_PI_4; // 45 degrees
 
     let pixels = make_rotated_elliptical_star(width, height, true_pos, 4.0, 2.0, angle, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
@@ -3799,7 +3721,7 @@ fn test_gaussian_fit_rotated_ellipse() {
         Vec2::new(true_cx, true_cy),
         3.5,
         2.0,
-        std::f32::consts::FRAC_PI_4,
+        FRAC_PI_4,
         0.8,
     );
 
@@ -3835,10 +3757,6 @@ fn test_gaussian_fit_rotated_ellipse() {
         "sigma_y out of range"
     );
 }
-
-// =============================================================================
-// Bad Initial Guess Recovery Tests
-// =============================================================================
 
 /// Test recovery from initial guess 2 pixels away from true position.
 #[test]
@@ -4013,10 +3931,6 @@ fn test_moffat_fit_bad_initial_guess() {
         error
     );
 }
-
-// =========================================================================
-// Fit-derived FWHM and Eccentricity Tests
-// =========================================================================
 
 use crate::stacking::star_detection::centroid::test_utils::{
     make_elliptical_star as make_elliptical_gaussian, make_moffat_star,
@@ -4261,8 +4175,6 @@ fn test_moffat_fit_fwhm_more_accurate_than_moments() {
     );
 }
 
-// ── Windowed (adaptive) second moments (PR5) ─────────────────────────────────
-
 #[test]
 fn windowed_covariance_recovers_gaussian_sigma() {
     // A clean round Gaussian of σ=2.5: the window deconvolution must recover σ²
@@ -4351,8 +4263,6 @@ fn windowed_covariance_resists_wing_noise() {
         "axis ratio {ratio} should stay ~1 under noise (no inflation)"
     );
 }
-
-// ── Inverse-variance weights (PR1) ───────────────────────────────────────────
 
 #[test]
 fn inverse_variance_weights_downweight_bright_pixels() {

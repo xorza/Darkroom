@@ -815,8 +815,6 @@ mod tests {
         }
     }
 
-    // --- Soft deringing tests ---
-
     #[test]
     fn test_soft_clamp_pure_positive() {
         let result = soft_clamp(2.0, 0.0, 1.0, 0.0, 0.3, 1.0 / 0.7);
@@ -1131,8 +1129,6 @@ mod tests {
         }
     }
 
-    // --- bilinear_sample direct tests ---
-
     #[test]
     fn test_bilinear_sample_hand_computed() {
         // 3x3 image:
@@ -1208,8 +1204,6 @@ mod tests {
         );
     }
 
-    // --- Deringing threshold sensitivity ---
-
     #[test]
     fn test_deringing_threshold_sensitivity() {
         // Different deringing thresholds should produce different results
@@ -1241,8 +1235,6 @@ mod tests {
             "Different thresholds should produce different results, max_diff={max_diff}"
         );
     }
-
-    // --- Lanczos2/4 optimized path tests ---
 
     /// Naive scalar Lanczos row warp for arbitrary `a`, used as reference.
     fn warp_row_lanczos_scalar_ref(

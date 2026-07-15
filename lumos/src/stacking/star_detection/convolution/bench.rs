@@ -11,8 +11,6 @@ use ::quickbench::quick_bench;
 use imaginarium::Buffer2;
 use std::hint::black_box;
 
-// ============ Row convolution: SIMD vs Scalar ============
-
 #[quick_bench(warmup_iters = 3, iters = 10)]
 fn bench_convolve_row_4k(b: ::quickbench::Bencher) {
     let width = 4096 * 10;
@@ -67,8 +65,6 @@ fn bench_convolve_row_large_kernel(b: ::quickbench::Bencher) {
     });
 }
 
-// ============ Column convolution ============
-
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_convolve_cols_1k(b: ::quickbench::Bencher) {
     let pixels = star_field(1024, 1024, 100, 42).image.channel(0).clone();
@@ -99,8 +95,6 @@ fn bench_convolve_cols_4k(b: ::quickbench::Bencher) {
     });
 }
 
-// ============ Row vs Column convolution comparison ============
-
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_row_vs_col_1k(b: ::quickbench::Bencher) {
     let pixels = star_field(1024, 1024, 100, 42).image.channel(0).clone();
@@ -123,8 +117,6 @@ fn bench_row_vs_col_1k(b: ::quickbench::Bencher) {
         );
     });
 }
-
-// ============ Full image convolution ============
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_gaussian_convolve_1k(b: ::quickbench::Bencher) {
@@ -159,8 +151,6 @@ fn bench_gaussian_convolve_4k(b: ::quickbench::Bencher) {
         );
     });
 }
-
-// ============ Elliptical convolution ============
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_elliptical_convolve_1k(b: ::quickbench::Bencher) {
@@ -210,8 +200,6 @@ fn bench_elliptical_vs_circular_1k(b: ::quickbench::Bencher) {
         );
     });
 }
-
-// ============ Matched filter (full pipeline) ============
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_matched_filter_1k(b: ::quickbench::Bencher) {

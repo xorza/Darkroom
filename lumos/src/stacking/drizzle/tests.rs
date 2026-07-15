@@ -1,3 +1,5 @@
+use std::f64::consts::{FRAC_PI_4, PI};
+
 use glam::DVec2;
 use imaginarium::Buffer2;
 
@@ -1261,8 +1263,6 @@ fn test_drizzle_accumulator_rejects_invalid_frame_inputs() {
     ));
 }
 
-// ==================== sgarea() unit tests ====================
-
 /// Test sgarea with a horizontal segment from (0,0.5) to (1,0.5).
 ///
 /// This is a left-to-right segment at y=0.5 across the full unit square.
@@ -1409,8 +1409,6 @@ fn test_sgarea_crosses_y_zero() {
     assert!((area - 0.125).abs() < 1e-12, "Expected 0.125, got {}", area);
 }
 
-// ==================== boxer() unit tests ====================
-
 /// Test boxer: quadrilateral exactly overlapping output pixel → area = 1.0.
 ///
 /// Quad corners at (0,0), (1,0), (1,1), (0,1). Output pixel (0,0) = [0,1]×[0,1].
@@ -1504,8 +1502,6 @@ fn test_boxer_rotated_diamond() {
         area
     );
 }
-
-// ==================== Square kernel integration tests ====================
 
 /// Test square kernel with identity transform, uniform image, scale=1, pixfrac=1.
 ///
@@ -1602,7 +1598,7 @@ fn test_square_kernel_rotation() {
     let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), vec![3.0; 20 * 20]);
 
     // 45° rotation around center (10, 10)
-    let angle = std::f64::consts::FRAC_PI_4;
+    let angle = FRAC_PI_4;
     let cos_a = angle.cos();
     let sin_a = angle.sin();
     let cx = 10.0;
@@ -1865,8 +1861,8 @@ fn test_square_kernel_jacobian_weighted_average() {
 /// 2) overlap is close to the quad area minus the clipped triangles
 #[test]
 fn test_boxer_rotated_partial_clip() {
-    let cos30 = (std::f64::consts::PI / 6.0).cos();
-    let sin30 = (std::f64::consts::PI / 6.0).sin();
+    let cos30 = (PI / 6.0).cos();
+    let sin30 = (PI / 6.0).sin();
     let cx = 0.5;
     let cy = 0.5;
 
@@ -2128,10 +2124,6 @@ fn test_square_kernel_two_frame_weighted_mean() {
     );
 }
 
-// ========================================================================
-// Jacobian correction tests
-// ========================================================================
-
 #[test]
 fn test_local_jacobian_identity_scale1() {
     // Identity transform, scale=1: one input pixel maps to exactly one output pixel.
@@ -2226,7 +2218,6 @@ fn test_local_jacobian_perspective_varies_spatially() {
     );
 }
 
-// ---- Two-frame Jacobian correctness tests ----
 //
 // Strategy: Two frames contribute to the same output pixel with different
 // local Jacobians. Frame A uses identity (jaco=1), Frame B uses scale-2x

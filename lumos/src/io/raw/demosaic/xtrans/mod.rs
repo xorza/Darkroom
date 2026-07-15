@@ -653,10 +653,6 @@ mod tests {
         assert!(blue_expected > 0.0 && blue_expected < 2.0);
     }
 
-    // ---------------------------------------------------------------
-    // process_xtrans_f32 tests
-    // ---------------------------------------------------------------
-
     #[test]
     fn test_process_xtrans_f32_output_size() {
         let data: Vec<f32> = vec![0.5; 12 * 12];

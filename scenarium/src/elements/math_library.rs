@@ -1,4 +1,6 @@
 #[cfg(feature = "builtin-random")]
+use rand::rngs::StdRng;
+#[cfg(feature = "builtin-random")]
 use rand::{RngExt, SeedableRng};
 
 use crate::DataType;
@@ -376,7 +378,7 @@ fn random_func() -> Func {
         .lambda(async_lambda!(move |_, cache, _, inputs, _, outputs| {
             assert_eq!(inputs.len(), 2);
             assert_eq!(outputs.len(), 1);
-            let rng = cache.get_or_default_with(|| rand::rngs::StdRng::from_rng(&mut rand::rng()));
+            let rng = cache.get_or_default_with(|| StdRng::from_rng(&mut rand::rng()));
             let min = float_input(inputs, 0)?;
             let max = float_input(inputs, 1)?;
             outputs[0] = (min + (max - min) * rng.random::<f64>()).into();

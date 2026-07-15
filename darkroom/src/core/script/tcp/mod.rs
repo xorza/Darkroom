@@ -32,7 +32,8 @@
 //! Cancellation is cooperative via [`CancellationToken`]: the accept
 //! loop `select!`s between the next accept and the cancel future.
 
-use std::net::SocketAddr;
+use std::io::{Error, ErrorKind};
+use std::net::{SocketAddr, TcpListener as StdTcpListener};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -96,7 +97,7 @@ impl Default for TcpTimeouts {
 /// accept loop starts.
 #[derive(Debug)]
 pub struct TcpTransport {
-    listener: std::net::TcpListener,
+    listener: StdTcpListener,
     token: Option<Uuid>,
     timeouts: TcpTimeouts,
 }
@@ -111,7 +112,7 @@ impl TcpTransport {
         token: Option<Uuid>,
         timeouts: TcpTimeouts,
     ) -> std::io::Result<Self> {
-        let listener = std::net::TcpListener::bind(addr)?;
+        let listener = StdTcpListener::bind(addr)?;
         // Required to convert into a `tokio::net::TcpListener` inside the task.
         listener.set_nonblocking(true)?;
         Ok(Self {
@@ -245,7 +246,7 @@ impl TcpTransport {
 }
 
 async fn run_listener(
-    listener: std::net::TcpListener,
+    listener: StdTcpListener,
     token: Option<Uuid>,
     timeouts: TcpTimeouts,
     tx: mpsc::Sender<ScriptRequest>,
@@ -314,7 +315,7 @@ where
 {
     timeout(dur, fut)
         .await
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, msg))?
+        .map_err(|_| Error::new(ErrorKind::TimedOut, msg))?
 }
 
 async fn handle_conn(
@@ -347,7 +348,7 @@ async fn handle_conn(
                 tracing::debug!(peer = %peer, "tcp script: idle between-frame timeout");
                 return Ok(());
             }
-            Ok(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
+            Ok(Err(e)) if e.kind() == ErrorKind::UnexpectedEof => return Ok(()),
             Ok(Err(e)) => return Err(e),
             Ok(Ok(v)) => v,
         };
@@ -404,8 +405,7 @@ async fn handle_conn(
 
 async fn read_string_frame(stream: &mut TcpStream) -> std::io::Result<String> {
     let buf = read_compressed_frame(stream).await?;
-    String::from_utf8(buf)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+    String::from_utf8(buf).map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))
 }
 
 /// Read `[u32 compressed_len][lz4-with-prepended-size payload]` and
@@ -414,14 +414,14 @@ async fn read_string_frame(stream: &mut TcpStream) -> std::io::Result<String> {
 async fn read_compressed_frame(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
     let len = stream.read_u32().await?;
     if len > MAX_FRAME_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+        return Err(Error::new(
+            ErrorKind::InvalidData,
             format!("frame too large: {len} > {MAX_FRAME_BYTES}"),
         ));
     }
     if len < 4 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+        return Err(Error::new(
+            ErrorKind::InvalidData,
             "compressed frame missing size prefix",
         ));
     }
@@ -431,19 +431,19 @@ async fn read_compressed_frame(stream: &mut TcpStream) -> std::io::Result<Vec<u8
     // the first 4 bytes. Cap the decompressed allocation up front.
     let original = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
     if original > MAX_FRAME_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+        return Err(Error::new(
+            ErrorKind::InvalidData,
             format!("decompressed size too large: {original} > {MAX_FRAME_BYTES}"),
         ));
     }
     lz4_flex::block::decompress_size_prepended(&buf)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+        .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))
 }
 
 async fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()> {
     let compressed = lz4_flex::block::compress_prepend_size(bytes);
-    let len = u32::try_from(compressed.len())
-        .map_err(|_| std::io::Error::other("reply frame exceeds u32"))?;
+    let len =
+        u32::try_from(compressed.len()).map_err(|_| Error::other("reply frame exceeds u32"))?;
     stream.write_u32(len).await?;
     stream.write_all(&compressed).await?;
     Ok(())

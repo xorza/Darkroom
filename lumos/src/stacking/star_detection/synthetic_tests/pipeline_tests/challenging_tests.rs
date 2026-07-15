@@ -53,8 +53,6 @@ fn run_challenging_test(
     );
 }
 
-// ---- Crowded fields ----
-
 #[test]
 fn test_crowded_cluster() {
     init_tracing();
@@ -106,8 +104,6 @@ fn test_gradient_density() {
         &crowded_criteria(),
     );
 }
-
-// ---- Elliptical (tracking error) ----
 
 #[test]
 fn test_uniform_tracking_error() {
@@ -177,8 +173,6 @@ fn test_field_rotation() {
     run_challenging_test("field_rotation", &frame, &Config::default(), &criteria);
 }
 
-// ---- Artifacts ----
-
 #[test]
 fn test_cosmic_rays() {
     init_tracing();
@@ -233,8 +227,6 @@ fn test_saturated_stars() {
     };
     run_challenging_test("saturated_stars", &frame, &Config::default(), &criteria);
 }
-
-// ---- Backgrounds ----
 
 #[test]
 fn test_gradient_background() {
@@ -304,8 +296,6 @@ fn test_nebula_background() {
     };
     run_challenging_test("nebula_background", &frame, &Config::default(), &criteria);
 }
-
-// ---- Edge cases ----
 
 #[test]
 fn test_edge_stars() {

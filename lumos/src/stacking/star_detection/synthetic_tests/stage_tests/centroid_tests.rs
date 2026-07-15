@@ -4,6 +4,8 @@
 //! stated sub-pixel tolerance, accuracy tracks SNR, and the three centroid methods
 //! (weighted-moments / Gaussian-fit / Moffat-fit) agree and the profile fits beat moments.
 
+use std::f32::consts::PI;
+
 use super::background_estimate;
 use crate::math::fwhm_to_sigma;
 use crate::math::rect::URect;
@@ -27,7 +29,7 @@ fn field(
 ) -> Buffer2<f32> {
     let mut pixels = vec![0.1f32; width * height];
     for &(x, y, brightness) in stars {
-        let amplitude = brightness / (2.0 * std::f32::consts::PI * sigma * sigma);
+        let amplitude = brightness / (2.0 * PI * sigma * sigma);
         render_gaussian_star(&mut pixels, width, x, y, sigma, amplitude);
     }
     let mut rng = TestRng::new(seed);

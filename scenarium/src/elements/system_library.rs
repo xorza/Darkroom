@@ -25,7 +25,6 @@ pub fn system_library() -> Library {
             })),
     );
 
-    // to string
     library.add(
         Func::new("01896a88-bf15-dead-4a15-5969da5a9e65", "To String")
             .description("Converts any value to its string representation.")
@@ -47,7 +46,6 @@ pub fn system_library() -> Library {
             })),
     );
 
-    // concat
     library.add(
         Func::new("8854cccc-81d3-4e26-8b4f-e33d62e3117b", "Concat")
             .description(

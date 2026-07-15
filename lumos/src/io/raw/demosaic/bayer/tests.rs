@@ -4,8 +4,6 @@ use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use crate::io::raw::demosaic::interleave_planes;
 use common::CancelToken;
 
-// ── CFA pattern tests ────────────────────────────────────────
-
 #[test]
 fn test_cfa_rggb_pattern() {
     let cfa = CfaPattern::Rggb;
@@ -46,8 +44,6 @@ fn test_cfa_gbrg_pattern() {
     assert_eq!(cfa.color_at(1, 1), 1); // G
 }
 
-// ── from_bayerpat tests ──────────────────────────────────────
-
 #[test]
 fn test_from_bayerpat() {
     assert_eq!(CfaPattern::from_bayerpat("RGGB"), Some(CfaPattern::Rggb));
@@ -64,8 +60,6 @@ fn test_from_bayerpat() {
     assert_eq!(CfaPattern::from_bayerpat("XXXX"), None);
     assert_eq!(CfaPattern::from_bayerpat(""), None);
 }
-
-// ── flip tests ───────────────────────────────────────────────
 
 #[test]
 fn test_flip_vertical() {
@@ -108,8 +102,6 @@ fn test_flip_both_axes() {
         CfaPattern::Rggb
     );
 }
-
-// ── BayerImage validation tests ──────────────────────────────
 
 #[test]
 #[should_panic(expected = "Output dimensions must be non-zero")]
@@ -157,8 +149,6 @@ fn test_bayer_image_valid() {
     assert_eq!(bayer.top_margin, 1);
     assert_eq!(bayer.left_margin, 1);
 }
-
-// ── RCD demosaic tests ───────────────────────────────────────
 
 /// Helper: create a BayerImage from a flat CFA array with no margins.
 fn make_bayer(data: &[f32], width: usize, height: usize, cfa: CfaPattern) -> BayerImage<'_> {

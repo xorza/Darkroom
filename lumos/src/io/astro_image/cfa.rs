@@ -4,6 +4,8 @@
 //! filter pattern metadata. Used for calibration frame processing (darks,
 //! flats, bias) and hot pixel correction on raw data.
 
+use std::io::Error;
+
 use rayon::prelude::*;
 
 use crate::io::astro_image::error::ImageError;
@@ -110,15 +112,14 @@ impl CfaImage {
     /// Serialize this CFA image to `path` (bitcode: the CFA plane + metadata).
     /// Pairs with [`Self::load`] for a calibration-master cache.
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
-        let bytes =
-            common::serialize(self, common::SerdeFormat::Bitcode).map_err(std::io::Error::other)?;
+        let bytes = common::serialize(self, common::SerdeFormat::Bitcode).map_err(Error::other)?;
         std::fs::write(path, bytes)
     }
 
     /// Load a CFA image written by [`Self::save`].
     pub fn load(path: &std::path::Path) -> std::io::Result<Self> {
         let bytes = std::fs::read(path)?;
-        common::deserialize(&bytes, common::SerdeFormat::Bitcode).map_err(std::io::Error::other)
+        common::deserialize(&bytes, common::SerdeFormat::Bitcode).map_err(Error::other)
     }
 
     /// Demosaic this CFA image into a 3-channel AstroImage.
@@ -429,10 +430,6 @@ mod tests {
         ));
     }
 
-    // ====================================================================
-    // CfaType tests
-    // ====================================================================
-
     #[test]
     fn test_cfa_type_mono_color_at() {
         let mono = CfaType::Mono;
@@ -487,10 +484,6 @@ mod tests {
         assert_eq!(xtrans.color_at(6, 0), xtrans.color_at(0, 0));
         assert_eq!(xtrans.color_at(0, 6), xtrans.color_at(0, 0));
     }
-
-    // ====================================================================
-    // CfaImage calibration tests
-    // ====================================================================
 
     #[test]
     fn test_subtract() {
@@ -593,10 +586,6 @@ mod tests {
         let img = make_cfa(10, 20, vec![0.0; 200], CfaType::Mono);
         assert_eq!(img.data.len(), 200);
     }
-
-    // ====================================================================
-    // Per-CFA-channel flat normalization tests
-    // ====================================================================
 
     #[test]
     fn test_bayer_flat_non_white_light() {

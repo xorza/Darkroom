@@ -380,6 +380,8 @@ pub unsafe fn convolve_2d_row_sse41(
 
 #[cfg(test)]
 mod tests {
+    use crate::stacking::star_detection::convolution::simd;
+
     use super::*;
     use common::cpu_features;
 
@@ -487,7 +489,7 @@ mod tests {
                 let mut sum = 0.0f32;
                 for (k, &kval) in kernel.iter().enumerate() {
                     let sy = y as isize + k as isize - radius as isize;
-                    let sy = crate::stacking::star_detection::convolution::simd::mirror_index(sy, height);
+                    let sy = simd::mirror_index(sy, height);
                     sum += input[sy * width + x] * kval;
                 }
                 output_scalar[y * width + x] = sum;
@@ -543,7 +545,7 @@ mod tests {
                 let mut sum = 0.0f32;
                 for (k, &kval) in kernel.iter().enumerate() {
                     let sy = y as isize + k as isize - radius as isize;
-                    let sy = crate::stacking::star_detection::convolution::simd::mirror_index(sy, height);
+                    let sy = simd::mirror_index(sy, height);
                     sum += input[sy * width + x] * kval;
                 }
                 output_scalar[y * width + x] = sum;

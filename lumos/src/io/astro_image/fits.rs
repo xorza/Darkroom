@@ -290,10 +290,6 @@ fn read_text(header: &Header, key: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    // ====================================================================
-    // normalize_fits_pixels tests
-    // ====================================================================
-
     #[test]
     fn test_normalize_float_already_01() {
         // Pixels already in [0, 1] — should be unchanged
@@ -431,10 +427,6 @@ mod tests {
         assert!((result[0] - 1.0).abs() < 1e-7);
     }
 
-    // ====================================================================
-    // NaN/Inf sanitization tests (float FITS only)
-    // ====================================================================
-
     #[test]
     fn test_normalize_float_nan_replaced_with_zero() {
         // FITS uses NaN as null indicator for float images.
@@ -490,10 +482,6 @@ mod tests {
         assert_eq!(result[1], 0.0); // BLANK → 0.0, not propagated as NaN
         assert!((result[2] - 1.0).abs() < 1e-7);
     }
-
-    // ====================================================================
-    // RA/DEC coordinate parsing tests
-    // ====================================================================
 
     #[test]
     fn test_parse_sexagesimal_hms_to_ra_deg() {

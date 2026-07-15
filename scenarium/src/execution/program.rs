@@ -70,8 +70,6 @@ impl From<usize> for OutputIdx {
     }
 }
 
-// === Execution Binding ===
-
 /// A flat output address: producer node `target_idx` (a [`NodeIdx`], resolved at
 /// flatten and stable for the program's lifetime), output `port_idx`. The producer's
 /// `NodeId` is *not* stored — it's `e_nodes[target_idx].id`; the index is the
@@ -89,8 +87,6 @@ pub(crate) enum ExecutionBinding {
     Const(StaticValue),
     Bind(ExecutionPortAddress),
 }
-
-// === Execution Node Components ===
 
 /// How an input's delivered value folds its **referent's** identity into the consumer's
 /// content digest — present iff the input is *declared* with a resource-reference type
@@ -121,8 +117,6 @@ pub(crate) struct ExecutionEvent {
     pub subscribers: Vec<NodeIdx>,
     pub lambda: EventLambda,
 }
-
-// === Execution Node ===
 
 /// Topology + code for one flat node. Immutable across runs; all mutable
 /// per-run/cross-run state lives in the executor's slot of the same index.
@@ -172,8 +166,6 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
         &self.id
     }
 }
-
-// === Execution Program ===
 
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionProgram {

@@ -18,10 +18,6 @@ use crate::concurrency::UnsafeSendPtr;
 /// Dir 2 = diagonal (1,1), Dir 3 = anti-diagonal (1,-1).
 const DIR_OFFSETS: [(i32, i32); NDIR] = [(0, 1), (1, 0), (1, 1), (1, -1)];
 
-// ───────────────────────────────────────────────────────────────
-// Precomputed color neighbor lookup for interpolate_missing_color
-// ───────────────────────────────────────────────────────────────
-
 /// For each X-Trans position, which interpolation strategy to use for a missing color.
 /// Precomputed from the 6×6 pattern to avoid per-pixel pattern lookups.
 #[derive(Debug, Clone, Copy)]
@@ -140,10 +136,6 @@ impl ColorInterpLookup {
     }
 }
 
-// ───────────────────────────────────────────────────────────────
-// Step 1: Green min/max
-// ───────────────────────────────────────────────────────────────
-
 /// Compute green min/max bounds at each non-green pixel.
 ///
 /// For green pixels, gmin=gmax=raw_value.
@@ -204,10 +196,6 @@ pub(crate) fn compute_green_minmax(
             }
         });
 }
-
-// ───────────────────────────────────────────────────────────────
-// Step 2: Interpolate green in 4 directions
-// ───────────────────────────────────────────────────────────────
 
 /// Interpolate green channel in 4 directions using weighted hexagonal neighbors.
 ///
@@ -321,10 +309,6 @@ pub(crate) fn interpolate_green(
         }
     });
 }
-
-// ───────────────────────────────────────────────────────────────
-// Step 3: Derivatives (RGB recomputed on-the-fly)
-// ───────────────────────────────────────────────────────────────
 
 /// Compute YPbPr spatial derivatives by recomputing RGB on-the-fly from green_dir.
 ///
@@ -753,10 +737,6 @@ fn interpolate_missing_color_fast(
     val.max(0.0)
 }
 
-// ───────────────────────────────────────────────────────────────
-// Step 4: Homogeneity maps
-// ───────────────────────────────────────────────────────────────
-
 /// Build homogeneity maps from per-direction derivatives.
 ///
 /// Two sub-passes:
@@ -825,10 +805,6 @@ pub(crate) fn compute_homogeneity(
             }
         });
 }
-
-// ───────────────────────────────────────────────────────────────
-// Step 5: Final blend
-// ───────────────────────────────────────────────────────────────
 
 /// Build a summed area table (SAT) from a u8 slice.
 ///
@@ -1184,8 +1160,6 @@ mod tests {
         assert_eq!(pr, 0.0);
     }
 
-    // ── Derivatives tests ─────────────────────────────────────────
-
     #[test]
     fn test_derivatives_uniform_input_near_zero() {
         // Uniform input → all RGB values the same → YPbPr Laplacian ≈ 0 everywhere.
@@ -1280,8 +1254,6 @@ mod tests {
         );
     }
 
-    // ── SAT (Summed Area Table) tests ────────────────────────────
-
     #[test]
     fn test_sat_uniform_ones() {
         // 4×3 grid of all 1s
@@ -1358,8 +1330,6 @@ mod tests {
         assert_eq!(sat_query(&sat, 5, 0, 0, 3, 3), 0);
     }
 
-    // ── Homogeneity border tests ─────────────────────────────────
-
     #[test]
     fn test_homogeneity_border_pixels_are_zero() {
         let w = 12;
@@ -1419,8 +1389,6 @@ mod tests {
             }
         }
     }
-
-    // ── ColorInterpLookup tests ──────────────────────────────────
 
     #[test]
     fn test_color_interp_lookup_coverage() {
@@ -1486,8 +1454,6 @@ mod tests {
             }
         }
     }
-
-    // ── Interpolate missing color: interior vs border consistency ─
 
     #[test]
     fn test_interpolate_interior_matches_border_path() {
@@ -1587,8 +1553,6 @@ mod tests {
             }
         }
     }
-
-    // ── Blend final tests ────────────────────────────────────────
 
     #[test]
     fn test_blend_uniform_homo_produces_uniform_output() {

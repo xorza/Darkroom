@@ -9,7 +9,6 @@ use common::Vec2us;
 
 use crate::stacking::star_detection::deblend::local_maxima::is_local_maximum;
 
-// Default deblend parameters for tests
 const DEFAULT_MIN_SEPARATION: usize = 3;
 const DEFAULT_MIN_PROMINENCE: f32 = 0.3;
 

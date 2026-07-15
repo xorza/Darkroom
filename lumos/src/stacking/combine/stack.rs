@@ -558,8 +558,6 @@ mod tests {
         );
     }
 
-    // ========== Helpers ==========
-
     /// Convenience wrapper: compute stats + norm params from cache (for tests).
     fn norm_params_for(cache: &LightCache, normalization: Normalization) -> Option<Vec<FrameNorm>> {
         compute_frame_norms(&cache.core.channel_stats, normalization)
@@ -614,8 +612,6 @@ mod tests {
             );
         }
     }
-
-    // ========== Error Handling ==========
 
     #[test]
     fn test_stack_empty_paths() {
@@ -769,8 +765,6 @@ mod tests {
         );
         assert!(matches!(result.unwrap_err(), Error::Cancelled));
     }
-
-    // ========== Per-pixel coverage weighting (warp → stack) ==========
 
     #[test]
     fn coverage_excludes_uncovered_frames() {
@@ -1049,8 +1043,6 @@ mod tests {
         }
     }
 
-    // ========== Normalization: Identity ==========
-
     #[test]
     fn test_norm_identity_for_identical_frames() {
         // Both Global and Multiplicative should produce identity for identical frames
@@ -1062,8 +1054,6 @@ mod tests {
             assert_norm_identity(&params);
         }
     }
-
-    // ========== Global Normalization ==========
 
     #[test]
     fn test_global_norm_offset_correction() {
@@ -1121,8 +1111,6 @@ mod tests {
         assert_channel_near(&result, 0, 100.0, 1.0);
     }
 
-    // ========== Multiplicative Normalization ==========
-
     #[test]
     fn test_multiplicative_norm_scales_by_median_ratio() {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
@@ -1175,8 +1163,6 @@ mod tests {
         assert_channel_near(&result, 0, 100.0, 1.0);
     }
 
-    // ========== RGB Normalization ==========
-
     #[test]
     fn test_normalized_stacking_rgb() {
         // Both modes should normalize RGB frames to frame 0's reference levels
@@ -1201,8 +1187,6 @@ mod tests {
             }
         }
     }
-
-    // ========== Dispatch ==========
 
     #[test]
     fn test_dispatch_normalized_vs_unnormalized() {
@@ -1274,8 +1258,6 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
-
-    // ========== Auto Reference Frame Selection ==========
 
     #[test]
     fn test_select_reference_frame_picks_lowest_noise() {
@@ -1420,8 +1402,6 @@ mod tests {
         });
         assert_channel_near(&result, 0, 200.0, 2.0);
     }
-
-    // ========== Noise Weighting ==========
 
     #[test]
     fn test_noise_weighting_downweights_noisy_frame() {

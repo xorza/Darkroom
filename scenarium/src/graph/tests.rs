@@ -612,8 +612,6 @@ fn node_remove_test() -> anyhow::Result<()> {
     Ok(())
 }
 
-// === Accessors ===
-
 #[test]
 fn node_kind_accessors() {
     let func_id = "432b9bf1-f478-476c-a9c9-9a6e190124fc".into();
@@ -670,8 +668,6 @@ fn binding_conversions() {
     assert_eq!(Binding::from(7i64), Binding::Const(7i64.into()));
 }
 
-// === Data bindings ===
-
 #[test]
 fn node_bindings_yields_ports_in_order_with_none_gaps() {
     let graph = test_graph();
@@ -699,8 +695,6 @@ fn node_bindings_yields_ports_in_order_with_none_gaps() {
         ]
     );
 }
-
-// === Event subscriptions ===
 
 #[test]
 fn subscribe_unsubscribe_is_subscribed() {
@@ -750,8 +744,6 @@ fn subscribers_ranges_one_emitter_event() {
     assert_eq!(graph.subscribers(emitter, 2).count(), 0);
 }
 
-// === Pinned outputs ===
-
 #[test]
 fn set_output_pinned_and_is_output_pinned() {
     let mut graph = test_graph();
@@ -785,8 +777,6 @@ fn with_fresh_node_ids_remaps_pinned_outputs() {
     assert!(fresh.graph.is_output_pinned(OutputPort::new(new_sum_id, 0)));
 }
 
-// === Snapshot / restore (editor undo) ===
-
 #[test]
 fn wiring_snapshot_round_trips_through_restore() {
     let mut graph = test_graph();
@@ -812,8 +802,6 @@ fn wiring_snapshot_round_trips_through_restore() {
     assert!(graph.is_subscribed(get_a_id, 0, sum_id));
     assert_eq!(graph.bindings_touching(sum_id), bindings);
 }
-
-// === Construction helpers seed default const bindings ===
 
 fn func_with_default(default: i64) -> Func {
     Func::new(FuncId::unique(), "withdefault")
@@ -932,8 +920,6 @@ fn find_node_search_scope_gates_subgraph_interiors() {
             .is_none()
     );
 }
-
-// === Definition resolution ===
 
 #[test]
 fn resolve_def_picks_local_or_linked_source() {

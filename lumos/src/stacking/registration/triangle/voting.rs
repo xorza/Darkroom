@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Iter;
+use std::f64::consts::SQRT_2;
 
 use glam::DVec2;
 
@@ -108,7 +110,7 @@ impl Iterator for DenseVoteIter<'_> {
 #[derive(Debug)]
 pub enum VoteIter<'a> {
     Dense(DenseVoteIter<'a>),
-    Sparse(std::collections::hash_map::Iter<'a, (usize, usize), u32>),
+    Sparse(Iter<'a, (usize, usize), u32>),
 }
 
 impl Iterator for VoteIter<'_> {
@@ -157,7 +159,7 @@ pub(crate) fn vote_for_correspondences(
     // The k-d tree uses L2 distance but is_similar uses L-infinity (per-axis max).
     // Multiply by sqrt(2) so the L2 circle circumscribes the L-inf square,
     // ensuring no valid candidates are missed at the corners.
-    let l2_radius = params.ratio_tolerance * std::f64::consts::SQRT_2;
+    let l2_radius = params.ratio_tolerance * SQRT_2;
 
     for target_tri in target_triangles {
         let query = DVec2::new(target_tri.ratios.0, target_tri.ratios.1);

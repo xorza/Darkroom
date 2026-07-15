@@ -41,11 +41,9 @@ fn milky_way_best_pipeline() {
     let path = calibration_dir().join("stacked_light.tiff");
     let mut img = Image::from(&AstroImage::from_file(&path).expect("load stacked_light.tiff"));
 
-    // --- Linear domain (before the stretch): colour-calibrate, then denoise. ---
     NeutralizeBackground.apply(&mut img).unwrap(); // equalize the green-elevated background
     Denoise::default().apply(&mut img).unwrap(); // gentle wavelet denoise (MW-tuned default)
 
-    // --- Stretch + green removal, as in the neutralize / SCNR / renorm reference image. ---
     Stretch {
         method: StretchMethod::AutoStf {
             shadow_sigmas: 1.5,
@@ -61,7 +59,6 @@ fn milky_way_best_pipeline() {
     assert_displayable(&img, "stretched base");
     save_png(&img, "milky_way/stretched.png");
 
-    // --- Display-domain enhancement, tuned for a wide-angle Milky Way. ---
     // HDR: gently compress the bright star-cloud cores to reveal detail (small amount; too much
     // flattens the large-scale brightness).
     Hdr {

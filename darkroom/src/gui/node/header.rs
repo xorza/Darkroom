@@ -7,6 +7,8 @@
 //! interactive controls (right) share the [`status_row`] below it. Drawn as
 //! the top children of each node body by [`crate::gui::node::NodeUI`].
 
+use std::f32::consts::FRAC_PI_4;
+
 use aperture::{
     Align, Background, Color, Configure, Corners, FontFamily, FontWeight, Panel, Sense, Shape,
     Sizing, Spacing, Spinner, Stroke, Text, TextStyle, Ui, VAlign, WidgetId,
@@ -84,7 +86,7 @@ pub(crate) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hov
     // rounded result grows back to the port box instead of past it.
     let r = EVENT_TRIANGLE_RADIUS;
     let c = Vec2::splat(hit * 0.5);
-    let rot = Vec2::from_angle(std::f32::consts::FRAC_PI_4);
+    let rot = Vec2::from_angle(FRAC_PI_4);
     let tf = |v: Vec2| c + rot.rotate(v - c);
     let pin = Panel::zstack()
         .id(subscription_glyph_wid(node.id))

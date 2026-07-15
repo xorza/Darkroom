@@ -34,6 +34,8 @@ use crate::execution::report::RunEvent;
 use crate::execution::stats::ExecutionStats;
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
+#[cfg(test)]
+use crate::node::lambda::OutputDemand;
 
 pub(crate) mod cache;
 pub(crate) mod codec;
@@ -143,8 +145,6 @@ impl<T> Column<OutputIdx, T> {
     }
 }
 
-// === Error Types ===
-
 /// An **operation-level** failure that aborts a whole plan / run: the schedule has a
 /// cycle ([`CycleDetected`](Error::CycleDetected)), a node seed didn't resolve
 /// ([`NodeSeedNotFound`](Error::NodeSeedNotFound)), or the event loop's lambda panicked
@@ -223,8 +223,6 @@ pub(crate) struct RunSeeds {
     pub nodes: Vec<NodeAddress>,
 }
 
-// === Execution Engine ===
-
 /// The run-side pipeline container. Owns the installed `program` and its
 /// `flatten_map` (flat↔authoring ids), the reusable `plan` buffer, the `planner`
 /// (scheduling scratch), the cross-run `cache` (per-node outputs + state, plus its
@@ -253,13 +251,9 @@ pub(crate) struct ExecutionEngine {
 }
 
 impl ExecutionEngine {
-    // === Accessors ===
-
     pub(crate) fn is_empty(&self) -> bool {
         self.compiled.program.e_nodes.is_empty()
     }
-
-    // === State Management ===
 
     pub(crate) fn clear(&mut self) {
         self.compiled = CompiledGraph::default();
@@ -277,8 +271,6 @@ impl ExecutionEngine {
         self.cache.disk_store = disk_store;
     }
 
-    // === Phase 1: install the compile artifact ===
-
     /// Install a host-compiled [`CompiledGraph`] as the current program.
     /// Infallible: everything that can go wrong went wrong at compile
     /// ([`compile::Compiler`]), on the host's thread.
@@ -295,8 +287,6 @@ impl ExecutionEngine {
 
         self.compiled.validate_installed(&self.cache);
     }
-
-    // === Phases 2–3: plan then execute ===
 
     /// When `events` is `Some`, a [`RunEvent`] is sent for live per-node
     /// feedback ahead of the final stats: a `RunEvent::Progress` before and
@@ -488,10 +478,7 @@ impl ExecutionEngine {
         self.plan.verdicts[idx.into()]
     }
 
-    pub(crate) fn node_output_demand(
-        &self,
-        e_node: &ExecutionNode,
-    ) -> &[crate::node::lambda::OutputDemand] {
+    pub(crate) fn node_output_demand(&self, e_node: &ExecutionNode) -> &[OutputDemand] {
         self.plan.outputs.demand.slice(e_node.outputs)
     }
 

@@ -426,8 +426,6 @@ impl RuntimeCache {
         snapshot.coverage.ports[port] = false;
     }
 
-    // === Caching policy (over the RAM slots + the owned `disk_store`) ===
-
     /// Stamp node `idx`'s content digest into its slot and return whether an unchanged output
     /// can be reused this run — resident in RAM ([`is_resident_hit`](Self::is_resident_hit)) or
     /// a blob on disk flagged now ([`mark_on_disk_if_present`](Self::mark_on_disk_if_present)).

@@ -226,10 +226,6 @@ mod tests {
         make_star(fwhm, 0.1, 0.3, 0.5)
     }
 
-    // =========================================================================
-    // estimate_fwhm_from_stars tests
-    // =========================================================================
-
     #[test]
     fn test_fwhm_estimation_insufficient_stars() {
         // Fewer than min_stars returns default FWHM
@@ -397,10 +393,6 @@ mod tests {
         assert!((result.fwhm.unwrap() - 4.0).abs() < 0.01); // Default
         assert_eq!(result.stars_used, 0);
     }
-
-    // =========================================================================
-    // FwhmResult tests
-    // =========================================================================
 
     #[test]
     fn test_fwhm_result_debug() {

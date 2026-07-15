@@ -3,6 +3,8 @@
 //! Pure geometry / linear algebra: translation, euclidean, similarity, affine,
 //! and homography estimation from point correspondences.
 
+use std::f64::consts::SQRT_2;
+
 use glam::DVec2;
 use nalgebra::{DMatrix, SVD};
 
@@ -357,7 +359,7 @@ pub(crate) fn normalize_points(points: &[DVec2]) -> (Vec<DVec2>, Transform) {
     }
 
     // Scale so average distance is sqrt(2)
-    let scale = std::f64::consts::SQRT_2 / avg_dist;
+    let scale = SQRT_2 / avg_dist;
 
     let normalized: Vec<DVec2> = points.iter().map(|p| (*p - c) * scale).collect();
 

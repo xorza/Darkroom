@@ -7,6 +7,9 @@
 //! Or with samply:
 //!   samply record -r 4999 ./target/release/examples/profile_star_detection
 
+use std::thread;
+use std::time::Duration;
+
 use lumos::{AstroImage, ImageDimensions, StarDetector};
 
 fn generate_synthetic_image(width: usize, height: usize, num_stars: usize) -> AstroImage {
@@ -68,7 +71,7 @@ fn main() {
     eprintln!("Running {} iterations (attach profiler now)...", iterations);
 
     // Small delay to allow attaching profiler
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    thread::sleep(Duration::from_secs(1));
 
     for i in 0..iterations {
         let stars = detector.detect(&image);

@@ -32,10 +32,6 @@ fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize,
     }
 }
 
-// =============================================================================
-// Basic Dilate Mask Tests
-// =============================================================================
-
 #[test]
 fn test_dilate_mask_empty() {
     let mask = BitBuffer2::from_slice(3, 3, &[false; 9]);
@@ -167,10 +163,6 @@ fn test_dilate_mask_merges_nearby_pixels() {
     assert!(!dilated.get(6));
 }
 
-// =============================================================================
-// Additional Dilate Mask Tests
-// =============================================================================
-
 #[test]
 fn test_dilate_mask_large_radius() {
     // 11x11 image with center pixel, radius 5 should fill most of image
@@ -282,10 +274,6 @@ fn test_dilate_mask_preserves_original_pixels() {
     assert!(dilated.get(12));
     assert!(dilated.get(24));
 }
-
-// =============================================================================
-// Word Boundary Tests (critical for word-level bit operations)
-// =============================================================================
 
 #[test]
 fn test_dilate_mask_width_64_exact_word() {

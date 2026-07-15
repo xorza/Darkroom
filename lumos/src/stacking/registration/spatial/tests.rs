@@ -11,10 +11,6 @@ fn radius_search_indices(tree: &KdTree, query: DVec2, radius: f64) -> Vec<usize>
     buf
 }
 
-// ============================================================================
-// KdTree::build tests
-// ============================================================================
-
 #[test]
 fn test_build_empty() {
     let tree = KdTree::build(&[]);
@@ -49,10 +45,6 @@ fn test_build_preserves_all_points() {
         assert_eq!(stored.y, p.y);
     }
 }
-
-// ============================================================================
-// KdTree::k_nearest tests
-// ============================================================================
 
 #[test]
 fn test_k_nearest_exact_distances() {
@@ -383,10 +375,6 @@ fn test_k_nearest_with_large_k_uses_large_heap() {
     }
 }
 
-// ============================================================================
-// KdTree::nearest_one tests
-// ============================================================================
-
 #[test]
 fn test_nearest_one_exact_match() {
     let points = [
@@ -455,10 +443,6 @@ fn test_nearest_one_empty_tree_not_possible() {
     // build(&[]) returns None.
     assert!(KdTree::build(&[]).is_none());
 }
-
-// ============================================================================
-// KdTree::radius_indices_into tests
-// ============================================================================
 
 #[test]
 fn test_radius_finds_correct_points() {
@@ -603,10 +587,6 @@ fn test_radius_different_radii_different_results() {
     assert_eq!(r3, vec![0, 1, 2]);
 }
 
-// ============================================================================
-// KdTree::get_point tests
-// ============================================================================
-
 #[test]
 fn test_get_point_returns_original_coordinates() {
     let points = [
@@ -622,10 +602,6 @@ fn test_get_point_returns_original_coordinates() {
         assert_eq!(stored.y, p.y);
     }
 }
-
-// ============================================================================
-// BoundedMaxHeap tests
-// ============================================================================
 
 #[test]
 fn test_heap_small_variant_selection() {
@@ -772,10 +748,6 @@ fn test_heap_capacity_one() {
     assert_eq!(result[0].index, 1);
     assert!((result[0].dist_sq - 3.0).abs() < 1e-10);
 }
-
-// ============================================================================
-// Cross-method consistency tests
-// ============================================================================
 
 #[test]
 fn test_k_nearest_and_radius_agree() {

@@ -18,6 +18,8 @@ mod tests;
 mod magsac;
 pub(crate) mod transforms;
 
+use std::cmp::Ordering;
+
 use magsac::MagsacScorer;
 use transforms::{adaptive_iterations, estimate_transform};
 
@@ -434,7 +436,7 @@ impl RansacEstimator {
         sorted_indices.sort_by(|&a, &b| {
             confidences[b]
                 .partial_cmp(&confidences[a])
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .unwrap_or(Ordering::Equal)
         });
 
         // Compute weights for weighted sampling
@@ -513,7 +515,7 @@ fn weighted_sample_into<R: Rng>(
 
     // Partition so the top k elements (by descending key) are in [0..k]
     scratch.select_nth_unstable_by(k - 1, |a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal)
     });
 
     for &(idx, _) in &scratch[..k] {

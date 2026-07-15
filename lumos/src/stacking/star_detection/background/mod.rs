@@ -174,8 +174,6 @@ fn interpolate_row(
     let tiles_x = grid.tiles_x();
     let centers_x = &grid.centers_x;
 
-    // --- Step 1: Evaluate Y spline at each tile column ---
-
     let ty0 = grid.find_lower_tile_y(fy);
     let ty1 = (ty0 + 1).min(grid.tiles_y() - 1);
     let cy0 = grid.center_y(ty0);
@@ -205,8 +203,6 @@ fn interpolate_row(
         node_noise[tx] = cubic_spline_eval(f0_n, f1_n, d0_n, d1_n, hy, ty);
     }
 
-    // --- Step 2: Solve tridiagonal system in X for second derivatives ---
-
     let d2x_bg = &mut scratch.d2x_bg[..tiles_x];
     let d2x_noise = &mut scratch.d2x_noise[..tiles_x];
 
@@ -217,8 +213,6 @@ fn interpolate_row(
         d2x_noise,
         &mut scratch.spline_scratch,
     );
-
-    // --- Step 3: Evaluate X spline per segment ---
 
     let mut x = 0usize;
 
