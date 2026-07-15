@@ -1,5 +1,6 @@
 scrolview on newnode popup
 
+review interned string impl
 darkroom string interning
 
 cleanup binary caches
@@ -24,3 +25,5 @@ auto chosen reference  and manually specified
 visual node groups
 
 audit test_support and test exposed proxies
+
+audit allocations overshoot , see where reserve_exxact would be better
