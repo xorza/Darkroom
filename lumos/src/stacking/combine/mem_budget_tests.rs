@@ -18,12 +18,10 @@ use common::CancelToken;
 use fits_well::{FitsWriter, Image};
 
 use crate::AstroImage;
-use crate::stacking::combine::cache_config::{
-    compute_load_concurrency, fits_in_memory, memory_budget,
-};
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::combine::stack::stack;
+use crate::stacking::frame_store::{fits_in_memory, load_concurrency, memory_budget};
 
 /// The tiered loader's core guarantee, as an invariant sweep: for any (frame size, count, budget),
 /// the chosen concurrency must not let peak *load* heap exceed the usable budget. Project that peak
@@ -48,8 +46,7 @@ fn load_budget_is_respected_across_configs() {
                 } else {
                     0
                 };
-                let c =
-                    compute_load_concurrency(frame, transient, resident_frames, budget, workers);
+                let c = load_concurrency(frame, transient, resident_frames, budget, workers);
                 let projected = resident_frames as u64 * frame as u64 + c as u64 * transient as u64;
                 assert!(
                     projected <= usable || c == 1,

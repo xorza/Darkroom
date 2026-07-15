@@ -2,7 +2,7 @@ use imaginarium::Buffer2;
 use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig,
     CalibrationComponent, CalibrationMasters, CombineMethod, DefectSummary, DrizzleConfig,
-    DrizzleConfigError, DrizzleError, DrizzleFrame, GesdConfig, ImageDimensions,
+    DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError, GesdConfig, ImageDimensions,
     LinearFitClipConfig, Normalization, PercentileClipConfig, Rejection, SigmaClipConfig, SmallN,
     StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig,
     StarDetectionConfigError, StarDetector, Transform, Weighting, WinsorizedClipConfig,
@@ -83,6 +83,16 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         operation_error,
         StackError::Config(StackConfigError::InvalidSigmaLow { value: 0.0 })
     ));
+
+    let storage_error = FrameStoreError::CreateDirectory {
+        path: ".tmp/unwritable".into(),
+        source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+    };
+    let operation_error: StackError = storage_error.into();
+    assert_eq!(
+        operation_error.to_string(),
+        "failed to create frame-store directory '.tmp/unwritable': denied"
+    );
 
     let drizzle_error = DrizzleConfig {
         scale: 0.0,

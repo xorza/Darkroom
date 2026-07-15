@@ -10,8 +10,10 @@
 //!
 //! [`plan_memory`]: super::plan_memory
 
-use super::{MemoryPlan, PER_FRAME_DECODE_PLANES, PER_FRAME_WORKING_PLANES, plan_memory};
-use crate::stacking::combine::cache_config::{fits_in_memory, memory_budget};
+use crate::stacking::frame_store::{
+    MemoryPlan, PER_FRAME_DECODE_PLANES, PER_FRAME_WORKING_PLANES, fits_in_memory, memory_budget,
+    plan_memory,
+};
 
 const MIB: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * MIB;

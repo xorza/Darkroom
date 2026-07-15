@@ -11,6 +11,7 @@
 pub(crate) mod calibration_masters;
 pub(crate) mod combine;
 pub(crate) mod drizzle;
+pub(crate) mod frame_store;
 pub(crate) mod pipeline;
 pub(crate) mod product;
 pub(crate) mod registration;

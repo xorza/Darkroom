@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::io::astro_image::ImageDimensions;
+use crate::stacking::frame_store::FrameStoreError;
 
 /// Invalid [`crate::StackConfig`] parameters.
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -53,6 +54,9 @@ pub enum Error {
     #[error(transparent)]
     Config(#[from] StackConfigError),
 
+    #[error(transparent)]
+    FrameStore(#[from] FrameStoreError),
+
     #[error("No frames provided for stacking")]
     NoFrames,
 
@@ -82,41 +86,6 @@ pub enum Error {
         expected_height: usize,
         actual_width: usize,
         actual_height: usize,
-    },
-
-    #[error("Failed to create cache directory '{path}': {source}")]
-    CreateCacheDir {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-
-    #[error("Failed to create cache file '{path}': {source}")]
-    CreateCacheFile {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-
-    #[error("Failed to write cache file '{path}': {source}")]
-    WriteCacheFile {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-
-    #[error("Failed to open cache file '{path}': {source}")]
-    OpenCacheFile {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-
-    #[error("Failed to memory-map cache file '{path}': {source}")]
-    MmapCacheFile {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
     },
 }
 
@@ -154,51 +123,15 @@ mod tests {
     }
 
     #[test]
-    fn test_create_cache_dir_error_message() {
-        let err = Error::CreateCacheDir {
-            path: PathBuf::from("/tmp/cache"),
-            source: io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"),
-        };
-        assert!(err.to_string().contains("/tmp/cache"));
-        assert!(err.to_string().contains("permission denied"));
-    }
-
-    #[test]
-    fn test_create_cache_file_error_message() {
-        let err = Error::CreateCacheFile {
-            path: PathBuf::from("/tmp/cache/frame.bin"),
-            source: io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"),
-        };
-        assert!(err.to_string().contains("/tmp/cache/frame.bin"));
-    }
-
-    #[test]
-    fn test_write_cache_file_error_message() {
-        let err = Error::WriteCacheFile {
+    fn frame_store_error_is_transparent() {
+        let error = Error::from(FrameStoreError::WriteFile {
             path: PathBuf::from("/tmp/cache/frame.bin"),
             source: io::Error::other("disk full"),
-        };
-        assert!(err.to_string().contains("/tmp/cache/frame.bin"));
-        assert!(err.to_string().contains("disk full"));
-    }
-
-    #[test]
-    fn test_open_cache_file_error_message() {
-        let err = Error::OpenCacheFile {
-            path: PathBuf::from("/tmp/cache/frame.bin"),
-            source: io::Error::new(io::ErrorKind::NotFound, "not found"),
-        };
-        assert!(err.to_string().contains("/tmp/cache/frame.bin"));
-    }
-
-    #[test]
-    fn test_mmap_cache_file_error_message() {
-        let err = Error::MmapCacheFile {
-            path: PathBuf::from("/tmp/cache/frame.bin"),
-            source: io::Error::other("mmap failed"),
-        };
-        assert!(err.to_string().contains("/tmp/cache/frame.bin"));
-        assert!(err.to_string().contains("mmap failed"));
+        });
+        assert_eq!(
+            error.to_string(),
+            "failed to write frame-store file '/tmp/cache/frame.bin': disk full"
+        );
     }
 
     #[test]

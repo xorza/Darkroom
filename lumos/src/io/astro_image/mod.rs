@@ -20,8 +20,7 @@ use imaginarium::{Buffer2, DeinterleavedImageData};
 
 use crate::io::raw::load_raw;
 use crate::math::sum::sum_f32;
-use crate::stacking::combine::cache::StackableImage;
-use crate::stacking::combine::error::Error;
+use crate::stacking::frame_store::StackableImage;
 
 /// FITS BITPIX values representing pixel data types.
 ///
@@ -458,11 +457,8 @@ impl StackableImage for AstroImage {
         &self.metadata
     }
 
-    fn load(path: &Path) -> Result<Self, Error> {
-        AstroImage::from_file(path).map_err(|e| Error::ImageLoad {
-            path: path.to_path_buf(),
-            source: std::io::Error::other(e),
-        })
+    fn load(path: &Path) -> Result<Self, ImageError> {
+        AstroImage::from_file(path)
     }
 
     fn from_stacked(

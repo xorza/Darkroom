@@ -10,22 +10,22 @@
 use rayon::prelude::*;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::io::astro_image::AstroImage;
 use crate::io::astro_image::error::ImageError;
-use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
 use crate::io::raw::{load_raw_cfa, raw_dimensions};
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, reject_cosmic_rays};
-use crate::stacking::combine::cache::{
-    FrameStats, Plane, WeightedFrame, image_from_spilled_channels, remove_spilled_channels,
-    spill_channels, spill_weighted_frame,
-};
-use crate::stacking::combine::cache_config::{compute_load_concurrency, fits_in_memory};
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::progress::ProgressCallback;
-use crate::stacking::combine::stack::{StackFrame, stack_images, stack_weighted_frames};
+use crate::stacking::combine::stack::{StackFrame, stack_images, stack_stored_frames};
+use crate::stacking::frame_store::{
+    MemoryPlan, SpillDirectory, StoredImage, StoredLightFrame, plan_memory, store_image,
+    store_light_frame,
+};
 use crate::stacking::product::StackProduct;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::{register, warp};
@@ -33,7 +33,6 @@ use crate::stacking::star_detection::config::Config as StarDetectionConfig;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::error::StarDetectionConfigError;
 use crate::stacking::star_detection::star::Star;
-use arrayvec::ArrayVec;
 use common::CancelToken;
 use common::parallel::try_par_map_limited;
 
@@ -150,15 +149,18 @@ pub fn align_and_stack(
     let total = lights.len();
     tracing::info!(frames = total, "Detecting stars");
     let detected = AtomicUsize::new(0);
-    let star_sets: Result<Vec<Vec<Star>>, StarDetectionConfigError> = lights
-        .par_iter()
-        .map(|img| {
+    let detected_frames: Result<Vec<DetectedFrame<AstroImage>>, StarDetectionConfigError> = lights
+        .into_par_iter()
+        .map(|image| {
             // Cancelled: skip this frame's detection (cheap empty result); the
             // post-loop check below turns the run into `Cancelled`.
             if cancel.is_cancelled() {
-                return Ok(Vec::new());
+                return Ok(DetectedFrame {
+                    image,
+                    stars: Arc::from([]),
+                });
             }
-            let result = StarDetector::from_config(config.detection.clone())?.detect(img);
+            let result = StarDetector::from_config(config.detection.clone())?.detect(&image);
             let d = &result.diagnostics;
             let n = detected.fetch_add(1, Ordering::Relaxed) + 1;
             // The detection funnel — candidates → deblended → centroided → kept — shows how
@@ -172,51 +174,52 @@ pub fn align_and_stack(
                 stars = result.stars.len(),
                 "detected stars"
             );
-            Ok(result.stars)
+            Ok(DetectedFrame {
+                image,
+                stars: result.stars.into(),
+            })
         })
         .collect();
-    let star_sets = star_sets?;
-    let total_stars: usize = star_sets.iter().map(|s| s.len()).sum();
+    let detected_frames = detected_frames?;
+    let total_stars: usize = detected_frames.iter().map(|frame| frame.stars.len()).sum();
     tracing::info!(total_stars, "Star detection complete");
     if cancel.is_cancelled() {
         return Err(Error::Stack(StackError::Cancelled));
     }
 
-    let star_counts: Vec<usize> = star_sets.iter().map(|s| s.len()).collect();
+    let star_counts: Vec<usize> = detected_frames
+        .iter()
+        .map(|frame| frame.stars.len())
+        .collect();
     let reference = select_reference(
         &star_counts,
         config.reference,
         config.registration.required_stars(),
     )?;
-    let ref_stars = &star_sets[reference];
-    // The stacked master inherits the reference frame's (the alignment anchor's) metadata — captured
-    // before `lights` is consumed by the warp, and matching the streaming path which combines with
-    // `detected[reference].metadata`. (Otherwise the combine would derive it from frame 0.)
-    let ref_metadata = lights[reference].metadata.clone();
+    let ref_stars = Arc::clone(&detected_frames[reference].stars);
+    // The master follows the alignment anchor rather than whichever frame reaches combine first.
+    let ref_metadata = detected_frames[reference].image.metadata.clone();
     tracing::info!(
         reference,
         ref_stars = ref_stars.len(),
         "Reference frame selected"
     );
 
-    // Register + warp every non-reference frame to the reference; the reference passes through
-    // unwarped. `lights` is consumed **by value** (`into_par_iter`) so each input frame is freed as
-    // its warped output is produced — we never hold the input set and the warped set at once, which
-    // roughly halves the peak of this (the heaviest) stage. A frame that fails to register is dropped
-    // (its index returned), not fatal.
-    let n_lights = lights.len();
+    // Consuming each detected record frees its input image as soon as its warped output is produced,
+    // so this stage never holds the complete input and warped sets simultaneously.
+    let n_lights = detected_frames.len();
     let reg_total = n_lights - 1;
     tracing::info!(frames = reg_total, "Registering frames to the reference");
     let registered_so_far = AtomicUsize::new(0);
-    let outcomes: Vec<Result<StackFrame, usize>> = lights
+    let outcomes: Vec<Result<StackFrame, usize>> = detected_frames
         .into_par_iter()
         .enumerate()
-        .map(|(index, img)| {
+        .map(|(index, detected)| {
             if index == reference {
                 // Reference goes in unwarped → fully covered; `coverage: None` weights it 1
                 // everywhere (no throwaway full-coverage map to allocate).
                 return Ok(StackFrame {
-                    image: img,
+                    image: detected.image,
                     coverage: None,
                 });
             }
@@ -226,7 +229,7 @@ pub fn align_and_stack(
                 return Err(index);
             }
             let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
-            match register(ref_stars, &star_sets[index], &config.registration) {
+            match register(&ref_stars, &detected.stars, &config.registration) {
                 Ok(result) => {
                     tracing::info!(
                         frame = n,
@@ -237,12 +240,15 @@ pub fn align_and_stack(
                         transform = %result.transform,
                         "registered"
                     );
-                    let warped = warp(&img, &result.warp_transform(), &config.registration);
+                    let warped = warp(
+                        &detected.image,
+                        &result.warp_transform(),
+                        &config.registration,
+                    );
                     Ok(StackFrame {
                         image: warped.image,
                         coverage: Some(warped.coverage),
                     })
-                    // `img` (the input frame) is dropped here, freeing its planes.
                 }
                 Err(error) => {
                     tracing::info!(frame = n, total = reg_total, %error, "registration failed");
@@ -302,81 +308,6 @@ pub fn align_and_stack(
 /// memory; the demosaic (work-conserving across cores) keeps the pool busy
 /// within a batch, so the cap costs little throughput.
 const MAX_CONCURRENT_LIGHTS: usize = 4;
-
-/// Rough per-frame working-set estimate, in f32 planes, for memory budgeting: a calibrated/warped
-/// frame plus its in-flight scratch (detection buffers, or a warp's input+output). Used to reserve
-/// RAM-path scratch headroom in the tier decision and to bound the streaming **warp** concurrency.
-const PER_FRAME_WORKING_PLANES: usize = 8;
-
-/// Per-frame working set for the streaming **decode→demosaic→detect** step, which additionally holds
-/// the transient ~10-plane demosaic arena (`io::raw::demosaic`) on top of the output + detect
-/// scratch. Larger than [`PER_FRAME_WORKING_PLANES`], so step 1 fans out less and doesn't overshoot.
-const PER_FRAME_DECODE_PLANES: usize = 14;
-
-/// The raw-light stack's memory-tier decision, as pure arithmetic over the sensor size, frame count,
-/// worker count, and RAM budget — extracted from [`calibrate_align_stack`] so the budget logic is
-/// testable without decoding a single frame. `fits_in_ram` picks the tier; the two concurrencies
-/// bound the streaming path's fan-out when it doesn't.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct MemoryPlan {
-    /// All warped frames plus the RAM path's per-frame scratch fit the usable budget → take the
-    /// all-in-memory path. Otherwise stream through the disk cache (memory-bounded, flat in N).
-    fits_in_ram: bool,
-    /// Streaming step 1 (decode → demosaic → detect) max in-flight frames: each holds the transient
-    /// ~[`PER_FRAME_DECODE_PLANES`]-plane demosaic arena, so this fans out less than the warp step.
-    decode_concurrency: usize,
-    /// Streaming step 2 (register → warp) max in-flight frames: each holds
-    /// ~[`PER_FRAME_WORKING_PLANES`] planes (input + output + scratch).
-    warp_concurrency: usize,
-}
-
-/// Decide the memory tier for `frame_count` raw lights whose single-channel f32 plane is
-/// `plane_bytes`, against a `threads`-wide pool and an `available`-byte RAM budget. Pure — no I/O, no
-/// globals — so the budget invariants are unit-testable ([`mem_budget_tests`]).
-fn plan_memory(
-    plane_bytes: usize,
-    frame_count: usize,
-    threads: usize,
-    available: u64,
-) -> MemoryPlan {
-    // Resident warped frame: 3 channels + coverage (conservative for a mono sensor).
-    let warped_bytes = 4 * plane_bytes;
-    // The RAM path runs detection/warp at full core count, each concurrent frame holding the
-    // per-frame working set of scratch. Reserve that worst case so the RAM path is only taken when
-    // the *frames and the scratch* fit — otherwise stream, which is memory-bounded (validated
-    // flat-in-N). This keeps a scratch overshoot from OOMing a stack whose frames alone would fit,
-    // on a high-core machine.
-    let concurrent = frame_count.min(threads);
-    let scratch_reserve = (PER_FRAME_WORKING_PLANES as u64)
-        .saturating_mul(plane_bytes as u64)
-        .saturating_mul(concurrent as u64);
-    let frame_budget = available.saturating_sub(scratch_reserve);
-    let fits_in_ram = fits_in_memory(warped_bytes, frame_count, frame_budget);
-
-    // Streaming fan-out: both steps spill to disk (0 resident frames), so headroom is divided by the
-    // per-decode transient. Decode holds the demosaic arena on top of the warp working set, so it
-    // fans out less and can't overshoot.
-    let decode_concurrency = compute_load_concurrency(
-        plane_bytes,
-        PER_FRAME_DECODE_PLANES * plane_bytes,
-        0,
-        available,
-        threads,
-    );
-    let warp_concurrency = compute_load_concurrency(
-        plane_bytes,
-        PER_FRAME_WORKING_PLANES * plane_bytes,
-        0,
-        available,
-        threads,
-    );
-
-    MemoryPlan {
-        fits_in_ram,
-        decode_concurrency,
-        warp_concurrency,
-    }
-}
 
 /// Calibrate, align, and stack raw light frames end to end — the full pipeline in one call.
 ///
@@ -505,20 +436,16 @@ fn select_reference(
     Ok(index)
 }
 
-/// A detected-but-not-yet-warped frame in the streaming path: its stars (kept in RAM) plus its
-/// calibrated channels spilled to disk (mmap), so no pixel data of the full set stays resident.
-/// `metadata`/`dimensions` are the small per-frame headers captured before the image was dropped.
-struct DetectedFrame {
-    stars: Vec<Star>,
-    calibrated: ArrayVec<Plane, 3>,
-    metadata: AstroImageMetadata,
-    dimensions: ImageDimensions,
+/// One detected frame whose pixels and stars advance through the pipeline together.
+#[derive(Debug)]
+struct DetectedFrame<I> {
+    image: I,
+    stars: Arc<[Star]>,
 }
 
 /// Memory-bounded `calibrate → align → stack` for sets that don't fit ~75% RAM. Spills calibrated
-/// and warped frames to the disk cache (mmap), so peak RAM is `concurrency × one-frame-working-set`
-/// plus the combine's chunk window — flat in the frame count. Reuses the combine cache's tiering
-/// primitives; the disk dir is removed when the combine's cache drops.
+/// and warped frames to the shared frame store (mmap), so peak RAM is
+/// `concurrency × one-frame-working-set` plus the combine's chunk window — flat in the frame count.
 fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     light_paths: &[P],
     masters: &CalibrationMasters,
@@ -527,13 +454,12 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     plan: MemoryPlan,
 ) -> Result<AlignStackResult, Error> {
     let total = light_paths.len();
-    let cache_dir = config.stack.cache.cache_dir.clone();
-    std::fs::create_dir_all(&cache_dir).map_err(|source| {
-        Error::Stack(StackError::CreateCacheDir {
-            path: cache_dir.clone(),
-            source,
-        })
-    })?;
+    let spill_directory = SpillDirectory::create(
+        config.stack.cache.cache_dir.clone(),
+        config.stack.cache.keep_cache,
+    )
+    .map_err(StackError::from)?;
+    let cache_dir = &spill_directory.path;
     // Fan-out for the two streaming steps was sized in `plan_memory` (decode holds the extra
     // demosaic arena, so it fans out less than the warp step). Both stream to disk, so peak RAM is
     // `concurrency × one-frame-working-set` plus the combine's chunk window — flat in the frame count.
@@ -543,7 +469,6 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
         ..
     } = plan;
 
-    // --- Step 1: decode → calibrate → demosaic → detect → spill calibrated. ---
     tracing::info!(
         frames = total,
         concurrency = decode_concurrency,
@@ -551,20 +476,18 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     );
     let done = AtomicUsize::new(0);
     let indexed: Vec<(usize, &P)> = light_paths.iter().enumerate().collect();
-    let detected: Vec<DetectedFrame> =
+    let detected: Vec<DetectedFrame<StoredImage>> =
         try_par_map_limited(&indexed, decode_concurrency, |&(idx, ref path)| {
             if cancel.is_cancelled() {
                 return Err(Error::Stack(StackError::Cancelled));
             }
             let image = decode_calibrate_demosaic(path.as_ref(), masters, config, &cancel)?;
-            let dimensions = image.dimensions();
-            let metadata = image.metadata.clone();
-            let stars = StarDetector::from_config(config.detection.clone())?
+            let stars: Arc<[Star]> = StarDetector::from_config(config.detection.clone())?
                 .detect(&image)
-                .stars;
-            let calibrated =
-                spill_channels(&cache_dir, &format!("calib_{idx}"), &image, dimensions)
-                    .map_err(Error::Stack)?;
+                .stars
+                .into();
+            let stored = store_image(cache_dir, &format!("calib_{idx}"), &image)
+                .map_err(StackError::from)?;
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             tracing::info!(
                 frame = n,
@@ -573,100 +496,94 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
                 "calibrated + detected"
             );
             Ok(DetectedFrame {
+                image: stored,
                 stars,
-                calibrated,
-                metadata,
-                dimensions,
             })
         })?;
     if cancel.is_cancelled() {
         return Err(Error::Stack(StackError::Cancelled));
     }
 
-    let dimensions = detected[0].dimensions;
+    let dimensions = detected[0].image.dimensions;
     let star_counts: Vec<usize> = detected.iter().map(|d| d.stars.len()).collect();
     let reference = select_reference(
         &star_counts,
         config.reference,
         config.registration.required_stars(),
     )?;
-    let metadata = detected[reference].metadata.clone();
-    let ref_stars = &detected[reference].stars;
+    let metadata = detected[reference].image.metadata.clone();
+    let ref_stars = Arc::clone(&detected[reference].stars);
     tracing::info!(
         reference,
         ref_stars = ref_stars.len(),
         "Reference selected (streaming)"
     );
 
-    // --- Step 2: load calibrated (mmap) → register + warp → spill warped → free calibrated. ---
     tracing::info!(
         frames = total - 1,
         "Streaming: registering + warping (spilling to disk)"
     );
     let registered_so_far = AtomicUsize::new(0);
-    let indices: Vec<usize> = (0..total).collect();
-    let outcomes: Vec<Option<(WeightedFrame, FrameStats)>> =
-        try_par_map_limited(&indices, warp_concurrency, |&idx| {
-            if cancel.is_cancelled() {
-                // Treated as dropped here; the post-loop check turns the run into `Cancelled`.
-                return Ok(None);
-            }
-            let d = &detected[idx];
-            let calib = image_from_spilled_channels(&d.calibrated, dimensions);
-            let base = format!("warped_{idx}");
-            let spilled = if idx == reference {
-                // Reference goes in unwarped → fully covered (`coverage: None`).
-                Some(spill_weighted_frame(
-                    &cache_dir, &base, calib, None, dimensions,
-                ))
-            } else {
+    let mut outcomes: Vec<Option<StoredLightFrame>> = Vec::with_capacity(total);
+    let mut pending = detected.into_iter().enumerate();
+    loop {
+        let batch: Vec<_> = pending.by_ref().take(warp_concurrency).collect();
+        if batch.is_empty() {
+            break;
+        }
+        let batch_outcomes: Result<Vec<Option<StoredLightFrame>>, Error> = batch
+            .into_par_iter()
+            .map(|(idx, detected)| {
+                if cancel.is_cancelled() {
+                    return Ok(None);
+                }
+                let calibrated = detected.image.load();
+                let name = format!("warped_{idx}");
+                if idx == reference {
+                    return store_light_frame(cache_dir, &name, calibrated, None)
+                        .map(Some)
+                        .map_err(StackError::from)
+                        .map_err(Error::Stack);
+                }
+
                 let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
-                match register(ref_stars, &d.stars, &config.registration) {
-                    Ok(reg) => {
-                        let warped = warp(&calib, &reg.warp_transform(), &config.registration);
-                        tracing::info!(
-                            frame = n,
-                            total = total - 1,
-                            inliers = reg.num_inliers,
-                            "registered (streaming)"
-                        );
-                        Some(spill_weighted_frame(
-                            &cache_dir,
-                            &base,
-                            warped.image,
-                            Some(warped.coverage),
-                            dimensions,
-                        ))
-                    }
+                let registration = match register(&ref_stars, &detected.stars, &config.registration)
+                {
+                    Ok(registration) => registration,
                     Err(error) => {
                         tracing::info!(frame = n, total = total - 1, %error, "registration failed");
-                        None
+                        return Ok(None);
                     }
-                }
-            };
-            // The calibrated spill is no longer needed once warped — free it to keep peak temp disk
-            // at ~`N × warped frame`, not `N × (calibrated + warped)`.
-            remove_spilled_channels(&cache_dir, &format!("calib_{idx}"), dimensions.channels);
-            match spilled {
-                Some(Ok(frame)) => Ok(Some(frame)),
-                Some(Err(e)) => Err(Error::Stack(e)), // a spill I/O failure is fatal
-                None => Ok(None),                     // registration drop
-            }
-        })?;
+                };
+                let warped = warp(
+                    &calibrated,
+                    &registration.warp_transform(),
+                    &config.registration,
+                );
+                tracing::info!(
+                    frame = n,
+                    total = total - 1,
+                    inliers = registration.num_inliers,
+                    "registered (streaming)"
+                );
+                store_light_frame(cache_dir, &name, warped.image, Some(warped.coverage))
+                    .map(Some)
+                    .map_err(StackError::from)
+                    .map_err(Error::Stack)
+            })
+            .collect();
+        outcomes.extend(batch_outcomes?);
+    }
     if cancel.is_cancelled() {
         return Err(Error::Stack(StackError::Cancelled));
     }
 
     // `try_par_map_limited` preserves input order, so the position is the frame index.
     let mut frames = Vec::with_capacity(outcomes.len());
-    let mut frame_stats = Vec::with_capacity(outcomes.len());
     let mut dropped = Vec::new();
     for (idx, outcome) in outcomes.into_iter().enumerate() {
         match outcome {
-            Some((frame, stats)) => {
-                frames.push(frame);
-                frame_stats.push(stats);
-            }
+            Some(frame) => frames.push(frame),
             None => dropped.push(idx),
         }
     }
@@ -681,10 +598,9 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
         dropped = dropped.len(),
         "Streaming: combining (mmap)"
     );
-    let stacked = stack_weighted_frames(
+    let stacked = stack_stored_frames(
         frames,
-        frame_stats,
-        Some(cache_dir),
+        Some(spill_directory),
         dimensions,
         metadata,
         config.stack.clone(),
@@ -706,6 +622,7 @@ mod mem_budget_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ImageDimensions;
     use crate::stacking::registration::transform::{Transform, WarpTransform};
     use crate::testing::synthetic::fixtures::star_field;
     use glam::DVec2;

@@ -31,7 +31,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 src/
 ├── stacking/   feature: load → calibrate → detect → register → combine into a stacked master
 │   ├── calibration_masters/   star_detection/   registration/
-│   └── combine/   drizzle/   pipeline/
+│   └── frame_store.rs   combine/   drizzle/   pipeline/
 ├── image_ops/  feature: in-place display/processing ops on a linear f32 master (imaginarium Image)
 │   ├── mod.rs (par_map_pixels / intensity / interleave helpers)   op.rs (OpError contract)   wavelet/
 │   ├── stretching/ (post-stack display: MTF/STF, arcsinh)   denoise/   hdr/   local_contrast/
@@ -51,6 +51,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 | `stacking::calibration_masters` | `pub(crate)` (types re-exported) | Master dark/flat/bias/flat-dark creation, defect maps, `calibrate()`. |
 | `stacking::star_detection` | `pub(crate)` | Six-stage stellar detection + sub-pixel centroiding. |
 | `stacking::registration` | `pub(crate)` | Triangle + RANSAC/MAGSAC++ star-pattern alignment, SIP distortion, image warp. |
+| `stacking::frame_store` | `pub(crate)` | Shared memory planning, RAM/mmap planes, spill lifetime, and stored frame records. |
 | `stacking::combine` | `pub(crate)` | Multi-frame combination with rejection / normalization / weighting + cache tiers. (Was the old top-level `stacking`.) |
 | `stacking::drizzle` | `pub(crate)` | Fruchter & Hook variable-pixel reconstruction. |
 | `stacking::pipeline` | `pub(crate)` | End-to-end orchestration: `align_and_stack`, `calibrate_align_stack`. |
@@ -132,9 +133,10 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 - `StackConfig` (`config.rs:127`): `method: CombineMethod` (`Mean(Rejection) | Median`), `weighting: Weighting` (`Equal | Noise | Manual(Vec<f32>)`), `normalization: Normalization` (`None | Global | Multiplicative`), `cache: CacheConfig`. Presets `sigma_clipped`/`winsorized`/`linear_fit`/`median`/`mean`/`gesd`/`percentile`/`weighted` + frame presets `light`/`flat`/`dark`/`bias`. `validate()` reports `StackConfigError`; every stack entry point validates before loading or allocating.
 - `Rejection` (`rejection.rs:831`): `None | SigmaClip | Winsorized | LinearFit | Percentile | Gesd` (each with its own config struct).
-- Two concrete caches (`cache.rs`) share the tiered store + combine engine `CacheCore` by **composition** (`{ frames, core: CacheCore }`): `CfaCache` (`CfaImage` calibration frames, `Frame`s — channels only, **no coverage**, plain combine → `CfaImage`) and `LightCache` (`AstroImage` light frames, `WeightedFrame`s — channels + optional coverage, coverage-weighted combine → `StackProduct`). Each frame is planar `Plane`s, `Memory` (RAM) or `Mapped` (mmap), chosen per stack by whether the set fits ~75% RAM; `CacheCore::process_chunks` is the one chunked-read path. Per-frame `FrameStats` (per-channel median + MAD). Coverage is type-true: it exists only on `WeightedFrame`, so `CfaCache` cannot carry it.
+- `frame_store.rs` owns memory-budget arithmetic, RAM/mmap `StoredPlane`s, spill-directory cleanup, per-frame statistics, and the `StoredFrame`/`StoredLightFrame` records consumed by combine. `StoredLightFrame` keeps channels, optional coverage, and `FrameStats` together. `cache.rs` now owns tier loading and `CacheCore::process_chunks`, not the storage representation.
 - Pipeline (`stack.rs`): `stack` (from paths → `LightCache`, coverage `None`) / `stack_images` (in-memory `StackFrame`s → `LightCache`) / calibration (`CfaCache::from_paths`). Each: tier-select + load → pick lowest-MAD reference → Global/Multiplicative norms → resolve weights → chunked per-pixel combine applying normalize → reject → accumulate. `run_stacking` (`CfaCache` → `CfaImage`) / `run_stacking_weighted` (`LightCache` → `StackProduct`). `align_and_stack` composes that product with an `AlignmentSummary` in `AlignStackResult`.
-- **Coverage weighting** (`LightCache::process_chunked_weighted`): a frame contributes at a pixel only where its coverage > `COVERAGE_EPSILON`, weighted by `coverage × per-frame weight`; `0` where no frame covers. Excluding sub-ε coverage keeps warp border-fill out of the rejection set, so `align_and_stack` leaves no dark warped-edge ring. Coverage is a `Plane` (so it's mmap-capable like channels; disk-backed coverage awaits the streaming-warp producer — roadmap Tier 4).
+- `pipeline::DetectedFrame<I>` owns each image (resident or `StoredImage`) together with its detected stars. The RAM and streaming paths consume these coherent records, so image/star indices cannot drift; streaming produces `StoredLightFrame`s through `frame_store` without naming combine cache types.
+- **Coverage weighting** (`LightCache::process_chunked_weighted`): a frame contributes at a pixel only where its coverage > `COVERAGE_EPSILON`, weighted by `coverage × per-frame weight`; `0` where no frame covers. Excluding sub-ε coverage keeps warp border-fill out of the rejection set, so `align_and_stack` leaves no dark warped-edge ring. Coverage is a `StoredPlane`, memory-mapped with the channels in the streaming tier.
 
 ## stacking/drizzle — variable-pixel reconstruction
 

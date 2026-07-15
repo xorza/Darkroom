@@ -1,89 +1,39 @@
 //! Image cache for stacking operations.
 //!
-//! Frames are stored as planar [`Plane`]s — each plane either in RAM ([`Plane::Memory`]) or
-//! memory-mapped from disk ([`Plane::Mapped`]), chosen per stack by whether the set fits in ~75% of
-//! RAM. One chunked-read path ([`Plane::chunk`]) serves both tiers, and a frame's planes always
-//! share a tier.
+//! Frames are supplied by `stacking::frame_store`, which owns RAM/mmap representation, memory
+//! planning, and spill cleanup. This module owns only tier loading and the chunked combine engine.
 //!
 //! Two concrete caches, one per image type, sharing the tiered store + combine engine
 //! ([`CacheCore`]) by composition:
-//! - [`CfaCache`] — `CfaImage` calibration frames, [`Frame`]s with **no coverage at all**, plain
-//!   combine → `CfaImage`.
-//! - [`LightCache`] — `AstroImage` light frames, [`WeightedFrame`]s with optional per-pixel
-//!   coverage, coverage-weighted combine → [`StackProduct`].
-//!
-//! Coverage is type-true: it exists only on [`WeightedFrame`] (so [`CfaCache`] cannot carry it),
-//! and a frame's planes always share a tier, so coverage is memory-mapped exactly when its
-//! channels are.
+//! - [`CfaCache`] — `CfaImage` calibration frames without coverage, plain combine → `CfaImage`.
+//! - [`LightCache`] — `AstroImage` light frames with optional per-pixel coverage,
+//!   coverage-weighted combine → [`StackProduct`].
 //!
 //! Disk cache format: one file per channel, `{hash}_c{channel}.bin`, raw f32 row-major
 //! (width * height * 4 bytes); loading is shared across image types via [`StackableImage`].
 
-use std::fs::File;
-use std::hash::{Hash, Hasher};
-use std::io::{BufWriter, Write};
-use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
 use common::CancelToken;
-use common::FnvHasher;
 use common::parallel::try_par_map_limited;
 use imaginarium::Buffer2;
-use memmap2::Mmap;
 use rayon::prelude::*;
 
 use crate::io::astro_image::cfa::CfaImage;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
-use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
-use crate::stacking::combine::cache_config::{
-    CacheConfig, compute_load_concurrency, compute_optimal_chunk_rows_with_memory, fits_in_memory,
-};
+use crate::math::statistics::ChannelStats;
+use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::progress::{ProgressCallback, StackingStage, report_progress};
 use crate::stacking::combine::stack::{FrameNorm, StackFrame};
+use crate::stacking::frame_store::{
+    FrameStats, SpillDirectory, StackableImage, StoredFrame, StoredLightFrame, StoredPlane,
+    cache_filename, channel_filename, compute_frame_stats, decode_transient_bytes, fits_in_memory,
+    frame_bytes, frame_from_memory, load_concurrency, map_plane, optimal_chunk_rows,
+    reusable_plane, store_frame,
+};
 use crate::stacking::product::StackProduct;
-
-/// Per-frame statistics: one `ChannelStats` per channel.
-#[derive(Debug, Clone)]
-pub(crate) struct FrameStats {
-    pub channels: ArrayVec<ChannelStats, 3>,
-}
-
-/// Compute per-channel median + MAD for a single image.
-fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
-    let dims = image.dimensions();
-    let n = dims.channels;
-
-    if n == 1 {
-        // Single channel — no parallelism needed, avoid rayon overhead.
-        let data = image.channel(0);
-        let mut buf = Vec::with_capacity(dims.size.x * dims.size.y);
-        buf.extend_from_slice(data);
-        let median = median_f32_mut(&mut buf);
-        let mad = mad_f32_with_scratch(data, median, &mut buf);
-        let mut channels = ArrayVec::new();
-        channels.push(ChannelStats { median, mad });
-        return FrameStats { channels };
-    }
-
-    // Multi-channel: compute stats in parallel.
-    let results: Vec<ChannelStats> = (0..n)
-        .into_par_iter()
-        .map(|c| {
-            let data = image.channel(c);
-            let mut buf = Vec::with_capacity(dims.size.x * dims.size.y);
-            buf.extend_from_slice(data);
-            let median = median_f32_mut(&mut buf);
-            let mad = mad_f32_with_scratch(data, median, &mut buf);
-            ChannelStats { median, mad }
-        })
-        .collect();
-
-    FrameStats {
-        channels: results.into_iter().collect(),
-    }
-}
 
 /// Per-thread scratch buffers for stacking combine closures.
 ///
@@ -114,129 +64,12 @@ impl ScratchBuffers {
     }
 }
 
-/// Trait for images that can be loaded into a stacking cache ([`CfaCache`]/[`LightCache`]).
-///
-/// Implementations must provide planar channel access as `&[f32]` slices
-/// and a file-loading constructor.
-pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
-    fn dimensions(&self) -> ImageDimensions;
-    fn channel(&self, c: usize) -> &[f32];
-    fn metadata(&self) -> &AstroImageMetadata;
-    fn load(path: &Path) -> Result<Self, Error>;
-
-    /// Pixel dimensions from the file header alone, *without* a full decode, when the format allows
-    /// it. Lets the loader size its tier and decode every frame in parallel instead of decoding
-    /// frame 0 serially just for its dimensions. `None` (the default) → the loader falls back to a
-    /// full first-frame decode.
-    fn peek_dimensions(_path: &Path) -> Option<ImageDimensions> {
-        None
-    }
-
-    /// Consume the image, moving its channel planes out (no copy) — one `Buffer2` per channel in
-    /// channel order. Populates the in-memory cache tier as [`Plane::Memory`].
-    fn into_planes(self) -> ArrayVec<Buffer2<f32>, 3>;
-
-    /// Construct from stacking output.
-    fn from_stacked(
-        pixels: PixelData,
-        metadata: AstroImageMetadata,
-        dimensions: ImageDimensions,
-    ) -> Self;
-}
-
-/// In-memory byte footprint of one frame's pixel data (planes are `f32`). Drives the tier decision
-/// and (as the resident-set term) the decode-concurrency budget.
-fn frame_bytes(dimensions: ImageDimensions) -> usize {
-    dimensions.sample_count() * size_of::<f32>()
-}
-
-/// Peak transient heap one in-flight decode holds, relative to the decoded frame. This — not the
-/// resident [`frame_bytes`] — is what [`compute_load_concurrency`] must divide the memory headroom
-/// by; sizing against the smaller resident frame let peak load heap overshoot the budget ~2×.
-///
-/// The factor is 2× and format-independent, because the dominant term is shared: every loader hands
-/// its decoded f32 frame (1×) to [`compute_frame_stats`], which copies an equal-size median scratch
-/// (1×) before the frame is stored or spilled. Both concrete loaders peak at exactly that window —
-/// FITS reads the source bytes but drops them before stats; the libraw CFA path reads a borrowed
-/// `&[u16]` (no copy) and frees libraw's buffers before stats — so neither exceeds the 2× floor.
-/// (The RAW decode→demosaic step in `pipeline` holds a much larger arena and budgets its own
-/// transient separately; it does not go through this loader.)
-const DECODE_TRANSIENT_FACTOR: usize = 2;
-
-fn decode_transient_bytes(dimensions: ImageDimensions) -> usize {
-    DECODE_TRANSIENT_FACTOR * frame_bytes(dimensions)
-}
-
-/// Generate a cache filename from the hash of the source path.
-fn cache_filename_for_path(path: &Path) -> String {
-    let mut hasher = FnvHasher::new();
-    path.hash(&mut hasher);
-    let hash = hasher.finish();
-    format!("{:016x}.bin", hash)
-}
-
-/// One W×H f32 plane — in RAM or memory-mapped. The single tiering primitive: every stored
-/// frame's channels (and a warped frame's coverage) is a `Plane`, so the in-memory and disk tiers
-/// share one chunked-read path and a frame's planes are always the same tier.
-#[derive(Debug)]
-pub(crate) enum Plane {
-    Memory(Buffer2<f32>),
-    Mapped(Mmap),
-}
-
-impl Plane {
-    /// Pixels `start..end` (a row-aligned chunk) as `f32`, tier-agnostic.
-    #[inline]
-    fn chunk(&self, start: usize, end: usize) -> &[f32] {
-        match self {
-            Plane::Memory(buffer) => &buffer[start..end],
-            Plane::Mapped(mmap) => {
-                bytemuck::cast_slice(&mmap[start * size_of::<f32>()..end * size_of::<f32>()])
-            }
-        }
-    }
-}
-
-/// A stored frame's channel planes — implemented by both [`Frame`] and [`WeightedFrame`] so the
-/// chunked combine machinery is shared. Coverage is deliberately *not* here: it lives only on
-/// [`WeightedFrame`], so a plain stack's frame type carries no coverage at all.
-pub(crate) trait CacheFrame: Send + Sync {
-    fn channels(&self) -> &[Plane];
-}
-
-/// Plain stack frame: channels only, never coverage. Used for CFA masters and plain light stacks.
-#[derive(Debug)]
-pub(crate) struct Frame {
-    channels: ArrayVec<Plane, 3>,
-}
-
-impl CacheFrame for Frame {
-    fn channels(&self) -> &[Plane] {
-        &self.channels
-    }
-}
-
-/// Registered/warped stack frame: channels + optional per-pixel coverage (`None` = fully covered,
-/// e.g. an unwarped reference). All of a frame's planes share one tier, so coverage is
-/// memory-mapped exactly when its channels are.
-#[derive(Debug)]
-pub(crate) struct WeightedFrame {
-    channels: ArrayVec<Plane, 3>,
-    coverage: Option<Plane>,
-}
-
-impl CacheFrame for WeightedFrame {
-    fn channels(&self) -> &[Plane] {
-        &self.channels
-    }
-}
-
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
 /// Owned by composition inside [`CfaCache`] and [`LightCache`]; all frames share one tier, and
-/// `cache_dir` is `Some` only when the planes are memory-mapped (removed on cleanup/drop).
+/// `spill_directory` is `Some` only when the planes are memory-mapped.
 #[derive(Debug)]
 pub(crate) struct CacheCore {
-    pub(crate) cache_dir: Option<PathBuf>,
+    pub(crate) spill_directory: Option<SpillDirectory>,
     /// Image dimensions (same for all frames).
     pub(crate) dimensions: ImageDimensions,
     /// Metadata from the first frame.
@@ -257,8 +90,8 @@ pub(crate) struct CacheCore {
 /// Built from disk via [`CfaCache::from_paths`]; stacks to a `CfaImage`.
 #[derive(Debug)]
 pub(crate) struct CfaCache {
-    // Declared before `core` so the frames' mmaps drop before `CacheCore`'s `Drop` removes the dir.
-    pub(crate) frames: Vec<Frame>,
+    // Stored planes drop before the spill directory owner in `core`.
+    pub(crate) frames: Vec<StoredFrame>,
     pub(crate) core: CacheCore,
 }
 
@@ -267,22 +100,24 @@ pub(crate) struct CfaCache {
 /// from disk ([`LightCache::from_paths`], coverage `None`); stacks to an `AstroImage`.
 #[derive(Debug)]
 pub(crate) struct LightCache {
-    pub(crate) frames: Vec<WeightedFrame>,
+    pub(crate) frames: Vec<StoredLightFrame>,
     pub(crate) core: CacheCore,
 }
 
-/// Tier-loader output: the stored [`Frame`]s plus the disk cache dir (`Some` if memory-mapped),
+/// Tier-loader output: stored frames plus the spill-directory owner (`Some` if memory-mapped),
 /// per-frame stats, and frame 0's metadata. Assembled into a [`CacheCore`] by [`load_tiered`].
+#[derive(Debug)]
 struct LoadedTier {
-    frames: Vec<Frame>,
-    cache_dir: Option<PathBuf>,
+    frames: Vec<StoredFrame>,
+    spill_directory: Option<SpillDirectory>,
     channel_stats: Vec<FrameStats>,
     metadata: AstroImageMetadata,
 }
 
 /// [`load_tiered`] output: the loaded plain frames plus the assembled [`CacheCore`].
+#[derive(Debug)]
 struct LoadedCache {
-    frames: Vec<Frame>,
+    frames: Vec<StoredFrame>,
     core: CacheCore,
 }
 
@@ -307,7 +142,7 @@ struct ChunkContext<'a> {
     pixel_offset: usize,
 }
 
-/// Load `paths` into tiered plain [`Frame`]s plus an assembled [`CacheCore`], choosing in-memory vs
+/// Load `paths` into tiered plain frames plus an assembled [`CacheCore`], choosing in-memory vs
 /// disk-backed (mmap) storage by whether the set fits ~75% of RAM. Shared by both caches'
 /// `from_paths`; the image type `I` only governs decoding.
 fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
@@ -331,7 +166,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     let (dimensions, first_image) = match I::peek_dimensions(first_path) {
         Some(dims) => (dims, None),
         None => {
-            let img = I::load(first_path)?;
+            let img = load_image::<I>(first_path)?;
             (img.dimensions(), Some(img))
         }
     };
@@ -347,7 +182,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
 
     let LoadedTier {
         frames,
-        cache_dir,
+        spill_directory,
         channel_stats,
         metadata,
     } = if use_in_memory {
@@ -364,7 +199,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         // haven't decoded frame 0 yet, so decode it now — rare, since calibration fits in RAM.
         let first = match first_image {
             Some(img) => img,
-            None => I::load(first_path)?,
+            None => load_image::<I>(first_path)?,
         };
         load_to_disk::<I, P>(
             paths,
@@ -380,7 +215,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     Ok(LoadedCache {
         frames,
         core: CacheCore {
-            cache_dir,
+            spill_directory,
             dimensions,
             metadata,
             channel_stats,
@@ -388,6 +223,13 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             progress,
             cancel,
         },
+    })
+}
+
+fn load_image<I: StackableImage>(path: &Path) -> Result<I, Error> {
+    I::load(path).map_err(|source| Error::ImageLoad {
+        path: path.to_path_buf(),
+        source: std::io::Error::other(source),
     })
 }
 
@@ -419,20 +261,10 @@ impl LightCache {
             load_tiered::<AstroImage, P>(paths, config, progress, cancel)?;
         let frames = frames
             .into_iter()
-            .map(|frame| WeightedFrame {
-                channels: frame.channels,
-                coverage: None,
-            })
+            .zip(core.channel_stats.iter().cloned())
+            .map(|(frame, stats)| StoredLightFrame::from_stored(frame, stats))
             .collect();
         Ok(Self { frames, core })
-    }
-}
-
-/// Move a loaded image's channels into an in-memory [`Frame`] (no copy — the channel buffers are
-/// moved out of the image and wrapped as [`Plane::Memory`]).
-fn image_to_frame<I: StackableImage>(image: I) -> Frame {
-    Frame {
-        channels: image.into_planes().into_iter().map(Plane::Memory).collect(),
     }
 }
 
@@ -448,7 +280,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     // Decode is CPU-bound, so fan out to the worker count, bounded by RAM headroom — every frame
     // stays resident in this tier, so only the budget left over feeds in-flight decode transients,
     // each charged its true ~2× footprint (`decode_transient_bytes`) so the load doesn't overshoot.
-    let concurrency = compute_load_concurrency(
+    let concurrency = load_concurrency(
         frame_bytes(dimensions),
         decode_transient_bytes(dimensions),
         paths.len(),
@@ -470,7 +302,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        let image = I::load(path.as_ref())?;
+        let image = load_image::<I>(path.as_ref())?;
         if image.dimensions() != dimensions {
             return Err(Error::DimensionMismatch {
                 index: idx,
@@ -480,7 +312,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         }
         let metadata = (idx == 0).then(|| image.metadata().clone());
         let stats = compute_frame_stats(&image);
-        Ok((image_to_frame(image), stats, metadata))
+        Ok((frame_from_memory(image), stats, metadata))
     })?;
 
     let mut frames = Vec::with_capacity(paths.len());
@@ -489,7 +321,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     if let Some(first_image) = first {
         metadata = Some(first_image.metadata().clone());
         all_stats.push(compute_frame_stats(&first_image));
-        frames.push(image_to_frame(first_image));
+        frames.push(frame_from_memory(first_image));
     }
     for (frame, stats, meta) in loaded {
         if meta.is_some() {
@@ -504,7 +336,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     tracing::info!("Loaded {} frames into memory", frames.len());
     Ok(LoadedTier {
         frames,
-        cache_dir: None,
+        spill_directory: None,
         channel_stats: all_stats,
         metadata: metadata.expect("frame 0 provides metadata"),
     })
@@ -522,25 +354,22 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     available_memory: u64,
     cancel: &CancelToken,
 ) -> Result<LoadedTier, Error> {
-    let cache_dir = &config.cache_dir;
-    std::fs::create_dir_all(cache_dir).map_err(|e| Error::CreateCacheDir {
-        path: cache_dir.to_path_buf(),
-        source: e,
-    })?;
+    let spill_directory = SpillDirectory::create(config.cache_dir.clone(), config.keep_cache)?;
+    let cache_dir = &spill_directory.path;
 
     // Cache first image and compute stats. Frame 0 carries the stack metadata.
     let metadata = first_image.metadata().clone();
     let first_stats = compute_frame_stats(&first_image);
     let first_path = paths[0].as_ref();
-    let base_filename = cache_filename_for_path(first_path);
-    let first_cached = cache_image_channels(cache_dir, &base_filename, &first_image, dimensions)?;
+    let base_filename = cache_filename(first_path);
+    let first_cached = cache_image_channels(cache_dir, &base_filename, &first_image)?;
     report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
     // Decode is CPU-bound, so fan out to the worker count, bounded by RAM. The disk tier streams
     // each decoded frame to its own file and drops it, so nothing stays resident (`0`) — only the
     // in-flight decodes occupy memory, each its true ~2× transient. Each frame writes unique files,
     // so there's no contention.
-    let concurrency = compute_load_concurrency(
+    let concurrency = load_concurrency(
         frame_bytes(dimensions),
         decode_transient_bytes(dimensions),
         0,
@@ -558,7 +387,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
             return Err(Error::Cancelled);
         }
         let path_ref = path.as_ref();
-        let base_filename = cache_filename_for_path(path_ref);
+        let base_filename = cache_filename(path_ref);
         load_and_cache_frame::<I>(cache_dir, &base_filename, path_ref, dimensions, idx)
     })?;
 
@@ -567,9 +396,9 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     let mut all_stats = Vec::with_capacity(paths.len());
     frames.push(first_cached);
     all_stats.push(first_stats);
-    for (frame, stats) in remaining {
-        frames.push(frame);
-        all_stats.push(stats);
+    for loaded in remaining {
+        frames.push(loaded.frame);
+        all_stats.push(loaded.stats);
     }
 
     report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
@@ -583,7 +412,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
 
     Ok(LoadedTier {
         frames,
-        cache_dir: Some(cache_dir.to_path_buf()),
+        spill_directory: Some(spill_directory),
         channel_stats: all_stats,
         metadata,
     })
@@ -592,11 +421,16 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
 impl CacheCore {
     /// Combine engine: walk the output in memory-bounded row chunks (whole planes for in-memory
     /// stacks, bounded row chunks for disk-backed), gather each frame's channel slice for the
-    /// chunk via [`Plane::chunk`], and hand `(output_slice, ChunkContext)` to `process`. The frames
+    /// chunk via [`StoredPlane::chunk`], and hand `(output_slice, ChunkContext)` to `process`. The frames
     /// live in the owning cache, so they're passed in. Returns the combined `PixelData`.
-    fn process_chunks<F, Process>(&self, frames: &[F], mut process: Process) -> PixelData
+    fn process_chunks<F, Channels, Process>(
+        &self,
+        frames: &[F],
+        frame_channels: Channels,
+        mut process: Process,
+    ) -> PixelData
     where
-        F: CacheFrame,
+        Channels: for<'a> Fn(&'a F) -> &'a [StoredPlane] + Copy,
         Process: FnMut(&mut [f32], ChunkContext),
     {
         let dims = self.dimensions;
@@ -606,24 +440,24 @@ impl CacheCore {
 
         // Whole-plane chunks in RAM; for disk-backed stacks size chunks to the memory budget
         // (queried only here, where it's used — an in-memory stack skips the sysinfo read).
-        let chunk_rows = if self.cache_dir.is_none() {
+        let chunk_rows = if self.spill_directory.is_none() {
             height
         } else {
             let available_memory = self.config.get_available_memory();
-            compute_optimal_chunk_rows_with_memory(width, 1, frame_count, available_memory)
+            optimal_chunk_rows(width, 1, frame_count, available_memory)
         };
 
         let mut output = PixelData::new_default(width, height, dims.channels);
-        let channels = output.channels();
+        let channel_count = output.channels();
 
         let num_chunks = height.div_ceil(chunk_rows);
-        let total_work = num_chunks * channels;
+        let total_work = num_chunks * channel_count;
 
         let mut chunks: Vec<&[f32]> = Vec::with_capacity(frame_count);
 
         report_progress(&self.progress, 0, total_work, StackingStage::Processing);
 
-        for channel in 0..channels {
+        for channel in 0..channel_count {
             for chunk_idx in 0..num_chunks {
                 let start_row = chunk_idx * chunk_rows;
                 let end_row = (start_row + chunk_rows).min(height);
@@ -632,7 +466,14 @@ impl CacheCore {
 
                 chunks.clear();
                 chunks.extend((0..frame_count).map(|frame_idx| {
-                    self.read_channel_chunk(frames, frame_idx, channel, start_row, end_row)
+                    self.read_channel_chunk(
+                        frames,
+                        frame_channels,
+                        frame_idx,
+                        channel,
+                        start_row,
+                        end_row,
+                    )
                 }));
 
                 let output_slice = &mut output.channel_mut(channel).pixels_mut()
@@ -668,33 +509,21 @@ impl CacheCore {
     }
 
     /// Read a horizontal chunk (rows `start_row..end_row`) of a single channel from one frame,
-    /// tier-agnostically via [`Plane::chunk`].
-    fn read_channel_chunk<'a, F: CacheFrame>(
+    /// tier-agnostically via [`StoredPlane::chunk`].
+    fn read_channel_chunk<'a, F, Channels>(
         &self,
         frames: &'a [F],
+        channels: Channels,
         frame_idx: usize,
         channel: usize,
         start_row: usize,
         end_row: usize,
-    ) -> &'a [f32] {
+    ) -> &'a [f32]
+    where
+        Channels: Fn(&'a F) -> &'a [StoredPlane],
+    {
         let width = self.dimensions.size.x;
-        frames[frame_idx].channels()[channel].chunk(start_row * width, end_row * width)
-    }
-
-    /// Remove the disk cache directory, if any (no-op for in-memory stacks or when `keep_cache`).
-    pub fn cleanup(&self) {
-        if self.config.keep_cache {
-            return;
-        }
-        if let Some(cache_dir) = &self.cache_dir {
-            let _ = std::fs::remove_dir_all(cache_dir);
-        }
-    }
-}
-
-impl Drop for CacheCore {
-    fn drop(&mut self) {
-        self.cleanup();
+        channels(&frames[frame_idx])[channel].chunk(start_row * width, end_row * width)
     }
 }
 
@@ -721,76 +550,75 @@ impl CfaCache {
         // An in-memory stack is one chunk, so the per-chunk cancel check in
         // `process_chunks` can't interrupt the combine — poll per row here too.
         let cancel = self.core.cancel.clone();
-        self.core.process_chunks(&self.frames, |output_slice, ctx| {
-            let ChunkContext {
-                frames,
-                width,
-                channel,
-                pixel_offset: _,
-            } = ctx;
-            let frame_count = frames.len();
-            output_slice
-                .par_chunks_mut(width)
-                .enumerate()
-                .for_each_init(
-                    || (vec![0.0f32; frame_count], ScratchBuffers::new(frame_count)),
-                    |(values, scratch), (row_in_chunk, row_output)| {
-                        // Cancelled: skip the row's work (output stays zero; the
-                        // caller discards the partial result and reports Cancelled).
-                        if cancel.is_cancelled() {
-                            return;
-                        }
-                        let row_offset = row_in_chunk * width;
-                        for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
-                            let pixel_idx = row_offset + pixel_in_row;
-                            if let Some(frame_norm) = frame_norms {
-                                for (frame_idx, chunk) in frames.iter().enumerate() {
-                                    let cn = frame_norm[frame_idx].channels[channel];
-                                    values[frame_idx] = chunk[pixel_idx] * cn.gain + cn.offset;
-                                }
-                            } else {
-                                for (frame_idx, chunk) in frames.iter().enumerate() {
-                                    values[frame_idx] = chunk[pixel_idx];
-                                }
+        self.core.process_chunks(
+            &self.frames,
+            |frame| &frame.channels,
+            |output_slice, ctx| {
+                let ChunkContext {
+                    frames,
+                    width,
+                    channel,
+                    pixel_offset: _,
+                } = ctx;
+                let frame_count = frames.len();
+                output_slice
+                    .par_chunks_mut(width)
+                    .enumerate()
+                    .for_each_init(
+                        || (vec![0.0f32; frame_count], ScratchBuffers::new(frame_count)),
+                        |(values, scratch), (row_in_chunk, row_output)| {
+                            // Cancelled: skip the row's work (output stays zero; the
+                            // caller discards the partial result and reports Cancelled).
+                            if cancel.is_cancelled() {
+                                return;
                             }
-                            // The combine reducers (median/MAD, compensated sums) assume finite
-                            // inputs — NaN/Inf would silently corrupt the output (NaN-unsafe
-                            // ordering, multiply-through). No production path emits them today
-                            // (FITS load sanitizes, flat division is floored, warp border-fills 0),
-                            // so this guards against a future upstream regression.
-                            debug_assert!(
-                                values.iter().all(|v| v.is_finite()),
-                                "non-finite pixel value entered the combine",
-                            );
-                            *out = combine(values, weights, scratch);
-                        }
-                    },
-                );
-        })
+                            let row_offset = row_in_chunk * width;
+                            for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
+                                let pixel_idx = row_offset + pixel_in_row;
+                                if let Some(frame_norm) = frame_norms {
+                                    for (frame_idx, chunk) in frames.iter().enumerate() {
+                                        let cn = frame_norm[frame_idx].channels[channel];
+                                        values[frame_idx] = chunk[pixel_idx] * cn.gain + cn.offset;
+                                    }
+                                } else {
+                                    for (frame_idx, chunk) in frames.iter().enumerate() {
+                                        values[frame_idx] = chunk[pixel_idx];
+                                    }
+                                }
+                                // The combine reducers (median/MAD, compensated sums) assume finite
+                                // inputs — NaN/Inf would silently corrupt the output (NaN-unsafe
+                                // ordering, multiply-through). No production path emits them today
+                                // (FITS load sanitizes, flat division is floored, warp border-fills 0),
+                                // so this guards against a future upstream regression.
+                                debug_assert!(
+                                    values.iter().all(|v| v.is_finite()),
+                                    "non-finite pixel value entered the combine",
+                                );
+                                *out = combine(values, weights, scratch);
+                            }
+                        },
+                    );
+            },
+        )
     }
 }
 
 impl LightCache {
-    /// Build a cache from pre-tiered [`WeightedFrame`]s and their stats — the streaming pipeline
-    /// produces these directly (spilling to disk or keeping in RAM as it warps), so the whole frame
-    /// set is never materialised at once. `cache_dir` is `Some` for the disk tier (removed on
-    /// `Drop`), `None` for the RAM tier. `dimensions`/`metadata` come from the (consumed) frames.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_weighted_frames(
-        frames: Vec<WeightedFrame>,
-        channel_stats: Vec<FrameStats>,
-        cache_dir: Option<PathBuf>,
+    /// Build a cache from frames already placed in the shared frame store.
+    pub(crate) fn from_stored_frames(
+        frames: Vec<StoredLightFrame>,
+        spill_directory: Option<SpillDirectory>,
         dimensions: ImageDimensions,
         metadata: AstroImageMetadata,
         config: &CacheConfig,
         progress: ProgressCallback,
         cancel: CancelToken,
     ) -> Self {
-        debug_assert_eq!(frames.len(), channel_stats.len());
+        let channel_stats = frames.iter().map(|frame| frame.stats.clone()).collect();
         Self {
             frames,
             core: CacheCore {
-                cache_dir,
+                spill_directory,
                 dimensions,
                 metadata,
                 channel_stats,
@@ -802,7 +630,7 @@ impl LightCache {
     }
 
     /// Build an in-memory coverage-weighted cache from [`StackFrame`]s (image + optional
-    /// per-pixel coverage), moving channels and coverage into [`Plane::Memory`] (no copy).
+    /// per-pixel coverage), moving channels and coverage into resident storage without copying.
     pub fn from_stack_frames(
         frames: Vec<StackFrame>,
         config: &CacheConfig,
@@ -834,27 +662,16 @@ impl LightCache {
                 });
             }
         }
-        let channel_stats = frames
-            .par_iter()
-            .map(|frame| compute_frame_stats(&frame.image))
-            .collect();
         let stored = frames
             .into_iter()
-            .map(|frame| WeightedFrame {
-                channels: frame
-                    .image
-                    .into_planes()
-                    .into_iter()
-                    .map(Plane::Memory)
-                    .collect(),
-                coverage: frame.coverage.map(Plane::Memory),
-            })
-            .collect();
+            .map(|frame| StoredLightFrame::from_memory(frame.image, frame.coverage))
+            .collect::<Vec<_>>();
+        let channel_stats = stored.iter().map(|frame| frame.stats.clone()).collect();
 
         Ok(Self {
             frames: stored,
             core: CacheCore {
-                cache_dir: None,
+                spill_directory: None,
                 dimensions,
                 metadata,
                 channel_stats,
@@ -914,10 +731,10 @@ impl LightCache {
         // Coverage planes share their frame's tier, so they may be mmap-backed: read them in the
         // same row-aligned chunks the combine uses. The output planes are small single-channel RAM
         // buffers, written in parallel across the three at once, one row per task.
-        let chunk_rows = if self.core.cache_dir.is_none() {
+        let chunk_rows = if self.core.spill_directory.is_none() {
             height
         } else {
-            compute_optimal_chunk_rows_with_memory(
+            optimal_chunk_rows(
                 width,
                 1,
                 frame_count,
@@ -1001,108 +818,88 @@ impl LightCache {
         // An in-memory stack is one chunk, so the per-chunk cancel check in
         // `process_chunks` can't interrupt the combine — poll per row here too.
         let cancel = self.core.cancel.clone();
-        self.core.process_chunks(&self.frames, |output_slice, ctx| {
-            let ChunkContext {
-                frames,
-                width,
-                channel,
-                pixel_offset,
-            } = ctx;
-            let frame_count = frames.len();
-            let chunk_pixels = output_slice.len();
-            // Per-frame coverage slice for this chunk's rows; `None` = fully covered.
-            let coverage: Vec<Option<&[f32]>> = self
-                .frames
-                .iter()
-                .map(|frame| {
-                    frame
-                        .coverage
-                        .as_ref()
-                        .map(|plane| plane.chunk(pixel_offset, pixel_offset + chunk_pixels))
-                })
-                .collect();
-            output_slice
-                .par_chunks_mut(width)
-                .enumerate()
-                .for_each_init(
-                    || {
-                        (
-                            vec![0.0f32; frame_count],
-                            vec![0.0f32; frame_count],
-                            ScratchBuffers::new(frame_count),
-                        )
-                    },
-                    |(values, eff_weights, scratch), (row_in_chunk, row_output)| {
-                        // Cancelled: skip the row's work (output stays zero; the
-                        // caller discards the partial result and reports Cancelled).
-                        if cancel.is_cancelled() {
-                            return;
-                        }
-                        let row_offset = row_in_chunk * width;
-                        for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
-                            let pixel_idx = row_offset + pixel_in_row;
-                            let mut covered = 0usize;
-                            for (frame_idx, chunk) in frames.iter().enumerate() {
-                                let c = match coverage[frame_idx] {
-                                    Some(map) => map[pixel_idx],
-                                    None => 1.0,
-                                };
-                                if c > COVERAGE_EPSILON {
-                                    let v = match frame_norms {
-                                        Some(fnm) => {
-                                            let cn = fnm[frame_idx].channels[channel];
-                                            chunk[pixel_idx] * cn.gain + cn.offset
-                                        }
-                                        None => chunk[pixel_idx],
-                                    };
-                                    values[covered] = v;
-                                    eff_weights[covered] =
-                                        weights.map_or(1.0, |w| w[frame_idx]) * c;
-                                    covered += 1;
-                                }
+        self.core.process_chunks(
+            &self.frames,
+            |frame| &frame.channels,
+            |output_slice, ctx| {
+                let ChunkContext {
+                    frames,
+                    width,
+                    channel,
+                    pixel_offset,
+                } = ctx;
+                let frame_count = frames.len();
+                let chunk_pixels = output_slice.len();
+                // Per-frame coverage slice for this chunk's rows; `None` = fully covered.
+                let coverage: Vec<Option<&[f32]>> = self
+                    .frames
+                    .iter()
+                    .map(|frame| {
+                        frame
+                            .coverage
+                            .as_ref()
+                            .map(|plane| plane.chunk(pixel_offset, pixel_offset + chunk_pixels))
+                    })
+                    .collect();
+                output_slice
+                    .par_chunks_mut(width)
+                    .enumerate()
+                    .for_each_init(
+                        || {
+                            (
+                                vec![0.0f32; frame_count],
+                                vec![0.0f32; frame_count],
+                                ScratchBuffers::new(frame_count),
+                            )
+                        },
+                        |(values, eff_weights, scratch), (row_in_chunk, row_output)| {
+                            // Cancelled: skip the row's work (output stays zero; the
+                            // caller discards the partial result and reports Cancelled).
+                            if cancel.is_cancelled() {
+                                return;
                             }
-                            *out = if covered == 0 {
-                                0.0
-                            } else {
-                                debug_assert!(
-                                    values[..covered].iter().all(|v| v.is_finite()),
-                                    "non-finite pixel value entered the combine",
-                                );
-                                combine(
-                                    &mut values[..covered],
-                                    Some(&eff_weights[..covered]),
-                                    scratch,
-                                )
-                            };
-                        }
-                    },
-                );
-        })
+                            let row_offset = row_in_chunk * width;
+                            for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
+                                let pixel_idx = row_offset + pixel_in_row;
+                                let mut covered = 0usize;
+                                for (frame_idx, chunk) in frames.iter().enumerate() {
+                                    let c = match coverage[frame_idx] {
+                                        Some(map) => map[pixel_idx],
+                                        None => 1.0,
+                                    };
+                                    if c > COVERAGE_EPSILON {
+                                        let v = match frame_norms {
+                                            Some(fnm) => {
+                                                let cn = fnm[frame_idx].channels[channel];
+                                                chunk[pixel_idx] * cn.gain + cn.offset
+                                            }
+                                            None => chunk[pixel_idx],
+                                        };
+                                        values[covered] = v;
+                                        eff_weights[covered] =
+                                            weights.map_or(1.0, |w| w[frame_idx]) * c;
+                                        covered += 1;
+                                    }
+                                }
+                                *out = if covered == 0 {
+                                    0.0
+                                } else {
+                                    debug_assert!(
+                                        values[..covered].iter().all(|v| v.is_finite()),
+                                        "non-finite pixel value entered the combine",
+                                    );
+                                    combine(
+                                        &mut values[..covered],
+                                        Some(&eff_weights[..covered]),
+                                        scratch,
+                                    )
+                                };
+                            }
+                        },
+                    );
+            },
+        )
     }
-}
-
-/// Generate cache filename for a specific channel.
-fn channel_cache_filename(base_filename: &str, channel: usize) -> String {
-    let stem = base_filename.strip_suffix(".bin").unwrap_or(base_filename);
-    format!("{stem}_c{channel}.bin")
-}
-
-/// Try to reuse an existing channel cache file if it exists and has matching size.
-///
-/// Returns true if the file can be reused, false if it needs to be rewritten.
-fn try_reuse_channel_cache_file(path: &Path, expected_dims: ImageDimensions) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-
-    let pixels_per_channel = expected_dims.size.x * expected_dims.size.y;
-    let expected_size = (pixels_per_channel * size_of::<f32>()) as u64;
-    if metadata.len() != expected_size {
-        return false;
-    }
-
-    tracing::debug!("Reusing existing channel cache file: {:?}", path);
-    true
 }
 
 /// Get the source file's modification time as seconds since epoch.
@@ -1146,57 +943,20 @@ fn validate_source_meta(cache_dir: &Path, base_filename: &str, source: &Path) ->
     stored_mtime == current_mtime
 }
 
-/// Write a single channel to a binary cache file.
-fn write_channel_cache_file(path: &Path, channel_data: &[f32]) -> Result<(), Error> {
-    let file = File::create(path).map_err(|e| Error::CreateCacheFile {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-    let mut writer = BufWriter::new(file);
-    let map_write_err = |e| Error::WriteCacheFile {
-        path: path.to_path_buf(),
-        source: e,
-    };
-
-    let bytes: &[u8] = bytemuck::cast_slice(channel_data);
-    writer.write_all(bytes).map_err(&map_write_err)?;
-    writer.flush().map_err(map_write_err)?;
-
-    Ok(())
-}
-
-/// Open and memory-map a channel cache file.
-/// Advises the OS for sequential access (the stacking pipeline reads row-by-row).
-fn mmap_channel_file(channel_path: PathBuf) -> Result<Mmap, Error> {
-    let file = File::open(&channel_path).map_err(|e| Error::OpenCacheFile {
-        path: channel_path.clone(),
-        source: e,
-    })?;
-    let mmap = unsafe {
-        Mmap::map(&file).map_err(|e| Error::MmapCacheFile {
-            path: channel_path,
-            source: e,
-        })?
-    };
-
-    #[cfg(unix)]
-    {
-        use memmap2::Advice;
-        let _ = mmap.advise(Advice::Sequential);
-    }
-
-    Ok(mmap)
-}
-
 /// Load an image and cache it, or reuse existing cache files if valid.
-/// Returns the [`Frame`] with memory-mapped channel planes.
+#[derive(Debug)]
+struct LoadedStoredFrame {
+    frame: StoredFrame,
+    stats: FrameStats,
+}
+
 fn load_and_cache_frame<I: StackableImage>(
     cache_dir: &Path,
     base_filename: &str,
     source_path: &Path,
     dimensions: ImageDimensions,
     frame_index: usize,
-) -> Result<(Frame, FrameStats), Error> {
+) -> Result<LoadedStoredFrame, Error> {
     let channels = dimensions.channels;
 
     // Check if all channel files exist, have correct size, and source hasn't changed
@@ -1205,28 +965,28 @@ fn load_and_cache_frame<I: StackableImage>(
     let can_reuse = meta_valid
         && has_stats
         && (0..channels).all(|c| {
-            let channel_path = cache_dir.join(channel_cache_filename(base_filename, c));
-            try_reuse_channel_cache_file(&channel_path, dimensions)
+            let channel_path = cache_dir.join(channel_filename(base_filename, c));
+            reusable_plane(&channel_path, dimensions)
         });
 
     if can_reuse {
         // Reuse existing cache files - just mmap them
         let mut planes = ArrayVec::new();
         for c in 0..channels {
-            let channel_path = cache_dir.join(channel_cache_filename(base_filename, c));
-            planes.push(Plane::Mapped(mmap_channel_file(channel_path)?));
+            let channel_path = cache_dir.join(channel_filename(base_filename, c));
+            planes.push(StoredPlane::Mapped(map_plane(channel_path)?));
         }
         tracing::debug!(
             source = %source_path.display(),
             "Reusing existing cache files"
         );
-        let frame = Frame { channels: planes };
+        let frame = StoredFrame { channels: planes };
         let stats = read_frame_stats(cache_dir, base_filename)
             .expect("stats sidecar missing for valid cache");
-        Ok((frame, stats))
+        Ok(LoadedStoredFrame { frame, stats })
     } else {
         // Load image and write to cache
-        let image = I::load(source_path)?;
+        let image = load_image::<I>(source_path)?;
 
         if image.dimensions() != dimensions {
             return Err(Error::DimensionMismatch {
@@ -1237,14 +997,17 @@ fn load_and_cache_frame<I: StackableImage>(
         }
 
         let stats = compute_frame_stats(&image);
-        let result = cache_image_channels(cache_dir, base_filename, &image, dimensions)?;
+        let result = cache_image_channels(cache_dir, base_filename, &image)?;
 
         // Record source mtime and stats so future runs skip recomputation
         let mtime = source_mtime(source_path).expect("source file must have mtime");
         write_source_meta(cache_dir, base_filename, mtime);
         write_frame_stats(cache_dir, base_filename, &stats);
 
-        Ok((result, stats))
+        Ok(LoadedStoredFrame {
+            frame: result,
+            stats,
+        })
     }
 }
 
@@ -1288,81 +1051,13 @@ fn read_frame_stats(cache_dir: &Path, base_filename: &str) -> Option<FrameStats>
     Some(FrameStats { channels })
 }
 
-/// Cache all channels of an image to separate files and return a memory-mapped [`Frame`].
+/// Cache all channels of an image to separate files.
 fn cache_image_channels(
     cache_dir: &Path,
     base_filename: &str,
     image: &impl StackableImage,
-    dimensions: ImageDimensions,
-) -> Result<Frame, Error> {
-    Ok(Frame {
-        channels: spill_channels(cache_dir, base_filename, image, dimensions)?,
-    })
-}
-
-/// Spill an image's channels to `cache_dir/<base>_c<ch>.bin` and return them as memory-mapped
-/// [`Plane`]s. The tiering primitive shared by the path-based loader, the streaming calibrate spill,
-/// and the streaming warp spill.
-pub(crate) fn spill_channels(
-    cache_dir: &Path,
-    base_filename: &str,
-    image: &impl StackableImage,
-    dimensions: ImageDimensions,
-) -> Result<ArrayVec<Plane, 3>, Error> {
-    let mut planes = ArrayVec::new();
-    for c in 0..dimensions.channels {
-        let channel_path = cache_dir.join(channel_cache_filename(base_filename, c));
-        if !try_reuse_channel_cache_file(&channel_path, dimensions) {
-            write_channel_cache_file(&channel_path, image.channel(c))?;
-        }
-        planes.push(Plane::Mapped(mmap_channel_file(channel_path)?));
-    }
-    Ok(planes)
-}
-
-/// Spill a warped light frame (channels + optional coverage) to the disk cache and return the
-/// memory-mapped [`WeightedFrame`] plus its [`FrameStats`] — computed from the in-RAM `image` before
-/// it is dropped, so the streaming pipeline never re-reads the planes just for stats.
-pub(crate) fn spill_weighted_frame(
-    cache_dir: &Path,
-    base_filename: &str,
-    image: AstroImage,
-    coverage: Option<Buffer2<f32>>,
-    dimensions: ImageDimensions,
-) -> Result<(WeightedFrame, FrameStats), Error> {
-    let stats = compute_frame_stats(&image);
-    let channels = spill_channels(cache_dir, base_filename, &image, dimensions)?;
-    let coverage = match coverage {
-        Some(cov) => {
-            let path = cache_dir.join(format!("{base_filename}_coverage.bin"));
-            write_channel_cache_file(&path, &cov)?;
-            Some(Plane::Mapped(mmap_channel_file(path)?))
-        }
-        None => None,
-    };
-    Ok((WeightedFrame { channels, coverage }, stats))
-}
-
-/// Reconstruct an `AstroImage` from spilled (memory-mapped) channels — used by the streaming warp to
-/// pull a calibrated frame back into RAM for [`crate::stacking::registration::warp`], which needs a
-/// full `AstroImage`. Copies the mmap'd planes into owned buffers (bounded by warp concurrency).
-pub(crate) fn image_from_spilled_channels(
-    channels: &[Plane],
-    dimensions: ImageDimensions,
-) -> AstroImage {
-    let n = dimensions.size.x * dimensions.size.y;
-    let planes = channels.iter().map(|p| p.chunk(0, n).to_vec());
-    // Metadata stays at the default: this image is only warped then re-spilled, and the spill keeps
-    // channels only — the stacked master's metadata is supplied separately to the combine.
-    AstroImage::from_planar_channels(dimensions, planes)
-}
-
-/// Delete a calibrated frame's spilled channel files once its warp has consumed it (keeps peak temp
-/// usage at ~`N × warped-frame` rather than `N × (calibrated + warped)`).
-pub(crate) fn remove_spilled_channels(cache_dir: &Path, base_filename: &str, channels: usize) {
-    for c in 0..channels {
-        let _ = std::fs::remove_file(cache_dir.join(channel_cache_filename(base_filename, c)));
-    }
+) -> Result<StoredFrame, Error> {
+    store_frame(cache_dir, base_filename, image).map_err(Error::from)
 }
 
 #[cfg(test)]
@@ -1467,13 +1162,13 @@ pub(crate) mod tests {
                         ..Default::default()
                     },
                 };
-                image_to_frame(image)
+                frame_from_memory(image)
             })
             .collect();
         CfaCache {
             frames,
             core: CacheCore {
-                cache_dir: None,
+                spill_directory: None,
                 dimensions: dims,
                 metadata: AstroImageMetadata::default(),
                 channel_stats: vec![],
@@ -1498,7 +1193,7 @@ pub(crate) mod tests {
         let image = AstroImage::from_pixels(dims, pixels);
 
         let base_filename = "test_frame.bin";
-        let cached_frame = cache_image_channels(&temp_dir, base_filename, &image, dims).unwrap();
+        let cached_frame = cache_image_channels(&temp_dir, base_filename, &image).unwrap();
 
         // Should create 3 channel files
         assert_eq!(cached_frame.channels.len(), 3);
@@ -1513,51 +1208,6 @@ pub(crate) mod tests {
         // Cleanup
         drop(cached_frame);
         let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn test_try_reuse_channel_cache_file() {
-        let temp_dir = std::env::temp_dir().join("lumos_reuse_test");
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        let dims = ImageDimensions::new((4, 3), 1);
-        let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-        let image = AstroImage::from_pixels(dims, pixels);
-
-        let cache_path = temp_dir.join("reuse_c0.bin");
-        write_channel_cache_file(&cache_path, image.channel(0)).unwrap();
-
-        // Matching dimensions: reusable
-        assert!(try_reuse_channel_cache_file(&cache_path, dims));
-
-        // Different dimensions: not reusable
-        assert!(!try_reuse_channel_cache_file(
-            &cache_path,
-            ImageDimensions::new((8, 3), 1)
-        ));
-
-        // Nonexistent file: not reusable
-        assert!(!try_reuse_channel_cache_file(
-            Path::new("/nonexistent/file.bin"),
-            dims
-        ));
-
-        // Wrong size file: not reusable
-        let wrong_size_path = temp_dir.join("wrong_size.bin");
-        std::fs::write(&wrong_size_path, b"too short").unwrap();
-        assert!(!try_reuse_channel_cache_file(&wrong_size_path, dims));
-
-        // Cleanup
-        let _ = std::fs::remove_file(&cache_path);
-        let _ = std::fs::remove_file(&wrong_size_path);
-        let _ = std::fs::remove_dir(&temp_dir);
-    }
-
-    #[test]
-    fn test_channel_cache_filename() {
-        assert_eq!(channel_cache_filename("abc123.bin", 0), "abc123_c0.bin");
-        assert_eq!(channel_cache_filename("abc123.bin", 1), "abc123_c1.bin");
-        assert_eq!(channel_cache_filename("abc123.bin", 2), "abc123_c2.bin");
     }
 
     // ========== Error Path Tests ==========
@@ -1730,8 +1380,7 @@ pub(crate) mod tests {
         let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let image = AstroImage::from_pixels(dims, pixels);
 
-        let cached_frame =
-            cache_image_channels(&temp_dir, "cleanup_test.bin", &image, dims).unwrap();
+        let cached_frame = cache_image_channels(&temp_dir, "cleanup_test.bin", &image).unwrap();
 
         // Verify cache dir has files
         assert!(temp_dir.exists());
@@ -1746,7 +1395,7 @@ pub(crate) mod tests {
         let cache = CfaCache {
             frames: vec![cached_frame],
             core: CacheCore {
-                cache_dir: Some(temp_dir.clone()),
+                spill_directory: Some(SpillDirectory::create(temp_dir.clone(), false).unwrap()),
                 dimensions: dims,
                 metadata: AstroImageMetadata::default(),
                 channel_stats: vec![],
@@ -1776,12 +1425,17 @@ pub(crate) mod tests {
         let cache = make_test_cache(images);
 
         // Read row 1 (pixels 4-7)
-        let chunk = cache.core.read_channel_chunk(&cache.frames, 0, 0, 1, 2);
+        let chunk =
+            cache
+                .core
+                .read_channel_chunk(&cache.frames, |frame| &frame.channels, 0, 0, 1, 2);
         let expected: Vec<f32> = (4..8).map(|i| i as f32).collect();
         assert_eq!(chunk, &expected[..]);
 
         // Read all rows
-        let all = cache.core.read_channel_chunk(&cache.frames, 0, 0, 0, 3);
+        let all = cache
+            .core
+            .read_channel_chunk(&cache.frames, |frame| &frame.channels, 0, 0, 0, 3);
         assert_eq!(all.len(), 12);
     }
 
@@ -1796,12 +1450,12 @@ pub(crate) mod tests {
 
         // Cache the image to disk
         let base_filename = "test_chunk.bin";
-        let cached_frame = cache_image_channels(&temp_dir, base_filename, &image, dims).unwrap();
+        let cached_frame = cache_image_channels(&temp_dir, base_filename, &image).unwrap();
 
         let cache = CfaCache {
             frames: vec![cached_frame],
             core: CacheCore {
-                cache_dir: Some(temp_dir.clone()),
+                spill_directory: Some(SpillDirectory::create(temp_dir.clone(), false).unwrap()),
                 dimensions: dims,
                 metadata: AstroImageMetadata::default(),
                 channel_stats: vec![],
@@ -1812,19 +1466,23 @@ pub(crate) mod tests {
         };
 
         // Read row 1 (pixels 4-7)
-        let chunk = cache.core.read_channel_chunk(&cache.frames, 0, 0, 1, 2);
+        let chunk =
+            cache
+                .core
+                .read_channel_chunk(&cache.frames, |frame| &frame.channels, 0, 0, 1, 2);
         let expected: Vec<f32> = (4..8).map(|i| i as f32).collect();
         assert_eq!(chunk, &expected[..]);
 
         // Read all rows
-        let all = cache.core.read_channel_chunk(&cache.frames, 0, 0, 0, 3);
+        let all = cache
+            .core
+            .read_channel_chunk(&cache.frames, |frame| &frame.channels, 0, 0, 0, 3);
         assert_eq!(all.len(), 12);
         for (i, &val) in all.iter().enumerate() {
             assert!((val - i as f32).abs() < f32::EPSILON);
         }
 
-        // Cleanup
-        cache.core.cleanup();
+        drop(cache);
     }
 
     #[test]
@@ -1840,15 +1498,14 @@ pub(crate) mod tests {
             let pixels: Vec<f32> = vec![i as f32; 4];
             let image = AstroImage::from_pixels(dims, pixels);
             let base_filename = format!("frame{}.bin", i);
-            let cached_frame =
-                cache_image_channels(&temp_dir, &base_filename, &image, dims).unwrap();
+            let cached_frame = cache_image_channels(&temp_dir, &base_filename, &image).unwrap();
             frames.push(cached_frame);
         }
 
         let cache = CfaCache {
             frames,
             core: CacheCore {
-                cache_dir: Some(temp_dir.clone()),
+                spill_directory: Some(SpillDirectory::create(temp_dir.clone(), false).unwrap()),
                 dimensions: dims,
                 metadata: AstroImageMetadata::default(),
                 channel_stats: vec![],
@@ -1860,8 +1517,7 @@ pub(crate) mod tests {
 
         assert_eq!(cache.frames.len(), 3);
 
-        // Cleanup
-        cache.core.cleanup();
+        drop(cache);
     }
 
     #[test]
@@ -1884,11 +1540,10 @@ pub(crate) mod tests {
             load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
                 .unwrap();
 
-        let (cached_frame, _stats) = cached_frame;
-        assert_eq!(cached_frame.channels.len(), 1);
+        assert_eq!(cached_frame.frame.channels.len(), 1);
 
         // Verify cached data matches original
-        let cached_data = cached_frame.channels[0].chunk(0, dims.size.x * dims.size.y);
+        let cached_data = cached_frame.frame.channels[0].chunk(0, dims.size.x * dims.size.y);
         assert_eq!(cached_data, &pixels[..]);
 
         // Cleanup
@@ -1923,8 +1578,8 @@ pub(crate) mod tests {
 
         // Both should have same data
         let n = dims.size.x * dims.size.y;
-        let first_data = first_frame.0.channels[0].chunk(0, n);
-        let second_data = second_frame.0.channels[0].chunk(0, n);
+        let first_data = first_frame.frame.channels[0].chunk(0, n);
+        let second_data = second_frame.frame.channels[0].chunk(0, n);
         assert_eq!(first_data, second_data);
         assert_eq!(first_data, &pixels[..]);
 
@@ -2094,53 +1749,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn test_cache_filename_for_path() {
-        // Same path should always produce same hash
-        let path1 = Path::new("/some/path/image.fits");
-        let filename1 = cache_filename_for_path(path1);
-        let filename2 = cache_filename_for_path(path1);
-        assert_eq!(filename1, filename2);
-
-        // Different paths should produce different hashes
-        let path2 = Path::new("/other/path/image.fits");
-        let filename3 = cache_filename_for_path(path2);
-        assert_ne!(filename1, filename3);
-
-        // Filename should end with .bin
-        assert!(filename1.ends_with(".bin"));
-
-        // Filename should be hex (16 chars + .bin)
-        assert_eq!(filename1.len(), 20); // 16 hex chars + ".bin"
-    }
-
-    #[test]
-    fn test_cache_filename_deterministic_across_calls() {
-        // Hash must be deterministic (FNV-1a with fixed seed). Pin a known value
-        // so any accidental revert to DefaultHasher (random seed) is caught.
-        let path = Path::new("/test/deterministic.fits");
-        let expected = cache_filename_for_path(path);
-
-        // Call multiple times to simulate "across invocations" within same process
-        for _ in 0..10 {
-            assert_eq!(
-                cache_filename_for_path(path),
-                expected,
-                "Cache filename must be deterministic"
-            );
-        }
-
-        // Pin the exact value. If someone reverts to DefaultHasher (random seed),
-        // this assertion will fail because the hash changes between runs.
-        assert_eq!(expected, "6f63e2eb959a4c65.bin");
-        // Verify it's a valid hex filename
-        let hex_part = &expected[..16];
-        assert!(
-            hex_part.chars().all(|c| c.is_ascii_hexdigit()),
-            "Filename must be hex: {hex_part}"
-        );
-    }
-
-    #[test]
     fn test_source_meta_validates_mtime() {
         let temp_dir = std::env::temp_dir().join("test_source_meta_validates");
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -2256,18 +1864,20 @@ pub(crate) mod tests {
         let base_filename = "stats_test.bin";
 
         // First call — loads image, computes stats, writes sidecar
-        let (_, first_stats) =
+        let first =
             load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
                 .unwrap();
+        let first_stats = first.stats;
 
         assert_eq!(first_stats.channels.len(), 1);
         assert!((first_stats.channels[0].median - 5.5).abs() < f32::EPSILON);
         assert!((first_stats.channels[0].mad - 3.0).abs() < f32::EPSILON);
 
         // Second call — reuses cache, reads stats from sidecar
-        let (_, reused_stats) =
+        let reused_stats =
             load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
-                .unwrap();
+                .unwrap()
+                .stats;
 
         // Stats must be identical (exact f32 roundtrip via le_bytes)
         assert_eq!(reused_stats.channels.len(), first_stats.channels.len());
@@ -2298,9 +1908,10 @@ pub(crate) mod tests {
         let base_filename = "missing_stats.bin";
 
         // First call — creates cache + sidecars
-        let (_, first_stats) =
+        let first_stats =
             load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
-                .unwrap();
+                .unwrap()
+                .stats;
 
         // Delete only the .stats sidecar
         let sp = stats_path(&temp_dir, base_filename);
@@ -2308,9 +1919,10 @@ pub(crate) mod tests {
         std::fs::remove_file(&sp).unwrap();
 
         // Second call — should reload (not panic) and recompute stats
-        let (_, reloaded_stats) =
+        let reloaded_stats =
             load_and_cache_frame::<AstroImage>(&temp_dir, base_filename, &source_path, dims, 0)
-                .unwrap();
+                .unwrap()
+                .stats;
 
         // Stats should match (same source image)
         assert_eq!(

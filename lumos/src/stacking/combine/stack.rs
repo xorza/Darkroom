@@ -3,7 +3,7 @@
 //! Provides `stack()` (from paths) and `stack_images()` (in-memory) as the main API
 //! for image stacking operations; both take a [`ProgressCallback`].
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use arrayvec::ArrayVec;
 
@@ -15,12 +15,11 @@ use imaginarium::Buffer2;
 
 use crate::math;
 use crate::math::statistics::ChannelStats;
-use crate::stacking::combine::cache::{
-    CfaCache, FrameStats, LightCache, StackableImage, WeightedFrame,
-};
+use crate::stacking::combine::cache::{CfaCache, LightCache};
 use crate::stacking::combine::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::progress::ProgressCallback;
+use crate::stacking::frame_store::{FrameStats, SpillDirectory, StackableImage, StoredLightFrame};
 use crate::stacking::product::StackProduct;
 
 /// Per-frame, per-channel affine normalization parameters.
@@ -178,15 +177,10 @@ pub fn stack_images(
     Ok(result)
 }
 
-/// Combine pre-tiered warped frames into a stacked result. The streaming align/stack pipeline builds
-/// the [`WeightedFrame`]s itself (spilling to disk or keeping in RAM as it warps), so the frame set
-/// is never fully resident; `cache_dir` is `Some` for the disk tier (removed on `Drop`). Identical
-/// combine math to [`stack_images`] — only the frame *storage* differs.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn stack_weighted_frames(
-    frames: Vec<WeightedFrame>,
-    channel_stats: Vec<FrameStats>,
-    cache_dir: Option<PathBuf>,
+/// Combine frames produced by the shared frame store.
+pub(crate) fn stack_stored_frames(
+    frames: Vec<StoredLightFrame>,
+    spill_directory: Option<SpillDirectory>,
     dimensions: ImageDimensions,
     metadata: AstroImageMetadata,
     config: StackConfig,
@@ -204,14 +198,13 @@ pub(crate) fn stack_weighted_frames(
         weighting = ?config.weighting,
         normalization = ?config.normalization,
         frame_count = frames.len(),
-        disk_tier = cache_dir.is_some(),
+        disk_tier = spill_directory.is_some(),
         "Starting unified stack (pre-tiered frames)"
     );
 
-    let cache = LightCache::from_weighted_frames(
+    let cache = LightCache::from_stored_frames(
         frames,
-        channel_stats,
-        cache_dir,
+        spill_directory,
         dimensions,
         metadata,
         &config.cache,
@@ -473,9 +466,9 @@ pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) ->
 mod tests {
     use super::*;
     use crate::io::astro_image::PixelData;
-    use crate::stacking::combine::cache::spill_weighted_frame;
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::rejection::Rejection;
+    use crate::stacking::frame_store::store_light_frame;
     use crate::{
         io::astro_image::{AstroImage, ImageDimensions},
         stacking::combine::cache::tests::make_test_cache,
@@ -525,20 +518,19 @@ mod tests {
 
         let cache_dir =
             std::env::temp_dir().join(format!("lumos_tier_test_{}", std::process::id()));
-        std::fs::create_dir_all(&cache_dir).unwrap();
+        let spill_directory = SpillDirectory::create(cache_dir, false).unwrap();
         let metadata = frames[0].image.metadata().clone();
-        let (wfs, stats): (Vec<_>, Vec<_>) = frames
+        let stored = frames
             .into_iter()
             .enumerate()
             .map(|(i, f)| {
-                spill_weighted_frame(&cache_dir, &format!("f{i}"), f.image, f.coverage, dims)
+                store_light_frame(&spill_directory.path, &format!("f{i}"), f.image, f.coverage)
                     .unwrap()
             })
-            .unzip();
-        let disk = stack_weighted_frames(
-            wfs,
-            stats,
-            Some(cache_dir.clone()),
+            .collect();
+        let disk = stack_stored_frames(
+            stored,
+            Some(spill_directory),
             dims,
             metadata,
             config,
@@ -564,8 +556,6 @@ mod tests {
             bits(&disk.variance),
             "variance differs"
         );
-
-        std::fs::remove_dir_all(&cache_dir).ok();
     }
 
     // ========== Helpers ==========

@@ -72,6 +72,7 @@ pub use stacking::combine::rejection::{
     WinsorizedClipConfig,
 };
 pub use stacking::combine::stack::{StackFrame, stack, stack_images};
+pub use stacking::frame_store::FrameStoreError;
 pub use stacking::product::StackProduct;
 
 pub use stacking::pipeline::{

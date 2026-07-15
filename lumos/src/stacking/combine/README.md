@@ -10,16 +10,17 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 | `config.rs` | `StackConfig`, `CombineMethod`, `Rejection`, `Normalization` |
 | `stack.rs` | `stack()` (from paths) / `stack_images()` (in-memory) entry points, dispatch, normalization |
 | `rejection.rs` | Pixel rejection algorithms |
-| `cache.rs` | `ImageCache` — in-memory or disk-backed (mmap) storage |
-| `cache_config.rs` | `CacheConfig` — adaptive chunk sizing (75% memory budget) |
+| `../frame_store.rs` | Shared memory planning, RAM/mmap planes, spill cleanup, stored frames |
+| `cache.rs` | Tier loading and chunked combine engine |
+| `cache_config.rs` | `CacheConfig` and available-memory query |
 | `progress.rs` | `ProgressCallback`, `StackingStage` |
 | `error.rs` | `Error` enum |
 
 ## Public API
 
 ```rust
-stack(paths, config, progress)         -> Result<AstroImage, Error>   // from disk (memory-tiered)
-stack_images(images, config, progress) -> Result<AstroImage, Error>   // already in memory
+stack(paths, config, progress, cancel)         -> Result<StackProduct, Error>
+stack_images(frames, config, progress, cancel) -> Result<StackProduct, Error>
 
 StackConfig        // { method, weighting, normalization, cache }
 CombineMethod      // Mean(Rejection) | Median
@@ -105,9 +106,14 @@ Per-frame, per-channel median and MAD (robust scale) are computed from the full 
 
 ### Storage
 
-`ImageCache` auto-selects storage mode based on available memory:
-- **In-memory**: When all frames fit in 75% of RAM. Stores `AstroImage` directly.
-- **Disk-backed**: Writes per-channel binary f32 files, accessed via memory-mapped I/O. Enables stacking 100+ frames of 50MP images.
+`stacking::frame_store` owns the storage representation and memory arithmetic shared by combine and
+the end-to-end pipeline:
+
+- **In-memory**: channel and coverage planes use resident `Buffer2<f32>` storage.
+- **Disk-backed**: channel and coverage planes use memory-mapped f32 files owned by a
+  `SpillDirectory`; dropping the final cache releases mappings before cleanup.
+- `StoredLightFrame` keeps channels, optional coverage, and per-channel median/MAD statistics in one
+  record. Combine consumes these records without exposing its cache internals to pipeline.
 
 ### Processing Pipeline
 
