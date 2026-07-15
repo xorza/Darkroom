@@ -12,7 +12,8 @@ use ::quickbench::quick_bench;
 
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
-use crate::stacking::registration::{register, warp};
+use crate::stacking::registration::register;
+use crate::stacking::registration::resample::warp;
 use crate::stacking::star_detection::config::{CentroidMethod, Config, NoiseModel};
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::calibration_dir;

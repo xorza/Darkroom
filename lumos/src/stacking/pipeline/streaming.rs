@@ -18,7 +18,8 @@ use crate::stacking::frame_store::{
     store_light_frame,
 };
 use crate::stacking::progress::ProgressCallback;
-use crate::stacking::registration::{register, warp};
+use crate::stacking::registration::register;
+use crate::stacking::registration::resample::warp;
 use crate::stacking::star_detection::detector::StarDetector;
 
 use crate::stacking::pipeline::align::{DetectedFrame, align_and_stack, select_reference};

@@ -46,8 +46,8 @@ use crate::stacking::pipeline::align::align_and_stack;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::config::Config as RegistrationConfig;
+use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
-use crate::stacking::registration::warp;
 use crate::testing::mem_probe::{
     BudgetChoice, MB, RssSampler, budget_ceiling_mb, ensure_frames, env_parse, measured,
     parse_budget, two_x_ceiling_mb,

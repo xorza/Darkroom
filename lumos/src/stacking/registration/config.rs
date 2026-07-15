@@ -189,13 +189,17 @@ impl RegistrationMatchingConfig {
 /// # Example
 ///
 /// ```ignore
-/// use lumos::registration::{Config, register};
+/// use lumos::{RegistrationConfig, register};
 ///
 /// // Use defaults (max_sigma auto-derived from star FWHM)
-/// let result = register(&ref_stars, &target_stars, &Config::default())?;
+/// let result = register(&ref_stars, &target_stars, &RegistrationConfig::default())?;
 ///
 /// // Use a preset
-/// let result = register(&ref_stars, &target_stars, &Config::wide_field())?;
+/// let result = register(
+///     &ref_stars,
+///     &target_stars,
+///     &RegistrationConfig::wide_field(),
+/// )?;
 /// ```
 #[derive(Debug, Clone)]
 pub struct Config {

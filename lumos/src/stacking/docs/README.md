@@ -60,21 +60,21 @@ pass-1 claims. These are now fixed in the docs (marked `**Correction (pass 2):**
 | 5 | Correlated-noise `R = r/(1−r/3)` (from the DrizzlePac Handbook) | F&H Eq. 10 has numerator **1**: `R = 1/(1−r/3)` — the Handbook's printed form is a typo (fails the r→0 ⇒ R→1 sanity check) |
 | 5 | "Smaller pixfrac inflates correlated noise"; weight `W = Σa·w·s²` | R is monotonically **increasing** in `r=p/s` (small pixfrac's real cost is coverage/holes); the output-scale `s²` lives only in the flux numerator, never in the weight (F&H Eqs. 2–3) |
 
-## Findings flagged against lumos source (for review — not changed)
+## Findings flagged against lumos source
 
-While grounding the research, the agents read lumos source and flagged these. Each
-is a *claim to verify*, with a pointer; none has been changed (research/docs only).
+While grounding the research, the source comparison flagged these items. The table records current
+status; resolved rows remain here so the research documents' historical references have context.
 
 | Stage | Finding | Pointer |
 |-------|---------|---------|
-| 3 | **`Star.roundness1`/`roundness2` are swapped vs the DAOFIND/photutils convention — CONFIRMED** with quoted Stetson 1987 + photutils definitions. lumos also drops the ×2, uses a marginal-max not a Gaussian fit, computes both on the unconvolved stamp, and its SROUND is a clamped asymmetry-RMS. Highest-value item. | `src/star_detection/star.rs:24`, `centroid/mod.rs:666` |
-| 4 | **`warp()` emits no coverage/footprint mask** for extrapolated pixels — they should be down-weighted in the combine. Biggest stacking-correctness gap. | `src/registration/` warp |
+| 3 | **Resolved:** `Star.roundness1` is GROUND and `roundness2` is SROUND; measurement constructs the canonical `Star` directly and filtering preserves one nested diagnostics record. | `star_detection/centroid/mod.rs`, `detector/stages/` |
+| 4 | **Resolved:** `warp()` returns `WarpResult { image, coverage }`; combine excludes near-zero coverage and applies the remaining coverage as a pixel weight. | `registration/resample.rs`, `combine/cache/mod.rs` |
 | 4 | lumos's robust loss is a bespoke kernel, **not** standard MAGSAC++ ρ — worth deciding if that's intended (works in tests, but diverges numerically from the paper). | `src/registration/ransac/magsac.rs` |
 | 5 | GESD over-rejects for **two** reasons (pass 3): inverse-**normal** instead of Student-t critical values, **and** a wrong effective sample size `n−2i` (not the live count `n−i`) in the λ formula; also a median+MAD Grubbs statistic. Plus: drizzle **omits F&H's `s²` flux factor** (output preserves input DN scale, not flux units); no output **variance/weight map**; no blot/drizzle-CR; scalar-only normalization; noise weighting omits a `pscale²` term. | `rejection.rs:759`/`:737-742`, `drizzle/mod.rs:667`, `src/stacking/` |
-| 3 | Background uses median/MAD only — no Pearson `2.5·median−1.5·mean` mode estimator (with the `|mean−median|/σ<0.3` switch), no tile-grid median filter. | `src/star_detection/background/` |
+| 3 | **Resolved:** background tiles use the crowding-aware Pearson-mode switch plus a 3×3 tile-grid median filter and natural spline interpolation. | `background_mesh/`, `star_detection/background/` |
 | 1 | Load-time clamp to `[0,1]` can positively bias dark/bias **masters**; integer-FITS `BLANK` unhandled; only `primary_hdu()` read (no multi-extension/tile-compressed FITS); CFA/Bayer-drizzle pieces exist but unwired. | `src/raw/mod.rs`, `src/astro_image/fits.rs` |
-| 2 | No dark **scaling/optimization**; no single-frame cosmic-ray rejection; no bad-column/overscan/superbias; no uncertainty plane. | `src/calibration_masters/mod.rs` |
-| 4 | SIP order fixed (not auto-selected); `Auto` upgrade skips the Euclidean/Affine rungs; TPS implemented but unwired. | `src/registration/` |
+| 2 | Dark scaling/optimization, bad-column/overscan/superbias, and an uncertainty plane remain absent. Single-frame L.A.Cosmic is implemented for mono, Bayer, and X-Trans CFA layouts and runs before demosaic when configured. | `calibration_masters/cosmic_ray.rs`, `pipeline/streaming.rs` |
+| 4 | SIP order remains caller-selected. `Auto` walks Euclidean → Similarity → Affine → Homography; TPS remains implemented and intentionally reserved for later integration. | `registration/mod.rs`, `registration/distortion/` |
 
 ## Remaining unverifiable / caveated claims (much reduced after pass 2)
 

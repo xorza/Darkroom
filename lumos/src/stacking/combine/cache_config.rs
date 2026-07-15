@@ -42,7 +42,7 @@ impl CacheConfig {
     }
 
     /// Get available memory, using the override when configured.
-    pub fn get_available_memory(&self) -> u64 {
+    pub(crate) fn get_available_memory(&self) -> u64 {
         self.available_memory.unwrap_or_else(get_available_memory)
     }
 }

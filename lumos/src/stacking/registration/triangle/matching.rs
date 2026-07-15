@@ -46,7 +46,7 @@ pub(crate) fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> 
 ///
 /// # Returns
 /// Vector of matched point pairs with confidence scores
-pub fn match_triangles(
+pub(crate) fn match_triangles(
     ref_positions: &[DVec2],
     target_positions: &[DVec2],
     config: &TriangleConfig,

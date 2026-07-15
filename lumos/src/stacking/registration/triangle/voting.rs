@@ -25,11 +25,11 @@ const DENSE_VOTE_THRESHOLD: usize = 250_000;
 
 /// A matched point pair between reference and target.
 #[derive(Debug, Clone, Copy)]
-pub struct PointMatch {
-    pub ref_idx: usize,
-    pub target_idx: usize,
-    pub votes: usize,
-    pub confidence: f64,
+pub(crate) struct PointMatch {
+    pub(crate) ref_idx: usize,
+    pub(crate) target_idx: usize,
+    pub(crate) votes: usize,
+    pub(crate) confidence: f64,
 }
 
 /// Vote matrix storage - either dense (Vec) or sparse (HashMap).
@@ -42,7 +42,7 @@ pub(crate) enum VoteMatrix {
 }
 
 impl VoteMatrix {
-    pub fn new(n_ref: usize, n_target: usize) -> Self {
+    pub(crate) fn new(n_ref: usize, n_target: usize) -> Self {
         let size = n_ref * n_target;
         if size < DENSE_VOTE_THRESHOLD {
             VoteMatrix::Dense {
@@ -55,7 +55,7 @@ impl VoteMatrix {
     }
 
     #[inline]
-    pub fn increment(&mut self, ref_idx: usize, target_idx: usize) {
+    pub(crate) fn increment(&mut self, ref_idx: usize, target_idx: usize) {
         match self {
             VoteMatrix::Dense { votes, n_target } => {
                 let idx = ref_idx * *n_target + target_idx;
@@ -75,7 +75,7 @@ impl VoteMatrix {
     }
 
     /// Iterate over all non-zero entries as `(ref_idx, target_idx, votes)`.
-    pub fn iter_nonzero(&self) -> VoteIter<'_> {
+    pub(crate) fn iter_nonzero(&self) -> VoteIter<'_> {
         match self {
             VoteMatrix::Dense { votes, n_target } => VoteIter::Dense(DenseVoteIter {
                 iter: votes.iter().enumerate(),
@@ -88,7 +88,7 @@ impl VoteMatrix {
 
 /// Iterator over non-zero entries in a dense vote matrix.
 #[derive(Debug)]
-pub struct DenseVoteIter<'a> {
+pub(crate) struct DenseVoteIter<'a> {
     iter: std::iter::Enumerate<std::slice::Iter<'a, u16>>,
     n_target: usize,
 }
@@ -108,7 +108,7 @@ impl Iterator for DenseVoteIter<'_> {
 
 /// Either-style iterator for [`VoteMatrix::iter_nonzero`].
 #[derive(Debug)]
-pub enum VoteIter<'a> {
+pub(crate) enum VoteIter<'a> {
     Dense(DenseVoteIter<'a>),
     Sparse(Iter<'a, (usize, usize), u32>),
 }

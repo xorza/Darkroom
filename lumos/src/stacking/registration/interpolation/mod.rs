@@ -59,7 +59,7 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
-pub mod warp;
+pub(crate) mod warp;
 
 // Lanczos LUT: 4096 samples/unit gives ~0.00024 precision.
 // Lanczos3 LUT: 4096 * 3 * 4 bytes = 48KB (fits in L1 cache).
@@ -352,7 +352,8 @@ fn interpolate(data: &Buffer2<f32>, pos: Vec2, params: &WarpParams) -> f32 {
 /// The warped *value* is renormalized to the in-bounds weighted average, but *where*
 /// depends on the kernel: bicubic/Lanczos (negative lobes) renormalize inside the
 /// sampler, while nearest/bilinear keep raw border-blended values that
-/// `registration::warp` divides by this coverage afterward (`renormalize_by_coverage`).
+/// `registration::resample::warp` divides by this coverage afterward
+/// (`renormalize_by_coverage`).
 /// Either way the value is already an average, so it is not divided by coverage again.
 fn coverage_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> f32 {
     let (sx, sy) = (pos.x, pos.y);

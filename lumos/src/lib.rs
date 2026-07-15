@@ -64,12 +64,13 @@ pub use stacking::registration::config::{
 pub use stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 pub use stacking::registration::interpolation::WarpParams;
 pub use stacking::registration::ransac::RansacConfig;
+pub use stacking::registration::register;
+pub use stacking::registration::resample::{WarpResult, warp};
 pub use stacking::registration::result::{
     RansacFailureReason, RegistrationError, RegistrationResult, StarMatch,
 };
 pub use stacking::registration::transform::{Transform, TransformType, WarpTransform};
 pub use stacking::registration::triangle::TriangleConfig;
-pub use stacking::registration::{WarpResult, register, warp};
 
 pub use stacking::combine::cache_config::CacheConfig;
 pub use stacking::combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};

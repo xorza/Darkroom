@@ -16,10 +16,10 @@
 use common::cpu_features;
 
 #[cfg(target_arch = "x86_64")]
-pub mod sse;
+pub(crate) mod sse;
 
 #[cfg(target_arch = "aarch64")]
-pub mod neon;
+pub(crate) mod neon;
 
 #[cfg(target_arch = "x86_64")]
 use crate::stacking::registration::interpolation::LANCZOS_LUT_RESOLUTION;
@@ -37,13 +37,13 @@ use imaginarium::Buffer2;
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct SoftClampAccum {
     /// Sum of positive weighted values (pixel * weight where result >= 0)
-    pub sp: f32,
+    pub(crate) sp: f32,
     /// Sum of absolute negative weighted values
-    pub sn: f32,
+    pub(crate) sn: f32,
     /// Sum of weights for positive contributions
-    pub wp: f32,
+    pub(crate) wp: f32,
     /// Sum of weights for negative contributions
-    pub wn: f32,
+    pub(crate) wn: f32,
 }
 
 impl SoftClampAccum {

@@ -10,6 +10,17 @@ Replacing a source master without rebuilding its defect map is not representable
 `from_images` accepts optional prebuilt CFA images through the same named dark, flat, bias, and
 flat-dark fields.
 
+## Construction and cancellation
+
+- `stack_cfa_master(paths, config, cancel)` stacks one calibration role and polls `CancelToken`
+  during loading and combination.
+- `CalibrationMasters::from_images(images, sigma, cancel)` builds the coherent bundle and polls
+  cancellation during hot/cold defect-map scans. Cancellation returns `Error::Cancelled`; partial
+  masters or defect maps never escape.
+- `CalibrationMasters::from_files(frames, sigma)` schedules independent role stacks concurrently
+  when the whole set fits the memory budget, or sequentially with the full budget per role when it
+  does not. This convenience constructor currently runs those role stacks to completion.
+
 ## Calibration Formula
 
 The standard astrophotography calibration formula:
@@ -88,6 +99,25 @@ draw only on good neighbors.
 1. Subtract master dark (removes bias + thermal)
 2. Divide by normalized master flat (corrects vignetting)
 3. Correct hot + cold/dead pixels (same-color neighbor median)
+
+## Optional single-frame cosmic-ray rejection
+
+`AlignStackConfig::cosmic_ray` enables L.A.Cosmic after calibration and before demosaic or
+registration, while the data is still linear and a hit has not been spread by interpolation.
+`CosmicRayConfig` controls significance, object contrast, mask growth, iterations, and empirical or
+parametric noise estimation.
+
+The implementation dispatches by sensor layout:
+
+- Mono: the dense subsampled Laplacian detector.
+- Bayer: deinterleave the four 2×2 phases, run the mono detector on each dense same-color plane,
+  then reassemble the mosaic.
+- X-Trans: same-color mosaic stencils selected through the 6×6 pattern.
+
+Unlabelled CFA frames skip the optional pipeline step because their same-color neighborhood is
+unknown. Tight Bayer stars can become nearly single-pixel sources in a phase plane, so per-frame
+rejection is best reserved for short sequences where stack-time rejection cannot reliably outvote
+transients; dithered multi-frame sets should normally rely on sigma/winsor rejection.
 
 ## References
 

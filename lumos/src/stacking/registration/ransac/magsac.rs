@@ -23,7 +23,7 @@ fn gamma_k2(x: f64) -> f64 {
 /// Computes a continuous, monotone saturating loss instead of a binary inlier decision (see the
 /// module docs — this is a lighter loss than the paper's exact `ρ`).
 #[derive(Debug)]
-pub struct MagsacScorer {
+pub(crate) struct MagsacScorer {
     /// Maximum sigma squared (σ²_max)
     max_sigma_sq: f64,
     /// Outlier loss (assigned to points beyond threshold)
@@ -38,7 +38,7 @@ impl MagsacScorer {
     /// # Arguments
     /// * `max_sigma` - Maximum noise scale in pixels. Points with residuals
     ///   greater than ~3·max_sigma are treated as outliers.
-    pub fn new(max_sigma: f64) -> Self {
+    pub(crate) fn new(max_sigma: f64) -> Self {
         let max_sigma_sq = max_sigma * max_sigma;
         let threshold_sq = CHI_QUANTILE_SQ * max_sigma_sq;
 
@@ -59,7 +59,7 @@ impl MagsacScorer {
     /// Lower loss = better fit. The loss smoothly transitions from 0
     /// (perfect fit) to outlier_loss (clear outlier).
     #[inline]
-    pub fn loss(&self, residual_sq: f64) -> f64 {
+    pub(crate) fn loss(&self, residual_sq: f64) -> f64 {
         if residual_sq > self.threshold_sq {
             return self.outlier_loss;
         }
@@ -75,7 +75,7 @@ impl MagsacScorer {
 
     /// Check if a point should be considered an inlier for counting purposes.
     #[inline]
-    pub fn is_inlier(&self, residual_sq: f64) -> bool {
+    pub(crate) fn is_inlier(&self, residual_sq: f64) -> bool {
         residual_sq <= self.threshold_sq
     }
 }

@@ -157,27 +157,27 @@ fn make_rng(seed: Option<u64>) -> rand_chacha::ChaCha8Rng {
 
 /// Result of RANSAC estimation.
 #[derive(Debug, Clone)]
-pub struct RansacResult {
+pub(crate) struct RansacResult {
     /// Best transformation found.
-    pub transform: Transform,
+    pub(crate) transform: Transform,
     /// Indices of inlier matches.
-    pub inliers: Vec<usize>,
+    pub(crate) inliers: Vec<usize>,
     /// RANSAC iterations performed — a diagnostic; the adaptive-early-termination
     /// test asserts on it (no production reader yet).
     #[allow(dead_code)]
-    pub iterations: usize,
+    pub(crate) iterations: usize,
 }
 
 /// RANSAC estimator for robust transformation fitting.
 #[derive(Debug)]
-pub struct RansacEstimator {
+pub(crate) struct RansacEstimator {
     config: RansacConfig,
     max_sigma: f64,
 }
 
 impl RansacEstimator {
     /// Create a RANSAC estimator for the runtime-derived maximum noise scale.
-    pub fn new(config: RansacConfig, max_sigma: f64) -> Self {
+    pub(crate) fn new(config: RansacConfig, max_sigma: f64) -> Self {
         assert!(max_sigma.is_finite() && max_sigma > 0.0);
         Self { config, max_sigma }
     }
@@ -451,7 +451,7 @@ impl RansacEstimator {
     ///
     /// # Returns
     /// Best transformation found, or None if estimation failed.
-    pub fn estimate(
+    pub(crate) fn estimate(
         &self,
         matches: &[PointMatch],
         ref_stars: &[DVec2],

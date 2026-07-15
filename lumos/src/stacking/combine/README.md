@@ -36,18 +36,25 @@ ProgressCallback   // pass ::default() for no progress reporting
 ## Usage
 
 ```rust
+use common::CancelToken;
 use lumos::{stack, Normalization, ProgressCallback, Rejection, StackConfig};
 
 // Every entry point takes a ProgressCallback; ::default() reports nothing.
 let none = ProgressCallback::default();
+let never = CancelToken::never();
 
 // Default: sigma-clipped mean (sigma=2.5, 3 iterations) + presets
-let result = stack(&paths, StackConfig::default(), none.clone())?;
-let result = stack(&paths, StackConfig::median(), none.clone())?;
-let result = stack(&paths, StackConfig::winsorized(3.0), none.clone())?;
+let result = stack(&paths, StackConfig::default(), none.clone(), never.clone())?;
+let result = stack(&paths, StackConfig::median(), none.clone(), never.clone())?;
+let result = stack(&paths, StackConfig::winsorized(3.0), none.clone(), never.clone())?;
 
 // Weighted stacking
-let result = stack(&paths, StackConfig::weighted(vec![1.0, 0.8, 1.2]), none.clone())?;
+let result = stack(
+    &paths,
+    StackConfig::weighted(vec![1.0, 0.8, 1.2]),
+    none.clone(),
+    never.clone(),
+)?;
 
 // Global normalization + custom rejection
 let config = StackConfig {
@@ -55,8 +62,12 @@ let config = StackConfig {
     normalization: Normalization::Global,
     ..Default::default()
 };
-let result = stack(&paths, config, none)?;
+let result = stack(&paths, config, none, never)?;
 ```
+
+`CancelToken` is cooperative: loading checks between frames, resident combines check between rows,
+and disk-backed combines check between chunks. Cancellation discards partial output and returns
+`StackError::Cancelled`.
 
 ## Rejection Algorithms
 

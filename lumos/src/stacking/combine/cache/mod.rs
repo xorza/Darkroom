@@ -22,15 +22,15 @@ use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress
 #[derive(Debug)]
 pub(crate) struct ScratchBuffers {
     /// Tracks original frame indices after rejection reordering.
-    pub indices: Vec<usize>,
+    pub(crate) indices: Vec<usize>,
     /// General-purpose f32 scratch (e.g. winsorized working copy).
-    pub floats_a: Vec<f32>,
+    pub(crate) floats_a: Vec<f32>,
     /// Second f32 scratch (e.g. median/MAD computation).
-    pub floats_b: Vec<f32>,
+    pub(crate) floats_b: Vec<f32>,
     /// usize scratch (large-N `sort_with_indices` permutation).
-    pub usize_a: Vec<usize>,
+    pub(crate) usize_a: Vec<usize>,
     /// Second usize scratch (large-N `sort_with_indices` index copy).
-    pub usize_b: Vec<usize>,
+    pub(crate) usize_b: Vec<usize>,
 }
 
 impl ScratchBuffers {
@@ -219,7 +219,7 @@ impl CfaCache {
     /// Plain per-pixel combine: every frame contributes at every pixel (CFA frames have no
     /// coverage). Optional `weights` provide per-frame weights; `frame_norms` apply per-frame
     /// affine normalization before combining. Per-channel, parallelized per-row with rayon.
-    pub fn process_chunked<Combine>(
+    pub(crate) fn process_chunked<Combine>(
         &self,
         weights: Option<&[f32]>,
         frame_norms: Option<&[FrameNorm]>,
@@ -319,7 +319,7 @@ impl LightCache {
 
     /// Build an in-memory coverage-weighted cache from [`StackFrame`]s (image + optional
     /// per-pixel coverage), moving channels and coverage into resident storage without copying.
-    pub fn from_stack_frames(
+    pub(crate) fn from_stack_frames(
         frames: Vec<StackFrame>,
         config: &CacheConfig,
         progress: ProgressCallback,
@@ -487,7 +487,7 @@ impl LightCache {
     /// [`COVERAGE_EPSILON`], weighted by `coverage × per-frame weight`. Excluding sub-ε coverage
     /// keeps warp border-fill out of the rejection set, so warped-frame borders don't drag the
     /// stacked edges dark; a pixel no frame covers gets `0`.
-    pub fn process_chunked_weighted<Combine>(
+    pub(crate) fn process_chunked_weighted<Combine>(
         &self,
         weights: Option<&[f32]>,
         frame_norms: Option<&[FrameNorm]>,

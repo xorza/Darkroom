@@ -9,9 +9,9 @@
 
 use crate::stacking::registration::config::InterpolationMethod;
 use crate::stacking::registration::interpolation::{WarpParams, warp_image};
+use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::synthetic_tests::helpers;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
-use crate::stacking::registration::warp;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::fixtures::star_field;
 use crate::{AstroImage, ImageDimensions};

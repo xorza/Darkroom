@@ -1,11 +1,11 @@
 use glam::DVec2;
 
 /// Minimum side length for valid triangles.
-pub(crate) const MIN_TRIANGLE_SIDE: f64 = 1e-10;
+const MIN_TRIANGLE_SIDE: f64 = 1e-10;
 
 /// Minimum area squared for valid triangles (Heron's formula).
 /// Prevents very flat/degenerate triangles.
-pub(crate) const MIN_TRIANGLE_AREA_SQ: f64 = 1e-6;
+const MIN_TRIANGLE_AREA_SQ: f64 = 1e-6;
 
 /// Orientation of a triangle (clockwise or counter-clockwise).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,18 +18,18 @@ pub(crate) enum Orientation {
 #[derive(Debug, Clone)]
 pub(crate) struct Triangle {
     /// Indices of the three points in the original list.
-    pub indices: [usize; 3],
+    pub(crate) indices: [usize; 3],
     /// Invariant ratios: (sides[0]/sides[2], sides[1]/sides[2]).
-    pub ratios: (f64, f64),
+    pub(crate) ratios: (f64, f64),
     /// Orientation of the triangle.
-    pub orientation: Orientation,
+    pub(crate) orientation: Orientation,
 }
 
 impl Triangle {
     /// Create a triangle from three positions.
     ///
     /// Returns None if the triangle is degenerate (collinear points).
-    pub fn from_positions(indices: [usize; 3], positions: [DVec2; 3]) -> Option<Self> {
+    pub(crate) fn from_positions(indices: [usize; 3], positions: [DVec2; 3]) -> Option<Self> {
         let p0 = positions[0];
         let p1 = positions[1];
         let p2 = positions[2];
@@ -117,7 +117,7 @@ impl Triangle {
     }
 
     /// Check if two triangles are similar within tolerance.
-    pub fn is_similar(&self, other: &Triangle, tolerance: f64) -> bool {
+    pub(crate) fn is_similar(&self, other: &Triangle, tolerance: f64) -> bool {
         let dr0 = (self.ratios.0 - other.ratios.0).abs();
         let dr1 = (self.ratios.1 - other.ratios.1).abs();
         dr0 < tolerance && dr1 < tolerance

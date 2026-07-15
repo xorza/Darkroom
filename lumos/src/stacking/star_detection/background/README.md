@@ -80,13 +80,14 @@ This is similar to Photutils' recommendation to use source masks for accurate ba
 ## Configuration
 
 ```rust
-Config {
-    tile_size: 64,            // Tile size in pixels (16-256)
-    sigma_clip_iterations: 3, // Sigma-clip iterations per tile
-    refinement: BackgroundRefinement::Iterative { iterations: 1 }, // None = single pass
-    bg_mask_dilation: 3,      // Source-mask dilation radius (pixels)
-    sigma_threshold: 4.0,     // Detection threshold for source masking during refinement
-}
+use lumos::{BackgroundRefinement, StarDetectionConfig};
+
+let mut config = StarDetectionConfig::default();
+config.background.tile_size = 64; // 16..=256
+config.background.sigma_clip_iterations = 3;
+config.background.refinement = BackgroundRefinement::Iterative { iterations: 1 };
+config.background.mask_dilation = 3;
+config.detection.sigma_threshold = 4.0; // Source-mask threshold during refinement
 ```
 
 ### Choosing Tile Size

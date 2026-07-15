@@ -460,13 +460,13 @@ impl FilterConfig {
 /// # Example
 ///
 /// ```rust,ignore
-/// use lumos::star_detection::Config;
+/// use lumos::StarDetectionConfig;
 ///
 /// // Use a preset
-/// let config = Config::wide_field();
+/// let config = StarDetectionConfig::wide_field();
 ///
 /// // Customize from a preset
-/// let mut config = Config::crowded_field();
+/// let mut config = StarDetectionConfig::crowded_field();
 /// config.filter.min_snr = 20.0;
 /// ```
 #[derive(Debug, Clone, Default)]

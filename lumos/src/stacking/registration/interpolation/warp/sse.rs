@@ -19,7 +19,7 @@ use crate::stacking::registration::transform::Transform;
 /// - Caller must ensure AVX2 is available.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-pub unsafe fn warp_row_bilinear_avx2(
+pub(crate) unsafe fn warp_row_bilinear_avx2(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
@@ -160,7 +160,7 @@ pub unsafe fn warp_row_bilinear_avx2(
 /// - Caller must ensure SSE4.1 is available.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
-pub unsafe fn warp_row_bilinear_sse(
+pub(crate) unsafe fn warp_row_bilinear_sse(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
@@ -297,7 +297,11 @@ use crate::stacking::registration::interpolation::{bilinear_sample, sample_pixel
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub unsafe fn lanczos_kernel_fma<const A: usize, const SIZE: usize, const DERINGING: bool>(
+pub(crate) unsafe fn lanczos_kernel_fma<
+    const A: usize,
+    const SIZE: usize,
+    const DERINGING: bool,
+>(
     pixels: &[f32],
     input_width: usize,
     kx: usize,
@@ -427,7 +431,7 @@ unsafe fn hsum256_ps(v: __m256) -> f32 {
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub unsafe fn lanczos_weights_gather<const SIZE: usize>(
+pub(crate) unsafe fn lanczos_weights_gather<const SIZE: usize>(
     lut_values: *const f32,
     base: &[f32; 8],
     sign: &[f32; 8],

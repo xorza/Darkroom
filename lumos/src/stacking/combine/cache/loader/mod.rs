@@ -127,7 +127,7 @@ fn load_image<I: StackableImage>(path: &Path) -> Result<I, Error> {
 
 impl CfaCache {
     /// Build a calibration cache from CFA frame files (tiered in-memory/disk per available RAM).
-    pub fn from_paths<P: AsRef<Path> + Sync>(
+    pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &CacheConfig,
         progress: ProgressCallback,
@@ -143,7 +143,7 @@ impl LightCache {
     /// Build a light-frame cache from image files (tiered per available RAM). These carry no
     /// coverage (`None`) — disk files don't store it — so the weighted combine treats every pixel
     /// as fully covered, matching a plain stack.
-    pub fn from_paths<P: AsRef<Path> + Sync>(
+    pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &CacheConfig,
         progress: ProgressCallback,
