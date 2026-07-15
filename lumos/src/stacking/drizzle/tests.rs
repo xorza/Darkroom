@@ -1,4 +1,41 @@
-use super::*;
+use glam::DVec2;
+use imaginarium::Buffer2;
+
+use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::stacking::drizzle::accumulator::test_support::{
+    accumulated_flux_sum, add_image as add_test_image,
+};
+use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
+use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
+use crate::stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
+use crate::stacking::drizzle::geometry::{
+    boxer, compute_square_overlap, lanczos_kernel, local_jacobian, sgarea,
+};
+use crate::stacking::drizzle::stack::{drizzle_images, drizzle_stack};
+use crate::stacking::progress::ProgressCallback;
+use crate::stacking::registration::transform::Transform;
+
+trait DrizzleAccumulatorTestExt {
+    fn add_image(
+        &mut self,
+        image: AstroImage,
+        transform: &Transform,
+        weight: f32,
+        pixel_weights: Option<&Buffer2<f32>>,
+    );
+}
+
+impl DrizzleAccumulatorTestExt for DrizzleAccumulator {
+    fn add_image(
+        &mut self,
+        image: AstroImage,
+        transform: &Transform,
+        weight: f32,
+        pixel_weights: Option<&Buffer2<f32>>,
+    ) {
+        add_test_image(self, image, transform, weight, pixel_weights);
+    }
+}
 
 fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAccumulator {
     DrizzleAccumulator::new(input_dims, config).expect("test drizzle config must be valid")
@@ -2044,7 +2081,7 @@ fn test_square_kernel_flux_conservation() {
     // For each input pixel, sum_over_output_of(overlap) = total_overlap = jaco (the quad
     // area), so sum_over_output_of(overlap/jaco) = 1.0 for fully interior pixels.
     // Therefore total_data ≈ sum(flux) = 544 for interior pixels.
-    let data_sum: f32 = acc.data[0].pixels().iter().sum();
+    let data_sum = accumulated_flux_sum(&acc, 0);
 
     // Allow ~10% margin for edge effects (rotated image has border pixels that
     // partially fall outside the output grid)

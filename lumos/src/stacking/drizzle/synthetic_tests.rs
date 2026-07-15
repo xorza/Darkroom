@@ -5,7 +5,14 @@
 //! sub-pixel-dithered renders: total flux is conserved, a source lands at its scale-mapped truth
 //! position, and dithering recovers resolution a single undersampled frame cannot.
 
-use super::*;
+use glam::DVec2;
+
+use crate::io::astro_image::AstroImage;
+use crate::stacking::drizzle::accumulator::DrizzleFrame;
+use crate::stacking::drizzle::config::DrizzleConfig;
+use crate::stacking::drizzle::stack::drizzle_images;
+use crate::stacking::progress::ProgressCallback;
+use crate::stacking::registration::transform::Transform;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};

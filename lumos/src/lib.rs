@@ -82,10 +82,10 @@ pub use stacking::pipeline::result::{
 };
 pub use stacking::pipeline::streaming::calibrate_align_stack;
 
+pub use stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
+pub use stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 pub use stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
-pub use stacking::drizzle::{
-    DrizzleAccumulator, DrizzleConfig, DrizzleFrame, DrizzleKernel, drizzle_images, drizzle_stack,
-};
+pub use stacking::drizzle::stack::{drizzle_images, drizzle_stack};
 
 pub use image_ops::stretching::{ColorMode, Stretch, StretchMethod};
 

@@ -8,11 +8,13 @@ use glam::DVec2;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
+use crate::io::astro_image::AstroImage;
+use crate::stacking::drizzle::accumulator::DrizzleFrame;
+use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
+use crate::stacking::drizzle::stack::drizzle_images;
+use crate::stacking::progress::ProgressCallback;
+use crate::stacking::registration::transform::Transform;
 use crate::testing::synthetic::fixtures::star_field;
-use crate::{
-    AstroImage, DrizzleConfig, DrizzleFrame, DrizzleKernel, ProgressCallback, Transform,
-    drizzle_images,
-};
 
 const N_FRAMES: usize = 8;
 
