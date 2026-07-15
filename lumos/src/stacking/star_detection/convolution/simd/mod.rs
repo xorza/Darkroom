@@ -12,7 +12,7 @@ use rayon::prelude::*;
 use common::cpu_features;
 
 cfg_x86_64! {
-    pub mod sse;
+    mod sse;
 }
 
 cfg_aarch64! {

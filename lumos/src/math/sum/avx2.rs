@@ -10,7 +10,7 @@ use crate::math::sum::scalar::neumaier_add;
 /// # Safety
 /// Caller must ensure AVX2 is available.
 #[target_feature(enable = "avx2")]
-pub unsafe fn sum_f32(values: &[f32]) -> f32 {
+pub(crate) unsafe fn sum_f32(values: &[f32]) -> f32 {
     unsafe {
         let mut sum_vec = _mm256_setzero_ps();
         let mut c_vec = _mm256_setzero_ps();
@@ -60,7 +60,7 @@ unsafe fn reduce_kahan_256(sum_vec: __m256, c_vec: __m256) -> (f32, f32) {
 /// # Safety
 /// Caller must ensure AVX2 is available.
 #[target_feature(enable = "avx2")]
-pub unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
+pub(crate) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     unsafe {
         let mut sum_vw = _mm256_setzero_ps();
         let mut c_vw = _mm256_setzero_ps();

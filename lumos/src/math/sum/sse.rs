@@ -9,7 +9,7 @@ use crate::math::sum::scalar::neumaier_add;
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
-pub unsafe fn sum_f32(values: &[f32]) -> f32 {
+pub(crate) unsafe fn sum_f32(values: &[f32]) -> f32 {
     unsafe {
         let mut sum_vec = _mm_setzero_ps();
         let mut c_vec = _mm_setzero_ps(); // compensation
@@ -59,7 +59,7 @@ unsafe fn reduce_kahan_128(sum_vec: __m128, c_vec: __m128) -> (f32, f32) {
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
-pub unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
+pub(crate) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     unsafe {
         let mut sum_vw = _mm_setzero_ps();
         let mut c_vw = _mm_setzero_ps();

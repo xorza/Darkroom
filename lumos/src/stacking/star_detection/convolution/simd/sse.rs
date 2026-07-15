@@ -18,7 +18,12 @@ use crate::stacking::star_detection::convolution::simd::convolve_pixel_scalar;
 /// # Safety
 /// Caller must ensure AVX2 and FMA are available (use `is_x86_feature_detected!`).
 #[target_feature(enable = "avx2,fma")]
-pub unsafe fn convolve_row_avx2(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
+pub(crate) unsafe fn convolve_row_avx2(
+    input: &[f32],
+    output: &mut [f32],
+    kernel: &[f32],
+    radius: usize,
+) {
     unsafe {
         let width = input.len();
 
@@ -79,7 +84,12 @@ pub unsafe fn convolve_row_avx2(input: &[f32], output: &mut [f32], kernel: &[f32
 /// # Safety
 /// Caller must ensure SSE4.1 is available (use `is_x86_feature_detected!`).
 #[target_feature(enable = "sse4.1")]
-pub unsafe fn convolve_row_sse41(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
+pub(crate) unsafe fn convolve_row_sse41(
+    input: &[f32],
+    output: &mut [f32],
+    kernel: &[f32],
+    radius: usize,
+) {
     unsafe {
         let width = input.len();
 
@@ -141,7 +151,7 @@ pub unsafe fn convolve_row_sse41(input: &[f32], output: &mut [f32], kernel: &[f3
 /// # Safety
 /// Caller must ensure AVX2+FMA is available.
 #[target_feature(enable = "avx2,fma")]
-pub unsafe fn convolve_cols_row_avx2(
+pub(crate) unsafe fn convolve_cols_row_avx2(
     input: &[f32],
     out_row: &mut [f32],
     width: usize,
@@ -183,7 +193,7 @@ pub unsafe fn convolve_cols_row_avx2(
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
-pub unsafe fn convolve_cols_row_sse41(
+pub(crate) unsafe fn convolve_cols_row_sse41(
     input: &[f32],
     out_row: &mut [f32],
     width: usize,
@@ -227,7 +237,7 @@ pub unsafe fn convolve_cols_row_sse41(
 /// Caller must ensure AVX2 and FMA are available.
 #[target_feature(enable = "avx2,fma")]
 #[allow(clippy::too_many_arguments)]
-pub unsafe fn convolve_2d_row_avx2(
+pub(crate) unsafe fn convolve_2d_row_avx2(
     input: &[f32],
     output_row: &mut [f32],
     width: usize,
@@ -307,7 +317,7 @@ pub unsafe fn convolve_2d_row_avx2(
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
 #[allow(clippy::too_many_arguments)]
-pub unsafe fn convolve_2d_row_sse41(
+pub(crate) unsafe fn convolve_2d_row_sse41(
     input: &[f32],
     output_row: &mut [f32],
     width: usize,

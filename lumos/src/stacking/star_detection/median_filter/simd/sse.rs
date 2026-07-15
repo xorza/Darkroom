@@ -21,7 +21,7 @@ use crate::stacking::star_detection::median_filter::simd;
 /// - `width` must be >= 12 (8 SIMD + edges).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-pub unsafe fn median_filter_row_avx2(
+pub(crate) unsafe fn median_filter_row_avx2(
     row_above: &[f32],
     row_curr: &[f32],
     row_below: &[f32],
@@ -88,7 +88,7 @@ pub unsafe fn median_filter_row_avx2(
 /// - `width` must be >= 8 (4 SIMD + edges).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
-pub unsafe fn median_filter_row_sse41(
+pub(crate) unsafe fn median_filter_row_sse41(
     row_above: &[f32],
     row_curr: &[f32],
     row_below: &[f32],

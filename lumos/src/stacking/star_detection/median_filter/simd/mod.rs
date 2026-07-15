@@ -104,7 +104,7 @@ macro_rules! median9_simd_sort {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub mod sse;
+mod sse;
 
 #[cfg(target_arch = "aarch64")]
 pub(crate) mod neon;
