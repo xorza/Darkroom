@@ -22,9 +22,7 @@ fn rect_construction_and_overlap_are_half_open_and_const() {
     }
 
     assert!(std::panic::catch_unwind(|| Rect::new(Vec2::ONE, Vec2::ZERO)).is_err());
-    assert!(
-        std::panic::catch_unwind(|| Rect::from_center_half_extent(Vec2::ZERO, -1.0)).is_err()
-    );
+    assert!(std::panic::catch_unwind(|| Rect::from_center_half_extent(Vec2::ZERO, -1.0)).is_err());
 }
 
 #[test]
@@ -52,9 +50,7 @@ fn urect_accumulation_uses_exclusive_max_and_const_union() {
     assert!(LEFT.contains(Vec2us::new(5, 8)));
     assert!(!LEFT.contains(Vec2us::new(6, 8)));
     assert!(!LEFT.contains(Vec2us::new(5, 9)));
-    assert!(
-        std::panic::catch_unwind(|| URect::new(Vec2us::ONE, Vec2us::ZERO)).is_err()
-    );
+    assert!(std::panic::catch_unwind(|| URect::new(Vec2us::new(1, 1), Vec2us::ZERO)).is_err());
 
     let mut bounds = URect::empty();
     bounds.include(Vec2us::new(5, 3));
