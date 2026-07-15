@@ -31,7 +31,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 src/
 ├── stacking/   feature: load → calibrate → detect → register → combine into a stacked master
 │   ├── calibration_masters/   star_detection/   registration/
-│   └── frame_store.rs   combine/   drizzle/   pipeline/
+│   └── frame_store/   combine/   drizzle/   pipeline/
 ├── image_ops/  feature: in-place display/processing ops on a linear f32 master (imaginarium Image)
 │   ├── mod.rs (par_map_pixels / intensity / interleave helpers)   op.rs (OpError contract)   wavelet/
 │   ├── stretching/ (post-stack display: MTF/STF, arcsinh)   denoise/   hdr/   local_contrast/
@@ -133,7 +133,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 - `StackConfig` (`config.rs:127`): `method: CombineMethod` (`Mean(Rejection) | Median`), `weighting: Weighting` (`Equal | Noise | Manual(Vec<f32>)`), `normalization: Normalization` (`None | Global | Multiplicative`), `cache: CacheConfig`. Presets `sigma_clipped`/`winsorized`/`linear_fit`/`median`/`mean`/`gesd`/`percentile`/`weighted` + frame presets `light`/`flat`/`dark`/`bias`. `validate()` reports `StackConfigError`; every stack entry point validates before loading or allocating.
 - `Rejection` (`rejection.rs:831`): `None | SigmaClip | Winsorized | LinearFit | Percentile | Gesd` (each with its own config struct).
-- `frame_store.rs` owns memory-budget arithmetic, RAM/mmap `StoredPlane`s, spill-directory cleanup, per-frame statistics, and the `StoredFrame`/`StoredLightFrame` records consumed by combine. `StoredLightFrame` keeps channels, optional coverage, and `FrameStats` together. `cache.rs` now owns tier loading and `CacheCore::process_chunks`, not the storage representation.
+- `frame_store/mod.rs` owns memory-budget arithmetic, RAM/mmap `StoredPlane`s, spill-directory cleanup, per-frame statistics, and the `StoredFrame`/`StoredLightFrame` records consumed by combine. `StoredLightFrame` keeps channels, optional coverage, and `FrameStats` together. `combine/cache/loader/mod.rs` owns tier loading and cache sidecars; `combine/cache/mod.rs` owns the chunked combine engine.
 - Pipeline (`stack.rs`): `stack` (from paths → `LightCache`, coverage `None`) / `stack_images` (in-memory `StackFrame`s → `LightCache`) / calibration (`CfaCache::from_paths`). Each: tier-select + load → pick lowest-MAD reference → Global/Multiplicative norms → resolve weights → chunked per-pixel combine applying normalize → reject → accumulate. `run_stacking` (`CfaCache` → `CfaImage`) / `run_stacking_weighted` (`LightCache` → `StackProduct`). `align_and_stack` composes that product with an `AlignmentSummary` in `AlignStackResult`.
 - `pipeline::DetectedFrame<I>` owns each image (resident or `StoredImage`) together with its detected stars. The RAM and streaming paths consume these coherent records, so image/star indices cannot drift; streaming produces `StoredLightFrame`s through `frame_store` without naming combine cache types.
 - **Coverage weighting** (`LightCache::process_chunked_weighted`): a frame contributes at a pixel only where its coverage > `COVERAGE_EPSILON`, weighted by `coverage × per-frame weight`; `0` where no frame covers. Excluding sub-ε coverage keeps warp border-fill out of the rejection set, so `align_and_stack` leaves no dark warped-edge ring. Coverage is a `StoredPlane`, memory-mapped with the channels in the streaming tier.

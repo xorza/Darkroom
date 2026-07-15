@@ -486,7 +486,7 @@ are not inflated by outliers, MAD-based clipping converges correctly even with a
 tail and is preferable to mean+sd clipping. siril exposes it as the `MAD` rejection
 case (`rejection_float.c:175-181`), identical to sigma clipping but with
 `siril_stats_float_mad` as the spread. lumos uses MAD throughout its frame statistics
-(`FrameStats`, `cache.rs:38`) and `mad_to_sigma` (`MAD_TO_SIGMA = 1.4826022`) in
+(`FrameStats`, `frame_store/mod.rs`) and `mad_to_sigma` (`MAD_TO_SIGMA = 1.4826022`) in
 `math/statistics`.
 
 ### 3.7 Min-frame requirements summary
@@ -1053,8 +1053,8 @@ quality varies.
   weight conservation, deferred weighted-average `accumulate`/`finalize`, coverage map
   with `min_coverage` masking, Lanczos **warned** (not blocked — it still runs) off
   pixfrac=scale=1 with negative-lobe clamping (`drizzle/mod.rs:271`, `:669`).
-- Memory-tiered `ImageCache` (in-memory vs mmap, `cache.rs:153`) so large stacks don't
-  OOM, with per-frame `FrameStats` (median + MAD) precomputed (`cache.rs:38`).
+- Memory-tiered stacking caches (in-memory vs mmap, `combine/cache/loader/mod.rs`) so large stacks
+  don't OOM, with per-frame `FrameStats` (median + MAD) precomputed by `frame_store/mod.rs`.
 
 **Gaps / opportunities (ranked):**
 
@@ -1227,7 +1227,7 @@ pscale·offset − offset0` / noise & wFWHM & nbstars weights / Winsorized
   (Entropy / AutoAdapt method names).
 - SWarp / reproject — `.tmp/refs/swarp/` (mesh background, weighted coadd),
   `.tmp/refs/reproject/reproject/mosaicking/background.py` (background matching).
-- lumos — `src/stacking/{config.rs, stack.rs, rejection.rs, cache.rs}`,
+- lumos — `src/stacking/combine/{config.rs, stack.rs, rejection.rs, cache/}`,
   `src/drizzle/mod.rs`.
 
 ### Online sources

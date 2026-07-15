@@ -44,6 +44,12 @@ pub enum FrameStoreError {
         #[source]
         source: std::io::Error,
     },
+    #[error("failed to read metadata for frame-store source '{path}': {source}")]
+    ReadMetadata {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("failed to memory-map frame-store file '{path}': {source}")]
     MemoryMap {
         path: PathBuf,

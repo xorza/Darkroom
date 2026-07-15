@@ -10,8 +10,11 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 | `config.rs` | `StackConfig`, `CombineMethod`, `Rejection`, `Normalization` |
 | `stack.rs` | `stack()` (from paths) / `stack_images()` (in-memory) entry points, dispatch, normalization |
 | `rejection.rs` | Pixel rejection algorithms |
-| `../frame_store.rs` | Shared memory planning, RAM/mmap planes, spill cleanup, stored frames |
-| `cache.rs` | Tier loading and chunked combine engine |
+| `../frame_store/mod.rs` | Shared memory planning, RAM/mmap planes, spill cleanup, stored frames |
+| `cache/mod.rs` | Chunked combine engine and product quality planes |
+| `cache/loader/mod.rs` | Tier selection, frame loading, and cache sidecars |
+| `cache/tests.rs` | Combine-engine tests and shared stack test helper |
+| `cache/loader/tests.rs` | Loader and sidecar tests |
 | `cache_config.rs` | `CacheConfig` and available-memory query |
 | `progress.rs` | `ProgressCallback`, `StackingStage` |
 | `error.rs` | `Error` enum |

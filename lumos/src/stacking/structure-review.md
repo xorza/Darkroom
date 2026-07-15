@@ -17,33 +17,27 @@ star-detection configuration batches. Tests and benchmarks are excluded from the
   validates dimensions and weights through typed errors before mutating state.
 - Star-detection configuration and its nested public values return `StarDetectionConfigError`;
   detector construction validates once, and alignment pipelines propagate that error.
+- `CalibrationMasters` keeps source images and its derived defect map private; construction rebuilds
+  defects, while component presence and counts escape only through read-only derived views.
+- `stacking::frame_store` owns memory planning, RAM/mmap planes, spill cleanup, and stored-frame
+  records. Pipeline uses coherent `DetectedFrame<I>` records in both tiers and produces stored light
+  frames without importing combine cache internals.
+- Combine cache is split by ownership: `cache/loader/mod.rs` owns tier selection and persistent
+  sidecars, `cache/mod.rs` owns chunk execution and product quality planes, and each has colocated
+  tests.
 
 ## Architectural issues
 
-### Pipeline storage still depends on combine internals
+### Calibration roles remain duplicated across containers
 
-The streaming pipeline imports `Plane`, `WeightedFrame`, spill/remove helpers, cache sizing, and
-`stack_weighted_frames`, then stores `Plane` directly in `DetectedFrame`. This makes orchestration
-construct the combine backend's private representation and prevents either layer from changing
-independently.
+`CalibrationFrames`, `CalibrationImages`, and the private `CalibrationMasters` storage repeat the
+same four roles with plural/master naming drift. `CalibrationComponent` provides canonical query
+names but does not yet remove the repeated storage declarations.
 
-References: `pipeline/mod.rs:20-28`, `pipeline/mod.rs:505-507`, `pipeline/mod.rs:560-678`.
+References: `calibration_masters/mod.rs:42-121`, `calibration_masters/mod.rs:236-280`.
 
-Extract `stacking::frame_store` for memory planning, RAM/mmap planes, spill cleanup, and stored
-frames. Pipeline should produce stored frames through that API; combine should consume them without
-pipeline naming cache implementation types.
-
-### Calibration masters expose derived state that callers can invalidate
-
-`CalibrationMasters` publicly exposes four optional images and the defect map. A caller can replace
-the dark or flat while retaining a defect map derived from the previous images. The three role
-containers also repeat the same four roles with plural/master naming drift.
-
-References: `calibration_masters/mod.rs:42-88`, `calibration_masters/mod.rs:161-216`.
-
-Keep the master images and defect map private behind a validated `CalibrationMasters` boundary.
-Represent the four image roles once and use that component for pre-stacked inputs and stored
-masters; expose only operations and non-trivial derived views.
+Represent the four image roles once and reuse that component for raw paths, pre-stacked inputs, and
+stored masters without weakening the private defect-map invariant.
 
 ### Stage configuration is still flat and widely coupled
 
@@ -61,13 +55,12 @@ only its own configuration, eliminating translation blocks and unrelated couplin
 
 ### Split large files only after responsibilities move
 
-`combine/cache.rs` is 2,154 lines and owns storage, tier selection, disk persistence, and chunk
-execution. `drizzle/mod.rs` is 943 lines and owns config, accumulation, five kernels, geometry, and
-entry points. `pipeline/mod.rs` is 919 lines and owns both RAM and streaming orchestration.
+`drizzle/mod.rs` owns config, accumulation, five kernels, geometry, and entry points.
+`pipeline/mod.rs` still owns configuration/results plus RAM and streaming orchestration.
 
-After extracting `frame_store`, split combine cache into load/store/engine, drizzle into
-config/accumulator/geometry/stack, and pipeline into config/result/align/streaming. Splitting first
-would only redistribute the current coupling.
+Split drizzle into config/accumulator/geometry/stack and pipeline into
+config/result/align/streaming. The storage boundary makes those ownership splits mechanical rather
+than circular.
 
 ### Name registration relationships instead of using tuples
 
@@ -110,12 +103,9 @@ Delete it now and restore it from history if a concrete post-RANSAC TPS mode is 
 ## Open questions
 
 - Does TPS have a near-term owner and caller? If not, deletion is the simpler state.
-- Do callers need to mutate individual calibration masters after construction? If not, the public
-  fields should close immediately.
 
 ## Prioritized shortlist
 
-1. Encapsulate `CalibrationMasters` so its defect map cannot drift from its source images.
-2. Extract `frame_store` and shared progress, then split cache/drizzle/pipeline by ownership.
-3. Compose stage configs; add named registration results; consolidate star diagnostics; delete TPS
-   if it has no owner.
+1. Split pipeline by ownership; move shared progress to `stacking::progress`, then split drizzle.
+2. Compose stage configs; consolidate calibration roles; add named registration results;
+   consolidate star diagnostics; delete TPS if it has no owner.
