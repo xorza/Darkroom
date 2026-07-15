@@ -8,7 +8,7 @@
 //! detection's `detect_memory_probe` (the per-frame stage the streaming loop runs). Here we pin the
 //! arithmetic those probes can only observe end-to-end: the tier flip and the streaming concurrency.
 //!
-//! [`plan_memory`]: super::plan_memory
+//! [`plan_memory`]: crate::stacking::frame_store::plan_memory
 
 use crate::stacking::frame_store::{
     MemoryPlan, PER_FRAME_DECODE_PLANES, PER_FRAME_WORKING_PLANES, fits_in_memory, memory_budget,

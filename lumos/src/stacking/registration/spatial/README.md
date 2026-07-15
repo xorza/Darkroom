@@ -13,7 +13,7 @@
 
 1. **Triangle matching** (`triangle/matching.rs`) — Build tree from star positions, query k-nearest neighbors to form triangles.
 2. **Triangle voting** (`triangle/voting.rs`) — Build tree on triangle invariant ratios, query by radius to find similar triangles.
-3. **Pipeline guided matching** (`pipeline/mod.rs`) — Build tree from target stars, query nearest neighbor to find additional matches after RANSAC.
+3. **Registration guided matching** (`registration/mod.rs`) — Build tree from target stars, query nearest neighbor to find additional matches after RANSAC.
 4. **Astrometry quad hashing** (`astrometry/quad_hash.rs`) — Build tree from star positions for quad formation.
 
 ## API

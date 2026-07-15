@@ -11,7 +11,7 @@ Robust estimation of geometric transformations (translation, Euclidean, similari
 
 ## Usage
 
-Called from the pipeline (`pipeline/mod.rs`) via `estimate()` after triangle matching, using `PointMatch` confidences for progressive sampling. Also calls `estimate_transform()` directly during unmatched-star recovery.
+Called from registration (`registration/mod.rs`) via `estimate()` after triangle matching, using `PointMatch` confidences for progressive sampling. Registration also calls `estimate_transform()` directly during unmatched-star recovery.
 
 ## API
 

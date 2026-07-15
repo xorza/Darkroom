@@ -39,11 +39,12 @@ use std::time::Instant;
 use common::CancelToken;
 use glam::DVec2;
 
-use super::{AlignStackConfig, Reference, align_and_stack};
 use crate::AstroImage;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::combine::stack::stack;
+use crate::stacking::pipeline::align::align_and_stack;
+use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::registration::warp;

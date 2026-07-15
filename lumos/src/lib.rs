@@ -75,10 +75,12 @@ pub use stacking::combine::stack::{StackFrame, stack, stack_images};
 pub use stacking::frame_store::FrameStoreError;
 pub use stacking::product::StackProduct;
 
-pub use stacking::pipeline::{
-    AlignStackConfig, AlignStackResult, AlignmentSummary, Error as AlignStackError, Reference,
-    align_and_stack, calibrate_align_stack,
+pub use stacking::pipeline::align::align_and_stack;
+pub use stacking::pipeline::config::{AlignStackConfig, Reference};
+pub use stacking::pipeline::result::{
+    AlignStackResult, AlignmentSummary, Error as AlignStackError,
 };
+pub use stacking::pipeline::streaming::calibrate_align_stack;
 
 pub use stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
 pub use stacking::drizzle::{
