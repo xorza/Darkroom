@@ -161,6 +161,11 @@ fn register_mutations(engine: &mut Engine, inbound: InboundSender) {
 }
 
 #[derive(Debug, Serialize)]
+struct ScriptFuncEvent<'a> {
+    name: &'a str,
+}
+
+#[derive(Debug, Serialize)]
 struct ScriptFunc<'a> {
     id: scenarium::FuncId,
     name: &'a str,
@@ -173,6 +178,7 @@ struct ScriptFunc<'a> {
     description: &'a Option<String>,
     inputs: &'a [scenarium::FuncInput],
     outputs: &'a [scenarium::FuncOutput],
+    events: Vec<ScriptFuncEvent<'a>>,
 }
 
 impl<'a> From<&'a Func> for ScriptFunc<'a> {
@@ -189,6 +195,11 @@ impl<'a> From<&'a Func> for ScriptFunc<'a> {
             description: &func.description,
             inputs: &func.inputs,
             outputs: &func.outputs,
+            events: func
+                .events
+                .iter()
+                .map(|event| ScriptFuncEvent { name: &event.name })
+                .collect(),
         }
     }
 }

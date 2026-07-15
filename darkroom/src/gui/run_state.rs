@@ -168,9 +168,10 @@ impl RunState {
     ) -> Option<&PinnedOutputValue> {
         self.pinned_outputs
             .iter()
-            .find(|(address, _)| {
+            .filter(|(address, _)| {
                 address.node.node_id == port.node_id && address.port_idx == port.port_idx
             })
+            .max_by_key(|(_, value)| value.revision)
             .map(|(_, value)| value)
     }
 
@@ -689,6 +690,14 @@ mod tests {
                 .value
                 .as_i64(),
             Some(8)
+        );
+        assert_eq!(
+            rs.representative_pinned_output(OutputPort::new(node, 0))
+                .unwrap()
+                .value
+                .as_i64(),
+            Some(8),
+            "the latest instance push is the representative"
         );
     }
 

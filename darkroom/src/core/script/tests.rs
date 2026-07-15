@@ -29,10 +29,14 @@ fn expect_apply(rx: &mut mpsc::UnboundedReceiver<ScriptMessage>) -> Vec<Intent> 
 
 #[test]
 fn list_funcs_returns_full_func_objects_in_insertion_order() {
-    use scenarium::{Func, FuncId};
+    use scenarium::{EventLambda, Func, FuncId};
 
     let mut lib = Library::default();
-    lib.add(Func::new(FuncId::unique(), "alpha").category("math"));
+    lib.add(
+        Func::new(FuncId::unique(), "alpha")
+            .category("math")
+            .event("changed", EventLambda::default()),
+    );
     lib.add(Func::new(FuncId::unique(), "beta").category("io"));
 
     let state = Arc::new(Mutex::new(String::new()));
@@ -58,6 +62,17 @@ fn list_funcs_returns_full_func_objects_in_insertion_order() {
     // `inputs` / `outputs` round-trip as arrays even when empty.
     let inputs_len: i64 = engine.eval("list_funcs()[0].inputs.len").unwrap();
     assert_eq!(inputs_len, 0);
+
+    let events: Array = engine
+        .eval("list_funcs()[0].events.map(|event| event.name)")
+        .unwrap();
+    let events: Vec<String> = events
+        .into_iter()
+        .map(|event| event.into_string().unwrap())
+        .collect();
+    assert_eq!(events, ["changed"]);
+    let beta_events_len: i64 = engine.eval("list_funcs()[1].events.len").unwrap();
+    assert_eq!(beta_events_len, 0);
 }
 
 #[test]
