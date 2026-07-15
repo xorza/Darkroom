@@ -9,11 +9,12 @@ Scenarium is a Cargo workspace for a node-based data processing pipeline framewo
 - **`darkroom`** — the editor app and `default-member`; the Aperture-based UI (its own conventions in `darkroom/AGENTS.md`).
 - **`lens`** — image-processing function library that adapts `imaginarium` operations into `scenarium`'s node-based workflow.
 - **`lumos`** — astronomical image-processing pipeline (RAW/FITS, starfield work).
+- **`fits-well`** — FITS reader and writer used by the astronomical pipeline.
 - **`imaginarium`** — image library with CPU and wgpu GPU operations.
 - **`quickbench`** — tiny no-frills micro-benchmark harness; benchmarks are `#[test] #[ignore]` fns run via `cargo test`.
 - **`aperture`** — our in-development immediate-mode GUI library (see GUI-rewrite note below).
 
-`default-members = ["darkroom"]`; only `.tmp` is `exclude`d. `imaginarium`, `quickbench`, and `aperture` are git submodules (see `.gitmodules`).
+`default-members = ["darkroom"]`; only `.tmp` is `exclude`d. `aperture`, `fits-well`, `imaginarium`, and `quickbench` are standalone projects pulled into this workspace as git submodules (see `.gitmodules`). Changes inside them, especially to `Cargo.toml`, must remain valid when the project is checked out and built independently; do not make them inherit settings from the enclosing workspace.
 
 **`darkroom` + `aperture`.** `darkroom/` is the editor, built on **Aperture** — our own in-tree immediate-mode GUI library in `aperture/`. Aperture is a sibling project (workspace member + git submodule) with its own conventions in `aperture/AGENTS.md`; changes to `darkroom/` may require coordinated changes in `aperture/`. Both are pre-1.0 and break freely.
 
