@@ -1,10 +1,10 @@
 use imaginarium::Buffer2;
 use lumos::{
-    AlignStackResult, AlignmentSummary, AstroImage, CacheConfig, CombineMethod, DrizzleConfig,
-    DrizzleConfigError, DrizzleError, DrizzleFrame, GesdConfig, ImageDimensions,
+    AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig, CombineMethod,
+    DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, GesdConfig, ImageDimensions,
     LinearFitClipConfig, Normalization, PercentileClipConfig, Rejection, SigmaClipConfig, SmallN,
-    StackConfig, StackConfigError, StackError, StackProduct, Transform, Weighting,
-    WinsorizedClipConfig,
+    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig,
+    StarDetectionConfigError, StarDetector, Transform, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -97,6 +97,23 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
     assert!(matches!(
         operation_error,
         DrizzleError::Config(DrizzleConfigError::InvalidScale { value: 0.0 })
+    ));
+
+    let detection_error = StarDetector::from_config(StarDetectionConfig {
+        sigma_threshold: 0.0,
+        ..StarDetectionConfig::default()
+    })
+    .unwrap_err();
+    assert_eq!(
+        detection_error,
+        StarDetectionConfigError::InvalidSigmaThreshold { value: 0.0 }
+    );
+    let pipeline_error: AlignStackError = detection_error.into();
+    assert!(matches!(
+        pipeline_error,
+        AlignStackError::DetectionConfig(StarDetectionConfigError::InvalidSigmaThreshold {
+            value: 0.0
+        })
     ));
 }
 

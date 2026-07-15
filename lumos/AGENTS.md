@@ -94,11 +94,11 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 ## stacking/star_detection — detection pipeline
 
-`StarDetector` (`detector/mod.rs:82`) holds a reusable `BufferPool` (`buffer_pool.rs:14`); `detect(&AstroImage)` → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`).
+`StarDetector` (`detector/mod.rs:76`) holds a reusable `BufferPool` (`buffer_pool.rs:14`); fallible `from_config` validates once through `StarDetectionConfigError`, then `detect(&AstroImage)` → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`). Alignment pipelines propagate invalid detection configuration through `AlignStackError` before doing useful work.
 
 `Star` (`star.rs:8`): `pos: DVec2`, `flux`, `fwhm`, `eccentricity`, `snr`, `peak`, `sharpness`, `roundness1`/`roundness2` (DAOFIND GROUND/SROUND), with `is_saturated`/`is_cosmic_ray`/`is_round`.
 
-`Config` (`config.rs:184`, re-exported as `StarDetectionConfig`) is a flat struct grouped by stage, with presets `wide_field` / `high_resolution` / `crowded_field` / `precise_ground`. Notable knobs: `CentroidMethod` (`WeightedMoments | GaussianFit | MoffatFit{beta}`, `config.rs:44`), `Connectivity` (`Four | Eight`, default 8), `BackgroundRefinement` (`None | Iterative{iterations}`), `LocalBackgroundMethod` (`GlobalMap | LocalAnnulus`), optional `NoiseModel{gain, read_noise}`, deblend selector `deblend_n_thresholds` (0 = local-maxima, ≥1 = multi-threshold).
+`Config` (`config.rs:184`, re-exported as `StarDetectionConfig`) is a flat struct grouped by stage, with presets `wide_field` / `high_resolution` / `crowded_field` / `precise_ground`. `validate()` reports `StarDetectionConfigError`. Notable knobs: `CentroidMethod` (`WeightedMoments | GaussianFit | MoffatFit{beta}`, `config.rs:44`), `Connectivity` (`Four | Eight`, default 8), `BackgroundRefinement` (`None | Iterative{iterations}`), `LocalBackgroundMethod` (`GlobalMap | LocalAnnulus`), optional `NoiseModel{gain, read_noise}`, deblend selector `deblend_n_thresholds` (0 = local-maxima, ≥2 = multi-threshold).
 
 **Six stages** in `detector/stages/` (each a pure function; buffers come from the pool):
 1. **prepare** (`prepare.rs:20`) — reduce to a single detection plane (copy for grayscale; inverse-variance / noise-weighted channel combination for RGB — the linear analogue of the SExtractor χ² detection image, kept linear so downstream flux/centroid stay valid); 3×3 median filter for CFA images.

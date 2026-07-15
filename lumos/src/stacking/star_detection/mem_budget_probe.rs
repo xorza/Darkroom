@@ -123,14 +123,16 @@ fn detect_memory_probe() {
     let steady_gate = sampler.gate();
 
     let start = Instant::now();
-    let mut reused = StarDetector::from_config(config.clone());
+    let mut reused = StarDetector::from_config(config.clone()).unwrap();
     let mut total_stars = 0usize;
     for i in 0..n {
         let frame = &frames[i % ring];
         let result = if reuse {
             reused.detect(frame)
         } else {
-            StarDetector::from_config(config.clone()).detect(frame)
+            StarDetector::from_config(config.clone())
+                .unwrap()
+                .detect(frame)
         };
         total_stars += result.stars.len();
         if i == 0 {

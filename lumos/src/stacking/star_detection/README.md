@@ -88,7 +88,7 @@ let config = Config {
     ..Default::default()
 };
 
-let mut detector = StarDetector::from_config(config);
+let mut detector = StarDetector::from_config(config)?;
 let result = detector.detect(&image);
 ```
 

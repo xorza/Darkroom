@@ -19,6 +19,7 @@ use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::buffer_pool::PoolCounts;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::stages::filter::FilterOutcome;
+use crate::stacking::star_detection::error::StarDetectionConfigError;
 use crate::stacking::star_detection::star::Star;
 
 /// Result of star detection with diagnostics.
@@ -81,17 +82,22 @@ pub struct StarDetector {
 
 impl Default for StarDetector {
     fn default() -> Self {
-        Self::from_config(Config::default())
+        Self::from_config(Config::default()).unwrap()
     }
 }
 
 impl StarDetector {
     /// Create a star detector from an existing configuration.
-    pub fn from_config(config: Config) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any configuration parameter is invalid.
+    pub fn from_config(config: Config) -> Result<Self, StarDetectionConfigError> {
+        config.validate()?;
+        Ok(Self {
             config,
             buffer_pool: None,
-        }
+        })
     }
 
     /// Get reference to the underlying configuration.
@@ -101,8 +107,6 @@ impl StarDetector {
 
     /// Detect stars in a single image.
     pub fn detect(&mut self, image: &AstroImage) -> DetectionResult {
-        self.config.validate();
-
         let width = image.width();
         let height = image.height();
 
@@ -197,5 +201,23 @@ impl StarDetector {
     /// tests that assert the pool stays flat in the frame count across repeated detections.
     pub(crate) fn pool_counts(&self) -> Option<PoolCounts> {
         self.buffer_pool.as_ref().map(|pool| pool.counts())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constructor_rejects_invalid_configuration() {
+        let error = StarDetector::from_config(Config {
+            sigma_threshold: 0.0,
+            ..Config::default()
+        })
+        .unwrap_err();
+        assert_eq!(
+            error,
+            StarDetectionConfigError::InvalidSigmaThreshold { value: 0.0 }
+        );
     }
 }

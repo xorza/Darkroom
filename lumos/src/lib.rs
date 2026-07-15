@@ -16,7 +16,7 @@
 //!
 //! // Detect stars
 //! let config = StarDetectionConfig::default();
-//! let mut detector = StarDetector::from_config(config);
+//! let mut detector = StarDetector::from_config(config)?;
 //! let result = detector.detect(&image);
 //!
 //! println!("Found {} stars", result.stars.len());
@@ -52,6 +52,7 @@ pub use stacking::star_detection::config::{
 pub use stacking::star_detection::detector::{
     DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics, StarDetector,
 };
+pub use stacking::star_detection::error::StarDetectionConfigError;
 pub use stacking::star_detection::star::Star;
 
 pub use stacking::registration::config::{Config as RegistrationConfig, InterpolationMethod};

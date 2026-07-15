@@ -39,7 +39,7 @@ fn run_test(
         )),
     );
 
-    let mut detector = StarDetector::from_config(detection_config.clone());
+    let mut detector = StarDetector::from_config(detection_config.clone()).unwrap();
     let stars = detector.detect(&frame.image).stars;
 
     // All forward-model sources share the instrument PSF; match within ~2 FWHM.

@@ -2,6 +2,7 @@
 
 use crate::{
     stacking::star_detection::config::{BackgroundRefinement, Config},
+    stacking::star_detection::error::StarDetectionConfigError,
     testing::estimate_background,
 };
 use imaginarium::Buffer2;
@@ -263,25 +264,17 @@ fn test_different_tile_sizes() {
 }
 
 #[test]
-#[should_panic(expected = "tile_size must be between 16 and 256")]
-fn test_tile_size_too_small() {
-    // Validation happens in Config::validate(), called by StarDetector::detect()
-    let config = Config {
-        tile_size: 8,
-        ..Default::default()
-    };
-    config.validate();
-}
-
-#[test]
-#[should_panic(expected = "tile_size must be between 16 and 256")]
-fn test_tile_size_too_large() {
-    // Validation happens in Config::validate(), called by StarDetector::detect()
-    let config = Config {
-        tile_size: 512,
-        ..Default::default()
-    };
-    config.validate();
+fn test_invalid_tile_sizes_return_exact_errors() {
+    for value in [8, 512] {
+        let config = Config {
+            tile_size: value,
+            ..Default::default()
+        };
+        assert_eq!(
+            config.validate(),
+            Err(StarDetectionConfigError::InvalidTileSize { value })
+        );
+    }
 }
 
 // =============================================================================

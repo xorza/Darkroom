@@ -4,6 +4,8 @@
 //! the star detection pipeline. All parameters are grouped by comments into
 //! logical sections.
 
+use crate::stacking::star_detection::error::StarDetectionConfigError;
+
 /// Pixel connectivity for connected component labeling.
 ///
 /// Determines which pixels are considered neighbors when grouping
@@ -61,15 +63,13 @@ pub enum CentroidMethod {
 
 impl CentroidMethod {
     /// Validate the centroid method configuration.
-    pub fn validate(&self) {
-        if let CentroidMethod::MoffatFit { beta } = self {
-            assert!(*beta > 0.0, "MoffatFit beta must be positive, got {}", beta);
-            assert!(
-                *beta <= 10.0,
-                "MoffatFit beta should be <= 10.0 for realistic PSFs, got {}",
-                beta
-            );
+    pub fn validate(&self) -> Result<(), StarDetectionConfigError> {
+        if let CentroidMethod::MoffatFit { beta } = self
+            && (!beta.is_finite() || *beta <= 0.0 || *beta > 10.0)
+        {
+            return Err(StarDetectionConfigError::InvalidMoffatBeta { value: *beta });
         }
+        Ok(())
     }
 }
 
@@ -91,13 +91,16 @@ impl NoiseModel {
     }
 
     /// Validate the noise model.
-    pub fn validate(&self) {
-        assert!(self.gain > 0.0, "gain must be positive, got {}", self.gain);
-        assert!(
-            self.read_noise >= 0.0,
-            "read_noise must be non-negative, got {}",
-            self.read_noise
-        );
+    pub fn validate(&self) -> Result<(), StarDetectionConfigError> {
+        if !self.gain.is_finite() || self.gain <= 0.0 {
+            return Err(StarDetectionConfigError::InvalidGain { value: self.gain });
+        }
+        if !self.read_noise.is_finite() || self.read_noise < 0.0 {
+            return Err(StarDetectionConfigError::InvalidReadNoise {
+                value: self.read_noise,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -120,20 +123,18 @@ pub enum BackgroundRefinement {
 
 impl BackgroundRefinement {
     /// Validate the configuration.
-    pub fn validate(&self) {
+    pub fn validate(&self) -> Result<(), StarDetectionConfigError> {
         match self {
-            Self::None => {}
-            Self::Iterative { iterations } => {
-                assert!(
-                    *iterations <= 10,
-                    "iterations must be <= 10, got {}",
-                    iterations
-                );
-                assert!(
-                    *iterations > 0,
-                    "iterations must be > 0 for Iterative refinement"
-                );
+            Self::None => Ok(()),
+            Self::Iterative { iterations: 0 } => {
+                Err(StarDetectionConfigError::ZeroBackgroundRefinementIterations)
             }
+            Self::Iterative { iterations } if *iterations > 10 => Err(
+                StarDetectionConfigError::ExcessiveBackgroundRefinementIterations {
+                    value: *iterations,
+                },
+            ),
+            Self::Iterative { .. } => Ok(()),
         }
     }
 
@@ -300,131 +301,131 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Validate the configuration, panicking if invalid.
-    pub fn validate(&self) {
-        // Background
-        assert!(
-            (16..=256).contains(&self.tile_size),
-            "tile_size must be between 16 and 256, got {}",
-            self.tile_size
-        );
-        assert!(
-            self.sigma_clip_iterations <= 10,
-            "sigma_clip_iterations must be <= 10, got {}",
-            self.sigma_clip_iterations
-        );
-        self.refinement.validate();
-        assert!(
-            self.bg_mask_dilation <= 50,
-            "bg_mask_dilation must be <= 50, got {}",
-            self.bg_mask_dilation
-        );
-
-        // Detection
-        assert!(
-            self.sigma_threshold > 0.0,
-            "sigma_threshold must be positive, got {}",
-            self.sigma_threshold
-        );
-
-        // PSF
-        assert!(
-            self.expected_fwhm >= 0.0,
-            "expected_fwhm must be non-negative (0.0 disables matched filter), got {}",
-            self.expected_fwhm
-        );
-        assert!(
-            self.psf_axis_ratio > 0.0 && self.psf_axis_ratio <= 1.0,
-            "psf_axis_ratio must be in (0, 1], got {}",
-            self.psf_axis_ratio
-        );
-        assert!(
-            self.min_stars_for_fwhm >= 5,
-            "min_stars_for_fwhm must be at least 5, got {}",
-            self.min_stars_for_fwhm
-        );
-        assert!(
-            self.fwhm_estimation_sigma_factor >= 1.0,
-            "fwhm_estimation_sigma_factor must be >= 1.0, got {}",
-            self.fwhm_estimation_sigma_factor
-        );
-
-        // Deblending
-        assert!(
-            self.deblend_min_separation >= 1,
-            "deblend_min_separation must be at least 1, got {}",
-            self.deblend_min_separation
-        );
-        assert!(
-            (0.0..=1.0).contains(&self.deblend_min_prominence),
-            "deblend_min_prominence must be in [0, 1], got {}",
-            self.deblend_min_prominence
-        );
-        assert!(
-            self.deblend_n_thresholds == 0
-                || (2..=MAX_DEBLEND_N_THRESHOLDS).contains(&self.deblend_n_thresholds),
-            "deblend_n_thresholds must be 0 (disabled) or between 2 and {}, got {}",
-            MAX_DEBLEND_N_THRESHOLDS,
-            self.deblend_n_thresholds
-        );
-        assert!(
-            (0.0..=1.0).contains(&self.deblend_min_contrast),
-            "deblend_min_contrast must be in [0, 1], got {}",
-            self.deblend_min_contrast
-        );
-
-        // Region filtering
-        assert!(
-            self.min_area >= 1,
-            "min_area must be at least 1, got {}",
-            self.min_area
-        );
-        assert!(
-            self.max_area >= self.min_area,
-            "max_area ({}) must be >= min_area ({})",
-            self.max_area,
-            self.min_area
-        );
-
-        // Centroid
-        self.centroid_method.validate();
-
-        // Star quality filtering
-        assert!(
-            self.min_snr > 0.0,
-            "min_snr must be positive, got {}",
-            self.min_snr
-        );
-        assert!(
-            (0.0..=1.0).contains(&self.max_eccentricity),
-            "max_eccentricity must be in [0, 1], got {}",
-            self.max_eccentricity
-        );
-        assert!(
-            self.max_sharpness > 0.0 && self.max_sharpness <= 1.0,
-            "max_sharpness must be in (0, 1], got {}",
-            self.max_sharpness
-        );
-        assert!(
-            self.max_roundness > 0.0 && self.max_roundness <= 1.0,
-            "max_roundness must be in (0, 1], got {}",
-            self.max_roundness
-        );
-        assert!(
-            self.max_fwhm_deviation >= 0.0,
-            "max_fwhm_deviation must be non-negative, got {}",
-            self.max_fwhm_deviation
-        );
-        assert!(
-            self.duplicate_min_separation >= 0.0,
-            "duplicate_min_separation must be non-negative, got {}",
-            self.duplicate_min_separation
-        );
-
-        // Noise model
-        if let Some(ref noise) = self.noise_model {
-            noise.validate();
+    /// Validate every parameter before constructing a detector.
+    pub fn validate(&self) -> Result<(), StarDetectionConfigError> {
+        if !(16..=256).contains(&self.tile_size) {
+            return Err(StarDetectionConfigError::InvalidTileSize {
+                value: self.tile_size,
+            });
         }
+        if self.sigma_clip_iterations > 10 {
+            return Err(StarDetectionConfigError::ExcessiveSigmaClipIterations {
+                value: self.sigma_clip_iterations,
+            });
+        }
+        self.refinement.validate()?;
+        if self.bg_mask_dilation > 50 {
+            return Err(StarDetectionConfigError::ExcessiveBackgroundMaskDilation {
+                value: self.bg_mask_dilation,
+            });
+        }
+        if !self.sigma_threshold.is_finite() || self.sigma_threshold <= 0.0 {
+            return Err(StarDetectionConfigError::InvalidSigmaThreshold {
+                value: self.sigma_threshold,
+            });
+        }
+        if !self.expected_fwhm.is_finite() || self.expected_fwhm < 0.0 {
+            return Err(StarDetectionConfigError::InvalidExpectedFwhm {
+                value: self.expected_fwhm,
+            });
+        }
+        if !self.psf_axis_ratio.is_finite()
+            || self.psf_axis_ratio <= 0.0
+            || self.psf_axis_ratio > 1.0
+        {
+            return Err(StarDetectionConfigError::InvalidPsfAxisRatio {
+                value: self.psf_axis_ratio,
+            });
+        }
+        if !self.psf_angle.is_finite() {
+            return Err(StarDetectionConfigError::InvalidPsfAngle {
+                value: self.psf_angle,
+            });
+        }
+        if self.min_stars_for_fwhm < 5 {
+            return Err(StarDetectionConfigError::TooFewStarsForFwhm {
+                value: self.min_stars_for_fwhm,
+            });
+        }
+        if !self.fwhm_estimation_sigma_factor.is_finite() || self.fwhm_estimation_sigma_factor < 1.0
+        {
+            return Err(StarDetectionConfigError::InvalidFwhmEstimationSigmaFactor {
+                value: self.fwhm_estimation_sigma_factor,
+            });
+        }
+        if self.deblend_min_separation == 0 {
+            return Err(StarDetectionConfigError::InvalidDeblendMinSeparation {
+                value: self.deblend_min_separation,
+            });
+        }
+        if !self.deblend_min_prominence.is_finite()
+            || !(0.0..=1.0).contains(&self.deblend_min_prominence)
+        {
+            return Err(StarDetectionConfigError::InvalidDeblendMinProminence {
+                value: self.deblend_min_prominence,
+            });
+        }
+        if self.deblend_n_thresholds != 0
+            && !(2..=MAX_DEBLEND_N_THRESHOLDS).contains(&self.deblend_n_thresholds)
+        {
+            return Err(StarDetectionConfigError::InvalidDeblendThresholdCount {
+                value: self.deblend_n_thresholds,
+                maximum: MAX_DEBLEND_N_THRESHOLDS,
+            });
+        }
+        if !self.deblend_min_contrast.is_finite()
+            || !(0.0..=1.0).contains(&self.deblend_min_contrast)
+        {
+            return Err(StarDetectionConfigError::InvalidDeblendMinContrast {
+                value: self.deblend_min_contrast,
+            });
+        }
+        if self.min_area == 0 {
+            return Err(StarDetectionConfigError::ZeroMinArea);
+        }
+        if self.max_area < self.min_area {
+            return Err(StarDetectionConfigError::MaxAreaBelowMin {
+                min_area: self.min_area,
+                max_area: self.max_area,
+            });
+        }
+        self.centroid_method.validate()?;
+        if !self.min_snr.is_finite() || self.min_snr <= 0.0 {
+            return Err(StarDetectionConfigError::InvalidMinSnr {
+                value: self.min_snr,
+            });
+        }
+        if !self.max_eccentricity.is_finite() || !(0.0..=1.0).contains(&self.max_eccentricity) {
+            return Err(StarDetectionConfigError::InvalidMaxEccentricity {
+                value: self.max_eccentricity,
+            });
+        }
+        if !self.max_sharpness.is_finite() || self.max_sharpness <= 0.0 || self.max_sharpness > 1.0
+        {
+            return Err(StarDetectionConfigError::InvalidMaxSharpness {
+                value: self.max_sharpness,
+            });
+        }
+        if !self.max_roundness.is_finite() || self.max_roundness <= 0.0 || self.max_roundness > 1.0
+        {
+            return Err(StarDetectionConfigError::InvalidMaxRoundness {
+                value: self.max_roundness,
+            });
+        }
+        if !self.max_fwhm_deviation.is_finite() || self.max_fwhm_deviation < 0.0 {
+            return Err(StarDetectionConfigError::InvalidMaxFwhmDeviation {
+                value: self.max_fwhm_deviation,
+            });
+        }
+        if !self.duplicate_min_separation.is_finite() || self.duplicate_min_separation < 0.0 {
+            return Err(StarDetectionConfigError::InvalidDuplicateMinSeparation {
+                value: self.duplicate_min_separation,
+            });
+        }
+        if let Some(noise) = &self.noise_model {
+            noise.validate()?;
+        }
+        Ok(())
     }
 
     // =========================================================================
@@ -556,19 +557,36 @@ mod tests {
         let model = NoiseModel::new(1.5, 5.0);
         assert!((model.gain - 1.5).abs() < 1e-6);
         assert!((model.read_noise - 5.0).abs() < 1e-6);
-        model.validate();
+        assert_eq!(model.validate(), Ok(()));
     }
 
     #[test]
-    #[should_panic(expected = "gain must be positive")]
-    fn test_noise_model_invalid_gain() {
-        NoiseModel::new(0.0, 5.0).validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "read_noise must be non-negative")]
-    fn test_noise_model_invalid_read_noise() {
-        NoiseModel::new(1.0, -1.0).validate();
+    fn test_noise_model_invalid_parameters_return_exact_errors() {
+        let cases = [
+            (
+                NoiseModel::new(0.0, 5.0),
+                StarDetectionConfigError::InvalidGain { value: 0.0 },
+            ),
+            (
+                NoiseModel::new(f32::INFINITY, 5.0),
+                StarDetectionConfigError::InvalidGain {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                NoiseModel::new(1.0, -1.0),
+                StarDetectionConfigError::InvalidReadNoise { value: -1.0 },
+            ),
+            (
+                NoiseModel::new(1.0, f32::INFINITY),
+                StarDetectionConfigError::InvalidReadNoise {
+                    value: f32::INFINITY,
+                },
+            ),
+        ];
+        for (model, expected) in cases {
+            assert_eq!(model.validate(), Err(expected));
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -577,21 +595,19 @@ mod tests {
 
     #[test]
     fn test_centroid_method_validate() {
-        CentroidMethod::WeightedMoments.validate();
-        CentroidMethod::GaussianFit.validate();
-        CentroidMethod::MoffatFit { beta: 2.5 }.validate();
+        assert_eq!(CentroidMethod::WeightedMoments.validate(), Ok(()));
+        assert_eq!(CentroidMethod::GaussianFit.validate(), Ok(()));
+        assert_eq!(CentroidMethod::MoffatFit { beta: 2.5 }.validate(), Ok(()));
     }
 
     #[test]
-    #[should_panic(expected = "MoffatFit beta must be positive")]
-    fn test_centroid_method_moffat_invalid_beta_zero() {
-        CentroidMethod::MoffatFit { beta: 0.0 }.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "MoffatFit beta should be <= 10.0")]
-    fn test_centroid_method_moffat_invalid_beta_large() {
-        CentroidMethod::MoffatFit { beta: 15.0 }.validate();
+    fn test_centroid_method_invalid_beta_returns_exact_error() {
+        for beta in [0.0, 15.0, f32::INFINITY] {
+            assert_eq!(
+                CentroidMethod::MoffatFit { beta }.validate(),
+                Err(StarDetectionConfigError::InvalidMoffatBeta { value: beta })
+            );
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -602,15 +618,15 @@ mod tests {
     fn test_config_default() {
         let config = Config::default();
         assert!(config.noise_model.is_none());
-        config.validate();
+        assert_eq!(config.validate(), Ok(()));
     }
 
     #[test]
     fn test_config_presets() {
-        Config::wide_field().validate();
-        Config::high_resolution().validate();
-        Config::crowded_field().validate();
-        Config::precise_ground().validate();
+        assert_eq!(Config::wide_field().validate(), Ok(()));
+        assert_eq!(Config::high_resolution().validate(), Ok(()));
+        assert_eq!(Config::crowded_field().validate(), Ok(()));
+        assert_eq!(Config::precise_ground().validate(), Ok(()));
     }
 
     #[test]
@@ -627,7 +643,7 @@ mod tests {
         assert!((config.min_snr - 15.0).abs() < 1e-6);
         assert_eq!(config.edge_margin, 20);
         assert!(config.noise_model.is_some());
-        config.validate();
+        assert_eq!(config.validate(), Ok(()));
     }
 
     #[test]
@@ -639,7 +655,7 @@ mod tests {
         };
         assert!(config.auto_estimate_fwhm);
         assert!((config.expected_fwhm - 0.0).abs() < 1e-6);
-        config.validate();
+        assert_eq!(config.validate(), Ok(()));
     }
 
     #[test]
@@ -648,120 +664,230 @@ mod tests {
             centroid_method: CentroidMethod::MoffatFit { beta: 2.5 },
             ..Default::default()
         };
-        config.validate(); // Should not panic with valid beta
+        assert_eq!(config.validate(), Ok(()));
     }
 
     #[test]
-    #[should_panic(expected = "sigma_threshold must be positive")]
-    fn test_config_invalid_sigma_threshold() {
-        Config {
-            sigma_threshold: 0.0,
-            ..Default::default()
-        }
-        .validate();
-    }
+    fn test_config_invalid_parameters_return_exact_errors() {
+        let cases = [
+            (
+                Config {
+                    tile_size: 10,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidTileSize { value: 10 },
+            ),
+            (
+                Config {
+                    sigma_clip_iterations: 11,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::ExcessiveSigmaClipIterations { value: 11 },
+            ),
+            (
+                Config {
+                    refinement: BackgroundRefinement::Iterative { iterations: 0 },
+                    ..Default::default()
+                },
+                StarDetectionConfigError::ZeroBackgroundRefinementIterations,
+            ),
+            (
+                Config {
+                    refinement: BackgroundRefinement::Iterative { iterations: 11 },
+                    ..Default::default()
+                },
+                StarDetectionConfigError::ExcessiveBackgroundRefinementIterations { value: 11 },
+            ),
+            (
+                Config {
+                    bg_mask_dilation: 51,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::ExcessiveBackgroundMaskDilation { value: 51 },
+            ),
+            (
+                Config {
+                    sigma_threshold: 0.0,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidSigmaThreshold { value: 0.0 },
+            ),
+            (
+                Config {
+                    expected_fwhm: -1.0,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidExpectedFwhm { value: -1.0 },
+            ),
+            (
+                Config {
+                    psf_axis_ratio: 0.0,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidPsfAxisRatio { value: 0.0 },
+            ),
+            (
+                Config {
+                    psf_angle: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidPsfAngle {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    min_stars_for_fwhm: 4,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::TooFewStarsForFwhm { value: 4 },
+            ),
+            (
+                Config {
+                    fwhm_estimation_sigma_factor: 0.5,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidFwhmEstimationSigmaFactor { value: 0.5 },
+            ),
+            (
+                Config {
+                    deblend_min_separation: 0,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidDeblendMinSeparation { value: 0 },
+            ),
+            (
+                Config {
+                    deblend_min_prominence: 1.5,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidDeblendMinProminence { value: 1.5 },
+            ),
+            (
+                Config {
+                    deblend_n_thresholds: 1,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidDeblendThresholdCount {
+                    value: 1,
+                    maximum: MAX_DEBLEND_N_THRESHOLDS,
+                },
+            ),
+            (
+                Config {
+                    deblend_n_thresholds: MAX_DEBLEND_N_THRESHOLDS + 1,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidDeblendThresholdCount {
+                    value: MAX_DEBLEND_N_THRESHOLDS + 1,
+                    maximum: MAX_DEBLEND_N_THRESHOLDS,
+                },
+            ),
+            (
+                Config {
+                    deblend_min_contrast: -0.1,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidDeblendMinContrast { value: -0.1 },
+            ),
+            (
+                Config {
+                    min_area: 0,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::ZeroMinArea,
+            ),
+            (
+                Config {
+                    min_area: 100,
+                    max_area: 50,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::MaxAreaBelowMin {
+                    min_area: 100,
+                    max_area: 50,
+                },
+            ),
+            (
+                Config {
+                    centroid_method: CentroidMethod::MoffatFit { beta: 0.0 },
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidMoffatBeta { value: 0.0 },
+            ),
+            (
+                Config {
+                    min_snr: 0.0,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidMinSnr { value: 0.0 },
+            ),
+            (
+                Config {
+                    max_eccentricity: 1.5,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidMaxEccentricity { value: 1.5 },
+            ),
+            (
+                Config {
+                    max_sharpness: 0.0,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidMaxSharpness { value: 0.0 },
+            ),
+            (
+                Config {
+                    max_roundness: 0.0,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidMaxRoundness { value: 0.0 },
+            ),
+            (
+                Config {
+                    max_fwhm_deviation: -1.0,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidMaxFwhmDeviation { value: -1.0 },
+            ),
+            (
+                Config {
+                    duplicate_min_separation: -1.0,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidDuplicateMinSeparation { value: -1.0 },
+            ),
+            (
+                Config {
+                    noise_model: Some(NoiseModel::new(0.0, 1.0)),
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidGain { value: 0.0 },
+            ),
+            (
+                Config {
+                    noise_model: Some(NoiseModel::new(1.0, -1.0)),
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidReadNoise { value: -1.0 },
+            ),
+        ];
 
-    #[test]
-    #[should_panic(expected = "tile_size must be between 16 and 256")]
-    fn test_config_invalid_tile_size() {
-        Config {
-            tile_size: 10,
-            ..Default::default()
+        for (config, expected) in cases {
+            assert_eq!(config.validate(), Err(expected));
         }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "min_area must be at least 1")]
-    fn test_config_invalid_min_area() {
-        Config {
-            min_area: 0,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "max_area")]
-    fn test_config_invalid_max_area() {
-        Config {
-            min_area: 100,
-            max_area: 50,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "min_snr must be positive")]
-    fn test_config_invalid_min_snr() {
-        Config {
-            min_snr: 0.0,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "psf_axis_ratio must be in (0, 1]")]
-    fn test_config_invalid_axis_ratio() {
-        Config {
-            psf_axis_ratio: 0.0,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "min_stars_for_fwhm must be at least 5")]
-    fn test_config_invalid_min_stars() {
-        Config {
-            min_stars_for_fwhm: 3,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "deblend_min_separation must be at least 1")]
-    fn test_config_invalid_deblend_min_separation() {
-        Config {
-            deblend_min_separation: 0,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "deblend_n_thresholds must be 0 (disabled) or between 2 and")]
-    fn test_config_invalid_deblend_n_thresholds() {
-        Config {
-            deblend_n_thresholds: 1,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "deblend_n_thresholds must be 0 (disabled) or between 2 and")]
-    fn test_config_deblend_n_thresholds_above_max_rejected() {
-        // Unbounded n_thresholds drives the multi-threshold deblend tree's recursion
-        // depth (build_deblend_tree's level loop is 0..=n_thresholds) with no
-        // independent cutoff — validate() must reject values beyond the cap.
-        Config {
-            deblend_n_thresholds: MAX_DEBLEND_N_THRESHOLDS + 1,
-            ..Default::default()
-        }
-        .validate();
     }
 
     #[test]
     fn test_config_deblend_n_thresholds_at_max_accepted() {
-        Config {
-            deblend_n_thresholds: MAX_DEBLEND_N_THRESHOLDS,
-            ..Default::default()
-        }
-        .validate();
+        assert_eq!(
+            Config {
+                deblend_n_thresholds: MAX_DEBLEND_N_THRESHOLDS,
+                ..Default::default()
+            }
+            .validate(),
+            Ok(())
+        );
     }
 
     #[test]
@@ -771,7 +897,7 @@ mod tests {
             ..Default::default()
         };
         assert!(config.is_multi_threshold());
-        config.validate();
+        assert_eq!(config.validate(), Ok(()));
     }
 
     #[test]
@@ -834,96 +960,147 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "max_eccentricity must be in [0, 1]")]
-    fn test_config_invalid_max_eccentricity() {
-        Config {
-            max_eccentricity: 1.5,
-            ..Default::default()
-        }
-        .validate();
-    }
+    fn test_config_rejects_non_finite_float_parameters() {
+        let cases = [
+            (
+                Config {
+                    sigma_threshold: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidSigmaThreshold {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    expected_fwhm: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidExpectedFwhm {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    psf_axis_ratio: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidPsfAxisRatio {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    fwhm_estimation_sigma_factor: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidFwhmEstimationSigmaFactor {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    deblend_min_prominence: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidDeblendMinProminence {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    deblend_min_contrast: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidDeblendMinContrast {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    min_snr: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidMinSnr {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    max_eccentricity: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidMaxEccentricity {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    max_sharpness: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidMaxSharpness {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    max_roundness: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidMaxRoundness {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    max_fwhm_deviation: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidMaxFwhmDeviation {
+                    value: f32::INFINITY,
+                },
+            ),
+            (
+                Config {
+                    duplicate_min_separation: f32::INFINITY,
+                    ..Default::default()
+                },
+                StarDetectionConfigError::InvalidDuplicateMinSeparation {
+                    value: f32::INFINITY,
+                },
+            ),
+        ];
 
-    #[test]
-    #[should_panic(expected = "max_sharpness must be in (0, 1]")]
-    fn test_config_invalid_max_sharpness_zero() {
-        Config {
-            max_sharpness: 0.0,
-            ..Default::default()
+        for (config, expected) in cases {
+            assert_eq!(config.validate(), Err(expected));
         }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "max_roundness must be in (0, 1]")]
-    fn test_config_invalid_max_roundness_zero() {
-        Config {
-            max_roundness: 0.0,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "deblend_min_prominence must be in [0, 1]")]
-    fn test_config_invalid_deblend_min_prominence() {
-        Config {
-            deblend_min_prominence: 1.5,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "deblend_min_contrast must be in [0, 1]")]
-    fn test_config_invalid_deblend_min_contrast() {
-        Config {
-            deblend_min_contrast: -0.1,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "fwhm_estimation_sigma_factor must be >= 1.0")]
-    fn test_config_invalid_fwhm_estimation_sigma_factor() {
-        Config {
-            fwhm_estimation_sigma_factor: 0.5,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "sigma_clip_iterations must be <= 10")]
-    fn test_config_invalid_sigma_clip_iterations() {
-        Config {
-            sigma_clip_iterations: 15,
-            ..Default::default()
-        }
-        .validate();
     }
 
     #[test]
     fn test_background_refinement_iterations() {
-        // BackgroundRefinement::None returns 0 iterations
         assert_eq!(BackgroundRefinement::None.iterations(), 0);
-        // Iterative returns configured count
         assert_eq!(
             BackgroundRefinement::Iterative { iterations: 3 }.iterations(),
             3
         );
+        assert_eq!(BackgroundRefinement::None.validate(), Ok(()));
+        assert_eq!(
+            BackgroundRefinement::Iterative { iterations: 3 }.validate(),
+            Ok(())
+        );
     }
 
     #[test]
-    #[should_panic(expected = "iterations must be > 0")]
-    fn test_background_refinement_zero_iterations() {
-        BackgroundRefinement::Iterative { iterations: 0 }.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "iterations must be <= 10")]
-    fn test_background_refinement_too_many_iterations() {
-        BackgroundRefinement::Iterative { iterations: 11 }.validate();
+    fn test_background_refinement_invalid_iterations_return_exact_errors() {
+        assert_eq!(
+            BackgroundRefinement::Iterative { iterations: 0 }.validate(),
+            Err(StarDetectionConfigError::ZeroBackgroundRefinementIterations)
+        );
+        assert_eq!(
+            BackgroundRefinement::Iterative { iterations: 11 }.validate(),
+            Err(StarDetectionConfigError::ExcessiveBackgroundRefinementIterations { value: 11 })
+        );
     }
 
     #[test]

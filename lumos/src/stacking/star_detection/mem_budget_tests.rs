@@ -45,7 +45,7 @@ fn buffer_pool_working_set_stays_flat_in_frame_count() {
         .map(|s| star_field(w, h, 60, 4200 + s).image)
         .collect();
 
-    let mut detector = StarDetector::from_config(Config::default());
+    let mut detector = StarDetector::from_config(Config::default()).unwrap();
 
     // Warm up across every distinct field: after this the pool holds its full steady-state scratch.
     for frame in &frames {

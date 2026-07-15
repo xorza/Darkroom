@@ -53,7 +53,7 @@ fn test_cosmic_ray_rejection() {
 
     let image =
         AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec.clone());
-    let mut detector = StarDetector::from_config(detection_config.clone());
+    let mut detector = StarDetector::from_config(detection_config.clone()).unwrap();
     let result = detector.detect(&image);
     let stars = result.stars;
 
@@ -174,6 +174,7 @@ fn detected_real_stars_have_low_sharpness() {
     };
     let image = AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec);
     let stars = StarDetector::from_config(detection_config)
+        .unwrap()
         .detect(&image)
         .stars;
 

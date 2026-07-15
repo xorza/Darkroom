@@ -321,7 +321,8 @@ fn test_warp_with_detected_transform() {
         min_snr: 5.0,
         sigma_threshold: 3.0,
         ..Default::default()
-    });
+    })
+    .unwrap();
 
     let ref_image = AstroImage::from_pixels(
         ImageDimensions::new((width, height), 1),

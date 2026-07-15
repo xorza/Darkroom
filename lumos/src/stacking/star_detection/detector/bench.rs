@@ -67,7 +67,7 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
         noise_model: None,
     };
 
-    let mut detector = StarDetector::from_config(config);
+    let mut detector = StarDetector::from_config(config).unwrap();
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }

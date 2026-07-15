@@ -39,7 +39,7 @@ fn test_detect_rho_opiuchi() {
         astro_image.height()
     );
 
-    let mut detector = StarDetector::from_config(Config::precise_ground());
+    let mut detector = StarDetector::from_config(Config::precise_ground()).unwrap();
 
     let start = std::time::Instant::now();
     let result = detector.detect(&astro_image);
@@ -304,7 +304,7 @@ fn quick_bench_detect_rho_opiuchi(b: quickbench::Bencher) {
     );
     let mut config = Config::precise_ground();
     config.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
-    let mut detector = StarDetector::from_config(config);
+    let mut detector = StarDetector::from_config(config).unwrap();
 
     b.bench(|| detector.detect(&astro_image));
 }

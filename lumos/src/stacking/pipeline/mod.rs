@@ -31,6 +31,7 @@ use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::{register, warp};
 use crate::stacking::star_detection::config::Config as StarDetectionConfig;
 use crate::stacking::star_detection::detector::StarDetector;
+use crate::stacking::star_detection::error::StarDetectionConfigError;
 use crate::stacking::star_detection::star::Star;
 use arrayvec::ArrayVec;
 use common::CancelToken;
@@ -123,6 +124,8 @@ pub enum Error {
     #[error("all {count} non-reference frames failed to register")]
     AllFramesDropped { count: usize },
     #[error(transparent)]
+    DetectionConfig(#[from] StarDetectionConfigError),
+    #[error(transparent)]
     Stack(#[from] StackError),
 }
 
@@ -141,20 +144,21 @@ pub fn align_and_stack(
     if lights.is_empty() {
         return Err(Error::NoFrames);
     }
+    config.detection.validate()?;
 
     // Detect stars on every frame. Each rayon task owns its detector — `detect` is `&mut`.
     let total = lights.len();
     tracing::info!(frames = total, "Detecting stars");
     let detected = AtomicUsize::new(0);
-    let star_sets: Vec<Vec<Star>> = lights
+    let star_sets: Result<Vec<Vec<Star>>, StarDetectionConfigError> = lights
         .par_iter()
         .map(|img| {
             // Cancelled: skip this frame's detection (cheap empty result); the
             // post-loop check below turns the run into `Cancelled`.
             if cancel.is_cancelled() {
-                return Vec::new();
+                return Ok(Vec::new());
             }
-            let result = StarDetector::from_config(config.detection.clone()).detect(img);
+            let result = StarDetector::from_config(config.detection.clone())?.detect(img);
             let d = &result.diagnostics;
             let n = detected.fetch_add(1, Ordering::Relaxed) + 1;
             // The detection funnel — candidates → deblended → centroided → kept — shows how
@@ -168,9 +172,10 @@ pub fn align_and_stack(
                 stars = result.stars.len(),
                 "detected stars"
             );
-            result.stars
+            Ok(result.stars)
         })
         .collect();
+    let star_sets = star_sets?;
     let total_stars: usize = star_sets.iter().map(|s| s.len()).sum();
     tracing::info!(total_stars, "Star detection complete");
     if cancel.is_cancelled() {
@@ -391,6 +396,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     if light_paths.is_empty() {
         return Err(Error::NoFrames);
     }
+    config.detection.validate()?;
     let total = light_paths.len();
 
     // Tier decision: peek the sensor dimensions (no decode) and plan the memory tier. If the warped
@@ -553,7 +559,7 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
             let image = decode_calibrate_demosaic(path.as_ref(), masters, config, &cancel)?;
             let dimensions = image.dimensions();
             let metadata = image.metadata.clone();
-            let stars = StarDetector::from_config(config.detection.clone())
+            let stars = StarDetector::from_config(config.detection.clone())?
                 .detect(&image)
                 .stars;
             let calibrated =
@@ -743,7 +749,7 @@ mod tests {
 
         // Alignment check: every frame was warped back to the reference, so the reference's
         // brightest star must reappear at the same place in the combined image.
-        let mut det = StarDetector::from_config(StarDetectionConfig::default());
+        let mut det = StarDetector::from_config(StarDetectionConfig::default()).unwrap();
         let ref_pos = det.detect(&base).stars[0].pos;
         let stack_stars = det.detect(&result.product.image).stars;
         let nearest = stack_stars
@@ -853,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_input_errors() {
+    fn public_input_errors() {
         let err = align_and_stack(
             Vec::new(),
             &AlignStackConfig::default(),
@@ -861,6 +867,20 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, Error::NoFrames));
+
+        let config = AlignStackConfig {
+            detection: StarDetectionConfig {
+                sigma_threshold: 0.0,
+                ..StarDetectionConfig::default()
+            },
+            ..AlignStackConfig::default()
+        };
+        let image = AstroImage::from_pixels(ImageDimensions::new((1, 1), 1), vec![0.0]);
+        let error = align_and_stack(vec![image], &config, CancelToken::never()).unwrap_err();
+        assert!(matches!(
+            error,
+            Error::DetectionConfig(StarDetectionConfigError::InvalidSigmaThreshold { value: 0.0 })
+        ));
     }
 
     #[test]

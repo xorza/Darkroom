@@ -89,7 +89,7 @@ fn test_register_two_calibrated_lights() {
 
     // Detect stars with precise Moffat centroids
     let star_config = Config::precise_ground();
-    let mut detector = StarDetector::from_config(star_config);
+    let mut detector = StarDetector::from_config(star_config).unwrap();
 
     let result1 = detector.detect(&img1);
     let result2 = detector.detect(&img2);
@@ -271,7 +271,7 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
 
     b.bench(|| {
         let star_config = Config::precise_ground();
-        let mut detector = StarDetector::from_config(star_config);
+        let mut detector = StarDetector::from_config(star_config).unwrap();
 
         // Detect stars in all frames
         let detections: Vec<_> = images.iter().map(|img| detector.detect(img)).collect();
@@ -338,7 +338,7 @@ fn bench_register_stars(b: ::quickbench::Bencher) {
 
     // Pre-detect stars (not part of the benchmark)
     let star_config = Config::default();
-    let mut detector = StarDetector::from_config(star_config);
+    let mut detector = StarDetector::from_config(star_config).unwrap();
     let result1 = detector.detect(&img1);
     let result2 = detector.detect(&img2);
 
@@ -372,7 +372,7 @@ fn test_weighted_fit_registration_rms() {
         let mut config = Config::precise_ground();
         config.centroid_method = CentroidMethod::GaussianFit;
         config.noise_model = noise;
-        let mut detector = StarDetector::from_config(config);
+        let mut detector = StarDetector::from_config(config).unwrap();
         let s1 = detector.detect(&img1).stars;
         let s2 = detector.detect(&img2).stars;
         let reg_config = RegistrationConfig {

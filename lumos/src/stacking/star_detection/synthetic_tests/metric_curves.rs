@@ -121,6 +121,7 @@ fn negligible_false_positives_on_source_free_noise() {
                 &Observation::reference(seed),
             );
             StarDetector::from_config(synthetic_config())
+                .unwrap()
                 .detect(&frame.image)
                 .stars
                 .len()

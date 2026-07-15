@@ -146,7 +146,7 @@ fn bench_full_pipeline() {
 
     let det_config = StarDetectionConfig::precise_ground();
     let all_stars: Vec<_> = common::parallel::par_map_limited(&calibrated, 3, |img| {
-        let mut det = StarDetector::from_config(det_config.clone());
+        let mut det = StarDetector::from_config(det_config.clone()).unwrap();
         det.detect(img).stars
     });
     for (i, stars) in all_stars.iter().enumerate() {

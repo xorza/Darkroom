@@ -35,6 +35,7 @@ pub(crate) fn truth_positions(frame: &SimFrame) -> Vec<DVec2> {
 /// Detect on `frame.image` with `config` and return the detected star positions.
 pub(crate) fn detected_positions(frame: &SimFrame, config: &Config) -> Vec<DVec2> {
     StarDetector::from_config(config.clone())
+        .unwrap()
         .detect(&frame.image)
         .stars
         .iter()

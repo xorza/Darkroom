@@ -27,6 +27,7 @@ fn detector() -> StarDetector {
         sigma_threshold: 3.0,
         ..Default::default()
     })
+    .unwrap()
 }
 
 /// Apply a similarity transform to an image.
@@ -313,7 +314,8 @@ fn test_image_registration_with_noise() {
         min_snr: 8.0,
         sigma_threshold: 4.0,
         ..Default::default()
-    });
+    })
+    .unwrap();
 
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);

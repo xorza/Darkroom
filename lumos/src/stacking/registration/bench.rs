@@ -17,7 +17,7 @@ use crate::{RegistrationConfig, Star, StarDetectionConfig, StarDetector, registe
 /// set that still drives the full matching + RANSAC machinery over `num_stars` points.
 fn star_pair(num_stars: usize, seed: u64) -> (Vec<Star>, Vec<Star>) {
     let frame = star_field(1500, 1500, num_stars, seed);
-    let mut detector = StarDetector::from_config(StarDetectionConfig::default());
+    let mut detector = StarDetector::from_config(StarDetectionConfig::default()).unwrap();
     let ref_stars = detector.detect(&frame.image).stars;
     // A modest rotation + scale + shift, the kind dithered subs differ by.
     let t = Transform::similarity(DVec2::new(11.0, -7.0), 0.03, 1.002);
