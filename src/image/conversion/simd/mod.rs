@@ -1,15 +1,4 @@
-// SIMD-optimized row conversion implementations
-//
-// This module contains SIMD implementations for single-row conversion.
-// All functions process one row at a time - parallelization is handled by the caller.
-//
-// Paths with SIMD:
-// - RGBA_U8 <-> RGB_U8 (1.07-1.12x)
-// - RGB_U8/RGBA_U8 -> L_U8 (1.65-1.90x)
-// - L_U8 -> RGBA_U8/RGB_U8 (2.10x)
-// - U8 <-> U16 (1.02-1.03x, kept for consistency)
-// - L_U16 <-> F32 (1.06-1.14x)
-// - F32 -> U8 (1.02-1.03x, kept for consistency)
+//! SIMD implementations for single-row conversion.
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
@@ -141,11 +130,6 @@ pub(crate) fn get_simd_row_converter(
         None
     }
 }
-
-// =============================================================================
-// Row conversion wrapper functions
-// These dispatch to the appropriate SIMD implementation based on CPU features.
-// =============================================================================
 
 fn convert_rgba_u8_to_rgb_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
     cfg_x86_64! {
@@ -307,10 +291,6 @@ elem_row!(convert_u8_to_u16_bytes, convert_u8_to_u16_row, u8 => u16);
 elem_row!(convert_u16_to_u8_bytes, convert_u16_to_u8_row, u16 => u8);
 elem_row!(convert_u16_to_f32_bytes, convert_u16_to_f32_row, u16 => f32);
 elem_row!(convert_f32_to_u16_bytes, convert_f32_to_u16_row, f32 => u16);
-
-// =============================================================================
-// Core SIMD row implementations
-// =============================================================================
 
 fn convert_f32_to_u8_row(src: &[f32], dst: &mut [u8]) {
     cfg_x86_64! {

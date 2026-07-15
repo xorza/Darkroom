@@ -7,10 +7,6 @@ use super::{TEST_WIDTHS, create_test_image, create_test_image_f32, create_test_i
 use crate::common::color_format::ColorFormat;
 use crate::image::{Image, ImageDesc};
 
-// =============================================================================
-// Round-trip tests for channel conversions
-// =============================================================================
-
 #[test]
 fn test_rgba_to_rgb_u8_various_widths() {
     for &width in &TEST_WIDTHS {
@@ -111,10 +107,6 @@ fn test_rgba_rgb_round_trip() {
         }
     }
 }
-
-// =============================================================================
-// Luminance conversion tests
-// =============================================================================
 
 #[test]
 fn test_luminance_weights_correctness() {
@@ -231,10 +223,6 @@ fn test_rgb_to_l_u8_various_widths() {
     }
 }
 
-// =============================================================================
-// LA <-> RGBA conversion tests
-// =============================================================================
-
 #[test]
 fn test_u8_to_u16_boundary_values() {
     let desc = ImageDesc::new(3, 1, ColorFormat::RGBA_U8);
@@ -301,10 +289,6 @@ fn test_u8_u16_round_trip() {
         }
     }
 }
-
-// =============================================================================
-// F32 <-> U8 conversion tests
-// =============================================================================
 
 #[test]
 fn test_f32_to_u8_clamping() {
@@ -388,10 +372,6 @@ fn test_f32_to_u8_various_widths() {
     }
 }
 
-// =============================================================================
-// L_U16 <-> F32 conversion tests
-// =============================================================================
-
 #[test]
 fn test_l_u16_to_f32_various_widths() {
     for &width in &TEST_WIDTHS {
@@ -448,10 +428,6 @@ fn test_l_f32_to_u16_various_widths() {
     }
 }
 
-// =============================================================================
-// Single-row and very small image tests
-// =============================================================================
-
 #[test]
 fn test_single_row_conversions() {
     for &width in &TEST_WIDTHS {
@@ -489,10 +465,6 @@ fn test_single_pixel_conversions() {
     assert_eq!(words[3], 255 * 257);
 }
 
-// =============================================================================
-// All formats - bit depth conversion tests
-// =============================================================================
-
 #[test]
 fn test_all_u8_u16_format_pairs() {
     let formats_u8 = [ColorFormat::L_U8, ColorFormat::RGB_U8, ColorFormat::RGBA_U8];
@@ -518,10 +490,6 @@ fn test_all_u8_u16_format_pairs() {
         }
     }
 }
-
-// =============================================================================
-// L_U8 expansion tests
-// =============================================================================
 
 #[test]
 fn test_l_u8_to_rgba_u8_various_widths() {

@@ -4,7 +4,7 @@ use bytemuck::Pod;
 use rayon::prelude::*;
 
 use super::ContrastBrightness;
-use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType};
+use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType, ColorFormat};
 #[cfg(target_arch = "x86_64")]
 use crate::cpu_features;
 use crate::image::Image;
@@ -19,10 +19,7 @@ type RowKernel = unsafe fn(&[u8], &mut [u8], usize, f32, f32);
 /// `last` argument, or `None` when the format has no SIMD path (u16) or the CPU
 /// lacks the feature — callers then fall back to the scalar path.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn simd_kernel(
-    format: crate::common::color_format::ColorFormat,
-    params: &ContrastBrightness,
-) -> Option<(RowKernel, f32)> {
+fn simd_kernel(format: ColorFormat, params: &ContrastBrightness) -> Option<(RowKernel, f32)> {
     #[cfg(target_arch = "x86_64")]
     if !cpu_features::has_sse4_1() {
         return None;
@@ -194,10 +191,6 @@ where
     });
 }
 
-// ============================================================================
-// U8 GRAY SSE4.1
-// ============================================================================
-
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 unsafe fn process_row_u8_gray_sse41(
@@ -262,10 +255,6 @@ unsafe fn process_row_u8_gray_sse41(
         }
     }
 }
-
-// ============================================================================
-// U8 RGB SSE4.1
-// ============================================================================
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
@@ -343,10 +332,6 @@ unsafe fn process_row_u8_rgb_sse41(
         }
     }
 }
-
-// ============================================================================
-// U8 RGBA SSE4.1
-// ============================================================================
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
@@ -435,10 +420,6 @@ unsafe fn process_row_u8_rgba_sse41(
     }
 }
 
-// ============================================================================
-// F32 GRAY SSE4.1
-// ============================================================================
-
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 unsafe fn process_row_f32_gray_sse41(
@@ -481,10 +462,6 @@ unsafe fn process_row_f32_gray_sse41(
         }
     }
 }
-
-// ============================================================================
-// F32 RGB SSE4.1
-// ============================================================================
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
@@ -546,10 +523,6 @@ unsafe fn process_row_f32_rgb_sse41(
     }
 }
 
-// ============================================================================
-// F32 RGBA SSE4.1
-// ============================================================================
-
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 unsafe fn process_row_f32_rgba_sse41(
@@ -591,14 +564,6 @@ unsafe fn process_row_f32_rgba_sse41(
         }
     }
 }
-
-// ============================================================================
-// AARCH64 NEON IMPLEMENTATIONS
-// ============================================================================
-
-// ============================================================================
-// U8 GRAY NEON
-// ============================================================================
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_u8_gray_neon(
@@ -664,10 +629,6 @@ unsafe fn process_row_u8_gray_neon(
     }
 }
 
-// ============================================================================
-// U8 RGB NEON
-// ============================================================================
-
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_u8_rgb_neon(
     in_row: &[u8],
@@ -732,10 +693,6 @@ unsafe fn process_row_u8_rgb_neon(
         }
     }
 }
-
-// ============================================================================
-// U8 RGBA NEON
-// ============================================================================
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_u8_rgba_neon(
@@ -807,10 +764,6 @@ unsafe fn process_row_u8_rgba_neon(
     }
 }
 
-// ============================================================================
-// F32 GRAY NEON
-// ============================================================================
-
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_f32_gray_neon(
     in_row: &[u8],
@@ -852,10 +805,6 @@ unsafe fn process_row_f32_gray_neon(
         }
     }
 }
-
-// ============================================================================
-// F32 RGB NEON
-// ============================================================================
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_f32_rgb_neon(
@@ -910,10 +859,6 @@ unsafe fn process_row_f32_rgb_neon(
         }
     }
 }
-
-// ============================================================================
-// F32 RGBA NEON
-// ============================================================================
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_f32_rgba_neon(
@@ -984,10 +929,6 @@ mod tests {
         !pixels_equal(img1, img2)
     }
 
-    // ========================================================================
-    // No-change tests (contrast=1.0, brightness=0.0 should preserve input)
-    // ========================================================================
-
     #[test]
     fn test_no_change_all_formats() {
         for format in ALL_FORMATS {
@@ -1011,10 +952,6 @@ mod tests {
             }
         }
     }
-
-    // ========================================================================
-    // Alpha preservation tests
-    // ========================================================================
 
     #[test]
     fn test_alpha_preserved_all_formats() {
@@ -1046,10 +983,6 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    // Brightness tests
-    // ========================================================================
-
     #[test]
     fn test_brightness_increase_all_formats() {
         for format in ALL_FORMATS {
@@ -1079,10 +1012,6 @@ mod tests {
             );
         }
     }
-
-    // ========================================================================
-    // Contrast tests
-    // ========================================================================
 
     #[test]
     fn test_contrast_increase_all_formats() {
@@ -1114,10 +1043,6 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    // Combined contrast and brightness tests
-    // ========================================================================
-
     #[test]
     fn test_combined_adjustment_all_formats() {
         for format in ALL_FORMATS {
@@ -1132,10 +1057,6 @@ mod tests {
             );
         }
     }
-
-    // ========================================================================
-    // Odd dimension tests (exercises scalar fallback in SIMD paths)
-    // ========================================================================
 
     #[test]
     fn test_odd_dimensions_all_formats() {
@@ -1152,10 +1073,6 @@ mod tests {
             );
         }
     }
-
-    // ========================================================================
-    // Clamp tests
-    // ========================================================================
 
     #[test]
     fn test_clamp_all_formats() {
@@ -1181,10 +1098,6 @@ mod tests {
             );
         }
     }
-
-    // ========================================================================
-    // SIMD vs scalar cross-check
-    // ========================================================================
 
     #[test]
     fn test_simd_matches_scalar_reference_all_formats() {
@@ -1240,10 +1153,6 @@ mod tests {
             }
         }
     }
-
-    // ========================================================================
-    // Large image tests (stress test SIMD paths)
-    // ========================================================================
 
     #[test]
     fn test_large_image() {

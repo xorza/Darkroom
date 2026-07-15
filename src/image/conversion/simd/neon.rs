@@ -1,6 +1,4 @@
-// NEON implementations for row conversion
-//
-// This module contains NEON SIMD implementations for aarch64.
+//! NEON row conversion implementations for aarch64.
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
@@ -9,9 +7,6 @@ use super::LUMA_B;
 use super::LUMA_G;
 use super::LUMA_R;
 
-// =============================================================================
-// NEON implementations (aarch64)
-// =============================================================================
 
 pub(super) unsafe fn convert_rgba_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::aarch64::*;

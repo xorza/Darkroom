@@ -6,10 +6,6 @@ use crate::common::test_utils::{
 use crate::image::conversion::scalar::ChannelConvert;
 use crate::image::{Image, ImageDesc};
 
-// =============================================================================
-// File reading tests
-// =============================================================================
-
 #[test]
 fn read_lena_rgba_8bit() {
     let img = load_lena_rgba_u8_895x551();
@@ -57,10 +53,6 @@ fn read_case_insensitive_extension() {
     ));
 }
 
-// =============================================================================
-// File saving tests
-// =============================================================================
-
 #[test]
 fn save_and_reload_png() {
     let original = load_lena_rgba_u8_895x551()
@@ -101,10 +93,6 @@ fn save_tiff_with_misaligned_bytes_returns_error() {
     assert!(result.is_err());
 }
 
-// =============================================================================
-// Image creation tests
-// =============================================================================
-
 #[test]
 fn new_empty_creates_zeroed_image() {
     let desc = ImageDesc::new(10, 10, ColorFormat::RGBA_U8);
@@ -144,10 +132,6 @@ fn valid_f32_format_succeeds() {
     assert!(result.is_ok());
 }
 
-// =============================================================================
-// ImageDesc tests
-// =============================================================================
-
 #[test]
 fn image_desc_is_tightly_packed() {
     // No row padding: row_bytes is exactly width * bytes_per_pixel, even for
@@ -183,10 +167,6 @@ fn bytes_per_pixel_calculation() {
     let img = Image::new_black(desc).unwrap();
     assert_eq!(img.bytes_per_pixel(), 4);
 }
-
-// =============================================================================
-// Conversion tests
-// =============================================================================
 
 #[test]
 fn convert_same_format_returns_same_image() {
@@ -333,10 +313,6 @@ fn convert_from_float_denormalizes() {
     assert_eq!(result.bytes()[0], 255);
 }
 
-// =============================================================================
-// Integration tests (file-based conversions)
-// =============================================================================
-
 #[test]
 fn convert_and_save_various_formats() {
     let img = load_lena_rgba_u8_895x551();
@@ -382,10 +358,6 @@ fn double_conversion_preserves_dimensions() {
     assert_eq!(converted.desc.height, height);
 }
 
-// =============================================================================
-// Edge case tests
-// =============================================================================
-
 #[test]
 fn single_pixel_image() {
     let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
@@ -410,10 +382,6 @@ fn clone_image() {
     assert_eq!(img.desc, cloned.desc);
     assert_eq!(img.bytes(), cloned.bytes());
 }
-
-// =============================================================================
-// Alignment & byte-cast tests
-// =============================================================================
 
 // Each format's typed `Buffer2<[T; N]>` is intrinsically aligned to its element
 // type `T` — exactly what `bytemuck::cast_slice` to that element needs (f32 → 4,

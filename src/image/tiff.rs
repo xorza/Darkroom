@@ -67,12 +67,10 @@ define_int_color_type!(Gray8U, u8, PhotometricInterpretation::BlackIsZero, 8, 1)
 define_int_color_type!(Gray16U, u16, PhotometricInterpretation::BlackIsZero, 16, 1);
 define_float_color_type!(Gray32F, f32, PhotometricInterpretation::BlackIsZero, 32, 1);
 
-// RGB
 define_int_color_type!(RGB8U, u8, PhotometricInterpretation::RGB, 8, 3);
 define_int_color_type!(RGB16U, u16, PhotometricInterpretation::RGB, 16, 3);
 define_float_color_type!(RGB32F, f32, PhotometricInterpretation::RGB, 32, 3);
 
-// RGBA
 define_int_color_type!(RGBA8U, u8, PhotometricInterpretation::RGB, 8, 4);
 define_int_color_type!(RGBA16U, u16, PhotometricInterpretation::RGB, 16, 4);
 define_float_color_type!(RGBA32F, f32, PhotometricInterpretation::RGB, 32, 4);

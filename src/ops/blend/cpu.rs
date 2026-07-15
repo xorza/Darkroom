@@ -88,10 +88,6 @@ pub(super) fn apply(params: &Blend, src: &Image, dst: &Image, output: &mut Image
     }
 }
 
-// ============================================================================
-// Scalar Implementation
-// ============================================================================
-
 trait BlendApply: Pod + Send + Sync + Copy {
     fn blend(src: Self, dst: Self, mode: BlendMode, alpha: f32) -> Self;
 }
@@ -195,10 +191,6 @@ where
             }
         });
 }
-
-// ============================================================================
-// RGBA U8 SSE4.1
-// ============================================================================
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
@@ -345,10 +337,6 @@ unsafe fn process_row_rgba_u8_sse41(
     }
 }
 
-// ============================================================================
-// RGBA F32 SSE4.1
-// ============================================================================
-
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_rgba_f32_sse41(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
@@ -445,10 +433,6 @@ unsafe fn process_row_rgba_f32_sse41(
         }
     }
 }
-
-// ============================================================================
-// RGBA U8 NEON
-// ============================================================================
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_rgba_u8_neon(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
@@ -601,10 +585,6 @@ unsafe fn process_row_rgba_u8_neon(
         }
     }
 }
-
-// ============================================================================
-// RGBA F32 NEON
-// ============================================================================
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_rgba_f32_neon(src: &Image, dst: &Image, output: &mut Image, params: Blend) {

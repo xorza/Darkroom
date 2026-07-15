@@ -1,6 +1,4 @@
-// SSE2 and SSSE3 implementations for row conversion
-//
-// This module contains SSE2 and SSSE3 SIMD implementations for x86_64.
+//! SSE2 and SSSE3 row conversion implementations for x86_64.
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
@@ -9,9 +7,6 @@ use super::LUMA_B;
 use super::LUMA_G;
 use super::LUMA_R;
 
-// =============================================================================
-// SSSE3 implementations
-// =============================================================================
 
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_rgba_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
@@ -350,9 +345,6 @@ pub(super) unsafe fn convert_l_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], widt
     }
 }
 
-// =============================================================================
-// SSE2 implementations
-// =============================================================================
 
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_f32_to_u8_row_sse2(src: &[f32], dst: &mut [u8]) {

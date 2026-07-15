@@ -66,6 +66,9 @@ impl<T> Slot<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+    use std::time::Duration;
+
     use super::*;
 
     #[test]
@@ -99,11 +102,11 @@ mod tests {
     #[test]
     fn take_blocking_waits_for_cross_thread_send() {
         let slot = Slot::default();
-        let sender = std::thread::spawn({
+        let sender = thread::spawn({
             let slot = slot.clone();
             move || {
                 // Give the main thread a moment to park in take_blocking.
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                thread::sleep(Duration::from_millis(10));
                 slot.send(5);
             }
         });

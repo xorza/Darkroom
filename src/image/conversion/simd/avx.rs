@@ -1,14 +1,9 @@
-// AVX2 implementations for row conversion
-//
-// This module contains AVX2 SIMD implementations for x86_64.
+//! AVX2 row conversion implementations for x86_64.
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use super::sse;
 
-// =============================================================================
-// AVX2 implementations
-// =============================================================================
 
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_rgba_to_rgb_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {

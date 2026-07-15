@@ -4,10 +4,6 @@ use bytemuck::Pod;
 
 use crate::common::color_format::*;
 
-// =============================================================================
-// Internal trait for channel conversion
-// =============================================================================
-
 pub(crate) trait ChannelConvert<To>: Copy {
     fn convert(self) -> To;
 }
@@ -24,11 +20,6 @@ pub trait OpaqueAlpha: Copy {
     fn opaque_alpha() -> Self;
 }
 
-// =============================================================================
-// Macro to implement ChannelConvert for all type combinations
-// =============================================================================
-
-// Identity conversions
 macro_rules! impl_convert_identity {
     ($($t:ty),+) => {
         $(
@@ -42,7 +33,6 @@ macro_rules! impl_convert_identity {
 
 impl_convert_identity!(u8, u16, f32);
 
-// Upscale: replicate bits to fill larger type
 macro_rules! impl_convert_upscale_unsigned {
     ($from:ty, $to:ty) => {
         impl ChannelConvert<$to> for $from {
@@ -55,7 +45,6 @@ macro_rules! impl_convert_upscale_unsigned {
     };
 }
 
-// Downscale: take high bits
 macro_rules! impl_convert_downscale {
     ($from:ty, $to:ty) => {
         impl ChannelConvert<$to> for $from {
@@ -68,7 +57,6 @@ macro_rules! impl_convert_downscale {
     };
 }
 
-// Integer to float
 macro_rules! impl_convert_int_to_float {
     ($int:ty, $float:ty) => {
         impl ChannelConvert<$float> for $int {
@@ -94,27 +82,15 @@ macro_rules! impl_convert_float_to_int {
     };
 }
 
-// =============================================================================
-// Implement all conversions
-// =============================================================================
-
-// Unsigned upscale
 impl_convert_upscale_unsigned!(u8, u16);
 
-// Unsigned downscale
 impl_convert_downscale!(u16, u8);
 
-// Integer to float
 impl_convert_int_to_float!(u8, f32);
 impl_convert_int_to_float!(u16, f32);
 
-// Float to integer
 impl_convert_float_to_int!(f32, u8);
 impl_convert_float_to_int!(f32, u16);
-
-// =============================================================================
-// Implement RgbToLuminance
-// =============================================================================
 
 use super::{LUMA_B, LUMA_G, LUMA_R};
 
@@ -140,10 +116,6 @@ impl RgbToLuminance for f32 {
     }
 }
 
-// =============================================================================
-// Implement OpaqueAlpha
-// =============================================================================
-
 impl OpaqueAlpha for u8 {
     #[inline]
     fn opaque_alpha() -> Self {
@@ -164,10 +136,6 @@ impl OpaqueAlpha for f32 {
         1.0
     }
 }
-
-// =============================================================================
-// Row conversion functions (scalar implementation)
-// =============================================================================
 
 /// Convert a single row of pixels using scalar code.
 /// This is the fallback when SIMD is not available.
@@ -233,10 +201,6 @@ pub(crate) fn convert_row_scalar<From, To>(
         }
     }
 }
-
-// =============================================================================
-// Format dispatch helpers
-// =============================================================================
 
 /// Get the Rust type size and conversion function for a given channel size/type pair.
 #[derive(Clone, Copy)]

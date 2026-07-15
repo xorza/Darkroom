@@ -189,8 +189,6 @@ fn test_full_pipeline() {
     assert_eq!(result_cpu.desc.height, height);
 }
 
-// Tests using Op::apply() which auto-selects CPU or GPU
-
 #[test]
 fn test_apply_auto_selects_gpu_when_data_on_gpu() {
     let mut ctx = test_processing_context();

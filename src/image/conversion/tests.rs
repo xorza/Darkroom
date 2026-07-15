@@ -31,7 +31,6 @@ macro_rules! test_upscale_downscale {
     };
 }
 
-// Unsigned upscale/downscale
 test_upscale_downscale!(upscale_downscale_u8_u16, u8, u16);
 
 macro_rules! test_float_conversion {
@@ -69,11 +68,9 @@ macro_rules! test_float_conversion {
     };
 }
 
-// Float conversions for unsigned integers
 test_float_conversion!(float_conversion_u8_f32, u8, f32);
 test_float_conversion!(float_conversion_u16_f32, u16, f32);
 
-// Test that opaque_alpha is correct for each channel type
 #[test]
 fn opaque_alpha_values() {
     use super::scalar::OpaqueAlpha;
@@ -90,7 +87,6 @@ fn opaque_alpha_values() {
     );
 }
 
-// Test all conversion paths between supported formats (u8, u16, f32)
 #[test]
 fn all_conversion_paths() {
     // u8 -> u16 -> u8

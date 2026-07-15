@@ -2,7 +2,7 @@ use std::fs::File;
 use std::path::Path;
 
 use image as image_lib;
-use tiff::decoder::DecodingResult;
+use tiff::decoder::{Decoder, DecodingResult, Limits};
 
 use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType, ColorFormat};
 use crate::common::error::{Error, Result};
@@ -37,8 +37,8 @@ pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
 
 pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
     // Use unlimited to support large astrophotography images
-    let limits = tiff::decoder::Limits::unlimited();
-    let mut decoder = tiff::decoder::Decoder::new(File::open(filename)?)?.with_limits(limits);
+    let limits = Limits::unlimited();
+    let mut decoder = Decoder::new(File::open(filename)?)?.with_limits(limits);
 
     let (channel_bits, channel_count) = match decoder.colortype()? {
         tiff::ColorType::Gray(b) => (b, ChannelCount::L),
