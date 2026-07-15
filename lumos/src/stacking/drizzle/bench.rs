@@ -10,28 +10,27 @@ use std::hint::black_box;
 
 use crate::testing::synthetic::fixtures::star_field;
 use crate::{
-    AstroImage, DrizzleConfig, DrizzleKernel, ProgressCallback, Transform, drizzle_images,
+    AstroImage, DrizzleConfig, DrizzleFrame, DrizzleKernel, ProgressCallback, Transform,
+    drizzle_images,
 };
 
 const N_FRAMES: usize = 8;
 
 /// `N_FRAMES` copies of one synthetic field, each with a small sub-pixel dither — the input a
 /// drizzle integration sees.
-fn dithered_set() -> (Vec<AstroImage>, Vec<Transform>) {
+fn dithered_set() -> Vec<DrizzleFrame<AstroImage>> {
     let base = star_field(1000, 1000, 250, 5).image;
-    let mut images = Vec::with_capacity(N_FRAMES);
-    let mut transforms = Vec::with_capacity(N_FRAMES);
-    for i in 0..N_FRAMES {
-        images.push(base.clone());
-        let dx = (i as f64 * 0.37).fract() * 2.0 - 1.0;
-        let dy = (i as f64 * 0.71).fract() * 2.0 - 1.0;
-        transforms.push(Transform::translation(DVec2::new(dx, dy)));
-    }
-    (images, transforms)
+    (0..N_FRAMES)
+        .map(|i| {
+            let dx = (i as f64 * 0.37).fract() * 2.0 - 1.0;
+            let dy = (i as f64 * 0.71).fract() * 2.0 - 1.0;
+            DrizzleFrame::new(base.clone(), Transform::translation(DVec2::new(dx, dy)))
+        })
+        .collect()
 }
 
 fn bench_kernel(b: ::quickbench::Bencher, kernel: DrizzleKernel) {
-    let (images, transforms) = dithered_set();
+    let frames = dithered_set();
     let config = DrizzleConfig {
         scale: 2.0,
         pixfrac: 0.8,
@@ -40,10 +39,7 @@ fn bench_kernel(b: ::quickbench::Bencher, kernel: DrizzleKernel) {
     };
     b.bench(|| {
         black_box(drizzle_images(
-            images.clone(),
-            &transforms,
-            None,
-            None,
+            frames.clone(),
             &config,
             ProgressCallback::default(),
         ))

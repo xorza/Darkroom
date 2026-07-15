@@ -1,9 +1,10 @@
 use imaginarium::Buffer2;
 use lumos::{
     AlignStackResult, AlignmentSummary, AstroImage, CacheConfig, CombineMethod, DrizzleConfig,
-    DrizzleConfigError, DrizzleError, GesdConfig, ImageDimensions, LinearFitClipConfig,
-    Normalization, PercentileClipConfig, Rejection, SigmaClipConfig, SmallN, StackConfig,
-    StackConfigError, StackError, StackProduct, Weighting, WinsorizedClipConfig,
+    DrizzleConfigError, DrizzleError, DrizzleFrame, GesdConfig, ImageDimensions,
+    LinearFitClipConfig, Normalization, PercentileClipConfig, Rejection, SigmaClipConfig, SmallN,
+    StackConfig, StackConfigError, StackError, StackProduct, Transform, Weighting,
+    WinsorizedClipConfig,
 };
 
 #[test]
@@ -56,6 +57,17 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     assert_eq!(small_n.min_frames, 3);
     assert_eq!(small_n.fallback, CombineMethod::Median);
     let _: CacheConfig = cache;
+
+    let frame = DrizzleFrame::new("light.fits", Transform::identity());
+    let DrizzleFrame {
+        source,
+        transform: _,
+        weight,
+        pixel_weight_map,
+    } = frame;
+    assert_eq!(source, "light.fits");
+    assert_eq!(weight, 1.0);
+    assert!(pixel_weight_map.is_none());
 }
 
 #[test]

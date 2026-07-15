@@ -80,7 +80,7 @@ pub use stacking::pipeline::{
 
 pub use stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
 pub use stacking::drizzle::{
-    DrizzleAccumulator, DrizzleConfig, DrizzleKernel, drizzle_images, drizzle_stack,
+    DrizzleAccumulator, DrizzleConfig, DrizzleFrame, DrizzleKernel, drizzle_images, drizzle_stack,
 };
 
 pub use image_ops::stretching::{ColorMode, Stretch, StretchMethod};

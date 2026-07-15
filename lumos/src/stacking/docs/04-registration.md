@@ -837,8 +837,8 @@ survives. But two regimes demand a flux-conserving resampler:
   & Hook 2002) is a *flux-conserving resampler*: it maps a shrunken "drop" of each
   input pixel onto a finer output grid, distributing flux by geometric overlap area.
   It recovers resolution lost to undersampling and produces a coverage/weight map.
-  lumos implements this as a separate stage (`src/drizzle/`), and the registration
-  `Transform` feeds it (`drizzle_stack(paths, transforms, …)`). Use drizzle (not
+  lumos implements this as a separate stage (`src/stacking/drizzle/`), and each
+  `DrizzleFrame` bundles a source with its registration `Transform` and weights. Use drizzle (not
   warp) when frames are dithered and undersampled and you want to up-sample; use
   plain warp when the data is already well-sampled and you just need alignment.
 - **Surface-brightness / mosaic photometry across resampled tiles.** The `reproject`

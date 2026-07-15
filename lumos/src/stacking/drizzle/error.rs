@@ -49,6 +49,29 @@ pub enum DrizzleError {
         actual: ImageDimensions,
     },
 
+    #[error("drizzle frame {index} weight must be finite and non-negative, got {value}")]
+    InvalidFrameWeight { index: usize, value: f32 },
+
+    #[error(
+        "pixel weight map dimensions for drizzle frame {index} do not match: expected {expected_width}x{expected_height}, got {actual_width}x{actual_height}"
+    )]
+    PixelWeightDimensionMismatch {
+        index: usize,
+        expected_width: usize,
+        expected_height: usize,
+        actual_width: usize,
+        actual_height: usize,
+    },
+
+    #[error(
+        "pixel weight {pixel_index} for drizzle frame {frame_index} must be finite and non-negative, got {value}"
+    )]
+    InvalidPixelWeight {
+        frame_index: usize,
+        pixel_index: usize,
+        value: f32,
+    },
+
     #[error("invalid drizzle input dimensions {width}x{height} with {channels} channels")]
     InvalidInputDimensions {
         width: usize,

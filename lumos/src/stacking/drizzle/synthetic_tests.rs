@@ -33,6 +33,18 @@ fn dithered_frames(
         .unzip()
 }
 
+fn drizzle_frames(
+    images: Vec<AstroImage>,
+    transforms: &[Transform],
+) -> Vec<DrizzleFrame<AstroImage>> {
+    assert_eq!(images.len(), transforms.len());
+    images
+        .into_iter()
+        .zip(transforms.iter().copied())
+        .map(|(source, transform)| DrizzleFrame::new(source, transform))
+        .collect()
+}
+
 fn sum(px: &[f32]) -> f64 {
     px.iter().map(|&v| v as f64).sum()
 }
@@ -96,10 +108,7 @@ fn drizzle_conserves_total_flux() {
             ..DrizzleConfig::default()
         };
         let result = drizzle_images(
-            images.clone(),
-            &transforms,
-            None,
-            None,
+            drizzle_frames(images.clone(), &transforms),
             &config,
             ProgressCallback::default(),
         )
@@ -134,10 +143,7 @@ fn drizzle_places_star_at_scaled_truth_position() {
         ..DrizzleConfig::default()
     };
     let result = drizzle_images(
-        images,
-        &transforms,
-        None,
-        None,
+        drizzle_frames(images, &transforms),
         &config,
         ProgressCallback::default(),
     )
@@ -185,10 +191,7 @@ fn drizzle_dithering_recovers_resolution() {
     // Distinct sub-pixel dithers vs the same single frame replicated N times: same frame count and
     // flux, so the only difference is sub-pixel diversity. Recovering it sharpens the peak.
     let multi = drizzle_images(
-        images.clone(),
-        &transforms,
-        None,
-        None,
+        drizzle_frames(images.clone(), &transforms),
         &config,
         ProgressCallback::default(),
     )
@@ -196,10 +199,7 @@ fn drizzle_dithering_recovers_resolution() {
     let replicated_imgs: Vec<AstroImage> = (0..dithers.len()).map(|_| images[4].clone()).collect();
     let replicated_tf: Vec<Transform> = (0..dithers.len()).map(|_| transforms[4]).collect();
     let replicated = drizzle_images(
-        replicated_imgs,
-        &replicated_tf,
-        None,
-        None,
+        drizzle_frames(replicated_imgs, &replicated_tf),
         &config,
         ProgressCallback::default(),
     )
@@ -239,10 +239,7 @@ fn drizzle_emits_coverage_weight_and_variance_maps() {
         ..DrizzleConfig::default()
     };
     let result = drizzle_images(
-        images,
-        &transforms,
-        None,
-        None,
+        drizzle_frames(images, &transforms),
         &config,
         ProgressCallback::default(),
     )

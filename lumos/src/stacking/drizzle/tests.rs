@@ -4,6 +4,18 @@ fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAcc
     DrizzleAccumulator::new(input_dims, config).expect("test drizzle config must be valid")
 }
 
+fn drizzle_frames(
+    images: Vec<AstroImage>,
+    transforms: &[Transform],
+) -> Vec<DrizzleFrame<AstroImage>> {
+    assert_eq!(images.len(), transforms.len());
+    images
+        .into_iter()
+        .zip(transforms.iter().copied())
+        .map(|(source, transform)| DrizzleFrame::new(source, transform))
+        .collect()
+}
+
 #[test]
 fn test_drizzle_config_default() {
     let config = DrizzleConfig::default();
@@ -228,15 +240,10 @@ fn test_drizzle_point_kernel() {
 
 #[test]
 fn test_drizzle_stack_empty_paths() {
-    let paths: Vec<std::path::PathBuf> = vec![];
-    let transforms: Vec<Transform> = vec![];
     let config = DrizzleConfig::default();
 
     let result = drizzle_stack(
-        &paths,
-        &transforms,
-        None,
-        None,
+        Vec::<DrizzleFrame<std::path::PathBuf>>::new(),
         &config,
         ProgressCallback::default(),
     );
@@ -247,9 +254,6 @@ fn test_drizzle_stack_empty_paths() {
 fn test_drizzle_images_empty() {
     let result = drizzle_images(
         Vec::new(),
-        &[],
-        None,
-        None,
         &DrizzleConfig::default(),
         ProgressCallback::default(),
     );
@@ -262,10 +266,7 @@ fn test_drizzle_images_matches_accumulator() {
     // single-image accumulator path: 200x200 output, interior pixels = 0.5.
     let image = AstroImage::from_pixels(ImageDimensions::new((100, 100), 1), vec![0.5; 100 * 100]);
     let result = drizzle_images(
-        vec![image],
-        &[Transform::identity()],
-        None,
-        None,
+        vec![DrizzleFrame::new(image, Transform::identity())],
         &DrizzleConfig::x2(),
         ProgressCallback::default(),
     )
@@ -286,10 +287,7 @@ fn test_drizzle_images_dimension_mismatch() {
     let a = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), vec![0.5; 400]);
     let b = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), vec![0.5; 100]);
     let result = drizzle_images(
-        vec![a, b],
-        &[Transform::identity(), Transform::identity()],
-        None,
-        None,
+        drizzle_frames(vec![a, b], &[Transform::identity(), Transform::identity()]),
         &DrizzleConfig::default(),
         ProgressCallback::default(),
     );
@@ -1196,16 +1194,55 @@ fn test_pixel_weight_with_gaussian_kernel() {
     );
 }
 
-/// Test that pixel_weights with wrong dimensions panics.
 #[test]
-#[should_panic(expected = "Pixel weight map dimensions")]
-fn test_pixel_weight_dimensions_mismatch_panics() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
-    let pw = Buffer2::new_filled(3, 3, 1.0f32); // Wrong size!
-
+fn test_drizzle_accumulator_rejects_invalid_frame_inputs() {
     let config = DrizzleConfig::x2();
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
+
+    let mut frame = DrizzleFrame::new(
+        AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
+        Transform::identity(),
+    );
+    frame.pixel_weight_map = Some(Buffer2::new_filled(3, 3, 1.0));
+    let error = acc.add_frame(frame).unwrap_err();
+    assert!(matches!(
+        error,
+        DrizzleError::PixelWeightDimensionMismatch {
+            index: 0,
+            expected_width: 4,
+            expected_height: 4,
+            actual_width: 3,
+            actual_height: 3,
+        }
+    ));
+
+    let mut frame = DrizzleFrame::new(
+        AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
+        Transform::identity(),
+    );
+    frame.weight = f32::NAN;
+    let error = acc.add_frame(frame).unwrap_err();
+    assert!(matches!(
+        error,
+        DrizzleError::InvalidFrameWeight { index: 0, value } if value.is_nan()
+    ));
+
+    let mut pixel_weights = vec![1.0; 16];
+    pixel_weights[5] = -0.25;
+    let mut frame = DrizzleFrame::new(
+        AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
+        Transform::identity(),
+    );
+    frame.pixel_weight_map = Some(Buffer2::new(4, 4, pixel_weights));
+    let error = acc.add_frame(frame).unwrap_err();
+    assert!(matches!(
+        error,
+        DrizzleError::InvalidPixelWeight {
+            frame_index: 0,
+            pixel_index: 5,
+            value: -0.25,
+        }
+    ));
 }
 
 // ==================== sgarea() unit tests ====================

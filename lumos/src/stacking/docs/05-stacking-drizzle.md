@@ -937,9 +937,9 @@ the key insight: it widens the tolerance where the image is steep (PSF cores, ed
 so undersampled structure isn't mistaken for CRs. siril's drizzle path similarly
 rejects pixels with zero drizzle weight before combining (`rejection_float.c:117-126`).
 
-lumos's drizzle has **no** built-in CR rejection or blot step — it accepts an optional
-`pixel_weight_maps` parameter (`drizzle_stack`, `mod.rs:937`) through which a caller
-can supply pre-computed rejection masks, but the median+blot+derivative scheme is not
+lumos's drizzle has **no** built-in CR rejection or blot step — each `DrizzleFrame`
+accepts an optional `pixel_weight_map` through which a caller can supply pre-computed
+rejection masks, but the median+blot+derivative scheme is not
 implemented (see §8).
 
 ### 5.9 When drizzle is justified vs harmful
@@ -1067,13 +1067,12 @@ quality varies.
    step; for later steps both shrink λ and reject too eagerly. Fix: use the live count
    *and* a proper t-inverse (or t-correction) to match siril's
    `λ = (size−1)t / √(size(size−2+t²))`, `t = t_inv(1 − α/(2·size), size−2)`.
-2. **No output variance/uncertainty map.** STScI's `update_data_var`
-   (`cdrizzlebox.c:91`) propagates variance with squared weights; lumos's stacker and
-   drizzle return only the image (+ coverage). An inverse-variance-weighted output
-   variance map would let downstream steps weight correctly and would expose the
-   correlated-noise issue honestly.
+2. **No data-dependent variance propagation.** STScI's `update_data_var`
+   (`cdrizzlebox.c:91`) propagates input variance with squared weights. lumos returns
+   `Σwᵢ²/(Σwᵢ)²`, the output variance per unit input variance, but does not accept a
+   distinct variance model for each input frame or pixel.
 3. **No drizzle CR rejection (median + blot + derivative).** lumos relies on
-   caller-supplied `pixel_weight_maps`. Implementing the DrizzlePac `drizCR` scheme
+   caller-supplied `DrizzleFrame::pixel_weight_map` values. Implementing the DrizzlePac `drizCR` scheme
    (`drizzlepac/drizCR.py`) — drizzle→median→blot→derivative-thresholded mask — would
    make the drizzle path self-contained. This also needs a **blot** (inverse-drizzle)
    operation, which lumos lacks (STScI: `cdrizzleblot.c`).

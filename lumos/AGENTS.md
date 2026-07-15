@@ -138,11 +138,12 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 ## stacking/drizzle — variable-pixel reconstruction
 
-`drizzle_stack(paths, transforms, weights?, pixel_weight_maps?, config, progress)` (`stacking/drizzle/mod.rs`) → `StackProduct`: output `AstroImage` + normalized `coverage` `[0,1]`, absolute `weight` map (`Σwᵢ`, the WHT), and `variance` map (`Σwᵢ²/(Σwᵢ)²` = output variance per unit input variance — the true per-pixel noise the correlation-suppressed image RMS understates).
+`drizzle_stack(Vec<DrizzleFrame<Path>>, config, progress)` (`stacking/drizzle/mod.rs`) → `StackProduct`: output `AstroImage` + normalized `coverage` `[0,1]`, absolute `weight` map (`Σwᵢ`, the WHT), and `variance` map (`Σwᵢ²/(Σwᵢ)²` = output variance per unit input variance — the true per-pixel noise the correlation-suppressed image RMS understates). `drizzle_images` accepts the same coherent records with in-memory `AstroImage` sources.
 
 - `DrizzleConfig` (`mod.rs:89`): `scale`, `pixfrac`, `kernel`, `fill_value`, `min_coverage`. `validate()` reports `DrizzleConfigError`; builders remain freely composable and drizzle entry points validate before loading or allocating.
 - `DrizzleKernel` (`mod.rs:61`): `Square` (exact polygon clipping via Green's theorem `boxer`/`sgarea`), `Turbo` (axis-aligned, default), `Point`, `Gaussian`, `Lanczos` (valid only at pixfrac=scale=1).
-- `DrizzleAccumulator` (`mod.rs:197`): fallible construction validates the configuration and input dimensions. It stores per-channel flux `Buffer2` (`Σ fluxᵢ·wᵢ`) plus a single shared `weight` (`Σwᵢ`) and `weight_sq` (`Σwᵢ²`) `Buffer2` — the weight is geometric, so it's channel-independent. `add_image` maps each input pixel via `Transform`, distributes flux over the drop footprint with a local Jacobian; `finalize` normalizes `data/weight` against `min_coverage` and emits the coverage/weight/variance maps. Pure CPU + rayon-parallel finalize.
+- `DrizzleFrame<T>` (`mod.rs:193`) owns one source, transform, frame weight, and optional per-pixel weight map, so those values cannot drift as parallel collections.
+- `DrizzleAccumulator` (`mod.rs:225`): fallible construction validates the configuration and input dimensions. It stores per-channel flux `Buffer2` (`Σ fluxᵢ·wᵢ`) plus a single shared `weight` (`Σwᵢ`) and `weight_sq` (`Σwᵢ²`) `Buffer2` — the weight is geometric, so it's channel-independent. `add_frame` validates all frame data before mapping each input pixel via its `Transform` and distributing flux over the drop footprint with a local Jacobian; `finalize` normalizes `data/weight` against `min_coverage` and emits the coverage/weight/variance maps. Pure CPU + rayon-parallel finalize.
 
 ## image_ops::stretching — non-linear display stretch
 
