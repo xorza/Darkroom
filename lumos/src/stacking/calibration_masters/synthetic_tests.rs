@@ -78,7 +78,8 @@ fn calibrate_removes_vignette_dark_and_bias() {
         },
         5.0,
         CancelToken::never(),
-    );
+    )
+    .unwrap();
 
     let mut light = make_cfa(w, h, light_px, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -132,7 +133,8 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
         },
         5.0,
         CancelToken::never(),
-    );
+    )
+    .unwrap();
 
     let mut light = make_cfa(w, h, light_px, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -159,7 +161,9 @@ fn defect_map_detects_injected_hot_and_cold_pixels() {
         dark_px[i] = 0.9;
     }
     let dark = make_cfa(w, h, dark_px, CfaType::Mono);
-    let map = DefectMap::default().detect_hot(&dark, 5.0, &CancelToken::never());
+    let map = DefectMap::default()
+        .detect_hot(&dark, 5.0, &CancelToken::never())
+        .unwrap();
     // The injected set is clean and uniform, so detection must be *exactly* the 5 hot pixels —
     // no spurious flags (precision 1.0) and none missed (recall 1.0).
     let hot_score = score_rejection(&map.hot_indices, &hot);
@@ -173,7 +177,9 @@ fn defect_map_detects_injected_hot_and_cold_pixels() {
         flat_px[i] = 0.01;
     }
     let flat = make_cfa(w, h, flat_px, CfaType::Mono);
-    let map = DefectMap::default().detect_cold(&flat, &CancelToken::never());
+    let map = DefectMap::default()
+        .detect_cold(&flat, &CancelToken::never())
+        .unwrap();
     let cold_score = score_rejection(&map.cold_indices, &dead);
     assert_eq!(map.cold_indices.len(), 3, "exactly the 3 dead pixels");
     assert_eq!((cold_score.precision, cold_score.recall), (1.0, 1.0));
@@ -198,10 +204,12 @@ fn hot_detection_sigma_threshold_is_monotonic() {
     let dark = make_cfa(w, h, dark_px, CfaType::Mono);
     let lenient = DefectMap::default()
         .detect_hot(&dark, 3.0, &CancelToken::never())
+        .unwrap()
         .hot_indices
         .len();
     let strict = DefectMap::default()
         .detect_hot(&dark, 8.0, &CancelToken::never())
+        .unwrap()
         .hot_indices
         .len();
     assert!(
@@ -221,11 +229,13 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
     for &(x, y) in &hot {
         dark[y * w + x] = 0.9;
     }
-    let map = DefectMap::default().detect_hot(
-        &make_cfa(w, h, dark, CfaType::Mono),
-        5.0,
-        &CancelToken::never(),
-    );
+    let map = DefectMap::default()
+        .detect_hot(
+            &make_cfa(w, h, dark, CfaType::Mono),
+            5.0,
+            &CancelToken::never(),
+        )
+        .unwrap();
 
     let mut img_px = vec![background; n];
     for &(x, y) in &hot {

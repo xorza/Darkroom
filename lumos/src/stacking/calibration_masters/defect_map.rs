@@ -39,6 +39,7 @@
 
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::math::statistics::{MAD_TO_SIGMA, median_f32_mut};
+use crate::stacking::combine::error::Error;
 use common::BitBuffer2;
 use common::CancelToken;
 use common::Vec2us;
@@ -72,30 +73,37 @@ impl DefectMap {
     }
 
     /// Detect **hot** pixels from a master dark — those above `median + sigma_threshold·σ` for
-    /// their CFA color — and store them. Chainable, in any order:
-    /// `DefectMap::default().detect_hot(&dark, 5.0, &CancelToken::never()).detect_cold(&flat, &CancelToken::never())`.
+    /// their CFA color — and store them. Calls are chainable with `?`, in any order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Cancelled`] if cancellation is requested before detection completes.
     pub fn detect_hot(
         mut self,
         dark: &CfaImage,
         sigma_threshold: f32,
         cancel: &CancelToken,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         // Clamp at the boundary rather than asserting: `sigma_threshold` may come from user config,
         // and a non-positive value (which would flag every pixel above the median) must not panic
         // the pipeline. Nothing below 1σ is a meaningful defect threshold.
         let sigma_threshold = sigma_threshold.max(MIN_SIGMA_THRESHOLD);
         self.set_dimensions(Vec2us::new(dark.data.width(), dark.data.height()));
-        self.hot_indices = detect_hot_pixels(dark, sigma_threshold, cancel);
-        self
+        self.hot_indices = detect_hot_pixels(dark, sigma_threshold, cancel)?;
+        Ok(self)
     }
 
     /// Detect **cold/dead** pixels from a master flat — those reading below [`DEAD_PIXEL_FRACTION`]
     /// of their same-color local-neighbourhood median — and store them. The local reference makes
     /// this robust to vignetting and dust, where a global cut cannot be.
-    pub fn detect_cold(mut self, flat: &CfaImage, cancel: &CancelToken) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Cancelled`] if cancellation is requested before detection completes.
+    pub fn detect_cold(mut self, flat: &CfaImage, cancel: &CancelToken) -> Result<Self, Error> {
         self.set_dimensions(Vec2us::new(flat.data.width(), flat.data.height()));
-        self.cold_indices = detect_cold_pixels(flat, DEAD_PIXEL_FRACTION, cancel);
-        self
+        self.cold_indices = detect_cold_pixels(flat, DEAD_PIXEL_FRACTION, cancel)?;
+        Ok(self)
     }
 
     /// Record the master dimensions on first detection, or assert they match on later calls: every
@@ -189,7 +197,15 @@ const DEAD_PIXEL_FRACTION: f32 = 0.5;
 
 /// Flag hot pixels in a master dark: those above `median + kσ` for their CFA color (robust
 /// per-color MAD stats). Per-color keeps green (50% of Bayer data) from masking red/blue defects.
-fn detect_hot_pixels(image: &CfaImage, sigma_threshold: f32, cancel: &CancelToken) -> Vec<usize> {
+fn detect_hot_pixels(
+    image: &CfaImage,
+    sigma_threshold: f32,
+    cancel: &CancelToken,
+) -> Result<Vec<usize>, Error> {
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+
     let data = &image.data;
     let width = data.width();
     let total = width * data.height();
@@ -202,10 +218,9 @@ fn detect_hot_pixels(image: &CfaImage, sigma_threshold: f32, cancel: &CancelToke
     // pixel's same-color neighbours are themselves hot, so the local median rises to the hot value.
     // (A gradient-/glow-robust *and* cluster-robust center would need large-box background
     // subtraction, à la IRAF `ccdmask` — deferred.)
-    (0..total)
+    let indices = (0..total)
         .into_par_iter()
         .filter(|&i| {
-            // Cancelled: skip the rest (partial result is discarded by the caller).
             if cancel.is_cancelled() {
                 return false;
             }
@@ -213,30 +228,47 @@ fn detect_hot_pixels(image: &CfaImage, sigma_threshold: f32, cancel: &CancelToke
             let ColorStats { median, sigma } = stats[color];
             data[i] > median + sigma_threshold * sigma
         })
-        .collect()
+        .collect();
+
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    Ok(indices)
 }
 
 /// Flag cold/dead pixels in a master flat: those reading below `dead_fraction` of the median of
 /// their same-color local neighbours. The local reference tracks vignetting (so a global cut's
 /// negative-threshold failure can't happen) and ignores dust shadows; only near-zero pixels pass.
 /// The neighbour scan runs on every pixel in parallel — one-time work, off the hot path.
-fn detect_cold_pixels(image: &CfaImage, dead_fraction: f32, cancel: &CancelToken) -> Vec<usize> {
+fn detect_cold_pixels(
+    image: &CfaImage,
+    dead_fraction: f32,
+    cancel: &CancelToken,
+) -> Result<Vec<usize>, Error> {
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+
     let data = &image.data;
     let width = data.width();
     let total = width * data.height();
     let neighbors = SameColorMedian::new(image.metadata.cfa_type.as_ref());
 
-    (0..total)
+    let indices = (0..total)
         .into_par_iter()
         .filter(|&i| {
-            // Cancelled: skip the rest (partial result is discarded by the caller).
             if cancel.is_cancelled() {
                 return false;
             }
             let local = neighbors.at(data, i % width, i / width, None);
             data[i] < dead_fraction * local
         })
-        .collect()
+        .collect();
+
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    Ok(indices)
 }
 
 /// Per-CFA-color robust background statistics used to threshold hot pixels.
@@ -599,6 +631,22 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_detection_returns_error() {
+        let image = make_cfa(4, 4, vec![0.5; 16], CfaType::Mono);
+        let cancel = CancelToken::new();
+        cancel.cancel();
+
+        assert!(matches!(
+            DefectMap::default().detect_hot(&image, 5.0, &cancel),
+            Err(Error::Cancelled)
+        ));
+        assert!(matches!(
+            DefectMap::default().detect_cold(&image, &cancel),
+            Err(Error::Cancelled)
+        ));
+    }
+
+    #[test]
     fn test_correct_clustered_defect_uses_only_good_neighbors() {
         // A defect whose same-color neighbours are MOSTLY other defects must still be repaired from
         // the few good ones — the defect mask excludes the bad neighbours. Pre-mask, the neighbour
@@ -612,7 +660,9 @@ mod tests {
             px[y * w + x] = 0.95;
         }
         let dark = make_cfa(w, h, px, cfa.clone());
-        let defect_map = DefectMap::default().detect_hot(&dark, 5.0, &CancelToken::never());
+        let defect_map = DefectMap::default()
+            .detect_hot(&dark, 5.0, &CancelToken::never())
+            .unwrap();
         assert_eq!(defect_map.hot_count(), 6, "all six 0.95 red pixels are hot");
 
         let mut light = make_cfa(w, h, vec![0.5f32; w * h], cfa);
@@ -668,7 +718,9 @@ mod tests {
         assert_eq!(cfa.color_at(b_hot.0, b_hot.1), 2);
 
         let dark = build(&[r_hot, b_hot]);
-        let defect_map = DefectMap::default().detect_hot(&dark, 5.0, &CancelToken::never());
+        let defect_map = DefectMap::default()
+            .detect_hot(&dark, 5.0, &CancelToken::never())
+            .unwrap();
         assert_eq!(defect_map.hot_count(), 2, "one R and one B hot pixel");
 
         let mut light = build(&[r_hot, b_hot]);
@@ -695,7 +747,9 @@ mod tests {
         pixels[35] = 10000.0; // hot at (5,5)
 
         let dark = make_cfa(6, 6, pixels, CfaType::Bayer(CfaPattern::Rggb));
-        let defect_map = DefectMap::default().detect_hot(&dark, 5.0, &CancelToken::never());
+        let defect_map = DefectMap::default()
+            .detect_hot(&dark, 5.0, &CancelToken::never())
+            .unwrap();
 
         assert_eq!(defect_map.hot_count(), 3);
         assert!(is_hot(&defect_map, 0));
@@ -806,7 +860,9 @@ mod tests {
         }
 
         let dark = make_cfa(size, size, pixels, CfaType::Bayer(CfaPattern::Rggb));
-        let defect_map = DefectMap::default().detect_hot(&dark, 5.0, &CancelToken::never());
+        let defect_map = DefectMap::default()
+            .detect_hot(&dark, 5.0, &CancelToken::never())
+            .unwrap();
 
         assert_eq!(defect_map.hot_count(), hot_positions.len());
         for &idx in &hot_positions {
@@ -843,7 +899,9 @@ mod tests {
         pixels[0] = 500.0; // (0,0) = R
 
         let dark = make_cfa(8, 8, pixels, pattern.clone());
-        let defect_map = DefectMap::default().detect_hot(&dark, 3.0, &CancelToken::never());
+        let defect_map = DefectMap::default()
+            .detect_hot(&dark, 3.0, &CancelToken::never())
+            .unwrap();
 
         // The hot red pixel should be detected
         assert!(
@@ -860,7 +918,9 @@ mod tests {
     fn test_cfa_no_defective_pixels() {
         let pixels = vec![100.0; 36];
         let dark = make_cfa(6, 6, pixels, CfaType::Mono);
-        let defect_map = DefectMap::default().detect_hot(&dark, 5.0, &CancelToken::never());
+        let defect_map = DefectMap::default()
+            .detect_hot(&dark, 5.0, &CancelToken::never())
+            .unwrap();
         assert_eq!(defect_map.hot_count(), 0);
         assert_eq!(defect_map.count(), 0);
     }
@@ -881,7 +941,9 @@ mod tests {
         }
         let dark = make_cfa(w, h, pixels, CfaType::Mono);
 
-        let defect_map = DefectMap::default().detect_hot(&dark, 5.0, &CancelToken::never());
+        let defect_map = DefectMap::default()
+            .detect_hot(&dark, 5.0, &CancelToken::never())
+            .unwrap();
 
         // Exactly the hot pixels — the ~half-the-frame sub-zero pixels are not "cold defects".
         assert_eq!(
@@ -907,7 +969,9 @@ mod tests {
         pixels[5] = 0.0; // dead pixel at index 5
         let flat = make_cfa(6, 6, pixels, CfaType::Mono);
 
-        let defect_map = DefectMap::default().detect_cold(&flat, &CancelToken::never());
+        let defect_map = DefectMap::default()
+            .detect_cold(&flat, &CancelToken::never())
+            .unwrap();
 
         // The dead pixel (0.0) reads below half its uniform 0.4 neighbourhood (0.5·0.4 = 0.2);
         // every normal pixel reads its full 0.4. A flat yields no hot pixels.
@@ -922,7 +986,9 @@ mod tests {
     #[test]
     fn uniform_flat_flags_no_cold() {
         let flat = make_cfa(8, 8, vec![0.5f32; 64], CfaType::Mono);
-        let defect_map = DefectMap::default().detect_cold(&flat, &CancelToken::never());
+        let defect_map = DefectMap::default()
+            .detect_cold(&flat, &CancelToken::never())
+            .unwrap();
         assert_eq!(defect_map.count(), 0);
     }
 
@@ -941,7 +1007,9 @@ mod tests {
         pixels[dead] = 0.0;
         let flat = make_cfa(w, h, pixels, CfaType::Mono);
 
-        let defect_map = DefectMap::default().detect_cold(&flat, &CancelToken::never());
+        let defect_map = DefectMap::default()
+            .detect_cold(&flat, &CancelToken::never())
+            .unwrap();
 
         assert_eq!(defect_map.cold_count(), 1, "only the dead pixel is cold");
         assert_eq!(defect_map.hot_count(), 0, "a flat yields no hot pixels");
@@ -971,7 +1039,9 @@ mod tests {
 
         let defect_map = DefectMap::default()
             .detect_hot(&dark, 5.0, &CancelToken::never())
-            .detect_cold(&flat, &CancelToken::never());
+            .unwrap()
+            .detect_cold(&flat, &CancelToken::never())
+            .unwrap();
 
         assert_eq!(defect_map.hot_count(), 1);
         assert_eq!(defect_map.cold_count(), 1);
@@ -1087,7 +1157,9 @@ mod tests {
         px[dead] = 0.0;
         let flat = make_cfa(w, h, px, pattern);
 
-        let defect_map = DefectMap::default().detect_cold(&flat, &CancelToken::never());
+        let defect_map = DefectMap::default()
+            .detect_cold(&flat, &CancelToken::never())
+            .unwrap();
 
         assert_eq!(defect_map.cold_count(), 1, "only the dead pixel is cold");
         assert_eq!(defect_map.hot_count(), 0, "detect_cold sets no hot pixels");

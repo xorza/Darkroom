@@ -86,7 +86,8 @@ fn bench_full_pipeline() {
         },
         DEFAULT_SIGMA_THRESHOLD,
         CancelToken::never(),
-    );
+    )
+    .unwrap();
     println!(
         "  DefectMap: {:.0}ms",
         t_defect.elapsed().as_secs_f64() * 1000.0

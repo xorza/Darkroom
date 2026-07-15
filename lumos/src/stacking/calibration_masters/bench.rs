@@ -55,6 +55,7 @@ fn make_masters() -> CalibrationMasters {
         DEFAULT_SIGMA_THRESHOLD,
         CancelToken::never(),
     )
+    .unwrap()
 }
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
@@ -83,7 +84,9 @@ fn bench_defect_map_build_bayer(b: ::quickbench::Bencher) {
                     DEFAULT_SIGMA_THRESHOLD,
                     &CancelToken::never(),
                 )
-                .detect_cold(black_box(&flat), &CancelToken::never()),
+                .unwrap()
+                .detect_cold(black_box(&flat), &CancelToken::never())
+                .unwrap(),
         )
     });
 }
