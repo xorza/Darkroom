@@ -121,10 +121,10 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
     )
     .expect("failed to build calibration masters");
 
-    if let Some(ref defects) = masters.defect_map {
+    if let Some(defects) = masters.defect_summary() {
         tracing::info!(
-            hot = defects.hot_indices.len(),
-            cold = defects.cold_indices.len(),
+            hot = defects.hot_pixels,
+            cold = defects.cold_pixels,
             "Defect map built (hot from dark, cold/dead from flat)"
         );
     }

@@ -69,23 +69,55 @@ pub struct CalibrationImages {
     pub flat_dark: Option<CfaImage>,
 }
 
-/// Holds master calibration frames (dark, flat, bias) and defect map.
+/// A component present in a [`CalibrationMasters`] bundle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalibrationComponent {
+    /// Master dark frame.
+    Dark,
+    /// Master flat frame.
+    Flat,
+    /// Master bias frame.
+    Bias,
+    /// Master dark frame taken at the flat exposure time.
+    FlatDark,
+    /// Defect map derived from a dark, flat, or both.
+    Defects,
+}
+
+impl std::fmt::Display for CalibrationComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Dark => f.write_str("dark"),
+            Self::Flat => f.write_str("flat"),
+            Self::Bias => f.write_str("bias"),
+            Self::FlatDark => f.write_str("flat-dark"),
+            Self::Defects => f.write_str("defects"),
+        }
+    }
+}
+
+/// Read-only defect statistics derived from a calibration bundle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DefectSummary {
+    /// Hot pixels detected from the master dark.
+    pub hot_pixels: usize,
+    /// Cold or dead pixels detected from the master flat.
+    pub cold_pixels: usize,
+    /// Percentage of sensor pixels present in either class.
+    pub percentage: f32,
+}
+
+/// Master calibration frames and their derived defect map.
 ///
-/// Operates on raw CFA (single-channel sensor) data before demosaicing,
-/// giving mathematically correct defect pixel correction using same-color
-/// CFA neighbors.
-#[derive(Debug)]
+/// Construction keeps the source masters and defect map synchronized. Calibration operates on raw
+/// CFA data before demosaicing so defect correction can use same-color neighbors.
+#[derive(Debug, Default)]
 pub struct CalibrationMasters {
-    /// Master dark frame (raw CFA)
-    pub master_dark: Option<CfaImage>,
-    /// Master flat frame (raw CFA)
-    pub master_flat: Option<CfaImage>,
-    /// Master bias frame (raw CFA)
-    pub master_bias: Option<CfaImage>,
-    /// Master flat dark frame (dark taken at flat exposure time)
-    pub master_flat_dark: Option<CfaImage>,
-    /// Defect map (hot + cold pixels) derived from master dark
-    pub defect_map: Option<DefectMap>,
+    master_dark: Option<CfaImage>,
+    master_flat: Option<CfaImage>,
+    master_bias: Option<CfaImage>,
+    master_flat_dark: Option<CfaImage>,
+    defect_map: Option<DefectMap>,
 }
 
 /// Frame-weighted share of the memory budget for one role when [`CalibrationMasters::from_files`]
@@ -156,6 +188,38 @@ pub fn stack_cfa_master(
 }
 
 impl CalibrationMasters {
+    /// Components present in this bundle, in calibration order.
+    pub fn components(&self) -> impl Iterator<Item = CalibrationComponent> {
+        [
+            self.master_dark
+                .as_ref()
+                .map(|_| CalibrationComponent::Dark),
+            self.master_flat
+                .as_ref()
+                .map(|_| CalibrationComponent::Flat),
+            self.master_bias
+                .as_ref()
+                .map(|_| CalibrationComponent::Bias),
+            self.master_flat_dark
+                .as_ref()
+                .map(|_| CalibrationComponent::FlatDark),
+            self.defect_map
+                .as_ref()
+                .map(|_| CalibrationComponent::Defects),
+        ]
+        .into_iter()
+        .flatten()
+    }
+
+    /// Defect statistics, or `None` when no dark or flat supplied a defect map.
+    pub fn defect_summary(&self) -> Option<DefectSummary> {
+        self.defect_map.as_ref().map(|map| DefectSummary {
+            hot_pixels: map.hot_indices.len(),
+            cold_pixels: map.cold_indices.len(),
+            percentage: map.percentage(),
+        })
+    }
+
     /// Resident RAM held by this bundle: the present master frames' pixel bytes
     /// plus the defect map's index lists.
     pub fn ram_bytes(&self) -> usize {

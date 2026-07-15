@@ -2,6 +2,10 @@
 
 Creates, loads, saves, and applies master calibration frames (bias, dark, flat) to light frames.
 
+`CalibrationMasters` keeps its images and derived defect map private. Build a bundle through
+`from_images` or `from_files`; inspect its read-only `components()` and `defect_summary()` views.
+Replacing a source master without rebuilding its defect map is not representable.
+
 ## Calibration Formula
 
 The standard astrophotography calibration formula:

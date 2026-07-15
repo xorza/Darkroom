@@ -10,9 +10,9 @@ use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
-    AstroImage, CalibrationImages, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, Normalization,
-    ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig, StarDetector,
-    register, stack, warp,
+    AstroImage, CalibrationComponent, CalibrationImages, CalibrationMasters,
+    DEFAULT_SIGMA_THRESHOLD, Normalization, ProgressCallback, RegistrationConfig, StackConfig,
+    Star, StarDetectionConfig, StarDetector, register, stack, warp,
 };
 
 #[test]
@@ -95,13 +95,23 @@ fn bench_full_pipeline() {
 
     println!(
         "  Masters: dark={}, flat={}, bias={}",
-        masters.master_dark.is_some(),
-        masters.master_flat.is_some(),
-        masters.master_bias.is_some(),
+        masters
+            .components()
+            .any(|component| component == CalibrationComponent::Dark),
+        masters
+            .components()
+            .any(|component| component == CalibrationComponent::Flat),
+        masters
+            .components()
+            .any(|component| component == CalibrationComponent::Bias),
     );
 
-    if let Some(ref hp) = masters.defect_map {
-        println!("  Hot pixels: {} ({:.4}%)", hp.count(), hp.percentage());
+    if let Some(defects) = masters.defect_summary() {
+        println!(
+            "  Defective pixels: {} ({:.4}%)",
+            defects.hot_pixels + defects.cold_pixels,
+            defects.percentage
+        );
     }
     println!("  Step 1 total: {:?}", step_start.elapsed());
 

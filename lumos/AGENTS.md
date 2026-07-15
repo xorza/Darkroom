@@ -78,7 +78,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 ## stacking/calibration_masters — master frames & defects
 
-- `CalibrationMasters` (`mod.rs:70`): optional master dark/flat/bias/flat-dark `CfaImage`s + `DefectMap`.
+- `CalibrationMasters` (`mod.rs:110`): private optional master dark/flat/bias/flat-dark `CfaImage`s plus their derived `DefectMap`; `from_images`/`from_files` keep sources and defects synchronized, while `components()` and `defect_summary()` expose read-only derived state. `Default` is the valid empty bundle.
 - `from_files` (`mod.rs:161`) stacks raw CFA frames through the full stacking pipeline (sigma-clipped mean at ≥8 frames, else median); `from_images` (`mod.rs:124`) builds from pre-stacked frames and derives a `DefectMap` (hot from the dark, cold/dead from the flat).
 - `calibrate(&mut CfaImage)` (`mod.rs:186`): **order = dark-subtract (or bias) → flat-divide (flat-dark priority over bias) → defect-correct**, in place.
 - `DefectMap` (`defect_map.rs`): hot/cold flat-index lists, built fluently from `DefectMap::default().detect_hot(&dark, σ).detect_cold(&flat)` — **hot** from the dark via per-color MAD threshold (adaptive sampling above 200K px), **cold/dead** from the flat via a same-color local-neighbour ratio (`< DEAD_PIXEL_FRACTION × local median`, robust to vignetting where a global cut can't be); `correct()` replaces defects with same-color CFA-neighbor medians. `DEFAULT_SIGMA_THRESHOLD = 5.0`.

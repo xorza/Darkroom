@@ -4,7 +4,10 @@ use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::weighted_budget;
 use crate::stacking::combine::error::Error;
 use crate::testing::constant_cfa;
-use crate::{AstroImageMetadata, CalibrationFrames, CalibrationImages, CalibrationMasters};
+use crate::{
+    AstroImageMetadata, CalibrationComponent, CalibrationFrames, CalibrationImages,
+    CalibrationMasters, DefectSummary,
+};
 use common::CancelToken;
 use imaginarium::Buffer2;
 
@@ -68,34 +71,54 @@ fn test_from_files_all_empty_yields_no_masters() {
     )
     .unwrap();
 
-    assert!(masters.master_dark.is_none());
-    assert!(masters.master_flat.is_none());
-    assert!(masters.master_bias.is_none());
-    assert!(masters.master_flat_dark.is_none());
-    assert!(masters.defect_map.is_none());
+    assert_eq!(masters.components().collect::<Vec<_>>(), Vec::new());
+    assert_eq!(masters.defect_summary(), None);
 }
 
 #[test]
 fn test_new_constructor() {
     let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
     let flat = constant_cfa(4, 4, 0.8, CfaType::Mono);
+    let bias = constant_cfa(4, 4, 0.02, CfaType::Mono);
+    let flat_dark = constant_cfa(4, 4, 0.03, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
         CalibrationImages {
             dark: Some(dark),
             flat: Some(flat),
-            ..Default::default()
+            bias: Some(bias),
+            flat_dark: Some(flat_dark),
         },
         DEFAULT_SIGMA_THRESHOLD,
         CancelToken::never(),
     )
     .unwrap();
 
-    assert!(masters.master_dark.is_some());
-    assert!(masters.master_flat.is_some());
-    assert!(masters.master_bias.is_none());
-    // Defect map derived from dark
-    assert!(masters.defect_map.is_some());
+    assert_eq!(
+        masters.components().collect::<Vec<_>>(),
+        vec![
+            CalibrationComponent::Dark,
+            CalibrationComponent::Flat,
+            CalibrationComponent::Bias,
+            CalibrationComponent::FlatDark,
+            CalibrationComponent::Defects,
+        ]
+    );
+    assert_eq!(
+        masters
+            .components()
+            .map(|component| component.to_string())
+            .collect::<Vec<_>>(),
+        vec!["dark", "flat", "bias", "flat-dark", "defects"]
+    );
+    assert_eq!(
+        masters.defect_summary(),
+        Some(DefectSummary {
+            hot_pixels: 0,
+            cold_pixels: 0,
+            percentage: 0.0,
+        })
+    );
 }
 
 #[test]
@@ -129,13 +152,18 @@ fn test_new_no_dark_no_hot_pixels() {
     )
     .unwrap();
 
-    assert!(masters.master_dark.is_none());
-    assert!(masters.master_flat.is_some());
-    // A flat is present, so a defect map is built — but with no dark there are no hot pixels,
-    // and a constant flat has no cold pixels either.
-    let defect_map = masters.defect_map.expect("a flat yields a defect map");
-    assert_eq!(defect_map.hot_count(), 0, "no dark → no hot pixels");
-    assert_eq!(defect_map.count(), 0, "constant flat → no cold pixels");
+    assert_eq!(
+        masters.components().collect::<Vec<_>>(),
+        vec![CalibrationComponent::Flat, CalibrationComponent::Defects]
+    );
+    assert_eq!(
+        masters.defect_summary(),
+        Some(DefectSummary {
+            hot_pixels: 0,
+            cold_pixels: 0,
+            percentage: 0.0,
+        })
+    );
 }
 
 #[test]
@@ -364,8 +392,8 @@ fn test_sigma_threshold_affects_detection() {
     )
     .unwrap();
 
-    let strict_count = masters_strict.defect_map.as_ref().unwrap().hot_count();
-    let loose_count = masters_loose.defect_map.as_ref().unwrap().hot_count();
+    let strict_count = masters_strict.defect_summary().unwrap().hot_pixels;
+    let loose_count = masters_loose.defect_summary().unwrap().hot_pixels;
 
     // sigma=3: 1000 > 199, the very-hot pixel is detected
     assert_eq!(strict_count, 1, "sigma=3 should detect the hot pixel");
@@ -440,9 +468,14 @@ fn test_calibrate_hot_pixel_correction() {
     )
     .unwrap();
 
-    assert!(masters.defect_map.is_some());
-    let defect_map = masters.defect_map.as_ref().unwrap();
-    assert!(defect_map.count() >= 1, "Should detect the hot pixel");
+    assert_eq!(
+        masters.defect_summary(),
+        Some(DefectSummary {
+            hot_pixels: 1,
+            cold_pixels: 0,
+            percentage: 100.0 / (w * h) as f32,
+        })
+    );
 
     // Create light with corrupted hot pixel
     let mut light_pixels = vec![0.5_f32; w * h];
@@ -615,5 +648,13 @@ fn ram_bytes_sums_present_frames_and_defects() {
     assert_eq!(
         masters.ram_bytes(),
         10 * 8 * 4 + 4 * 4 * 4 + 3 * std::mem::size_of::<usize>()
+    );
+    assert_eq!(
+        masters.defect_summary(),
+        Some(DefectSummary {
+            hot_pixels: 2,
+            cold_pixels: 1,
+            percentage: 0.0,
+        })
     );
 }

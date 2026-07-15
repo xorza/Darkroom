@@ -1,7 +1,8 @@
 use imaginarium::Buffer2;
 use lumos::{
-    AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig, CombineMethod,
-    DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, GesdConfig, ImageDimensions,
+    AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig,
+    CalibrationComponent, CalibrationMasters, CombineMethod, DefectSummary, DrizzleConfig,
+    DrizzleConfigError, DrizzleError, DrizzleFrame, GesdConfig, ImageDimensions,
     LinearFitClipConfig, Normalization, PercentileClipConfig, Rejection, SigmaClipConfig, SmallN,
     StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig,
     StarDetectionConfigError, StarDetector, Transform, Weighting, WinsorizedClipConfig,
@@ -115,6 +116,15 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
             value: 0.0
         })
     ));
+}
+
+#[test]
+fn calibration_master_views_are_available_from_the_crate_root() {
+    let masters = CalibrationMasters::default();
+    assert_eq!(masters.components().collect::<Vec<_>>(), Vec::new());
+    let summary: Option<DefectSummary> = masters.defect_summary();
+    assert_eq!(summary, None);
+    assert_eq!(CalibrationComponent::FlatDark.to_string(), "flat-dark");
 }
 
 #[test]

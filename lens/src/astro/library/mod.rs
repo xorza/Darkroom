@@ -346,13 +346,7 @@ pub fn astro_library() -> Library {
                     // heavy synchronous CPU work that polls `cancel` throughout.
                     // A cancel propagates out as `InvokeError::Cancelled` via `?`.
                     let result = run_cancellable(cancel, move |c| {
-                        let empty = CalibrationMasters {
-                            master_dark: None,
-                            master_flat: None,
-                            master_bias: None,
-                            master_flat_dark: None,
-                            defect_map: None,
-                        };
+                        let empty = CalibrationMasters::default();
                         let masters = masters_val
                             .as_custom::<Masters>()
                             .map(|m| &m.masters)

@@ -51,28 +51,19 @@ impl CustomValue for Masters {
 
 impl std::fmt::Display for Masters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let m = &self.masters;
-        let mut parts = Vec::new();
-        if m.master_dark.is_some() {
-            parts.push("dark");
+        let mut components = self.masters.components().peekable();
+        if components.peek().is_none() {
+            return f.write_str("no masters");
         }
-        if m.master_flat.is_some() {
-            parts.push("flat");
+
+        f.write_str("masters: ")?;
+        for (index, component) in components.enumerate() {
+            if index > 0 {
+                f.write_str(", ")?;
+            }
+            write!(f, "{component}")?;
         }
-        if m.master_bias.is_some() {
-            parts.push("bias");
-        }
-        if m.master_flat_dark.is_some() {
-            parts.push("flat-dark");
-        }
-        if m.defect_map.is_some() {
-            parts.push("defects");
-        }
-        if parts.is_empty() {
-            write!(f, "no masters")
-        } else {
-            write!(f, "masters: {}", parts.join(", "))
-        }
+        Ok(())
     }
 }
 
@@ -84,18 +75,31 @@ impl From<CalibrationMasters> for Masters {
 
 #[cfg(test)]
 mod tests {
-    use lumos::DefectMap;
+    use common::CancelToken;
+    use imaginarium::Buffer2;
+    use lumos::{AstroImageMetadata, CalibrationImages, CfaImage, CfaType};
 
     use super::*;
 
     fn bundle(defects: bool) -> CalibrationMasters {
-        CalibrationMasters {
-            master_dark: None,
-            master_flat: None,
-            master_bias: None,
-            master_flat_dark: None,
-            defect_map: defects.then(DefectMap::default),
+        if !defects {
+            return CalibrationMasters::default();
         }
+        CalibrationMasters::from_images(
+            CalibrationImages {
+                dark: Some(CfaImage {
+                    data: Buffer2::new_filled(4, 4, 0.1),
+                    metadata: AstroImageMetadata {
+                        cfa_type: Some(CfaType::Mono),
+                        ..AstroImageMetadata::default()
+                    },
+                }),
+                ..CalibrationImages::default()
+            },
+            5.0,
+            CancelToken::never(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -105,6 +109,9 @@ mod tests {
 
     #[test]
     fn display_lists_present_masters() {
-        assert_eq!(Masters::new(bundle(true)).to_string(), "masters: defects");
+        assert_eq!(
+            Masters::new(bundle(true)).to_string(),
+            "masters: dark, defects"
+        );
     }
 }
