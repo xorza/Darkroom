@@ -1,7 +1,7 @@
 //! Configuration for the registration module.
 
-use glam::DVec2;
-
+use crate::stacking::registration::distortion::sip::SipConfig;
+use crate::stacking::registration::interpolation::WarpParams;
 use crate::stacking::registration::ransac::RansacConfig;
 use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::TransformType;
@@ -199,9 +199,8 @@ impl RegistrationMatchingConfig {
 /// ```
 #[derive(Debug, Clone)]
 pub struct Config {
-    // == Transform model ==
     /// Transformation model: Translation, Euclidean, Similarity, Affine, Homography, Auto.
-    /// Default: Auto (starts with Similarity, upgrades to Homography if needed).
+    /// Default: Auto (starts with Euclidean and upgrades through Homography if needed).
     pub transform_type: TransformType,
 
     /// Star selection, acceptance gates, and triangle matching.
@@ -210,47 +209,30 @@ pub struct Config {
     /// Robust transform-estimation configuration.
     pub ransac: RansacConfig,
 
-    // == Quality ==
     /// Maximum acceptable RMS error in pixels. Default: 2.0.
     pub max_rms_error: f64,
 
-    // == Distortion correction ==
-    /// Enable SIP polynomial distortion correction. Default: false.
-    pub sip_enabled: bool,
-    /// SIP polynomial order (2-5). Default: 3.
-    pub sip_order: usize,
-    /// SIP reference point (e.g. image center). Default: None (uses star centroid).
-    /// For proper optical distortion modeling, set to image center: `Some(DVec2::new(w/2, h/2))`.
-    pub sip_reference_point: Option<DVec2>,
+    /// Optional SIP polynomial distortion correction.
+    pub sip: Option<SipConfig>,
 
-    // == Image warping ==
-    /// Interpolation method for warping. Default: Lanczos3 with deringing.
-    pub interpolation: InterpolationMethod,
-    /// Border value for out-of-bounds pixels. Default: 0.0.
-    pub border_value: f32,
+    /// Image resampling configuration.
+    pub warp: WarpParams,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            // Transform
             transform_type: TransformType::Auto,
 
             matching: RegistrationMatchingConfig::default(),
 
             ransac: RansacConfig::default(),
 
-            // Quality
             max_rms_error: 2.0,
 
-            // Distortion
-            sip_enabled: false,
-            sip_order: 3,
-            sip_reference_point: None,
+            sip: None,
 
-            // Warping
-            interpolation: InterpolationMethod::default(),
-            border_value: 0.0,
+            warp: WarpParams::default(),
         }
     }
 }
@@ -268,7 +250,10 @@ impl Config {
                 max_stars: 100,
                 ..Default::default()
             },
-            interpolation: InterpolationMethod::Bilinear,
+            warp: WarpParams {
+                method: InterpolationMethod::Bilinear,
+                ..Default::default()
+            },
             ..Self::default()
         }
     }
@@ -281,7 +266,7 @@ impl Config {
                 confidence: 0.999,
                 ..Default::default()
             },
-            sip_enabled: true,
+            sip: Some(SipConfig::default()),
             max_rms_error: 1.0,
             ..Self::default()
         }
@@ -291,7 +276,7 @@ impl Config {
     pub fn wide_field() -> Self {
         Self {
             transform_type: TransformType::Homography,
-            sip_enabled: true,
+            sip: Some(SipConfig::default()),
             ransac: RansacConfig {
                 max_rotation: None,
                 scale_range: None,
@@ -354,8 +339,8 @@ impl Config {
     /// - `min_votes` < 1
     /// - invalid RANSAC configuration
     /// - `max_rms_error` <= 0
-    /// - `sip_order` not in 2..=5 (when SIP enabled)
-    /// - `border_value` not finite
+    /// - invalid SIP configuration (when enabled)
+    /// - invalid warp configuration
     pub fn validate(&self) -> Result<(), RegistrationError> {
         let invalid = |msg: String| Err(RegistrationError::InvalidConfig(msg));
 
@@ -370,18 +355,10 @@ impl Config {
             ));
         }
 
-        // Distortion
-        if self.sip_enabled && !(2..=5).contains(&self.sip_order) {
-            return invalid(format!("sip_order must be 2-5, got {}", self.sip_order));
+        if let Some(sip) = &self.sip {
+            sip.validate()?;
         }
-
-        // Warping
-        if !self.border_value.is_finite() {
-            return invalid(format!(
-                "border_value must be finite, got {}",
-                self.border_value
-            ));
-        }
+        self.warp.validate()?;
 
         Ok(())
     }
@@ -419,17 +396,15 @@ mod tests {
         assert!(config.ransac.local_optimization);
         assert_eq!(config.ransac.lo_iterations, 10);
         assert!((config.max_rms_error - 2.0).abs() < 1e-10);
-        assert!(!config.sip_enabled);
-        assert_eq!(config.sip_order, 3);
-        assert!(config.sip_reference_point.is_none());
+        assert!(config.sip.is_none());
         assert_eq!(
-            config.interpolation,
+            config.warp.method,
             InterpolationMethod::Lanczos3 {
                 deringing: DEFAULT_DERINGING_THRESHOLD
             }
         );
-        assert!(config.interpolation.deringing_enabled());
-        assert!((config.border_value - 0.0).abs() < 1e-10);
+        assert!(config.warp.method.deringing_enabled());
+        assert!((config.warp.border_value - 0.0).abs() < 1e-10);
     }
 
     #[test]
@@ -438,7 +413,7 @@ mod tests {
         assert_eq!(config.ransac.max_iterations, 500);
         assert_eq!(config.matching.max_stars, 100);
         assert!(!config.ransac.local_optimization);
-        assert_eq!(config.interpolation, InterpolationMethod::Bilinear);
+        assert_eq!(config.warp.method, InterpolationMethod::Bilinear);
         config.validate().unwrap();
     }
 
@@ -447,7 +422,7 @@ mod tests {
         let config = Config::precise();
         assert_eq!(config.ransac.max_iterations, 5000);
         assert!((config.ransac.confidence - 0.999).abs() < 1e-10);
-        assert!(config.sip_enabled);
+        assert!(config.sip.is_some());
         assert!((config.max_rms_error - 1.0).abs() < 1e-10);
         config.validate().unwrap();
     }
@@ -456,7 +431,7 @@ mod tests {
     fn test_config_wide_field_preset() {
         let config = Config::wide_field();
         assert_eq!(config.transform_type, TransformType::Homography);
-        assert!(config.sip_enabled);
+        assert!(config.sip.is_some());
         assert!(config.ransac.max_rotation.is_none());
         assert!(config.ransac.scale_range.is_none());
         config.validate().unwrap();
@@ -471,7 +446,7 @@ mod tests {
         assert!((config.matching.triangle.ratio_tolerance - 0.02).abs() < 1e-10);
         assert_eq!(config.ransac.max_iterations, 5000);
         assert!((config.ransac.confidence - 0.9999).abs() < 1e-10);
-        assert!(config.sip_enabled);
+        assert!(config.sip.is_some());
         assert!((config.max_rms_error - 1.0).abs() < 1e-10);
         // Inherits unlimited rotation/scale from wide_field()
         assert!(config.ransac.max_rotation.is_none());
@@ -712,11 +687,13 @@ mod tests {
             ),
             (
                 Config {
-                    sip_enabled: true,
-                    sip_order: 6,
+                    sip: Some(SipConfig {
+                        order: 6,
+                        ..Default::default()
+                    }),
                     ..Config::default()
                 },
-                "sip_order must be 2-5",
+                "SIP order must be 2-5",
             ),
             (
                 // Homography needs 4 points, so min_matches = 3 is too few.
@@ -732,7 +709,10 @@ mod tests {
             ),
             (
                 Config {
-                    border_value: f32::NAN,
+                    warp: WarpParams {
+                        border_value: f32::NAN,
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "border_value must be finite",

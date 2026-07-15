@@ -10,7 +10,7 @@ use common::FnvHasher;
 use smallvec::SmallVec;
 
 use crate::math::statistics::{mad_floored, median_and_mad_f32_mut};
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::FilterConfig;
 use crate::stacking::star_detection::detector::Diagnostics;
 use crate::stacking::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
 use crate::stacking::star_detection::star::{SATURATION_PEAK, Star};
@@ -57,7 +57,7 @@ pub(crate) struct FilterOutcome {
 ///
 /// Returns the filtered stars and rejection statistics. Stars are returned
 /// sorted by flux (brightest first).
-pub(crate) fn filter(mut stars: Vec<Star>, config: &Config) -> FilterOutcome {
+pub(crate) fn filter(mut stars: Vec<Star>, config: &FilterConfig) -> FilterOutcome {
     let mut stats = QualityFilterStats::default();
 
     // Apply quality filters

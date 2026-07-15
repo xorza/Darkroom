@@ -990,7 +990,7 @@ well-grounded against astroalign, MAGSAC, astrometry.net, and SCAMP.
    a selection heuristic) is a clear opportunity. Confirmed unwired in the crate map.
 3. **SIP order is fixed by config, not auto-selected.** Best practice (astrometry.net
    `tweak`) tries increasing orders and stops when residuals stop improving (an
-   AIC/BIC-style or RMS-plateau criterion). lumos always uses `sip_order`; an
+   AIC/BIC-style or RMS-plateau criterion). lumos always uses `SipConfig::order`; an
    automatic order sweep guarded by the 3×-points rule would prevent both under- and
    over-fitting without user tuning.
 4. **`Auto` only considers Similarity↔Homography**, skipping Euclidean (the most

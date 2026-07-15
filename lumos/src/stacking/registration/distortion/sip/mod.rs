@@ -29,7 +29,9 @@
 use arrayvec::ArrayVec;
 use glam::DVec2;
 
-use crate::stacking::registration::{distortion::SINGULAR_THRESHOLD, transform::Transform};
+use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
+use crate::stacking::registration::result::RegistrationError;
+use crate::stacking::registration::transform::Transform;
 
 #[cfg(test)]
 mod tests;
@@ -75,17 +77,20 @@ impl Default for SipConfig {
 }
 
 impl SipConfig {
-    fn validate(&self) {
-        assert!(
-            (2..=5).contains(&self.order),
-            "SIP order must be 2-5, got {}",
-            self.order
-        );
-        assert!(
-            self.clip_sigma > 0.0,
-            "clip_sigma must be positive, got {}",
-            self.clip_sigma
-        );
+    pub(crate) fn validate(&self) -> Result<(), RegistrationError> {
+        if !(2..=5).contains(&self.order) {
+            return Err(RegistrationError::InvalidConfig(format!(
+                "SIP order must be 2-5, got {}",
+                self.order
+            )));
+        }
+        if !self.clip_sigma.is_finite() || self.clip_sigma <= 0.0 {
+            return Err(RegistrationError::InvalidConfig(format!(
+                "SIP clip_sigma must be positive and finite, got {}",
+                self.clip_sigma
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -129,29 +134,35 @@ impl SipPolynomial {
     /// Given matched inlier positions and a homography, fits a polynomial
     /// correction to minimize residual errors.
     ///
-    /// Returns `None` if `ref_points` and `target_points` have different lengths,
-    /// or if the system is underdetermined or singular.
+    /// # Errors
     ///
-    /// # Panics
-    ///
-    /// - If `config` fails validation (see [`SipConfig`]: order must be 2..=5).
+    /// Returns an error if `config` fails validation, the point counts differ,
+    /// there are too few points for a stable fit, or the polynomial system is
+    /// singular.
     pub fn fit_from_transform(
         ref_points: &[DVec2],
         target_points: &[DVec2],
         transform: &Transform,
         config: &SipConfig,
-    ) -> Option<SipFitResult> {
-        config.validate();
+    ) -> Result<SipFitResult, RegistrationError> {
+        config.validate()?;
         if ref_points.len() != target_points.len() {
-            return None;
+            return Err(RegistrationError::SipPointCountMismatch {
+                reference: ref_points.len(),
+                target: target_points.len(),
+            });
         }
 
         let n = ref_points.len();
         let terms = term_exponents(config.order);
         // Require at least 3x as many points as polynomial terms to prevent overfitting.
         // Astrometry.net practice: order 4 (12 terms) needs ~36 points minimum.
-        if n < 3 * terms.len() {
-            return None;
+        let required_points = 3 * terms.len();
+        if n < required_points {
+            return Err(RegistrationError::InsufficientSipPoints {
+                found: n,
+                required: required_points,
+            });
         }
 
         let ref_pt = config.reference_point.unwrap_or_else(|| {
@@ -174,9 +185,11 @@ impl SipPolynomial {
 
         // Initial fit on all points
         let mut mask = vec![true; n];
-        let (mut coeffs_u, mut coeffs_v) = solve_masked(
+        let Some((mut coeffs_u, mut coeffs_v)) = solve_masked(
             ref_points, &targets_u, &targets_v, &mask, ref_pt, norm_scale, &terms,
-        )?;
+        ) else {
+            return Err(RegistrationError::SingularSipSystem);
+        };
 
         // Iterative sigma-clipping
         for _ in 0..config.clip_iterations {
@@ -244,9 +257,11 @@ impl SipPolynomial {
             }
 
             // Re-fit on surviving points
-            let (new_u, new_v) = solve_masked(
+            let Some((new_u, new_v)) = solve_masked(
                 ref_points, &targets_u, &targets_v, &mask, ref_pt, norm_scale, &terms,
-            )?;
+            ) else {
+                return Err(RegistrationError::SingularSipSystem);
+            };
             coeffs_u = new_u;
             coeffs_v = new_v;
         }
@@ -285,7 +300,7 @@ impl SipPolynomial {
             0.0
         };
 
-        Some(SipFitResult {
+        Ok(SipFitResult {
             polynomial,
             rms_residual,
             max_residual,

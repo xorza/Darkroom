@@ -136,7 +136,7 @@ pub fn align_and_stack(
                     let warped = warp(
                         &detected.image,
                         &result.warp_transform(),
-                        &config.registration,
+                        &config.registration.warp,
                     );
                     Ok(StackFrame {
                         image: warped.image,

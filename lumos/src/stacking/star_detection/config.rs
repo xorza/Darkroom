@@ -1,8 +1,7 @@
 //! Configuration types for star detection.
 //!
-//! This module defines the flat [`Config`] struct and associated enums used by
-//! the star detection pipeline. All parameters are grouped by comments into
-//! logical sections.
+//! This module defines the composed [`Config`] and stage-specific configuration types used by
+//! the star detection pipeline.
 
 use crate::stacking::star_detection::error::StarDetectionConfigError;
 
@@ -156,145 +155,32 @@ impl BackgroundRefinement {
 /// 256 levels is already far beyond the documented useful range ("32+ = SExtractor-style").
 const MAX_DEBLEND_N_THRESHOLDS: usize = 256;
 
-/// Configuration for the star detection pipeline.
-///
-/// Single flat struct with all parameters grouped by pipeline stage.
-/// Use constructor presets for common scenarios, then customize individual
-/// fields as needed.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use lumos::star_detection::Config;
-///
-/// // Use a preset
-/// let config = Config::wide_field();
-///
-/// // Customize from a preset
-/// let mut config = Config::crowded_field();
-/// config.min_snr = 20.0;
-/// ```
+/// Configuration for tiled background estimation and optional refinement.
 #[derive(Debug, Clone)]
-pub struct Config {
-    /// Tile size for background estimation in pixels. Range: 16-256.
+pub struct BackgroundConfig {
+    /// Width and height of each background-estimation tile in pixels.
     pub tile_size: usize,
-    /// Number of sigma-clipping iterations for tile statistics.
+    /// Maximum sigma-clipping iterations per tile.
     pub sigma_clip_iterations: usize,
-    /// Background refinement strategy.
+    /// Optional source-masking refinement strategy.
     pub refinement: BackgroundRefinement,
-    /// Dilation radius for background refinement object masks (pixels).
-    pub bg_mask_dilation: usize,
-
-    /// Detection threshold in sigma above background.
-    pub sigma_threshold: f32,
-    /// Pixel connectivity for connected component labeling.
-    pub connectivity: Connectivity,
-
-    /// Expected FWHM of stars in pixels. 0 = no matched filter.
-    pub expected_fwhm: f32,
-    /// Enable automatic FWHM estimation from bright stars.
-    pub auto_estimate_fwhm: bool,
-    /// Minimum number of stars required for valid FWHM estimation.
-    pub min_stars_for_fwhm: usize,
-    /// Sigma threshold multiplier for first-pass bright star detection.
-    pub fwhm_estimation_sigma_factor: f32,
-    /// PSF axis ratio (minor/major). 1.0 = circular.
-    pub psf_axis_ratio: f32,
-    /// PSF position angle in radians.
-    pub psf_angle: f32,
-
-    /// Minimum separation between peaks for deblending (pixels).
-    pub deblend_min_separation: usize,
-    /// Minimum peak prominence as fraction of primary peak.
-    pub deblend_min_prominence: f32,
-    /// Number of sub-thresholds for multi-threshold deblending.
-    /// 0 = local maxima only, 32+ = SExtractor-style.
-    pub deblend_n_thresholds: usize,
-    /// Minimum contrast for multi-threshold deblending.
-    pub deblend_min_contrast: f32,
-
-    /// Minimum star area in pixels.
-    pub min_area: usize,
-    /// Maximum star area in pixels.
-    pub max_area: usize,
-    /// Edge margin in pixels (stars too close to edge are rejected).
-    pub edge_margin: usize,
-
-    /// Method for computing sub-pixel centroids.
-    pub centroid_method: CentroidMethod,
-    /// Method for computing local background during centroid refinement.
-    pub local_background: LocalBackgroundMethod,
-
-    /// Minimum SNR for a star to be considered valid.
-    pub min_snr: f32,
-    /// Maximum eccentricity (0-1, higher = more elongated allowed).
-    pub max_eccentricity: f32,
-    /// Maximum sharpness. Cosmic rays have sharpness > 0.7.
-    pub max_sharpness: f32,
-    /// Maximum roundness for shape filtering.
-    pub max_roundness: f32,
-    /// Maximum FWHM deviation from median in MAD units. 0 = disabled.
-    pub max_fwhm_deviation: f32,
-    /// Minimum separation between stars for duplicate removal (pixels).
-    pub duplicate_min_separation: f32,
-
-    /// Optional camera noise model for accurate SNR calculation.
-    pub noise_model: Option<NoiseModel>,
+    /// Radius used to dilate the source mask during refinement.
+    pub mask_dilation: usize,
 }
 
-impl Default for Config {
+impl Default for BackgroundConfig {
     fn default() -> Self {
         Self {
-            // Background estimation
             tile_size: 64,
             sigma_clip_iterations: 3,
             refinement: BackgroundRefinement::None,
-            bg_mask_dilation: 3,
-
-            // Detection
-            sigma_threshold: 4.0,
-            connectivity: Connectivity::Eight,
-
-            // PSF / matched filter
-            expected_fwhm: 4.0,
-            auto_estimate_fwhm: false,
-            min_stars_for_fwhm: 10,
-            fwhm_estimation_sigma_factor: 2.0,
-            psf_axis_ratio: 1.0,
-            psf_angle: 0.0,
-
-            // Deblending
-            deblend_min_separation: 3,
-            deblend_min_prominence: 0.3,
-            deblend_n_thresholds: 0,
-            deblend_min_contrast: 0.005,
-
-            // Region filtering
-            min_area: 5,
-            max_area: 500,
-            edge_margin: 10,
-
-            // Centroid
-            centroid_method: CentroidMethod::WeightedMoments,
-            local_background: LocalBackgroundMethod::GlobalMap,
-
-            // Star quality filtering
-            min_snr: 10.0,
-            max_eccentricity: 0.6,
-            max_sharpness: 0.7,
-            max_roundness: 0.5,
-            max_fwhm_deviation: 3.0,
-            duplicate_min_separation: 8.0,
-
-            // Noise model
-            noise_model: None,
+            mask_dilation: 3,
         }
     }
 }
 
-impl Config {
-    /// Validate every parameter before constructing a detector.
-    pub fn validate(&self) -> Result<(), StarDetectionConfigError> {
+impl BackgroundConfig {
+    pub(crate) fn validate(&self) -> Result<(), StarDetectionConfigError> {
         if !(16..=256).contains(&self.tile_size) {
             return Err(StarDetectionConfigError::InvalidTileSize {
                 value: self.tile_size,
@@ -306,19 +192,65 @@ impl Config {
             });
         }
         self.refinement.validate()?;
-        if self.bg_mask_dilation > 50 {
+        if self.mask_dilation > 50 {
             return Err(StarDetectionConfigError::ExcessiveBackgroundMaskDilation {
-                value: self.bg_mask_dilation,
+                value: self.mask_dilation,
             });
         }
+        Ok(())
+    }
+}
+
+/// Configuration for candidate detection, deblending, and region filtering.
+#[derive(Debug, Clone)]
+pub struct DetectionConfig {
+    /// Detection threshold in local background-noise standard deviations.
+    pub sigma_threshold: f32,
+    /// Pixel connectivity used to form candidate regions.
+    pub connectivity: Connectivity,
+    /// Minor-to-major axis ratio for the matched-filter PSF.
+    pub psf_axis_ratio: f32,
+    /// Matched-filter PSF angle in radians.
+    pub psf_angle: f32,
+    /// Minimum separation between deblended peaks in pixels.
+    pub deblend_min_separation: usize,
+    /// Minimum local prominence for local-maxima deblending.
+    pub deblend_min_prominence: f32,
+    /// Number of multi-threshold deblending levels; zero selects local maxima.
+    pub deblend_n_thresholds: usize,
+    /// Minimum branch-to-component flux contrast for multi-threshold deblending.
+    pub deblend_min_contrast: f32,
+    /// Minimum candidate-region area in pixels.
+    pub min_area: usize,
+    /// Maximum candidate-region area in pixels.
+    pub max_area: usize,
+    /// Rejected border width in pixels.
+    pub edge_margin: usize,
+}
+
+impl Default for DetectionConfig {
+    fn default() -> Self {
+        Self {
+            sigma_threshold: 4.0,
+            connectivity: Connectivity::Eight,
+            psf_axis_ratio: 1.0,
+            psf_angle: 0.0,
+            deblend_min_separation: 3,
+            deblend_min_prominence: 0.3,
+            deblend_n_thresholds: 0,
+            deblend_min_contrast: 0.005,
+            min_area: 5,
+            max_area: 500,
+            edge_margin: 10,
+        }
+    }
+}
+
+impl DetectionConfig {
+    fn validate(&self) -> Result<(), StarDetectionConfigError> {
         if !self.sigma_threshold.is_finite() || self.sigma_threshold <= 0.0 {
             return Err(StarDetectionConfigError::InvalidSigmaThreshold {
                 value: self.sigma_threshold,
-            });
-        }
-        if !self.expected_fwhm.is_finite() || self.expected_fwhm < 0.0 {
-            return Err(StarDetectionConfigError::InvalidExpectedFwhm {
-                value: self.expected_fwhm,
             });
         }
         if !self.psf_axis_ratio.is_finite()
@@ -332,17 +264,6 @@ impl Config {
         if !self.psf_angle.is_finite() {
             return Err(StarDetectionConfigError::InvalidPsfAngle {
                 value: self.psf_angle,
-            });
-        }
-        if self.min_stars_for_fwhm < 5 {
-            return Err(StarDetectionConfigError::TooFewStarsForFwhm {
-                value: self.min_stars_for_fwhm,
-            });
-        }
-        if !self.fwhm_estimation_sigma_factor.is_finite() || self.fwhm_estimation_sigma_factor < 1.0
-        {
-            return Err(StarDetectionConfigError::InvalidFwhmEstimationSigmaFactor {
-                value: self.fwhm_estimation_sigma_factor,
             });
         }
         if self.deblend_min_separation == 0 {
@@ -381,7 +302,123 @@ impl Config {
                 max_area: self.max_area,
             });
         }
+        Ok(())
+    }
+
+    #[inline]
+    pub const fn is_multi_threshold(&self) -> bool {
+        self.deblend_n_thresholds > 0
+    }
+}
+
+/// Configuration for selecting or estimating the matched-filter FWHM.
+#[derive(Debug, Clone)]
+pub struct FwhmConfig {
+    /// Fixed matched-filter FWHM, or the fallback for auto-estimation; zero disables it.
+    pub expected: f32,
+    /// Whether to estimate FWHM from a first-pass star catalog.
+    pub auto_estimate: bool,
+    /// Minimum first-pass stars required to accept an estimate.
+    pub min_stars: usize,
+    /// Multiplier applied to the detection threshold during the first pass.
+    pub estimation_sigma_factor: f32,
+}
+
+impl Default for FwhmConfig {
+    fn default() -> Self {
+        Self {
+            expected: 4.0,
+            auto_estimate: false,
+            min_stars: 10,
+            estimation_sigma_factor: 2.0,
+        }
+    }
+}
+
+impl FwhmConfig {
+    fn validate(&self) -> Result<(), StarDetectionConfigError> {
+        if !self.expected.is_finite() || self.expected < 0.0 {
+            return Err(StarDetectionConfigError::InvalidExpectedFwhm {
+                value: self.expected,
+            });
+        }
+        if self.min_stars < 5 {
+            return Err(StarDetectionConfigError::TooFewStarsForFwhm {
+                value: self.min_stars,
+            });
+        }
+        if !self.estimation_sigma_factor.is_finite() || self.estimation_sigma_factor < 1.0 {
+            return Err(StarDetectionConfigError::InvalidFwhmEstimationSigmaFactor {
+                value: self.estimation_sigma_factor,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Configuration for centroid refinement and metric measurement.
+#[derive(Debug, Clone)]
+pub struct MeasurementConfig {
+    /// Centroid refinement algorithm.
+    pub centroid_method: CentroidMethod,
+    /// Background source used for per-star measurement.
+    pub local_background: LocalBackgroundMethod,
+    /// Optional sensor model for variance-weighted fitting and SNR.
+    pub noise_model: Option<NoiseModel>,
+}
+
+impl Default for MeasurementConfig {
+    fn default() -> Self {
+        Self {
+            centroid_method: CentroidMethod::WeightedMoments,
+            local_background: LocalBackgroundMethod::GlobalMap,
+            noise_model: None,
+        }
+    }
+}
+
+impl MeasurementConfig {
+    fn validate(&self) -> Result<(), StarDetectionConfigError> {
         self.centroid_method.validate()?;
+        if let Some(noise) = &self.noise_model {
+            noise.validate()?;
+        }
+        Ok(())
+    }
+}
+
+/// Configuration for final star-quality filtering and duplicate removal.
+#[derive(Debug, Clone)]
+pub struct FilterConfig {
+    /// Minimum accepted signal-to-noise ratio.
+    pub min_snr: f32,
+    /// Maximum accepted eccentricity.
+    pub max_eccentricity: f32,
+    /// Maximum accepted sharpness.
+    pub max_sharpness: f32,
+    /// Maximum accepted absolute roundness.
+    pub max_roundness: f32,
+    /// Maximum robust FWHM deviation in MAD-scaled units.
+    pub max_fwhm_deviation: f32,
+    /// Minimum retained separation between duplicate stars in pixels.
+    pub duplicate_min_separation: f32,
+}
+
+impl Default for FilterConfig {
+    fn default() -> Self {
+        Self {
+            min_snr: 10.0,
+            max_eccentricity: 0.6,
+            max_sharpness: 0.7,
+            max_roundness: 0.5,
+            max_fwhm_deviation: 3.0,
+            duplicate_min_separation: 8.0,
+        }
+    }
+}
+
+impl FilterConfig {
+    fn validate(&self) -> Result<(), StarDetectionConfigError> {
         if !self.min_snr.is_finite() || self.min_snr <= 0.0 {
             return Err(StarDetectionConfigError::InvalidMinSnr {
                 value: self.min_snr,
@@ -414,9 +451,46 @@ impl Config {
                 value: self.duplicate_min_separation,
             });
         }
-        if let Some(noise) = &self.noise_model {
-            noise.validate()?;
-        }
+        Ok(())
+    }
+}
+
+/// Configuration for the star detection pipeline, composed by processing stage.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use lumos::star_detection::Config;
+///
+/// // Use a preset
+/// let config = Config::wide_field();
+///
+/// // Customize from a preset
+/// let mut config = Config::crowded_field();
+/// config.filter.min_snr = 20.0;
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct Config {
+    /// Background estimation and refinement settings.
+    pub background: BackgroundConfig,
+    /// Candidate detection, deblending, and region-filtering settings.
+    pub detection: DetectionConfig,
+    /// Matched-filter FWHM selection and estimation settings.
+    pub fwhm: FwhmConfig,
+    /// Centroid and metric measurement settings.
+    pub measurement: MeasurementConfig,
+    /// Final quality and duplicate-filtering settings.
+    pub filter: FilterConfig,
+}
+
+impl Config {
+    /// Validate every parameter before constructing a detector.
+    pub fn validate(&self) -> Result<(), StarDetectionConfigError> {
+        self.background.validate()?;
+        self.detection.validate()?;
+        self.fwhm.validate()?;
+        self.measurement.validate()?;
+        self.filter.validate()?;
         Ok(())
     }
 
@@ -428,14 +502,23 @@ impl Config {
     /// undersampled PSFs that may not connect well with 4-connectivity.
     pub fn wide_field() -> Self {
         Self {
-            expected_fwhm: 6.0,
-            auto_estimate_fwhm: true,
-            min_stars_for_fwhm: 15,
-            min_area: 7,
-            max_area: 1500,
-            edge_margin: 20,
-            max_eccentricity: 0.7,
-            connectivity: Connectivity::Eight,
+            fwhm: FwhmConfig {
+                expected: 6.0,
+                auto_estimate: true,
+                min_stars: 15,
+                ..Default::default()
+            },
+            detection: DetectionConfig {
+                min_area: 7,
+                max_area: 1500,
+                edge_margin: 20,
+                connectivity: Connectivity::Eight,
+                ..Default::default()
+            },
+            filter: FilterConfig {
+                max_eccentricity: 0.7,
+                ..Default::default()
+            },
             ..Self::default()
         }
     }
@@ -448,15 +531,27 @@ impl Config {
     /// to build a clean, high-quality star catalog.
     pub fn high_resolution() -> Self {
         Self {
-            expected_fwhm: 2.5,
-            auto_estimate_fwhm: true,
-            min_stars_for_fwhm: 15,
-            min_area: 3,
-            max_area: 200,
-            min_snr: 15.0,
-            max_eccentricity: 0.5,
-            max_roundness: 0.3,
-            centroid_method: CentroidMethod::GaussianFit,
+            fwhm: FwhmConfig {
+                expected: 2.5,
+                auto_estimate: true,
+                min_stars: 15,
+                ..Default::default()
+            },
+            detection: DetectionConfig {
+                min_area: 3,
+                max_area: 200,
+                ..Default::default()
+            },
+            measurement: MeasurementConfig {
+                centroid_method: CentroidMethod::GaussianFit,
+                ..Default::default()
+            },
+            filter: FilterConfig {
+                min_snr: 15.0,
+                max_eccentricity: 0.5,
+                max_roundness: 0.3,
+                ..Default::default()
+            },
             ..Self::default()
         }
     }
@@ -468,14 +563,26 @@ impl Config {
     /// background refinement to re-estimate background after masking sources.
     pub fn crowded_field() -> Self {
         Self {
-            deblend_n_thresholds: 32,
-            deblend_min_separation: 2,
-            deblend_min_prominence: 0.15,
-            deblend_min_contrast: 0.005,
-            refinement: BackgroundRefinement::Iterative { iterations: 2 },
-            duplicate_min_separation: 3.0,
-            connectivity: Connectivity::Eight,
-            auto_estimate_fwhm: true,
+            background: BackgroundConfig {
+                refinement: BackgroundRefinement::Iterative { iterations: 2 },
+                ..Default::default()
+            },
+            detection: DetectionConfig {
+                deblend_n_thresholds: 32,
+                deblend_min_separation: 2,
+                deblend_min_prominence: 0.15,
+                deblend_min_contrast: 0.005,
+                connectivity: Connectivity::Eight,
+                ..Default::default()
+            },
+            fwhm: FwhmConfig {
+                auto_estimate: true,
+                ..Default::default()
+            },
+            filter: FilterConfig {
+                duplicate_min_separation: 3.0,
+                ..Default::default()
+            },
             ..Self::default()
         }
     }
@@ -487,54 +594,54 @@ impl Config {
     /// Local annulus background subtraction handles nebulosity near stars.
     pub fn precise_ground() -> Self {
         Self {
-            // Background
-            sigma_threshold: 3.0,
-            bg_mask_dilation: 5,
-            tile_size: 128,
-            sigma_clip_iterations: 3,
-            refinement: BackgroundRefinement::Iterative { iterations: 3 },
-
-            // Region filtering
-            min_area: 7,
-            max_area: 2000,
-            edge_margin: 15,
-            connectivity: Connectivity::Eight,
-
-            // Deblending
-            deblend_min_separation: 2,
-            deblend_min_prominence: 0.15,
-            deblend_n_thresholds: 32,
-            deblend_min_contrast: 0.003,
-
-            // Centroid
-            centroid_method: CentroidMethod::MoffatFit { beta: 2.5 },
-            local_background: LocalBackgroundMethod::LocalAnnulus,
-
-            // PSF
-            expected_fwhm: 3.0,
-            auto_estimate_fwhm: true,
-            min_stars_for_fwhm: 30,
-            fwhm_estimation_sigma_factor: 2.5,
-
-            // Star quality filtering
-            min_snr: 15.0,
-            max_fwhm_deviation: 4.0,
-            duplicate_min_separation: 5.0,
-
-            ..Self::default()
+            background: BackgroundConfig {
+                mask_dilation: 5,
+                tile_size: 128,
+                sigma_clip_iterations: 3,
+                refinement: BackgroundRefinement::Iterative { iterations: 3 },
+            },
+            detection: DetectionConfig {
+                sigma_threshold: 3.0,
+                min_area: 7,
+                max_area: 2000,
+                edge_margin: 15,
+                connectivity: Connectivity::Eight,
+                deblend_min_separation: 2,
+                deblend_min_prominence: 0.15,
+                deblend_n_thresholds: 32,
+                deblend_min_contrast: 0.003,
+                ..Default::default()
+            },
+            fwhm: FwhmConfig {
+                expected: 3.0,
+                auto_estimate: true,
+                min_stars: 30,
+                estimation_sigma_factor: 2.5,
+            },
+            measurement: MeasurementConfig {
+                centroid_method: CentroidMethod::MoffatFit { beta: 2.5 },
+                local_background: LocalBackgroundMethod::LocalAnnulus,
+                ..Default::default()
+            },
+            filter: FilterConfig {
+                min_snr: 15.0,
+                max_fwhm_deviation: 4.0,
+                duplicate_min_separation: 5.0,
+                ..Default::default()
+            },
         }
-    }
-
-    /// Returns true if multi-threshold deblending is enabled.
-    #[inline]
-    pub const fn is_multi_threshold(&self) -> bool {
-        self.deblend_n_thresholds > 0
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn configured(update: impl FnOnce(&mut Config)) -> Config {
+        let mut config = Config::default();
+        update(&mut config);
+        config
+    }
 
     #[test]
     fn test_noise_model() {
@@ -593,7 +700,7 @@ mod tests {
     #[test]
     fn test_config_default() {
         let config = Config::default();
-        assert!(config.noise_model.is_none());
+        assert!(config.measurement.noise_model.is_none());
         assert_eq!(config.validate(), Ok(()));
     }
 
@@ -607,39 +714,36 @@ mod tests {
 
     #[test]
     fn test_config_custom() {
-        let config = Config {
-            expected_fwhm: 5.0,
-            min_snr: 15.0,
-            edge_margin: 20,
-            noise_model: Some(NoiseModel::new(1.5, 5.0)),
-            ..Default::default()
-        };
+        let config = configured(|config| {
+            config.fwhm.expected = 5.0;
+            config.filter.min_snr = 15.0;
+            config.detection.edge_margin = 20;
+            config.measurement.noise_model = Some(NoiseModel::new(1.5, 5.0));
+        });
 
-        assert!((config.expected_fwhm - 5.0).abs() < 1e-6);
-        assert!((config.min_snr - 15.0).abs() < 1e-6);
-        assert_eq!(config.edge_margin, 20);
-        assert!(config.noise_model.is_some());
+        assert!((config.fwhm.expected - 5.0).abs() < 1e-6);
+        assert!((config.filter.min_snr - 15.0).abs() < 1e-6);
+        assert_eq!(config.detection.edge_margin, 20);
+        assert!(config.measurement.noise_model.is_some());
         assert_eq!(config.validate(), Ok(()));
     }
 
     #[test]
     fn test_config_with_auto_fwhm() {
-        let config = Config {
-            auto_estimate_fwhm: true,
-            expected_fwhm: 0.0,
-            ..Default::default()
-        };
-        assert!(config.auto_estimate_fwhm);
-        assert!((config.expected_fwhm - 0.0).abs() < 1e-6);
+        let config = configured(|config| {
+            config.fwhm.auto_estimate = true;
+            config.fwhm.expected = 0.0;
+        });
+        assert!(config.fwhm.auto_estimate);
+        assert!((config.fwhm.expected - 0.0).abs() < 1e-6);
         assert_eq!(config.validate(), Ok(()));
     }
 
     #[test]
     fn test_config_validates_centroid() {
-        let config = Config {
-            centroid_method: CentroidMethod::MoffatFit { beta: 2.5 },
-            ..Default::default()
-        };
+        let config = configured(|config| {
+            config.measurement.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
+        });
         assert_eq!(config.validate(), Ok(()));
     }
 
@@ -647,204 +751,139 @@ mod tests {
     fn test_config_invalid_parameters_return_exact_errors() {
         let cases = [
             (
-                Config {
-                    tile_size: 10,
-                    ..Default::default()
-                },
+                configured(|config| config.background.tile_size = 10),
                 StarDetectionConfigError::InvalidTileSize { value: 10 },
             ),
             (
-                Config {
-                    sigma_clip_iterations: 11,
-                    ..Default::default()
-                },
+                configured(|config| config.background.sigma_clip_iterations = 11),
                 StarDetectionConfigError::ExcessiveSigmaClipIterations { value: 11 },
             ),
             (
-                Config {
-                    refinement: BackgroundRefinement::Iterative { iterations: 0 },
-                    ..Default::default()
-                },
+                configured(|config| {
+                    config.background.refinement =
+                        BackgroundRefinement::Iterative { iterations: 0 };
+                }),
                 StarDetectionConfigError::ZeroBackgroundRefinementIterations,
             ),
             (
-                Config {
-                    refinement: BackgroundRefinement::Iterative { iterations: 11 },
-                    ..Default::default()
-                },
+                configured(|config| {
+                    config.background.refinement =
+                        BackgroundRefinement::Iterative { iterations: 11 };
+                }),
                 StarDetectionConfigError::ExcessiveBackgroundRefinementIterations { value: 11 },
             ),
             (
-                Config {
-                    bg_mask_dilation: 51,
-                    ..Default::default()
-                },
+                configured(|config| config.background.mask_dilation = 51),
                 StarDetectionConfigError::ExcessiveBackgroundMaskDilation { value: 51 },
             ),
             (
-                Config {
-                    sigma_threshold: 0.0,
-                    ..Default::default()
-                },
+                configured(|config| config.detection.sigma_threshold = 0.0),
                 StarDetectionConfigError::InvalidSigmaThreshold { value: 0.0 },
             ),
             (
-                Config {
-                    expected_fwhm: -1.0,
-                    ..Default::default()
-                },
+                configured(|config| config.fwhm.expected = -1.0),
                 StarDetectionConfigError::InvalidExpectedFwhm { value: -1.0 },
             ),
             (
-                Config {
-                    psf_axis_ratio: 0.0,
-                    ..Default::default()
-                },
+                configured(|config| config.detection.psf_axis_ratio = 0.0),
                 StarDetectionConfigError::InvalidPsfAxisRatio { value: 0.0 },
             ),
             (
-                Config {
-                    psf_angle: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.detection.psf_angle = f32::INFINITY),
                 StarDetectionConfigError::InvalidPsfAngle {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    min_stars_for_fwhm: 4,
-                    ..Default::default()
-                },
+                configured(|config| config.fwhm.min_stars = 4),
                 StarDetectionConfigError::TooFewStarsForFwhm { value: 4 },
             ),
             (
-                Config {
-                    fwhm_estimation_sigma_factor: 0.5,
-                    ..Default::default()
-                },
+                configured(|config| config.fwhm.estimation_sigma_factor = 0.5),
                 StarDetectionConfigError::InvalidFwhmEstimationSigmaFactor { value: 0.5 },
             ),
             (
-                Config {
-                    deblend_min_separation: 0,
-                    ..Default::default()
-                },
+                configured(|config| config.detection.deblend_min_separation = 0),
                 StarDetectionConfigError::InvalidDeblendMinSeparation { value: 0 },
             ),
             (
-                Config {
-                    deblend_min_prominence: 1.5,
-                    ..Default::default()
-                },
+                configured(|config| config.detection.deblend_min_prominence = 1.5),
                 StarDetectionConfigError::InvalidDeblendMinProminence { value: 1.5 },
             ),
             (
-                Config {
-                    deblend_n_thresholds: 1,
-                    ..Default::default()
-                },
+                configured(|config| config.detection.deblend_n_thresholds = 1),
                 StarDetectionConfigError::InvalidDeblendThresholdCount {
                     value: 1,
                     maximum: MAX_DEBLEND_N_THRESHOLDS,
                 },
             ),
             (
-                Config {
-                    deblend_n_thresholds: MAX_DEBLEND_N_THRESHOLDS + 1,
-                    ..Default::default()
-                },
+                configured(|config| {
+                    config.detection.deblend_n_thresholds = MAX_DEBLEND_N_THRESHOLDS + 1;
+                }),
                 StarDetectionConfigError::InvalidDeblendThresholdCount {
                     value: MAX_DEBLEND_N_THRESHOLDS + 1,
                     maximum: MAX_DEBLEND_N_THRESHOLDS,
                 },
             ),
             (
-                Config {
-                    deblend_min_contrast: -0.1,
-                    ..Default::default()
-                },
+                configured(|config| config.detection.deblend_min_contrast = -0.1),
                 StarDetectionConfigError::InvalidDeblendMinContrast { value: -0.1 },
             ),
             (
-                Config {
-                    min_area: 0,
-                    ..Default::default()
-                },
+                configured(|config| config.detection.min_area = 0),
                 StarDetectionConfigError::ZeroMinArea,
             ),
             (
-                Config {
-                    min_area: 100,
-                    max_area: 50,
-                    ..Default::default()
-                },
+                configured(|config| {
+                    config.detection.min_area = 100;
+                    config.detection.max_area = 50;
+                }),
                 StarDetectionConfigError::MaxAreaBelowMin {
                     min_area: 100,
                     max_area: 50,
                 },
             ),
             (
-                Config {
-                    centroid_method: CentroidMethod::MoffatFit { beta: 0.0 },
-                    ..Default::default()
-                },
+                configured(|config| {
+                    config.measurement.centroid_method = CentroidMethod::MoffatFit { beta: 0.0 };
+                }),
                 StarDetectionConfigError::InvalidMoffatBeta { value: 0.0 },
             ),
             (
-                Config {
-                    min_snr: 0.0,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.min_snr = 0.0),
                 StarDetectionConfigError::InvalidMinSnr { value: 0.0 },
             ),
             (
-                Config {
-                    max_eccentricity: 1.5,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.max_eccentricity = 1.5),
                 StarDetectionConfigError::InvalidMaxEccentricity { value: 1.5 },
             ),
             (
-                Config {
-                    max_sharpness: 0.0,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.max_sharpness = 0.0),
                 StarDetectionConfigError::InvalidMaxSharpness { value: 0.0 },
             ),
             (
-                Config {
-                    max_roundness: 0.0,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.max_roundness = 0.0),
                 StarDetectionConfigError::InvalidMaxRoundness { value: 0.0 },
             ),
             (
-                Config {
-                    max_fwhm_deviation: -1.0,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.max_fwhm_deviation = -1.0),
                 StarDetectionConfigError::InvalidMaxFwhmDeviation { value: -1.0 },
             ),
             (
-                Config {
-                    duplicate_min_separation: -1.0,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.duplicate_min_separation = -1.0),
                 StarDetectionConfigError::InvalidDuplicateMinSeparation { value: -1.0 },
             ),
             (
-                Config {
-                    noise_model: Some(NoiseModel::new(0.0, 1.0)),
-                    ..Default::default()
-                },
+                configured(|config| {
+                    config.measurement.noise_model = Some(NoiseModel::new(0.0, 1.0));
+                }),
                 StarDetectionConfigError::InvalidGain { value: 0.0 },
             ),
             (
-                Config {
-                    noise_model: Some(NoiseModel::new(1.0, -1.0)),
-                    ..Default::default()
-                },
+                configured(|config| {
+                    config.measurement.noise_model = Some(NoiseModel::new(1.0, -1.0));
+                }),
                 StarDetectionConfigError::InvalidReadNoise { value: -1.0 },
             ),
         ];
@@ -857,10 +896,9 @@ mod tests {
     #[test]
     fn test_config_deblend_n_thresholds_at_max_accepted() {
         assert_eq!(
-            Config {
-                deblend_n_thresholds: MAX_DEBLEND_N_THRESHOLDS,
-                ..Default::default()
-            }
+            configured(|config| {
+                config.detection.deblend_n_thresholds = MAX_DEBLEND_N_THRESHOLDS;
+            })
             .validate(),
             Ok(())
         );
@@ -868,54 +906,54 @@ mod tests {
 
     #[test]
     fn test_config_deblend_multi_threshold() {
-        let config = Config {
-            deblend_n_thresholds: 32,
-            ..Default::default()
-        };
-        assert!(config.is_multi_threshold());
+        let config = configured(|config| config.detection.deblend_n_thresholds = 32);
+        assert!(config.detection.is_multi_threshold());
         assert_eq!(config.validate(), Ok(()));
     }
 
     #[test]
     fn test_config_wide_field_values() {
         let config = Config::wide_field();
-        assert!((config.expected_fwhm - 6.0).abs() < 1e-6);
-        assert!(config.auto_estimate_fwhm);
-        assert_eq!(config.min_area, 7);
-        assert_eq!(config.max_area, 1500);
-        assert_eq!(config.edge_margin, 20);
-        assert!((config.max_eccentricity - 0.7).abs() < 1e-6);
-        assert_eq!(config.connectivity, Connectivity::Eight);
+        assert!((config.fwhm.expected - 6.0).abs() < 1e-6);
+        assert!(config.fwhm.auto_estimate);
+        assert_eq!(config.detection.min_area, 7);
+        assert_eq!(config.detection.max_area, 1500);
+        assert_eq!(config.detection.edge_margin, 20);
+        assert!((config.filter.max_eccentricity - 0.7).abs() < 1e-6);
+        assert_eq!(config.detection.connectivity, Connectivity::Eight);
     }
 
     #[test]
     fn test_config_precise_ground_values() {
         let config = Config::precise_ground();
         assert!(matches!(
-            config.centroid_method,
+            config.measurement.centroid_method,
             CentroidMethod::MoffatFit { beta } if (beta - 2.5).abs() < 1e-6
         ));
-        assert_eq!(config.local_background, LocalBackgroundMethod::LocalAnnulus);
-        assert_eq!(config.deblend_n_thresholds, 32);
-        assert!((config.min_snr - 15.0).abs() < 1e-6);
-        assert_eq!(config.tile_size, 128);
-        assert!((config.sigma_threshold - 3.0).abs() < 1e-6);
-        assert!(config.auto_estimate_fwhm);
-        assert_eq!(config.min_stars_for_fwhm, 30);
+        assert_eq!(
+            config.measurement.local_background,
+            LocalBackgroundMethod::LocalAnnulus
+        );
+        assert_eq!(config.detection.deblend_n_thresholds, 32);
+        assert!((config.filter.min_snr - 15.0).abs() < 1e-6);
+        assert_eq!(config.background.tile_size, 128);
+        assert!((config.detection.sigma_threshold - 3.0).abs() < 1e-6);
+        assert!(config.fwhm.auto_estimate);
+        assert_eq!(config.fwhm.min_stars, 30);
     }
 
     #[test]
     fn test_config_high_resolution_values() {
         let config = Config::high_resolution();
-        assert!((config.expected_fwhm - 2.5).abs() < 1e-6);
-        assert!(config.auto_estimate_fwhm);
-        assert_eq!(config.min_area, 3);
-        assert_eq!(config.max_area, 200);
-        assert!((config.min_snr - 15.0).abs() < 1e-6);
-        assert!((config.max_eccentricity - 0.5).abs() < 1e-6);
-        assert!((config.max_roundness - 0.3).abs() < 1e-6);
+        assert!((config.fwhm.expected - 2.5).abs() < 1e-6);
+        assert!(config.fwhm.auto_estimate);
+        assert_eq!(config.detection.min_area, 3);
+        assert_eq!(config.detection.max_area, 200);
+        assert!((config.filter.min_snr - 15.0).abs() < 1e-6);
+        assert!((config.filter.max_eccentricity - 0.5).abs() < 1e-6);
+        assert!((config.filter.max_roundness - 0.3).abs() < 1e-6);
         assert!(matches!(
-            config.centroid_method,
+            config.measurement.centroid_method,
             CentroidMethod::GaussianFit
         ));
     }
@@ -923,125 +961,91 @@ mod tests {
     #[test]
     fn test_config_crowded_field_values() {
         let config = Config::crowded_field();
-        assert_eq!(config.deblend_n_thresholds, 32);
-        assert_eq!(config.deblend_min_separation, 2);
-        assert!((config.deblend_min_prominence - 0.15).abs() < 1e-6);
-        assert!((config.deblend_min_contrast - 0.005).abs() < 1e-6);
+        assert_eq!(config.detection.deblend_n_thresholds, 32);
+        assert_eq!(config.detection.deblend_min_separation, 2);
+        assert!((config.detection.deblend_min_prominence - 0.15).abs() < 1e-6);
+        assert!((config.detection.deblend_min_contrast - 0.005).abs() < 1e-6);
         assert!(matches!(
-            config.refinement,
+            config.background.refinement,
             BackgroundRefinement::Iterative { iterations: 2 }
         ));
-        assert!((config.duplicate_min_separation - 3.0).abs() < 1e-6);
-        assert!(config.auto_estimate_fwhm);
+        assert!((config.filter.duplicate_min_separation - 3.0).abs() < 1e-6);
+        assert!(config.fwhm.auto_estimate);
     }
 
     #[test]
     fn test_config_rejects_non_finite_float_parameters() {
         let cases = [
             (
-                Config {
-                    sigma_threshold: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.detection.sigma_threshold = f32::INFINITY),
                 StarDetectionConfigError::InvalidSigmaThreshold {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    expected_fwhm: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.fwhm.expected = f32::INFINITY),
                 StarDetectionConfigError::InvalidExpectedFwhm {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    psf_axis_ratio: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.detection.psf_axis_ratio = f32::INFINITY),
                 StarDetectionConfigError::InvalidPsfAxisRatio {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    fwhm_estimation_sigma_factor: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.fwhm.estimation_sigma_factor = f32::INFINITY),
                 StarDetectionConfigError::InvalidFwhmEstimationSigmaFactor {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    deblend_min_prominence: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| {
+                    config.detection.deblend_min_prominence = f32::INFINITY;
+                }),
                 StarDetectionConfigError::InvalidDeblendMinProminence {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    deblend_min_contrast: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.detection.deblend_min_contrast = f32::INFINITY),
                 StarDetectionConfigError::InvalidDeblendMinContrast {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    min_snr: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.min_snr = f32::INFINITY),
                 StarDetectionConfigError::InvalidMinSnr {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    max_eccentricity: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.max_eccentricity = f32::INFINITY),
                 StarDetectionConfigError::InvalidMaxEccentricity {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    max_sharpness: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.max_sharpness = f32::INFINITY),
                 StarDetectionConfigError::InvalidMaxSharpness {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    max_roundness: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.max_roundness = f32::INFINITY),
                 StarDetectionConfigError::InvalidMaxRoundness {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    max_fwhm_deviation: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.max_fwhm_deviation = f32::INFINITY),
                 StarDetectionConfigError::InvalidMaxFwhmDeviation {
                     value: f32::INFINITY,
                 },
             ),
             (
-                Config {
-                    duplicate_min_separation: f32::INFINITY,
-                    ..Default::default()
-                },
+                configured(|config| config.filter.duplicate_min_separation = f32::INFINITY),
                 StarDetectionConfigError::InvalidDuplicateMinSeparation {
                     value: f32::INFINITY,
                 },
@@ -1082,17 +1086,11 @@ mod tests {
     #[test]
     fn test_is_multi_threshold() {
         // 0 = disabled → false
-        let config = Config {
-            deblend_n_thresholds: 0,
-            ..Default::default()
-        };
-        assert!(!config.is_multi_threshold());
+        let config = configured(|config| config.detection.deblend_n_thresholds = 0);
+        assert!(!config.detection.is_multi_threshold());
 
         // >= 2 → true
-        let config = Config {
-            deblend_n_thresholds: 2,
-            ..Default::default()
-        };
-        assert!(config.is_multi_threshold());
+        let config = configured(|config| config.detection.deblend_n_thresholds = 2);
+        assert!(config.detection.is_multi_threshold());
     }
 }

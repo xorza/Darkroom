@@ -1,6 +1,6 @@
 //! Benchmarks for connected component labeling.
 
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::BackgroundConfig;
 use crate::stacking::star_detection::config::Connectivity;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
@@ -18,7 +18,7 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
     let height = pixels.height();
 
     // Create background map (same as real pipeline)
-    let background = estimate_background(pixels, &Config::default());
+    let background = estimate_background(pixels, &BackgroundConfig::default());
 
     // Create threshold mask
     let mut mask = BitBuffer2::new_filled(width, height, false);

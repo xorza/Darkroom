@@ -46,8 +46,10 @@ pub use stacking::calibration_masters::{
 };
 
 pub use stacking::star_detection::config::{
-    BackgroundRefinement, CentroidMethod, Config as StarDetectionConfig, Connectivity,
-    LocalBackgroundMethod, NoiseModel,
+    BackgroundConfig as StarDetectionBackgroundConfig, BackgroundRefinement, CentroidMethod,
+    Config as StarDetectionConfig, Connectivity, DetectionConfig as StarDetectionCandidateConfig,
+    FilterConfig as StarDetectionFilterConfig, FwhmConfig as StarDetectionFwhmConfig,
+    LocalBackgroundMethod, MeasurementConfig as StarDetectionMeasurementConfig, NoiseModel,
 };
 pub use stacking::star_detection::detector::{
     DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics, StarDetector,
@@ -58,7 +60,8 @@ pub use stacking::star_detection::star::Star;
 pub use stacking::registration::config::{
     Config as RegistrationConfig, InterpolationMethod, RegistrationMatchingConfig,
 };
-pub use stacking::registration::distortion::sip::SipPolynomial;
+pub use stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
+pub use stacking::registration::interpolation::WarpParams;
 pub use stacking::registration::ransac::RansacConfig;
 pub use stacking::registration::result::{
     RansacFailureReason, RegistrationError, RegistrationResult, StarMatch,

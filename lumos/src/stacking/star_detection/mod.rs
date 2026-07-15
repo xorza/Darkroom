@@ -38,8 +38,8 @@
 //!
 //! // Or customize from defaults
 //! let mut config = Config::default();
-//! config.min_snr = 15.0;
-//! config.sigma_threshold = 3.0;
+//! config.filter.min_snr = 15.0;
+//! config.detection.sigma_threshold = 3.0;
 //!
 //! // Detect stars
 //! let mut detector = StarDetector::from_config(config)?;

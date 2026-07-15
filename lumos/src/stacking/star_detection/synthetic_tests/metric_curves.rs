@@ -7,7 +7,6 @@
 //! crowding, and the `min_snr` knob gates the faint end.
 
 use super::{Placement, Scenario, detected_positions, synthetic_config, truth_positions};
-use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::metrics::{astrometric_rms, score_detection};
@@ -183,14 +182,10 @@ fn min_snr_knob_gates_faint_detections() {
         ..Default::default()
     }
     .frame();
-    let permissive = Config {
-        min_snr: 5.0,
-        ..synthetic_config()
-    };
-    let strict = Config {
-        min_snr: 30.0,
-        ..synthetic_config()
-    };
+    let mut permissive = synthetic_config();
+    permissive.filter.min_snr = 5.0;
+    let mut strict = synthetic_config();
+    strict.filter.min_snr = 30.0;
     let n_permissive = detected_positions(&frame, &permissive).len();
     let n_strict = detected_positions(&frame, &strict).len();
     assert!(

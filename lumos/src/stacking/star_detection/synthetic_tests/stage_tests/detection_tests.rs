@@ -2,7 +2,7 @@
 //!
 //! Tests the peak detection and thresholding logic.
 
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::{BackgroundConfig, DetectionConfig};
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::stacking::star_detection::synthetic_tests::Scenario;
 use crate::stacking::star_detection::test_common::output::image_writer::{
@@ -67,14 +67,14 @@ fn test_detection_sparse() {
     // Estimate background
     let background = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
     );
 
     // Detect candidates
-    let det_config = Config::default();
+    let det_config = DetectionConfig::default();
     let candidates = detect_stars_test(&pixels, &background, &det_config);
 
     println!("Ground truth: {} stars", ground_truth.len());
@@ -156,7 +156,7 @@ fn test_detection_thresholds() {
     // Estimate background
     let background = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -171,7 +171,7 @@ fn test_detection_thresholds() {
         .collect();
     let mut counts: Vec<(f32, usize, usize)> = Vec::new();
     for sigma in [2.0, 3.0, 5.0, 10.0] {
-        let det_config = Config {
+        let det_config = DetectionConfig {
             sigma_threshold: sigma,
             ..Default::default()
         };
@@ -239,7 +239,7 @@ fn test_detection_area_filter() {
     // Estimate background
     let background = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -253,7 +253,7 @@ fn test_detection_area_filter() {
         .map(|s| (s.pos.x as f32, s.pos.y as f32))
         .collect();
     let run = |min_area: usize, max_area: usize| -> (usize, usize) {
-        let det_config = Config {
+        let det_config = DetectionConfig {
             min_area,
             max_area,
             ..Default::default()

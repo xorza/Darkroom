@@ -20,7 +20,7 @@ use rayon::prelude::*;
 use crate::background_mesh::TileGrid;
 use crate::background_mesh::spline::{cubic_spline_eval, solve_natural_spline_d2};
 use crate::stacking::star_detection::buffer_pool::BufferPool;
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::BackgroundConfig;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
 use estimate::BackgroundEstimate;
@@ -31,7 +31,7 @@ use estimate::BackgroundEstimate;
 /// All buffer management is contained within this function.
 pub(crate) fn estimate_background(
     pixels: &Buffer2<f32>,
-    config: &Config,
+    config: &BackgroundConfig,
     pool: &mut BufferPool,
 ) -> BackgroundEstimate {
     let width = pixels.width();
@@ -57,7 +57,8 @@ pub(crate) fn estimate_background(
 pub(crate) fn refine_background(
     pixels: &Buffer2<f32>,
     estimate: &mut BackgroundEstimate,
-    config: &Config,
+    config: &BackgroundConfig,
+    detection_sigma: f32,
     pool: &mut BufferPool,
 ) {
     let iterations = config.refinement.iterations();
@@ -76,8 +77,8 @@ pub(crate) fn refine_background(
             pixels,
             &estimate.background,
             &estimate.noise,
-            config.sigma_threshold,
-            config.bg_mask_dilation,
+            detection_sigma,
+            config.mask_dilation,
             &mut mask,
             &mut scratch,
         );

@@ -31,6 +31,15 @@ fn rms(residuals: &[f64]) -> f64 {
     (residuals.iter().map(|r| r * r).sum::<f64>() / residuals.len() as f64).sqrt()
 }
 
+fn fit_sip(
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
+    transform: &Transform,
+    config: &SipConfig,
+) -> SipFitResult {
+    SipPolynomial::fit_from_transform(ref_points, target_points, transform, config).unwrap()
+}
+
 #[test]
 fn test_term_exponents_order_2() {
     // Order 2: terms where p+q = 2 (linear terms excluded).
@@ -190,9 +199,7 @@ fn test_correct_at_reference_point_is_identity() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     let corrected = sip.correct(center);
     // At center: u=0, v=0. All monomials u^p*v^q with p+q>=2 evaluate to 0.
@@ -219,9 +226,7 @@ fn test_correct_barrel_at_specific_point() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     // Test point (700, 300): d = (200, -200), |d|^2 = 80000
     // Expected distortion: (200, -200) * 1e-7 * 80000 = (1.6, -1.6)
@@ -283,9 +288,7 @@ fn test_fit_barrel_distortion_with_translation() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     let residuals = sip.compute_corrected_residuals(&ref_points, &target_points, &transform);
     let r = rms(&residuals);
@@ -310,9 +313,7 @@ fn test_fit_pincushion_distortion() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     let residuals = sip.compute_corrected_residuals(&ref_points, &target_points, &transform);
     let r = rms(&residuals);
@@ -354,12 +355,8 @@ fn test_barrel_vs_pincushion_opposite_corrections() {
         ..Default::default()
     };
 
-    let sip_barrel = SipPolynomial::fit_from_transform(&ref_b, &tgt_b, &transform, &config)
-        .unwrap()
-        .polynomial;
-    let sip_pincushion = SipPolynomial::fit_from_transform(&ref_p, &tgt_p, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip_barrel = fit_sip(&ref_b, &tgt_b, &transform, &config).polynomial;
+    let sip_pincushion = fit_sip(&ref_p, &tgt_p, &transform, &config).polynomial;
 
     // Test at a corner point: corrections should have opposite signs
     let test_p = DVec2::new(800.0, 200.0);
@@ -388,47 +385,7 @@ fn test_barrel_vs_pincushion_opposite_corrections() {
 }
 
 #[test]
-fn test_too_few_points_returns_none() {
-    // Order 2 has 3 terms, minimum points = 3*3 = 9.
-    // 2 points < 9 => None.
-    let ref_points = vec![DVec2::new(0.0, 0.0), DVec2::new(100.0, 100.0)];
-    let target_points = vec![DVec2::new(0.1, 0.0), DVec2::new(99.9, 100.0)];
-
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 2,
-        reference_point: Some(DVec2::ZERO),
-        ..Default::default()
-    };
-
-    assert!(
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-            .is_none()
-    );
-}
-
-#[test]
-fn test_exactly_minimum_points_returns_none() {
-    // Order 2 has 3 terms. 3*3 = 9 required. Test with exactly 8 (should fail).
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 2,
-        reference_point: Some(DVec2::ZERO),
-        ..Default::default()
-    };
-
-    let ref_points: Vec<DVec2> = (0..8).map(|i| DVec2::new(i as f64 * 50.0, 0.0)).collect();
-    let target_points = ref_points.clone();
-
-    assert!(
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-            .is_none(),
-        "8 points < 9 minimum for order 2 should return None"
-    );
-}
-
-#[test]
-fn test_minimum_point_count_scales_with_order() {
+fn test_insufficient_point_count_scales_with_order() {
     // Verify the 3x multiplier: each order needs 3 * term_count points minimum.
     // Order 2: 3 terms -> 9 min
     // Order 3: 7 terms -> 21 min
@@ -444,10 +401,8 @@ fn test_minimum_point_count_scales_with_order() {
             ..Default::default()
         };
 
-        // One fewer than minimum -> None
         let ref_pts: Vec<DVec2> = (0..min_needed - 1)
             .map(|i| {
-                // Spread points on a grid to avoid singular matrix
                 let row = i / 10;
                 let col = i % 10;
                 DVec2::new(col as f64 * 100.0, row as f64 * 100.0)
@@ -455,13 +410,15 @@ fn test_minimum_point_count_scales_with_order() {
             .collect();
         let tgt_pts = ref_pts.clone();
 
-        assert!(
-            SipPolynomial::fit_from_transform(&ref_pts, &tgt_pts, &transform, &config).is_none(),
-            "Order {}: {} points < {} minimum should return None",
-            order,
-            min_needed - 1,
-            min_needed
-        );
+        let error =
+            SipPolynomial::fit_from_transform(&ref_pts, &tgt_pts, &transform, &config).unwrap_err();
+        match error {
+            RegistrationError::InsufficientSipPoints { found, required } => {
+                assert_eq!(found, min_needed - 1);
+                assert_eq!(required, min_needed);
+            }
+            other => panic!("expected insufficient SIP points error, got {other:?}"),
+        }
     }
 }
 
@@ -486,9 +443,7 @@ fn test_zero_distortion_produces_zero_correction() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     // Verify all coefficients are essentially zero
     for (i, &c) in sip.coeffs_u.iter().enumerate() {
@@ -521,42 +476,78 @@ fn test_zero_distortion_produces_zero_correction() {
 }
 
 #[test]
-#[should_panic(expected = "SIP order must be 2-5")]
-fn test_invalid_order_low() {
-    let config = SipConfig {
-        order: 1,
-        reference_point: None,
-        ..Default::default()
-    };
+fn test_invalid_config_returns_error() {
     let ref_points = vec![DVec2::ZERO; 10];
     let target_points = vec![DVec2::ZERO; 10];
     let transform = Transform::identity();
-    SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config);
+
+    for (config, expected_message) in [
+        (
+            SipConfig {
+                order: 1,
+                ..Default::default()
+            },
+            "SIP order must be 2-5, got 1",
+        ),
+        (
+            SipConfig {
+                order: 6,
+                ..Default::default()
+            },
+            "SIP order must be 2-5, got 6",
+        ),
+        (
+            SipConfig {
+                clip_sigma: 0.0,
+                ..Default::default()
+            },
+            "SIP clip_sigma must be positive and finite, got 0",
+        ),
+    ] {
+        let error =
+            SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
+                .unwrap_err();
+
+        match error {
+            RegistrationError::InvalidConfig(message) => {
+                assert_eq!(message, expected_message);
+            }
+            other => panic!("expected invalid configuration error, got {other:?}"),
+        }
+    }
 }
 
 #[test]
-#[should_panic(expected = "SIP order must be 2-5")]
-fn test_invalid_order_high() {
-    let config = SipConfig {
-        order: 6,
-        reference_point: None,
-        ..Default::default()
-    };
-    let ref_points = vec![DVec2::ZERO; 10];
-    let target_points = vec![DVec2::ZERO; 10];
-    let transform = Transform::identity();
-    SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config);
-}
-
-#[test]
-fn test_mismatched_point_counts_returns_none() {
+fn test_mismatched_and_singular_fits_return_exact_errors() {
     let config = SipConfig::default();
     let ref_points = vec![DVec2::ZERO; 30];
     let target_points = vec![DVec2::ZERO; 20];
     let transform = Transform::identity();
-    let result =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config);
-    assert!(result.is_none());
+    let mismatch =
+        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
+            .unwrap_err();
+    assert!(matches!(
+        mismatch,
+        RegistrationError::SipPointCountMismatch {
+            reference: 30,
+            target: 20
+        }
+    ));
+
+    let singular_config = SipConfig {
+        order: 2,
+        reference_point: Some(DVec2::ZERO),
+        ..Default::default()
+    };
+    let coincident_points = vec![DVec2::ZERO; 9];
+    let singular = SipPolynomial::fit_from_transform(
+        &coincident_points,
+        &coincident_points,
+        &transform,
+        &singular_config,
+    )
+    .unwrap_err();
+    assert!(matches!(singular, RegistrationError::SingularSipSystem));
 }
 
 #[test]
@@ -574,9 +565,7 @@ fn test_max_correction_at_corners() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     let max_corr = sip.max_correction(1000, 1000, 50.0);
 
@@ -626,9 +615,7 @@ fn test_max_correction_zero_distortion() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     let max_corr = sip.max_correction(400, 400, 100.0);
     assert!(
@@ -649,9 +636,7 @@ fn test_compute_corrected_residuals_length() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     let residuals = sip.compute_corrected_residuals(&ref_points, &target_points, &transform);
     assert_eq!(residuals.len(), ref_points.len());
@@ -669,9 +654,7 @@ fn test_compute_corrected_residuals_all_small_for_fitted_data() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     let residuals = sip.compute_corrected_residuals(&ref_points, &target_points, &transform);
     let max_residual = residuals.iter().cloned().fold(0.0_f64, f64::max);
@@ -717,14 +700,8 @@ fn test_higher_order_fits_higher_order_distortion_better() {
         ..Default::default()
     };
 
-    let sip_2 =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_2)
-            .unwrap()
-            .polynomial;
-    let sip_4 =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_4)
-            .unwrap()
-            .polynomial;
+    let sip_2 = fit_sip(&ref_points, &target_points, &transform, &config_2).polynomial;
+    let sip_4 = fit_sip(&ref_points, &target_points, &transform, &config_4).polynomial;
 
     let rms_2 = rms(&sip_2.compute_corrected_residuals(&ref_points, &target_points, &transform));
     let rms_4 = rms(&sip_4.compute_corrected_residuals(&ref_points, &target_points, &transform));
@@ -756,12 +733,8 @@ fn test_different_k_values_produce_different_corrections() {
     let (ref_1, tgt_1) = make_radial_distortion_points(center, 1e-7, 100, 1000);
     let (ref_2, tgt_2) = make_radial_distortion_points(center, 5e-7, 100, 1000);
 
-    let sip_1 = SipPolynomial::fit_from_transform(&ref_1, &tgt_1, &transform, &config)
-        .unwrap()
-        .polynomial;
-    let sip_2 = SipPolynomial::fit_from_transform(&ref_2, &tgt_2, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip_1 = fit_sip(&ref_1, &tgt_1, &transform, &config).polynomial;
+    let sip_2 = fit_sip(&ref_2, &tgt_2, &transform, &config).polynomial;
 
     // At corner (0, 0): distortion scales linearly with k.
     // k2/k1 = 5, so correction magnitude ratio should be ~5.
@@ -802,9 +775,7 @@ fn test_reference_point_none_uses_centroid() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     // Centroid of symmetric grid = center, so this should work as well as explicit center
     let residuals = sip.compute_corrected_residuals(&ref_points, &target_points, &transform);
@@ -859,18 +830,9 @@ fn test_crpix_vs_centroid_when_points_are_off_center() {
         ..Default::default()
     };
 
-    let sip_crpix =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_crpix)
-            .unwrap()
-            .polynomial;
-    let sip_centroid = SipPolynomial::fit_from_transform(
-        &ref_points,
-        &target_points,
-        &transform,
-        &config_centroid,
-    )
-    .unwrap()
-    .polynomial;
+    let sip_crpix = fit_sip(&ref_points, &target_points, &transform, &config_crpix).polynomial;
+    let sip_centroid =
+        fit_sip(&ref_points, &target_points, &transform, &config_centroid).polynomial;
 
     let rms_crpix =
         rms(&sip_crpix.compute_corrected_residuals(&ref_points, &target_points, &transform));
@@ -915,10 +877,7 @@ fn test_sigma_clipping_rejects_outliers() {
         clip_iterations: 0,
         ..Default::default()
     };
-    let sip_no_clip =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_no_clip)
-            .unwrap()
-            .polynomial;
+    let sip_no_clip = fit_sip(&ref_points, &target_points, &transform, &config_no_clip).polynomial;
     let rms_no_clip = rms(&sip_no_clip.compute_corrected_residuals(
         &ref_points[..n_clean],
         &target_points[..n_clean],
@@ -931,10 +890,7 @@ fn test_sigma_clipping_rejects_outliers() {
         reference_point: Some(center),
         ..Default::default()
     };
-    let sip_clipped =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_clipped)
-            .unwrap()
-            .polynomial;
+    let sip_clipped = fit_sip(&ref_points, &target_points, &transform, &config_clipped).polynomial;
     let rms_clipped = rms(&sip_clipped.compute_corrected_residuals(
         &ref_points[..n_clean],
         &target_points[..n_clean],
@@ -978,14 +934,8 @@ fn test_sigma_clipping_no_effect_on_clean_data() {
         ..Default::default()
     };
 
-    let sip_clipped =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_clipped)
-            .unwrap()
-            .polynomial;
-    let sip_no_clip =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_no_clip)
-            .unwrap()
-            .polynomial;
+    let sip_clipped = fit_sip(&ref_points, &target_points, &transform, &config_clipped).polynomial;
+    let sip_no_clip = fit_sip(&ref_points, &target_points, &transform, &config_no_clip).polynomial;
 
     // Coefficients should be identical (clipping didn't change anything)
     for (i, (&a, &b)) in sip_clipped
@@ -1045,9 +995,7 @@ fn test_ill_conditioned_falls_back_to_lu() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     // Verify corrections are reasonable within the data region (y=500 strip)
     for x_val in (0..=1000).step_by(100) {
@@ -1214,7 +1162,7 @@ fn test_sip_config_validate_accepts_all_valid_orders() {
             order,
             ..Default::default()
         };
-        config.validate(); // Should not panic
+        config.validate().unwrap();
     }
 }
 
@@ -1231,9 +1179,7 @@ fn test_norm_scale_stored_correctly() {
         ..Default::default()
     };
 
-    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-        .unwrap()
-        .polynomial;
+    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     let expected_norm_scale = avg_distance(&ref_points, center);
     assert!(
@@ -1268,9 +1214,7 @@ fn test_fit_result_zero_distortion_metrics() {
         ..Default::default()
     };
 
-    let result =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-            .unwrap();
+    let result = fit_sip(&ref_points, &target_points, &transform, &config);
 
     assert_eq!(result.points_used, 25);
     assert_eq!(result.points_rejected, 0);
@@ -1311,9 +1255,7 @@ fn test_fit_result_barrel_metrics() {
         ..Default::default()
     };
 
-    let result =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-            .unwrap();
+    let result = fit_sip(&ref_points, &target_points, &transform, &config);
 
     // Clean data → no rejections
     assert_eq!(result.points_used, n);
@@ -1373,9 +1315,7 @@ fn test_fit_result_with_outliers_metrics() {
         ..Default::default()
     };
 
-    let result =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-            .unwrap();
+    let result = fit_sip(&ref_points, &target_points, &transform, &config);
 
     // Sigma-clipping should reject at least the 3 gross outliers.
     // The initial unclipped fit is contaminated, so early iterations may also
@@ -1409,7 +1349,7 @@ fn test_fit_result_points_used_plus_rejected_equals_total() {
         reference_point: Some(center),
         ..Default::default()
     };
-    let r1 = SipPolynomial::fit_from_transform(&ref_1, &tgt_1, &transform, &config).unwrap();
+    let r1 = fit_sip(&ref_1, &tgt_1, &transform, &config);
     assert_eq!(
         r1.points_used + r1.points_rejected,
         n1,
@@ -1426,7 +1366,7 @@ fn test_fit_result_points_used_plus_rejected_equals_total() {
     ref_2.push(DVec2::new(900.0, 900.0));
     tgt_2.push(DVec2::new(880.0, 930.0));
     let n2 = ref_2.len();
-    let r2 = SipPolynomial::fit_from_transform(&ref_2, &tgt_2, &transform, &config).unwrap();
+    let r2 = fit_sip(&ref_2, &tgt_2, &transform, &config);
     assert_eq!(
         r2.points_used + r2.points_rejected,
         n2,
@@ -1443,8 +1383,7 @@ fn test_fit_result_points_used_plus_rejected_equals_total() {
         clip_iterations: 0,
         ..Default::default()
     };
-    let r3 =
-        SipPolynomial::fit_from_transform(&ref_2, &tgt_2, &transform, &config_no_clip).unwrap();
+    let r3 = fit_sip(&ref_2, &tgt_2, &transform, &config_no_clip);
     assert_eq!(
         r3.points_used + r3.points_rejected,
         n2,
@@ -1472,7 +1411,7 @@ fn test_fit_result_max_residual_geq_rms() {
 
     // Case 1: barrel distortion (non-zero residuals)
     let (ref_pts, tgt_pts) = make_radial_distortion_points(center, 1e-7, 100, 1000);
-    let r = SipPolynomial::fit_from_transform(&ref_pts, &tgt_pts, &transform, &config).unwrap();
+    let r = fit_sip(&ref_pts, &tgt_pts, &transform, &config);
     assert!(
         r.max_residual >= r.rms_residual,
         "max ({:.6e}) must be >= rms ({:.6e})",
@@ -1492,7 +1431,7 @@ fn test_fit_result_max_residual_geq_rms() {
             tgt_pts2.push(p + d * 1e-14 * r2 * r2); // r^4 distortion
         }
     }
-    let r2 = SipPolynomial::fit_from_transform(&ref_pts2, &tgt_pts2, &transform, &config).unwrap();
+    let r2 = fit_sip(&ref_pts2, &tgt_pts2, &transform, &config);
     assert!(
         r2.max_residual >= r2.rms_residual,
         "max ({:.6e}) must be >= rms ({:.6e})",
@@ -1549,10 +1488,8 @@ fn test_fit_result_higher_order_reduces_residuals() {
         ..Default::default()
     };
 
-    let r3 = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_3)
-        .unwrap();
-    let r4 = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_4)
-        .unwrap();
+    let r3 = fit_sip(&ref_points, &target_points, &transform, &config_3);
+    let r4 = fit_sip(&ref_points, &target_points, &transform, &config_4);
 
     // Order 4 should produce strictly lower RMS residual
     assert!(
@@ -1615,9 +1552,7 @@ fn test_fit_result_max_correction_hand_computed() {
         ..Default::default()
     };
 
-    let result =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
-            .unwrap();
+    let result = fit_sip(&ref_points, &target_points, &transform, &config);
 
     // Expected max correction at corner:
     // |d| * k * |d|^2 = sqrt(500000) * 1e-7 * 500000 = 707.107 * 0.05 = 35.3553
@@ -1663,12 +1598,8 @@ fn test_fit_result_clipping_disabled_vs_enabled_metrics() {
         ..Default::default()
     };
 
-    let r_clip =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_clip)
-            .unwrap();
-    let r_no_clip =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_no_clip)
-            .unwrap();
+    let r_clip = fit_sip(&ref_points, &target_points, &transform, &config_clip);
+    let r_no_clip = fit_sip(&ref_points, &target_points, &transform, &config_no_clip);
 
     // No-clip: all points used
     assert_eq!(r_no_clip.points_used, n);

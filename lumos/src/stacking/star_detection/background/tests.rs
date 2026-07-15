@@ -1,7 +1,7 @@
 //! Tests for background estimation.
 
 use crate::{
-    stacking::star_detection::config::{BackgroundRefinement, Config},
+    stacking::star_detection::config::{BackgroundConfig, BackgroundRefinement},
     stacking::star_detection::error::StarDetectionConfigError,
     testing::estimate_background,
 };
@@ -15,7 +15,7 @@ fn test_uniform_background() {
 
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -43,7 +43,7 @@ fn test_small_image_below_tile_size_does_not_panic() {
 
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 64, // larger than the 20x20 image → clamped to the image
             ..Default::default()
         },
@@ -71,7 +71,7 @@ fn test_gradient_background() {
 
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -96,7 +96,7 @@ fn test_background_with_stars() {
     let pixels = Buffer2::new(width, height, data);
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -119,7 +119,7 @@ fn test_noise_estimation() {
 
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -142,7 +142,7 @@ fn test_non_square_image() {
 
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -168,7 +168,7 @@ fn test_sigma_clipping_rejects_outliers() {
     let pixels = Buffer2::new(width, height, data);
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -198,7 +198,7 @@ fn test_interpolation_produces_valid_values() {
 
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 16,
             ..Default::default()
         },
@@ -228,7 +228,7 @@ fn test_large_image() {
 
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 64,
             ..Default::default()
         },
@@ -250,7 +250,7 @@ fn test_different_tile_sizes() {
         let pixels = Buffer2::new(width, height, data.clone());
         let bg = estimate_background(
             &pixels,
-            &Config {
+            &BackgroundConfig {
                 tile_size,
                 ..Default::default()
             },
@@ -266,7 +266,7 @@ fn test_different_tile_sizes() {
 #[test]
 fn test_invalid_tile_sizes_return_exact_errors() {
     for value in [8, 512] {
-        let config = Config {
+        let config = BackgroundConfig {
             tile_size: value,
             ..Default::default()
         };
@@ -285,7 +285,7 @@ fn test_single_tile_image() {
 
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -322,7 +322,7 @@ fn test_noise_estimation_with_actual_noise() {
     let pixels = Buffer2::new(width, height, data);
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -355,7 +355,7 @@ fn test_interpolation_smooth_at_tile_boundaries() {
     let pixels = Buffer2::new(width, height, data);
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -396,7 +396,7 @@ fn test_iterative_background_uniform() {
     let height = 128;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let config = Config {
+    let config = BackgroundConfig {
         tile_size: 32,
         ..Default::default()
     };
@@ -445,21 +445,18 @@ fn test_iterative_background_with_bright_stars() {
     // Non-iterative estimate
     let bg_simple = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
     );
 
     // Iterative estimate (should be better at excluding stars)
-    let config = Config {
-        sigma_threshold: 3.0,
+    let config = BackgroundConfig {
         refinement: BackgroundRefinement::Iterative { iterations: 2 },
-        bg_mask_dilation: 5,
+        mask_dilation: 5,
         tile_size: 32,
         sigma_clip_iterations: 2,
-
-        ..Default::default()
     };
     let bg_iterative = estimate_background(&pixels, &config);
 
@@ -505,7 +502,7 @@ fn test_iterative_background_preserves_gradient() {
     }
 
     let pixels = Buffer2::new(width, height, data);
-    let config = Config {
+    let config = BackgroundConfig {
         tile_size: 16,
         ..Default::default()
     };
@@ -542,14 +539,11 @@ fn test_iterative_background_no_dilation() {
     }
 
     let pixels = Buffer2::new(width, height, data);
-    let config = Config {
-        sigma_threshold: 3.0,
+    let config = BackgroundConfig {
         refinement: BackgroundRefinement::Iterative { iterations: 1 },
-        bg_mask_dilation: 0, // No dilation
+        mask_dilation: 0, // No dilation
         tile_size: 32,
         sigma_clip_iterations: 2,
-
-        ..Default::default()
     };
     let bg = estimate_background(&pixels, &config);
 
@@ -564,11 +558,10 @@ fn test_iterative_background_no_dilation() {
 
 #[test]
 fn test_iterative_background_config_default() {
-    let config = Config::default();
+    let config = BackgroundConfig::default();
 
-    assert!((config.sigma_threshold - 4.0).abs() < 1e-6);
     assert!(matches!(config.refinement, BackgroundRefinement::None));
-    assert_eq!(config.bg_mask_dilation, 3);
+    assert_eq!(config.mask_dilation, 3);
 }
 
 #[test]
@@ -578,7 +571,7 @@ fn test_iterative_background_no_refinement() {
     let height = 64;
     let pixels = Buffer2::new(width, height, vec![0.3; width * height]);
 
-    let config = Config {
+    let config = BackgroundConfig {
         refinement: BackgroundRefinement::None,
         tile_size: 32,
         ..Default::default()
@@ -608,7 +601,7 @@ fn test_bicubic_reproduces_linear_gradient() {
     let pixels = Buffer2::new(width, height, data.clone());
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -675,7 +668,7 @@ fn test_bicubic_c1_continuity_at_tile_boundaries() {
     let pixels = Buffer2::new(width, height, data);
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 64,
             ..Default::default()
         },
@@ -725,7 +718,7 @@ fn test_bicubic_smoother_than_bilinear_would_be() {
     let pixels = Buffer2::new(width, height, data);
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -765,7 +758,7 @@ fn test_bicubic_c2_continuity_y_direction() {
     let pixels = Buffer2::new(width, height, data);
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 64,
             ..Default::default()
         },
@@ -823,7 +816,7 @@ fn test_noise_map_bicubic_interpolation() {
     let pixels = Buffer2::new(width, height, data);
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -874,7 +867,7 @@ fn test_bicubic_single_tile_column() {
 
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -910,7 +903,7 @@ fn test_bicubic_two_tile_columns() {
     let pixels = Buffer2::new(width, height, data);
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -958,7 +951,7 @@ fn test_bicubic_single_tile_row() {
 
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -996,7 +989,7 @@ fn test_bicubic_two_tile_rows() {
     let pixels = Buffer2::new(width, height, data);
     let bg = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },

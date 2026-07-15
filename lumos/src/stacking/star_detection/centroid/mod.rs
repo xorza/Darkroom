@@ -26,7 +26,9 @@ use glam::Vec2;
 use crate::math::statistics::{ClippedStats, sigma_clipped_median_mad_arrayvec};
 use crate::math::{FWHM_TO_SIGMA, sigma_to_fwhm};
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
+use crate::stacking::star_detection::config::{
+    CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
+};
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::star::Star;
 use gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
@@ -341,12 +343,13 @@ pub fn measure_star(
     pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
     region: &Region,
-    config: &Config,
+    config: &MeasurementConfig,
+    expected_fwhm: f32,
 ) -> Option<Star> {
     let width = pixels.width();
     let height = pixels.height();
     // Compute adaptive stamp radius based on expected FWHM
-    let stamp_radius = compute_stamp_radius(config.expected_fwhm);
+    let stamp_radius = compute_stamp_radius(expected_fwhm);
 
     // Initial position from peak
     let mut pos = Vec2::new(region.peak.x as f32, region.peak.y as f32);
@@ -369,7 +372,7 @@ pub fn measure_star(
             background,
             pos,
             stamp_radius,
-            config.expected_fwhm,
+            expected_fwhm,
         )?;
 
         let delta = new_pos - pos;

@@ -112,7 +112,7 @@ fn test_register_two_calibrated_lights() {
     // Register image 2 to image 1 WITHOUT SIP first (baseline).
     let reg_config = RegistrationConfig {
         transform_type: TransformType::Auto,
-        sip_enabled: false,
+        sip: None,
         ..RegistrationConfig::default()
     };
 
@@ -173,39 +173,34 @@ fn test_register_two_calibrated_lights() {
         &inlier_target,
         &result.transform,
         &sip_config,
+    )
+    .unwrap();
+
+    let corrected_residuals =
+        sip.polynomial
+            .compute_corrected_residuals(&inlier_ref, &inlier_target, &result.transform);
+    let sip_rms = (corrected_residuals.iter().map(|r| r * r).sum::<f64>()
+        / corrected_residuals.len() as f64)
+        .sqrt();
+
+    let improvement = (baseline_rms - sip_rms) / baseline_rms * 100.0;
+
+    println!("\nSIP correction (order 4) on same inliers:");
+    println!("  Baseline RMS:      {:.4} pixels", baseline_rms);
+    println!("  With SIP RMS:      {:.4} pixels", sip_rms);
+    println!("  Improvement:       {:.1}%", improvement);
+    println!(
+        "  Max SIP correction: {:.4} pixels",
+        sip.polynomial
+            .max_correction(img1.width(), img1.height(), 50.0)
     );
 
-    if let Some(ref sip) = sip {
-        let corrected_residuals = sip.polynomial.compute_corrected_residuals(
-            &inlier_ref,
-            &inlier_target,
-            &result.transform,
-        );
-        let sip_rms = (corrected_residuals.iter().map(|r| r * r).sum::<f64>()
-            / corrected_residuals.len() as f64)
-            .sqrt();
-
-        let improvement = (baseline_rms - sip_rms) / baseline_rms * 100.0;
-
-        println!("\nSIP correction (order 4) on same inliers:");
-        println!("  Baseline RMS:      {:.4} pixels", baseline_rms);
-        println!("  With SIP RMS:      {:.4} pixels", sip_rms);
-        println!("  Improvement:       {:.1}%", improvement);
-        println!(
-            "  Max SIP correction: {:.4} pixels",
-            sip.polynomial
-                .max_correction(img1.width(), img1.height(), 50.0)
-        );
-
-        assert!(
-            sip_rms <= baseline_rms + 1e-10,
-            "SIP should not worsen RMS: baseline={:.4}, sip={:.4}",
-            baseline_rms,
-            sip_rms
-        );
-    } else {
-        println!("\nSIP fitting failed (not enough inliers for order 3)");
-    }
+    assert!(
+        sip_rms <= baseline_rms + 1e-10,
+        "SIP should not worsen RMS: baseline={:.4}, sip={:.4}",
+        baseline_rms,
+        sip_rms
+    );
 
     assert!(
         result.num_inliers >= 5,
@@ -220,7 +215,7 @@ fn test_register_two_calibrated_lights() {
 
     // Warp img2 to align with img1 and measure time
     let warp_start = Instant::now();
-    let warped = warp(&img2, &result.warp_transform(), &reg_config).image;
+    let warped = warp(&img2, &result.warp_transform(), &reg_config.warp).image;
     let warp_elapsed = warp_start.elapsed();
 
     println!(
@@ -310,7 +305,7 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
                 name, result.num_inliers, result.rms_error, result.elapsed_ms,
             );
 
-            let warped = warp(&images[i], &result.warp_transform(), &reg_config).image;
+            let warped = warp(&images[i], &result.warp_transform(), &reg_config.warp).image;
 
             let output_path = output_dir.join(name);
             warped
@@ -367,14 +362,14 @@ fn test_weighted_fit_registration_rms() {
 
     let register_with = |noise: Option<NoiseModel>| -> (f64, usize) {
         let mut config = Config::precise_ground();
-        config.centroid_method = CentroidMethod::GaussianFit;
-        config.noise_model = noise;
+        config.measurement.centroid_method = CentroidMethod::GaussianFit;
+        config.measurement.noise_model = noise;
         let mut detector = StarDetector::from_config(config).unwrap();
         let s1 = detector.detect(&img1).stars;
         let s2 = detector.detect(&img2).stars;
         let reg_config = RegistrationConfig {
             transform_type: TransformType::Auto,
-            sip_enabled: false,
+            sip: None,
             ..RegistrationConfig::default()
         };
         let r = register(&s1, &s2, &reg_config).expect("registration should succeed");

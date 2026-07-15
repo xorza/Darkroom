@@ -31,7 +31,7 @@ fn base_field() -> BaseField {
 /// Warp `base` by a pure translation to fake a dithered exposure.
 fn shifted(base: &AstroImage, reg: &RegistrationConfig, dx: f64, dy: f64) -> AstroImage {
     let t = Transform::translation(DVec2::new(dx, dy));
-    warp(base, &WarpTransform::new(t), reg).image
+    warp(base, &WarpTransform::new(t), &reg.warp).image
 }
 
 #[test]
@@ -194,7 +194,10 @@ fn public_input_errors() {
 
     let config = AlignStackConfig {
         detection: StarDetectionConfig {
-            sigma_threshold: 0.0,
+            detection: crate::stacking::star_detection::config::DetectionConfig {
+                sigma_threshold: 0.0,
+                ..Default::default()
+            },
             ..StarDetectionConfig::default()
         },
         ..AlignStackConfig::default()

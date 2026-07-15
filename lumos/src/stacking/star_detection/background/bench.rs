@@ -9,17 +9,20 @@ use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::background::{
     BufferPool, estimate_background, refine_background,
 };
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::BackgroundConfig;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 use common::BitBuffer2;
 use imaginarium::Buffer2;
 
 /// Estimate background with automatic buffer pool management (bench helper).
-fn estimate_background_test(pixels: &Buffer2<f32>, config: &Config) -> BackgroundEstimate {
+fn estimate_background_test(
+    pixels: &Buffer2<f32>,
+    config: &BackgroundConfig,
+) -> BackgroundEstimate {
     let mut pool = BufferPool::new(pixels.width(), pixels.height());
     let mut estimate = estimate_background(pixels, config, &mut pool);
     if config.refinement.iterations() > 0 {
-        refine_background(pixels, &mut estimate, config, &mut pool);
+        refine_background(pixels, &mut estimate, config, 4.0, &mut pool);
     }
     estimate
 }
@@ -34,7 +37,7 @@ fn bench_background_estimate_6k(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let config = Config {
+    let config = BackgroundConfig {
         tile_size: 64,
         ..Default::default()
     };

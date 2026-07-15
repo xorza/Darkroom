@@ -20,11 +20,10 @@ use glam::DVec2;
 /// Detection config for synthetic (already-linear) frames: the CFA matched filter is disabled
 /// so the measured FWHM stays accurate.
 pub(crate) fn synthetic_config() -> Config {
-    Config {
-        expected_fwhm: 0.0,
-        min_snr: 5.0,
-        ..Config::default()
-    }
+    let mut config = Config::default();
+    config.fwhm.expected = 0.0;
+    config.filter.min_snr = 5.0;
+    config
 }
 
 /// True source positions of a rendered frame.

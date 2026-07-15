@@ -10,7 +10,7 @@ use super::background_estimate;
 use crate::math::fwhm_to_sigma;
 use crate::math::rect::URect;
 use crate::stacking::star_detection::centroid::measure_star;
-use crate::stacking::star_detection::config::{CentroidMethod, Config};
+use crate::stacking::star_detection::config::{CentroidMethod, MeasurementConfig};
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::render_gaussian_star;
@@ -71,10 +71,7 @@ fn centroid_recovers_known_subpixel_positions() {
     let stars: Vec<(f32, f32, f32)> = positions.iter().map(|&(x, y)| (x, y, 5.0)).collect();
     let pixels = field(width, height, sigma, &stars, 0.01, 42);
     let background = background_estimate(&pixels);
-    let config = Config {
-        expected_fwhm: fwhm,
-        ..Default::default()
-    };
+    let config = MeasurementConfig::default();
 
     let mut max_error = 0.0f64;
     for &(true_x, true_y) in &positions {
@@ -83,6 +80,7 @@ fn centroid_recovers_known_subpixel_positions() {
             &background,
             &candidate_at(&pixels, true_x, true_y),
             &config,
+            fwhm,
         )
         .unwrap_or_else(|| panic!("no centroid at ({true_x}, {true_y})"));
         let error =
@@ -116,10 +114,7 @@ fn centroid_accuracy_improves_with_snr() {
         .collect();
     let pixels = field(width, height, sigma, &stars, 0.01, 42);
     let background = background_estimate(&pixels);
-    let config = Config {
-        expected_fwhm: fwhm,
-        ..Default::default()
-    };
+    let config = MeasurementConfig::default();
 
     let mut measured = Vec::new();
     for &(tx, ty, _) in &stars {
@@ -128,6 +123,7 @@ fn centroid_accuracy_improves_with_snr() {
             &background,
             &candidate_at(&pixels, tx, ty),
             &config,
+            fwhm,
         )
         .expect("centroid");
         let error = ((star.pos.x - tx as f64).powi(2) + (star.pos.y - ty as f64).powi(2)).sqrt();
@@ -170,8 +166,7 @@ fn centroid_methods_agree_and_fits_beat_moments() {
     let background = background_estimate(&pixels);
 
     let error_for = |method: CentroidMethod| -> (f64, f64) {
-        let config = Config {
-            expected_fwhm: fwhm,
+        let config = MeasurementConfig {
             centroid_method: method,
             ..Default::default()
         };
@@ -180,6 +175,7 @@ fn centroid_methods_agree_and_fits_beat_moments() {
             &background,
             &candidate_at(&pixels, tx, ty),
             &config,
+            fwhm,
         )
         .expect("centroid");
         let err = ((star.pos.x - tx as f64).powi(2) + (star.pos.y - ty as f64).powi(2)).sqrt();

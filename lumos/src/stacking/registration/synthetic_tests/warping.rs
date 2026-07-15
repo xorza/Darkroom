@@ -293,13 +293,11 @@ fn test_warp_with_detected_transform() {
     );
 
     // Detect stars in both images
-    let mut det = StarDetector::from_config(StarConfig {
-        expected_fwhm: 0.0,
-        min_snr: 5.0,
-        sigma_threshold: 3.0,
-        ..Default::default()
-    })
-    .unwrap();
+    let mut detection_config = StarConfig::default();
+    detection_config.fwhm.expected = 0.0;
+    detection_config.filter.min_snr = 5.0;
+    detection_config.detection.sigma_threshold = 3.0;
+    let mut det = StarDetector::from_config(detection_config).unwrap();
 
     let ref_image = AstroImage::from_pixels(
         ImageDimensions::new((width, height), 1),
@@ -328,8 +326,8 @@ fn test_warp_with_detected_transform() {
         ImageDimensions::new((width, height), 1),
         target_pixels.into_vec(),
     );
-    let warp_config = RegConfig {
-        interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
+    let warp_config = WarpParams {
+        method: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
     let warped_astro = warp(&target_astro, &result.warp_transform(), &warp_config).image;
@@ -419,8 +417,6 @@ fn test_interpolation_quality_ordering() {
 
 #[test]
 fn test_warp_grayscale_translation() {
-    use crate::stacking::registration::config::Config as RegConfig;
-
     let ref_buf = star_field(256, 256, 30, 88888).image.channel(0).clone();
     let width = ref_buf.width();
     let height = ref_buf.height();
@@ -431,8 +427,8 @@ fn test_warp_grayscale_translation() {
     // Apply a translation of (5, -3) pixels
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
 
-    let warp_config = RegConfig {
-        interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
+    let warp_config = WarpParams {
+        method: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
     let warped = warp(&ref_image, &WarpTransform::new(transform), &warp_config).image;
@@ -469,8 +465,6 @@ fn test_warp_grayscale_translation() {
 
 #[test]
 fn test_warp_rgb() {
-    use crate::stacking::registration::config::Config as RegConfig;
-
     let gray_buf = star_field(256, 256, 30, 99999).image.channel(0).clone();
     let width = gray_buf.width();
     let height = gray_buf.height();
@@ -493,8 +487,8 @@ fn test_warp_rgb() {
     let transform = Transform::euclidean(DVec2::new(3.0, -2.0), 1.0_f64.to_radians());
 
     // Warp the RGB image
-    let warp_config = RegConfig {
-        interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
+    let warp_config = WarpParams {
+        method: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
     let warped = warp(&rgb_image, &WarpTransform::new(transform), &warp_config).image;
@@ -532,7 +526,6 @@ fn test_warp_rgb() {
 #[test]
 fn test_warp_preserves_output_metadata() {
     use crate::io::astro_image::AstroImageMetadata;
-    use crate::stacking::registration::config::Config as RegConfig;
 
     let pixels = star_field(256, 256, 30, 11111).image.channel(0).clone();
     let width = pixels.width();
@@ -546,8 +539,8 @@ fn test_warp_preserves_output_metadata() {
     };
 
     let transform = Transform::translation(DVec2::new(5.0, 5.0));
-    let warp_config = RegConfig {
-        interpolation: InterpolationMethod::Bilinear,
+    let warp_config = WarpParams {
+        method: InterpolationMethod::Bilinear,
         ..Default::default()
     };
     let warped = warp(&image, &WarpTransform::new(transform), &warp_config).image;
@@ -631,7 +624,7 @@ fn test_warp_with_sip_correction() {
     };
     let sip =
         SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)
-            .expect("SIP fitting should succeed")
+            .unwrap()
             .polynomial;
 
     // Verify SIP correction is non-trivial
@@ -695,7 +688,6 @@ fn test_warp_with_sip_correction() {
 /// Test that warp with SIP correction through the public `warp()` API works.
 #[test]
 fn test_warp_api_with_sip() {
-    use crate::stacking::registration::config::Config as RegConfig;
     use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 
     let width = 128;
@@ -733,7 +725,7 @@ fn test_warp_api_with_sip() {
     };
     let sip =
         SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)
-            .expect("SIP fitting should succeed")
+            .unwrap()
             .polynomial;
 
     // Create a grayscale image
@@ -744,8 +736,8 @@ fn test_warp_api_with_sip() {
     let image =
         AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels.into_vec());
 
-    let warp_config = RegConfig {
-        interpolation: InterpolationMethod::Bilinear,
+    let warp_config = WarpParams {
+        method: InterpolationMethod::Bilinear,
         ..Default::default()
     };
 
@@ -781,8 +773,6 @@ fn test_warp_api_with_sip() {
 /// in-bounds average instead of darkening them toward the zero border.
 #[test]
 fn warp_emits_coverage_and_renormalizes_bilinear_border() {
-    use crate::stacking::registration::config::Config as RegConfig;
-
     // Constant image so any darkening is unambiguous: a covered output pixel
     // must read back exactly V.
     const V: f32 = 0.5;
@@ -793,8 +783,8 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     // bounds, column 13 is half-covered (its right bilinear tap is off the
     // edge), columns 14..=15 fall entirely outside.
     let transform = Transform::translation(DVec2::new(2.5, 0.0));
-    let config = RegConfig {
-        interpolation: InterpolationMethod::Bilinear,
+    let config = WarpParams {
+        method: InterpolationMethod::Bilinear,
         ..Default::default()
     };
     assert_eq!(config.border_value, 0.0, "test assumes a zero border");
@@ -847,8 +837,6 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
 /// not V·coverage (darkened). Coverage stays as the downstream stacking weight.
 #[test]
 fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
-    use crate::stacking::registration::config::Config as RegConfig;
-
     const V: f32 = 0.5;
     let (w, h) = (32usize, 8usize);
     let image = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), vec![V; w * h]);
@@ -856,8 +844,8 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     // src = (x + 3.5, y): a Lanczos3 (6-tap) kernel reaches off the right edge
     // for x ≳ 26 and lands entirely outside by x = 31.
     let transform = Transform::translation(DVec2::new(3.5, 0.0));
-    let config = RegConfig {
-        interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
+    let config = WarpParams {
+        method: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
 

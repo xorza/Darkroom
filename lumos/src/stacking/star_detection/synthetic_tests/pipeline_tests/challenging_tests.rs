@@ -327,11 +327,9 @@ fn test_faint_in_noise() {
         ..Default::default()
     }
     .frame();
-    let detection_config = Config {
-        min_snr: 3.0,
-        sigma_threshold: 2.5,
-        ..Default::default()
-    };
+    let mut detection_config = Config::default();
+    detection_config.filter.min_snr = 3.0;
+    detection_config.detection.sigma_threshold = 2.5;
     run_challenging_test(
         "faint_in_noise",
         &frame,
@@ -353,11 +351,9 @@ fn test_very_low_snr() {
         ..Default::default()
     }
     .frame();
-    let detection_config = Config {
-        min_snr: 2.5,
-        sigma_threshold: 2.0,
-        ..Default::default()
-    };
+    let mut detection_config = Config::default();
+    detection_config.filter.min_snr = 2.5;
+    detection_config.detection.sigma_threshold = 2.0;
     let criteria = PassCriteria {
         min_detection_rate: 0.50,
         max_false_positive_rate: 0.30,

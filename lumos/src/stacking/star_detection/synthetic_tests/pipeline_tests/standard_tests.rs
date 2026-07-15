@@ -12,10 +12,9 @@ use crate::testing::synthetic::scene::BackgroundField;
 
 /// Detection config for synthetic images: disable the CFA matched filter so FWHM stays accurate.
 fn detection_config() -> Config {
-    Config {
-        expected_fwhm: 0.0,
-        ..Config::default()
-    }
+    let mut config = Config::default();
+    config.fwhm.expected = 0.0;
+    config
 }
 
 /// Test: Sparse field with well-separated stars.
@@ -134,11 +133,8 @@ fn test_pipeline_dynamic_range() {
     }
     .frame();
 
-    let detection_config = Config {
-        expected_fwhm: 0.0,
-        min_snr: 5.0,
-        ..Config::default()
-    };
+    let mut detection_config = detection_config();
+    detection_config.filter.min_snr = 5.0;
     let metrics = run_test("dynamic_range", "pipeline", &frame, &detection_config);
 
     // The faint end sits near the detection limit, so completeness is lower — but enforced as a

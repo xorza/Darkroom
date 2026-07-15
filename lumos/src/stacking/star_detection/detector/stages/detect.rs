@@ -11,7 +11,7 @@ use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::buffer_pool::BufferPool;
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::DetectionConfig;
 use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
 use crate::stacking::star_detection::deblend::ComponentData;
 use crate::stacking::star_detection::deblend::local_maxima::deblend_local_maxima;
@@ -54,7 +54,7 @@ pub(crate) fn detect(
     pixels: &Buffer2<f32>,
     stats: &BackgroundEstimate,
     fwhm: Option<f32>,
-    config: &Config,
+    config: &DetectionConfig,
     pool: &mut BufferPool,
 ) -> DetectResult {
     let width = pixels.width();
@@ -136,13 +136,13 @@ pub(crate) fn detect(
 fn extract_and_filter_candidates(
     pixels: &Buffer2<f32>,
     label_map: &LabelMap,
-    config: &Config,
+    config: &DetectionConfig,
     width: usize,
     height: usize,
 ) -> ExtractionResult {
     let mut result = extract_candidates(pixels, label_map, config);
 
-    // `Config::validate()` can't bound `edge_margin` against the image (it doesn't know the
+    // `DetectionConfig::validate()` can't bound `edge_margin` against the image (it doesn't know the
     // image size), so a margin that swallows the whole image is only catchable here: the retain
     // below needs `bbox.min >= edge_margin && bbox.max <= dim - edge_margin`, which no bbox can
     // satisfy once `2 * edge_margin >= dim` — every region is silently filtered out. Surface it
@@ -171,7 +171,7 @@ fn extract_and_filter_candidates(
 fn extract_candidates(
     pixels: &Buffer2<f32>,
     label_map: &LabelMap,
-    config: &Config,
+    config: &DetectionConfig,
 ) -> ExtractionResult {
     if label_map.num_labels() == 0 {
         return ExtractionResult {
@@ -392,8 +392,8 @@ mod tests {
         (pixels, label_map_from_raw(labels, 1))
     }
 
-    fn local_maxima_config() -> Config {
-        Config {
+    fn local_maxima_config() -> DetectionConfig {
+        DetectionConfig {
             deblend_n_thresholds: 0, // 0 selects the local-maxima deblend path
             deblend_min_separation: 3,
             deblend_min_prominence: 0.3,
@@ -448,7 +448,7 @@ mod tests {
         // (2 * 16 == 32) and a margin past the dimension itself (saturating_sub floors at 0).
         for edge_margin in [16, 32] {
             let (pixels, label_map) = one_component(32, 32, &[(16, 16, 1.0, 3.0)]);
-            let config = Config {
+            let config = DetectionConfig {
                 edge_margin,
                 ..local_maxima_config()
             };

@@ -218,7 +218,7 @@ fn align_stack_memory_probe() {
         let dx = ((i * 37 % 11) as f64 - 5.0) * 1.7;
         let dy = ((i * 53 % 11) as f64 - 5.0) * 1.7;
         let t = Transform::translation(DVec2::new(dx, dy));
-        frames.push(warp(&base, &WarpTransform::new(t), &reg).image);
+        frames.push(warp(&base, &WarpTransform::new(t), &reg.warp).image);
     }
     drop(base); // redundant with frames[0]; free it so only the `n` inputs are resident.
     println!(

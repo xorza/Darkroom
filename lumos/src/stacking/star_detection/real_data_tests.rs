@@ -159,7 +159,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Saved: 01_grayscale");
 
     // 2. Background
-    let background = estimate_background(&grayscale, &config, &mut pool);
+    let background = estimate_background(&grayscale, &config.background, &mut pool);
     image_writer::save_grayscale_stretched(
         background.background.pixels(),
         width,
@@ -188,7 +188,15 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Saved: 04_subtracted");
 
     // 5. FWHM estimation
-    let fwhm_result = estimate_fwhm(&grayscale, &background, &config, &mut pool);
+    let fwhm_result = estimate_fwhm(
+        &grayscale,
+        &background,
+        &config.fwhm,
+        &config.detection,
+        &config.measurement,
+        &config.filter,
+        &mut pool,
+    );
     let fwhm = fwhm_result.fwhm;
     println!(
         "Estimated FWHM: {:?} (from {} stars)",
@@ -204,8 +212,8 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
             &grayscale,
             &background.background,
             fwhm_val,
-            config.psf_axis_ratio,
-            config.psf_angle,
+            config.detection.psf_axis_ratio,
+            config.detection.psf_angle,
             &mut MatchedFilterBuffers {
                 output: &mut scratch,
                 subtraction_scratch: &mut conv_scratch,
@@ -239,7 +247,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
         create_threshold_mask_filtered(
             &filtered_buf,
             &background.noise,
-            config.sigma_threshold,
+            config.detection.sigma_threshold,
             &mut mask,
         );
     } else {
@@ -247,7 +255,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
             &grayscale,
             &background.background,
             &background.noise,
-            config.sigma_threshold,
+            config.detection.sigma_threshold,
             &mut mask,
         );
     }
@@ -266,7 +274,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Saved: 07_dilated_mask ({dilated_count} pixels)");
 
     // 9. Label map
-    let label_map = LabelMap::from_pool(&dilated, config.connectivity, &mut pool);
+    let label_map = LabelMap::from_pool(&dilated, config.detection.connectivity, &mut pool);
     let num_labels = label_map.num_labels();
     let labels_buf = Buffer2::new(width, height, label_map.labels().to_vec());
     let labels_rgb = image_writer::labels_to_rgb(&labels_buf);
@@ -305,7 +313,7 @@ fn quick_bench_detect_rho_opiuchi(b: quickbench::Bencher) {
         astro_image.height()
     );
     let mut config = Config::precise_ground();
-    config.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
+    config.measurement.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
     let mut detector = StarDetector::from_config(config).unwrap();
 
     b.bench(|| detector.detect(&astro_image));

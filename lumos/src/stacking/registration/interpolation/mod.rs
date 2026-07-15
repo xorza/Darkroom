@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 use rayon::prelude::*;
 
 use crate::stacking::registration::config::InterpolationMethod;
+use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::WarpTransform;
 use common::Vec2us;
 use glam::{IVec2, Vec2};
@@ -18,7 +19,9 @@ use imaginarium::Buffer2;
 /// Bundled warp parameters passed through the interpolation pipeline.
 #[derive(Debug, Clone, Copy)]
 pub struct WarpParams {
+    /// Resampling kernel.
     pub method: InterpolationMethod,
+    /// Constant value sampled outside the input image.
     pub border_value: f32,
 }
 
@@ -27,6 +30,26 @@ impl Default for WarpParams {
         Self {
             method: InterpolationMethod::default(),
             border_value: 0.0,
+        }
+    }
+}
+
+impl WarpParams {
+    pub(crate) fn validate(&self) -> Result<(), RegistrationError> {
+        if !self.border_value.is_finite() {
+            return Err(RegistrationError::InvalidConfig(format!(
+                "warp border_value must be finite, got {}",
+                self.border_value
+            )));
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new(method: InterpolationMethod) -> Self {
+        Self {
+            method,
+            ..Default::default()
         }
     }
 }
@@ -472,14 +495,4 @@ pub(crate) fn warp_image(
                 }
             }
         });
-}
-
-#[cfg(test)]
-impl WarpParams {
-    pub(crate) fn new(method: InterpolationMethod) -> Self {
-        Self {
-            method,
-            ..Default::default()
-        }
-    }
 }

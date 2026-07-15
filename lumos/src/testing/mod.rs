@@ -12,7 +12,7 @@ use crate::io::astro_image::AstroImageMetadata;
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::stacking::star_detection::background::{self, estimate::BackgroundEstimate};
 use crate::stacking::star_detection::buffer_pool::BufferPool;
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::BackgroundConfig;
 
 pub mod mem_probe;
 pub mod real_data;
@@ -67,7 +67,10 @@ impl TestRng {
 ///
 /// Returns a `BackgroundEstimate` with background and noise estimates.
 /// Creates a temporary buffer pool internally.
-pub(crate) fn estimate_background(pixels: &Buffer2<f32>, config: &Config) -> BackgroundEstimate {
+pub(crate) fn estimate_background(
+    pixels: &Buffer2<f32>,
+    config: &BackgroundConfig,
+) -> BackgroundEstimate {
     let mut pool = BufferPool::new(pixels.width(), pixels.height());
     background::estimate_background(pixels, config, &mut pool)
 }

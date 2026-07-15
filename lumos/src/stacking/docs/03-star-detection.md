@@ -48,8 +48,8 @@ tile grid back up to a full-resolution per-pixel map.
 
 The tile must be **large enough to contain mostly sky** (so the robust estimator
 sees a sky-dominated histogram) but **small enough to track the gradient**.
-64 px is the canonical default; lumos uses 64 (`config.rs:265`,
-`tile_size`). For heavy gradients shrink it; for sparse fields you can enlarge.
+64 px is the canonical default; lumos uses 64 (`BackgroundConfig::tile_size`).
+For heavy gradients shrink it; for sparse fields you can enlarge.
 
 ### 1.2 The robust per-tile estimator: sigma-clipped mode
 
@@ -264,8 +264,8 @@ hurts deblending. lumos auto-estimates FWHM first (§5) then builds a
 A pixel is "detected" if `(I − sky) > n·σ(x,y)` (or `filtered > n·σ` after
 matched filtering). The threshold `n` (SExtractor `DETECT_THRESH`, default
 1.5σ for analysis but commonly 3–5σ for clean catalogs; photutils
-`detect_threshold` with `nsigma`; lumos `sigma_threshold`, default 4.0,
-`config.rs:272`) trades completeness against false-alarm rate. For a Gaussian
+`detect_threshold` with `nsigma`; lumos `DetectionConfig::sigma_threshold`, default 4.0)
+trades completeness against false-alarm rate. For a Gaussian
 noise field, the per-pixel false-positive rate at 5σ is ~3×10⁻⁷; with a
 minimum-area requirement (below) the effective rate drops much further.
 
@@ -371,8 +371,8 @@ well-separated stars, but it **over-deblends** noisy bright stars (every bump in
 the PSF wings becomes a "star") and lacks the flux-contrast safeguard. It is the
 right default only when sources are sparse.
 
-lumos offers both, selected by `deblend_n_thresholds` (`config.rs:224`,
-default **0** → `deblend_local_maxima`; ≥1 → `deblend_multi_threshold`):
+lumos offers both, selected by `DetectionConfig::deblend_n_thresholds`,
+default **0** → `deblend_local_maxima`; ≥2 → `deblend_multi_threshold`):
 
 - `deblend/local_maxima/mod.rs`: local maxima + prominence + separation +
   nearest-peak Voronoi, ArrayVec for ≤`MAX_PEAKS` peaks.

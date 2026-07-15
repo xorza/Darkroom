@@ -5,10 +5,13 @@ use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig,
     CalibrationComponent, CalibrationMasters, CombineMethod, DefectSummary, DrizzleConfig,
     DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError, GesdConfig, ImageDimensions,
-    LinearFitClipConfig, Normalization, PercentileClipConfig, RansacConfig, RegistrationConfig,
-    RegistrationMatchingConfig, Rejection, SigmaClipConfig, SmallN, StackConfig, StackConfigError,
-    StackError, StackProduct, StarDetectionConfig, StarDetectionConfigError, StarDetector,
-    StarMatch, Transform, TransformType, TriangleConfig, Weighting, WinsorizedClipConfig,
+    InterpolationMethod, LinearFitClipConfig, Normalization, PercentileClipConfig, RansacConfig,
+    RegistrationConfig, RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN,
+    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
+    StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionConfigError,
+    StarDetectionFilterConfig, StarDetectionFwhmConfig, StarDetectionMeasurementConfig,
+    StarDetector, StarMatch, Transform, TransformType, TriangleConfig, WarpParams, Weighting,
+    WinsorizedClipConfig,
 };
 
 #[test]
@@ -79,6 +82,14 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
             seed: Some(42),
             ..Default::default()
         },
+        sip: Some(SipConfig {
+            order: 2,
+            ..Default::default()
+        }),
+        warp: WarpParams {
+            method: InterpolationMethod::Bilinear,
+            border_value: -1.0,
+        },
         ..Default::default()
     };
     registration.validate().unwrap();
@@ -87,12 +98,24 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     assert_eq!(registration.matching.triangle.ratio_tolerance, 0.02);
     assert_eq!(registration.ransac.max_iterations, 750);
     assert_eq!(registration.ransac.seed, Some(42));
+    assert_eq!(registration.sip.as_ref().unwrap().order, 2);
+    assert_eq!(registration.warp.method, InterpolationMethod::Bilinear);
+    assert_eq!(registration.warp.border_value, -1.0);
     assert_eq!(
         registration
             .matching
             .required_stars(registration.transform_type),
         10
     );
+
+    let detection = StarDetectionConfig {
+        background: StarDetectionBackgroundConfig::default(),
+        detection: StarDetectionCandidateConfig::default(),
+        fwhm: StarDetectionFwhmConfig::default(),
+        measurement: StarDetectionMeasurementConfig::default(),
+        filter: StarDetectionFilterConfig::default(),
+    };
+    detection.validate().unwrap();
 
     let frame = DrizzleFrame::new("light.fits", Transform::identity());
     let DrizzleFrame {
@@ -146,7 +169,10 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
     ));
 
     let detection_error = StarDetector::from_config(StarDetectionConfig {
-        sigma_threshold: 0.0,
+        detection: StarDetectionCandidateConfig {
+            sigma_threshold: 0.0,
+            ..Default::default()
+        },
         ..StarDetectionConfig::default()
     })
     .unwrap_err();

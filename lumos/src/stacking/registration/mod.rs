@@ -13,7 +13,8 @@
 //! println!("Matched {} stars, RMS = {:.2}px", result.num_inliers, result.rms_error);
 //!
 //! // Warp target image in place to align with reference
-//! let aligned = warp(target_image, &result.warp_transform(), &Config::default());
+//! let config = Config::default();
+//! let aligned = warp(target_image, &result.warp_transform(), &config.warp);
 //! ```
 //!
 //! # Transformation Models
@@ -63,9 +64,8 @@ use glam::DVec2;
 use crate::AstroImage;
 use crate::io::astro_image::PixelData;
 use crate::stacking::star_detection::star::Star;
-use distortion::sip::SipConfig;
 use imaginarium::Buffer2;
-use interpolation::warp_image;
+use interpolation::{WarpParams, warp_image};
 use ransac::RansacEstimator;
 use ransac::transforms::estimate_transform;
 use spatial::KdTree;
@@ -237,14 +237,10 @@ pub struct WarpResult {
 /// use lumos::registration::{register, warp, Config};
 ///
 /// let result = register(&ref_stars, &target_stars, &Config::default())?;
-/// let aligned = warp(&target_image, &result.warp_transform(), &Config::default()).image;
+/// let config = Config::default();
+/// let aligned = warp(&target_image, &result.warp_transform(), &config.warp).image;
 /// ```
-pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &Config) -> WarpResult {
-    let params = interpolation::WarpParams {
-        method: config.interpolation,
-        border_value: config.border_value,
-    };
-
+pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &WarpParams) -> WarpResult {
     let mut output = AstroImage {
         metadata: image.metadata.clone(),
         dimensions: image.dimensions,
@@ -256,15 +252,12 @@ pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &Config)
             image.channel(c),
             output.channel_mut(c),
             warp_transform,
-            &params,
+            config,
         );
     }
 
-    let coverage = interpolation::warp_coverage(
-        image.dimensions().size,
-        warp_transform,
-        config.interpolation,
-    );
+    let coverage =
+        interpolation::warp_coverage(image.dimensions().size, warp_transform, config.method);
 
     // Border-flux renormalization: a partially-covered pixel warped with a zero
     // border is `Σ_in(value·w)`; dividing by `coverage = Σ_in(w)` recovers the
@@ -272,7 +265,7 @@ pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &Config)
     // Exact only for non-negative kernels (nearest/bilinear); negative-lobe
     // kernels (bicubic/Lanczos) still emit coverage but keep their raw values,
     // and a non-zero border is a deliberate fill we must not rescale.
-    if config.border_value == 0.0 && renormalizable(config.interpolation) {
+    if config.border_value == 0.0 && renormalizable(config.method) {
         for c in 0..image.channels() {
             renormalize_by_coverage(output.channel_mut(c), &coverage);
         }
@@ -404,7 +397,7 @@ fn estimate_and_refine(
     let recovery_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     let t0 = Instant::now();
-    let sip_fit = if config.sip_enabled {
+    let sip_fit = if let Some(sip_config) = &config.sip {
         let inlier_ref: Vec<DVec2> = inlier_matches
             .iter()
             .map(|star_match| ref_stars[star_match.reference])
@@ -414,13 +407,12 @@ fn estimate_and_refine(
             .map(|star_match| target_stars[star_match.target])
             .collect();
 
-        let sip_config = SipConfig {
-            order: config.sip_order,
-            reference_point: config.sip_reference_point,
-            ..Default::default()
-        };
-
-        SipPolynomial::fit_from_transform(&inlier_ref, &inlier_target, &transform, &sip_config)
+        Some(SipPolynomial::fit_from_transform(
+            &inlier_ref,
+            &inlier_target,
+            &transform,
+            sip_config,
+        )?)
     } else {
         None
     };

@@ -7,7 +7,7 @@
 
 use super::{background_estimate, matched_truths};
 use crate::math::fwhm_to_sigma;
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::render_gaussian_star;
@@ -33,9 +33,8 @@ fn field(
     Buffer2::new(width, height, pixels)
 }
 
-fn deblend_config(fwhm: f32, n_thresholds: usize, min_contrast: f32) -> Config {
-    Config {
-        expected_fwhm: fwhm,
+fn deblend_config(n_thresholds: usize, min_contrast: f32) -> DetectionConfig {
+    DetectionConfig {
         deblend_n_thresholds: n_thresholds,
         deblend_min_contrast: min_contrast,
         ..Default::default()
@@ -52,7 +51,7 @@ fn deblend_resolves_equal_pair_into_exactly_two() {
     let pixels = field(width, height, sigma, &[(x1, y, 0.15), (x2, y, 0.15)], 42);
     let background = background_estimate(&pixels);
 
-    let candidates = detect_stars_test(&pixels, &background, &deblend_config(fwhm, 32, 0.005));
+    let candidates = detect_stars_test(&pixels, &background, &deblend_config(32, 0.005));
     assert_eq!(
         candidates.len(),
         2,
@@ -78,7 +77,7 @@ fn deblend_resolves_chain_of_five() {
     let pixels = field(width, height, sigma, &stars, 42);
     let background = background_estimate(&pixels);
 
-    let candidates = detect_stars_test(&pixels, &background, &deblend_config(fwhm, 32, 0.005));
+    let candidates = detect_stars_test(&pixels, &background, &deblend_config(32, 0.005));
     assert_eq!(
         candidates.len(),
         5,
@@ -103,7 +102,7 @@ fn deblend_resolves_unequal_pair() {
     let pixels = field(width, height, sigma, &[(x1, y, 0.20), (x2, y, 0.05)], 42);
     let background = background_estimate(&pixels);
 
-    let candidates = detect_stars_test(&pixels, &background, &deblend_config(fwhm, 32, 0.005));
+    let candidates = detect_stars_test(&pixels, &background, &deblend_config(32, 0.005));
     assert_eq!(
         candidates.len(),
         2,
@@ -129,7 +128,7 @@ fn deblend_separation_controls_split() {
         let (x1, x2, y) = (128.0 - sep / 2.0, 128.0 + sep / 2.0, 128.0);
         let pixels = field(width, height, sigma, &[(x1, y, 0.15), (x2, y, 0.15)], 42);
         let background = background_estimate(&pixels);
-        detect_stars_test(&pixels, &background, &deblend_config(fwhm, 32, 0.005)).len()
+        detect_stars_test(&pixels, &background, &deblend_config(32, 0.005)).len()
     };
     let wide = pair_count(2.5);
     let touching = pair_count(0.5);

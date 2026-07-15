@@ -7,7 +7,7 @@ use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::measure_star;
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::MeasurementConfig;
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::star::Star;
 
@@ -19,12 +19,13 @@ pub(crate) fn measure(
     regions: &[Region],
     pixels: &Buffer2<f32>,
     stats: &BackgroundEstimate,
-    config: &Config,
+    config: &MeasurementConfig,
+    expected_fwhm: f32,
 ) -> Vec<Star> {
     use rayon::prelude::*;
 
     regions
         .par_iter()
-        .filter_map(|region| measure_star(pixels, stats, region, config))
+        .filter_map(|region| measure_star(pixels, stats, region, config, expected_fwhm))
         .collect()
 }

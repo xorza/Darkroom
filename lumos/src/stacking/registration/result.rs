@@ -56,6 +56,12 @@ pub enum RegistrationError {
     StarDetection(String),
     /// A configuration parameter is outside its valid range.
     InvalidConfig(String),
+    /// Reference and target point counts differ for SIP fitting.
+    SipPointCountMismatch { reference: usize, target: usize },
+    /// Not enough matched points are available for a stable SIP fit.
+    InsufficientSipPoints { found: usize, required: usize },
+    /// The SIP polynomial system is singular.
+    SingularSipSystem,
 }
 
 impl std::fmt::Display for RegistrationError {
@@ -97,6 +103,23 @@ impl std::fmt::Display for RegistrationError {
             }
             RegistrationError::InvalidConfig(msg) => {
                 write!(f, "Invalid configuration: {}", msg)
+            }
+            RegistrationError::SipPointCountMismatch { reference, target } => {
+                write!(
+                    f,
+                    "SIP point count mismatch: {} reference points, {} target points",
+                    reference, target
+                )
+            }
+            RegistrationError::InsufficientSipPoints { found, required } => {
+                write!(
+                    f,
+                    "Insufficient points for SIP fit: found {}, need {}",
+                    found, required
+                )
+            }
+            RegistrationError::SingularSipSystem => {
+                write!(f, "SIP fit failed: singular polynomial system")
             }
         }
     }
@@ -381,6 +404,32 @@ mod tests {
         let err = RegistrationError::StarDetection("threshold too high".to_string());
         let msg = format!("{}", err);
         assert_eq!(msg, "Star detection failed: threshold too high");
+    }
+
+    #[test]
+    fn test_registration_error_display_sip_failures() {
+        for (error, expected) in [
+            (
+                RegistrationError::SipPointCountMismatch {
+                    reference: 12,
+                    target: 10,
+                },
+                "SIP point count mismatch: 12 reference points, 10 target points",
+            ),
+            (
+                RegistrationError::InsufficientSipPoints {
+                    found: 8,
+                    required: 9,
+                },
+                "Insufficient points for SIP fit: found 8, need 9",
+            ),
+            (
+                RegistrationError::SingularSipSystem,
+                "SIP fit failed: singular polynomial system",
+            ),
+        ] {
+            assert_eq!(error.to_string(), expected);
+        }
     }
 
     #[test]

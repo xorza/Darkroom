@@ -6,7 +6,9 @@
 use crate::math::statistics::{mad_f32_with_scratch, mad_floored, median_f32_mut};
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::buffer_pool::BufferPool;
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::{
+    DetectionConfig, FilterConfig, FwhmConfig, MeasurementConfig,
+};
 use crate::stacking::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
 use crate::stacking::star_detection::detector::stages::detect::detect;
 use crate::stacking::star_detection::detector::stages::measure;
@@ -51,19 +53,30 @@ pub(crate) struct FwhmResult {
 pub(crate) fn estimate_fwhm(
     pixels: &Buffer2<f32>,
     stats: &BackgroundEstimate,
-    config: &Config,
+    config: &FwhmConfig,
+    detection_config: &DetectionConfig,
+    measurement_config: &MeasurementConfig,
+    filter_config: &FilterConfig,
     pool: &mut BufferPool,
 ) -> FwhmResult {
     // Auto-estimation takes precedence; `expected_fwhm` becomes its fallback when too few stars
     // are found (see `estimate_from_bright_stars`).
-    if config.auto_estimate_fwhm {
-        return estimate_from_bright_stars(pixels, stats, config, pool);
+    if config.auto_estimate {
+        return estimate_from_bright_stars(
+            pixels,
+            stats,
+            config,
+            detection_config,
+            measurement_config,
+            filter_config,
+            pool,
+        );
     }
 
     // Otherwise use the fixed expected FWHM (0 disables the matched filter).
-    if config.expected_fwhm > f32::EPSILON {
+    if config.expected > f32::EPSILON {
         return FwhmResult {
-            fwhm: Some(config.expected_fwhm),
+            fwhm: Some(config.expected),
             stars_used: 0,
         };
     }
@@ -78,16 +91,16 @@ pub(crate) fn estimate_fwhm(
 fn estimate_from_bright_stars(
     pixels: &Buffer2<f32>,
     stats: &BackgroundEstimate,
-    config: &Config,
+    config: &FwhmConfig,
+    detection_config: &DetectionConfig,
+    measurement_config: &MeasurementConfig,
+    filter_config: &FilterConfig,
     pool: &mut BufferPool,
 ) -> FwhmResult {
-    // Use stricter thresholds for FWHM estimation
-    let first_pass_config = Config {
-        sigma_threshold: config.sigma_threshold * config.fwhm_estimation_sigma_factor,
-        expected_fwhm: 0.0,
+    let first_pass_config = DetectionConfig {
+        sigma_threshold: detection_config.sigma_threshold * config.estimation_sigma_factor,
         min_area: 3,
-        min_snr: config.min_snr * 2.0,
-        ..config.clone()
+        ..detection_config.clone()
     };
 
     // Run detection without matched filter
@@ -97,21 +110,21 @@ fn estimate_from_bright_stars(
         regions.len()
     );
 
-    let stars = measure::measure(&regions, pixels, stats, &first_pass_config);
+    let stars = measure::measure(&regions, pixels, stats, measurement_config, 0.0);
 
     // Fall back to the configured `expected_fwhm` (a tuned per-preset seed) when auto-estimation
     // can't find enough stars; only use the generic default if no expected FWHM was set.
-    let fallback_fwhm = if config.expected_fwhm > f32::EPSILON {
-        config.expected_fwhm
+    let fallback_fwhm = if config.expected > f32::EPSILON {
+        config.expected
     } else {
         DEFAULT_FWHM
     };
     estimate_fwhm_from_stars(
         &stars,
-        config.min_stars_for_fwhm,
+        config.min_stars,
         fallback_fwhm,
-        config.max_eccentricity,
-        config.max_sharpness,
+        filter_config.max_eccentricity,
+        filter_config.max_sharpness,
     )
 }
 

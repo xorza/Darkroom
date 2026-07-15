@@ -397,12 +397,14 @@ registration/
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `transform_type` | Homography | Maximum transformation complexity |
-| `min_stars_for_matching` | 10 | Minimum stars required to attempt registration |
-| `min_matched_stars` | 8 | Minimum matches after triangle matching |
-| `max_residual_pixels` | 2.0 | Maximum acceptable RMS error |
+| `transform_type` | Auto | Transformation model or automatic model ladder |
+| `matching` | `RegistrationMatchingConfig::default()` | Star selection and triangle matching |
+| `ransac` | `RansacConfig::default()` | Robust transform estimation |
+| `max_rms_error` | 2.0 | Maximum acceptable RMS error |
+| `sip` | None | Optional `SipConfig` distortion correction |
+| `warp` | `WarpParams::default()` | Resampling method and border value |
 
-### TriangleMatchConfig
+### TriangleConfig
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -424,12 +426,14 @@ registration/
 
 `max_sigma` is derived from the input stars' median FWHM at runtime.
 
-### SipCorrectionConfig
+### SipConfig
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `enabled` | false | Enable SIP distortion correction |
 | `order` | 3 | Polynomial order (2-5) |
+| `reference_point` | None | Polynomial origin; input centroid when absent |
+| `clip_sigma` | 3.0 | MAD sigma-clipping threshold |
+| `clip_iterations` | 3 | Outlier-rejection iterations |
 
 ---
 

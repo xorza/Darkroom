@@ -22,13 +22,11 @@ use imaginarium::Buffer2;
 
 /// Default star detector for synthetic images.
 fn detector() -> StarDetector {
-    StarDetector::from_config(DetConfig {
-        expected_fwhm: 0.0, // Disable matched filter for synthetic images
-        min_snr: 5.0,
-        sigma_threshold: 3.0,
-        ..Default::default()
-    })
-    .unwrap()
+    let mut config = DetConfig::default();
+    config.fwhm.expected = 0.0;
+    config.filter.min_snr = 5.0;
+    config.detection.sigma_threshold = 3.0;
+    StarDetector::from_config(config).unwrap()
 }
 
 /// Apply a similarity transform to an image.
@@ -307,13 +305,11 @@ fn test_image_registration_with_noise() {
     let target_image =
         AstroImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
 
-    let mut det = StarDetector::from_config(DetConfig {
-        expected_fwhm: 0.0,
-        min_snr: 8.0,
-        sigma_threshold: 4.0,
-        ..Default::default()
-    })
-    .unwrap();
+    let mut detection_config = DetConfig::default();
+    detection_config.fwhm.expected = 0.0;
+    detection_config.filter.min_snr = 8.0;
+    detection_config.detection.sigma_threshold = 4.0;
+    let mut det = StarDetector::from_config(detection_config).unwrap();
 
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);

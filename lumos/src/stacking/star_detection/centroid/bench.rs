@@ -11,7 +11,9 @@ use crate::stacking::star_detection::centroid::measure_star;
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 use crate::stacking::star_detection::centroid::refine_centroid;
 use crate::stacking::star_detection::centroid::test_utils::make_gaussian_star;
-use crate::stacking::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
+use crate::stacking::star_detection::config::{
+    BackgroundConfig, CentroidMethod, DetectionConfig, LocalBackgroundMethod, MeasurementConfig,
+};
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::estimate_background;
 use crate::testing::synthetic::fixtures::star_field;
@@ -23,10 +25,10 @@ fn bench_measure_star_single(b: ::quickbench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = estimate_background(&pixels, &Config::default());
-    let candidates = detect_stars_test(&pixels, &bg, &Config::default());
+    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
-    let config = Config {
+    let config = MeasurementConfig {
         centroid_method: CentroidMethod::WeightedMoments,
         ..Default::default()
     };
@@ -37,6 +39,7 @@ fn bench_measure_star_single(b: ::quickbench::Bencher) {
             black_box(&bg),
             black_box(region),
             black_box(&config),
+            4.0,
         ))
     });
 }
@@ -47,10 +50,10 @@ fn bench_measure_star_gaussian_fit(b: ::quickbench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = estimate_background(&pixels, &Config::default());
-    let candidates = detect_stars_test(&pixels, &bg, &Config::default());
+    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
-    let config = Config {
+    let config = MeasurementConfig {
         centroid_method: CentroidMethod::GaussianFit,
         ..Default::default()
     };
@@ -61,6 +64,7 @@ fn bench_measure_star_gaussian_fit(b: ::quickbench::Bencher) {
             black_box(&bg),
             black_box(region),
             black_box(&config),
+            4.0,
         ))
     });
 }
@@ -71,10 +75,10 @@ fn bench_measure_star_moffat_fit(b: ::quickbench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = estimate_background(&pixels, &Config::default());
-    let candidates = detect_stars_test(&pixels, &bg, &Config::default());
+    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
-    let config = Config {
+    let config = MeasurementConfig {
         centroid_method: CentroidMethod::MoffatFit { beta: 2.5 },
         ..Default::default()
     };
@@ -85,6 +89,7 @@ fn bench_measure_star_moffat_fit(b: ::quickbench::Bencher) {
             black_box(&bg),
             black_box(region),
             black_box(&config),
+            4.0,
         ))
     });
 }
@@ -95,10 +100,10 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
     let width = 128;
     let height = 128;
     let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), 2.5, 0.8, 0.1);
-    let bg = estimate_background(&pixels, &Config::default());
-    let candidates = detect_stars_test(&pixels, &bg, &Config::default());
+    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
-    let config = Config {
+    let config = MeasurementConfig {
         centroid_method: CentroidMethod::WeightedMoments,
         local_background: LocalBackgroundMethod::LocalAnnulus,
         ..Default::default()
@@ -110,6 +115,7 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
             black_box(&bg),
             black_box(region),
             black_box(&config),
+            4.0,
         ))
     });
 }
@@ -118,10 +124,10 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
 fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
     // 100 stars batch processing with WeightedMoments
     let pixels = star_field(512, 512, 100, 42).image.channel(0).clone();
-    let bg = estimate_background(&pixels, &Config::default());
-    let candidates = detect_stars_test(&pixels, &bg, &Config::default());
+    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let regions: Vec<_> = candidates.iter().collect();
-    let config = Config {
+    let config = MeasurementConfig {
         centroid_method: CentroidMethod::WeightedMoments,
         ..Default::default()
     };
@@ -129,7 +135,7 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
     b.bench(|| {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config))
+            .filter_map(|r| measure_star(&pixels, &bg, r, &config, 4.0))
             .collect();
         black_box(stars)
     });
@@ -139,19 +145,19 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
 fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     // 2000 stars on 4K image - compare all centroid methods
     let pixels = star_field(6144, 6144, 10000, 42).image.channel(0).clone();
-    let bg = estimate_background(&pixels, &Config::default());
-    let candidates = detect_stars_test(&pixels, &bg, &Config::default());
+    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let regions: Vec<_> = candidates.iter().collect();
 
-    let config_moments = Config {
+    let config_moments = MeasurementConfig {
         centroid_method: CentroidMethod::WeightedMoments,
         ..Default::default()
     };
-    let config_gaussian = Config {
+    let config_gaussian = MeasurementConfig {
         centroid_method: CentroidMethod::GaussianFit,
         ..Default::default()
     };
-    let config_moffat = Config {
+    let config_moffat = MeasurementConfig {
         centroid_method: CentroidMethod::MoffatFit { beta: 2.5 },
         ..Default::default()
     };
@@ -159,7 +165,7 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("weighted_moments", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config_moments))
+            .filter_map(|r| measure_star(&pixels, &bg, r, &config_moments, 4.0))
             .collect();
         black_box(stars)
     });
@@ -167,7 +173,7 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("gaussian_fit", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config_gaussian))
+            .filter_map(|r| measure_star(&pixels, &bg, r, &config_gaussian, 4.0))
             .collect();
         black_box(stars)
     });
@@ -175,7 +181,7 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("moffat_fit", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config_moffat))
+            .filter_map(|r| measure_star(&pixels, &bg, r, &config_moffat, 4.0))
             .collect();
         black_box(stars)
     });
@@ -187,7 +193,7 @@ fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = estimate_background(&pixels, &Config::default());
+    let bg = estimate_background(&pixels, &BackgroundConfig::default());
     let stamp_radius = 7; // typical for FWHM ~4
     let expected_fwhm = 4.0;
 
@@ -210,7 +216,7 @@ fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = estimate_background(&pixels, &Config::default());
+    let bg = estimate_background(&pixels, &BackgroundConfig::default());
     let stamp_radius = 7;
     let expected_fwhm = 4.0;
 

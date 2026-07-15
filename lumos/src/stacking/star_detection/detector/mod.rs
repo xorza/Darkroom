@@ -18,6 +18,8 @@ use crate::stacking::star_detection::buffer_pool::BufferPool;
 #[cfg(test)]
 use crate::stacking::star_detection::buffer_pool::PoolCounts;
 use crate::stacking::star_detection::config::Config;
+#[cfg(test)]
+use crate::stacking::star_detection::config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::filter::FilterOutcome;
 use crate::stacking::star_detection::error::StarDetectionConfigError;
 use crate::stacking::star_detection::star::Star;
@@ -120,23 +122,36 @@ impl StarDetector {
         let grayscale_image = stages::prepare::prepare(image, pool);
 
         // Step 2: Estimate background and noise
-        let mut background = estimate_background(&grayscale_image, &self.config, pool);
+        let mut background = estimate_background(&grayscale_image, &self.config.background, pool);
 
         // Step 2b: Refine background if iterative refinement is enabled
-        if self.config.refinement.iterations() > 0 {
-            refine_background(&grayscale_image, &mut background, &self.config, pool);
+        if self.config.background.refinement.iterations() > 0 {
+            refine_background(
+                &grayscale_image,
+                &mut background,
+                &self.config.background,
+                self.config.detection.sigma_threshold,
+                pool,
+            );
         }
 
         // Step 3: Determine effective FWHM (manual > auto-estimate > disabled)
-        let fwhm_result =
-            stages::fwhm::estimate_fwhm(&grayscale_image, &background, &self.config, pool);
+        let fwhm_result = stages::fwhm::estimate_fwhm(
+            &grayscale_image,
+            &background,
+            &self.config.fwhm,
+            &self.config.detection,
+            &self.config.measurement,
+            &self.config.filter,
+            pool,
+        );
 
         // Step 4: Detect star candidate regions (with optional matched filter)
         let detect_result = stages::detect::detect(
             &grayscale_image,
             &background,
             fwhm_result.fwhm,
-            &self.config,
+            &self.config.detection,
             pool,
         );
 
@@ -157,7 +172,8 @@ impl StarDetector {
             &detect_result.regions,
             &grayscale_image,
             &background,
-            &self.config,
+            &self.config.measurement,
+            self.config.fwhm.expected,
         );
         diagnostics.stars_after_centroid = stars.len();
 
@@ -167,7 +183,7 @@ impl StarDetector {
         pool.release_f32(grayscale_image);
 
         // Step 6: Apply quality filters, sort, and remove duplicates
-        let FilterOutcome { stars, stats } = stages::filter::filter(stars, &self.config);
+        let FilterOutcome { stars, stats } = stages::filter::filter(stars, &self.config.filter);
         stats.apply_to(&mut diagnostics);
 
         if stats.fwhm_outliers > 0 {
@@ -211,7 +227,10 @@ mod tests {
     #[test]
     fn constructor_rejects_invalid_configuration() {
         let error = StarDetector::from_config(Config {
-            sigma_threshold: 0.0,
+            detection: DetectionConfig {
+                sigma_threshold: 0.0,
+                ..Default::default()
+            },
             ..Config::default()
         })
         .unwrap_err();

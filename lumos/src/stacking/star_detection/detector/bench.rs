@@ -7,7 +7,8 @@ use std::hint::black_box;
 
 use crate::io::astro_image::ImageDimensions;
 use crate::stacking::star_detection::config::{
-    BackgroundRefinement, CentroidMethod, Config, Connectivity, LocalBackgroundMethod,
+    BackgroundConfig, BackgroundRefinement, CentroidMethod, Config, Connectivity, DetectionConfig,
+    FilterConfig, FwhmConfig, LocalBackgroundMethod, MeasurementConfig,
 };
 use crate::testing::init_tracing;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
@@ -29,42 +30,44 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
 
     // Fully expanded config - adjust values here to experiment
     let config = Config {
-        // Background
-        sigma_threshold: 4.0,
-        bg_mask_dilation: 3,
-        tile_size: 64,
-        sigma_clip_iterations: 5,
-        refinement: BackgroundRefinement::Iterative { iterations: 2 },
-        // Detection
-        connectivity: Connectivity::Eight,
-        // Region filtering
-        min_area: 5,
-        max_area: 500,
-        edge_margin: 10,
-        // Deblending
-        deblend_min_separation: 2,
-        deblend_min_prominence: 0.3,
-        deblend_n_thresholds: 32,
-        deblend_min_contrast: 0.005,
-        // Centroid
-        centroid_method: CentroidMethod::WeightedMoments,
-        local_background: LocalBackgroundMethod::GlobalMap,
-        // PSF
-        expected_fwhm: 4.0,
-        psf_axis_ratio: 1.0,
-        psf_angle: 0.0,
-        auto_estimate_fwhm: false,
-        min_stars_for_fwhm: 10,
-        fwhm_estimation_sigma_factor: 2.0,
-        // Star quality filtering
-        min_snr: 10.0,
-        max_eccentricity: 0.6,
-        max_sharpness: 0.7,
-        max_roundness: 1.0,
-        max_fwhm_deviation: 3.0,
-        duplicate_min_separation: 8.0,
-        // Other
-        noise_model: None,
+        background: BackgroundConfig {
+            tile_size: 64,
+            sigma_clip_iterations: 5,
+            refinement: BackgroundRefinement::Iterative { iterations: 2 },
+            mask_dilation: 3,
+        },
+        detection: DetectionConfig {
+            sigma_threshold: 4.0,
+            connectivity: Connectivity::Eight,
+            psf_axis_ratio: 1.0,
+            psf_angle: 0.0,
+            deblend_min_separation: 2,
+            deblend_min_prominence: 0.3,
+            deblend_n_thresholds: 32,
+            deblend_min_contrast: 0.005,
+            min_area: 5,
+            max_area: 500,
+            edge_margin: 10,
+        },
+        fwhm: FwhmConfig {
+            expected: 4.0,
+            auto_estimate: false,
+            min_stars: 10,
+            estimation_sigma_factor: 2.0,
+        },
+        measurement: MeasurementConfig {
+            centroid_method: CentroidMethod::WeightedMoments,
+            local_background: LocalBackgroundMethod::GlobalMap,
+            noise_model: None,
+        },
+        filter: FilterConfig {
+            min_snr: 10.0,
+            max_eccentricity: 0.6,
+            max_sharpness: 0.7,
+            max_roundness: 1.0,
+            max_fwhm_deviation: 3.0,
+            duplicate_min_separation: 8.0,
+        },
     };
 
     let mut detector = StarDetector::from_config(config).unwrap();

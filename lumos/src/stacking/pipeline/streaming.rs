@@ -244,7 +244,7 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
                 let warped = warp(
                     &calibrated,
                     &registration.warp_transform(),
-                    &config.registration,
+                    &config.registration.warp,
                 );
                 tracing::info!(
                     frame = n,

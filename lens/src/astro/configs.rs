@@ -11,7 +11,7 @@
 use common::{Introspect, IntrospectEnum};
 use lumos::{
     BackgroundMode, ColorMode, Denoise, ExtractBackground, Hdr, LocalContrast, RegistrationConfig,
-    Scnr, StackConfig, StarDetectionConfig, Stretch, StretchMethod, Threshold,
+    Scnr, SipConfig, StackConfig, StarDetectionConfig, Stretch, StretchMethod, Threshold,
 };
 use strum_macros::{Display, EnumString};
 
@@ -114,27 +114,26 @@ impl Default for DetectionConfigDef {
 impl From<StarDetectionConfig> for DetectionConfigDef {
     fn from(config: StarDetectionConfig) -> Self {
         Self {
-            sigma_threshold: config.sigma_threshold,
-            expected_fwhm: config.expected_fwhm,
-            min_area: config.min_area,
-            max_area: config.max_area,
-            min_snr: config.min_snr,
-            max_eccentricity: config.max_eccentricity,
+            sigma_threshold: config.detection.sigma_threshold,
+            expected_fwhm: config.fwhm.expected,
+            min_area: config.detection.min_area,
+            max_area: config.detection.max_area,
+            min_snr: config.filter.min_snr,
+            max_eccentricity: config.filter.max_eccentricity,
         }
     }
 }
 
 impl From<DetectionConfigDef> for StarDetectionConfig {
     fn from(mirror: DetectionConfigDef) -> Self {
-        StarDetectionConfig {
-            sigma_threshold: mirror.sigma_threshold,
-            expected_fwhm: mirror.expected_fwhm,
-            min_area: mirror.min_area,
-            max_area: mirror.max_area,
-            min_snr: mirror.min_snr,
-            max_eccentricity: mirror.max_eccentricity,
-            ..Default::default()
-        }
+        let mut config = StarDetectionConfig::default();
+        config.detection.sigma_threshold = mirror.sigma_threshold;
+        config.fwhm.expected = mirror.expected_fwhm;
+        config.detection.min_area = mirror.min_area;
+        config.detection.max_area = mirror.max_area;
+        config.filter.min_snr = mirror.min_snr;
+        config.filter.max_eccentricity = mirror.max_eccentricity;
+        config
     }
 }
 
@@ -168,7 +167,7 @@ impl From<RegistrationConfig> for RegistrationConfigDef {
             ratio_tolerance: config.matching.triangle.ratio_tolerance,
             ransac_iterations: config.ransac.max_iterations,
             max_rms_error: config.max_rms_error,
-            sip_enabled: config.sip_enabled,
+            sip_enabled: config.sip.is_some(),
         }
     }
 }
@@ -181,7 +180,7 @@ impl From<RegistrationConfigDef> for RegistrationConfig {
         config.matching.triangle.ratio_tolerance = mirror.ratio_tolerance;
         config.ransac.max_iterations = mirror.ransac_iterations;
         config.max_rms_error = mirror.max_rms_error;
-        config.sip_enabled = mirror.sip_enabled;
+        config.sip = mirror.sip_enabled.then(SipConfig::default);
         config
     }
 }

@@ -3,7 +3,7 @@
 //! Tests the Gaussian filtering for star enhancement.
 
 use crate::math::fwhm_to_sigma;
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::BackgroundConfig;
 use crate::stacking::star_detection::convolution::gaussian_convolve;
 use crate::stacking::star_detection::synthetic_tests::Scenario;
 use crate::stacking::star_detection::test_common::output::image_writer::save_grayscale;
@@ -53,7 +53,7 @@ fn test_gaussian_filter_sparse() {
     // Estimate and subtract background
     let background = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -162,7 +162,7 @@ fn test_gaussian_filter_fwhm_range() {
     // Background subtraction
     let background = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -240,7 +240,7 @@ fn test_gaussian_filter_noise() {
     // Background subtraction
     let background = estimate_background(
         &pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },

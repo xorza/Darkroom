@@ -1,7 +1,7 @@
 //! Algorithm stage tests - tests individual components of the star detection pipeline.
 
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::BackgroundConfig;
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::testing::estimate_background;
 use imaginarium::Buffer2;
@@ -20,7 +20,7 @@ mod detection_tests;
 pub(crate) fn background_estimate(pixels: &Buffer2<f32>) -> BackgroundEstimate {
     estimate_background(
         pixels,
-        &Config {
+        &BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
