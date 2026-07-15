@@ -30,3 +30,5 @@ move benches to the src to avoid overexposing api
 audit allocations overshoot , see where reserve_exxact would be better
 
 pinned output makes node store outputs in ram
+
+callback when eventloop stopped for gui

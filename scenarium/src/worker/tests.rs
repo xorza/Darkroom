@@ -528,17 +528,21 @@ async fn stale_cancel_is_cleared_at_run_start() {
 async fn start_stop_event_loop() {
     let mut h = FrameHarness::with_callback_capacity(32).await;
 
-    h.worker
-        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
-        .unwrap();
+    sync_after(&h.worker, [h.update_msg(), WorkerMessage::StartEventLoop]).await;
 
-    let _ = h.compute_rx.recv().await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(h.worker.is_event_loop_started());
+    let initial = h.compute_rx.recv().await.unwrap().unwrap();
+    assert!(messages(&initial).is_empty());
+    let event = timeout(Duration::from_millis(500), h.compute_rx.recv())
+        .await
+        .expect("event loop did not produce a callback")
+        .expect("callback channel closed")
+        .expect("event loop execution failed");
+    assert_eq!(event.executed_nodes.len(), 3);
+    assert_eq!(event.logs.len(), 1);
 
-    h.worker.send(WorkerMessage::StopEventLoop).unwrap();
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(!h.worker.is_event_loop_started());
+    sync_after(&h.worker, [WorkerMessage::StopEventLoop]).await;
+    while h.compute_rx.try_recv().is_ok() {}
+    assert_no_callback_within(&mut h.compute_rx, Duration::from_millis(100)).await;
 }
 
 /// `ExecuteNodes` end-to-end: an `Update` + `ExecuteNodes` batch runs only the seeded
@@ -591,18 +595,22 @@ async fn sync_fires_after_execution() {
 async fn update_restarts_event_loop_if_running() {
     let mut h = FrameHarness::with_callback_capacity(32).await;
 
-    h.worker
-        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
-        .unwrap();
-    let _ = h.compute_rx.recv().await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(h.worker.is_event_loop_started());
-
-    h.worker.send(h.update_msg()).unwrap();
+    sync_after(&h.worker, [h.update_msg(), WorkerMessage::StartEventLoop]).await;
     while h.compute_rx.try_recv().is_ok() {}
+    timeout(Duration::from_millis(500), h.compute_rx.recv())
+        .await
+        .expect("event loop did not produce a callback before update")
+        .expect("callback channel closed")
+        .expect("event loop execution failed");
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(h.worker.is_event_loop_started());
+    sync_after(&h.worker, [h.update_msg()]).await;
+    while h.compute_rx.try_recv().is_ok() {}
+    let event = timeout(Duration::from_millis(500), h.compute_rx.recv())
+        .await
+        .expect("restarted event loop did not produce a callback")
+        .expect("callback channel closed")
+        .expect("event loop execution failed");
+    assert_eq!(event.executed_nodes.len(), 3);
 }
 
 // Stale-event filtering is now structural: each start_event_loop
@@ -648,11 +656,7 @@ async fn send_many_empty_is_noop() {
 async fn stop_event_loop_when_not_running_is_noop() {
     let worker = Worker::new(|_| {});
 
-    worker.send(WorkerMessage::StopEventLoop).unwrap();
-    assert!(!worker.is_event_loop_started());
-
-    // Worker still responsive after a no-op stop.
-    sync_after(&worker, std::iter::empty()).await;
+    sync_after(&worker, [WorkerMessage::StopEventLoop]).await;
 }
 
 #[tokio::test]
@@ -711,7 +715,7 @@ async fn assert_no_callback_within(
 ) {
     assert!(
         timeout(d, rx.recv()).await.is_err(),
-        "empty-graph commands must be silent no-ops, but a callback fired"
+        "unexpected worker callback"
     );
 }
 
@@ -739,12 +743,8 @@ async fn event_on_empty_graph_is_silent_noop() {
 #[tokio::test]
 async fn start_event_loop_on_empty_graph_is_silent_noop() {
     let (worker, mut rx) = finished_worker(8);
-    worker.send(WorkerMessage::StartEventLoop).unwrap();
+    sync_after(&worker, [WorkerMessage::StartEventLoop]).await;
     assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
-    assert!(
-        !worker.is_event_loop_started(),
-        "no loop should actually have started"
-    );
 }
 
 // F4 regression: when a batch triggers both an execution
@@ -778,15 +778,7 @@ async fn execute_sinks_with_start_event_loop_fires_callback_once() {
         .expect("callback channel closed");
     assert!(first.is_ok(), "execute must succeed: {first:?}");
 
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(
-        compute_finish_rx.try_recv().is_err(),
-        "ExecuteSinks+StartEventLoop must fire callback exactly once"
-    );
-    assert!(
-        !worker.is_event_loop_started(),
-        "sink-only graph yields no triggers; loop should not have started"
-    );
+    assert_no_callback_within(&mut compute_finish_rx, Duration::from_millis(100)).await;
     assert_eq!(messages(first.as_ref().unwrap()), ["hi"]);
 }
 
@@ -843,11 +835,12 @@ async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
     // empty graph must fire no callback at all.
     let (worker, mut rx) = finished_worker(8);
 
-    worker
-        .send_many([WorkerMessage::ExecuteSinks, WorkerMessage::StartEventLoop])
-        .unwrap();
+    sync_after(
+        &worker,
+        [WorkerMessage::ExecuteSinks, WorkerMessage::StartEventLoop],
+    )
+    .await;
     assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
-    assert!(!worker.is_event_loop_started());
 }
 
 #[test]
@@ -1044,12 +1037,13 @@ async fn update_then_clear_in_same_batch_leaves_graph_cleared() {
 async fn commands_not_starved_by_fast_event_loop() {
     let mut h = FrameHarness::with_callback_capacity(512).await;
 
-    h.worker
-        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
-        .unwrap();
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(h.worker.is_event_loop_started());
+    sync_after(&h.worker, [h.update_msg(), WorkerMessage::StartEventLoop]).await;
+    h.compute_rx.recv().await.unwrap().unwrap();
+    timeout(Duration::from_millis(500), h.compute_rx.recv())
+        .await
+        .expect("event loop did not produce a callback")
+        .expect("callback channel closed")
+        .expect("event loop execution failed");
 
     // Drain accumulated callbacks so the channel isn't a
     // confounding factor.
@@ -1059,10 +1053,8 @@ async fn commands_not_starved_by_fast_event_loop() {
     // even though lambda events are still being produced.
     sync_after(&h.worker, [WorkerMessage::StopEventLoop]).await;
 
-    assert!(
-        !h.worker.is_event_loop_started(),
-        "event loop should be stopped"
-    );
+    while h.compute_rx.try_recv().is_ok() {}
+    assert_no_callback_within(&mut h.compute_rx, Duration::from_millis(100)).await;
 }
 
 // End-to-end: an event fired by a lambda reaches the worker's
@@ -1125,46 +1117,22 @@ async fn exit_in_batch_closes_pending_sync() {
 async fn start_event_loop_twice_is_idempotent() {
     let mut h = FrameHarness::with_callback_capacity(64).await;
 
-    h.worker
-        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
-        .unwrap();
-
-    let _ = timeout(Duration::from_millis(500), h.compute_rx.recv())
+    sync_after(&h.worker, [h.update_msg(), WorkerMessage::StartEventLoop]).await;
+    while h.compute_rx.try_recv().is_ok() {}
+    timeout(Duration::from_millis(500), h.compute_rx.recv())
         .await
-        .expect("initial execute callback");
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(h.worker.is_event_loop_started());
+        .expect("event loop did not produce a callback before restart")
+        .expect("callback channel closed")
+        .expect("event loop execution failed");
 
     // Second StartEventLoop — no graph change; must not panic.
     sync_after(&h.worker, [WorkerMessage::StartEventLoop]).await;
-
-    assert!(
-        h.worker.is_event_loop_started(),
-        "loop must still be running after a redundant Start"
-    );
-}
-
-// F7: the post-commit refresh of `event_loop_started` (mod.rs:381)
-// must make a Sync reply observe the loop state *without* needing a
-// further sleep/yield. A regression that re-stores only at the top
-// of the loop would make this assertion race.
-#[tokio::test]
-async fn is_event_loop_started_reflects_state_before_sync_reply() {
-    let h = FrameHarness::with_callback_capacity(64).await;
-
-    // Start: Sync fires in the same commit → observable must be true.
-    sync_after(&h.worker, [h.update_msg(), WorkerMessage::StartEventLoop]).await;
-    assert!(
-        h.worker.is_event_loop_started(),
-        "is_event_loop_started must be true immediately after Sync reply for a Start batch"
-    );
-
-    // Stop: same expectation, opposite direction.
-    sync_after(&h.worker, [WorkerMessage::StopEventLoop]).await;
-    assert!(
-        !h.worker.is_event_loop_started(),
-        "is_event_loop_started must be false immediately after Sync reply for a Stop batch"
-    );
+    while h.compute_rx.try_recv().is_ok() {}
+    timeout(Duration::from_millis(500), h.compute_rx.recv())
+        .await
+        .expect("event loop did not produce a callback after restart")
+        .expect("callback channel closed")
+        .expect("event loop execution failed");
 }
 
 // F8: dropping a Worker without calling exit() must not leak or

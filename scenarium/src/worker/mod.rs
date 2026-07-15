@@ -1,6 +1,3 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 
@@ -23,7 +20,6 @@ pub(crate) mod protocol;
 pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
     tx: UnboundedSender<Vec<WorkerMessage>>,
-    event_loop_started: Arc<AtomicBool>,
     cancel: CancelToken,
 }
 
@@ -33,26 +29,19 @@ impl Worker {
         ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
     {
         let (tx, rx) = unbounded_channel::<Vec<WorkerMessage>>();
-        let event_loop_started = Arc::new(AtomicBool::new(false));
         let cancel = CancelToken::new();
         let thread_handle = tokio::spawn({
-            let event_loop_started = event_loop_started.clone();
             let cancel = cancel.clone();
             async move {
-                worker_loop(rx, callback, event_loop_started, cancel).await;
+                worker_loop(rx, callback, cancel).await;
             }
         });
 
         Self {
             thread_handle: Some(thread_handle),
             tx,
-            event_loop_started,
             cancel,
         }
-    }
-
-    pub fn is_event_loop_started(&self) -> bool {
-        self.event_loop_started.load(Ordering::Relaxed)
     }
 
     pub fn request_cancel(&self) {
@@ -105,7 +94,6 @@ where
 async fn worker_loop<ExecutionCallback>(
     mut worker_message_rx: UnboundedReceiver<Vec<WorkerMessage>>,
     execution_callback: ExecutionCallback,
-    event_loop_started: Arc<AtomicBool>,
     cancel: CancelToken,
 ) where
     ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
@@ -117,7 +105,6 @@ async fn worker_loop<ExecutionCallback>(
     let event_loop_pause_gate = PauseGate::default();
 
     loop {
-        event_loop_started.store(event_loop.is_some(), Ordering::Relaxed);
         event_buffer.clear();
 
         tokio::select! {
@@ -220,7 +207,6 @@ async fn worker_loop<ExecutionCallback>(
             execution_callback(WorkerReport::Finished(result));
         }
 
-        event_loop_started.store(event_loop.is_some(), Ordering::Relaxed);
         for reply in intent.syncs.drain(..) {
             let _ = reply.send(());
         }
