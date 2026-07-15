@@ -15,7 +15,7 @@ Called from registration (`registration/mod.rs`) via `estimate()` after triangle
 
 ## API
 
-- `RansacEstimator::new(params) -> Self`
+- `RansacEstimator::new(config, max_sigma) -> Self`
 - `estimate(matches, ref_stars, target_stars, transform_type) -> Option<RansacResult>`
 
 Internal:
@@ -69,7 +69,7 @@ Uses Algorithm A-Res (reservoir sampling with weights) with `select_nth_unstable
 When a new best model is found:
 1. Re-estimate transform using all current inliers (least squares)
 2. Recount inliers with refined transform
-3. Repeat if improved, up to `lo_max_iterations` (default 10)
+3. Repeat if improved, up to `lo_iterations` (default 10)
 
 ### Transform Types
 
@@ -86,13 +86,15 @@ When a new best model is found:
 | Parameter | Default | Rationale |
 |-----------|---------|-----------|
 | `max_iterations` | 2000 | Matches OpenCV/PixInsight |
-| `max_sigma` | 1.0 px | MAGSAC++ noise scale (~3px effective threshold) |
 | `confidence` | 0.995 | OpenCV default; avoids premature termination |
 | `min_inlier_ratio` | 0.3 | Handles partial overlap / noisy matches |
-| `use_local_optimization` | true | LO-RANSAC (Chum et al., 2003) |
-| `lo_max_iterations` | 10 | Convergence typically in 3–5 |
+| `local_optimization` | true | LO-RANSAC (Chum et al., 2003) |
+| `lo_iterations` | 10 | Convergence typically in 3–5 |
 | `max_rotation` | 10° | Tracked mounts; set `None` for mosaics |
 | `scale_range` | (0.8, 1.2) | Same telescope; set `None` for mixed setups |
+
+Registration derives `max_sigma` at runtime from the input stars' median FWHM and passes it beside
+the composed `RansacConfig`; it is not a static configuration field.
 
 ## Techniques
 

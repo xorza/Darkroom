@@ -404,9 +404,9 @@ iteration count. LO typically improves inlier count by 5–15% and tightens RMS.
 lumos's `local_optimization` (`ransac/mod.rs:167-240`) implements method **(2)
 Simple**, *iterated*: it re-estimates from all current inliers, rescores with the same
 (non-narrowing) MAGSAC++ loss, swaps in the result only if it improves, and repeats up
-to `lo_max_iterations` times until the inlier count and score stop improving
+to `lo_iterations` times until the inlier count and score stop improving
 (`mod.rs:196-237`) — and crucially **only refines new-best hypotheses**
-(`mod.rs:315-316`: `use_local_optimization && score > best_score`), the standard
+(`mod.rs:360-361`: `local_optimization && score > best_score`), the standard
 cost-saving form. It does *not* do the method-(3) threshold narrowing — a noted gap
 (§9.6). A final least-squares refit on all inliers happens after the loop
 (`mod.rs:353-388`). This non-minimal final refit is essential: the reported transform

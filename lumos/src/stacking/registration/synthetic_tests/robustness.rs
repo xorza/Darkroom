@@ -7,6 +7,7 @@
 //! - Minimum star counts
 //! - Combined disturbances (stress tests)
 
+use crate::stacking::registration::ransac::RansacConfig;
 use crate::stacking::registration::{Config, RegistrationError, TransformType, register};
 use crate::stacking::star_detection::star::Star;
 use crate::testing::synthetic::transforms::{
@@ -37,8 +38,11 @@ fn unconstrained_config(transform_type: TransformType) -> Config {
     Config {
         transform_type,
         matching: helpers::matching_config(6, 4),
-        max_rotation: None,
-        scale_range: None,
+        ransac: RansacConfig {
+            max_rotation: None,
+            scale_range: None,
+            ..Default::default()
+        },
         ..Default::default()
     }
 }

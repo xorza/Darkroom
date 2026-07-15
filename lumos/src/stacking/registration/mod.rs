@@ -66,8 +66,8 @@ use crate::stacking::star_detection::star::Star;
 use distortion::sip::SipConfig;
 use imaginarium::Buffer2;
 use interpolation::warp_image;
+use ransac::RansacEstimator;
 use ransac::transforms::estimate_transform;
-use ransac::{RansacEstimator, RansacParams};
 use spatial::KdTree;
 use triangle::matching::match_triangles;
 use triangle::voting::PointMatch;
@@ -367,25 +367,13 @@ fn estimate_and_refine(
     max_sigma: f64,
     config: &Config,
 ) -> Result<RegistrationResult, RegistrationError> {
-    let ransac_params = RansacParams {
-        max_iterations: config.ransac_iterations,
-        max_sigma,
-        confidence: config.confidence,
-        min_inlier_ratio: config.min_inlier_ratio,
-        seed: config.seed,
-        use_local_optimization: config.local_optimization,
-        lo_max_iterations: config.lo_iterations,
-        max_rotation: config.max_rotation,
-        scale_range: config.scale_range,
-    };
-
     let t0 = Instant::now();
-    let ransac = RansacEstimator::new(ransac_params);
+    let ransac = RansacEstimator::new(config.ransac.clone(), max_sigma);
     let ransac_result = ransac
         .estimate(matches, ref_stars, target_stars, transform_type)
         .ok_or(RegistrationError::RansacFailed {
             reason: RansacFailureReason::NoInliersFound,
-            iterations: config.ransac_iterations,
+            iterations: config.ransac.max_iterations,
             best_inlier_count: 0,
         })?;
     let ransac_ms = t0.elapsed().as_secs_f64() * 1000.0;

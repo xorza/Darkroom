@@ -5,7 +5,7 @@ use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig,
     CalibrationComponent, CalibrationMasters, CombineMethod, DefectSummary, DrizzleConfig,
     DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError, GesdConfig, ImageDimensions,
-    LinearFitClipConfig, Normalization, PercentileClipConfig, RegistrationConfig,
+    LinearFitClipConfig, Normalization, PercentileClipConfig, RansacConfig, RegistrationConfig,
     RegistrationMatchingConfig, Rejection, SigmaClipConfig, SmallN, StackConfig, StackConfigError,
     StackError, StackProduct, StarDetectionConfig, StarDetectionConfigError, StarDetector,
     StarMatch, Transform, TransformType, TriangleConfig, Weighting, WinsorizedClipConfig,
@@ -74,12 +74,19 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
                 check_orientation: false,
             },
         },
+        ransac: RansacConfig {
+            max_iterations: 750,
+            seed: Some(42),
+            ..Default::default()
+        },
         ..Default::default()
     };
     registration.validate().unwrap();
     assert_eq!(registration.matching.max_stars, 50);
     assert_eq!(registration.matching.min_matches, 6);
     assert_eq!(registration.matching.triangle.ratio_tolerance, 0.02);
+    assert_eq!(registration.ransac.max_iterations, 750);
+    assert_eq!(registration.ransac.seed, Some(42));
     assert_eq!(
         registration
             .matching

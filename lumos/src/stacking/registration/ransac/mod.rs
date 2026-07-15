@@ -26,6 +26,7 @@ use transforms::{adaptive_iterations, estimate_transform};
 use glam::DVec2;
 use rand::prelude::*;
 
+use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::{Transform, TransformType};
 use crate::stacking::registration::triangle::voting::PointMatch;
 
@@ -61,42 +62,84 @@ impl LocalOptBuffers {
 /// close to a line for reliable transform estimation.
 const COLLINEARITY_THRESHOLD: f64 = 1.0;
 
-/// RANSAC parameters extracted from Config.
+/// Configuration for robust transform estimation.
 #[derive(Debug, Clone)]
-pub struct RansacParams {
+pub struct RansacConfig {
+    /// Maximum hypotheses to evaluate. Default: 2000.
     pub max_iterations: usize,
-    /// Maximum noise scale (σ_max) in pixels for MAGSAC++ scoring.
-    ///
-    /// Points with residuals greater than ~3·max_sigma are treated as outliers.
-    /// The effective threshold is approximately `3.03 * max_sigma` (based on
-    /// the 99% χ² quantile for 2 degrees of freedom).
-    ///
-    /// Default: 1.0 pixel (~3px effective threshold).
-    ///
-    /// Migration from old `inlier_threshold`: use `max_sigma = inlier_threshold / 3.0`
-    pub max_sigma: f64,
+    /// Target confidence for adaptive early termination. Default: 0.995.
     pub confidence: f64,
+    /// Minimum inlier ratio before adaptive early termination. Default: 0.3.
     pub min_inlier_ratio: f64,
+    /// Random seed for reproducible sampling. Default: random.
     pub seed: Option<u64>,
-    pub use_local_optimization: bool,
-    pub lo_max_iterations: usize,
+    /// Whether to refine promising hypotheses with LO-RANSAC. Default: true.
+    pub local_optimization: bool,
+    /// Maximum LO-RANSAC refinement iterations. Default: 10.
+    pub lo_iterations: usize,
+    /// Maximum absolute rotation in radians. Default: 10 degrees.
     pub max_rotation: Option<f64>,
+    /// Accepted uniform-scale range. Default: 0.8 to 1.2.
     pub scale_range: Option<(f64, f64)>,
 }
 
-impl Default for RansacParams {
+impl Default for RansacConfig {
     fn default() -> Self {
         Self {
             max_iterations: 2000,
-            max_sigma: 1.0, // ~3px effective threshold
             confidence: 0.995,
             min_inlier_ratio: 0.3,
             seed: None,
-            use_local_optimization: true,
-            lo_max_iterations: 10,
-            max_rotation: None,
-            scale_range: None,
+            local_optimization: true,
+            lo_iterations: 10,
+            max_rotation: Some(10.0_f64.to_radians()),
+            scale_range: Some((0.8, 1.2)),
         }
+    }
+}
+
+impl RansacConfig {
+    pub(crate) fn validate(&self) -> Result<(), RegistrationError> {
+        let invalid = |msg: String| Err(RegistrationError::InvalidConfig(msg));
+        if self.max_iterations == 0 {
+            return invalid(format!(
+                "ransac max_iterations must be positive, got {}",
+                self.max_iterations
+            ));
+        }
+        if self.local_optimization && self.lo_iterations == 0 {
+            return invalid(format!(
+                "ransac lo_iterations must be positive when local_optimization is enabled, got {}",
+                self.lo_iterations
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.confidence) {
+            return invalid(format!(
+                "ransac confidence must be in [0, 1], got {}",
+                self.confidence
+            ));
+        }
+        if !(self.min_inlier_ratio > 0.0 && self.min_inlier_ratio <= 1.0) {
+            return invalid(format!(
+                "ransac min_inlier_ratio must be in (0, 1], got {}",
+                self.min_inlier_ratio
+            ));
+        }
+        if let Some(max_rotation) = self.max_rotation
+            && max_rotation <= 0.0
+        {
+            return invalid(format!(
+                "ransac max_rotation must be positive, got {max_rotation}"
+            ));
+        }
+        if let Some((min_scale, max_scale)) = self.scale_range
+            && !(min_scale > 0.0 && max_scale > min_scale)
+        {
+            return invalid(format!(
+                "ransac scale_range must have 0 < min < max, got ({min_scale}, {max_scale})"
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -126,14 +169,17 @@ pub struct RansacResult {
 }
 
 /// RANSAC estimator for robust transformation fitting.
+#[derive(Debug)]
 pub struct RansacEstimator {
-    params: RansacParams,
+    config: RansacConfig,
+    max_sigma: f64,
 }
 
 impl RansacEstimator {
-    /// Create a new RANSAC estimator.
-    pub fn new(params: RansacParams) -> Self {
-        Self { params }
+    /// Create a RANSAC estimator for the runtime-derived maximum noise scale.
+    pub fn new(config: RansacConfig, max_sigma: f64) -> Self {
+        assert!(max_sigma.is_finite() && max_sigma > 0.0);
+        Self { config, max_sigma }
     }
 
     /// Check whether a transform hypothesis is physically plausible.
@@ -141,13 +187,13 @@ impl RansacEstimator {
     /// Rejects hypotheses where rotation or scale fall outside configured bounds.
     /// Returns `true` if the transform is plausible (or checks are disabled).
     fn is_plausible(&self, transform: &Transform) -> bool {
-        if let Some(max_rotation) = self.params.max_rotation {
+        if let Some(max_rotation) = self.config.max_rotation {
             let angle = transform.rotation_angle().abs();
             if angle > max_rotation {
                 return false;
             }
         }
-        if let Some((min_scale, max_scale)) = self.params.scale_range {
+        if let Some((min_scale, max_scale)) = self.config.scale_range {
             let scale = transform.scale_factor();
             if scale < min_scale || scale > max_scale {
                 return false;
@@ -193,7 +239,7 @@ impl RansacEstimator {
         );
         let mut current_score = initial_score;
 
-        for _ in 0..self.params.lo_max_iterations {
+        for _ in 0..self.config.lo_iterations {
             if buffers.inlier_buf.len() < min_samples {
                 break;
             }
@@ -253,7 +299,7 @@ impl RansacEstimator {
         mut sample_fn: impl FnMut(usize, usize, &mut Vec<usize>),
     ) -> Option<RansacResult> {
         // Initialize MAGSAC++ scorer
-        let scorer = MagsacScorer::new(self.params.max_sigma);
+        let scorer = MagsacScorer::new(self.max_sigma);
 
         let mut best_transform: Option<Transform> = None;
         let mut best_inliers: Vec<usize> = Vec::new();
@@ -267,7 +313,7 @@ impl RansacEstimator {
         let mut lo_buffers = LocalOptBuffers::with_capacity(n);
 
         let mut iterations = 0;
-        let max_iter = self.params.max_iterations;
+        let max_iter = self.config.max_iterations;
 
         while iterations < max_iter {
             iterations += 1;
@@ -312,7 +358,7 @@ impl RansacEstimator {
             let mut current_transform = transform;
 
             // Local Optimization: refine only new-best hypotheses (standard LO-RANSAC)
-            if self.params.use_local_optimization
+            if self.config.local_optimization
                 && score > best_score
                 && inlier_buf.len() >= min_samples
             {
@@ -344,9 +390,9 @@ impl RansacEstimator {
 
                 // Adaptive iteration count based on inlier ratio
                 let inlier_ratio = best_inliers.len() as f64 / n as f64;
-                if inlier_ratio >= self.params.min_inlier_ratio {
+                if inlier_ratio >= self.config.min_inlier_ratio {
                     let adaptive_max =
-                        adaptive_iterations(inlier_ratio, min_samples, self.params.confidence);
+                        adaptive_iterations(inlier_ratio, min_samples, self.config.confidence);
                     if iterations >= adaptive_max {
                         break;
                     }
@@ -429,7 +475,7 @@ impl RansacEstimator {
             return None;
         }
 
-        let mut rng = make_rng(self.params.seed);
+        let mut rng = make_rng(self.config.seed);
 
         // Build sorted index by confidence (descending)
         let mut sorted_indices: Vec<usize> = (0..n).collect();

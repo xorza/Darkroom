@@ -184,7 +184,7 @@ for iteration in 1..max_iterations:
 
     if LO-RANSAC enabled and inliers >= min_samples:
         local_optimization: iteratively re-estimate from inliers
-        (up to lo_max_iterations rounds)
+        (up to lo_iterations rounds)
 
     if score > best_score:
         update best model
@@ -416,12 +416,13 @@ registration/
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `max_iterations` | 2000 | Maximum RANSAC iterations |
-| `max_sigma` | 1.0 | Maximum noise scale for MAGSAC++ scoring (~3px effective threshold) |
 | `confidence` | 0.995 | Target confidence for adaptive termination |
 | `min_inlier_ratio` | 0.3 | Minimum inlier fraction to accept model |
 | `seed` | None | Random seed for deterministic behavior |
-| `use_local_optimization` | true | Enable LO-RANSAC refinement |
-| `lo_max_iterations` | 10 | Maximum local optimization iterations |
+| `local_optimization` | true | Enable LO-RANSAC refinement |
+| `lo_iterations` | 10 | Maximum local optimization iterations |
+
+`max_sigma` is derived from the input stars' median FWHM at runtime.
 
 ### SipCorrectionConfig
 

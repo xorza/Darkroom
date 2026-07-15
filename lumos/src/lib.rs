@@ -59,6 +59,7 @@ pub use stacking::registration::config::{
     Config as RegistrationConfig, InterpolationMethod, RegistrationMatchingConfig,
 };
 pub use stacking::registration::distortion::sip::SipPolynomial;
+pub use stacking::registration::ransac::RansacConfig;
 pub use stacking::registration::result::{
     RansacFailureReason, RegistrationError, RegistrationResult, StarMatch,
 };

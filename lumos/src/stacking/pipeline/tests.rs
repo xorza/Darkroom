@@ -285,7 +285,7 @@ fn streaming_disk_tier_matches_ram_on_real_lights() {
 
     // Seed RANSAC so both tiers are bit-comparable (registration is the only nondeterminism).
     let mut config = AlignStackConfig::default();
-    config.registration.seed = Some(0x00C0_FFEE);
+    config.registration.ransac.seed = Some(0x00C0_FFEE);
 
     // RAM tier: huge memory budget → the all-in-memory path.
     let mut ram_cfg = config.clone();

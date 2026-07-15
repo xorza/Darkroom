@@ -16,3 +16,7 @@ features = ["builtin-fs-watch", "builtin-random"] - move from scenarium
 scenarium = { workspace = true, features = ["internals"] }
 
 diskcached pinned outputs arent shown
+
+stacking frames (outer, inner, reference)
+
+auto chosen reference  and manually specified

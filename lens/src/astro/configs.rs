@@ -166,7 +166,7 @@ impl From<RegistrationConfig> for RegistrationConfigDef {
             max_stars: config.matching.max_stars,
             min_matches: config.matching.min_matches,
             ratio_tolerance: config.matching.triangle.ratio_tolerance,
-            ransac_iterations: config.ransac_iterations,
+            ransac_iterations: config.ransac.max_iterations,
             max_rms_error: config.max_rms_error,
             sip_enabled: config.sip_enabled,
         }
@@ -179,7 +179,7 @@ impl From<RegistrationConfigDef> for RegistrationConfig {
         config.matching.max_stars = mirror.max_stars;
         config.matching.min_matches = mirror.min_matches;
         config.matching.triangle.ratio_tolerance = mirror.ratio_tolerance;
-        config.ransac_iterations = mirror.ransac_iterations;
+        config.ransac.max_iterations = mirror.ransac_iterations;
         config.max_rms_error = mirror.max_rms_error;
         config.sip_enabled = mirror.sip_enabled;
         config

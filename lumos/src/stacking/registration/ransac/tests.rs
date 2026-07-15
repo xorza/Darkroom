@@ -10,6 +10,14 @@ use rand::rngs::SmallRng;
 
 const TOL: f64 = 1e-6;
 
+fn make_estimator(config: RansacConfig) -> RansacEstimator {
+    RansacEstimator::new(config, 1.0)
+}
+
+fn estimator_with_max_sigma(max_sigma: f64, config: RansacConfig) -> RansacEstimator {
+    RansacEstimator::new(config, max_sigma)
+}
+
 fn approx_eq(a: f64, b: f64, eps: f64) -> bool {
     (a - b).abs() < eps
 }
@@ -886,7 +894,7 @@ fn test_ransac_perfect_translation() {
         .map(|p| *p + DVec2::new(15.0, -7.0))
         .collect();
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         ..Default::default()
     });
@@ -911,8 +919,10 @@ fn test_ransac_perfect_similarity() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), PI / 4.0, 1.2);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
+        max_rotation: None,
+        scale_range: None,
         ..Default::default()
     });
     let result = estimate_uniform(
@@ -942,11 +952,13 @@ fn test_ransac_with_outliers() {
     target_points[8] = DVec2::new(500.0, 500.0);
     target_points[9] = DVec2::new(600.0, 600.0);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_sigma: 0.33,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.33,
+        RansacConfig {
+            seed: Some(42),
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -986,12 +998,14 @@ fn test_ransac_30_percent_outliers() {
     target_points[12] = DVec2::new(700.0, 700.0);
     target_points[13] = DVec2::new(800.0, 400.0);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_sigma: 0.33,
-        use_local_optimization: true,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.33,
+        RansacConfig {
+            seed: Some(42),
+            local_optimization: true,
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -1016,7 +1030,7 @@ fn test_ransac_insufficient_points() {
     let ref_points = [DVec2::new(0.0, 0.0)];
     let target_points = [DVec2::new(1.0, 1.0)];
 
-    let estimator = RansacEstimator::new(RansacParams::default());
+    let estimator = make_estimator(RansacConfig::default());
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -1030,7 +1044,7 @@ fn test_ransac_insufficient_points() {
 #[test]
 fn test_ransac_empty_matches() {
     let matches: Vec<PointMatch> = vec![];
-    let ransac = RansacEstimator::new(RansacParams::default());
+    let ransac = make_estimator(RansacConfig::default());
     let result = ransac.estimate(&matches, &[], &[], TransformType::Translation);
     assert!(result.is_none());
 }
@@ -1042,12 +1056,14 @@ fn test_ransac_minimum_points_for_translation() {
     let ref_points = [DVec2::new(0.0, 0.0), DVec2::new(100.0, 0.0)];
     let target_points = [DVec2::new(10.0, 10.0), DVec2::new(110.0, 10.0)];
 
-    let estimator = RansacEstimator::new(RansacParams {
-        max_iterations: 100,
-        max_sigma: 0.33,
-        min_inlier_ratio: 0.5,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.33,
+        RansacConfig {
+            max_iterations: 100,
+            min_inlier_ratio: 0.5,
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -1070,12 +1086,12 @@ fn test_ransac_deterministic_with_seed() {
         .map(|p| *p + DVec2::new(5.0, 3.0))
         .collect();
 
-    let config = RansacParams {
+    let config = RansacConfig {
         seed: Some(12345),
         ..Default::default()
     };
 
-    let estimator1 = RansacEstimator::new(config.clone());
+    let estimator1 = make_estimator(config.clone());
     let result1 = estimate_uniform(
         &estimator1,
         &ref_points,
@@ -1084,7 +1100,7 @@ fn test_ransac_deterministic_with_seed() {
     )
     .unwrap();
 
-    let estimator2 = RansacEstimator::new(config);
+    let estimator2 = make_estimator(config);
     let result2 = estimate_uniform(
         &estimator2,
         &ref_points,
@@ -1110,12 +1126,14 @@ fn test_ransac_early_termination() {
     let transform = Transform::translation(DVec2::new(7.0, 3.0));
     let target_points = apply_all(&transform, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        max_iterations: 10000,
-        max_sigma: 0.33,
-        confidence: 0.999,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.33,
+        RansacConfig {
+            max_iterations: 10000,
+            confidence: 0.999,
+            ..Default::default()
+        },
+    );
 
     let result = estimate_uniform(
         &estimator,
@@ -1145,11 +1163,15 @@ fn test_ransac_100_percent_inliers() {
     let transform = Transform::similarity(DVec2::new(10.0, -5.0), 0.2, 1.1);
     let target_points = apply_all(&transform, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        max_iterations: 100,
-        max_sigma: 0.33,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.33,
+        RansacConfig {
+            max_iterations: 100,
+            max_rotation: None,
+            scale_range: None,
+            ..Default::default()
+        },
+    );
 
     let result = estimate_uniform(
         &estimator,
@@ -1168,7 +1190,7 @@ fn test_ransac_affine() {
     let known = Transform::affine([1.1, 0.2, 10.0, -0.1, 0.95, 5.0]);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         ..Default::default()
     });
@@ -1202,11 +1224,13 @@ fn test_ransac_affine_with_shear() {
     let known = Transform::affine([1.0, 0.3, 10.0, 0.1, 1.0, -5.0]);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_sigma: 0.17,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.17,
+        RansacConfig {
+            seed: Some(42),
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -1229,11 +1253,13 @@ fn test_ransac_homography() {
     let known = Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 0.0001, 0.00005]);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_sigma: 0.33,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.33,
+        RansacConfig {
+            seed: Some(42),
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -1252,11 +1278,13 @@ fn test_ransac_homography_near_affine() {
     let known = Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 1e-8, 1e-8]);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_sigma: 0.17,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.17,
+        RansacConfig {
+            seed: Some(42),
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -1288,8 +1316,10 @@ fn test_ransac_large_coordinates() {
     let known = Transform::similarity(DVec2::new(50.0, -30.0), PI / 16.0, 1.05);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
+        max_rotation: None,
+        scale_range: None,
         ..Default::default()
     });
     let result = estimate_uniform(
@@ -1317,11 +1347,13 @@ fn test_ransac_extreme_scale_coordinates() {
     let known = Transform::translation(DVec2::new(5000.0, -3000.0));
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_sigma: 33.0,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        33.0,
+        RansacConfig {
+            seed: Some(42),
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -1343,11 +1375,13 @@ fn test_ransac_small_translation() {
     let known = Transform::translation(DVec2::new(0.5, -0.3));
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_sigma: 0.033,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.033,
+        RansacConfig {
+            seed: Some(42),
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -1381,11 +1415,13 @@ fn test_ransac_mixed_scale_coordinates() {
     let known = Transform::translation(DVec2::new(10.0, -5.0));
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_sigma: 0.17,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.17,
+        RansacConfig {
+            seed: Some(42),
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -1407,11 +1443,13 @@ fn test_similarity_very_small_rotation() {
     let known = Transform::similarity(DVec2::new(5.0, 3.0), tiny_angle, 1.0);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_sigma: 0.17,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.17,
+        RansacConfig {
+            seed: Some(42),
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -1444,11 +1482,13 @@ fn test_similarity_near_unity_scale() {
     let known = Transform::similarity(DVec2::new(2.0, -1.0), 0.0, tiny_scale);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_sigma: 0.17,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.17,
+        RansacConfig {
+            seed: Some(42),
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_points,
@@ -1472,10 +1512,10 @@ fn test_lo_ransac_converges_to_exact_solution() {
     let known = Transform::translation(DVec2::new(5.0, 3.0));
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
-        use_local_optimization: true,
-        lo_max_iterations: 10,
+        local_optimization: true,
+        lo_iterations: 10,
         ..Default::default()
     });
     let result = estimate_uniform(
@@ -1505,13 +1545,17 @@ fn test_lo_ransac_vs_standard_with_noisy_data() {
 
     let matches = make_matches(ref_points.len());
 
-    let result_with_lo = RansacEstimator::new(RansacParams {
-        seed: Some(123),
-        use_local_optimization: true,
-        lo_max_iterations: 5,
-        max_sigma: 0.33,
-        ..Default::default()
-    })
+    let result_with_lo = estimator_with_max_sigma(
+        0.33,
+        RansacConfig {
+            seed: Some(123),
+            local_optimization: true,
+            lo_iterations: 5,
+            max_rotation: None,
+            scale_range: None,
+            ..Default::default()
+        },
+    )
     .estimate(
         &matches,
         &ref_points,
@@ -1520,12 +1564,16 @@ fn test_lo_ransac_vs_standard_with_noisy_data() {
     )
     .unwrap();
 
-    let result_without_lo = RansacEstimator::new(RansacParams {
-        seed: Some(123),
-        use_local_optimization: false,
-        max_sigma: 0.33,
-        ..Default::default()
-    })
+    let result_without_lo = estimator_with_max_sigma(
+        0.33,
+        RansacConfig {
+            seed: Some(123),
+            local_optimization: false,
+            max_rotation: None,
+            scale_range: None,
+            ..Default::default()
+        },
+    )
     .estimate(
         &matches,
         &ref_points,
@@ -1549,7 +1597,7 @@ fn test_progressive_ransac_basic() {
     let target_points: Vec<DVec2> = ref_points.iter().map(|p| *p + offset).collect();
 
     let confidences = vec![0.9; 20];
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         ..Default::default()
     });
@@ -1585,7 +1633,7 @@ fn test_progressive_ransac_outlier_rejection() {
     let mut confidences = vec![0.9; 15];
     confidences.extend(vec![0.1; 5]);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(123),
         max_iterations: 500,
         ..Default::default()
@@ -1624,11 +1672,13 @@ fn test_progressive_ransac_uses_weights() {
 
     let confidences: Vec<f64> = (0..20).map(|i| if i < 5 { 0.1 } else { 0.9 }).collect();
 
-    let estimator = RansacEstimator::new(RansacParams {
-        max_iterations: 200,
-        max_sigma: 0.67,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.67,
+        RansacConfig {
+            max_iterations: 200,
+            ..Default::default()
+        },
+    );
 
     let result = estimator
         .estimate(
@@ -1671,9 +1721,11 @@ fn test_progressive_ransac_finds_solution_faster() {
         })
         .collect();
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(999),
         max_iterations: 200,
+        max_rotation: None,
+        scale_range: None,
         ..Default::default()
     });
 
@@ -1713,7 +1765,7 @@ fn test_estimate_with_varying_confidence() {
         })
         .collect();
 
-    let ransac = RansacEstimator::new(RansacParams {
+    let ransac = make_estimator(RansacConfig {
         seed: Some(42),
         ..Default::default()
     });
@@ -1754,11 +1806,13 @@ fn test_estimate_rejects_outlier_with_low_confidence() {
         })
         .collect();
 
-    let ransac = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_sigma: 1.67,
-        ..Default::default()
-    });
+    let ransac = estimator_with_max_sigma(
+        1.67,
+        RansacConfig {
+            seed: Some(42),
+            ..Default::default()
+        },
+    );
     let result = ransac
         .estimate(
             &matches,
@@ -1782,7 +1836,7 @@ fn test_plausibility_rejects_large_rotation() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 30.0_f64.to_radians(), 1.0);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: None,
@@ -1807,7 +1861,7 @@ fn test_plausibility_rejects_negative_rotation() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), -30.0_f64.to_radians(), 1.0);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: None,
@@ -1832,7 +1886,7 @@ fn test_plausibility_rejects_large_scale() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 0.0, 2.0);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: None,
         scale_range: Some((0.8, 1.2)),
@@ -1857,7 +1911,7 @@ fn test_plausibility_rejects_small_scale() {
     let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 0.5);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: None,
         scale_range: Some((0.8, 1.2)),
@@ -1884,7 +1938,7 @@ fn test_plausibility_accepts_within_bounds() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), angle, scale);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: Some((0.8, 1.2)),
@@ -1908,7 +1962,7 @@ fn test_plausibility_disabled_accepts_everything() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), PI / 4.0, 2.0);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: None,
         scale_range: None,
@@ -1935,7 +1989,7 @@ fn test_plausibility_rotation_boundary() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), angle_pass, 1.0);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: Some(max_rotation),
         scale_range: None,
@@ -1957,7 +2011,7 @@ fn test_plausibility_rotation_boundary() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), angle_fail, 1.0);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: Some(max_rotation),
         scale_range: None,
@@ -1983,7 +2037,7 @@ fn test_plausibility_scale_boundary() {
     let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 1.15);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: None,
         scale_range: Some((0.8, 1.2)),
@@ -2004,7 +2058,7 @@ fn test_plausibility_scale_boundary() {
     let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 1.25);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: None,
         scale_range: Some((0.8, 1.2)),
@@ -2025,7 +2079,7 @@ fn test_plausibility_scale_boundary() {
 #[test]
 fn test_plausibility_combined_rotation_and_scale() {
     let ref_points = make_grid(5, 4, 50.0);
-    let config_base = RansacParams {
+    let config_base = RansacConfig {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: Some((0.8, 1.2)),
@@ -2035,7 +2089,7 @@ fn test_plausibility_combined_rotation_and_scale() {
     // Rotation OK (5deg) but scale too large (1.5) -- should fail
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 5.0_f64.to_radians(), 1.5);
     let target_points = apply_all(&known, &ref_points);
-    let estimator = RansacEstimator::new(config_base.clone());
+    let estimator = make_estimator(config_base.clone());
     assert!(
         estimate_uniform(
             &estimator,
@@ -2050,7 +2104,7 @@ fn test_plausibility_combined_rotation_and_scale() {
     // Scale OK (1.1) but rotation too large (20deg) -- should fail
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 20.0_f64.to_radians(), 1.1);
     let target_points = apply_all(&known, &ref_points);
-    let estimator = RansacEstimator::new(config_base.clone());
+    let estimator = make_estimator(config_base.clone());
     assert!(
         estimate_uniform(
             &estimator,
@@ -2065,7 +2119,7 @@ fn test_plausibility_combined_rotation_and_scale() {
     // Both within range -- should pass
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 5.0_f64.to_radians(), 1.1);
     let target_points = apply_all(&known, &ref_points);
-    let estimator = RansacEstimator::new(config_base);
+    let estimator = make_estimator(config_base);
     assert!(
         estimate_uniform(
             &estimator,
@@ -2087,7 +2141,7 @@ fn test_plausibility_translation_unaffected() {
         .map(|p| *p + DVec2::new(100.0, -50.0))
         .collect();
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: Some(1.0_f64.to_radians()),
         scale_range: Some((0.99, 1.01)),
@@ -2112,7 +2166,7 @@ fn test_plausibility_progressive_ransac_respects_checks() {
     let target_points = apply_all(&known, &ref_points);
     let confidences = vec![0.9; 20];
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         ..Default::default()
@@ -2133,7 +2187,7 @@ fn test_plausibility_progressive_ransac_respects_checks() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 5.0_f64.to_radians(), 1.05);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimator = RansacEstimator::new(RansacParams {
+    let estimator = make_estimator(RansacConfig {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: Some((0.8, 1.2)),
@@ -2164,13 +2218,15 @@ fn test_plausibility_with_outliers_filters_bad_hypotheses() {
     target_points.push(DVec2::new(500.0, -300.0));
     target_points.push(DVec2::new(-100.0, 800.0));
 
-    let estimator = RansacEstimator::new(RansacParams {
-        seed: Some(42),
-        max_rotation: Some(5.0_f64.to_radians()),
-        scale_range: Some((0.9, 1.1)),
-        max_sigma: 0.67,
-        ..Default::default()
-    });
+    let estimator = estimator_with_max_sigma(
+        0.67,
+        RansacConfig {
+            seed: Some(42),
+            max_rotation: Some(5.0_f64.to_radians()),
+            scale_range: Some((0.9, 1.1)),
+            ..Default::default()
+        },
+    );
     let result = estimate_uniform(
         &estimator,
         &ref_with_outliers,

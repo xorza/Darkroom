@@ -63,7 +63,7 @@ fn main() {
     .expect("empty masters");
 
     let mut config = AlignStackConfig::default();
-    config.registration.seed = Some(1);
+    config.registration.ransac.seed = Some(1);
     config.stack.cache.keep_cache = false;
     config.stack.cache.available_memory = Some(match tier.as_str() {
         "ram" => u64::MAX,

@@ -2,6 +2,7 @@
 
 use glam::DVec2;
 
+use crate::stacking::registration::ransac::RansacConfig;
 use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::TransformType;
 use crate::stacking::registration::triangle::TriangleConfig;
@@ -206,23 +207,8 @@ pub struct Config {
     /// Star selection, acceptance gates, and triangle matching.
     pub matching: RegistrationMatchingConfig,
 
-    // == RANSAC ==
-    /// RANSAC iterations. Default: 2000.
-    pub ransac_iterations: usize,
-    /// Target confidence for early termination. Default: 0.995.
-    pub confidence: f64,
-    /// Minimum inlier ratio. Default: 0.3.
-    pub min_inlier_ratio: f64,
-    /// Random seed for reproducibility (None = random). Default: None.
-    pub seed: Option<u64>,
-    /// Enable LO-RANSAC refinement. Default: true.
-    pub local_optimization: bool,
-    /// LO-RANSAC iterations. Default: 10.
-    pub lo_iterations: usize,
-    /// Maximum rotation in radians (None = unlimited). Default: Some(0.175).
-    pub max_rotation: Option<f64>,
-    /// Scale range (min, max). Default: Some((0.8, 1.2)).
-    pub scale_range: Option<(f64, f64)>,
+    /// Robust transform-estimation configuration.
+    pub ransac: RansacConfig,
 
     // == Quality ==
     /// Maximum acceptable RMS error in pixels. Default: 2.0.
@@ -252,15 +238,7 @@ impl Default for Config {
 
             matching: RegistrationMatchingConfig::default(),
 
-            // RANSAC
-            ransac_iterations: 2000,
-            confidence: 0.995,
-            min_inlier_ratio: 0.3,
-            seed: None,
-            local_optimization: true,
-            lo_iterations: 10,
-            max_rotation: Some(10.0_f64.to_radians()),
-            scale_range: Some((0.8, 1.2)),
+            ransac: RansacConfig::default(),
 
             // Quality
             max_rms_error: 2.0,
@@ -281,12 +259,15 @@ impl Config {
     /// Fast configuration: fewer iterations, lower quality, faster.
     pub fn fast() -> Self {
         Self {
-            ransac_iterations: 500,
+            ransac: RansacConfig {
+                max_iterations: 500,
+                local_optimization: false,
+                ..Default::default()
+            },
             matching: RegistrationMatchingConfig {
                 max_stars: 100,
                 ..Default::default()
             },
-            local_optimization: false,
             interpolation: InterpolationMethod::Bilinear,
             ..Self::default()
         }
@@ -295,8 +276,11 @@ impl Config {
     /// Precise configuration: more iterations, SIP correction enabled.
     pub fn precise() -> Self {
         Self {
-            ransac_iterations: 5000,
-            confidence: 0.999,
+            ransac: RansacConfig {
+                max_iterations: 5000,
+                confidence: 0.999,
+                ..Default::default()
+            },
             sip_enabled: true,
             max_rms_error: 1.0,
             ..Self::default()
@@ -308,8 +292,11 @@ impl Config {
         Self {
             transform_type: TransformType::Homography,
             sip_enabled: true,
-            max_rotation: None,
-            scale_range: None,
+            ransac: RansacConfig {
+                max_rotation: None,
+                scale_range: None,
+                ..Default::default()
+            },
             ..Self::default()
         }
     }
@@ -320,8 +307,13 @@ impl Config {
     /// tighter matching from `precise()` plus extra stars and stricter confidence.
     pub fn precise_wide_field() -> Self {
         Self {
-            // From precise(): tighter convergence
-            ransac_iterations: 5000,
+            ransac: RansacConfig {
+                max_iterations: 5000,
+                confidence: 0.9999,
+                max_rotation: None,
+                scale_range: None,
+                ..Default::default()
+            },
             max_rms_error: 1.0,
             // Stricter than precise(): more stars, tighter matching
             matching: RegistrationMatchingConfig {
@@ -333,7 +325,6 @@ impl Config {
                 },
                 ..Default::default()
             },
-            confidence: 0.9999,
             // From wide_field(): Homography, SIP, unlimited rotation/scale
             ..Self::wide_field()
         }
@@ -342,8 +333,11 @@ impl Config {
     /// Mosaic configuration: allows larger offsets and rotations.
     pub fn mosaic() -> Self {
         Self {
-            max_rotation: None,
-            scale_range: Some((0.5, 2.0)),
+            ransac: RansacConfig {
+                max_rotation: None,
+                scale_range: Some((0.5, 2.0)),
+                ..Default::default()
+            },
             ..Self::default()
         }
     }
@@ -358,12 +352,7 @@ impl Config {
     /// - `min_matches` < transform minimum points
     /// - `ratio_tolerance` not in (0, 1)
     /// - `min_votes` < 1
-    /// - `ransac_iterations` < 1
-    /// - `lo_iterations` < 1 (when `local_optimization` is enabled)
-    /// - `confidence` not in \[0, 1\]
-    /// - `min_inlier_ratio` not in (0, 1\]
-    /// - `max_rotation` <= 0 (when set)
-    /// - `scale_range` with min <= 0 or max <= min (when set)
+    /// - invalid RANSAC configuration
     /// - `max_rms_error` <= 0
     /// - `sip_order` not in 2..=5 (when SIP enabled)
     /// - `border_value` not finite
@@ -371,45 +360,7 @@ impl Config {
         let invalid = |msg: String| Err(RegistrationError::InvalidConfig(msg));
 
         self.matching.validate(self.transform_type)?;
-
-        // RANSAC
-        if self.ransac_iterations == 0 {
-            return invalid(format!(
-                "ransac_iterations must be positive, got {}",
-                self.ransac_iterations
-            ));
-        }
-        if self.local_optimization && self.lo_iterations == 0 {
-            return invalid(format!(
-                "lo_iterations must be positive when local_optimization is enabled, got {}",
-                self.lo_iterations
-            ));
-        }
-        if !(0.0..=1.0).contains(&self.confidence) {
-            return invalid(format!(
-                "confidence must be in [0, 1], got {}",
-                self.confidence
-            ));
-        }
-        if !(self.min_inlier_ratio > 0.0 && self.min_inlier_ratio <= 1.0) {
-            return invalid(format!(
-                "min_inlier_ratio must be in (0, 1], got {}",
-                self.min_inlier_ratio
-            ));
-        }
-        if let Some(max_rot) = self.max_rotation
-            && max_rot <= 0.0
-        {
-            return invalid(format!("max_rotation must be positive, got {}", max_rot));
-        }
-        if let Some((min_scale, max_scale)) = self.scale_range
-            && !(min_scale > 0.0 && max_scale > min_scale)
-        {
-            return invalid(format!(
-                "scale_range must have 0 < min < max, got ({}, {})",
-                min_scale, max_scale
-            ));
-        }
+        self.ransac.validate()?;
 
         // Quality
         if self.max_rms_error <= 0.0 {
@@ -461,12 +412,12 @@ mod tests {
         assert!((config.matching.triangle.ratio_tolerance - 0.01).abs() < 1e-10);
         assert_eq!(config.matching.triangle.min_votes, 3);
         assert!(config.matching.triangle.check_orientation);
-        assert_eq!(config.ransac_iterations, 2000);
-        assert!((config.confidence - 0.995).abs() < 1e-10);
-        assert!((config.min_inlier_ratio - 0.3).abs() < 1e-10);
-        assert!(config.seed.is_none());
-        assert!(config.local_optimization);
-        assert_eq!(config.lo_iterations, 10);
+        assert_eq!(config.ransac.max_iterations, 2000);
+        assert!((config.ransac.confidence - 0.995).abs() < 1e-10);
+        assert!((config.ransac.min_inlier_ratio - 0.3).abs() < 1e-10);
+        assert!(config.ransac.seed.is_none());
+        assert!(config.ransac.local_optimization);
+        assert_eq!(config.ransac.lo_iterations, 10);
         assert!((config.max_rms_error - 2.0).abs() < 1e-10);
         assert!(!config.sip_enabled);
         assert_eq!(config.sip_order, 3);
@@ -484,9 +435,9 @@ mod tests {
     #[test]
     fn test_config_fast_preset() {
         let config = Config::fast();
-        assert_eq!(config.ransac_iterations, 500);
+        assert_eq!(config.ransac.max_iterations, 500);
         assert_eq!(config.matching.max_stars, 100);
-        assert!(!config.local_optimization);
+        assert!(!config.ransac.local_optimization);
         assert_eq!(config.interpolation, InterpolationMethod::Bilinear);
         config.validate().unwrap();
     }
@@ -494,8 +445,8 @@ mod tests {
     #[test]
     fn test_config_precise_preset() {
         let config = Config::precise();
-        assert_eq!(config.ransac_iterations, 5000);
-        assert!((config.confidence - 0.999).abs() < 1e-10);
+        assert_eq!(config.ransac.max_iterations, 5000);
+        assert!((config.ransac.confidence - 0.999).abs() < 1e-10);
         assert!(config.sip_enabled);
         assert!((config.max_rms_error - 1.0).abs() < 1e-10);
         config.validate().unwrap();
@@ -506,8 +457,8 @@ mod tests {
         let config = Config::wide_field();
         assert_eq!(config.transform_type, TransformType::Homography);
         assert!(config.sip_enabled);
-        assert!(config.max_rotation.is_none());
-        assert!(config.scale_range.is_none());
+        assert!(config.ransac.max_rotation.is_none());
+        assert!(config.ransac.scale_range.is_none());
         config.validate().unwrap();
     }
 
@@ -518,21 +469,21 @@ mod tests {
         assert_eq!(config.matching.max_stars, 500);
         assert_eq!(config.matching.min_matches, 20);
         assert!((config.matching.triangle.ratio_tolerance - 0.02).abs() < 1e-10);
-        assert_eq!(config.ransac_iterations, 5000);
-        assert!((config.confidence - 0.9999).abs() < 1e-10);
+        assert_eq!(config.ransac.max_iterations, 5000);
+        assert!((config.ransac.confidence - 0.9999).abs() < 1e-10);
         assert!(config.sip_enabled);
         assert!((config.max_rms_error - 1.0).abs() < 1e-10);
         // Inherits unlimited rotation/scale from wide_field()
-        assert!(config.max_rotation.is_none());
-        assert!(config.scale_range.is_none());
+        assert!(config.ransac.max_rotation.is_none());
+        assert!(config.ransac.scale_range.is_none());
         config.validate().unwrap();
     }
 
     #[test]
     fn test_config_mosaic_preset() {
         let config = Config::mosaic();
-        assert!(config.max_rotation.is_none());
-        assert_eq!(config.scale_range, Some((0.5, 2.0)));
+        assert!(config.ransac.max_rotation.is_none());
+        assert_eq!(config.ransac.scale_range, Some((0.5, 2.0)));
         config.validate().unwrap();
     }
 
@@ -540,11 +491,14 @@ mod tests {
     fn test_config_custom() {
         let config = Config {
             transform_type: TransformType::Similarity,
-            ransac_iterations: 1000,
+            ransac: RansacConfig {
+                max_iterations: 1000,
+                ..Default::default()
+            },
             ..Config::default()
         };
         assert_eq!(config.transform_type, TransformType::Similarity);
-        assert_eq!(config.ransac_iterations, 1000);
+        assert_eq!(config.ransac.max_iterations, 1000);
         config.validate().unwrap();
     }
 
@@ -620,10 +574,13 @@ mod tests {
         let cases: &[(Config, &str)] = &[
             (
                 Config {
-                    ransac_iterations: 0,
+                    ransac: RansacConfig {
+                        max_iterations: 0,
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
-                "ransac_iterations must be positive",
+                "ransac max_iterations must be positive",
             ),
             (
                 Config {
@@ -697,36 +654,51 @@ mod tests {
             ),
             (
                 Config {
-                    confidence: 1.5,
+                    ransac: RansacConfig {
+                        confidence: 1.5,
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "confidence must be in [0, 1]",
             ),
             (
                 Config {
-                    min_inlier_ratio: 0.0,
+                    ransac: RansacConfig {
+                        min_inlier_ratio: 0.0,
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "min_inlier_ratio must be in (0, 1]",
             ),
             (
                 Config {
-                    local_optimization: true,
-                    lo_iterations: 0,
+                    ransac: RansacConfig {
+                        local_optimization: true,
+                        lo_iterations: 0,
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "lo_iterations must be positive",
             ),
             (
                 Config {
-                    max_rotation: Some(-0.1),
+                    ransac: RansacConfig {
+                        max_rotation: Some(-0.1),
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "max_rotation must be positive",
             ),
             (
                 Config {
-                    scale_range: Some((1.5, 0.5)),
+                    ransac: RansacConfig {
+                        scale_range: Some((1.5, 0.5)),
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "scale_range must have 0 < min < max",
@@ -785,8 +757,11 @@ mod tests {
     fn test_config_lo_iterations_zero_ok_when_lo_disabled() {
         // lo_iterations is only validated when local_optimization is enabled.
         let config = Config {
-            local_optimization: false,
-            lo_iterations: 0,
+            ransac: RansacConfig {
+                local_optimization: false,
+                lo_iterations: 0,
+                ..Default::default()
+            },
             ..Config::default()
         };
         assert!(config.validate().is_ok());
@@ -800,14 +775,14 @@ mod tests {
         let precise = Config::precise();
 
         // fast has fewer iterations than default
-        assert!(fast.ransac_iterations < default.ransac_iterations);
+        assert!(fast.ransac.max_iterations < default.ransac.max_iterations);
         // precise has more iterations than default
-        assert!(precise.ransac_iterations > default.ransac_iterations);
+        assert!(precise.ransac.max_iterations > default.ransac.max_iterations);
         // precise has tighter RMS tolerance
         assert!(precise.max_rms_error < default.max_rms_error);
         // fast disables LO, default enables it
-        assert!(!fast.local_optimization);
-        assert!(default.local_optimization);
+        assert!(!fast.ransac.local_optimization);
+        assert!(default.ransac.local_optimization);
     }
 
     #[test]
