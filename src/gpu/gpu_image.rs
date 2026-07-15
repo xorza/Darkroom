@@ -16,27 +16,27 @@ fn align_to_u32(bytes: usize) -> usize {
 
 /// Wrapper for read-only buffer access.
 #[derive(Debug)]
-pub struct ReadBuffer<'a>(pub(crate) &'a wgpu::Buffer);
+pub(crate) struct ReadBuffer<'a>(pub(crate) &'a wgpu::Buffer);
 
 impl ReadBuffer<'_> {
     /// Returns the entire buffer as a binding resource.
-    pub fn as_entire_binding(&self) -> wgpu::BindingResource<'_> {
+    pub(crate) fn as_entire_binding(&self) -> wgpu::BindingResource<'_> {
         self.0.as_entire_binding()
     }
 }
 
 /// Wrapper for writable buffer access.
 #[derive(Debug)]
-pub struct WriteBuffer<'a>(pub(crate) &'a wgpu::Buffer);
+pub(crate) struct WriteBuffer<'a>(pub(crate) &'a wgpu::Buffer);
 
 impl WriteBuffer<'_> {
     /// Returns the entire buffer as a binding resource.
-    pub fn as_entire_binding(&self) -> wgpu::BindingResource<'_> {
+    pub(crate) fn as_entire_binding(&self) -> wgpu::BindingResource<'_> {
         self.0.as_entire_binding()
     }
 
     /// Returns a reference to the underlying buffer for queue operations.
-    pub fn buffer(&self) -> &wgpu::Buffer {
+    pub(crate) fn buffer(&self) -> &wgpu::Buffer {
         self.0
     }
 }

@@ -22,7 +22,7 @@ fn ensure_test_output_dir() {
 }
 
 /// Path to a file under `<workspace>/test_output/`. Parent dirs are created.
-pub fn test_output_path(name: &str) -> PathBuf {
+pub(crate) fn test_output_path(name: &str) -> PathBuf {
     ensure_test_output_dir();
     let path = PathBuf::from(workspace_root())
         .join("test_output")
@@ -40,7 +40,7 @@ fn test_resource(name: &str) -> String {
 
 /// Loads the lena test image as RGBA_U8 format (895x551).
 /// The image is cached and cloned on each call to avoid repeated file I/O.
-pub fn load_lena_rgba_u8_895x551() -> Image {
+pub(crate) fn load_lena_rgba_u8_895x551() -> Image {
     static LENA: OnceLock<Image> = OnceLock::new();
     LENA.get_or_init(|| {
         Image::read_file(test_resource("lena_895x551.tiff"))
@@ -57,7 +57,7 @@ pub fn load_lena_rgba_u8_895x551() -> Image {
 
 /// Loads a small lena test image as RGBA_U8 format (61x38).
 /// The image is cached and cloned on each call to avoid repeated file I/O.
-pub fn load_lena_rgba_u8_61x38() -> Image {
+pub(crate) fn load_lena_rgba_u8_61x38() -> Image {
     static LENA_SMALL: OnceLock<Image> = OnceLock::new();
     LENA_SMALL
         .get_or_init(|| {
@@ -76,14 +76,14 @@ pub fn load_lena_rgba_u8_61x38() -> Image {
 /// Returns a shared GPU context for tests.
 /// This avoids the ~2 second initialization overhead per test.
 #[cfg(feature = "wgpu")]
-pub fn test_gpu() -> Option<Gpu> {
+pub(crate) fn test_gpu() -> Option<Gpu> {
     static TEST_GPU: OnceLock<Option<Gpu>> = OnceLock::new();
     TEST_GPU.get_or_init(|| Gpu::new().ok()).clone()
 }
 
 /// Returns a shared ProcessingContext for tests.
 /// This avoids the ~2 second GPU initialization overhead per test.
-pub fn test_processing_context() -> ProcessingContext {
+pub(crate) fn test_processing_context() -> ProcessingContext {
     #[cfg(feature = "wgpu")]
     {
         match test_gpu() {
@@ -101,7 +101,12 @@ pub fn test_processing_context() -> ProcessingContext {
 
 /// Creates a test image with a deterministic pattern based on seed.
 /// For integer formats, uses a byte pattern. For float formats, uses normalized values.
-pub fn create_test_image(format: ColorFormat, width: usize, height: usize, seed: usize) -> Image {
+pub(crate) fn create_test_image(
+    format: ColorFormat,
+    width: usize,
+    height: usize,
+    seed: usize,
+) -> Image {
     use crate::image::ImageDesc;
 
     let desc = ImageDesc::new(width, height, format);
@@ -125,7 +130,7 @@ pub fn create_test_image(format: ColorFormat, width: usize, height: usize, seed:
 
 /// Loads the lena test image as RGBA_F32 format (895x551).
 /// The image is cached and cloned on each call to avoid repeated file I/O.
-pub fn load_lena_rgba_f32_895x551() -> Image {
+pub(crate) fn load_lena_rgba_f32_895x551() -> Image {
     static LENA_F32: OnceLock<Image> = OnceLock::new();
     LENA_F32
         .get_or_init(|| {
@@ -138,7 +143,7 @@ pub fn load_lena_rgba_f32_895x551() -> Image {
 }
 
 /// Creates a test image filled with a constant f32 value.
-pub fn create_test_image_f32(
+pub(crate) fn create_test_image_f32(
     format: ColorFormat,
     width: usize,
     height: usize,

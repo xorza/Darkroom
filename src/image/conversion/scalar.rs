@@ -16,7 +16,7 @@ pub(crate) trait RgbToLuminance: Copy {
 
 /// Trait for getting the opaque alpha value for a channel type.
 /// For integers this is max value (255, 65535), for floats it's 1.0.
-pub trait OpaqueAlpha: Copy {
+pub(crate) trait OpaqueAlpha: Copy {
     fn opaque_alpha() -> Self;
 }
 
@@ -212,7 +212,7 @@ pub(crate) struct ConversionInfo {
 }
 
 impl ConversionInfo {
-    pub fn new(from_fmt: ColorFormat, to_fmt: ColorFormat) -> Self {
+    pub(crate) fn new(from_fmt: ColorFormat, to_fmt: ColorFormat) -> Self {
         fn validate_size_type(size: ChannelSize, typ: ChannelType) {
             match (size, typ) {
                 (ChannelSize::_8bit | ChannelSize::_16bit, ChannelType::UInt) => {}

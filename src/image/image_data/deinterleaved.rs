@@ -103,12 +103,12 @@ macro_rules! with_deinterleaved {
 
 impl AnyDeinterleavedImageData {
     /// Width in pixels, regardless of format.
-    pub fn width(&self) -> usize {
+    pub(crate) fn width(&self) -> usize {
         with_deinterleaved!(self, img => img.width())
     }
 
     /// Height in pixels, regardless of format.
-    pub fn height(&self) -> usize {
+    pub(crate) fn height(&self) -> usize {
         with_deinterleaved!(self, img => img.height())
     }
 

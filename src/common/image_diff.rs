@@ -13,7 +13,7 @@ use crate::image::Image;
 ///
 /// # Panics
 /// Panics if images have different dimensions or formats.
-pub fn max_pixel_diff(img1: &Image, img2: &Image) -> f64 {
+pub(crate) fn max_pixel_diff(img1: &Image, img2: &Image) -> f64 {
     assert_eq!(img1.desc.width, img2.desc.width, "width mismatch");
     assert_eq!(img1.desc.height, img2.desc.height, "height mismatch");
     assert_eq!(
@@ -71,7 +71,7 @@ fn row_max_diff(row1: &[u8], row2: &[u8], size: ChannelSize, typ: ChannelType) -
 ///
 /// # Panics
 /// Panics if images have different dimensions or formats.
-pub fn pixels_equal(img1: &Image, img2: &Image) -> bool {
+pub(crate) fn pixels_equal(img1: &Image, img2: &Image) -> bool {
     assert_eq!(img1.desc.width, img2.desc.width, "width mismatch");
     assert_eq!(img1.desc.height, img2.desc.height, "height mismatch");
     assert_eq!(

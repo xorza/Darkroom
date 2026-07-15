@@ -28,7 +28,7 @@ pub(crate) struct ImageData<const N: usize, T> {
 
 impl<const N: usize, T: bytemuck::Pod> ImageData<N, T> {
     /// Wrap an interleaved pixel buffer.
-    pub fn from_buffer(buffer: Buffer2<[T; N]>) -> Self {
+    pub(crate) fn from_buffer(buffer: Buffer2<[T; N]>) -> Self {
         const {
             assert!(
                 N == 1 || N == 3 || N == 4,
@@ -39,13 +39,13 @@ impl<const N: usize, T: bytemuck::Pod> ImageData<N, T> {
     }
 
     /// A `width × height` interleaved image, zero-filled.
-    pub fn new_zeroed(width: usize, height: usize) -> Self {
+    pub(crate) fn new_zeroed(width: usize, height: usize) -> Self {
         Self::from_buffer(Buffer2::new_filled(width, height, [T::zeroed(); N]))
     }
 
     /// Build from interleaved bytes (`RGBRGB…`), copying into the typed buffer.
     /// `bytes.len()` must be exactly `width * height * size_of::<[T; N]>()`.
-    pub fn from_bytes(width: usize, height: usize, bytes: &[u8]) -> Self {
+    pub(crate) fn from_bytes(width: usize, height: usize, bytes: &[u8]) -> Self {
         let count = width * height;
         assert_eq!(
             bytes.len(),
@@ -58,22 +58,22 @@ impl<const N: usize, T: bytemuck::Pod> ImageData<N, T> {
     }
 
     /// Width in pixels.
-    pub fn width(&self) -> usize {
+    pub(crate) fn width(&self) -> usize {
         self.buffer.width()
     }
 
     /// Height in pixels.
-    pub fn height(&self) -> usize {
+    pub(crate) fn height(&self) -> usize {
         self.buffer.height()
     }
 
     /// Interleaved samples as raw bytes — zero-copy view of the pixel buffer.
-    pub fn as_bytes(&self) -> &[u8] {
+    pub(crate) fn as_bytes(&self) -> &[u8] {
         bytemuck::cast_slice(self.buffer.pixels().as_flattened())
     }
 
     /// Interleaved samples as mutable raw bytes — zero-copy; writes hit the buffer.
-    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+    pub(crate) fn as_bytes_mut(&mut self) -> &mut [u8] {
         bytemuck::cast_slice_mut(self.buffer.pixels_mut().as_flattened_mut())
     }
 }
@@ -138,18 +138,23 @@ macro_rules! by_format {
 
 impl AnyImageData {
     /// A zeroed interleaved image for `format` at `width × height`.
-    pub fn new_zeroed(format: ColorFormat, width: usize, height: usize) -> Self {
+    pub(crate) fn new_zeroed(format: ColorFormat, width: usize, height: usize) -> Self {
         by_format!(format, new_zeroed(width, height))
     }
 
     /// Build from interleaved bytes for `format` at `width × height` (copies the
     /// bytes into the typed buffer).
-    pub fn from_bytes(format: ColorFormat, width: usize, height: usize, bytes: &[u8]) -> Self {
+    pub(crate) fn from_bytes(
+        format: ColorFormat,
+        width: usize,
+        height: usize,
+        bytes: &[u8],
+    ) -> Self {
         by_format!(format, from_bytes(width, height, bytes))
     }
 
     /// The pixel format of this image (derived from the variant).
-    pub fn color_format(&self) -> ColorFormat {
+    pub(crate) fn color_format(&self) -> ColorFormat {
         match self {
             Self::L_U8(_) => ColorFormat::L_U8,
             Self::L_U16(_) => ColorFormat::L_U16,
@@ -164,22 +169,22 @@ impl AnyImageData {
     }
 
     /// Width in pixels, regardless of format.
-    pub fn width(&self) -> usize {
+    pub(crate) fn width(&self) -> usize {
         with_interleaved!(self, img => img.width())
     }
 
     /// Height in pixels, regardless of format.
-    pub fn height(&self) -> usize {
+    pub(crate) fn height(&self) -> usize {
         with_interleaved!(self, img => img.height())
     }
 
     /// Interleaved samples as raw bytes (zero-copy).
-    pub fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &[u8] {
         with_interleaved!(self, img => img.as_bytes())
     }
 
     /// Interleaved samples as mutable raw bytes (zero-copy).
-    pub fn bytes_mut(&mut self) -> &mut [u8] {
+    pub(crate) fn bytes_mut(&mut self) -> &mut [u8] {
         with_interleaved!(self, img => img.as_bytes_mut())
     }
 }

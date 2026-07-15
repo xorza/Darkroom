@@ -37,7 +37,7 @@ use simd::get_simd_row_converter;
 /// Convert `from` into `to`'s format, using SIMD acceleration when available.
 /// `from` and `to` must share dimensions; every format pair is handled (SIMD
 /// fast paths fall back to the scalar reference), so this is infallible.
-pub fn convert_image(from: &Image, to: &mut Image) {
+pub(crate) fn convert_image(from: &Image, to: &mut Image) {
     assert_eq!(from.desc.width, to.desc.width);
     assert_eq!(from.desc.height, to.desc.height);
 
