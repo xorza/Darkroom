@@ -7,8 +7,8 @@ use rayon::prelude::*;
 
 use crate::io::astro_image::AstroImage;
 use crate::stacking::combine::error::Error as StackError;
-use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::combine::stack::{StackFrame, stack_images};
+use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::{register, warp};
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::error::StarDetectionConfigError;

@@ -19,9 +19,9 @@ use fits_well::{FitsWriter, Image};
 
 use crate::AstroImage;
 use crate::stacking::combine::config::StackConfig;
-use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::frame_store::{fits_in_memory, load_concurrency, memory_budget};
+use crate::stacking::progress::ProgressCallback;
 
 /// The tiered loader's core guarantee, as an invariant sweep: for any (frame size, count, budget),
 /// the chosen concurrency must not let peak *load* heap exceed the usable budget. Project that peak

@@ -66,7 +66,6 @@ pub use stacking::registration::{WarpResult, register, warp};
 pub use stacking::combine::cache_config::CacheConfig;
 pub use stacking::combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};
 pub use stacking::combine::error::{Error as StackError, StackConfigError};
-pub use stacking::combine::progress::{ProgressCallback, StackingProgress, StackingStage};
 pub use stacking::combine::rejection::{
     GesdConfig, LinearFitClipConfig, PercentileClipConfig, Rejection, SigmaClipConfig,
     WinsorizedClipConfig,
@@ -74,6 +73,7 @@ pub use stacking::combine::rejection::{
 pub use stacking::combine::stack::{StackFrame, stack, stack_images};
 pub use stacking::frame_store::FrameStoreError;
 pub use stacking::product::StackProduct;
+pub use stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 
 pub use stacking::pipeline::align::align_and_stack;
 pub use stacking::pipeline::config::{AlignStackConfig, Reference};

@@ -31,7 +31,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 src/
 ├── stacking/   feature: load → calibrate → detect → register → combine into a stacked master
 │   ├── calibration_masters/   star_detection/   registration/
-│   └── frame_store/   combine/   drizzle/   pipeline/
+│   └── frame_store/   combine/   drizzle/   pipeline/   progress.rs
 ├── image_ops/  feature: in-place display/processing ops on a linear f32 master (imaginarium Image)
 │   ├── mod.rs (par_map_pixels / intensity / interleave helpers)   op.rs (OpError contract)   wavelet/
 │   ├── stretching/ (post-stack display: MTF/STF, arcsinh)   denoise/   hdr/   local_contrast/
@@ -47,7 +47,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 | Module | Vis | Role |
 |--------|-----|------|
-| `stacking` | `pub(crate)` | Umbrella for the stacked-master feature; declares the six stage modules below (no re-exports). |
+| `stacking` | `pub(crate)` | Umbrella for the stacked-master feature; declares its stage and support modules without re-exports. |
 | `stacking::calibration_masters` | `pub(crate)` (types re-exported) | Master dark/flat/bias/flat-dark creation, defect maps, `calibrate()`. |
 | `stacking::star_detection` | `pub(crate)` | Six-stage stellar detection + sub-pixel centroiding. |
 | `stacking::registration` | `pub(crate)` | Triangle + RANSAC/MAGSAC++ star-pattern alignment, SIP distortion, image warp. |
@@ -55,6 +55,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 | `stacking::combine` | `pub(crate)` | Multi-frame combination with rejection / normalization / weighting + cache tiers. (Was the old top-level `stacking`.) |
 | `stacking::drizzle` | `pub(crate)` | Fruchter & Hook variable-pixel reconstruction. |
 | `stacking::pipeline` | `pub(crate)` | End-to-end orchestration: `align_and_stack`, `calibrate_align_stack`. |
+| `stacking::progress` | `pub(crate)` (types re-exported) | Progress reporting shared by combine, drizzle, calibration, and pipeline. |
 | `image_ops` | `pub(crate)` (types re-exported) | Umbrella for in-place display/processing ops on a linear f32 master; holds the `op` contract, per-pixel/interleave helpers, and `wavelet`. |
 | `image_ops::stretching` | `pub(crate)` (types re-exported) | Post-stack non-linear display stretch: MTF/STF and color-preserving arcsinh. |
 | `image_ops::{denoise, hdr, local_contrast, color_calibration, background_extraction}` | `pub(crate)` (types re-exported) | Wavelet denoise, HDR tone-compression, local contrast, SCNR/background neutralization, gradient background extraction. |

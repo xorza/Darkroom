@@ -12,12 +12,12 @@ use crate::io::raw::{load_raw_cfa, raw_dimensions};
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::stacking::combine::error::Error as StackError;
-use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::combine::stack::stack_stored_frames;
 use crate::stacking::frame_store::{
     MemoryPlan, SpillDirectory, StoredImage, StoredLightFrame, plan_memory, store_image,
     store_light_frame,
 };
+use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::{register, warp};
 use crate::stacking::star_detection::detector::StarDetector;
 

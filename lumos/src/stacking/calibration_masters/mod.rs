@@ -21,9 +21,9 @@ use crate::io::raw::raw_dimensions;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
-use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::combine::stack::run_stacking;
 use crate::stacking::frame_store::fits_in_memory;
+use crate::stacking::progress::ProgressCallback;
 use defect_map::DefectMap;
 
 /// Default sigma threshold for defect detection.

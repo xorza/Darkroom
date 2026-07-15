@@ -18,9 +18,9 @@ use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::cache::{CfaCache, LightCache};
 use crate::stacking::combine::config::{CombineMethod, Normalization, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
-use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::frame_store::{FrameStats, SpillDirectory, StackableImage, StoredLightFrame};
 use crate::stacking::product::StackProduct;
+use crate::stacking::progress::ProgressCallback;
 
 /// Per-frame, per-channel affine normalization parameters.
 ///

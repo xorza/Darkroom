@@ -9,12 +9,12 @@ use rayon::prelude::*;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::Error;
-use crate::stacking::combine::progress::{ProgressCallback, StackingStage, report_progress};
 use crate::stacking::combine::stack::{FrameNorm, StackFrame};
 use crate::stacking::frame_store::{
     FrameStats, SpillDirectory, StoredFrame, StoredLightFrame, StoredPlane, optimal_chunk_rows,
 };
 use crate::stacking::product::StackProduct;
+use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 
 /// Per-thread scratch buffers for stacking combine closures.
 ///

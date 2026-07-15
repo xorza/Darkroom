@@ -12,8 +12,8 @@ use std::hint::black_box;
 use crate::AstroImage;
 use crate::io::astro_image::ImageDimensions;
 use crate::stacking::combine::config::StackConfig;
-use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::combine::stack::{StackFrame, stack_images};
+use crate::stacking::progress::ProgressCallback;
 
 /// A 1 MP mono frame: smooth background + per-frame offset/gain (so normalization has work to do) +
 /// ~0.2% bright outliers (so rejection has something to clip).

@@ -16,7 +16,7 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 | `cache/tests.rs` | Combine-engine tests and shared stack test helper |
 | `cache/loader/tests.rs` | Loader and sidecar tests |
 | `cache_config.rs` | `CacheConfig` and available-memory query |
-| `progress.rs` | `ProgressCallback`, `StackingStage` |
+| `../progress.rs` | Shared `ProgressCallback`, `StackingProgress`, and `StackingStage` |
 | `error.rs` | `Error` enum |
 
 ## Public API

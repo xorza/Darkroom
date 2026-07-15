@@ -11,13 +11,13 @@ use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
 use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::Error;
-use crate::stacking::combine::progress::{ProgressCallback, StackingStage, report_progress};
 use crate::stacking::frame_store::{
     FrameStats, FrameStoreError, SpillDirectory, StackableImage, StoredFrame, StoredLightFrame,
     StoredPlane, cache_filename, channel_filename, compute_frame_stats, decode_transient_bytes,
     fits_in_memory, frame_bytes, frame_from_memory, load_concurrency, map_plane, reusable_plane,
     store_frame,
 };
+use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 
 use super::{CacheCore, CfaCache, LightCache};
 

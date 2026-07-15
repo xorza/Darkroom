@@ -49,9 +49,9 @@ use std::time::Instant;
 use common::CancelToken;
 
 use crate::stacking::combine::config::{CombineMethod, StackConfig};
-use crate::stacking::combine::progress::{ProgressCallback, StackingProgress, StackingStage};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::stack::stack;
+use crate::stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 use crate::testing::mem_probe::{
     BudgetChoice, MB, RssSampler, budget_ceiling_mb, ensure_frames, env_parse, parse_budget,
 };

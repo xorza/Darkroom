@@ -1,8 +1,8 @@
 use common::CancelToken;
 
 use crate::stacking::combine::config::{Normalization, StackConfig};
-use crate::stacking::combine::progress::ProgressCallback;
 use crate::stacking::combine::stack::stack;
+use crate::stacking::progress::ProgressCallback;
 use crate::testing::{calibration_dir, init_tracing};
 
 #[test]

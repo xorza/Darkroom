@@ -25,8 +25,7 @@ pub enum StackingStage {
 /// Callback type for progress reporting.
 pub type ProgressCallback = SharedFn<dyn Fn(StackingProgress) + Send + Sync>;
 
-/// Report progress using the callback if set.
-pub fn report_progress(
+pub(crate) fn report_progress(
     callback: &ProgressCallback,
     current: usize,
     total: usize,

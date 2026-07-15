@@ -31,9 +31,9 @@ use rayon::prelude::*;
 
 use crate::ImageDimensions;
 use crate::io::astro_image::AstroImage;
-use crate::stacking::combine::progress::report_progress;
-use crate::stacking::combine::progress::{ProgressCallback, StackingStage};
 use crate::stacking::product::StackProduct;
+use crate::stacking::progress::report_progress;
+use crate::stacking::progress::{ProgressCallback, StackingStage};
 use crate::stacking::registration::transform::Transform;
 use error::{DrizzleConfigError, DrizzleError};
 use imaginarium::Buffer2;
