@@ -9,11 +9,11 @@
 
 use std::path::PathBuf;
 
+use arrayvec::ArrayVec;
 use ort::session::Session;
 use ort::value::TensorRef;
 
-use crate::image_ops::{deinterleave_f32, interleave_f32};
-use imaginarium::{Buffer2, Image};
+use imaginarium::{Buffer2, ChannelCount, DeinterleavedImageData, Image};
 
 /// The fixed model processing window — these nets take a `[1, 512, 512, 3]` (NHWC) input.
 const WINDOW: usize = 512;
@@ -51,6 +51,36 @@ pub enum MlError {
 
 fn model_err(e: ort::Error) -> MlError {
     MlError::Model(e.to_string())
+}
+
+fn deinterleave_f32(image: &Image) -> ArrayVec<Buffer2<f32>, 3> {
+    match image.desc.color_format.channel_count {
+        ChannelCount::L => {
+            let planar: DeinterleavedImageData<1, f32> = image.try_into().unwrap();
+            planar.channels.into_iter().collect()
+        }
+        ChannelCount::Rgb => {
+            let planar: DeinterleavedImageData<3, f32> = image.try_into().unwrap();
+            planar.channels.into_iter().collect()
+        }
+        ChannelCount::Rgba => unreachable!("ML operations reject RGBA inputs"),
+    }
+}
+
+fn interleave_f32(planes: ArrayVec<Buffer2<f32>, 3>) -> Image {
+    match planes.len() {
+        1 => {
+            let mut planes = planes.into_iter();
+            let channels = [planes.next().unwrap()];
+            Image::from(&DeinterleavedImageData::from_channels(channels))
+        }
+        3 => {
+            let mut planes = planes.into_iter();
+            let channels: [Buffer2<f32>; 3] = std::array::from_fn(|_| planes.next().unwrap());
+            Image::from(&DeinterleavedImageData::from_channels(channels))
+        }
+        n => panic!("interleave_f32 expects 1 (L) or 3 (RGB) planes, got {n}"),
+    }
 }
 
 /// Run the model over `image` in 512² tiles (NHWC `[0,1]` in, NHWC out), feather-blending the
@@ -187,7 +217,7 @@ fn accumulate(
 /// Normalize the feather-weighted accumulation into an `Image` matching the input's channels.
 fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], w: usize, h: usize) -> Image {
     if rgb {
-        let planes: Vec<Buffer2<f32>> = (0..3)
+        let planes: ArrayVec<Buffer2<f32>, 3> = (0..3)
             .map(|c| {
                 let px = acc[c]
                     .iter()
@@ -203,6 +233,30 @@ fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], w: usize, h: usi
         let gray: Vec<f32> = (0..w * h)
             .map(|i| ((acc[0][i] + acc[1][i] + acc[2][i]) / (3.0 * weight[i])).clamp(0.0, 1.0))
             .collect();
-        interleave_f32(vec![Buffer2::new(w, h, gray)])
+        let mut planes = ArrayVec::new();
+        planes.push(Buffer2::new(w, h, gray));
+        interleave_f32(planes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use imaginarium::{ColorFormat, ImageDesc};
+
+    #[test]
+    fn deinterleave_interleave_round_trips() {
+        let samples = [0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6];
+        let image = Image::new_with_data(
+            ImageDesc::new(2, 1, ColorFormat::RGB_F32),
+            bytemuck::cast_slice(&samples).to_vec(),
+        )
+        .unwrap();
+        let bytes = image.bytes().to_vec();
+        let planes = deinterleave_f32(&image);
+        assert_eq!(planes.len(), 3);
+        assert_eq!(planes[0].pixels(), &[0.1, 0.4]);
+        let back = interleave_f32(planes);
+        assert_eq!(back.bytes(), bytes);
     }
 }

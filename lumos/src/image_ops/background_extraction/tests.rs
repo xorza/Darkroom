@@ -1,6 +1,6 @@
 use super::*;
-use crate::image_ops::deinterleave_f32;
 use crate::image_ops::op::OpError;
+use crate::image_ops::test_support::channel_plane as channel;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn fill(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
@@ -22,10 +22,6 @@ fn gray(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Image {
 }
 
 /// Channel `c` of an image as a buffer (for assertions).
-fn channel(image: &Image, c: usize) -> Buffer2<f32> {
-    deinterleave_f32(image)[c].clone()
-}
-
 fn max_abs(p: &[f32]) -> f32 {
     p.iter().fold(0.0f32, |m, &v| m.max(v.abs()))
 }

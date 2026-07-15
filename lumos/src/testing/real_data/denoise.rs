@@ -2,7 +2,7 @@
 //! the linear domain, then stretch and SCNR into a viewable image — saving only the final result.
 //! Gated behind the `real-data` feature.
 
-use crate::image_ops::deinterleave_f32;
+use crate::image_ops::test_support::channel_plane;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{AstroImage, Denoise, NeutralizeBackground, Scnr, Stretch};
@@ -12,7 +12,7 @@ use imaginarium::Image;
 /// gradients and extended signal cancel in the difference, so this isolates the pixel-scale noise
 /// that denoising removes (unlike a global sigma, which is dominated by real structure).
 fn highfreq_noise(image: &Image, channel: usize) -> f32 {
-    let buf = deinterleave_f32(image)[channel].clone();
+    let buf = channel_plane(image, channel);
     let width = buf.width();
     let px = buf.pixels();
     let n = px.len();

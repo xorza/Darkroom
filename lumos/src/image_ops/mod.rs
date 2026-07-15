@@ -6,9 +6,10 @@
 //!   ([`remap_intensity`]), or a per-channel reduction/curve applied in place (e.g.
 //!   [`crate::image_ops::color_calibration::neutralize_background`], per-channel
 //!   [`crate::image_ops::stretching`]);
-//! - only ops with genuine per-channel 2D structure ([`crate::image_ops::denoise`]'s wavelets,
-//!   [`crate::image_ops::background_extraction`]'s surface fit) [`deinterleave_f32`] to channel
-//!   planes, process, and [`interleave_f32`] back.
+//! - ops with genuine per-channel 2D structure ([`crate::image_ops::denoise`]'s wavelets,
+//!   [`crate::image_ops::background_extraction`]'s surface fit) stream one plane at a time through
+//!   [`process_channels`]. The optional ML backend privately converts full images at its model
+//!   boundary, where input and output buffers differ.
 //!
 //! The submodules below are the image operations themselves (each an op-named config struct with an
 //! in-place `apply`), plus their shared support: [`op`] (the `OpError` contract) and [`wavelet`]
@@ -29,7 +30,7 @@ pub(crate) mod stretching;
 pub(crate) mod wavelet;
 
 use common::Rgb;
-use imaginarium::{Buffer2, ChannelCount, DeinterleavedImageData, Image};
+use imaginarium::{Buffer2, ChannelCount, Image};
 use rayon::prelude::*;
 
 /// Pixels per rayon work item. Parallelizing per pixel (`par_chunks_mut(3)`) drowns a cheap
@@ -139,21 +140,6 @@ fn apply_intensity_remap(image: &mut Image, intensity: &Buffer2<f32>, mapped: &B
     }
 }
 
-/// Deinterleave an f32 master into its channel planes (1 for L, 3 for RGB).
-pub(crate) fn deinterleave_f32(image: &Image) -> Vec<Buffer2<f32>> {
-    match image.desc.color_format.channel_count {
-        ChannelCount::L => {
-            let planar: DeinterleavedImageData<1, f32> = image.try_into().unwrap();
-            planar.channels.into_iter().collect()
-        }
-        ChannelCount::Rgb => {
-            let planar: DeinterleavedImageData<3, f32> = image.try_into().unwrap();
-            planar.channels.into_iter().collect()
-        }
-        ChannelCount::Rgba => unreachable!("assert_f32_master rejects RGBA"),
-    }
-}
-
 /// Run a per-channel operation that needs a contiguous 2D plane, **one channel at a
 /// time**: gather the channel into a reused plane, process it, scatter it back. For the
 /// spatial ops ([`crate::image_ops::denoise`], [`crate::image_ops::background_extraction`])
@@ -188,24 +174,6 @@ fn scatter_channel(image: &mut Image, channel: usize, channels: usize, plane: &B
         .step_by(channels)
         .zip(plane.pixels().par_iter())
         .for_each(|(s, &p)| *s = p);
-}
-
-/// Re-interleave channel planes (1 or 3) into a **new** f32 `Image` — used by the ML ops, whose
-/// output image differs from the input (channel count or content). In-place ops use
-/// [`interleave_into`] instead, which reuses the existing buffer.
-#[cfg(any(test, feature = "ml"))]
-pub(crate) fn interleave_f32(planes: Vec<Buffer2<f32>>) -> Image {
-    match planes.len() {
-        1 => {
-            let channels: [Buffer2<f32>; 1] = planes.try_into().unwrap();
-            Image::from(&DeinterleavedImageData::from_channels(channels))
-        }
-        3 => {
-            let channels: [Buffer2<f32>; 3] = planes.try_into().unwrap();
-            Image::from(&DeinterleavedImageData::from_channels(channels))
-        }
-        n => panic!("interleave_f32 expects 1 (L) or 3 (RGB) planes, got {n}"),
-    }
 }
 
 #[cfg(test)]
@@ -269,17 +237,6 @@ mod tests {
     }
 
     #[test]
-    fn deinterleave_interleave_round_trips() {
-        let image = rgb_f32(2, 1, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
-        let bytes = image.bytes().to_vec();
-        let planes = deinterleave_f32(&image);
-        assert_eq!(planes.len(), 3);
-        assert_eq!(planes[0].pixels(), &[0.1, 0.4]); // R column
-        let back = interleave_f32(planes);
-        assert_eq!(back.bytes(), &bytes[..]);
-    }
-
-    #[test]
     fn process_channels_streams_each_channel_planar_and_in_order() {
         // Dyadic values so the +1.0 edit is exact in f32.
         let mut rgb = rgb_f32(2, 1, vec![0.125, 0.25, 0.375, 0.5, 0.625, 0.75]);
@@ -310,5 +267,18 @@ mod tests {
             }
         });
         assert_eq!(bytemuck::cast_slice::<u8, f32>(l.bytes()), &[0.5, 1.0, 1.5]);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use imaginarium::{Buffer2, Image};
+
+    pub(crate) fn channel_plane(image: &Image, channel: usize) -> Buffer2<f32> {
+        let channels = image.desc.color_format.channel_count.channel_count() as usize;
+        assert!(channel < channels);
+        let mut plane = Buffer2::new_default(image.desc.width, image.desc.height);
+        super::gather_channel(image, channel, channels, &mut plane);
+        plane
     }
 }

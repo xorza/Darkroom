@@ -1,6 +1,6 @@
 use super::{LocalContrast, build_tile_luts};
-use crate::image_ops::deinterleave_f32;
 use crate::image_ops::op::OpError;
+use crate::image_ops::test_support::channel_plane as channel;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
@@ -18,10 +18,6 @@ fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Im
 }
 
 /// Channel `c` of an image as a buffer (for assertions).
-fn channel(image: &Image, c: usize) -> Buffer2<f32> {
-    deinterleave_f32(image)[c].clone()
-}
-
 fn mean(d: &[f32]) -> f32 {
     d.iter().sum::<f32>() / d.len() as f32
 }

@@ -1,6 +1,6 @@
 use super::{Denoise, Threshold};
-use crate::image_ops::deinterleave_f32;
 use crate::image_ops::op::OpError;
+use crate::image_ops::test_support::channel_plane as channel;
 use imaginarium::{Buffer2, ColorFormat, DeinterleavedImageData, Image, ImageDesc};
 
 /// Deterministic xorshift64 + Box-Muller Gaussian, so noise tests are reproducible without a dep.
@@ -48,10 +48,6 @@ fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Im
 }
 
 /// Channel `c` of an image as a buffer (for assertions).
-fn channel(image: &Image, c: usize) -> Buffer2<f32> {
-    deinterleave_f32(image)[c].clone()
-}
-
 fn mean(data: &[f32]) -> f32 {
     data.iter().sum::<f32>() / data.len() as f32
 }

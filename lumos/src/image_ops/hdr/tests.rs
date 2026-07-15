@@ -1,6 +1,6 @@
 use super::Hdr;
-use crate::image_ops::deinterleave_f32;
 use crate::image_ops::op::OpError;
+use crate::image_ops::test_support::channel_plane as channel;
 use crate::image_ops::wavelet::atrous_smooth;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
@@ -11,10 +11,6 @@ fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
 }
 
 /// Channel `c` of an image as a buffer (for assertions).
-fn channel(image: &Image, c: usize) -> Buffer2<f32> {
-    deinterleave_f32(image)[c].clone()
-}
-
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale
 /// brightness HDR is meant to compress.
 fn dome(width: usize, height: usize) -> Vec<f32> {

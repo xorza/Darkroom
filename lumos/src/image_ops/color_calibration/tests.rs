@@ -1,6 +1,6 @@
 use super::*;
-use crate::image_ops::deinterleave_f32;
 use crate::image_ops::op::OpError;
+use crate::image_ops::test_support::channel_plane;
 use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
 fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Image {
@@ -19,7 +19,7 @@ fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
 
 /// Channel `c` of an image as a flat vector (for assertions).
 fn channel(image: &Image, c: usize) -> Vec<f32> {
-    deinterleave_f32(image)[c].pixels().to_vec()
+    channel_plane(image, c).pixels().to_vec()
 }
 
 #[test]
