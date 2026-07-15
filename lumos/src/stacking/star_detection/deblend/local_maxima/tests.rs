@@ -1,6 +1,6 @@
 //! Tests for local maxima deblending.
 
-use crate::math::bbox::Aabb;
+use crate::math::rect::URect;
 use crate::stacking::star_detection::deblend::assign_to_nearest_peak;
 use crate::stacking::star_detection::deblend::local_maxima::*;
 use crate::stacking::star_detection::labeling::LabelMap;
@@ -22,7 +22,7 @@ fn make_test_component(
     let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
     let mut labels = Buffer2::new_filled(width, height, 0u32);
 
-    let mut bbox = Aabb::empty();
+    let mut bbox = URect::empty();
     let mut area = 0;
 
     for (cx, cy, amplitude, sigma) in stars {
@@ -313,10 +313,10 @@ fn test_voronoi_partitioning() {
     // Each candidate should have its peak inside its bounding box
     for candidate in &candidates {
         assert!(
-            candidate.peak.x >= candidate.bbox.min.x && candidate.peak.x <= candidate.bbox.max.x
+            candidate.peak.x >= candidate.bbox.min.x && candidate.peak.x < candidate.bbox.max.x
         );
         assert!(
-            candidate.peak.y >= candidate.bbox.min.y && candidate.peak.y <= candidate.bbox.max.y
+            candidate.peak.y >= candidate.bbox.min.y && candidate.peak.y < candidate.bbox.max.y
         );
     }
 }
@@ -356,7 +356,7 @@ fn test_plateau_no_local_max() {
 
     let labels = label_map_from_raw(labels_buf, 1);
     let data = ComponentData {
-        bbox: Aabb::new(Vec2us::new(3, 3), Vec2us::new(5, 5)),
+        bbox: URect::new(Vec2us::new(3, 3), Vec2us::new(6, 6)),
         label: 1,
         area: 9,
     };
@@ -378,7 +378,7 @@ fn test_single_pixel_is_local_max() {
 
     let labels = label_map_from_raw(labels_buf, 1);
     let data = ComponentData {
-        bbox: Aabb::new(Vec2us::new(5, 5), Vec2us::new(5, 5)),
+        bbox: URect::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
         label: 1,
         area: 1,
     };
@@ -421,7 +421,7 @@ fn test_voronoi_midpoint_assignment() {
 
     let labels = label_map_from_raw(labels_buf, 1);
     let data = ComponentData {
-        bbox: Aabb::new(Vec2us::new(20, 50), Vec2us::new(79, 50)),
+        bbox: URect::new(Vec2us::new(20, 50), Vec2us::new(80, 51)),
         label: 1,
         area: 60,
     };

@@ -5,8 +5,8 @@
 //! - [`sum`]: Sum, accumulate, and scale operations
 //! - [`statistics`]: Median, MAD, and sigma-clipped statistics
 
-pub(crate) mod bbox;
 pub(crate) mod dmat3;
+pub(crate) mod rect;
 
 pub mod statistics;
 pub mod sum;

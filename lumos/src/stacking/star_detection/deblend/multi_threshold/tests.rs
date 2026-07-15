@@ -1,6 +1,6 @@
 //! Tests for multi-threshold deblending.
 
-use crate::math::bbox::Aabb;
+use crate::math::rect::URect;
 use crate::stacking::star_detection::deblend::multi_threshold::*;
 use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
 
@@ -34,7 +34,7 @@ fn make_test_component(
     let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
     let mut labels = Buffer2::new_filled(width, height, 0u32);
 
-    let mut bbox = Aabb::empty();
+    let mut bbox = URect::empty();
     let mut area = 0;
 
     for (cx, cy, amplitude, sigma) in stars {
@@ -164,7 +164,7 @@ fn test_empty_component() {
     let labels_buf = Buffer2::new_filled(10, 10, 0u32);
     let labels = label_map_from_raw(labels_buf, 0);
     let data = ComponentData {
-        bbox: Aabb::default(),
+        bbox: URect::default(),
         label: 1,
         area: 0,
     };
@@ -406,7 +406,7 @@ fn test_single_pixel_component() {
 
     let labels = label_map_from_raw(labels_buf, 1);
     let data = ComponentData {
-        bbox: Aabb::new(Vec2us::new(5, 5), Vec2us::new(5, 5)),
+        bbox: URect::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
         label: 1,
         area: 1,
     };
@@ -422,7 +422,7 @@ fn test_flat_profile_no_deblend() {
     let mut pixels = Buffer2::new_filled(50, 50, 0.0f32);
     let mut labels_buf = Buffer2::new_filled(50, 50, 0u32);
 
-    let mut bbox = Aabb::empty();
+    let mut bbox = URect::empty();
     let mut area = 0;
 
     for y in 10..40 {
@@ -467,7 +467,7 @@ fn test_zero_floor_pixel_does_not_prevent_deblending() {
     let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
     let mut labels_buf = Buffer2::new_filled(width, height, 0u32);
 
-    let mut bbox = Aabb::empty();
+    let mut bbox = URect::empty();
     let mut area = 0;
     // The whole rectangle is one connected component; most of it stays at 0.0.
     for y in 10..90 {

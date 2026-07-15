@@ -62,7 +62,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 | `image_ops::ml` | `pub(crate)`, `#[cfg(feature = "ml")]` | ONNX-backed ML denoise + star removal (tiled inference). |
 | `io::astro_image` | `pub(crate)` (types re-exported) | `AstroImage` container, FITS/standard loading, metadata, CFA, sensor detection. |
 | `io::raw` | `pub(crate)` | libraw RAW decode + Bayer (RCD) / X-Trans (Markesteijn) demosaicing. |
-| `math` | `pub(crate)` | `DMat3`, `Aabb`/`BBox`, compensated SIMD `sum`, robust statistics. (`Vec2us` lives in the workspace `common` crate.) |
+| `math` | `pub(crate)` | `DMat3`, half-open `Rect`/`URect`, compensated SIMD `sum`, robust statistics. (`Vec2us` lives in the workspace `common` crate.) |
 | `concurrency` | `pub(crate)` | `UnsafeSendPtr` (send raw pointers across rayon closures). |
 | `testing` | `#[cfg(test)]` | Forward-model synthetic generator (`synthetic/`: `Scene` → `Camera` → `observe::render` → `SimFrame{image, truth}`, graded by `metrics`) + `real_data/` fixtures, for tests/benches. |
 
@@ -159,7 +159,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 - `sum/`: `sum_f32` / `mean_f32` / `weighted_mean_f32` — hybrid compensated summation (per-lane Kahan in the SIMD inner loop, Neumaier horizontal reduction + remainder). AVX2 (8-wide) / SSE4.1 (4-wide) / NEON / scalar.
 - `statistics/`: `median_f32_mut` (quickselect, NaN-safe `total_cmp`), `median_f32_fast` (NaN-free intermediate), `mad_f32_fast`, `mad_to_sigma` (`MAD_TO_SIGMA = 1.4826022`), iterative `sigma_clipped_median_mad` → `ClippedStats {median, sigma, mean}` (the survivors' mean exposes residual skew for the background's Pearson-mode estimator); `FWHM_TO_SIGMA ≈ 2.3548` lives in `mod.rs`.
-- `dmat3.rs` (`DMat3`, row-major f64 homogeneous transforms + inverse/determinant), `bbox.rs` (`Aabb`, several methods test-gated). (`Vec2us` pixel indexing now lives in `common`.)
+- `dmat3.rs` (`DMat3`, row-major f64 homogeneous transforms + inverse/determinant), `rect/` (`Rect` for continuous geometry and `URect` for pixel regions; both use half-open min/max bounds). (`Vec2us` pixel indexing now lives in `common`.)
 
 ## SIMD dispatch
 
@@ -180,7 +180,7 @@ Runtime feature detection via the `common` crate (`cpu_features::has_avx2()` / `
 ## WIP / notes
 
 - `stacking/registration/distortion/tps` (thin-plate spline) is implemented and tested but `#![allow(dead_code)]` and **not wired** into `register()` — an alternate post-RANSAC distortion model.
-- Test-only constructors/APIs are gated and kept minimal (e.g. `math/bbox`, warp params). Don't widen them for production use.
+- Test-only constructors/APIs are gated and kept minimal (e.g. warp params). Don't widen them for production use.
 - The `real-data` feature flag (empty) gates real-data tests/benches that read the bundled `test_data/lumos_data` dataset (gitignored; present locally).
 - **Test layout:** per-file unit tests are the `foo/{mod.rs, tests.rs}` split, beside the code. Module-level integration tests sit beside the implementation as `<module>/synthetic_tests[.rs|/]` (forward-model tests) and `<module>/real_data_tests.rs` (`#[cfg_attr(not(feature="real-data"), ignore)]`). `stacking::star_detection`'s shared test-output/metric infra is `stacking/star_detection/test_common/`; its synthetic tree groups `stacking/star_detection/synthetic_tests/{stage_tests, pipeline_tests}/` + `metric_curves.rs` / `subpixel_accuracy.rs`. The shared generator + graders live in `testing::synthetic`.
 

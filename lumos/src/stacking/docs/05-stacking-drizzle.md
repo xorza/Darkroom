@@ -593,11 +593,12 @@ receives.
   corners (`interpolate_four_points`), computes the **exact polygon-pixel overlap**
   with `boxer()` (`:280`), which sums signed sub-areas under each edge via `sgarea()`
   (`:174`, Green's-theorem line-integral area). Correct under rotation/shear. lumos:
-  `add_image_square` (`mod.rs:398`) with `compute_square_overlap`/`boxer`.
+  `add_image_square` (`drizzle/accumulator.rs`) with `boxer`.
 - **Turbo kernel** (`do_kernel_turbo`, `:1841`, lumos default): approximates the drop
   as an **axis-aligned rectangle** centered on the transformed pixel center, overlap
   via the simple `over()` rectangle intersection (`:460`). Fast; valid only when
-  rotation between frames is small. lumos: `add_image_turbo` (`mod.rs:329`).
+  rotation between frames is small. lumos: `add_image_turbo` (`drizzle/accumulator.rs`) using
+  `math::rect::Rect::overlap_area`.
 
 ### 5.2 The Jacobian and flux conservation
 

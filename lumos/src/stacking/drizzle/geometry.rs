@@ -27,24 +27,6 @@ pub(crate) fn local_jacobian(
     (dx.x * dy.y - dx.y * dy.x).abs() * scale * scale
 }
 
-/// Compute overlap area between two axis-aligned rectangles.
-#[inline]
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn compute_square_overlap(
-    ax1: f32,
-    ay1: f32,
-    ax2: f32,
-    ay2: f32,
-    bx1: f32,
-    by1: f32,
-    bx2: f32,
-    by2: f32,
-) -> f32 {
-    let x_overlap = (ax2.min(bx2) - ax1.max(bx1)).max(0.0);
-    let y_overlap = (ay2.min(by2) - ay1.max(by1)).max(0.0);
-    x_overlap * y_overlap
-}
-
 /// Lanczos kernel function.
 #[inline]
 pub(crate) fn lanczos_kernel(x: f32, a: f32) -> f32 {

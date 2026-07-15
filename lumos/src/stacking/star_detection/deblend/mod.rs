@@ -12,7 +12,7 @@
 
 use arrayvec::ArrayVec;
 
-use crate::math::bbox::Aabb;
+use crate::math::rect::URect;
 use crate::stacking::star_detection::labeling::LabelMap;
 use common::Vec2us;
 use imaginarium::Buffer2;
@@ -44,7 +44,7 @@ pub struct Pixel {
 #[derive(Debug, Clone, Copy)]
 pub struct ComponentData {
     /// Bounding box of the component.
-    pub bbox: Aabb,
+    pub bbox: URect,
     /// Component label in the labels buffer.
     pub label: u32,
     /// Number of pixels in the component (pre-computed).
@@ -63,8 +63,8 @@ impl ComponentData {
     ) -> impl Iterator<Item = Pixel> + 'a {
         let width = pixels.width();
         let bbox = &self.bbox;
-        (bbox.min.y..=bbox.max.y).flat_map(move |y| {
-            (bbox.min.x..=bbox.max.x).filter_map(move |x| {
+        (bbox.min.y..bbox.max.y).flat_map(move |y| {
+            (bbox.min.x..bbox.max.x).filter_map(move |x| {
                 let idx = y * width + x;
                 if labels[idx] == self.label {
                     Some(Pixel {
@@ -108,7 +108,7 @@ pub(crate) fn assign_to_nearest_peak(
     let peaks = &peaks[..peaks.len().min(MAX_PEAKS)];
 
     // Per-peak (bbox, area) accumulators, indexed like `peaks`.
-    let mut acc = [(Aabb::empty(), 0usize); MAX_PEAKS];
+    let mut acc = [(URect::empty(), 0usize); MAX_PEAKS];
     for pixel in data.iter_pixels(pixels, labels) {
         let nearest = nearest_peak_index(pixel.pos, peaks);
         acc[nearest].0.include(pixel.pos);
@@ -117,6 +117,10 @@ pub(crate) fn assign_to_nearest_peak(
 
     for (peak, &(bbox, area)) in peaks.iter().zip(acc.iter()) {
         if area > 0 {
+            assert!(
+                bbox.contains(peak.pos),
+                "assigned region must contain its peak"
+            );
             result.push(Region {
                 bbox,
                 peak: peak.pos,

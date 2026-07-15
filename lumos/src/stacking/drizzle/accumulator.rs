@@ -1,16 +1,15 @@
 //! Pixel distribution and accumulation for drizzle reconstruction.
 
 use arrayvec::ArrayVec;
-use glam::DVec2;
+use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::astro_image::{AstroImage, ImageDimensions};
+use crate::math::rect::Rect;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::DrizzleError;
-use crate::stacking::drizzle::geometry::{
-    boxer, compute_square_overlap, lanczos_kernel, local_jacobian,
-};
+use crate::stacking::drizzle::geometry::{boxer, lanczos_kernel, local_jacobian};
 use crate::stacking::product::StackProduct;
 use crate::stacking::registration::transform::Transform;
 
@@ -307,20 +306,15 @@ impl DrizzleAccumulator {
                     ((ox_center + half_drop).round() + 1.0).min(output_width as f32) as usize;
                 let oy_max =
                     ((oy_center + half_drop).round() + 1.0).min(output_height as f32) as usize;
+                let drop =
+                    Rect::from_center_half_extent(Vec2::new(ox_center, oy_center), half_drop);
 
                 let effective_weight = weight * pw / jaco;
                 for oy in oy_min..oy_max {
                     for ox in ox_min..ox_max {
-                        let overlap = compute_square_overlap(
-                            ox_center - half_drop,
-                            oy_center - half_drop,
-                            ox_center + half_drop,
-                            oy_center + half_drop,
-                            ox as f32 - 0.5,
-                            oy as f32 - 0.5,
-                            ox as f32 + 0.5,
-                            oy as f32 + 0.5,
-                        );
+                        let pixel =
+                            Rect::from_center_half_extent(Vec2::new(ox as f32, oy as f32), 0.5);
+                        let overlap = drop.overlap_area(pixel);
 
                         if overlap > 0.0 {
                             let pixel_weight = effective_weight * overlap * inv_area;

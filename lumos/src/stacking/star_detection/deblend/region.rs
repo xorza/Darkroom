@@ -1,6 +1,6 @@
 //! Connected region from segmentation and deblending.
 
-use crate::math::bbox::Aabb;
+use crate::math::rect::URect;
 use common::Vec2us;
 
 /// A connected region of pixels identified during detection.
@@ -11,7 +11,7 @@ use common::Vec2us;
 #[derive(Debug)]
 pub struct Region {
     /// Bounding box of the region.
-    pub bbox: Aabb,
+    pub bbox: URect,
     /// Peak pixel coordinates within the region.
     pub peak: Vec2us,
     /// Peak pixel value.

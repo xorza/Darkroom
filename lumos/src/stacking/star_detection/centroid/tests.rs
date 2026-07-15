@@ -4,7 +4,7 @@ use glam::Vec2;
 
 use super::*;
 use crate::math::FWHM_TO_SIGMA;
-use crate::math::bbox::Aabb;
+use crate::math::rect::URect;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::compute_roundness;
 use crate::stacking::star_detection::centroid::moffat_fit::alpha_beta_to_fwhm;
@@ -1222,7 +1222,7 @@ fn test_measure_star_returns_none_for_edge_candidate() {
 
     // Create region near edge
     let region = Region {
-        bbox: Aabb::new(Vec2us::new(0, 30), Vec2us::new(5, 35)),
+        bbox: URect::new(Vec2us::new(0, 30), Vec2us::new(6, 36)),
         peak: Vec2us::new(3, 32),
         peak_value: 0.9,
         area: 18,
@@ -4040,14 +4040,14 @@ fn measure_single_star(
         ..Default::default()
     };
     let region = Region {
-        bbox: Aabb::new(
+        bbox: URect::new(
             Vec2us::new(
                 (peak_pos.x as usize).saturating_sub(5),
                 (peak_pos.y as usize).saturating_sub(5),
             ),
             Vec2us::new(
-                (peak_pos.x as usize + 5).min(width - 1),
-                (peak_pos.y as usize + 5).min(height - 1),
+                (peak_pos.x as usize + 6).min(width),
+                (peak_pos.y as usize + 6).min(height),
             ),
         ),
         peak: Vec2us::new(peak_pos.x.round() as usize, peak_pos.y.round() as usize),

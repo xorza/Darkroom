@@ -5,8 +5,8 @@
 //! (weighted-moments / Gaussian-fit / Moffat-fit) agree and the profile fits beat moments.
 
 use super::background_estimate;
-use crate::math::bbox::Aabb;
 use crate::math::fwhm_to_sigma;
+use crate::math::rect::URect;
 use crate::stacking::star_detection::centroid::measure_star;
 use crate::stacking::star_detection::config::{CentroidMethod, Config};
 use crate::stacking::star_detection::deblend::region::Region;
@@ -43,9 +43,9 @@ fn candidate_at(pixels: &Buffer2<f32>, x: f32, y: f32) -> Region {
     let (w, h) = (pixels.width(), pixels.height());
     let (px, py) = (x.round() as usize, y.round() as usize);
     Region {
-        bbox: Aabb::new(
+        bbox: URect::new(
             Vec2us::new(px.saturating_sub(5), py.saturating_sub(5)),
-            Vec2us::new((px + 5).min(w - 1), (py + 5).min(h - 1)),
+            Vec2us::new((px + 6).min(w), (py + 6).min(h)),
         ),
         peak: Vec2us::new(px, py),
         peak_value: pixels[(px, py)],

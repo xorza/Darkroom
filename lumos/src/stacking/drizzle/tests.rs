@@ -8,9 +8,7 @@ use crate::stacking::drizzle::accumulator::test_support::{
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
-use crate::stacking::drizzle::geometry::{
-    boxer, compute_square_overlap, lanczos_kernel, local_jacobian, sgarea,
-};
+use crate::stacking::drizzle::geometry::{boxer, lanczos_kernel, local_jacobian, sgarea};
 use crate::stacking::drizzle::stack::{drizzle_images, drizzle_stack};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::transform::Transform;
@@ -166,25 +164,6 @@ fn test_drizzle_accumulator_dimensions() {
     assert_eq!(dims.size.x, 200);
     assert_eq!(dims.size.y, 160);
     assert_eq!(dims.channels, 3);
-}
-
-#[test]
-fn test_compute_square_overlap() {
-    // Full overlap (unit squares at same position)
-    let overlap = compute_square_overlap(0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-    assert!((overlap - 1.0).abs() < f32::EPSILON);
-
-    // No overlap
-    let overlap = compute_square_overlap(0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0);
-    assert!((overlap - 0.0).abs() < f32::EPSILON);
-
-    // Partial overlap (half)
-    let overlap = compute_square_overlap(0.0, 0.0, 1.0, 1.0, 0.5, 0.0, 1.5, 1.0);
-    assert!((overlap - 0.5).abs() < f32::EPSILON);
-
-    // Quarter overlap
-    let overlap = compute_square_overlap(0.0, 0.0, 1.0, 1.0, 0.5, 0.5, 1.5, 1.5);
-    assert!((overlap - 0.25).abs() < f32::EPSILON);
 }
 
 #[test]

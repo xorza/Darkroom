@@ -5,7 +5,7 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::math::bbox::Aabb;
+use crate::math::rect::URect;
 use crate::stacking::star_detection::config::Connectivity;
 use crate::stacking::star_detection::deblend::ComponentData;
 use crate::stacking::star_detection::deblend::local_maxima::{
@@ -37,7 +37,7 @@ fn create_components_from_pixels(
     let num_labels = labels.num_labels();
 
     let mut components = Vec::with_capacity(num_labels);
-    let mut bboxes = vec![Aabb::empty(); num_labels + 1];
+    let mut bboxes = vec![URect::empty(); num_labels + 1];
     let mut areas = vec![0usize; num_labels + 1];
 
     for y in 0..height {

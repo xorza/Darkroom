@@ -1,7 +1,7 @@
 //! Integration tests for deblending algorithms.
 //! These tests compare behavior between local_maxima and multi_threshold.
 
-use crate::math::bbox::Aabb;
+use crate::math::rect::URect;
 use crate::stacking::star_detection::deblend::local_maxima::deblend_local_maxima;
 use crate::stacking::star_detection::deblend::multi_threshold::{
     DeblendBuffers, deblend_multi_threshold,
@@ -43,7 +43,7 @@ fn make_test_component(
     let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
     let mut labels = Buffer2::new_filled(width, height, 0u32);
 
-    let mut bbox = Aabb::empty();
+    let mut bbox = URect::empty();
     let mut area = 0;
 
     for (cx, cy, amplitude, sigma) in stars {

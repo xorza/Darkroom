@@ -5,7 +5,7 @@
 
 use rayon::prelude::*;
 
-use crate::math::bbox::Aabb;
+use crate::math::rect::URect;
 use common::Vec2us;
 use imaginarium::Buffer2;
 
@@ -144,7 +144,7 @@ fn extract_and_filter_candidates(
 
     // `Config::validate()` can't bound `edge_margin` against the image (it doesn't know the
     // image size), so a margin that swallows the whole image is only catchable here: the retain
-    // below needs `bbox.min >= edge_margin && bbox.max < dim - edge_margin`, which no bbox can
+    // below needs `bbox.min >= edge_margin && bbox.max <= dim - edge_margin`, which no bbox can
     // satisfy once `2 * edge_margin >= dim` — every region is silently filtered out. Surface it
     // instead of leaving an empty result indistinguishable from "no stars in the image".
     if 2 * config.edge_margin >= width.min(height) {
@@ -160,8 +160,8 @@ fn extract_and_filter_candidates(
         c.area >= config.min_area
             && c.bbox.min.x >= config.edge_margin
             && c.bbox.min.y >= config.edge_margin
-            && c.bbox.max.x < width.saturating_sub(config.edge_margin)
-            && c.bbox.max.y < height.saturating_sub(config.edge_margin)
+            && c.bbox.max.x <= width.saturating_sub(config.edge_margin)
+            && c.bbox.max.y <= height.saturating_sub(config.edge_margin)
     });
 
     result
@@ -288,7 +288,7 @@ fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
 
     let result = Mutex::new(vec![
         ComponentData {
-            bbox: Aabb::empty(),
+            bbox: URect::empty(),
             label: 0,
             area: 0,
         };
@@ -300,7 +300,7 @@ fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
             (
                 vec![
                     ComponentData {
-                        bbox: Aabb::empty(),
+                        bbox: URect::empty(),
                         label: 0,
                         area: 0,
                     };
@@ -319,7 +319,7 @@ fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
 
             for &idx in touched.iter() {
                 local_data[idx] = ComponentData {
-                    bbox: Aabb::empty(),
+                    bbox: URect::empty(),
                     label: 0,
                     area: 0,
                 };
@@ -348,7 +348,7 @@ fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
             for &idx in touched.iter() {
                 let partial_comp = &local_data[idx];
                 let data = &mut result[idx];
-                data.bbox = data.bbox.merge(&partial_comp.bbox);
+                data.bbox = data.bbox.union(partial_comp.bbox);
                 data.label = partial_comp.label;
                 data.area += partial_comp.area;
             }
@@ -441,7 +441,7 @@ mod tests {
     #[test]
     fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
         // Once 2 * edge_margin >= the smallest dimension, the retain predicate
-        // `bbox.min >= margin && bbox.max < dim - margin` is unsatisfiable, so every region
+        // `bbox.min >= margin && bbox.max <= dim - margin` is unsatisfiable, so every region
         // is filtered out. This must degrade gracefully (empty result, no panic/overflow)
         // rather than crash, since detect() runs once per frame in a batch and one
         // oddly-sized frame shouldn't abort the whole run. Covers both the exact boundary
