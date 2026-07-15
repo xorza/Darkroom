@@ -15,7 +15,7 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::testing::make_cfa;
 use crate::{
-    CalibrationImages, CalibrationMasters, CfaImage, CfaType, CosmicRayConfig,
+    CalibrationMasters, CalibrationSet, CfaImage, CfaType, CosmicRayConfig,
     DEFAULT_SIGMA_THRESHOLD, DefectMap,
 };
 
@@ -46,7 +46,7 @@ fn cfa_pixels(base: f32, amp: f32, defect: f32, salt: u32) -> Vec<f32> {
 /// A full master set (dark + flat + bias + defect map) over the bench dimensions.
 fn make_masters() -> CalibrationMasters {
     CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(make_cfa(W, H, cfa_pixels(0.02, 0.004, 0.9, 0x11), bayer())),
             flat: Some(make_cfa(W, H, cfa_pixels(0.6, 0.05, 0.001, 0x22), bayer())),
             bias: Some(make_cfa(W, H, cfa_pixels(0.01, 0.002, 0.5, 0x33), bayer())),

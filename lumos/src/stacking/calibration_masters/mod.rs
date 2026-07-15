@@ -33,40 +33,20 @@ use defect_map::DefectMap;
 /// PixInsight uses 3.0; 5.0 is more conservative (fewer false positives).
 pub const DEFAULT_SIGMA_THRESHOLD: f32 = 5.0;
 
-/// Raw frame paths for [`CalibrationMasters::from_files`], grouped by role.
+/// Four calibration roles carrying values of one common type.
 ///
-/// Naming each role at the call site prevents accidentally swapping, say, flats
-/// and bias (all four are path slices). An empty slice produces `None` for that
-/// master.
-#[derive(Debug)]
-pub struct CalibrationFrames<'a, P: AsRef<Path> + Sync> {
-    /// Dark frames (thermal-noise calibration).
-    pub darks: &'a [P],
-    /// Flat frames (vignetting / dust correction).
-    pub flats: &'a [P],
-    /// Bias frames (read-noise calibration).
-    pub bias: &'a [P],
-    /// Dark frames taken at the flat exposure time. When non-empty, subtracted
-    /// from the flat instead of bias during flat normalization — matters for
-    /// narrowband, where flat exposures accumulate dark current.
-    pub flat_darks: &'a [P],
-}
-
-/// Pre-stacked master frames for [`CalibrationMasters::from_images`], grouped by role.
-///
-/// Like [`CalibrationFrames`] but for already-stacked CFA images. Naming each
-/// role at the call site prevents swapping them (all four are `Option<CfaImage>`).
-/// `None` omits that master.
+/// Named fields prevent swapping roles when `T` is the same for all four. Raw
+/// inputs use path slices; prebuilt and stored masters use optional CFA images.
 #[derive(Debug, Default)]
-pub struct CalibrationImages {
-    /// Master dark frame (raw CFA).
-    pub dark: Option<CfaImage>,
-    /// Master flat frame (raw CFA).
-    pub flat: Option<CfaImage>,
-    /// Master bias frame (raw CFA).
-    pub bias: Option<CfaImage>,
-    /// Master flat-dark frame (dark taken at the flat exposure time).
-    pub flat_dark: Option<CfaImage>,
+pub struct CalibrationSet<T> {
+    /// Thermal-noise calibration data.
+    pub dark: T,
+    /// Vignetting and dust correction data.
+    pub flat: T,
+    /// Read-noise calibration data.
+    pub bias: T,
+    /// Dark calibration data taken at the flat exposure time.
+    pub flat_dark: T,
 }
 
 /// A component present in a [`CalibrationMasters`] bundle.
@@ -113,10 +93,7 @@ pub struct DefectSummary {
 /// CFA data before demosaicing so defect correction can use same-color neighbors.
 #[derive(Debug, Default)]
 pub struct CalibrationMasters {
-    master_dark: Option<CfaImage>,
-    master_flat: Option<CfaImage>,
-    master_bias: Option<CfaImage>,
-    master_flat_dark: Option<CfaImage>,
+    images: CalibrationSet<Option<CfaImage>>,
     defect_map: Option<DefectMap>,
 }
 
@@ -139,11 +116,11 @@ fn weighted_budget(available: u64, role_frames: usize, total: usize) -> u64 {
 /// sensor) without a full decode. No frames, or a peek failure, returns `true`: per-role tiering is
 /// memory-safe regardless, so this only governs whether to *optimize* for staying in RAM.
 fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
-    frames: &CalibrationFrames<'_, P>,
+    frames: &CalibrationSet<&[P]>,
     total_frames: usize,
     available: u64,
 ) -> bool {
-    let Some(first) = [frames.darks, frames.flats, frames.bias, frames.flat_darks]
+    let Some(first) = [frames.dark, frames.flat, frames.bias, frames.flat_dark]
         .into_iter()
         .find(|paths| !paths.is_empty())
         .map(|paths| &paths[0])
@@ -191,16 +168,20 @@ impl CalibrationMasters {
     /// Components present in this bundle, in calibration order.
     pub fn components(&self) -> impl Iterator<Item = CalibrationComponent> {
         [
-            self.master_dark
+            self.images
+                .dark
                 .as_ref()
                 .map(|_| CalibrationComponent::Dark),
-            self.master_flat
+            self.images
+                .flat
                 .as_ref()
                 .map(|_| CalibrationComponent::Flat),
-            self.master_bias
+            self.images
+                .bias
                 .as_ref()
                 .map(|_| CalibrationComponent::Bias),
-            self.master_flat_dark
+            self.images
+                .flat_dark
                 .as_ref()
                 .map(|_| CalibrationComponent::FlatDark),
             self.defect_map
@@ -224,10 +205,10 @@ impl CalibrationMasters {
     /// plus the defect map's index lists.
     pub fn ram_bytes(&self) -> usize {
         let frames = [
-            &self.master_dark,
-            &self.master_flat,
-            &self.master_bias,
-            &self.master_flat_dark,
+            &self.images.dark,
+            &self.images.flat,
+            &self.images.bias,
+            &self.images.flat_dark,
         ];
         let frame_bytes: usize = frames
             .iter()
@@ -249,7 +230,7 @@ impl CalibrationMasters {
     ///
     /// Returns [`Error::Cancelled`] if cancellation is requested before defect detection completes.
     pub fn from_images(
-        images: CalibrationImages,
+        images: CalibrationSet<Option<CfaImage>>,
         sigma_threshold: f32,
         cancel: CancelToken,
     ) -> Result<Self, Error> {
@@ -257,22 +238,15 @@ impl CalibrationMasters {
             return Err(Error::Cancelled);
         }
 
-        let CalibrationImages {
-            dark,
-            flat,
-            bias,
-            flat_dark,
-        } = images;
-
         // Hot pixels from the dark, cold/dead pixels from the flat — None if we have neither.
         // Both detections poll `cancel` per pixel (the defect-map scan dominates a cached-master
         // build, so a cancel must bail it mid-scan).
-        let defect_map = if dark.is_some() || flat.is_some() {
+        let defect_map = if images.dark.is_some() || images.flat.is_some() {
             let mut map = DefectMap::default();
-            if let Some(dark) = dark.as_ref() {
+            if let Some(dark) = images.dark.as_ref() {
                 map = map.detect_hot(dark, sigma_threshold, &cancel)?;
             }
-            if let Some(flat) = flat.as_ref() {
+            if let Some(flat) = images.flat.as_ref() {
                 map = map.detect_cold(flat, &cancel)?;
             }
             Some(map)
@@ -280,20 +254,14 @@ impl CalibrationMasters {
             None
         };
 
-        Ok(Self {
-            master_dark: dark,
-            master_flat: flat,
-            master_bias: bias,
-            master_flat_dark: flat_dark,
-            defect_map,
-        })
+        Ok(Self { images, defect_map })
     }
 
     /// Create CalibrationMasters by stacking raw CFA files.
     ///
     /// Uses sigma-clipped mean (>= 8 frames) or median (< 8 frames)
     /// with the full stacking pipeline (rejection, normalization, chunked processing).
-    /// Empty slices produce `None` for that master (see [`CalibrationFrames`]).
+    /// Empty slices produce `None` for that master.
     ///
     /// `sigma_threshold` controls defect detection sensitivity (see
     /// [`DEFAULT_SIGMA_THRESHOLD`]).
@@ -308,14 +276,14 @@ impl CalibrationMasters {
     /// role that individually fits in RAM, which beats parallel-on-disk. The fit check peeks one
     /// frame's header for the per-frame footprint (all calibration frames share a sensor).
     pub fn from_files<P: AsRef<Path> + Sync>(
-        frames: CalibrationFrames<'_, P>,
+        frames: CalibrationSet<&[P]>,
         sigma_threshold: f32,
     ) -> Result<Self, Error> {
         let counts = [
-            frames.darks.len(),
-            frames.flats.len(),
+            frames.dark.len(),
+            frames.flat.len(),
             frames.bias.len(),
-            frames.flat_darks.len(),
+            frames.flat_dark.len(),
         ];
         let total_frames: usize = counts.iter().sum();
         let available = StackConfig::dark().cache.get_available_memory();
@@ -342,8 +310,8 @@ impl CalibrationMasters {
                 let ((dark, flat), (bias, flat_dark)) = rayon::join(
                     move || {
                         rayon::join(
-                            move || stack_cfa_master(frames.darks, dark_cfg, CancelToken::never()),
-                            move || stack_cfa_master(frames.flats, flat_cfg, CancelToken::never()),
+                            move || stack_cfa_master(frames.dark, dark_cfg, CancelToken::never()),
+                            move || stack_cfa_master(frames.flat, flat_cfg, CancelToken::never()),
                         )
                     },
                     move || {
@@ -351,7 +319,7 @@ impl CalibrationMasters {
                             move || stack_cfa_master(frames.bias, bias_cfg, CancelToken::never()),
                             move || {
                                 stack_cfa_master(
-                                    frames.flat_darks,
+                                    frames.flat_dark,
                                     flat_dark_cfg,
                                     CancelToken::never(),
                                 )
@@ -364,15 +332,15 @@ impl CalibrationMasters {
                 // Sequential, full budget each (each role's cache frees before the next loads), so a
                 // role that fits the whole budget stays in RAM instead of being forced to disk.
                 (
-                    stack_cfa_master(frames.darks, StackConfig::dark(), CancelToken::never())?,
-                    stack_cfa_master(frames.flats, StackConfig::flat(), CancelToken::never())?,
+                    stack_cfa_master(frames.dark, StackConfig::dark(), CancelToken::never())?,
+                    stack_cfa_master(frames.flat, StackConfig::flat(), CancelToken::never())?,
                     stack_cfa_master(frames.bias, StackConfig::bias(), CancelToken::never())?,
-                    stack_cfa_master(frames.flat_darks, StackConfig::dark(), CancelToken::never())?,
+                    stack_cfa_master(frames.flat_dark, StackConfig::dark(), CancelToken::never())?,
                 )
             };
 
         Self::from_images(
-            CalibrationImages {
+            CalibrationSet {
                 dark,
                 flat,
                 bias,
@@ -398,15 +366,15 @@ impl CalibrationMasters {
         image.metadata.calibrated = true;
 
         // 1. Dark subtraction
-        if let Some(ref dark) = self.master_dark {
+        if let Some(ref dark) = self.images.dark {
             image.subtract(dark);
-        } else if let Some(ref bias) = self.master_bias {
+        } else if let Some(ref bias) = self.images.bias {
             image.subtract(bias);
         }
 
         // 2. Flat division (flat dark takes priority over bias for flat normalization)
-        if let Some(ref flat) = self.master_flat {
-            let flat_sub = self.master_flat_dark.as_ref().or(self.master_bias.as_ref());
+        if let Some(ref flat) = self.images.flat {
+            let flat_sub = self.images.flat_dark.as_ref().or(self.images.bias.as_ref());
             image.divide_by_normalized(flat, flat_sub);
         }
 

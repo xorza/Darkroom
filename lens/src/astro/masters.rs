@@ -77,7 +77,7 @@ impl From<CalibrationMasters> for Masters {
 mod tests {
     use common::CancelToken;
     use imaginarium::Buffer2;
-    use lumos::{AstroImageMetadata, CalibrationImages, CfaImage, CfaType};
+    use lumos::{AstroImageMetadata, CalibrationSet, CfaImage, CfaType};
 
     use super::*;
 
@@ -86,7 +86,7 @@ mod tests {
             return CalibrationMasters::default();
         }
         CalibrationMasters::from_images(
-            CalibrationImages {
+            CalibrationSet {
                 dark: Some(CfaImage {
                     data: Buffer2::new_filled(4, 4, 0.1),
                     metadata: AstroImageMetadata {
@@ -94,7 +94,7 @@ mod tests {
                         ..AstroImageMetadata::default()
                     },
                 }),
-                ..CalibrationImages::default()
+                ..CalibrationSet::default()
             },
             5.0,
             CancelToken::never(),

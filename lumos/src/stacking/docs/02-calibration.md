@@ -107,7 +107,7 @@ dark current, which are additive and must be removed from `F` **before** `F` is 
 divisor — hence `F − FD` (or `F − B`). If you divide lights by a flat that still has its
 own pedestal in it, you inject the flat's bias signal into your data
 (opticalmechanics; astropy guide). This is exactly why lumos passes a `flat_sub`
-(`master_flat_dark` with priority over `master_bias`) into `divide_by_normalized`
+(`flat_dark` with priority over `bias`) into `divide_by_normalized`
 (`$HOME/Projects/Scenarium/lumos/src/calibration_masters/mod.rs:181`).
 
 ### 1.3 Linearity and the pedestal problem

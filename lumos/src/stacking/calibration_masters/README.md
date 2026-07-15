@@ -6,6 +6,10 @@ Creates, loads, saves, and applies master calibration frames (bias, dark, flat) 
 `from_images` or `from_files`; inspect its read-only `components()` and `defect_summary()` views.
 Replacing a source master without rebuilding its defect map is not representable.
 
+`CalibrationSet<T>` is the shared four-role shape: `from_files` accepts path slices and
+`from_images` accepts optional prebuilt CFA images through the same named dark, flat, bias, and
+flat-dark fields.
+
 ## Calibration Formula
 
 The standard astrophotography calibration formula:

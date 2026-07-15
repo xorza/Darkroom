@@ -3,15 +3,15 @@ use std::io::{Error, ErrorKind};
 use imaginarium::Buffer2;
 use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig,
-    CalibrationComponent, CalibrationMasters, CombineMethod, DefectSummary, DrizzleConfig,
-    DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError, GesdConfig, ImageDimensions,
-    InterpolationMethod, LinearFitClipConfig, Normalization, PercentileClipConfig, RansacConfig,
-    RegistrationConfig, RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN,
-    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
-    StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionConfigError,
-    StarDetectionFilterConfig, StarDetectionFwhmConfig, StarDetectionMeasurementConfig,
-    StarDetector, StarMatch, Transform, TransformType, TriangleConfig, WarpParams, Weighting,
-    WinsorizedClipConfig,
+    CalibrationComponent, CalibrationMasters, CalibrationSet, CombineMethod, DefectSummary,
+    DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError, GesdConfig,
+    ImageDimensions, InterpolationMethod, LinearFitClipConfig, Normalization, PercentileClipConfig,
+    RansacConfig, RegistrationConfig, RegistrationMatchingConfig, Rejection, SigmaClipConfig,
+    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
+    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
+    StarDetectionConfigError, StarDetectionFilterConfig, StarDetectionFwhmConfig,
+    StarDetectionMeasurementConfig, StarDetector, StarMatch, Transform, TransformType,
+    TriangleConfig, WarpParams, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -191,6 +191,17 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
 
 #[test]
 fn calibration_master_views_are_available_from_the_crate_root() {
+    let roles = CalibrationSet {
+        dark: 1,
+        flat: 2,
+        bias: 3,
+        flat_dark: 4,
+    };
+    assert_eq!(
+        [roles.dark, roles.flat, roles.bias, roles.flat_dark],
+        [1, 2, 3, 4]
+    );
+
     let masters = CalibrationMasters::default();
     assert_eq!(masters.components().collect::<Vec<_>>(), Vec::new());
     let summary: Option<DefectSummary> = masters.defect_summary();

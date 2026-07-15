@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use common::CancelToken;
 use lumos::{
-    AlignStackConfig, CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
+    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
     calibrate_align_stack,
 };
 
@@ -52,11 +52,11 @@ fn main() {
 
     let empty: Vec<PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
-        CalibrationFrames {
-            darks: &empty,
-            flats: &empty,
+        CalibrationSet {
+            dark: &empty,
+            flat: &empty,
             bias: &empty,
-            flat_darks: &empty,
+            flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
     )

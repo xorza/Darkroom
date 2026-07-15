@@ -14,7 +14,7 @@ use crate::testing::synthetic::noise::{add_read_noise, apply_shot_noise};
 use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 use crate::testing::{constant_cfa, make_cfa};
-use crate::{CalibrationImages, CalibrationMasters, CfaType};
+use crate::{CalibrationMasters, CalibrationSet, CfaType};
 use common::CancelToken;
 
 /// A multiplicative radial vignette (sensor flat-field response).
@@ -64,7 +64,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
     );
 
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(constant_cfa(w, h, bias + dark, CfaType::Mono)),
             // Flat frame under uniform illumination: bias + sensor response.
             flat: Some(make_cfa(
@@ -125,7 +125,7 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
     add_sensor_noise(&mut light_px, 50_000.0, 3.0, 42);
 
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(constant_cfa(w, h, bias + dark, CfaType::Mono)),
             flat: Some(constant_cfa(w, h, bias + 1.0, CfaType::Mono)),
             bias: Some(constant_cfa(w, h, bias, CfaType::Mono)),

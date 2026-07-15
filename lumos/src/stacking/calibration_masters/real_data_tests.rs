@@ -23,9 +23,7 @@ use quickbench::quick_bench;
 
 use crate::io::raw;
 use crate::testing::{calibration_dir, init_tracing};
-use crate::{
-    CalibrationFrames, CalibrationMasters, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig,
-};
+use crate::{CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig};
 
 use super::stack_cfa_master;
 
@@ -81,21 +79,21 @@ fn builds_full_master_set() {
     };
 
     let masters = CalibrationMasters::from_files(
-        CalibrationFrames {
-            darks: &paths.darks,
-            flats: &paths.flats,
+        CalibrationSet {
+            dark: &paths.darks,
+            flat: &paths.flats,
             bias: &paths.bias,
-            flat_darks: &[],
+            flat_dark: &[],
         },
         DEFAULT_SIGMA_THRESHOLD,
     )
     .expect("master build failed");
 
     // Every supplied role yields a master; the un-supplied flat-dark stays `None`.
-    let dark = masters.master_dark.as_ref().expect("master dark");
-    let flat = masters.master_flat.as_ref().expect("master flat");
-    let bias = masters.master_bias.as_ref().expect("master bias");
-    assert!(masters.master_flat_dark.is_none());
+    let dark = masters.images.dark.as_ref().expect("master dark");
+    let flat = masters.images.flat.as_ref().expect("master flat");
+    let bias = masters.images.bias.as_ref().expect("master bias");
+    assert!(masters.images.flat_dark.is_none());
 
     // All masters share the single sensor geometry (one CFA plane each).
     let (w, h) = (dark.data.width(), dark.data.height());
@@ -171,11 +169,11 @@ fn bench_build_masters_from_files(b: ::quickbench::Bencher) {
     b.bench(|| {
         black_box(
             CalibrationMasters::from_files(
-                CalibrationFrames {
-                    darks: &paths.darks,
-                    flats: &paths.flats,
+                CalibrationSet {
+                    dark: &paths.darks,
+                    flat: &paths.flats,
                     bias: &paths.bias,
-                    flat_darks: &[],
+                    flat_dark: &[],
                 },
                 DEFAULT_SIGMA_THRESHOLD,
             )

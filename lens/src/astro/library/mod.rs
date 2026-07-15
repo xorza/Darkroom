@@ -13,7 +13,7 @@ use common::file_utils::astro_image_files;
 use imaginarium::Buffer2;
 use imaginarium::Image as RawImage;
 use lumos::{
-    AlignStackConfig, AstroImage, CalibrationImages, CalibrationMasters, CfaImage,
+    AlignStackConfig, AstroImage, CalibrationMasters, CalibrationSet, CfaImage,
     DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, ImageDimensions, LocalContrast,
     MlError, NeutralizeBackground, OpError, Reference, StackConfig, TiledOnnxConfig,
     calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only, stack_cfa_master,
@@ -915,7 +915,7 @@ fn build_masters_cached(
     };
 
     CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: role(darks, StackConfig::dark(), "master_dark.lcm")?,
             flat: role(flats, StackConfig::flat(), "master_flat.lcm")?,
             bias: role(bias, StackConfig::bias(), "master_bias.lcm")?,

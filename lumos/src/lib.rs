@@ -41,8 +41,8 @@ pub use stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, NoiseEstima
 pub use stacking::calibration_masters::defect_map::DefectMap;
 
 pub use stacking::calibration_masters::{
-    CalibrationComponent, CalibrationFrames, CalibrationImages, CalibrationMasters,
-    DEFAULT_SIGMA_THRESHOLD, DefectSummary, stack_cfa_master,
+    CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
+    DefectSummary, stack_cfa_master,
 };
 
 pub use stacking::star_detection::config::{

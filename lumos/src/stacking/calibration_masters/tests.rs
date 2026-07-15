@@ -5,8 +5,7 @@ use crate::stacking::calibration_masters::weighted_budget;
 use crate::stacking::combine::error::Error;
 use crate::testing::constant_cfa;
 use crate::{
-    AstroImageMetadata, CalibrationComponent, CalibrationFrames, CalibrationImages,
-    CalibrationMasters, DefectSummary,
+    AstroImageMetadata, CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary,
 };
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -48,7 +47,7 @@ fn test_calibrate_twice_panics() {
     // A second calibrate() would subtract the dark / divide the flat twice — must crash, not
     // silently corrupt.
     let masters =
-        CalibrationMasters::from_images(CalibrationImages::default(), 5.0, CancelToken::never())
+        CalibrationMasters::from_images(CalibrationSet::default(), 5.0, CancelToken::never())
             .unwrap();
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -61,11 +60,11 @@ fn test_from_files_all_empty_yields_no_masters() {
     // Empty frame sets must produce a `None` for every master (no file I/O path).
     let empty: Vec<std::path::PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
-        CalibrationFrames {
-            darks: &empty,
-            flats: &empty,
+        CalibrationSet {
+            dark: &empty,
+            flat: &empty,
             bias: &empty,
-            flat_darks: &empty,
+            flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
     )
@@ -83,7 +82,7 @@ fn test_new_constructor() {
     let flat_dark = constant_cfa(4, 4, 0.03, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(dark),
             flat: Some(flat),
             bias: Some(bias),
@@ -127,7 +126,7 @@ fn test_from_images_rejects_cancelled_operation() {
     cancel.cancel();
 
     let result = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(constant_cfa(4, 4, 0.1, CfaType::Mono)),
             ..Default::default()
         },
@@ -143,7 +142,7 @@ fn test_new_no_dark_no_hot_pixels() {
     let flat = constant_cfa(4, 4, 0.8, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             flat: Some(flat),
             ..Default::default()
         },
@@ -170,7 +169,7 @@ fn test_new_no_dark_no_hot_pixels() {
 fn test_calibrate_dark_subtraction() {
     let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(dark),
             ..Default::default()
         },
@@ -193,7 +192,7 @@ fn test_calibrate_bias_only() {
     // No dark → bias is subtracted instead
     let bias = constant_cfa(4, 4, 0.05, CfaType::Mono);
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             bias: Some(bias),
             ..Default::default()
         },
@@ -217,7 +216,7 @@ fn test_calibrate_dark_takes_priority_over_bias() {
     let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
     let bias = constant_cfa(4, 4, 0.05, CfaType::Mono);
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(dark),
             bias: Some(bias),
             ..Default::default()
@@ -251,7 +250,7 @@ fn test_calibrate_flat_correction() {
     };
 
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             flat: Some(flat),
             ..Default::default()
         },
@@ -305,7 +304,7 @@ fn test_calibrate_full_pipeline() {
     let bias = constant_cfa(2, 1, bias_val, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(dark),
             flat: Some(flat),
             bias: Some(bias),
@@ -374,7 +373,7 @@ fn test_sigma_threshold_affects_detection() {
     };
 
     let masters_strict = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(dark_strict),
             ..Default::default()
         },
@@ -383,7 +382,7 @@ fn test_sigma_threshold_affects_detection() {
     )
     .unwrap();
     let masters_loose = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(dark_loose),
             ..Default::default()
         },
@@ -459,7 +458,7 @@ fn test_calibrate_hot_pixel_correction() {
     };
 
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(dark),
             ..Default::default()
         },
@@ -534,7 +533,7 @@ fn test_calibrate_flat_dark() {
     let flat_dark = constant_cfa(2, 1, flat_dark_val, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             dark: Some(dark),
             flat: Some(flat),
             flat_dark: Some(flat_dark),
@@ -589,7 +588,7 @@ fn test_flat_dark_takes_priority_over_bias() {
     let flat_dark = constant_cfa(2, 2, 0.10, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
-        CalibrationImages {
+        CalibrationSet {
             flat: Some(flat),
             bias: Some(bias),
             flat_dark: Some(flat_dark),
@@ -638,10 +637,12 @@ fn ram_bytes_sums_present_frames_and_defects() {
 
     // The bundle sums present roles + the defect map; absent roles add nothing.
     let masters = CalibrationMasters {
-        master_dark: Some(dark),
-        master_flat: Some(constant_cfa(4, 4, 1.0, CfaType::Mono)),
-        master_bias: None,
-        master_flat_dark: None,
+        images: CalibrationSet {
+            dark: Some(dark),
+            flat: Some(constant_cfa(4, 4, 1.0, CfaType::Mono)),
+            bias: None,
+            flat_dark: None,
+        },
         defect_map: Some(defects),
     };
     // 320 (dark: 80·4) + 64 (flat: 16·4) + 24 (defects: 3·8) = 408 bytes.

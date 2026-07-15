@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use common::CancelToken;
 use lumos::{
-    AlignStackConfig, CalibrationFrames, CalibrationMasters, DEFAULT_SIGMA_THRESHOLD,
+    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
     calibrate_align_stack,
 };
 use tracing_subscriber::EnvFilter;
@@ -111,11 +111,11 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
 
     let empty: Vec<PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
-        CalibrationFrames {
-            darks: &darks,
-            flats: &flats,
+        CalibrationSet {
+            dark: &darks,
+            flat: &flats,
             bias: &bias,
-            flat_darks: &empty,
+            flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
     )

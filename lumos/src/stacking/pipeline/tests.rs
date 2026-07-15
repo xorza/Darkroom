@@ -217,18 +217,18 @@ fn public_input_errors() {
 )]
 fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
     use crate::testing::calibration_image_paths;
-    use crate::{CalibrationFrames, DEFAULT_SIGMA_THRESHOLD};
+    use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
 
     let dark_paths = calibration_image_paths("Darks").unwrap_or_default();
     let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
     let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
     let empty: Vec<std::path::PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
-        CalibrationFrames {
-            darks: &dark_paths,
-            flats: &flat_paths,
+        CalibrationSet {
+            dark: &dark_paths,
+            flat: &flat_paths,
             bias: &bias_paths,
-            flat_darks: &empty,
+            flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
     )
@@ -265,18 +265,18 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
 )]
 fn streaming_disk_tier_matches_ram_on_real_lights() {
     use crate::testing::calibration_image_paths;
-    use crate::{CalibrationFrames, DEFAULT_SIGMA_THRESHOLD};
+    use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
 
     let dark_paths = calibration_image_paths("Darks").unwrap_or_default();
     let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
     let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
     let empty: Vec<std::path::PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
-        CalibrationFrames {
-            darks: &dark_paths,
-            flats: &flat_paths,
+        CalibrationSet {
+            dark: &dark_paths,
+            flat: &flat_paths,
             bias: &bias_paths,
-            flat_darks: &empty,
+            flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
     )
