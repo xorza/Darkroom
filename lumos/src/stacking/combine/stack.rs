@@ -391,10 +391,10 @@ fn validate_manual_weights(
     Ok(())
 }
 
-/// Normalize weights to sum to 1.0. Returns `None` if total weight is zero.
+/// Normalize weights to sum to 1.0. Returns `None` if the total cannot be normalized.
 fn normalize_weights(weights: &[f32]) -> Option<Vec<f32>> {
     let sum: f32 = weights.iter().sum();
-    if sum > f32::EPSILON {
+    if sum.is_finite() && sum > 0.0 {
         Some(weights.iter().map(|w| w / sum).collect())
     } else {
         None
@@ -1573,13 +1573,18 @@ mod tests {
     }
 
     #[test]
-    fn test_manual_weighting_unchanged() {
-        // Manual(vec![1.0, 2.0, 3.0]) should produce normalized [1/6, 2/6, 3/6]
+    fn test_manual_weighting_is_scale_invariant() {
         let weights = resolve_weights(&Weighting::Manual(vec![1.0, 2.0, 3.0]), &[], None).unwrap();
-        assert_eq!(weights.len(), 3);
-        assert!((weights[0] - 1.0 / 6.0).abs() < 1e-6);
-        assert!((weights[1] - 2.0 / 6.0).abs() < 1e-6);
-        assert!((weights[2] - 3.0 / 6.0).abs() < 1e-6);
+        assert_eq!(weights, [1.0_f32 / 6.0, 2.0 / 6.0, 3.0 / 6.0]);
+
+        let scale = f32::MIN_POSITIVE;
+        let tiny = resolve_weights(
+            &Weighting::Manual(vec![scale, 2.0 * scale, 3.0 * scale]),
+            &[],
+            None,
+        )
+        .unwrap();
+        assert_eq!(tiny, weights);
     }
 
     #[test]
