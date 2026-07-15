@@ -20,6 +20,11 @@ fn rect_construction_and_overlap_are_half_open_and_const() {
         assert_eq!(UNIT.overlap_area(other), expected);
         assert_eq!(other.overlap_area(UNIT), expected);
     }
+
+    assert!(std::panic::catch_unwind(|| Rect::new(Vec2::ONE, Vec2::ZERO)).is_err());
+    assert!(
+        std::panic::catch_unwind(|| Rect::from_center_half_extent(Vec2::ZERO, -1.0)).is_err()
+    );
 }
 
 #[test]
@@ -27,11 +32,29 @@ fn urect_accumulation_uses_exclusive_max_and_const_union() {
     const LEFT: URect = URect::new(Vec2us::new(2, 3), Vec2us::new(6, 9));
     const RIGHT: URect = URect::new(Vec2us::new(4, 6), Vec2us::new(10, 11));
     const UNION: URect = LEFT.union(RIGHT);
+    const DISJOINT: URect = URect::new(Vec2us::new(20, 30), Vec2us::new(22, 33));
+    const CONTAINED: URect = URect::new(Vec2us::new(3, 4), Vec2us::new(5, 8));
 
     assert_eq!(UNION, URect::new(Vec2us::new(2, 3), Vec2us::new(10, 11)));
     assert_eq!(LEFT.union(URect::empty()), LEFT);
     assert_eq!(URect::empty().union(LEFT), LEFT);
+    assert_eq!(LEFT.union(CONTAINED), LEFT);
+    assert_eq!(CONTAINED.union(LEFT), LEFT);
+    assert_eq!(
+        LEFT.union(DISJOINT),
+        URect::new(Vec2us::new(2, 3), Vec2us::new(22, 33))
+    );
+    assert_eq!(LEFT.union(RIGHT), RIGHT.union(LEFT));
     assert_eq!(URect::default(), URect::empty());
+    assert!(URect::empty().is_empty());
+    assert!(!LEFT.is_empty());
+    assert!(LEFT.contains(Vec2us::new(2, 3)));
+    assert!(LEFT.contains(Vec2us::new(5, 8)));
+    assert!(!LEFT.contains(Vec2us::new(6, 8)));
+    assert!(!LEFT.contains(Vec2us::new(5, 9)));
+    assert!(
+        std::panic::catch_unwind(|| URect::new(Vec2us::ONE, Vec2us::ZERO)).is_err()
+    );
 
     let mut bounds = URect::empty();
     bounds.include(Vec2us::new(5, 3));
