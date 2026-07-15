@@ -75,8 +75,7 @@ fn interleave_f32(planes: ArrayVec<Buffer2<f32>, 3>) -> Image {
             Image::from(&DeinterleavedImageData::from_channels(channels))
         }
         3 => {
-            let mut planes = planes.into_iter();
-            let channels: [Buffer2<f32>; 3] = std::array::from_fn(|_| planes.next().unwrap());
+            let channels = planes.into_inner().unwrap();
             Image::from(&DeinterleavedImageData::from_channels(channels))
         }
         n => panic!("interleave_f32 expects 1 (L) or 3 (RGB) planes, got {n}"),

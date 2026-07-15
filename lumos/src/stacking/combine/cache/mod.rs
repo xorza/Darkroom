@@ -590,7 +590,5 @@ impl LightCache {
     }
 }
 
-/// Get the source file's modification time as seconds since epoch.
-
 #[cfg(test)]
 pub(crate) mod tests;
