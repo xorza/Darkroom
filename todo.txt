@@ -25,5 +25,6 @@ auto chosen reference  and manually specified
 visual node groups
 
 audit test_support and test exposed proxies
+move benches to the src to avoid overexposing api
 
 audit allocations overshoot , see where reserve_exxact would be better
