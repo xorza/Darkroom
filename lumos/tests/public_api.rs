@@ -5,9 +5,10 @@ use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig,
     CalibrationComponent, CalibrationMasters, CombineMethod, DefectSummary, DrizzleConfig,
     DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError, GesdConfig, ImageDimensions,
-    LinearFitClipConfig, Normalization, PercentileClipConfig, Rejection, SigmaClipConfig, SmallN,
-    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig,
-    StarDetectionConfigError, StarDetector, StarMatch, Transform, Weighting, WinsorizedClipConfig,
+    LinearFitClipConfig, Normalization, PercentileClipConfig, RegistrationConfig,
+    RegistrationMatchingConfig, Rejection, SigmaClipConfig, SmallN, StackConfig, StackConfigError,
+    StackError, StackProduct, StarDetectionConfig, StarDetectionConfigError, StarDetector,
+    StarMatch, Transform, TransformType, TriangleConfig, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -60,6 +61,31 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     assert_eq!(small_n.min_frames, 3);
     assert_eq!(small_n.fallback, CombineMethod::Median);
     let _: CacheConfig = cache;
+
+    let registration = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        matching: RegistrationMatchingConfig {
+            max_stars: 50,
+            min_stars: Some(10),
+            min_matches: 6,
+            triangle: TriangleConfig {
+                ratio_tolerance: 0.02,
+                min_votes: 4,
+                check_orientation: false,
+            },
+        },
+        ..Default::default()
+    };
+    registration.validate().unwrap();
+    assert_eq!(registration.matching.max_stars, 50);
+    assert_eq!(registration.matching.min_matches, 6);
+    assert_eq!(registration.matching.triangle.ratio_tolerance, 0.02);
+    assert_eq!(
+        registration
+            .matching
+            .required_stars(registration.transform_type),
+        10
+    );
 
     let frame = DrizzleFrame::new("light.fits", Transform::identity());
     let DrizzleFrame {

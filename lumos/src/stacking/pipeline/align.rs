@@ -84,7 +84,10 @@ pub fn align_and_stack(
     let reference = select_reference(
         &star_counts,
         config.reference,
-        config.registration.required_stars(),
+        config
+            .registration
+            .matching
+            .required_stars(config.registration.transform_type),
     )?;
     let ref_stars = std::mem::take(&mut detected_frames[reference].stars);
     // The master follows the alignment anchor rather than whichever frame reaches combine first.

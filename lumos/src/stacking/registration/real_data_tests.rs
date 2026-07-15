@@ -137,7 +137,7 @@ fn test_register_two_calibrated_lights() {
 
     // Now fit SIP on the SAME inliers from the SAME RANSAC run for fair comparison.
     // Reconstruct inlier positions from match indices.
-    let max_stars = reg_config.max_stars;
+    let max_stars = reg_config.matching.max_stars;
     let ref_positions: Vec<glam::DVec2> = result1
         .stars
         .iter()

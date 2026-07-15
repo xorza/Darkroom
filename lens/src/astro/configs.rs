@@ -163,9 +163,9 @@ impl Default for RegistrationConfigDef {
 impl From<RegistrationConfig> for RegistrationConfigDef {
     fn from(config: RegistrationConfig) -> Self {
         Self {
-            max_stars: config.max_stars,
-            min_matches: config.min_matches,
-            ratio_tolerance: config.ratio_tolerance,
+            max_stars: config.matching.max_stars,
+            min_matches: config.matching.min_matches,
+            ratio_tolerance: config.matching.triangle.ratio_tolerance,
             ransac_iterations: config.ransac_iterations,
             max_rms_error: config.max_rms_error,
             sip_enabled: config.sip_enabled,
@@ -175,15 +175,14 @@ impl From<RegistrationConfig> for RegistrationConfigDef {
 
 impl From<RegistrationConfigDef> for RegistrationConfig {
     fn from(mirror: RegistrationConfigDef) -> Self {
-        RegistrationConfig {
-            max_stars: mirror.max_stars,
-            min_matches: mirror.min_matches,
-            ratio_tolerance: mirror.ratio_tolerance,
-            ransac_iterations: mirror.ransac_iterations,
-            max_rms_error: mirror.max_rms_error,
-            sip_enabled: mirror.sip_enabled,
-            ..Default::default()
-        }
+        let mut config = RegistrationConfig::default();
+        config.matching.max_stars = mirror.max_stars;
+        config.matching.min_matches = mirror.min_matches;
+        config.matching.triangle.ratio_tolerance = mirror.ratio_tolerance;
+        config.ransac_iterations = mirror.ransac_iterations;
+        config.max_rms_error = mirror.max_rms_error;
+        config.sip_enabled = mirror.sip_enabled;
+        config
     }
 }
 

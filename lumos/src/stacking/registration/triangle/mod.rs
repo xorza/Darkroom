@@ -19,15 +19,15 @@ pub(crate) mod matching;
 mod tests;
 pub(crate) mod voting;
 
-/// Triangle matching parameters extracted from Config.
+/// Configuration for triangle matching.
 #[derive(Debug, Clone)]
-pub struct TriangleParams {
+pub struct TriangleConfig {
     pub ratio_tolerance: f64,
     pub min_votes: usize,
     pub check_orientation: bool,
 }
 
-impl Default for TriangleParams {
+impl Default for TriangleConfig {
     fn default() -> Self {
         Self {
             ratio_tolerance: 0.01,

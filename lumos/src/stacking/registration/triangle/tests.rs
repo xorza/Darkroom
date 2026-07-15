@@ -3,7 +3,7 @@
 use glam::DVec2;
 
 use crate::stacking::registration::spatial::KdTree;
-use crate::stacking::registration::triangle::TriangleParams;
+use crate::stacking::registration::triangle::TriangleConfig;
 use crate::stacking::registration::triangle::geometry::{Orientation, Triangle};
 use crate::stacking::registration::triangle::matching::{
     form_triangles_from_neighbors, form_triangles_kdtree, match_triangles,
@@ -1004,7 +1004,7 @@ fn test_vote_for_correspondences_identical_triangles() {
     assert!(!triangles.is_empty());
     let invariant_tree = build_invariant_tree(&triangles).unwrap();
 
-    let config = TriangleParams::default();
+    let config = TriangleConfig::default();
     let vm = vote_for_correspondences(
         &triangles,
         &triangles,
@@ -1055,7 +1055,7 @@ fn test_vote_for_correspondences_no_matching_triangles() {
 
     let invariant_tree = build_invariant_tree(&tri_a).unwrap();
 
-    let config = TriangleParams {
+    let config = TriangleConfig {
         ratio_tolerance: 0.01,
         ..Default::default()
     };
@@ -1090,7 +1090,7 @@ fn test_vote_for_correspondences_orientation_filtering() {
     let invariant_tree = build_invariant_tree(&ref_triangles).unwrap();
 
     // With orientation check: mirrored triangles rejected → fewer/no votes
-    let config_with = TriangleParams {
+    let config_with = TriangleConfig {
         check_orientation: true,
         ..Default::default()
     };
@@ -1104,7 +1104,7 @@ fn test_vote_for_correspondences_orientation_filtering() {
     );
 
     // Without orientation check: all matching triangles accepted → more votes
-    let config_without = TriangleParams {
+    let config_without = TriangleConfig {
         check_orientation: false,
         ..Default::default()
     };
@@ -1137,9 +1137,9 @@ fn test_match_triangles_too_few_points() {
     ];
 
     // Both sides need >= 3 points
-    assert!(match_triangles(&two, &three, &TriangleParams::default()).is_empty());
-    assert!(match_triangles(&three, &two, &TriangleParams::default()).is_empty());
-    assert!(match_triangles(&two, &two, &TriangleParams::default()).is_empty());
+    assert!(match_triangles(&two, &three, &TriangleConfig::default()).is_empty());
+    assert!(match_triangles(&three, &two, &TriangleConfig::default()).is_empty());
+    assert!(match_triangles(&two, &two, &TriangleConfig::default()).is_empty());
 }
 
 #[test]
@@ -1150,8 +1150,8 @@ fn test_match_triangles_empty_inputs() {
         DVec2::new(1.0, 0.0),
         DVec2::new(0.0, 1.0),
     ];
-    assert!(match_triangles(&empty, &three, &TriangleParams::default()).is_empty());
-    assert!(match_triangles(&three, &empty, &TriangleParams::default()).is_empty());
+    assert!(match_triangles(&empty, &three, &TriangleConfig::default()).is_empty());
+    assert!(match_triangles(&three, &empty, &TriangleConfig::default()).is_empty());
 }
 
 #[test]
@@ -1165,7 +1165,7 @@ fn test_match_identical_star_lists() {
         DVec2::new(5.0, 5.0),
     ];
 
-    let matches = match_triangles(&positions, &positions, &TriangleParams::default());
+    let matches = match_triangles(&positions, &positions, &TriangleConfig::default());
 
     assert_eq!(matches.len(), 5);
     for m in &matches {
@@ -1190,7 +1190,7 @@ fn test_match_translated_stars() {
     let matches = match_triangles(
         &ref_positions,
         &target_positions,
-        &TriangleParams::default(),
+        &TriangleConfig::default(),
     );
 
     assert_eq!(matches.len(), 5);
@@ -1215,7 +1215,7 @@ fn test_match_scaled_stars() {
     let matches = match_triangles(
         &ref_positions,
         &target_positions,
-        &TriangleParams::default(),
+        &TriangleConfig::default(),
     );
 
     assert_eq!(matches.len(), 5);
@@ -1241,7 +1241,7 @@ fn test_match_rotated_stars() {
         .map(|p| DVec2::new(-p.y, p.x))
         .collect();
 
-    let config = TriangleParams {
+    let config = TriangleConfig {
         check_orientation: false,
         ..Default::default()
     };
@@ -1271,7 +1271,7 @@ fn test_match_with_missing_stars() {
     let matches = match_triangles(
         &ref_positions,
         &target_positions,
-        &TriangleParams::default(),
+        &TriangleConfig::default(),
     );
 
     assert_eq!(matches.len(), 4);
@@ -1302,7 +1302,7 @@ fn test_match_with_extra_stars() {
     let matches = match_triangles(
         &ref_positions,
         &target_positions,
-        &TriangleParams::default(),
+        &TriangleConfig::default(),
     );
 
     assert_eq!(matches.len(), 4);
@@ -1328,14 +1328,14 @@ fn test_match_mirrored_image_orientation_effect() {
         .map(|p| DVec2::new(-p.x, p.y))
         .collect();
 
-    let config_with = TriangleParams {
+    let config_with = TriangleConfig {
         check_orientation: true,
         min_votes: 1,
         ..Default::default()
     };
     let matches_with = match_triangles(&ref_positions, &target_positions, &config_with);
 
-    let config_without = TriangleParams {
+    let config_without = TriangleConfig {
         check_orientation: false,
         min_votes: 1,
         ..Default::default()
@@ -1368,7 +1368,7 @@ fn test_match_with_outliers() {
     target_positions.push(DVec2::new(75.0, 125.0));
     target_positions.push(DVec2::new(200.0, 200.0));
 
-    let config = TriangleParams {
+    let config = TriangleConfig {
         min_votes: 2,
         ..Default::default()
     };
@@ -1404,7 +1404,7 @@ fn test_match_permuted_indices() {
 
     let target_points: Vec<DVec2> = points.iter().rev().copied().collect();
 
-    let config = TriangleParams {
+    let config = TriangleConfig {
         min_votes: 1,
         ..Default::default()
     };
@@ -1453,12 +1453,12 @@ fn test_match_ratio_tolerance_sensitivity() {
         })
         .collect();
 
-    let tight = TriangleParams {
+    let tight = TriangleConfig {
         ratio_tolerance: 0.001,
         min_votes: 2,
         ..Default::default()
     };
-    let loose = TriangleParams {
+    let loose = TriangleConfig {
         ratio_tolerance: 0.1,
         min_votes: 2,
         ..Default::default()
@@ -1489,11 +1489,11 @@ fn test_match_min_votes_sensitivity() {
 
     let target_positions = ref_positions.clone();
 
-    let low_min = TriangleParams {
+    let low_min = TriangleConfig {
         min_votes: 1,
         ..Default::default()
     };
-    let high_min = TriangleParams {
+    let high_min = TriangleConfig {
         min_votes: 5,
         ..Default::default()
     };
@@ -1528,7 +1528,7 @@ fn test_match_sparse_field_10_stars() {
     let offset = DVec2::new(10.0, 20.0);
     let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
-    let config = TriangleParams {
+    let config = TriangleConfig {
         min_votes: 2,
         ..Default::default()
     };
@@ -1565,7 +1565,7 @@ fn test_match_with_subpixel_noise() {
         })
         .collect();
 
-    let config = TriangleParams::default();
+    let config = TriangleConfig::default();
     let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     // With 80-pixel spacing and 0.3-pixel noise, ratios change by < 0.01 tolerance

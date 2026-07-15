@@ -19,7 +19,7 @@ use crate::testing::synthetic::transforms::{
 use glam::DVec2;
 
 use crate::stacking::registration::synthetic_tests::helpers::{
-    FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography,
+    self, FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography,
 };
 
 #[test]
@@ -35,8 +35,7 @@ fn test_registration_translation_only() {
     // Configure registration for translation only
     let config = Config {
         transform_type: TransformType::Translation,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
 
@@ -99,8 +98,7 @@ fn test_registration_similarity_transform() {
     // Configure registration with scale
     let config = Config {
         transform_type: TransformType::Similarity,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
 
@@ -177,8 +175,7 @@ fn test_registration_with_noise() {
     // Configure registration
     let config = Config {
         transform_type: TransformType::Translation,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
 
@@ -228,8 +225,7 @@ fn test_registration_large_translation() {
     // Configure registration
     let config = Config {
         transform_type: TransformType::Translation,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
 
@@ -269,8 +265,7 @@ fn test_registration_euclidean_rotation_only() {
 
     let config = Config {
         transform_type: TransformType::Euclidean,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
 
@@ -319,8 +314,7 @@ fn test_registration_euclidean_translation_and_rotation() {
 
     let config = Config {
         transform_type: TransformType::Euclidean,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
 
@@ -368,8 +362,7 @@ fn test_registration_affine_differential_scale() {
 
     let config = Config {
         transform_type: TransformType::Affine,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
 
@@ -414,8 +407,7 @@ fn test_registration_affine_with_shear() {
 
     let config = Config {
         transform_type: TransformType::Affine,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
 
@@ -465,8 +457,7 @@ fn test_registration_affine_rotation_and_differential_scale() {
 
     let config = Config {
         transform_type: TransformType::Affine,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
 
@@ -511,8 +502,7 @@ fn test_registration_homography_mild_perspective() {
 
     let config = Config {
         transform_type: TransformType::Homography,
-        min_stars: Some(8),
-        min_matches: 6,
+        matching: helpers::matching_config(8, 6),
         ..Default::default()
     };
 
@@ -559,8 +549,7 @@ fn test_registration_homography_with_rotation() {
 
     let config = Config {
         transform_type: TransformType::Homography,
-        min_stars: Some(8),
-        min_matches: 6,
+        matching: helpers::matching_config(8, 6),
         ..Default::default()
     };
 
@@ -600,8 +589,7 @@ fn test_similarity_recovers_from_euclidean_data() {
     // Use Similarity estimator
     let config = Config {
         transform_type: TransformType::Similarity,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
 
@@ -643,8 +631,7 @@ fn test_affine_recovers_from_similarity_data() {
 
     let config = Config {
         transform_type: TransformType::Affine,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
 
@@ -672,8 +659,7 @@ fn test_auto_ladder_selects_simplest_adequate_model() {
     let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101010, FWHM_TIGHT);
     let config = Config {
         transform_type: TransformType::Auto,
-        min_stars: Some(8),
-        min_matches: 6,
+        matching: helpers::matching_config(8, 6),
         ..Default::default()
     };
 

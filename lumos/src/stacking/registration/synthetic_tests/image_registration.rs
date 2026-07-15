@@ -9,6 +9,7 @@ use glam::DVec2;
 
 use crate::stacking::registration::config::InterpolationMethod;
 use crate::stacking::registration::interpolation::{WarpParams, warp_image};
+use crate::stacking::registration::synthetic_tests::helpers;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::registration::{Config, TransformType, register};
 use crate::stacking::star_detection::config::Config as DetConfig;
@@ -112,8 +113,7 @@ fn test_image_registration_translation() {
     // Register the images using detected stars directly
     let reg_config = Config {
         transform_type: TransformType::Translation,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         max_rms_error: 3.0,
         ..Default::default()
     };
@@ -180,8 +180,7 @@ fn test_image_registration_rotation() {
 
     let reg_config = Config {
         transform_type: TransformType::Euclidean,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         max_rms_error: 3.0,
         ..Default::default()
     };
@@ -237,8 +236,7 @@ fn test_image_registration_similarity() {
 
     let reg_config = Config {
         transform_type: TransformType::Similarity,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         max_rms_error: 3.0,
         ..Default::default()
     };
@@ -322,8 +320,7 @@ fn test_image_registration_with_noise() {
 
     let reg_config = Config {
         transform_type: TransformType::Translation,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         max_rms_error: 5.0, // Allow more error due to noise
         ..Default::default()
     };
@@ -386,8 +383,7 @@ fn test_image_registration_dense_field() {
 
     let reg_config = Config {
         transform_type: TransformType::Euclidean,
-        min_stars: Some(10),
-        min_matches: 8,
+        matching: helpers::matching_config(10, 8),
         max_rms_error: 3.0,
         ..Default::default()
     };
@@ -434,8 +430,7 @@ fn test_image_registration_large_image() {
 
     let reg_config = Config {
         transform_type: TransformType::Translation,
-        min_stars: Some(6),
-        min_matches: 4,
+        matching: helpers::matching_config(6, 4),
         max_rms_error: 3.0,
         ..Default::default()
     };

@@ -4,6 +4,7 @@ use glam::DVec2;
 
 use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::TransformType;
+use crate::stacking::registration::triangle::TriangleConfig;
 
 /// Default soft-clamping threshold for Lanczos deringing (PixInsight default).
 /// Lower = more aggressive. Range [0.0, 1.0]. Negative disables deringing.
@@ -89,6 +90,95 @@ impl InterpolationMethod {
     }
 }
 
+/// Configuration for the star-matching stage.
+#[derive(Debug, Clone)]
+pub struct RegistrationMatchingConfig {
+    /// Maximum stars to use for matching (brightest N). Default: 200.
+    pub max_stars: usize,
+    /// Minimum stars required in each image. `None` derives the gate from the transform model.
+    pub min_stars: Option<usize>,
+    /// Minimum matched star pairs to accept. Default: 8.
+    pub min_matches: usize,
+    /// Triangle-invariant matching configuration.
+    pub triangle: TriangleConfig,
+}
+
+impl Default for RegistrationMatchingConfig {
+    fn default() -> Self {
+        Self {
+            max_stars: 200,
+            min_stars: None,
+            min_matches: 8,
+            triangle: TriangleConfig::default(),
+        }
+    }
+}
+
+impl RegistrationMatchingConfig {
+    /// The star-count gate applied to each input set: the explicit `min_stars` override when set,
+    /// otherwise twice the transform's minimal sample, floored at three for triangle matching.
+    /// `Auto` can climb to homography, so it uses homography's eight-star gate.
+    pub fn required_stars(&self, transform_type: TransformType) -> usize {
+        if let Some(n) = self.min_stars {
+            return n;
+        }
+        let model = if transform_type == TransformType::Auto {
+            TransformType::Homography
+        } else {
+            transform_type
+        };
+        (2 * model.min_points()).max(3)
+    }
+
+    fn validate(&self, transform_type: TransformType) -> Result<(), RegistrationError> {
+        let invalid = |msg: String| Err(RegistrationError::InvalidConfig(msg));
+        if self.max_stars < 3 {
+            return invalid(format!(
+                "max_stars must be >= 3 for triangle matching, got {}",
+                self.max_stars
+            ));
+        }
+        if let Some(n) = self.min_stars
+            && n < 3
+        {
+            return invalid(format!(
+                "min_stars must be >= 3 for triangle matching, got {n}"
+            ));
+        }
+        let required_stars = self.required_stars(transform_type);
+        if self.max_stars < required_stars {
+            return invalid(format!(
+                "max_stars ({}) must be >= the star gate ({required_stars})",
+                self.max_stars
+            ));
+        }
+        let required_points = if transform_type == TransformType::Auto {
+            TransformType::Homography.min_points()
+        } else {
+            transform_type.min_points()
+        };
+        if self.min_matches < required_points {
+            return invalid(format!(
+                "min_matches ({}) must be >= transform minimum points ({required_points})",
+                self.min_matches
+            ));
+        }
+        if !(self.triangle.ratio_tolerance > 0.0 && self.triangle.ratio_tolerance < 1.0) {
+            return invalid(format!(
+                "ratio_tolerance must be in (0, 1), got {}",
+                self.triangle.ratio_tolerance
+            ));
+        }
+        if self.triangle.min_votes == 0 {
+            return invalid(format!(
+                "min_votes must be at least 1, got {}",
+                self.triangle.min_votes
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Configuration for image registration.
 ///
 /// All parameters have sensible defaults calibrated against industry standards
@@ -113,21 +203,8 @@ pub struct Config {
     /// Default: Auto (starts with Similarity, upgrades to Homography if needed).
     pub transform_type: TransformType,
 
-    // == Star matching ==
-    /// Maximum stars to use for matching (brightest N). Default: 200.
-    pub max_stars: usize,
-    /// Minimum stars required in each image. `None` (default) derives the gate from
-    /// `transform_type` (see [`Config::required_stars`]); `Some(n)` overrides it — e.g. as a
-    /// frame-quality floor independent of the model.
-    pub min_stars: Option<usize>,
-    /// Minimum matched star pairs to accept. Default: 8.
-    pub min_matches: usize,
-    /// Triangle ratio tolerance (0.01 = 1%). Default: 0.01.
-    pub ratio_tolerance: f64,
-    /// Minimum confirming triangles per match. Default: 3.
-    pub min_votes: usize,
-    /// Check orientation (false allows mirrored images). Default: true.
-    pub check_orientation: bool,
+    /// Star selection, acceptance gates, and triangle matching.
+    pub matching: RegistrationMatchingConfig,
 
     // == RANSAC ==
     /// RANSAC iterations. Default: 2000.
@@ -173,13 +250,7 @@ impl Default for Config {
             // Transform
             transform_type: TransformType::Auto,
 
-            // Star matching
-            max_stars: 200,
-            min_stars: None,
-            min_matches: 8,
-            ratio_tolerance: 0.01,
-            min_votes: 3,
-            check_orientation: true,
+            matching: RegistrationMatchingConfig::default(),
 
             // RANSAC
             ransac_iterations: 2000,
@@ -211,7 +282,10 @@ impl Config {
     pub fn fast() -> Self {
         Self {
             ransac_iterations: 500,
-            max_stars: 100,
+            matching: RegistrationMatchingConfig {
+                max_stars: 100,
+                ..Default::default()
+            },
             local_optimization: false,
             interpolation: InterpolationMethod::Bilinear,
             ..Self::default()
@@ -250,9 +324,15 @@ impl Config {
             ransac_iterations: 5000,
             max_rms_error: 1.0,
             // Stricter than precise(): more stars, tighter matching
-            max_stars: 500,
-            min_matches: 20,
-            ratio_tolerance: 0.02,
+            matching: RegistrationMatchingConfig {
+                max_stars: 500,
+                min_matches: 20,
+                triangle: TriangleConfig {
+                    ratio_tolerance: 0.02,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
             confidence: 0.9999,
             // From wide_field(): Homography, SIP, unlimited rotation/scale
             ..Self::wide_field()
@@ -266,23 +346,6 @@ impl Config {
             scale_range: Some((0.5, 2.0)),
             ..Self::default()
         }
-    }
-
-    /// The star-count gate `register()` applies to each input set: the explicit `min_stars`
-    /// override when set, otherwise keyed to the transform model — twice its minimal RANSAC
-    /// sample (margin for triangle voting and LO refinement), floored at 3 for triangle
-    /// matching. `Auto` can climb to Homography, so it gates like Homography (8). A Similarity
-    /// fit thus accepts a 4-star frame that the old flat gate of 10 rejected.
-    pub fn required_stars(&self) -> usize {
-        if let Some(n) = self.min_stars {
-            return n;
-        }
-        let model = if self.transform_type == TransformType::Auto {
-            TransformType::Homography
-        } else {
-            self.transform_type
-        };
-        (2 * model.min_points()).max(3)
     }
 
     /// Validate all configuration parameters.
@@ -307,51 +370,7 @@ impl Config {
     pub fn validate(&self) -> Result<(), RegistrationError> {
         let invalid = |msg: String| Err(RegistrationError::InvalidConfig(msg));
 
-        // Star matching
-        if self.max_stars < 3 {
-            return invalid(format!(
-                "max_stars must be >= 3 for triangle matching, got {}",
-                self.max_stars
-            ));
-        }
-        if let Some(n) = self.min_stars
-            && n < 3
-        {
-            return invalid(format!(
-                "min_stars must be >= 3 for triangle matching, got {n}"
-            ));
-        }
-        if self.max_stars < self.required_stars() {
-            return invalid(format!(
-                "max_stars ({}) must be >= the star gate ({})",
-                self.max_stars,
-                self.required_stars()
-            ));
-        }
-        // Auto can upgrade to Homography (needs 4 points), so validate against that
-        let required_points = if self.transform_type == TransformType::Auto {
-            TransformType::Homography.min_points()
-        } else {
-            self.transform_type.min_points()
-        };
-        if self.min_matches < required_points {
-            return invalid(format!(
-                "min_matches ({}) must be >= transform minimum points ({})",
-                self.min_matches, required_points
-            ));
-        }
-        if !(self.ratio_tolerance > 0.0 && self.ratio_tolerance < 1.0) {
-            return invalid(format!(
-                "ratio_tolerance must be in (0, 1), got {}",
-                self.ratio_tolerance
-            ));
-        }
-        if self.min_votes < 1 {
-            return invalid(format!(
-                "min_votes must be at least 1, got {}",
-                self.min_votes
-            ));
-        }
+        self.matching.validate(self.transform_type)?;
 
         // RANSAC
         if self.ransac_iterations == 0 {
@@ -425,30 +444,23 @@ mod tests {
     fn test_config_default_values() {
         let config = Config::default();
         assert_eq!(config.transform_type, TransformType::Auto);
-        assert_eq!(config.max_stars, 200);
-        assert_eq!(config.min_stars, None);
+        assert_eq!(config.matching.max_stars, 200);
+        assert_eq!(config.matching.min_stars, None);
         // Auto gates like Homography: 2 × 4 minimal points = 8.
-        assert_eq!(config.required_stars(), 8);
+        assert_eq!(config.matching.required_stars(config.transform_type), 8);
+        assert_eq!(config.matching.required_stars(TransformType::Similarity), 4);
         assert_eq!(
-            Config {
-                transform_type: TransformType::Similarity,
-                ..Config::default()
-            }
-            .required_stars(),
-            4
-        );
-        assert_eq!(
-            Config {
+            RegistrationMatchingConfig {
                 min_stars: Some(20),
-                ..Config::default()
+                ..Default::default()
             }
-            .required_stars(),
+            .required_stars(TransformType::Auto),
             20
         );
-        assert_eq!(config.min_matches, 8);
-        assert!((config.ratio_tolerance - 0.01).abs() < 1e-10);
-        assert_eq!(config.min_votes, 3);
-        assert!(config.check_orientation);
+        assert_eq!(config.matching.min_matches, 8);
+        assert!((config.matching.triangle.ratio_tolerance - 0.01).abs() < 1e-10);
+        assert_eq!(config.matching.triangle.min_votes, 3);
+        assert!(config.matching.triangle.check_orientation);
         assert_eq!(config.ransac_iterations, 2000);
         assert!((config.confidence - 0.995).abs() < 1e-10);
         assert!((config.min_inlier_ratio - 0.3).abs() < 1e-10);
@@ -473,7 +485,7 @@ mod tests {
     fn test_config_fast_preset() {
         let config = Config::fast();
         assert_eq!(config.ransac_iterations, 500);
-        assert_eq!(config.max_stars, 100);
+        assert_eq!(config.matching.max_stars, 100);
         assert!(!config.local_optimization);
         assert_eq!(config.interpolation, InterpolationMethod::Bilinear);
         config.validate().unwrap();
@@ -503,9 +515,9 @@ mod tests {
     fn test_config_precise_wide_field_preset() {
         let config = Config::precise_wide_field();
         assert_eq!(config.transform_type, TransformType::Homography);
-        assert_eq!(config.max_stars, 500);
-        assert_eq!(config.min_matches, 20);
-        assert!((config.ratio_tolerance - 0.02).abs() < 1e-10);
+        assert_eq!(config.matching.max_stars, 500);
+        assert_eq!(config.matching.min_matches, 20);
+        assert!((config.matching.triangle.ratio_tolerance - 0.02).abs() < 1e-10);
         assert_eq!(config.ransac_iterations, 5000);
         assert!((config.confidence - 0.9999).abs() < 1e-10);
         assert!(config.sip_enabled);
@@ -615,43 +627,70 @@ mod tests {
             ),
             (
                 Config {
-                    max_stars: 2,
+                    matching: RegistrationMatchingConfig {
+                        max_stars: 2,
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "max_stars must be >= 3",
             ),
             (
                 Config {
-                    min_stars: Some(2),
+                    matching: RegistrationMatchingConfig {
+                        min_stars: Some(2),
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "min_stars must be >= 3",
             ),
             (
                 Config {
-                    max_stars: 5,
-                    min_stars: Some(10),
+                    matching: RegistrationMatchingConfig {
+                        max_stars: 5,
+                        min_stars: Some(10),
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "max_stars (5) must be >= the star gate (10)",
             ),
             (
                 Config {
-                    ratio_tolerance: 0.0,
+                    matching: RegistrationMatchingConfig {
+                        triangle: TriangleConfig {
+                            ratio_tolerance: 0.0,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "ratio_tolerance must be in (0, 1)",
             ),
             (
                 Config {
-                    ratio_tolerance: 1.0,
+                    matching: RegistrationMatchingConfig {
+                        triangle: TriangleConfig {
+                            ratio_tolerance: 1.0,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "ratio_tolerance must be in (0, 1)",
             ),
             (
                 Config {
-                    min_votes: 0,
+                    matching: RegistrationMatchingConfig {
+                        triangle: TriangleConfig {
+                            min_votes: 0,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "min_votes must be at least 1",
@@ -711,7 +750,10 @@ mod tests {
                 // Homography needs 4 points, so min_matches = 3 is too few.
                 Config {
                     transform_type: TransformType::Homography,
-                    min_matches: 3,
+                    matching: RegistrationMatchingConfig {
+                        min_matches: 3,
+                        ..Default::default()
+                    },
                     ..Config::default()
                 },
                 "min_matches (3) must be >= transform minimum points (4)",

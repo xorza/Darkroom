@@ -6,7 +6,7 @@ use glam::DVec2;
 
 use crate::stacking::registration::spatial::KdTree;
 
-use crate::stacking::registration::triangle::TriangleParams;
+use crate::stacking::registration::triangle::TriangleConfig;
 use crate::stacking::registration::triangle::geometry::Triangle;
 
 /// Threshold for switching between dense and sparse vote matrix storage.
@@ -147,7 +147,7 @@ pub(crate) fn vote_for_correspondences(
     target_triangles: &[Triangle],
     ref_triangles: &[Triangle],
     invariant_tree: &KdTree,
-    params: &TriangleParams,
+    config: &TriangleConfig,
     n_ref: usize,
     n_target: usize,
 ) -> VoteMatrix {
@@ -159,7 +159,7 @@ pub(crate) fn vote_for_correspondences(
     // The k-d tree uses L2 distance but is_similar uses L-infinity (per-axis max).
     // Multiply by sqrt(2) so the L2 circle circumscribes the L-inf square,
     // ensuring no valid candidates are missed at the corners.
-    let l2_radius = params.ratio_tolerance * SQRT_2;
+    let l2_radius = config.ratio_tolerance * SQRT_2;
 
     for target_tri in target_triangles {
         let query = DVec2::new(target_tri.ratios.0, target_tri.ratios.1);
@@ -169,12 +169,12 @@ pub(crate) fn vote_for_correspondences(
             let ref_tri = &ref_triangles[ref_idx];
 
             // L-inf filter: exact per-axis tolerance check
-            if !ref_tri.is_similar(target_tri, params.ratio_tolerance) {
+            if !ref_tri.is_similar(target_tri, config.ratio_tolerance) {
                 continue;
             }
 
             // Check orientation if required
-            if params.check_orientation && ref_tri.orientation != target_tri.orientation {
+            if config.check_orientation && ref_tri.orientation != target_tri.orientation {
                 continue;
             }
 

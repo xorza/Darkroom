@@ -192,7 +192,10 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     let reference = select_reference(
         &star_counts,
         config.reference,
-        config.registration.required_stars(),
+        config
+            .registration
+            .matching
+            .required_stars(config.registration.transform_type),
     )?;
     let metadata = detected[reference].image.metadata.clone();
     let ref_stars = std::mem::take(&mut detected[reference].stars);

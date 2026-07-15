@@ -55,12 +55,15 @@ pub use stacking::star_detection::detector::{
 pub use stacking::star_detection::error::StarDetectionConfigError;
 pub use stacking::star_detection::star::Star;
 
-pub use stacking::registration::config::{Config as RegistrationConfig, InterpolationMethod};
+pub use stacking::registration::config::{
+    Config as RegistrationConfig, InterpolationMethod, RegistrationMatchingConfig,
+};
 pub use stacking::registration::distortion::sip::SipPolynomial;
 pub use stacking::registration::result::{
     RansacFailureReason, RegistrationError, RegistrationResult, StarMatch,
 };
 pub use stacking::registration::transform::{Transform, TransformType, WarpTransform};
+pub use stacking::registration::triangle::TriangleConfig;
 pub use stacking::registration::{WarpResult, register, warp};
 
 pub use stacking::combine::cache_config::CacheConfig;

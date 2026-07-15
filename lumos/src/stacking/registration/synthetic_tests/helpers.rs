@@ -1,5 +1,6 @@
 //! Shared test helpers for synthetic registration tests.
 
+use crate::stacking::registration::config::RegistrationMatchingConfig;
 use crate::stacking::star_detection::star::Star;
 use glam::DVec2;
 
@@ -7,6 +8,14 @@ use glam::DVec2;
 pub const FWHM_TIGHT: f32 = 1.34;
 /// FWHM for normal/typical stars (~max_sigma 1.0).
 pub const FWHM_NORMAL: f32 = 2.0;
+
+pub(crate) fn matching_config(min_stars: usize, min_matches: usize) -> RegistrationMatchingConfig {
+    RegistrationMatchingConfig {
+        min_stars: Some(min_stars),
+        min_matches,
+        ..Default::default()
+    }
+}
 
 /// Apply an affine transform to star positions.
 /// Affine: [a, b, tx, c, d, ty] where the transform is:

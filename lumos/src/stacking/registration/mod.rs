@@ -69,7 +69,6 @@ use interpolation::warp_image;
 use ransac::transforms::estimate_transform;
 use ransac::{RansacEstimator, RansacParams};
 use spatial::KdTree;
-use triangle::TriangleParams;
 use triangle::matching::match_triangles;
 use triangle::voting::PointMatch;
 
@@ -114,7 +113,7 @@ pub fn register(
     let start = Instant::now();
 
     // Validate input — the gate is keyed to the transform model unless min_stars overrides it.
-    let required_stars = config.required_stars();
+    let required_stars = config.matching.required_stars(config.transform_type);
     if ref_stars.len() < required_stars {
         return Err(RegistrationError::InsufficientStars {
             found: ref_stars.len(),
@@ -135,23 +134,18 @@ pub fn register(
     // Select stars for matching (take brightest N)
     let ref_positions: Vec<DVec2> = ref_stars
         .iter()
-        .take(config.max_stars)
+        .take(config.matching.max_stars)
         .map(|s| s.pos)
         .collect();
     let target_positions: Vec<DVec2> = target_stars
         .iter()
-        .take(config.max_stars)
+        .take(config.matching.max_stars)
         .map(|s| s.pos)
         .collect();
 
     // Triangle matching
-    let triangle_params = TriangleParams {
-        ratio_tolerance: config.ratio_tolerance,
-        min_votes: config.min_votes,
-        check_orientation: config.check_orientation,
-    };
     let t0 = Instant::now();
-    let matches = match_triangles(&ref_positions, &target_positions, &triangle_params);
+    let matches = match_triangles(&ref_positions, &target_positions, &config.matching.triangle);
     let triangle_ms = t0.elapsed().as_secs_f64() * 1000.0;
     tracing::debug!(
         triangle_ms,
@@ -159,7 +153,7 @@ pub fn register(
         "Triangle matching complete"
     );
 
-    if matches.len() < config.min_matches {
+    if matches.len() < config.matching.min_matches {
         return Err(RegistrationError::NoMatchingPatterns);
     }
 
