@@ -56,7 +56,16 @@
   {
     "label": "run aperture showcase",
     "command": "RUST_BACKTRACE=1 cargo",
-    "args": ["run", "--release", "--manifest-path", "aperture/Cargo.toml"],
+    "args": [
+      "run",
+      "--release",
+      "--manifest-path",
+      "aperture/Cargo.toml",
+      "--bin",
+      "showcase",
+      "--features",
+      "showcase",
+    ],
   },
   {
     "label": "run aperture showcase with tracy",
@@ -66,8 +75,10 @@
       "--release",
       "--manifest-path",
       "aperture/Cargo.toml",
+      "--bin",
+      "showcase",
       "--features",
-      "profile-with-tracy",
+      "showcase,profile-with-tracy",
     ],
   },
 ]
