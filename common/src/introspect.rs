@@ -7,8 +7,9 @@
 //!
 //! Derive with `#[derive(Introspect)]` (re-exported here). Enum-typed fields
 //! implement [`IntrospectEnum`] (variant list + string round-trip) — derive it
-//! with `#[derive(IntrospectEnum)]`, which delegates to the enum's
-//! `Display`/`FromStr` (typically strum's `Display`/`EnumString`).
+//! with `#[derive(IntrospectEnum)]` plus a stable `#[config(type_id = "…")]`
+//! UUID; the derive delegates to the enum's `Display`/`FromStr` (typically
+//! strum's `Display`/`EnumString`).
 //!
 //! ```ignore
 //! #[derive(Default, Introspect)]
@@ -38,8 +39,9 @@ pub enum FieldKind {
     Bool,
     Str,
     Enum {
-        /// The enum type's name (a stable identity key for consumers).
-        type_name: String,
+        /// Stable UUID identity, independent of Rust and display names.
+        type_id: String,
+        display_name: String,
         variants: Vec<String>,
     },
     /// An optional field of the inner kind (not required).
@@ -70,9 +72,13 @@ pub trait Introspect: Default {
 }
 
 /// A fieldless enum usable as an introspected field — a variant list plus a
-/// string round-trip. Derive with `#[derive(IntrospectEnum)]` (needs the enum's
-/// `Display` + `FromStr` — e.g. strum's `Display` + `EnumString`).
+/// string round-trip. Derive with `#[derive(IntrospectEnum)]` and a stable
+/// `#[config(type_id = "…")]` UUID (needs the enum's `Display` + `FromStr` —
+/// e.g. strum's `Display` + `EnumString`).
 pub trait IntrospectEnum: Sized {
+    const TYPE_ID: &'static str;
+    const DISPLAY_NAME: &'static str;
+
     fn variants() -> Vec<String>;
     fn to_variant(&self) -> String;
     fn from_variant(name: &str) -> Option<Self>;
@@ -92,6 +98,9 @@ mod tests {
     }
 
     impl IntrospectEnum for Mode {
+        const TYPE_ID: &'static str = "8254c974-43ba-4bd4-9521-6dd749aab5ea";
+        const DISPLAY_NAME: &'static str = "Mode";
+
         fn variants() -> Vec<String> {
             vec!["fast".to_string(), "slow".to_string()]
         }
@@ -115,6 +124,7 @@ mod tests {
     /// `FromStr` (hand-written here; strum's `Display`/`EnumString` are the usual
     /// source), with no `strum`/`IntoEnumIterator` dependency.
     #[derive(Debug, Clone, Copy, PartialEq, IntrospectEnum)]
+    #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb")]
     enum Speed {
         Fast,
         Slow,
@@ -142,6 +152,8 @@ mod tests {
 
     #[test]
     fn derived_introspect_enum_delegates_to_display_and_from_str() {
+        assert_ne!(Speed::TYPE_ID, Mode::TYPE_ID);
+        assert_eq!(Speed::DISPLAY_NAME, "Speed");
         assert_eq!(Speed::variants(), ["fast", "slow"]);
         assert_eq!(Speed::Slow.to_variant(), "slow");
         assert_eq!(Speed::from_variant("fast"), Some(Speed::Fast));
@@ -184,7 +196,8 @@ mod tests {
         assert_eq!(
             fields[2].kind,
             FieldKind::Enum {
-                type_name: "Mode".to_string(),
+                type_id: Mode::TYPE_ID.to_string(),
+                display_name: "Mode".to_string(),
                 variants: vec!["fast".to_string(), "slow".to_string()],
             }
         );
@@ -222,5 +235,40 @@ mod tests {
         // Mismatched / missing → that field's default.
         let knobs = Knobs::from_fields(&[FieldValue::Bool(true)]);
         assert_eq!(knobs, Knobs::default());
+    }
+
+    mod other {
+        use crate::IntrospectEnum;
+
+        #[derive(Debug)]
+        pub(crate) enum Mode {
+            Only,
+        }
+
+        impl IntrospectEnum for Mode {
+            const TYPE_ID: &'static str = "b3ee5042-6965-4d47-a8ca-bcd979dd5491";
+            const DISPLAY_NAME: &'static str = "Mode";
+
+            fn variants() -> Vec<String> {
+                vec!["only".to_string()]
+            }
+
+            fn to_variant(&self) -> String {
+                match self {
+                    Mode::Only => "only".to_string(),
+                }
+            }
+
+            fn from_variant(name: &str) -> Option<Self> {
+                (name == "only").then_some(Mode::Only)
+            }
+        }
+    }
+
+    #[test]
+    fn same_named_enums_in_different_modules_have_distinct_identities() {
+        assert_eq!(Mode::DISPLAY_NAME, other::Mode::DISPLAY_NAME);
+        assert_ne!(Mode::TYPE_ID, other::Mode::TYPE_ID);
+        assert_eq!(other::Mode::variants(), ["only"]);
     }
 }

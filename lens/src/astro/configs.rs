@@ -20,6 +20,7 @@ use crate::config_node::NodeConfig;
 /// Editable mirror of [`lumos::BackgroundMode`]. `strum` gives the variant
 /// string round-trip backing [`IntrospectEnum`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
+#[config(type_id = "ed416b2d-378b-4eb1-9029-bc7a80a509aa")]
 #[strum(serialize_all = "snake_case")]
 pub enum BackgroundModeDef {
     #[default]
@@ -193,6 +194,7 @@ impl NodeConfig for RegistrationConfigDef {
 /// Frame-combination method (mirrors the rejection/median/mean choice of
 /// [`lumos::StackConfig`]; `sigma` applies to the rejection methods).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
+#[config(type_id = "0ac16ec1-4a1e-48e9-aff5-17df1ff645bc")]
 #[strum(serialize_all = "snake_case")]
 pub enum CombineMethodDef {
     #[default]
@@ -237,6 +239,7 @@ impl NodeConfig for CombineConfigDef {
 
 /// Editable mirror of [`lumos::Threshold`] — wavelet coefficient thresholding.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
+#[config(type_id = "542a0fa0-25ff-4839-b309-acbe65d93a84")]
 #[strum(serialize_all = "snake_case")]
 pub enum ThresholdDef {
     Hard,
@@ -385,6 +388,7 @@ impl NodeConfig for LocalContrastConfigDef {
 /// SCNR method (mirrors [`lumos::Scnr`]'s variant choice; `amount` applies
 /// to `additive_mask`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
+#[config(type_id = "662e2432-b685-4b5b-bf05-0041814dc908")]
 #[strum(serialize_all = "snake_case")]
 pub enum ScnrMethodDef {
     #[default]
@@ -425,6 +429,7 @@ impl NodeConfig for ScnrConfigDef {
 
 /// Mirror of [`lumos::ColorMode`] (how a stretch curve maps across channels).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
+#[config(type_id = "ca1be21f-2096-410c-8bc2-33e96d9b12be")]
 #[strum(serialize_all = "snake_case")]
 pub enum ColorModeDef {
     #[default]
@@ -453,6 +458,7 @@ impl From<ColorMode> for ColorModeDef {
 /// The auto-stretch method choice (mirrors the two automatic
 /// [`lumos::StretchMethod`] variants the presets use).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
+#[config(type_id = "722f7047-a6fc-4538-abd7-8af5fd1ee0ff")]
 #[strum(serialize_all = "snake_case")]
 pub enum StretchMethodKindDef {
     #[default]

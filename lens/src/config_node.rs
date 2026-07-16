@@ -15,7 +15,7 @@
 
 use std::any::Any;
 use std::fmt;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use common::{FieldKind, FieldValue, Introspect};
 use scenarium::FuncLambda;
@@ -131,27 +131,31 @@ fn data_type(kind: &FieldKind) -> DataType {
         FieldKind::Float => DataType::Float,
         FieldKind::Bool => DataType::Bool,
         FieldKind::Str => DataType::String,
-        FieldKind::Enum { type_name, .. } => DataType::Enum(stable_type_id(type_name)),
+        FieldKind::Enum { type_id, .. } => DataType::Enum(type_id.as_str().into()),
         // An `Option<T>` port is `T`'s type; optionality is the input's `required` flag.
         FieldKind::Option(inner) => data_type(inner),
     }
 }
 
-/// Register the enum type(s) a `kind` references on `library`. Idempotent — a
-/// mirror enum can appear across several config builders, so a second
-/// registration of the same id is a no-op rather than a panic.
+/// Register the enum type(s) a `kind` references on `library`. A mirror enum can
+/// appear across several config builders, so identical registrations are
+/// idempotent while conflicting metadata is a wiring bug.
 fn register_field_enum(library: &mut Library, kind: &FieldKind) {
     match kind {
         FieldKind::Enum {
-            type_name,
+            type_id,
+            display_name,
             variants,
         } => {
-            let id = stable_type_id(type_name);
-            if library.type_decl(&id).is_none() {
-                library.register_type(
-                    id,
-                    TypeEntry::enum_with_variants(type_name, variants.clone()),
+            let id: TypeId = type_id.as_str().into();
+            let entry = TypeEntry::enum_with_variants(display_name, variants.clone());
+            if let Some(existing) = library.type_decl(&id) {
+                assert_eq!(
+                    existing, &entry.decl,
+                    "conflicting enum type registration for {id}"
                 );
+            } else {
+                library.register_type(id, entry);
             }
         }
         FieldKind::Option(inner) => register_field_enum(library, inner),
@@ -200,21 +204,6 @@ fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
     }
 }
 
-/// A stable [`TypeId`] for a reflected enum datatype, as a UUIDv5 of the enum's
-/// name under [`ENUM_TYPE_NAMESPACE`] — deterministic across runs, full-width and
-/// collision-resistant. These types are generated from introspection, not
-/// authored, so they carry no `uuidgen` literal of their own (bindings serialize
-/// the variant name only); the namespace literal supplies the entropy.
-fn stable_type_id(name: &str) -> TypeId {
-    TypeId::from_name(*ENUM_TYPE_NAMESPACE, name)
-}
-
-/// Fixed namespace for [`stable_type_id`]'s UUIDv5 enum-type ids (a `uuidgen`
-/// literal). Distinct from any authored type id, so a reflected enum can't
-/// collide with a hand-minted one.
-static ENUM_TYPE_NAMESPACE: LazyLock<TypeId> =
-    LazyLock::new(|| "48cbf7b0-f118-4ad8-a3c7-c2f71e8e555e".into());
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,21 +217,50 @@ mod tests {
             data_type(&FieldKind::Option(Box::new(FieldKind::Float))),
             DataType::Float
         ));
+        let type_id = TypeId::unique().to_string();
         let kind = FieldKind::Enum {
-            type_name: "Mode".to_string(),
+            type_id: type_id.clone(),
+            display_name: "Mode".to_string(),
             variants: vec!["a".to_string(), "b".to_string()],
         };
-        assert_eq!(data_type(&kind), DataType::Enum(stable_type_id("Mode")));
+        let expected_id: TypeId = type_id.as_str().into();
+        assert_eq!(data_type(&kind), DataType::Enum(expected_id));
+        let renamed = FieldKind::Enum {
+            type_id,
+            display_name: "Renamed Mode".to_string(),
+            variants: vec!["a".to_string(), "b".to_string()],
+        };
+        assert_eq!(data_type(&renamed), DataType::Enum(expected_id));
 
         // Registration records the enum's name + variants under that id.
         let mut library = Library::default();
         register_field_enum(&mut library, &kind);
-        let decl = library.type_decl(&stable_type_id("Mode")).unwrap();
+        register_field_enum(&mut library, &kind);
+        let decl = library.type_decl(&expected_id).unwrap();
         assert_eq!(decl.display_name(), "Mode");
         assert_eq!(
             decl.variants(),
             Some(["a".to_string(), "b".to_string()].as_slice())
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "conflicting enum type registration")]
+    fn rejects_disagreeing_metadata_for_one_enum_identity() {
+        let type_id = TypeId::unique().to_string();
+        let first = FieldKind::Enum {
+            type_id: type_id.clone(),
+            display_name: "Mode".to_string(),
+            variants: vec!["a".to_string()],
+        };
+        let conflicting = FieldKind::Enum {
+            type_id,
+            display_name: "Mode".to_string(),
+            variants: vec!["b".to_string()],
+        };
+        let mut library = Library::default();
+        register_field_enum(&mut library, &first);
+        register_field_enum(&mut library, &conflicting);
     }
 
     #[test]

@@ -10,7 +10,8 @@
 //! `Float`, `bool` → `Bool`, `String` → `Str`, `Option<T>` → `T` but not
 //! required, anything else → an enum (the type must impl
 //! `common::IntrospectEnum`). Field attribute `#[config(label = "…")]` overrides
-//! the auto label (the field name title-cased).
+//! the auto label (the field name title-cased). Enum derive requires a stable
+//! `#[config(type_id = "…")]` UUID.
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -72,7 +73,7 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 /// (typically from strum's `Display` + `EnumString`, so the strings honor
 /// `#[strum(serialize_all = "…")]`), replacing the hand-written bridge impl. The
 /// enum must be fieldless (unit variants only).
-#[proc_macro_derive(IntrospectEnum)]
+#[proc_macro_derive(IntrospectEnum, attributes(config))]
 pub fn derive_introspect_enum(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     expand_enum(input).unwrap_or_else(|err| err.to_compile_error().into())
@@ -80,6 +81,7 @@ pub fn derive_introspect_enum(input: TokenStream) -> TokenStream {
 
 fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
+    let type_id = enum_type_id(&input)?;
     let Data::Enum(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             ident,
@@ -99,6 +101,9 @@ fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         impl ::common::IntrospectEnum for #ident {
+            const TYPE_ID: &'static str = #type_id;
+            const DISPLAY_NAME: &'static str = ::core::stringify!(#ident);
+
             fn variants() -> ::std::vec::Vec<::std::string::String> {
                 ::std::vec![ #( ::std::string::ToString::to_string(&#ident::#variants) ),* ]
             }
@@ -116,13 +121,13 @@ fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
 }
 
 /// Reflected field kind. `Int`/`Float` carry the concrete numeric type (for the
-/// cast), `Enum` the type + its name, `Option` its inner kind + inner type.
+/// cast), `Enum` its type, `Option` its inner kind + inner type.
 enum Kind {
     Int(Type),
     Float(Type),
     Bool,
     Str,
-    Enum(Type, String),
+    Enum(Type),
     Option(Box<Kind>, Type),
 }
 
@@ -162,7 +167,7 @@ fn classify(ty: &Type) -> syn::Result<Kind> {
             }
             Ok(Kind::Option(Box::new(inner_kind), inner.clone()))
         }
-        name => Ok(Kind::Enum(ty.clone(), name.to_string())),
+        _ => Ok(Kind::Enum(ty.clone())),
     }
 }
 
@@ -195,11 +200,11 @@ fn kind_tokens(kind: &Kind) -> TokenStream2 {
             let inner = kind_tokens(inner);
             quote!(::common::FieldKind::Option(::std::boxed::Box::new(#inner)))
         }
-        Kind::Enum(ty, name) => {
-            let name = LitStr::new(name, Span::call_site());
+        Kind::Enum(ty) => {
             quote! {
                 ::common::FieldKind::Enum {
-                    type_name: #name.to_string(),
+                    type_id: <#ty as ::common::IntrospectEnum>::TYPE_ID.to_string(),
+                    display_name: <#ty as ::common::IntrospectEnum>::DISPLAY_NAME.to_string(),
                     variants: <#ty as ::common::IntrospectEnum>::variants(),
                 }
             }
@@ -215,7 +220,7 @@ fn default_scalar(kind: &Kind, place: TokenStream2) -> TokenStream2 {
         Kind::Float(_) => quote!(::common::FieldValue::Float(#place as f64)),
         Kind::Bool => quote!(::common::FieldValue::Bool(#place)),
         Kind::Str => quote!(::common::FieldValue::Str(#place.clone())),
-        Kind::Enum(..) => {
+        Kind::Enum(_) => {
             quote!(::common::FieldValue::Enum(::common::IntrospectEnum::to_variant(&#place)))
         }
         Kind::Option(..) => quote!(::common::FieldValue::Null),
@@ -268,7 +273,7 @@ fn read_tokens(index: usize, fname: &Ident, kind: &Kind) -> TokenStream2 {
                 _ => d.#fname,
             }
         },
-        Kind::Enum(ty, _) => quote! {
+        Kind::Enum(ty) => quote! {
             match #get {
                 ::core::option::Option::Some(::common::FieldValue::Enum(s)) => {
                     <#ty as ::common::IntrospectEnum>::from_variant(s).unwrap_or(d.#fname)
@@ -299,7 +304,7 @@ fn option_read(get: &TokenStream2, fname: &Ident, inner: &Kind, inner_ty: &Type)
             ::core::option::Option::Some(::common::FieldValue::Str(s)) =>
                 ::core::option::Option::Some(s.clone()),
         },
-        Kind::Enum(ty, _) => quote! {
+        Kind::Enum(ty) => quote! {
             ::core::option::Option::Some(::common::FieldValue::Enum(s)) =>
                 <#ty as ::common::IntrospectEnum>::from_variant(s).map(::core::option::Option::Some).unwrap_or(d.#fname),
         },
@@ -331,6 +336,42 @@ fn field_label(field: &Field) -> syn::Result<String> {
         })?;
     }
     Ok(label.unwrap_or_else(|| prettify(&field.ident.as_ref().expect("named field").to_string())))
+}
+
+fn enum_type_id(input: &DeriveInput) -> syn::Result<LitStr> {
+    let mut type_id = None;
+    for attr in &input.attrs {
+        if !attr.path().is_ident("config") {
+            continue;
+        }
+        attr.parse_nested_meta(|meta| {
+            if !meta.path.is_ident("type_id") {
+                return Err(meta.error("expected `type_id`"));
+            }
+            if type_id.is_some() {
+                return Err(meta.error("duplicate `type_id`"));
+            }
+            let value = meta.value()?.parse::<LitStr>()?;
+            let raw = value.value();
+            let Ok(parsed) = uuid::Uuid::parse_str(&raw) else {
+                return Err(syn::Error::new_spanned(&value, "`type_id` must be a UUID"));
+            };
+            if parsed.hyphenated().to_string() != raw {
+                return Err(syn::Error::new_spanned(
+                    &value,
+                    "`type_id` must be a canonical lowercase UUID",
+                ));
+            }
+            type_id = Some(value);
+            Ok(())
+        })?;
+    }
+    type_id.ok_or_else(|| {
+        syn::Error::new_spanned(
+            &input.ident,
+            "IntrospectEnum requires `#[config(type_id = \"…\")]`",
+        )
+    })
 }
 
 /// `snake_case` → "Title Case".
