@@ -22,15 +22,10 @@ pub struct KeyIndexVec<K: Copy + Eq + Hash, V: KeyIndexKey<K>> {
 impl<K, V> PartialEq for KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash,
-    V: KeyIndexKey<K> + Eq,
+    V: KeyIndexKey<K> + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        if self.items.len() != other.items.len() {
-            return false;
-        }
-        self.items
-            .iter()
-            .all(|item| other.by_key(item.key()) == Some(item))
+        self.items == other.items
     }
 }
 
@@ -437,6 +432,7 @@ mod tests {
             let deserialized: KeyIndexVec<u32, TestItem> =
                 deserialize(&serialized, format).unwrap();
 
+            assert_eq!(vec, deserialized);
             assert_eq!(deserialized.items.len(), 2);
             assert_eq!(deserialized.idx_by_key.len(), 2);
 
@@ -543,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    fn key_index_vec_eq_is_order_independent() {
+    fn key_index_vec_equality_includes_order_and_values() {
         let mut left = KeyIndexVec::<u32, TestItem>::default();
         left.add(TestItem { id: 1, value: 10 });
         left.add(TestItem { id: 2, value: 20 });
@@ -554,6 +550,9 @@ mod tests {
         right.add(TestItem { id: 1, value: 10 });
         right.add(TestItem { id: 2, value: 20 });
 
+        assert_ne!(left, right);
+
+        right.move_to_index(&3, 2);
         assert_eq!(left, right);
 
         right.add(TestItem { id: 2, value: 99 });

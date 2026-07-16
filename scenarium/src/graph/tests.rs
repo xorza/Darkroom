@@ -18,6 +18,11 @@ fn passthrough_func() -> Func {
 #[test]
 fn roundtrip_serialization() -> anyhow::Result<()> {
     let graph = test_graph();
+    let mut reordered = graph.clone();
+    let first_id = reordered.iter().next().unwrap().id;
+    let last_index = reordered.len() - 1;
+    reordered.nodes.move_to_index(&first_id, last_index);
+    assert_ne!(graph, reordered);
 
     for format in SerdeFormat::all_formats_for_testing() {
         let serialized = graph.serialize(format)?;

@@ -1280,6 +1280,13 @@ mod tests {
 
     #[test]
     fn document_roundtrip() {
+        let view = build_test_doc().main_view;
+        let mut reordered = view.clone();
+        let first_key = reordered.view_items[0].key;
+        let last_index = reordered.view_items.len() - 1;
+        reordered.view_items.move_to_index(&first_key, last_index);
+        assert_ne!(view, reordered);
+
         for format in SerdeFormat::all_formats_for_testing() {
             assert_roundtrip(format);
         }
@@ -1300,26 +1307,8 @@ mod tests {
             .expect("document deserialization should succeed for test payload");
         deserialized.validate();
         assert_eq!(
-            doc.main_view.view_items.len(),
-            deserialized.main_view.view_items.len(),
-            "view item counts should round-trip"
-        );
-        assert_eq!(
-            doc.main_view.view_items[0].key, deserialized.main_view.view_items[0].key,
-            "view item keys should round-trip"
-        );
-        assert_eq!(
-            doc.graph.len(),
-            deserialized.graph.len(),
-            "graph nodes should round-trip"
-        );
-        assert_eq!(
-            doc.main_view.viewport.zoom, deserialized.main_view.viewport.zoom,
-            "zoom should round-trip"
-        );
-        assert_eq!(
-            doc.main_view.viewport.pan, deserialized.main_view.viewport.pan,
-            "pan should round-trip"
+            doc, deserialized,
+            "the complete document should round-trip through {format:?}"
         );
     }
 
