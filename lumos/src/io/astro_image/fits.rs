@@ -79,46 +79,10 @@ pub(crate) fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
     }
 
     let header = &reader.hdus()[index].header;
-
-    // DATAMAX (the writer's declared full-scale) is the frame-independent normalization divisor
-    // when present; see `normalize_fits_pixels`. RAW files arrive already normalized.
-    let data_max = header.get_real("DATAMAX");
-    let pixels = normalize_fits_pixels(pixels, bitpix, data_max);
-
-    // Detect CFA pattern from BAYERPAT header
-    let cfa_type = read_cfa_from_headers(header);
-
-    // Read metadata
-    let metadata = AstroImageMetadata {
-        object: read_text(header, "OBJECT"),
-        instrument: read_text(header, "INSTRUME"),
-        telescope: read_text(header, "TELESCOP"),
-        date_obs: read_text(header, "DATE-OBS"),
-        exposure_time: header.get_real("EXPTIME"),
-        iso: header.get_integer("ISOSPEED").map(|v| v as u32),
-        bitpix,
-        header_dimensions: shape,
-        cfa_type,
-        filter: read_text(header, "FILTER"),
-        gain: header.get_real("GAIN"),
-        egain: header.get_real("EGAIN"),
-        ccd_temp: header
-            .get_real("CCD-TEMP")
-            .or_else(|| header.get_real("CCDTEMP")),
-        image_type: read_text(header, "IMAGETYP").or_else(|| read_text(header, "FRAME")),
-        xbinning: header.get_integer("XBINNING").map(|v| v as i32),
-        ybinning: header.get_integer("YBINNING").map(|v| v as i32),
-        set_temp: header.get_real("SET-TEMP"),
-        offset: header.get_integer("OFFSET").map(|v| v as i32),
-        focal_length: header.get_real("FOCALLEN"),
-        airmass: header.get_real("AIRMASS"),
-        ra_deg: read_ra_deg(header),
-        dec_deg: read_dec_deg(header),
-        pixel_size_x: header.get_real("XPIXSZ"),
-        pixel_size_y: header.get_real("YPIXSZ"),
-        data_max,
-        calibrated: false,
-    };
+    let metadata = read_metadata(header, shape, bitpix).map_err(|source| fits_err(path, source))?;
+    // DATAMAX is the frame-independent normalization divisor when present; RAW
+    // files arrive already normalized. See `normalize_fits_pixels`.
+    let pixels = normalize_fits_pixels(pixels, bitpix, metadata.data_max);
 
     // FITS stores 3D images in planar order (all R, then all G, then all B).
     // Use from_planar_channels for RGB, from_pixels for grayscale.
@@ -130,6 +94,41 @@ pub(crate) fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
     };
     astro.metadata = metadata;
     Ok(astro)
+}
+
+fn read_metadata(
+    header: &Header,
+    header_dimensions: Vec<usize>,
+    bitpix: BitPix,
+) -> fits_well::Result<AstroImageMetadata> {
+    Ok(AstroImageMetadata {
+        object: read_text(header, "OBJECT")?,
+        instrument: read_text(header, "INSTRUME")?,
+        telescope: read_text(header, "TELESCOP")?,
+        date_obs: read_text(header, "DATE-OBS")?,
+        exposure_time: header.get_real("EXPTIME")?,
+        iso: read_u32(header, "ISOSPEED")?,
+        bitpix,
+        header_dimensions,
+        cfa_type: read_cfa_from_headers(header)?,
+        filter: read_text(header, "FILTER")?,
+        gain: header.get_real("GAIN")?,
+        egain: header.get_real("EGAIN")?,
+        ccd_temp: first_real(header, "CCD-TEMP", "CCDTEMP")?,
+        image_type: first_text(header, "IMAGETYP", "FRAME")?,
+        xbinning: read_i32(header, "XBINNING")?,
+        ybinning: read_i32(header, "YBINNING")?,
+        set_temp: header.get_real("SET-TEMP")?,
+        offset: read_i32(header, "OFFSET")?,
+        focal_length: header.get_real("FOCALLEN")?,
+        airmass: header.get_real("AIRMASS")?,
+        ra_deg: read_ra_deg(header)?,
+        dec_deg: read_dec_deg(header)?,
+        pixel_size_x: header.get_real("XPIXSZ")?,
+        pixel_size_y: header.get_real("YPIXSZ")?,
+        data_max: header.get_real("DATAMAX")?,
+        calibrated: false,
+    })
 }
 
 /// Map fits-well's effective `SampleType` to lumos's `BitPix`.
@@ -202,15 +201,19 @@ fn normalize_fits_pixels(mut pixels: Vec<f32>, bitpix: BitPix, data_max: Option<
 /// BAYERPAT values: "RGGB", "BGGR", "GRBG", "GBRG", or "TRUE" (= RGGB).
 /// ROWORDER: "TOP-DOWN" (default) or "BOTTOM-UP" (flips pattern vertically).
 /// XBAYROFF/YBAYROFF: integer offsets into the Bayer matrix (shifts pattern).
-fn read_cfa_from_headers(header: &Header) -> Option<CfaType> {
+fn read_cfa_from_headers(header: &Header) -> fits_well::Result<Option<CfaType>> {
     use crate::io::raw::demosaic::bayer::CfaPattern;
 
-    let bayerpat = header.get_text("BAYERPAT")?;
-    let mut pattern = CfaPattern::from_bayerpat(bayerpat)?;
+    let Some(bayerpat) = header.get_text("BAYERPAT")? else {
+        return Ok(None);
+    };
+    let Some(mut pattern) = CfaPattern::from_bayerpat(bayerpat) else {
+        return Ok(None);
+    };
 
     // ROWORDER: if BOTTOM-UP, the first row in memory is the bottom of the image,
     // so the Bayer pattern needs to be flipped vertically.
-    if let Some(roworder) = header.get_text("ROWORDER")
+    if let Some(roworder) = header.get_text("ROWORDER")?
         && roworder.trim().eq_ignore_ascii_case("BOTTOM-UP")
     {
         pattern = pattern.flip_vertical();
@@ -218,8 +221,8 @@ fn read_cfa_from_headers(header: &Header) -> Option<CfaType> {
 
     // XBAYROFF/YBAYROFF: offset into the Bayer matrix.
     // An odd Y offset flips rows, an odd X offset flips columns.
-    let xoff = header.get_integer("XBAYROFF").unwrap_or(0);
-    let yoff = header.get_integer("YBAYROFF").unwrap_or(0);
+    let xoff = header.get_integer("XBAYROFF")?.unwrap_or(0);
+    let yoff = header.get_integer("YBAYROFF")?.unwrap_or(0);
     if yoff & 1 != 0 {
         pattern = pattern.flip_vertical();
     }
@@ -227,20 +230,20 @@ fn read_cfa_from_headers(header: &Header) -> Option<CfaType> {
         pattern = pattern.flip_horizontal();
     }
 
-    Some(CfaType::Bayer(pattern))
+    Ok(Some(CfaType::Bayer(pattern)))
 }
 
 /// Read RA in degrees from FITS headers.
 ///
 /// Tries: `RA` (degrees, NINA/SGP), `OBJCTRA` (HMS string, MaximDL/ASCOM),
 /// `CRVAL1` (WCS reference point, plate-solved images).
-fn read_ra_deg(header: &Header) -> Option<f64> {
-    if let Some(ra) = header.get_real("RA") {
-        return Some(ra);
+fn read_ra_deg(header: &Header) -> fits_well::Result<Option<f64>> {
+    if let Some(ra) = header.get_real("RA")? {
+        return Ok(Some(ra));
     }
-    if let Some(s) = header.get_text("OBJCTRA") {
+    if let Some(s) = header.get_text("OBJCTRA")? {
         // OBJCTRA is in hours; scale the sexagesimal value to degrees.
-        return parse_sexagesimal(s).map(|h| h * 15.0);
+        return Ok(parse_sexagesimal(s).map(|h| h * 15.0));
     }
     header.get_real("CRVAL1")
 }
@@ -248,12 +251,12 @@ fn read_ra_deg(header: &Header) -> Option<f64> {
 /// Read DEC in degrees from FITS headers.
 ///
 /// Tries: `DEC` (degrees), `OBJCTDEC` (DMS string), `CRVAL2` (WCS).
-fn read_dec_deg(header: &Header) -> Option<f64> {
-    if let Some(dec) = header.get_real("DEC") {
-        return Some(dec);
+fn read_dec_deg(header: &Header) -> fits_well::Result<Option<f64>> {
+    if let Some(dec) = header.get_real("DEC")? {
+        return Ok(Some(dec));
     }
-    if let Some(s) = header.get_text("OBJCTDEC") {
-        return parse_sexagesimal(s);
+    if let Some(s) = header.get_text("OBJCTDEC")? {
+        return Ok(parse_sexagesimal(s));
     }
     header.get_real("CRVAL2")
 }
@@ -282,8 +285,40 @@ fn parse_sexagesimal(s: &str) -> Option<f64> {
 }
 
 /// Read an optional string-valued header key as an owned `String`.
-fn read_text(header: &Header, key: &str) -> Option<String> {
-    header.get_text(key).map(str::to_owned)
+fn read_text(header: &Header, key: &str) -> fits_well::Result<Option<String>> {
+    Ok(header.get_text(key)?.map(str::to_owned))
+}
+
+fn first_text(header: &Header, first: &str, second: &str) -> fits_well::Result<Option<String>> {
+    match read_text(header, first)? {
+        Some(value) => Ok(Some(value)),
+        None => read_text(header, second),
+    }
+}
+
+fn first_real(header: &Header, first: &str, second: &str) -> fits_well::Result<Option<f64>> {
+    match header.get_real(first)? {
+        Some(value) => Ok(Some(value)),
+        None => header.get_real(second),
+    }
+}
+
+fn read_u32(header: &Header, key: &'static str) -> fits_well::Result<Option<u32>> {
+    header
+        .get_integer(key)?
+        .map(|value| {
+            u32::try_from(value).map_err(|_| fits_well::FitsError::KeywordOutOfRange { name: key })
+        })
+        .transpose()
+}
+
+fn read_i32(header: &Header, key: &'static str) -> fits_well::Result<Option<i32>> {
+    header
+        .get_integer(key)?
+        .map(|value| {
+            i32::try_from(value).map_err(|_| fits_well::FitsError::KeywordOutOfRange { name: key })
+        })
+        .transpose()
 }
 
 #[cfg(test)]

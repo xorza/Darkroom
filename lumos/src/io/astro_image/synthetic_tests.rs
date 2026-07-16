@@ -7,12 +7,13 @@
 
 use std::fs::File;
 
+use crate::io::astro_image::error::ImageError;
 use crate::io::astro_image::fits::load_fits;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::testing::make_cfa;
 use crate::{AstroImage, CfaType};
 use common::CancelToken;
-use fits_well::{FitsWriter, Image, ImageData, Scaling};
+use fits_well::{FitsError, FitsWriter, Header, Image, ImageData, Scaling};
 
 fn identity_scaling() -> Scaling {
     Scaling {
@@ -29,6 +30,49 @@ fn write_and_load(name: &str, image: &Image) -> AstroImage {
     writer.write_image(image).unwrap();
     writer.into_inner().sync_all().unwrap();
     load_fits(&path).unwrap()
+}
+
+fn write_header_and_load(name: &str, header: &Header) -> Result<AstroImage, ImageError> {
+    let path = common::test_utils::test_output_path(&format!("fits_roundtrip/{name}.fits"));
+    let mut writer = FitsWriter::new(File::create(&path).unwrap());
+    writer.write_header(header).unwrap();
+    writer.write_data_unit(&0.0f32.to_be_bytes(), 0).unwrap();
+    writer.into_inner().sync_all().unwrap();
+    load_fits(&path)
+}
+
+fn one_pixel_header() -> Header {
+    let mut header = Header::new();
+    header
+        .set("SIMPLE", true)
+        .set("BITPIX", -32)
+        .set("NAXIS", 2)
+        .set("NAXIS1", 1)
+        .set("NAXIS2", 1);
+    header
+}
+
+#[test]
+fn fits_metadata_errors_survive_the_lumos_loader() {
+    let mut mistyped = one_pixel_header();
+    mistyped.set("DATAMAX", "not a real");
+    assert!(matches!(
+        write_header_and_load("mistyped_metadata", &mistyped),
+        Err(ImageError::Fits {
+            source: FitsError::TypeMismatch { name, expected },
+            ..
+        }) if name == "DATAMAX" && expected == "real"
+    ));
+
+    let mut out_of_range = one_pixel_header();
+    out_of_range.set("ISOSPEED", -1);
+    assert!(matches!(
+        write_header_and_load("out_of_range_metadata", &out_of_range),
+        Err(ImageError::Fits {
+            source: FitsError::KeywordOutOfRange { name: "ISOSPEED" },
+            ..
+        })
+    ));
 }
 
 #[test]
