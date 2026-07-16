@@ -285,7 +285,7 @@ fn read_tokens(index: usize, fname: &Ident, kind: &Kind) -> TokenStream2 {
     }
 }
 
-/// Read a bound optional value as `Some(value)`; anything else keeps the default.
+/// Read null as `None`, a bound value as `Some(value)`, and otherwise keep the default.
 fn option_read(get: &TokenStream2, fname: &Ident, inner: &Kind, inner_ty: &Type) -> TokenStream2 {
     let some = match inner {
         Kind::Int(_) => quote! {
@@ -313,6 +313,8 @@ fn option_read(get: &TokenStream2, fname: &Ident, inner: &Kind, inner_ty: &Type)
     };
     quote! {
         match #get {
+            ::core::option::Option::Some(::common::FieldValue::Null) =>
+                ::core::option::Option::None,
             #some
             _ => d.#fname,
         }

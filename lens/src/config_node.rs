@@ -176,8 +176,8 @@ fn static_value(value: &FieldValue) -> StaticValue {
 }
 
 /// Read an input's runtime value back into a neutral field value (per the
-/// field's kind). An unset/incompatible value reads as `Any` → the rebuild
-/// falls back to that field's default.
+/// field's kind). An unset/incompatible value reads as `Null`: required fields
+/// fall back to their default while optional fields clear to `None`.
 fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
     match kind {
         FieldKind::Int => value

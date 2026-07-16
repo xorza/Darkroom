@@ -182,6 +182,21 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone, PartialEq, Introspect)]
+    struct OptionalDefaults {
+        default_none: Option<u32>,
+        default_some: Option<u32>,
+    }
+
+    impl Default for OptionalDefaults {
+        fn default() -> Self {
+            Self {
+                default_none: None,
+                default_some: Some(11),
+            }
+        }
+    }
+
     #[test]
     fn fields_carry_labels_kinds_required_and_defaults() {
         let fields = Knobs::fields();
@@ -235,6 +250,32 @@ mod tests {
         // Mismatched / missing → that field's default.
         let knobs = Knobs::from_fields(&[FieldValue::Bool(true)]);
         assert_eq!(knobs, Knobs::default());
+
+        assert_eq!(
+            OptionalDefaults::from_fields(&[]),
+            OptionalDefaults::default()
+        );
+        assert_eq!(
+            OptionalDefaults::from_fields(&[FieldValue::Null, FieldValue::Null]),
+            OptionalDefaults {
+                default_none: None,
+                default_some: None,
+            }
+        );
+        assert_eq!(
+            OptionalDefaults::from_fields(&[FieldValue::Int(7), FieldValue::Int(13)]),
+            OptionalDefaults {
+                default_none: Some(7),
+                default_some: Some(13),
+            }
+        );
+        assert_eq!(
+            OptionalDefaults::from_fields(&[
+                FieldValue::Bool(false),
+                FieldValue::Str("wrong".to_string()),
+            ]),
+            OptionalDefaults::default()
+        );
     }
 
     mod other {
