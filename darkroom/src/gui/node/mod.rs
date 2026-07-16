@@ -287,7 +287,7 @@ impl NodeUI {
 
     /// Pre-record pass: peek aperture's input state for any widgets
     /// this `NodeUI` owns and push the corresponding `Intent`s into
-    /// `out`. Runs before `Scene::rebuild` in `App::frame`, so any
+    /// `out`. Runs before `Scene::rebuild` in `App::record`, so any
     /// state mutation applied from these intents (notably drag-driven
     /// `MoveSelection`) lands in `Document` before recording — Pass A's
     /// arrange already reflects the cursor; no Pass B relayout retry.

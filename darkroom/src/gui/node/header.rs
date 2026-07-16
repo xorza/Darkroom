@@ -215,7 +215,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
         .show(ui, |ui| {
             // Last-run time leads the row, tied to the node's status color —
             // the final time once executed, or live elapsed-so-far while
-            // running (`App::frame` repaints so it ticks). Mono/tabular so it
+            // running (`App::record` repaints so it ticks). Mono/tabular so it
             // holds a column across a stack of nodes.
             let elapsed = match node.exec_status {
                 ExecStatus::Executed(secs) => Some(secs),

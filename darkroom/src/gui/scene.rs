@@ -227,7 +227,7 @@ pub(crate) struct SceneConnection {
 impl Scene {
     /// Names live in aperture's per-frame text arena, which clears at
     /// the next `Ui::frame` — so `Scene` must be rebuilt every frame
-    /// before any widget consumes it. `App::frame` enforces this.
+    /// before any widget consumes it. `App::record` enforces this.
     ///
     /// `ctx_def` is the enclosing `SubgraphDef` when `graph` is a
     /// subgraph interior, `None` for the root. It's the only source of

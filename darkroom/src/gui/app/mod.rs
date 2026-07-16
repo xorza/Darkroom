@@ -49,8 +49,8 @@ pub(crate) struct AppContext<'a> {
 /// pipeline + the GUI tree): `App` holds only the runtime/IO the editor
 /// borrows each frame — the [`Engine`] (func lib + worker + script host),
 /// the active theme, session preferences + file path, and the host handle. Its
-/// `frame` drains the engine's worker + script queues into the editor's
-/// projections, runs one `Editor::frame`, and actions the
+/// `update` drains the engine's worker + script queues into the editor's
+/// projections once, while replayable `record` runs `Editor::frame` and actions the
 /// [`AppCommand`](commands::AppCommand) it surfaces (file / theme /
 /// subgraph dialogs, run) outside the record.
 #[derive(Debug)]
@@ -315,7 +315,7 @@ impl App {
 }
 
 impl aperture::App for App {
-    fn frame(&mut self, _win: aperture::WindowToken, ui: &mut Ui) {
+    fn update(&mut self, _win: aperture::WindowToken, ui: &Ui) {
         // Keep the persisted window geometry current so a save on quit
         // captures the latest size / position.
         self.track_window_state(ui);
@@ -325,6 +325,12 @@ impl aperture::App for App {
         // reads reflect the latest run.
         self.drain_worker_events();
 
+        // Apply anything scripts pushed since the last frame (graph edits,
+        // run, quit) before the editor rebuilds, so the scene reflects them.
+        self.handle_script_inbound();
+    }
+
+    fn record(&mut self, _win: aperture::WindowToken, ui: &mut Ui) {
         // While nodes are computing, keep repainting (~20 fps) so the running
         // node's live elapsed-so-far timer ticks — a single long node emits no
         // progress events between its start and finish.
@@ -332,12 +338,8 @@ impl aperture::App for App {
             ui.request_repaint_after(Duration::from_millis(50));
         }
 
-        // Apply anything scripts pushed since the last frame (graph edits,
-        // run, quit) before the editor rebuilds, so the scene reflects them.
-        self.handle_script_inbound();
-
-        // One consistent library snapshot for the whole frame (cheap atomic
-        // load); a mid-frame promote/publish swap takes effect next frame.
+        // One library snapshot for this record pass (a cheap Arc clone).
+        // A command that publishes below is visible to a replay or the next frame.
         let library = self.engine.library().clone();
         let command = self.editor.frame(
             ui,

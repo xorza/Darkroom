@@ -26,7 +26,7 @@ impl UndoStep {
 
     /// Whether replaying this step changes anything the layout engine
     /// reads (node positions, sizes, label text length, viewport
-    /// transform). When true, `App::frame` calls `ui.request_relayout()`
+    /// transform). When true, `App::record` calls `ui.request_relayout()`
     /// after applying the batch so the next pass picks up the change.
     /// UI-only state with no measure/arrange input (selection, cache
     /// behavior, model-only bindings) returns false. Exhaustive on

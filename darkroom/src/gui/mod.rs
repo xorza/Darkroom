@@ -23,7 +23,7 @@ use aperture::WindowToken;
 
 /// darkroom is single-window; this is the token its one OS window is
 /// addressed by — passed to `WinitHost::builder`, handed back to
-/// `App::frame`, and used for `HostHandle::request_repaint`.
+/// `App::record`, and used for `HostHandle::request_repaint`.
 pub(crate) const MAIN_WINDOW: WindowToken = WindowToken(0);
 
 /// Aperture's `HostHandle` is generic over the app type (only its
