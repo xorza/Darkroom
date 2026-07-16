@@ -9,7 +9,7 @@
 //! [`WireEmphasis`] — so they stay visually identical apart from brush and
 //! handle shape, and can't drift.
 
-use aperture::{Brush, Color, LineCap, Shape, Ui};
+use aperture::{Color, CurveBrush, LineCap, Shape, Ui};
 use glam::Vec2;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
@@ -73,7 +73,7 @@ pub(crate) fn add_cubic_wire(
     p3: Vec2,
     handles: CubicHandles,
     width: f32,
-    brush: Brush,
+    brush: CurveBrush,
 ) {
     ui.add_shape(
         Shape::cubic_bezier(p0, handles.p1, handles.p2, p3, width)

@@ -1,4 +1,4 @@
-use aperture::{Brush, Ui};
+use aperture::{CurveBrush, Ui};
 use glam::Vec2;
 use scenarium::NodeId;
 
@@ -213,9 +213,9 @@ impl SubscriptionUI {
                 geometry.events.is_hovered(emitter) || geometry.subs.is_hovered(s.subscriber);
             let hovered = !broken && emphasis.hovered(endpoint_hover);
             let brush = if broken {
-                Brush::Solid(ctx.theme.colors.connection_broken)
+                CurveBrush::Solid(ctx.theme.colors.connection_broken)
             } else {
-                Brush::Solid(emphasis.tint(event_color(ctx.theme, false), hovered))
+                CurveBrush::Solid(emphasis.tint(event_color(ctx.theme, false), hovered))
             };
             let w = emphasis.width(width, hovered || broken);
             add_cubic_wire(ui, p0, p3, handles, w, brush);
@@ -269,7 +269,7 @@ impl SubscriptionUI {
             p3,
             event_handles(p0, p3),
             ctx.theme.connection_width,
-            Brush::Solid(event_color(ctx.theme, false)),
+            CurveBrush::Solid(event_color(ctx.theme, false)),
         );
     }
 }

@@ -1,4 +1,6 @@
-use aperture::{Brush, Color, LinearGradient, PointerButton, PointerEvent, PointerSense, Stop, Ui};
+use aperture::{
+    Color, CurveBrush, LinearGradient, PointerButton, PointerEvent, PointerSense, Stop, Ui,
+};
 use glam::Vec2;
 use scenarium::DataType;
 use scenarium::{Binding, InputPort, closes_data_cycle};
@@ -295,10 +297,10 @@ impl ConnectionUI {
             // end of a connection visually matches the port it touches —
             // and, with per-type port colors, the wire reads as its data
             // type (both ends share it unless one side is the untyped
-            // `Any` wildcard). `lower_cubic_bezier` samples `Brush::Linear`
-            // along the curve parameter `t` and ignores `angle` — we pass
-            // 0.0. Broken-state still wins as a flat color so the alarm
-            // read doesn't get diluted by the gradient.
+            // `Any` wildcard). Aperture's cubic-curve lowering samples
+            // `CurveBrush::Linear` along the curve parameter `t` and ignores
+            // `angle` — we pass 0.0. Broken-state still wins as a flat color
+            // so the alarm read doesn't get diluted by the gradient.
             //
             // Emphasis tiers resolve through the shared `WireEmphasis` (see
             // wire.rs). A broken wire is the alarm: full color and full
@@ -307,7 +309,7 @@ impl ConnectionUI {
                 geometry.ports.is_hovered(src_port) || geometry.ports.is_hovered(tgt_port);
             let hovered = !broken && emphasis.hovered(endpoint_hover);
             let brush = if broken {
-                Brush::Solid(ctx.theme.colors.connection_broken)
+                CurveBrush::Solid(ctx.theme.colors.connection_broken)
             } else {
                 let src_ty = port_data_type(scene, src_port).unwrap_or_default();
                 let tgt_ty = port_data_type(scene, tgt_port).unwrap_or_default();
@@ -372,11 +374,11 @@ impl ConnectionUI {
 
 /// Linear gradient running along the curve parameter from `start`
 /// (`t = 0`, the output-port side at `p0`) to `end` (`t = 1`, the
-/// input-port side at `p3`). `lower_cubic_bezier` samples the brush
-/// along `t` and ignores `angle`, so the geometric direction doesn't
-/// matter here.
-fn port_gradient(start: Color, end: Color) -> Brush {
-    Brush::Linear(LinearGradient::new(
+/// input-port side at `p3`). Aperture's cubic-curve lowering samples
+/// the brush along `t` and ignores `angle`, so the geometric direction
+/// doesn't matter here.
+fn port_gradient(start: Color, end: Color) -> CurveBrush {
+    CurveBrush::Linear(LinearGradient::new(
         0.0,
         [Stop::new(0.0, start), Stop::new(1.0, end)],
     ))

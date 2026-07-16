@@ -30,7 +30,7 @@
 
 use std::collections::BTreeSet;
 
-use aperture::{Brush, Rect, Ui};
+use aperture::{CurveBrush, Rect, Ui};
 use glam::Vec2;
 use scenarium::{NodeId, OutputPort};
 
@@ -277,7 +277,7 @@ impl PinUi {
                 g.top_left,
                 g.handles,
                 width,
-                Brush::Solid(wire_color),
+                CurveBrush::Solid(wire_color),
             );
         }
     }
