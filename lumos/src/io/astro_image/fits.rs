@@ -46,7 +46,7 @@ pub(crate) fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
         // `physical_f32` applies BSCALE/BZERO and maps the integer BLANK to NaN (the
         // effective values cfitsio's f32 read produced), narrowing in a single pass.
         let pixels: Vec<f32> = raw.physical_f32();
-        (raw.shape.clone(), bitpix, pixels)
+        (raw.metadata().shape.to_vec(), bitpix, pixels)
     };
 
     // fits-well reports shape NAXIS1-first: [width, height, (channels)]. All shapes other than
