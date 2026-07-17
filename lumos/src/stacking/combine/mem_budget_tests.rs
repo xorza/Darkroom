@@ -15,7 +15,8 @@
 //! [`load_in_memory`]: super::cache
 
 use common::CancelToken;
-use fits_well::{FitsWriter, Image};
+use fits_well::FitsWriter;
+use fits_well::image::Image;
 
 use crate::AstroImage;
 use crate::stacking::combine::config::StackConfig;
@@ -62,7 +63,7 @@ fn load_budget_is_respected_across_configs() {
 
 /// Write a spatially-uniform 16-bit FITS frame (`value` in every pixel) to `path`.
 fn write_const_fits(path: &std::path::Path, w: usize, h: usize, value: u16) {
-    let image = Image::from_u16(vec![w, h], &vec![value; w * h]);
+    let image = Image::from_u16(vec![w, h], &vec![value; w * h]).expect("valid image");
     let mut buf = Vec::new();
     FitsWriter::new(&mut buf)
         .write_image(&image)

@@ -16,7 +16,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use fits_well::{FitsWriter, Image};
+use fits_well::FitsWriter;
+use fits_well::image::Image;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
@@ -216,7 +217,7 @@ pub(crate) fn write_fits_u16(
     data: &[u16],
     buf: &mut Vec<u8>,
 ) -> io::Result<()> {
-    let image = Image::from_u16(vec![width, height], data);
+    let image = Image::from_u16(vec![width, height], data).map_err(io::Error::other)?;
     buf.clear();
     FitsWriter::new(&mut *buf)
         .write_image(&image)

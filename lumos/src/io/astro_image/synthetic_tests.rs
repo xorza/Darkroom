@@ -13,15 +13,9 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::testing::make_cfa;
 use crate::{AstroImage, CfaType};
 use common::CancelToken;
-use fits_well::{FitsError, FitsWriter, Header, Image, ImageData, Scaling};
-
-fn identity_scaling() -> Scaling {
-    Scaling {
-        bscale: 1.0,
-        bzero: 0.0,
-        blank: None,
-    }
-}
+use fits_well::header::Header;
+use fits_well::image::Image;
+use fits_well::{FitsError, FitsWriter};
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `load_fits`.
 fn write_and_load(name: &str, image: &Image) -> AstroImage {
@@ -35,27 +29,25 @@ fn write_and_load(name: &str, image: &Image) -> AstroImage {
 fn write_header_and_load(name: &str, header: &Header) -> Result<AstroImage, ImageError> {
     let path = common::test_utils::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
-    writer.write_header(header).unwrap();
-    writer.write_data_unit(&0.0f32.to_be_bytes(), 0).unwrap();
+    writer.write_raw_hdu(header, &0.0f32.to_be_bytes()).unwrap();
     writer.into_inner().sync_all().unwrap();
     load_fits(&path)
 }
 
 fn one_pixel_header() -> Header {
     let mut header = Header::new();
-    header
-        .set("SIMPLE", true)
-        .set("BITPIX", -32)
-        .set("NAXIS", 2)
-        .set("NAXIS1", 1)
-        .set("NAXIS2", 1);
+    header.set("SIMPLE", true).unwrap();
+    header.set("BITPIX", -32).unwrap();
+    header.set("NAXIS", 2).unwrap();
+    header.set("NAXIS1", 1).unwrap();
+    header.set("NAXIS2", 1).unwrap();
     header
 }
 
 #[test]
 fn fits_metadata_errors_survive_the_lumos_loader() {
     let mut mistyped = one_pixel_header();
-    mistyped.set("DATAMAX", "not a real");
+    mistyped.set("DATAMAX", "not a real").unwrap();
     assert!(matches!(
         write_header_and_load("mistyped_metadata", &mistyped),
         Err(ImageError::Fits {
@@ -65,7 +57,7 @@ fn fits_metadata_errors_survive_the_lumos_loader() {
     ));
 
     let mut out_of_range = one_pixel_header();
-    out_of_range.set("ISOSPEED", -1);
+    out_of_range.set("ISOSPEED", -1).unwrap();
     assert!(matches!(
         write_header_and_load("out_of_range_metadata", &out_of_range),
         Err(ImageError::Fits {
@@ -82,11 +74,11 @@ fn fits_float32_round_trips_pixels_and_order() {
     let pixels: Vec<f32> = (0..h)
         .flat_map(|_| (0..w).map(|x| x as f32 / (w - 1) as f32))
         .collect();
-    let image = Image {
-        shape: vec![w, h], // fits-well is NAXIS1-first: [width, height]
-        samples: ImageData::F32(pixels.clone()),
-        scaling: identity_scaling(),
-    };
+    let image = Image::new(
+        vec![w, h], // fits-well is NAXIS1-first: [width, height]
+        pixels.clone(),
+    )
+    .unwrap();
 
     let loaded = write_and_load("float32", &image);
     assert_eq!(loaded.width(), w);
@@ -102,7 +94,7 @@ fn fits_unsigned16_round_trips_via_bzero_and_normalizes() {
     let (w, h) = (5usize, 1usize);
     // Stored signed-16 + BZERO=32768 by `from_u16`; loaded back and divided by 65535 → [0,1].
     let raw = [0u16, 16384, 32768, 49152, 65535];
-    let image = Image::from_u16(vec![w, h], &raw);
+    let image = Image::from_u16(vec![w, h], &raw).unwrap();
 
     let loaded = write_and_load("uint16", &image);
     let expected: Vec<f32> = raw.iter().map(|&v| v as f32 / 65535.0).collect();
@@ -118,11 +110,7 @@ fn fits_sanitizes_nan_and_inf() {
     pixels[0] = f32::NAN;
     pixels[5] = f32::INFINITY;
     pixels[10] = f32::NEG_INFINITY;
-    let image = Image {
-        shape: vec![w, h],
-        samples: ImageData::F32(pixels),
-        scaling: identity_scaling(),
-    };
+    let image = Image::new(vec![w, h], pixels).unwrap();
 
     let loaded = write_and_load("nan_inf", &image);
     let px = loaded.channel(0).pixels();

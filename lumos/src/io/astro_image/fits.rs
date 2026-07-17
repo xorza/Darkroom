@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use fits_well::{FitsReader, Header, SampleType};
+use fits_well::FitsReader;
+use fits_well::header::Header;
+use fits_well::image::SampleType;
 use rayon::prelude::*;
 
 use crate::io::astro_image::cfa::CfaType;
