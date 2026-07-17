@@ -151,13 +151,14 @@ fn run_gui(script_cfg: ScriptConfig) {
             window = window.position(pos);
         }
     }
-    WinitHost::new(MAIN_WINDOW, move |ui, handle| {
-        ui.debug_overlay_mut().damage_rect = is_debug();
+    WinitHost::builder(MAIN_WINDOW)
+        .window(window)
+        .build(move |ui, handle| {
+            ui.debug_overlay_mut().damage_rect = is_debug();
 
-        App::new(ui, handle, script_cfg, preferences)
-    })
-    .window(window)
-    .run();
+            App::new(ui, handle, script_cfg, preferences)
+        })
+        .run();
 }
 
 /// Decode the baked-in window icon (PNG → RGBA8) for the title bar /

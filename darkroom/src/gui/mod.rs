@@ -22,7 +22,7 @@ use crate::gui::app::App;
 use aperture::WindowToken;
 
 /// darkroom is single-window; this is the token its one OS window is
-/// addressed by — passed to `WinitHost::new`, handed back to
+/// addressed by — passed to `WinitHost::builder`, handed back to
 /// `App::record`, and used for `HostHandle::request_repaint`.
 pub(crate) const MAIN_WINDOW: WindowToken = WindowToken(0);
 
