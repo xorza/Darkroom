@@ -329,7 +329,7 @@ impl ImageViewer {
         let mut changed = false;
         Panel::vstack()
             .id(control_wid(port, "panel"))
-            .size((Sizing::Hug, Sizing::Hug))
+            .size((Sizing::HUG, Sizing::HUG))
             .align(Align::new(HAlign::Right, VAlign::Top))
             .child_align(Align::new(HAlign::Right, VAlign::Top))
             .margin(Spacing::new(0.0, TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0))
@@ -485,7 +485,7 @@ fn background_swatch(
 fn readout_pill(ui: &mut Ui, theme: &Theme, panel: Panel, text: impl Into<InternedStr>) {
     let text = text.into();
     panel
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
         .background(pill_background(theme))
         .show(ui, |ui| {

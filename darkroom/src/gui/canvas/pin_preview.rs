@@ -222,7 +222,7 @@ pub(crate) fn draw_widget<'ui>(
     Panel::vstack()
         .id(pin_preview_wid(port))
         .position(top_left)
-        .size((Sizing::Fixed(PREVIEW_WIDTH), Sizing::Fixed(PREVIEW_HEIGHT)))
+        .size((Sizing::fixed(PREVIEW_WIDTH), Sizing::fixed(PREVIEW_HEIGHT)))
         .sense(Sense::CLICK | Sense::DRAG)
         .background(
             Background::rounded(
@@ -238,7 +238,7 @@ pub(crate) fn draw_widget<'ui>(
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("header")
-                .size((Sizing::FILL, Sizing::Hug))
+                .size((Sizing::FILL, Sizing::HUG))
                 .padding(Spacing::xy(CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y))
                 .gap(4.0)
                 .child_align(Align::v(VAlign::Center))
@@ -319,7 +319,7 @@ pub(crate) fn draw_widget<'ui>(
 fn info_row(ui: &mut Ui, theme: &Theme, inner_r: f32, image: &ImagePreview) {
     Panel::hstack()
         .id_salt("info")
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::HUG))
         .padding(Spacing::xy(CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y))
         .gap(10.0)
         .line_gap(4.0)
@@ -335,7 +335,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, inner_r: f32, image: &ImagePreview) {
             bare_value(ui, format_label(image.native_format));
             Panel::hstack()
                 .id_salt("info_size")
-                .size((Sizing::Hug, Sizing::Hug))
+                .size((Sizing::HUG, Sizing::HUG))
                 .gap(4.0)
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {

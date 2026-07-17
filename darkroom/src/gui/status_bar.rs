@@ -29,7 +29,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) {
     let colors = &ctx.theme.colors;
     Panel::hstack()
         .id_salt("status_bar")
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::HUG))
         .child_align(Align::new(HAlign::Right, VAlign::Center))
         .padding(Spacing::xy(PAD_X, PAD_Y))
         .background(Background::fill(colors.chrome_fill))

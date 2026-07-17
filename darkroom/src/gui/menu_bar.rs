@@ -14,7 +14,7 @@ pub(crate) fn show(ui: &mut Ui) -> Option<AppCommand> {
     let mut command = None;
     Panel::hstack()
         .auto_id()
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .padding(Spacing::xy(4.0, 4.0))
         .gap(2.0)
         .show(ui, |ui| {

@@ -485,7 +485,7 @@ pub(crate) fn node_ports(node: &SceneNode, kind: PortKind) -> impl Iterator<Item
 /// coords. Inner canvas applies `TranslateScale::new(pan, zoom)`,
 /// so `outer = pan + zoom * world`.
 pub(crate) fn to_world(outer_local: Vec2, viewport: &Viewport) -> Vec2 {
-    (outer_local - viewport.pan) / viewport.safe_zoom()
+    (outer_local - viewport.pan) / viewport.zoom
 }
 
 /// The pointer in inner-canvas world coords, or `None` when it's off-window.

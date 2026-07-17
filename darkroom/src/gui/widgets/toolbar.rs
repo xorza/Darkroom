@@ -47,7 +47,7 @@ pub(crate) fn pill_background(theme: &Theme) -> Background {
 /// canvas or image beneath.
 pub(crate) fn pill(ui: &mut Ui, theme: &Theme, panel: Panel, body: impl FnOnce(&mut Ui)) {
     panel
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .gap(BUTTON_GAP)
         .padding(Spacing::all(PILL_PADDING))
         .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL)
@@ -138,7 +138,7 @@ impl Chip {
         let s = BUTTON_SIZE;
         let button = Panel::zstack()
             .id(self.wid)
-            .size((Sizing::Fixed(s), Sizing::Fixed(s)))
+            .size((Sizing::fixed(s), Sizing::fixed(s)))
             .sense(Sense::CLICK)
             .background(Background::rounded(fill, Corners::all(BUTTON_RADIUS)))
             .show(ui, |ui| draw_glyph(ui, s, glyph));

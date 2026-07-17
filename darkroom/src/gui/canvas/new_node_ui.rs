@@ -177,7 +177,7 @@ fn palette_body(
         .id(search_id)
         .placeholder("Search…")
         .style(ctx.theme.inline_rename.text_edit.clone())
-        .size((Sizing::Fill(1.0), Sizing::Hug))
+        .size((Sizing::fill(1.0), Sizing::HUG))
         .min_size((200.0, 0.0))
         .margin(Spacing::new(0.0, 0.0, 0.0, SEARCH_ROW_GAP))
         .show(ui);
@@ -188,12 +188,12 @@ fn palette_body(
 
     Scroll::vertical()
         .id_salt("new_node_scroll")
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .max_size((f32::INFINITY, scroll_cap))
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("new_node_columns")
-                .size((Sizing::Hug, Sizing::Hug))
+                .size((Sizing::HUG, Sizing::HUG))
                 .gap(12.0)
                 .show(ui, |ui| {
                     for category in sorted_categories(ctx) {
@@ -250,7 +250,7 @@ fn category_column(
     let mut chosen = None;
     Panel::vstack()
         .id_salt(("new_node_col", category))
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .gap(4.0)
         .show(ui, |ui| {
             Text::new(category.to_owned())
@@ -258,7 +258,7 @@ fn category_column(
                 .show(ui);
             Panel::vstack()
                 .id_salt(("new_node_funcs", category))
-                .size((Sizing::Hug, Sizing::Hug))
+                .size((Sizing::HUG, Sizing::HUG))
                 .gap(2.0)
                 .show(ui, |ui| {
                     for entry in entries {

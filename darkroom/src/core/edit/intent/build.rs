@@ -15,9 +15,10 @@ use crate::core::edit::intent::types::{
 /// into a complete [`UndoStep`]. Pure — does not write to the graph.
 /// Returns `None` when the intent targets a node that no longer exists
 /// (e.g. a `RemoveNode`/`SetInput` whose anchor lingered one frame past a
-/// `RemoveNode` applied earlier in the same frame). Callers should treat a
-/// `None` result as "stale intent, drop it". (`MoveSelection` instead skips
-/// vanished nodes/pins individually rather than dropping the whole batch.)
+/// `RemoveNode` applied earlier in the same frame) or carries an invalid
+/// viewport. Callers should treat a `None` result as "invalid or stale intent,
+/// drop it". (`MoveSelection` instead skips vanished nodes/pins individually
+/// rather than dropping the whole batch.)
 pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Option<UndoStep> {
     // Document-global intents don't resolve a graph scope.
     if let Intent::Dock(op) = intent {
@@ -182,10 +183,15 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
                 def: Box::new(copy),
             }
         }
-        Intent::SetViewport { to } => GraphStep::SetViewport {
-            from: view.viewport,
-            to,
-        },
+        Intent::SetViewport { to } => {
+            if !to.is_valid() {
+                return None;
+            }
+            GraphStep::SetViewport {
+                from: view.viewport,
+                to,
+            }
+        }
         Intent::SetSubscription {
             emitter,
             event_idx,

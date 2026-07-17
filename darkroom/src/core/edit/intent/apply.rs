@@ -21,11 +21,11 @@ use crate::core::edit::intent::types::{DocStep, GraphStep, Intent, NodeProperty,
 /// intents through the same path.
 ///
 /// Returns the committed [`UndoStep`] (the caller records it and reads its
-/// `requires_*` signals), or `None` when the intent was stale (anchor node
-/// gone), a no-op, or a bind that would close a data cycle — in all cases
-/// nothing was written. `build_step` / `apply_step` stay separate for the
-/// undo-stack redo path, which applies a stored step without rebuilding it
-/// (a redo replays already-valid history, so it needs no cycle check).
+/// `requires_*` signals), or `None` when the intent was invalid or stale, a
+/// no-op, or a bind that would close a data cycle — in all cases nothing was
+/// written. `build_step` / `apply_step` stay separate for the undo-stack redo
+/// path, which applies a stored step without rebuilding it (a redo replays
+/// already-valid history, so it needs no cycle check).
 pub(crate) fn commit_intent(
     intent: Intent,
     doc: &mut Document,

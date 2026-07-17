@@ -77,7 +77,7 @@ pub(crate) fn ports_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: 
     let rows: Vec<Track> = vec![Track::fixed(row_height); n_rows];
     Grid::new()
         .id_salt("ports")
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::HUG))
         .cols([
             Track::hug(),
             Track::hug().max(theme.static_value_editor.max_width),
@@ -248,7 +248,7 @@ fn input_label_cell(
         .id(input_cell_wid(port))
         .grid_cell((port.port_idx as u16, COL_INPUT))
         .align(Align::new(HAlign::Left, VAlign::Center))
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
@@ -270,7 +270,7 @@ fn input_label_cell(
     // (prepass), since adding/removing a `Const` resizes the node and the
     // wires must re-anchor before the record.
     ContextMenu::for_id(menu_id)
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
             let can_set = allow_const
                 && !matches!(input.binding, InputBindingView::Const(_))
@@ -368,7 +368,7 @@ fn output_cell(
         .id_salt(("out", port.port_idx))
         .grid_cell((port.port_idx as u16, COL_OUTPUT))
         .align(Align::new(HAlign::Right, VAlign::Center))
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
@@ -397,7 +397,7 @@ fn output_cell(
     // the menu item below and the drag are the only ways to pin/unpin.
     open_port_context_menu(ui, menu_id, cell_secondary, circle_state.right.clicked());
     ContextMenu::for_id(menu_id)
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
             let pinned = output.pin_position.is_some();
             let label = if pinned { "Unpin output" } else { "Pin output" };
@@ -441,7 +441,7 @@ fn event_cell(
         .id_salt(("event", event_idx))
         .grid_cell((row as u16, COL_OUTPUT))
         .align(Align::new(HAlign::Right, VAlign::Center))
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {

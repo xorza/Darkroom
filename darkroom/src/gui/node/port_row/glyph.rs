@@ -80,7 +80,7 @@ pub(crate) fn circle_frame(
     // and (b) can latch a connection drag.
     let circle = Panel::zstack()
         .id(wid)
-        .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
+        .size((Sizing::fixed(hit), Sizing::fixed(hit)))
         .margin(hit_margin)
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
@@ -134,7 +134,7 @@ pub(crate) fn event_glyph(
     } = grown_hit_box(port, margin);
     let glyph = Panel::zstack()
         .id(wid)
-        .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
+        .size((Sizing::fixed(hit), Sizing::fixed(hit)))
         .margin(hit_margin)
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {

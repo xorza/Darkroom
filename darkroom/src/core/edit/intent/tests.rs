@@ -128,6 +128,63 @@ fn dirties_document_splits_edits_from_navigation() {
 }
 
 #[test]
+fn invalid_viewports_are_dropped_before_mutation() {
+    let mut doc = Document::default();
+    let initial = doc.main_view.viewport;
+    let invalid = [
+        Viewport {
+            pan: Vec2::new(f32::NAN, 0.0),
+            zoom: 1.0,
+        },
+        Viewport {
+            pan: Vec2::new(0.0, f32::INFINITY),
+            zoom: 1.0,
+        },
+        Viewport {
+            pan: Vec2::ZERO,
+            zoom: 0.0,
+        },
+        Viewport {
+            pan: Vec2::ZERO,
+            zoom: -1.0,
+        },
+        Viewport {
+            pan: Vec2::ZERO,
+            zoom: f32::NAN,
+        },
+        Viewport {
+            pan: Vec2::ZERO,
+            zoom: f32::INFINITY,
+        },
+        Viewport {
+            pan: Vec2::ZERO,
+            zoom: f32::NEG_INFINITY,
+        },
+    ];
+    for to in invalid {
+        assert!(
+            commit_intent(Intent::SetViewport { to }, &mut doc, GraphRef::Main).is_none(),
+            "invalid viewport {to:?} must be dropped"
+        );
+        assert_eq!(
+            doc.main_view.viewport, initial,
+            "an invalid viewport must not mutate the document"
+        );
+    }
+
+    let valid = Viewport {
+        pan: Vec2::new(10.0, -20.0),
+        zoom: 2.0,
+    };
+    assert!(
+        commit_intent(Intent::SetViewport { to: valid }, &mut doc, GraphRef::Main).is_some(),
+        "a finite positive viewport must commit"
+    );
+    assert_eq!(doc.main_view.viewport, valid);
+    doc.validate();
+}
+
+#[test]
 fn subscribe_unsubscribe_commit_and_undo() {
     let mut doc = Document::default();
     let emitter = add_node_at(&mut doc, Vec2::ZERO);

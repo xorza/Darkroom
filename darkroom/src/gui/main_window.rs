@@ -90,7 +90,7 @@ impl MainWindow {
             .show(ui, |ui| {
                 Panel::hstack()
                     .id_salt("chrome_row")
-                    .size((Sizing::FILL, Sizing::Hug))
+                    .size((Sizing::FILL, Sizing::HUG))
                     .child_align(Align::v(VAlign::Bottom))
                     .background(Background::fill(chrome))
                     .show(ui, |ui| {

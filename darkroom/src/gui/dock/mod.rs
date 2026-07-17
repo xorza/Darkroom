@@ -308,7 +308,7 @@ fn draw_drag_feedback(ui: &mut Ui, theme: &Theme, doc: &Document, dragged: &TabD
         ui.layer(Layer::Tooltip, p + Vec2::new(14.0, 18.0), None, |ui| {
             Panel::hstack()
                 .id(WidgetId::from_hash("dock.drag_ghost"))
-                .size((Sizing::Hug, Sizing::Hug))
+                .size((Sizing::HUG, Sizing::HUG))
                 .padding(Spacing::new(10.0, 4.0, 10.0, 4.0))
                 .background(
                     Background::rounded(theme.colors.chrome_fill, Corners::all(4.0))

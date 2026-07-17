@@ -111,16 +111,6 @@ mod tests {
         assert_eq!(r2.size, Size::new(1632.0, 1232.0));
         assert_ne!(r.size, r2.size);
 
-        // Degenerate zoom falls back to 1:1 like `to_world`.
-        let vp = Viewport {
-            pan: Vec2::ZERO,
-            zoom: 0.0,
-        };
-        let r = CullRegion::from_canvas(Some(Rect::new(0.0, 0.0, 100.0, 100.0)), Vec2::ZERO, &vp)
-            .visible
-            .unwrap();
-        assert_eq!(r.size, Size::new(132.0, 132.0));
-
         let unmeasured = CullRegion::from_canvas(None, Vec2::new(50.0, 25.0), &vp);
         assert_eq!(unmeasured.visible, None);
     }

@@ -33,7 +33,7 @@ pub(crate) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode) {
 
     Panel::vstack()
         .id_salt("node_mem")
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::HUG))
         .padding(Spacing::xy(CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y))
         .gap(5.0)
         // Round only the bottom corners so the strip seats into the node's
@@ -42,7 +42,7 @@ pub(crate) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode) {
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("node_mem_meters")
-                .size((Sizing::FILL, Sizing::Hug))
+                .size((Sizing::FILL, Sizing::HUG))
                 .gap(12.0)
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
@@ -62,7 +62,7 @@ pub(crate) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode) {
 fn meter(ui: &mut Ui, theme: &Theme, hue: Color, label: &'static str, bytes: usize) {
     Panel::hstack()
         .id_salt(("node_mem_meter", label))
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .gap(5.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
@@ -76,7 +76,7 @@ fn meter(ui: &mut Ui, theme: &Theme, hue: Color, label: &'static str, bytes: usi
 fn dot(ui: &mut Ui, hue: Color) {
     Panel::zstack()
         .id_salt("node_mem_dot")
-        .size((Sizing::Fixed(DOT), Sizing::Fixed(DOT)))
+        .size((Sizing::fixed(DOT), Sizing::fixed(DOT)))
         .background(Background::rounded(hue, Corners::all(DOT * 0.5)))
         .show(ui, |_ui| {});
 }
@@ -87,7 +87,7 @@ fn dot(ui: &mut Ui, hue: Color) {
 fn proportion_bar(ui: &mut Ui, theme: &Theme, ram: RamUsage) {
     Panel::hstack()
         .id_salt("node_mem_bar")
-        .size((Sizing::FILL, Sizing::Fixed(BAR_H)))
+        .size((Sizing::FILL, Sizing::fixed(BAR_H)))
         .show(ui, |ui| {
             if ram.cpu > 0 {
                 bar_segment(ui, "ram", theme.colors.badge_cache, ram.cpu as f32);
@@ -102,7 +102,7 @@ fn proportion_bar(ui: &mut Ui, theme: &Theme, ram: RamUsage) {
 fn bar_segment(ui: &mut Ui, salt: &'static str, hue: Color, weight: f32) {
     Panel::zstack()
         .id_salt(("node_mem_seg", salt))
-        .size((Sizing::Fill(weight), Sizing::FILL))
+        .size((Sizing::fill(weight), Sizing::FILL))
         .background(Background::rounded(hue, Corners::all(BAR_H * 0.5)))
         .show(ui, |_ui| {});
 }

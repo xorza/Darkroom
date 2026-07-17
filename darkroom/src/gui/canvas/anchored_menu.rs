@@ -44,7 +44,7 @@ impl AnchoredMenu {
             .click_outside(ClickOutside::Dismiss)
             .background(chrome)
             .id_salt(id_salt)
-            .size((Sizing::Hug, Sizing::Hug))
+            .size((Sizing::HUG, Sizing::HUG))
             .padding(Spacing::all(6.0));
         if let Some(h) = max_height {
             popup = popup.max_size((f32::INFINITY, h));

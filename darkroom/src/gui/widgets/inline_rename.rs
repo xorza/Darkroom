@@ -163,7 +163,7 @@ impl<'a> InlineRename<'a> {
             // `DRAG`), so this only applies while idle.
             let resp = Panel::hstack()
                 .id(id)
-                .size((Sizing::Hug, Sizing::Hug))
+                .size((Sizing::HUG, Sizing::HUG))
                 .min_size((MIN_EDIT_WIDTH, line_h))
                 .padding(idle_padding)
                 .justify(justify)
@@ -202,7 +202,7 @@ impl<'a> InlineRename<'a> {
             .id(id)
             .style(edit_style(theme, style))
             .max_chars(max_chars)
-            .size((Sizing::Hug, Sizing::Hug))
+            .size((Sizing::HUG, Sizing::HUG))
             .min_size((MIN_EDIT_WIDTH, line_h))
             .text_align(text_align)
             .show(ui);

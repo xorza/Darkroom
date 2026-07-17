@@ -110,8 +110,8 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
     Panel::zstack()
         .id(tab_new_wid())
         .size((
-            Sizing::Fixed(NEW_TAB_CHIP_SIDE),
-            Sizing::Fixed(NEW_TAB_CHIP_SIDE),
+            Sizing::fixed(NEW_TAB_CHIP_SIDE),
+            Sizing::fixed(NEW_TAB_CHIP_SIDE),
         ))
         .sense(Sense::CLICK)
         .child_align(Align::CENTER)
@@ -170,7 +170,7 @@ pub(crate) fn show(
     // through to `canvas_bg` so it reads as one piece with the pane.
     Panel::hstack()
         .id(strip_wid(group.id))
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::HUG))
         .padding(Spacing::new(6.0, 4.0, 6.0, 0.0))
         .gap(3.0)
         .child_align(Align::v(VAlign::Bottom))
@@ -242,14 +242,14 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
     };
     Panel::hstack()
         .id(tab_chip_wid(s.group, index))
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .sense(sense)
         .padding(Spacing::new(0.0, outer_top, 0.0, 0.0))
         .background(outer_bg)
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("tab_content")
-                .size((Sizing::Hug, Sizing::Hug))
+                .size((Sizing::HUG, Sizing::HUG))
                 .padding(padding)
                 .gap(6.0)
                 .child_align(Align::v(VAlign::Center))
@@ -302,7 +302,7 @@ fn close_button(ui: &mut Ui, theme: &Theme, close_wid: WidgetId) {
     let bg = hover_bg(ui.response_for(close_wid).hovered, theme, Corners::all(3.0));
     Panel::zstack()
         .id(close_wid)
-        .size((Sizing::Fixed(16.0), Sizing::Fixed(16.0)))
+        .size((Sizing::fixed(16.0), Sizing::fixed(16.0)))
         .sense(Sense::CLICK)
         // Pin to the chip's top edge so it reads as a top-right corner
         // close (it's already the rightmost item in the row).
@@ -339,7 +339,7 @@ fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef, index: usize) {
         ContextMenu::open(ui, menu_wid, p);
     }
     ContextMenu::for_id(menu_wid)
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
             let mut side = None;
             if MenuItem::new("Split right").show(ui, popup).left.clicked() {

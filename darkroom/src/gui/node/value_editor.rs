@@ -222,7 +222,7 @@ fn read_only_label(
     TextEdit::new(&mut buf)
         .id(id)
         .style(editor.clone())
-        .size((Sizing::Fixed(width), Sizing::FILL))
+        .size((Sizing::fixed(width), Sizing::FILL))
         .show(ui);
     None
 }
@@ -272,7 +272,7 @@ fn buffered_text_edit<T>(
     let submitted = TextEdit::new(&mut text)
         .id(id)
         .style(editor.clone())
-        .size((Sizing::Fixed(width), Sizing::FILL))
+        .size((Sizing::fixed(width), Sizing::FILL))
         .show(ui)
         .submitted;
     let snapshot = text.clone();
@@ -311,7 +311,7 @@ fn numeric_edit(
                 .editable(true)
                 .speed(int_speed(*current))
                 .style(theme.drag_value.clone())
-                .size((Sizing::Fixed(width), Sizing::FILL))
+                .size((Sizing::fixed(width), Sizing::FILL))
                 .id(id)
                 .show(ui)
                 .committed;
@@ -324,7 +324,7 @@ fn numeric_edit(
                 .speed(float_speed(*current))
                 .decimals(3)
                 .style(theme.drag_value.clone())
-                .size((Sizing::Fixed(width), Sizing::FILL))
+                .size((Sizing::fixed(width), Sizing::FILL))
                 .id(id)
                 .show(ui)
                 .committed;

@@ -91,7 +91,7 @@ pub(crate) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hov
     let pin = Panel::zstack()
         .id(subscription_glyph_wid(node.id))
         .position(node.pos - Vec2::splat(hit * 0.5))
-        .size((Sizing::Fixed(hit), Sizing::Fixed(hit)))
+        .size((Sizing::fixed(hit), Sizing::fixed(hit)))
         .sense(Sense::CLICK | Sense::DRAG)
         .show(ui, |ui| {
             ui.add_shape(
@@ -135,7 +135,7 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
     let r = theme.card_inner_radius();
     Panel::hstack()
         .id_salt("header")
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::HUG))
         .padding(Spacing::xy(CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y))
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
@@ -206,7 +206,7 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
     let theme = rcx.theme;
     Panel::hstack()
         .id_salt("status_row")
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::HUG))
         // Extra top padding sets the controls off from the header bar (the body
         // vstack has no gap between rows). Order: left, top, right, bottom.
         .padding(Spacing::new(8.0, 7.0, 8.0, 2.0))
@@ -540,7 +540,7 @@ impl Badge {
                     color.with_alpha(CHIP_TINT_ALPHA),
                     Corners::all(BADGE_SIZE * 0.5),
                 ),
-                Sizing::Hug,
+                Sizing::HUG,
             ),
             BadgeKind::Control { wid, filled } => {
                 let mut bg = Background {
@@ -560,11 +560,11 @@ impl Badge {
                 if alpha > 0.0 {
                     bg.fill = color.with_alpha(alpha).into();
                 }
-                (bg, Sizing::Fixed(BADGE_SIZE))
+                (bg, Sizing::fixed(BADGE_SIZE))
             }
         };
         let mut panel = Panel::zstack()
-            .size((width, Sizing::Fixed(BADGE_SIZE)))
+            .size((width, Sizing::fixed(BADGE_SIZE)))
             .child_align(Align::CENTER)
             .background(background);
         // A marker hugs its glyph into a pill (horizontal padding) and senses

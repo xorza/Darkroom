@@ -50,7 +50,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
         .show(ui, |ui| {
             Panel::vstack()
                 .id_salt("preferences_column")
-                .size((Sizing::FILL, Sizing::Hug))
+                .size((Sizing::FILL, Sizing::HUG))
                 .max_size((COLUMN_WIDTH, f32::INFINITY))
                 .gap(SECTIONS_GAP)
                 .show(ui, |ui| {
@@ -60,7 +60,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                     section(ui, theme, "Appearance", |ui| {
                         Panel::hstack()
                             .id_salt("preferences_theme_row")
-                            .size((Sizing::Hug, Sizing::Hug))
+                            .size((Sizing::HUG, Sizing::HUG))
                             .gap(16.0)
                             .show(ui, |ui| {
                                 for (choice, label) in [
@@ -135,7 +135,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
 fn section(ui: &mut Ui, theme: &Theme, title: &'static str, body: impl FnOnce(&mut Ui)) {
     Panel::vstack()
         .id_salt(title)
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::HUG))
         .gap(SECTION_GAP)
         .show(ui, |ui| {
             let style = TextStyle {
@@ -230,25 +230,25 @@ fn model_row(
     let mut draft = std::mem::take(&mut field.text);
     Panel::vstack()
         .id_salt(label)
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::HUG))
         .gap(4.0)
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("row")
-                .size((Sizing::FILL, Sizing::Hug))
+                .size((Sizing::FILL, Sizing::HUG))
                 .gap(ML_ROW_GAP)
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
                     Panel::hstack()
                         .id_salt("label")
-                        .size((Sizing::Fixed(ML_LABEL_WIDTH), Sizing::Hug))
+                        .size((Sizing::fixed(ML_LABEL_WIDTH), Sizing::HUG))
                         .show(ui, |ui| {
                             Text::new(label).style(sized_text(ui, 13.0)).show(ui);
                         });
 
                     let mut edit = TextEdit::new(&mut draft)
                         .id(id)
-                        .size((Sizing::FILL, Sizing::Hug))
+                        .size((Sizing::FILL, Sizing::HUG))
                         .min_size((ML_PATH_FIELD_MIN, 0.0))
                         .placeholder("/path/to/model.onnx");
                     // A broken committed path recolors the field's chrome to
@@ -319,7 +319,7 @@ const DOWNLOAD_HINT: &str = " \u{2014} unzip and point the field above at the .o
 fn indented_line(ui: &mut Ui, salt: &'static str, body: impl FnOnce(&mut Ui)) {
     Panel::hstack()
         .id_salt(salt)
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::HUG))
         .padding(Spacing::new(ML_LABEL_WIDTH + ML_ROW_GAP, 0.0, 0.0, 0.0))
         .gap(0.0)
         .child_align(Align::v(VAlign::Center))
@@ -342,7 +342,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
     indented_line(ui, "hint", |ui| {
         let link = Panel::hstack()
             .id(id)
-            .size((Sizing::Hug, Sizing::Hug))
+            .size((Sizing::HUG, Sizing::HUG))
             .sense(Sense::CLICK)
             .show(ui, |ui| {
                 Text::new(link_label)

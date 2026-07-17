@@ -152,10 +152,8 @@ pub(crate) struct Viewport {
 }
 
 impl Viewport {
-    /// Zoom guarded against the degenerate `0` (a viewport that was
-    /// never set), so inverse transforms can't divide by zero.
-    pub(crate) fn safe_zoom(&self) -> f32 {
-        if self.zoom > 0.0 { self.zoom } else { 1.0 }
+    pub(crate) fn is_valid(self) -> bool {
+        self.pan.is_finite() && self.zoom.is_finite() && self.zoom > 0.0
     }
 }
 
@@ -224,10 +222,9 @@ impl GraphView {
 
     fn check(&self, graph: &CoreGraph) -> Result<()> {
         ensure!(
-            self.viewport.zoom.is_finite() && self.viewport.zoom > 0.0,
-            "graph zoom must be finite and positive"
+            self.viewport.is_valid(),
+            "graph viewport must have finite pan and positive finite zoom"
         );
-        ensure!(self.viewport.pan.is_finite(), "graph pan must be finite");
 
         // Item-set match, both kinds. Duplicate keys are rejected at
         // deserialize and unrepresentable by construction (`KeyIndexVec`),

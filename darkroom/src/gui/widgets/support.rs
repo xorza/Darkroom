@@ -123,7 +123,7 @@ pub(crate) fn frame(ui: &mut Ui, s: f32, color: Color) {
 pub(crate) fn hspacer(ui: &mut Ui, salt: &'static str) {
     Panel::hstack()
         .id_salt(salt)
-        .size((Sizing::FILL, Sizing::Hug))
+        .size((Sizing::FILL, Sizing::HUG))
         .show(ui, |_| {});
 }
 

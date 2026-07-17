@@ -56,7 +56,7 @@ pub(crate) fn show(
     let mut command = None;
     Panel::vstack()
         .id_salt("graph_toolbar")
-        .size((Sizing::Hug, Sizing::Hug))
+        .size((Sizing::HUG, Sizing::HUG))
         .align(Align::new(HAlign::Left, VAlign::Top))
         .child_align(Align::new(HAlign::Left, VAlign::Top))
         .margin(Spacing::new(TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0, 0.0))

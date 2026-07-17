@@ -198,7 +198,7 @@ impl Inspectors {
         Panel::vstack()
             .id(inspect_panel_wid(node.id))
             .position(pos)
-            .size((Sizing::Fixed(PANEL_WIDTH), Sizing::Hug))
+            .size((Sizing::fixed(PANEL_WIDTH), Sizing::HUG))
             .sense(Sense::CLICK)
             .padding(Spacing::all(8.0))
             .gap(3.0)

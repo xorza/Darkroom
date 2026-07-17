@@ -222,7 +222,7 @@ impl NodeUI {
             .id(node_widget_id(node.id))
             .position(node.pos)
             .min_size((theme.node_min_width, theme.node_min_height))
-            .size((Sizing::Hug, Sizing::Hug))
+            .size((Sizing::HUG, Sizing::HUG))
             .sense(Sense::CLICK | Sense::DRAG)
             .background(
                 Background::rounded(
@@ -328,7 +328,7 @@ impl NodeUI {
         // `drag_delta` is in screen pixels; node positions live in the
         // canvas's pre-transform frame. Divide by zoom so cursor travel
         // matches node travel at every zoom level.
-        let offset = delta / scene.viewport.safe_zoom();
+        let offset = delta / scene.viewport.zoom;
         // Anchor still present (success path never cleared it); re-borrow
         // to read the start positions without cloning.
         let anchor = self.drag_anchor.as_ref().unwrap();
