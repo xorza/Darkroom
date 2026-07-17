@@ -34,7 +34,3 @@ pinned output makes node store outputs in ram
 callback when eventloop stopped for gui
 
 invert removed retain logic to optimize
-
-remove offscren builder and window builder, window token and window id
-
-unify ofscreen renderer and window renderer
