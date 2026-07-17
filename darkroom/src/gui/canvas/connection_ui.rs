@@ -389,7 +389,7 @@ fn port_gradient(start: Color, end: Color) -> CurveBrush {
 /// port wins ties (matches paint order). Skips output ports while Cmd is
 /// held — that chord is reserved for `PinUi`'s pin-creation drag (see
 /// `pin_ui.rs`), so the two controllers never both latch the same press.
-fn scan_drag_start(geometry: &CanvasGeometry, scene: &Scene, ui: &Ui) -> Option<PortRef> {
+fn scan_drag_start(geometry: &CanvasGeometry, scene: &Scene, ui: &mut Ui) -> Option<PortRef> {
     let cmd_reserved_for_pin = ui.modifiers().ctrl;
     let keys = scene.nodes.iter().flat_map(move |n| {
         [PortKind::Input, PortKind::Output]

@@ -436,7 +436,7 @@ pub(crate) enum CanvasGesture {
 /// body or `S` badge routes to `node_menu` / `subgraph_menu` (which read
 /// those widgets' `secondary_clicked` directly) and never reaches here —
 /// `NewNode` is therefore right-click-on-*empty*-canvas by construction.
-pub(crate) fn classify_canvas_gesture(ui: &Ui) -> Option<CanvasGesture> {
+pub(crate) fn classify_canvas_gesture(ui: &mut Ui) -> Option<CanvasGesture> {
     let resp = ui.response_for(outer_canvas_widget_id());
     if resp.middle.drag.started() {
         return Some(CanvasGesture::Pan);
