@@ -56,7 +56,7 @@ pub(crate) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
 }
 
 /// A click on an `FsPath` input's inline pick button, surfaced for the
-/// caller to translate into a deferred file-dialog command. The node UI
+/// caller to translate into a file-dialog command. The node UI
 /// produces the domain request (node + port + picker config) and stays
 /// unaware of the app-level `AppCommand` enum — the canvas, which already
 /// owns the command channel, does the translation.
@@ -70,8 +70,8 @@ pub(crate) struct PathPickRequest {
 
 /// Scan for a click on an `FsPath` input's inline pick button (polled by
 /// its const-editor id, from last frame's responses). Returns the first
-/// hit — one pick per frame — for the caller to defer into a blocking file
-/// dialog outside the record.
+/// hit — one pick per frame — for the caller to open a blocking file dialog
+/// after authoring.
 pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest> {
     for node in &scene.nodes {
         for (port_idx, input) in scene.inputs(node.inputs).iter().enumerate() {

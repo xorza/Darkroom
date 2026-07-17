@@ -4,12 +4,11 @@
 //! Rendered by `main_window` when the active tab is `TabRef::Preferences`.
 //!
 //! It edits the borrowed [`Preferences`] **in place** and reports a single
-//! [`PrefsCommand::Changed`] whenever any field moved — `App` re-syncs
-//! derived state (theme palette, ML paths) and persists once, outside the
-//! record. So adding a preference is just another widget here; no new
-//! command or handler. The "Browse…" buttons are the exception: they open a
-//! blocking file dialog, so they return [`PrefsCommand::PickMlModel`] for
-//! `App` to run after the record.
+//! [`PrefsCommand::Changed`] whenever any field moved. `App` synchronizes and
+//! persists derived state after authoring, so adding a preference is just
+//! another widget here; no new command or handler. The "Browse…" buttons
+//! return [`PrefsCommand::PickMlModel`] so `App` can open the blocking dialog
+//! after authoring has released its borrows.
 
 use std::path::{Path, PathBuf};
 

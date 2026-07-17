@@ -1,7 +1,6 @@
-//! Preferences edits: the single `Changed` re-sync sink (theme palette +
-//! ML paths + persist) plus the ML-model file dialog. `set_confirm_exit` is
-//! the one preference `App` also writes from outside the tab (the exit
-//! dialog's "Don't ask again").
+//! Preferences edits: the single `Changed` synchronization sink plus the ML
+//! model picker. `set_confirm_exit` is the one preference `App` also writes
+//! from outside the tab (the exit dialog's "Don't ask again").
 
 use std::path::PathBuf;
 
@@ -12,18 +11,18 @@ use crate::gui::app::App;
 use crate::gui::dialogs;
 use crate::gui::theme::Theme;
 
-/// Preferences edits. Handled by [`App::handle_prefs`].
+/// Preferences UI actions. Handled by [`App::handle_prefs`] after authoring.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum PrefsCommand {
     /// A field of [`crate::core::io::preferences::Preferences`] was edited
     /// in place — by the Preferences tab (any checkbox / radio / path field)
-    /// or the image viewer's toolbar (backdrop / sampling). `App` re-syncs
-    /// derived state (theme palette, ML paths) and persists — one command
-    /// for every field, so adding a preference needs no new command.
+    /// or the image viewer's toolbar (backdrop / sampling). `App` synchronizes
+    /// derived state and persists it — one command for every field, so adding
+    /// a preference needs no new command.
     Changed,
     /// Open an ONNX file dialog for one of the ML model paths (the "Browse…"
-    /// buttons) — the blocking dialog runs outside the record, unlike the
-    /// in-place field edits that report [`Self::Changed`].
+    /// buttons). The handler opens the blocking dialog after UI authoring has
+    /// released its application borrows.
     PickMlModel(MlModelKind),
 }
 
@@ -44,12 +43,7 @@ impl App {
         }
     }
 
-    /// Re-derive everything that depends on [`Preferences`] and persist —
-    /// the single sink for the Preferences tab's in-place edits, so every
-    /// field flows through one path (no per-field command). Re-resolves the
-    /// theme palette (`System` queries the OS) onto `self.theme` + the `Ui`,
-    /// republishes the ML paths to lens, and writes the file. Idempotent, so
-    /// running it for a field whose derived bit didn't move is harmless.
+    /// Re-derive everything that depends on [`Preferences`] and persist it.
     ///
     /// [`Preferences`]: crate::core::io::preferences::Preferences
     fn apply_preferences(&mut self, ui: &mut Ui) {
@@ -69,8 +63,7 @@ impl App {
     }
 
     /// Open an ONNX file dialog for one of the ML model paths and, on a
-    /// pick, record it (persist + republish to lens). Runs outside the
-    /// record (blocking dialog), like the other file ops.
+    /// pick, record it (persist + republish to lens).
     fn pick_ml_model(&mut self, kind: MlModelKind) {
         let filter =
             FsPathConfig::with_extensions(FsPathMode::ExistingFile, vec!["onnx".to_string()]);

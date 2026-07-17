@@ -14,6 +14,7 @@ use crate::core::wake::Wake;
 use crate::core::worker::WorkerEvent;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
+use crate::gui::app::exit_dialog::{ExitChoice, ExitOutcome};
 use crate::gui::run_state::RunState;
 use crate::gui::theme::Theme;
 
@@ -22,7 +23,6 @@ pub(crate) mod editor;
 mod exit_dialog;
 
 use editor::Editor;
-use exit_dialog::ExitChoice;
 
 /// Shared per-frame context threaded down the UI tree. Holds borrows
 /// of state owned higher up so child subtrees don't take a growing
@@ -48,11 +48,9 @@ pub(crate) struct AppContext<'a> {
 /// Thin shell around the [`Editor`] (which owns the document + its edit
 /// pipeline + the GUI tree): `App` holds only the runtime/IO the editor
 /// borrows each frame — the [`Engine`] (func lib + worker + script host),
-/// the active theme, session preferences + file path, and the host handle. Its
-/// `update` drains the engine's worker + script queues into the editor's
-/// projections once, while replayable `record` runs `Editor::frame` and actions the
-/// [`AppCommand`](commands::AppCommand) it surfaces (file / theme /
-/// subgraph dialogs, run) outside the record.
+/// the active theme, session preferences + file path, and the host handle.
+/// `update` drains external queues once, while replayable `record` runs
+/// `Editor::frame` and handles actions only in the pass that receives input.
 #[derive(Debug)]
 pub(crate) struct App {
     pub(crate) editor: Editor,
@@ -244,7 +242,7 @@ impl App {
     /// [`Self::track_window_state`]) and ask the host to exit. Every
     /// explicit quit path routes through here so geometry is saved on the
     /// way out; the titlebar-X clean close — which never calls this —
-    /// saves in [`Self::handle_exit`] instead.
+    /// saves in [`Self::handle_close_request`] instead.
     fn quit(&mut self) {
         self.save_preferences();
         self.host_handle.quit();
@@ -252,47 +250,30 @@ impl App {
 
     /// Whether a pending quit needs to prompt before proceeding: unsaved
     /// changes and the confirm-on-exit preference both hold. Shared by the
-    /// titlebar-X path ([`Self::handle_exit`]) and File ▸ Quit
+    /// titlebar-X path ([`Self::handle_close_request`]) and File ▸ Quit
     /// (`commands::shell::ShellCommand`'s handler), which both raise the
     /// same dialog off the same condition.
     fn needs_exit_confirmation(&self) -> bool {
         self.editor.dirty && self.preferences.confirm_unsaved_on_exit
     }
 
-    /// Resolve a pending quit. A window-close request (titlebar X) with
-    /// unsaved changes raises the confirm dialog and vetoes the close
-    /// ([`Ui::keep_open`]); a clean document lets the close proceed. While
-    /// the dialog is up, render it and act on the choice. Also finishes
-    /// File ▸ Quit, which set `confirm_quit` via `request_quit` earlier this
-    /// frame.
-    fn handle_exit(&mut self, ui: &mut Ui) {
-        if ui.close_requested() {
-            // The titlebar X closes the window after this frame unless we
-            // veto. A clean close never routes through `quit`, so persist
-            // geometry here — `track_window_state` already mirrored the
-            // current size / position into `preferences` this frame.
-            self.save_preferences();
-            // Unsaved changes raise the prompt and veto the close — unless
-            // the user turned confirmation off, in which case it proceeds.
-            if self.needs_exit_confirmation() {
-                ui.keep_open();
-                self.confirm_quit = true;
-            }
-        }
-        if !self.confirm_quit {
+    fn handle_close_request(&mut self, ui: &Ui) {
+        if !ui.close_requested() {
             return;
         }
 
-        let file_name = self
-            .current_path
-            .as_deref()
-            .and_then(|p| p.file_name())
-            .and_then(|s| s.to_str());
-        let outcome = exit_dialog::show(ui, file_name);
+        self.save_preferences();
+        if self.needs_exit_confirmation() {
+            self.confirm_quit = true;
+        }
+    }
+
+    fn apply_exit_outcome(&mut self, outcome: ExitOutcome) {
         match outcome.choice {
-            ExitChoice::Stay => {}
+            ExitChoice::Stay => unreachable!("exit outcome must resolve the dialog"),
             ExitChoice::Cancel => self.confirm_quit = false,
             ExitChoice::Discard => {
+                self.confirm_quit = false;
                 if outcome.dont_ask_again {
                     self.set_confirm_exit(false);
                 }
@@ -304,12 +285,30 @@ impl App {
                     self.set_confirm_exit(false);
                 }
                 self.save_current();
-                // Save As can be cancelled, leaving the doc dirty — only
-                // quit once the save actually landed.
+                // Save As can be cancelled, leaving the document dirty.
                 if !self.editor.dirty {
                     self.quit();
                 }
             }
+        }
+    }
+
+    fn record_exit(&mut self, ui: &mut Ui) {
+        if ui.close_requested() && self.confirm_quit {
+            ui.keep_open();
+        }
+        if !self.confirm_quit {
+            return;
+        }
+
+        let file_name = self
+            .current_path
+            .as_deref()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str());
+        let outcome = exit_dialog::show(ui, file_name);
+        if outcome.choice != ExitChoice::Stay {
+            self.apply_exit_outcome(outcome);
         }
     }
 }
@@ -328,6 +327,8 @@ impl aperture::App for App {
         // Apply anything scripts pushed since the last frame (graph edits,
         // run, quit) before the editor rebuilds, so the scene reflects them.
         self.handle_script_inbound();
+
+        self.handle_close_request(ui);
     }
 
     fn record(&mut self, _win: aperture::WindowToken, ui: &mut Ui) {
@@ -339,7 +340,7 @@ impl aperture::App for App {
         }
 
         // One library snapshot for this record pass (a cheap Arc clone).
-        // A command that publishes below is visible to a replay or the next frame.
+        // A command that publishes below is visible to pass B or the next frame.
         let library = self.engine.library().clone();
         let command = self.editor.frame(
             ui,
@@ -350,26 +351,14 @@ impl aperture::App for App {
             self.engine.status.error.as_deref(),
         );
 
-        // A disk-cache toggle this frame: flush the node's resident value to disk now
-        // (a `SaveCaches` to the worker — refresh the program + persist, no re-run),
-        // instead of waiting for the next evaluation. A compile failure is
-        // reported to the engine's status log; nothing is sent.
         if self.editor.take_caches_dirty() {
             self.engine.save_caches(&self.editor.document.graph);
         }
 
-        // Menu side effects run last so the blocking file dialog opens
-        // after the frame's record + drain. Loading replaces the
-        // document/theme wholesale, so always relayout afterward.
         if let Some(command) = command {
             self.handle_command(ui, command);
-            ui.request_relayout();
         }
 
-        // Catch a window-close request and, with unsaved changes, prompt
-        // instead of quitting. Runs after `handle_command` so a File ▸ Quit
-        // (which set `confirm_quit` via `request_quit`) draws its dialog the
-        // same frame.
-        self.handle_exit(ui);
+        self.record_exit(ui);
     }
 }

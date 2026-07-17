@@ -1,7 +1,6 @@
-//! [`AppCommand`] handling: the file / subgraph /
-//! run / preferences / edit / shell side effects `App` runs *outside* the
-//! record pass (after the frame's record + drain), so a blocking file dialog
-//! or worker call holds no frame borrows.
+//! [`AppCommand`] handling: file / subgraph / run / preferences / edit / shell
+//! side effects. Commands are produced by action input, which Aperture exposes
+//! only to the first record pass, so handlers can run directly after authoring.
 //!
 //! [`App::handle_command`] is a thin dispatcher — each top-level command group
 //! resolves to one submodule's `impl App` block (`file`, `subgraph`, `run`,
@@ -27,14 +26,9 @@ use run::RunCommand;
 use shell::ShellCommand;
 use subgraph::SubgraphCommand;
 
-/// A deferred, side-effecting command a UI surface (the menu bar, the graph
-/// toolbar, the Preferences tab, a node's S-badge, an inline path-picker)
-/// hands to [`App`] to perform *outside* the record pass — after the frame's
-/// record + drain, so a blocking file dialog or worker call holds no frame
-/// borrows. The producing UI never touches `Document` / `Theme` / `Engine`
-/// directly; it returns one of these and [`App::handle_command`] dispatches
-/// it to the matching group handler (one submodule of `gui::app::commands`
-/// per variant here).
+/// A command a UI surface (the menu bar, the graph toolbar, the Preferences
+/// tab, a node's S-badge, an inline path-picker) hands to [`App`]. The producing
+/// UI never touches `Document` / `Theme` / `Engine` directly.
 #[derive(Clone, Debug)]
 pub(crate) enum AppCommand {
     /// Document file lifecycle — [`file`].
@@ -52,9 +46,7 @@ pub(crate) enum AppCommand {
 }
 
 impl App {
-    /// Dispatch a deferred command to its group handler. Runs after the
-    /// frame's record + drain (see the module docs) with `ui` available for
-    /// the handful of handlers that re-sync `Ui` state (e.g. theme).
+    /// Dispatch a command after the editor has finished authoring its pass.
     pub(crate) fn handle_command(&mut self, ui: &mut Ui, command: AppCommand) {
         match command {
             AppCommand::File(c) => self.handle_file(c),

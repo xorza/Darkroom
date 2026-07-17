@@ -26,8 +26,8 @@ impl App {
 
     /// A quit was requested (File ▸ Quit, ⌘Q). Prompt to save when the
     /// document has unsaved changes *and* the confirm-on-exit preference is
-    /// on; otherwise exit now. The confirm dialog is rendered and resolved
-    /// by [`App::handle_exit`].
+    /// on; otherwise exit now. [`App::record_exit`] renders and resolves the
+    /// confirm dialog.
     fn request_quit(&mut self) {
         if self.needs_exit_confirmation() {
             self.confirm_quit = true;

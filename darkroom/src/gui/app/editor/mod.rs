@@ -195,7 +195,7 @@ impl Editor {
 
     /// Run one frame of the edit pipeline against the borrowed runtime
     /// context (`library`, `theme`, `host`), returning the [`AppCommand`]
-    /// the frame surfaced (if any) for `App` to action outside the record.
+    /// the frame surfaced (if any) for the next `App::update` to execute.
     ///
     /// The frame splits into a **navigation phase** (settle *which* graph
     /// is active, from frame-top inputs) and an **edit phase** (mutate that

@@ -1,7 +1,7 @@
 //! The "save changes before quitting?" confirmation dialog. Rendered by
-//! [`App::handle_exit`](super::App) when a quit is requested with unsaved
-//! changes; the returned [`ExitOutcome`] drives whether the app saves,
-//! discards, or stays — and whether to stop asking in future.
+//! [`App::record_exit`](crate::gui::app::App::record_exit) when a quit is
+//! requested with unsaved changes; the returned [`ExitOutcome`] is applied
+//! immediately after the dialog finishes authoring.
 
 use aperture::{Button, Checkbox, Configure, Modal, Panel, Text, Ui, WidgetId};
 

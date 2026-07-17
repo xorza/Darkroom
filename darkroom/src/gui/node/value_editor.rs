@@ -5,9 +5,8 @@
 //! converts that into an `Intent::SetInput { to: Binding::Const(..) }`.
 //!
 //! Supports `Int`, `Float`, `Bool`, `String`, and `FsPath` (a pick
-//! button showing the chosen file's name — the actual path change comes
-//! back deferred via the OS file dialog, opened by `App` outside the
-//! record and polled here by `emit_path_picks`). `Enum` renders as a
+//! button showing the chosen file's name — `emit_path_picks` polls the click,
+//! then `App` opens the OS file dialog after authoring). `Enum` renders as a
 //! dropdown over the port's declared variants. `Any` renders as a
 //! smart text field that infers the literal's kind from the text (see
 //! [`parse_any`]).

@@ -1,5 +1,5 @@
 //! Node edits that need a blocking dialog before applying — currently the
-//! inline `FsPath` const-input picker. The dialog runs outside the record,
+//! inline `FsPath` const-input picker. The dialog opens after UI authoring,
 //! then the chosen path lands as an ordinary undoable `SetInput` edit.
 
 use scenarium::Binding;
@@ -29,9 +29,9 @@ impl App {
     }
 
     /// Open a file dialog for a node's `FsPath` const input and, if the
-    /// user picks one, apply the chosen path as a `SetInput` edit. Runs
-    /// outside the record (blocking dialog), so it goes through
-    /// `Editor::apply_edit` rather than the frame's intent drain.
+    /// user picks one, apply the chosen path as a `SetInput` edit. Runs after
+    /// authoring, so it goes through `Editor::apply_edit` rather than the
+    /// frame's intent drain.
     fn pick_input_path(&mut self, req: PathPickRequest) {
         let Some(path) = dialogs::pick_path(&req.config) else {
             return;

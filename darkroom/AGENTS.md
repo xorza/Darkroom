@@ -28,10 +28,11 @@ default look just run the tests and commit the asset diff (see `theme.rs`).
   `SubgraphDef`, `StaticValue`, the headless `Worker` evaluator, serde formats.
   darkroom never reimplements graph semantics; it edits a `scenarium::Graph`,
   resolves nodes against a `Library`, and runs the graph through `Worker`.
-- **`aperture`** — the GUI runtime. `App` implements `aperture::App::frame`;
-  `WinitHost` (in `main.rs`) drives it. All widgets, input, layout, theming,
-  texture upload come from here. Pre-1.0, breaks freely — coordinate changes
-  with aperture.
+- **`aperture`** — the GUI runtime. `App` implements once-only
+  `aperture::App::update` plus replayable `aperture::App::record`; `WinitHost`
+  (in `main.rs`) drives both. All widgets, input, layout, theming, texture
+  upload come from here. Pre-1.0, breaks freely — coordinate changes with
+  aperture.
 - **`common`** — `SerdeFormat`, `serialize`/`deserialize`, `KeyIndexVec`.
 - **`lens`** — `image_library()` / `astro_library()` (image + astro node libraries).
 - **`tokio`** — multi-thread runtime backing the execution worker (graph runs
@@ -74,29 +75,31 @@ Root holds the entry point; implementation is grouped by responsibility:
 
 ## Architecture: App vs Editor split
 
-`App` (`src/app/mod.rs`) is the **runtime owner**; `Editor`
-(`src/app/editor/mod.rs`) is the **document + editing pipeline**. `App` holds:
+`App` (`src/gui/app/mod.rs`) is the **runtime owner**; `Editor`
+(`src/gui/app/editor/mod.rs`) is the **document + editing pipeline**. `App` holds:
 
 - `editor: Editor` — everything document-related and the per-frame pipeline.
-- `library: Arc<Library>` — shared runtime library (builtins + loaded library
-  subgraph defs), built at startup.
+- `engine: Engine` — shared runtime services: library, worker, script host,
+  status, and compilation state.
 - `theme: Theme`, `preferences: Preferences`, `current_path: Option<PathBuf>`.
 - `host_handle: HostHandle` — winit integration for file dialogs + repaints.
-- `worker: WorkerBridge` — drives the headless graph-execution worker.
 
-`App::frame` is thin — it wires the runtime to the editor each frame:
+`App::update` runs once before recording and wires runtime effects to the
+editor:
 
 1. **drain worker events** (`drain_worker_events`) — fold progress/stats and
    pinned-output pushes into `editor.run_state`.
 2. **handle script inbound** (`handle_script_inbound`) — apply queued graph
    edits and run/quit requests before rebuilding the scene.
-3. **editor frame** (`editor.frame`) — the full edit pipeline; returns an
-   optional `AppCommand`.
-4. **handle command** (`handle_command`) — file/theme dialogs and run commands
-   execute last, outside the record, so blocking side effects hold no frame
-   borrows.
+3. **handle close request** (`handle_close_request`) — persist window state and
+   raise the unsaved-changes prompt before the replayable phase.
 
-`AppContext<'a>` (`app/mod.rs`) threads `&Theme`, `&Library`, and `&RunState`
+`App::record` may replay, but Aperture exposes action input only to the first
+real pass. It runs `Editor::frame`, handles its action-derived `AppCommand`
+after authoring has released application borrows, submits dirty caches, and
+renders and resolves the exit dialog. Unconditional work stays in `update`.
+
+`AppContext<'a>` (`gui/app/mod.rs`) threads `&Theme`, `&Library`, and `&RunState`
 down the UI tree so child widgets don't grow a parameter fan-out.
 
 ## Architecture: the per-frame edit pipeline (`Editor::frame`)
@@ -113,9 +116,9 @@ edits or records. `Editor` owns the pipeline state:
 - `scene_target: Option<GraphRef>` (detects tab change), `scene_dirty`,
   `needs_reconcile`, `needs_relayout` flags.
 - `intents: Vec<Intent>` and `actions: Vec<UiAction>` — reused scratch buffers,
-  cleared each frame (no cross-frame state).
+  cleared each record pass (no cross-frame state).
 
-One frame:
+One record pass:
 
 1. **clear scratch** — `intents` + `actions`.
 2. **navigate** — apply keyboard undo/redo (which can replay a dock-layout
@@ -272,11 +275,11 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   it at `io::cache`'s `<stem>.darkroom-cache/` store. An unsaved doc stays
   memory-only. So a node toggled to `CachePersistence::Disk` (header `C` chip)
   reloads its output across sessions from a store beside the project file.
-- On-thread, `App::frame` drains the channel (`worker.drain()`, non-blocking).
+- On-thread, `App::update` drains the channel (`worker.drain()`, non-blocking).
   `NodeProgress` → `RunState::apply_progress` marks the active node
   `ExecStatus::Running(Instant)` (purple glow) live — carrying the start instant
   so the node header shows a `aperture::Spinner` + live elapsed-so-far
-  (`App::frame` repaints ~20fps while `run_state.is_running()`);
+  (`App::record` repaints ~20fps while `run_state.is_running()`);
   `ExecutionFinished` → `set_results`
   folds the final `ExecutionStats` (including nested-subgraph attribution) onto
   authoring nodes: per-node `ExecStatus`

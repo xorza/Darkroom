@@ -214,8 +214,8 @@ impl GraphUI {
             .apply(ui, ctx, scene, popup_gesture, pending_connection, out);
         self.gestures.subgraph_menu.apply(ui, scene, out, cmd);
         self.gestures.node_menu.apply(ui, scene, out, cmd);
-        // A click on an FsPath input's pick button surfaces a deferred
-        // PickInputPath command (App opens the dialog outside the record).
+        // A click on an FsPath input's pick button surfaces a PickInputPath
+        // command that App handles after authoring.
         // The node UI returns a domain request; the canvas — which owns the
         // command channel — translates it, so node code never names
         // `AppCommand`. A command already set this frame wins.
