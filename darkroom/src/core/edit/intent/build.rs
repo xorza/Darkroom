@@ -66,6 +66,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }
         Intent::AddNode {
             pos,
+            node_id,
             mut node,
             def,
             bindings,
@@ -73,6 +74,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             let def = reuse_local_subgraph(graph, &mut node, def);
             GraphStep::AddNode {
                 pos,
+                node_id,
                 node,
                 def,
                 bindings,
@@ -85,7 +87,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         } => {
             let to_selection = nodes
                 .iter()
-                .map(|(_, node)| ItemRef::Node(node.id))
+                .map(|(_, node_id, _)| ItemRef::Node(*node_id))
                 .collect();
             GraphStep::DuplicateNodes {
                 nodes,

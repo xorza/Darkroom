@@ -583,8 +583,7 @@ mod tests {
 
         // Seed a node, then rename it — a content edit must dirty.
         let node = Node::new(NodeKind::Func(FuncId::unique()));
-        let id = node.id;
-        editor.document.graph.add(node);
+        let id = editor.document.graph.add(node);
         editor
             .document
             .main_view
@@ -638,8 +637,7 @@ mod tests {
         let lib = Library::default();
         let mut editor = Editor::new(Document::default());
         let node = Node::new(NodeKind::Func(FuncId::unique()));
-        let id = node.id;
-        editor.document.graph.add(node);
+        let id = editor.document.graph.add(node);
         editor
             .document
             .main_view

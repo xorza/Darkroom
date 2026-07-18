@@ -101,17 +101,14 @@ fn log_frame_no_graph(library: &Library) -> Graph {
     let to_string_func = library.by_name("To String").unwrap();
     let print_func = library.by_name("Print").unwrap();
 
-    let mut frame_event_node: Node = frame_event_func.into();
-    frame_event_node.id = frame_event_node_id;
-    graph.add(frame_event_node);
+    let frame_event_node: Node = frame_event_func.into();
+    graph.insert(frame_event_node_id, frame_event_node);
 
-    let mut to_string_node: Node = to_string_func.into();
-    to_string_node.id = to_string_node_id;
-    graph.add(to_string_node);
+    let to_string_node: Node = to_string_func.into();
+    graph.insert(to_string_node_id, to_string_node);
 
-    let mut print_node: Node = print_func.into();
-    print_node.id = print_node_id;
-    graph.add(print_node);
+    let print_node: Node = print_func.into();
+    graph.insert(print_node_id, print_node);
 
     graph.set_input_binding(InputPort::new(frame_event_node_id, 0), 1.into());
     graph.subscribe(frame_event_node_id, 0, print_node_id);
@@ -132,10 +129,8 @@ fn log_frame_no_graph(library: &Library) -> Graph {
 /// log line, not the graph's shape.
 fn print_literal_graph(library: &Library, message: &str) -> (Graph, NodeId) {
     let mut graph = Graph::default();
-    let mut print_node: Node = library.by_name("Print").unwrap().into();
-    print_node.id = NodeId::unique();
-    let print_node_id = print_node.id;
-    graph.add(print_node);
+    let print_node: Node = library.by_name("Print").unwrap().into();
+    let print_node_id = graph.add(print_node);
     graph.set_input_binding(
         InputPort::new(print_node_id, 0),
         StaticValue::String(message.to_string()).into(),

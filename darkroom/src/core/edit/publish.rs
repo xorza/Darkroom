@@ -205,9 +205,7 @@ mod tests {
             doc.graph.subgraphs.by_key(&local_id).unwrap(),
             SubgraphRef::Local(local_id),
         );
-        let node_id = node.id;
-        doc.graph.add(node);
-        node_id
+        doc.graph.add(node)
     }
 
     fn def(name: &str, origin: Option<SubgraphId>) -> SubgraphDef {
@@ -319,8 +317,7 @@ mod tests {
         let mut library = Library::default();
         let mut doc = Document::default();
         let node = Node::new(scenarium::NodeKind::Func(FuncId::unique()));
-        let node_id = node.id;
-        doc.graph.add(node);
+        let node_id = doc.graph.add(node);
 
         assert!(!publish_local_def(
             &mut doc,

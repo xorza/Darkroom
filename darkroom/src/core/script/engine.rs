@@ -255,6 +255,7 @@ fn register_host_helpers(engine: &mut Engine, library: Arc<Library>) {
             let node: Node = func.into();
             let action = Intent::AddNode {
                 pos: Vec2::new(x as f32, y as f32),
+                node_id: NodeId::unique(),
                 node,
                 def: None,
                 // Script-created nodes set their inputs explicitly; no

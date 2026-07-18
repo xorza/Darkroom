@@ -31,29 +31,17 @@ fn roundtrip_serialization() -> anyhow::Result<()> {
 #[test]
 fn check_rejects_node_ids_reused_across_graph_levels() {
     let node = Node::new(NodeKind::Func(FuncId::unique()));
+    let node_id = NodeId::unique();
     let mut interior = Graph::default();
-    interior.add(node.clone());
+    interior.insert(node_id, node.clone());
     let def = SubgraphDef::new(SubgraphId::unique(), "duplicate id").graph(interior);
 
     let mut graph = Graph::default();
-    graph.add(node);
+    graph.insert(node_id, node);
     graph.subgraphs.add(def);
 
     let error = graph.check().unwrap_err().to_string();
     assert!(error.contains("occurs in more than one authoring graph"));
-}
-
-#[test]
-fn check_rejects_node_id_key_drift() {
-    let mut graph = test_graph();
-    let stored_id = graph.by_name("sum").unwrap().id;
-    graph
-        .find_node_mut(&stored_id, NodeSearch::TopLevel)
-        .unwrap()
-        .id = NodeId::unique();
-
-    let error = graph.check().unwrap_err().to_string();
-    assert!(error.contains("disagrees with its id"));
 }
 
 #[test]
@@ -101,8 +89,7 @@ fn cache_mode_bits_and_from_bits_round_trip() {
 }
 
 #[test]
-fn cache_mode_round_trips_and_defaults_to_none() {
-    use common::deserialize;
+fn cache_mode_round_trips() {
     assert_eq!(CacheMode::default(), CacheMode::None);
 
     let library = test_func_lib(TestFuncHooks::default());
@@ -127,14 +114,6 @@ fn cache_mode_round_trips_and_defaults_to_none() {
             );
         }
     }
-
-    // A node authored before the `cache` field existed (or under the old `persist`
-    // name) has no `cache` key, so `#[serde(default)]` fills the `CacheMode`
-    // default, `None`.
-    let legacy = r#"{ "id": "00000000-0000-0000-0000-000000000001",
-            "kind": { "Func": "00000000-0000-0000-0000-000000000002" }, "name": "n" }"#;
-    let node: Node = deserialize(legacy.as_bytes(), SerdeFormat::Json).unwrap();
-    assert_eq!(node.cache, CacheMode::None);
 }
 
 #[test]
@@ -577,8 +556,7 @@ fn input_type_resolves_declared_types_and_skips_boundaries() {
 
     // A boundary node carries no per-port type here → None (caller's Null).
     let boundary = Node::new(NodeKind::SubgraphInput);
-    let b = boundary.id;
-    graph.add(boundary);
+    let b = graph.add(boundary);
     assert_eq!(graph.input_type(&library, InputPort::new(b, 0)), None);
 }
 
@@ -596,24 +574,12 @@ fn deserialize_rejects_corrupt_graph() {
     let bytes = graph.serialize(SerdeFormat::Bitcode).unwrap();
     assert!(Graph::deserialize(&bytes, SerdeFormat::Bitcode).is_err());
 
-    let duplicate_nodes = br#"{
-        "nodes": [
-            {
-                "id": "00000000-0000-0000-0000-000000000001",
-                "kind": { "Func": "00000000-0000-0000-0000-000000000002" },
-                "name": "a"
-            },
-            {
-                "id": "00000000-0000-0000-0000-000000000001",
-                "kind": { "Func": "00000000-0000-0000-0000-000000000003" },
-                "name": "b"
-            }
-        ]
-    }"#;
-    let error = Graph::deserialize(duplicate_nodes, SerdeFormat::Json)
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("duplicate node id"));
+    let mut nil_key = Graph::default();
+    nil_key
+        .nodes
+        .insert(NodeId::nil(), Node::new(NodeKind::Func(FuncId::unique())));
+    let bytes = nil_key.serialize(SerdeFormat::Bitcode).unwrap();
+    assert!(Graph::deserialize(&bytes, SerdeFormat::Bitcode).is_err());
 }
 
 #[test]
@@ -819,7 +785,7 @@ fn wiring_snapshot_round_trips_through_restore() {
 
     let edges_before = graph.edges().count();
     let detached = graph.detach_node(sum_id);
-    assert_eq!(detached.node.id, sum_id);
+    assert_eq!(detached.node_id, sum_id);
     assert_eq!(graph.edges().count(), edges_before - 3);
     assert!(!graph.is_subscribed(get_a_id, 0, sum_id));
 
@@ -892,8 +858,7 @@ fn find_node_search_scope_gates_subgraph_interiors() {
     // interior holds another local def with the target node inside.
     let mut inner_graph = Graph::default();
     let deep = Node::new(NodeKind::Func(FuncId::unique()));
-    let deep_id = deep.id;
-    inner_graph.add(deep);
+    let deep_id = inner_graph.add(deep);
     let inner = SubgraphDef::new(SubgraphId::unique(), "Inner").graph(inner_graph);
 
     let mut outer_graph = Graph::default();
@@ -902,26 +867,16 @@ fn find_node_search_scope_gates_subgraph_interiors() {
 
     let mut graph = Graph::default();
     let top = Node::new(NodeKind::Func(FuncId::unique()));
-    let top_id = top.id;
-    graph.add(top);
+    let top_id = graph.add(top);
     graph.subgraphs.add(outer);
 
     // Top-level node: found either way.
-    assert_eq!(
-        graph.find_node(&top_id, NodeSearch::TopLevel).unwrap().id,
-        top_id
-    );
-    assert_eq!(
-        graph.find_node(&top_id, NodeSearch::Recursive).unwrap().id,
-        top_id
-    );
+    assert!(graph.find_node(&top_id, NodeSearch::TopLevel).is_some());
+    assert!(graph.find_node(&top_id, NodeSearch::Recursive).is_some());
     // Interior node: invisible to TopLevel, found two levels down by
     // Recursive; an unknown id misses both ways.
     assert!(graph.find_node(&deep_id, NodeSearch::TopLevel).is_none());
-    assert_eq!(
-        graph.find_node(&deep_id, NodeSearch::Recursive).unwrap().id,
-        deep_id
-    );
+    assert!(graph.find_node(&deep_id, NodeSearch::Recursive).is_some());
     assert!(
         graph
             .find_node(&NodeId::unique(), NodeSearch::Recursive)
@@ -995,11 +950,9 @@ fn prune_subscriptions_drops_out_of_range_and_missing_emitter() {
 
     let mut graph = Graph::default();
     let emitter = Node::new(NodeKind::Func(func_id));
-    let emitter_id = emitter.id;
     let subscriber = Node::new(NodeKind::Func(func_id));
-    let subscriber_id = subscriber.id;
-    graph.add(emitter);
-    graph.add(subscriber);
+    let emitter_id = graph.add(emitter);
+    let subscriber_id = graph.add(subscriber);
 
     // A real but absent emitter id models one whose node was removed.
     let ghost = NodeId::unique();
@@ -1022,8 +975,7 @@ fn prune_subscriptions_drops_out_of_range_and_missing_emitter() {
     // An emitter whose func is missing from the library has unknowable
     // arity, so its subscription is kept (not panicked on, not dropped).
     let ghost = Node::new(NodeKind::Func(FuncId::from_u128(0xdead)));
-    let ghost_id = ghost.id;
-    graph.add(ghost);
+    let ghost_id = graph.add(ghost);
     graph.subscribe(ghost_id, 4, subscriber_id);
     assert_eq!(graph.prune_dangling_wiring(&library), 0);
     assert!(graph.is_subscribed(ghost_id, 4, subscriber_id));
@@ -1046,9 +998,7 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
     let ids: Vec<NodeId> = (0..5)
         .map(|_| {
             let n = Node::new(NodeKind::Func(func_id));
-            let id = n.id;
-            graph.add(n);
-            id
+            graph.add(n)
         })
         .collect();
     let (a, b, c, d, e) = (ids[0], ids[1], ids[2], ids[3], ids[4]);
@@ -1089,8 +1039,7 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
     // against a richer library) has unknowable arity, so its wiring is
     // kept — never panicked on, never dropped.
     let ghost_func = Node::new(NodeKind::Func(FuncId::from_u128(0xdead)));
-    let ghost_id = ghost_func.id;
-    graph.add(ghost_func);
+    let ghost_id = graph.add(ghost_func);
     graph.set_input_binding(InputPort::new(ghost_id, 3), Binding::bind(a, 0));
     graph.set_input_binding(InputPort::new(b, 0), Binding::bind(ghost_id, 7));
     assert_eq!(

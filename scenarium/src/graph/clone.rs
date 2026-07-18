@@ -15,12 +15,10 @@ impl Graph {
     pub(crate) fn with_fresh_node_ids(&self) -> FreshGraph {
         let mut id_map = HashMap::with_capacity(self.nodes.len());
         let mut nodes = NodeMap::with_capacity(self.nodes.len());
-        for node in self.nodes.values() {
+        for (node_id, node) in &self.nodes {
             let new_id = NodeId::unique();
-            id_map.insert(node.id, new_id);
-            let mut clone = node.clone();
-            clone.id = new_id;
-            nodes.insert(new_id, clone);
+            id_map.insert(*node_id, new_id);
+            nodes.insert(new_id, node.clone());
         }
         let remap = |id: NodeId| id_map.get(&id).copied().unwrap_or(id);
         let bindings = self

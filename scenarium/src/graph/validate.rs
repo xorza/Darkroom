@@ -66,13 +66,13 @@ impl Graph {
         // Resolve every node's func/def first (and recurse into composites):
         // the port-count helpers below look funcs/defs up infallibly, so this
         // pass must establish they all resolve before any count is taken.
-        for node in self.nodes.values() {
+        for (node_id, node) in &self.nodes {
             match &node.kind {
                 NodeKind::Func(func_id) => {
                     ensure!(
                         library.by_id(func_id).is_some(),
                         "node {:?} references func {:?}, absent from the library",
-                        node.id,
+                        node_id,
                         func_id
                     );
                 }
@@ -80,7 +80,7 @@ impl Graph {
                     let def = self.resolve_def(*r, library).with_context(|| {
                         format!(
                             "node {:?} references a missing subgraph definition",
-                            node.id
+                            node_id
                         )
                     })?;
                     ensure!(

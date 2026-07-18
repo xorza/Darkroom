@@ -63,6 +63,7 @@ pub(crate) enum Intent {
         /// Where the node lands on the canvas; its view item is created
         /// alongside it, at the top of the paint stack.
         pos: Vec2,
+        node_id: NodeId,
         node: Node,
         /// Local subgraph def to add alongside the node — set when the
         /// node is a `Subgraph(Local(_))` instance whose def the caller
@@ -82,8 +83,8 @@ pub(crate) enum Intent {
     /// only captures the prior selection. One undo entry for the whole
     /// duplicate.
     DuplicateNodes {
-        /// `(position, node)` per clone.
-        nodes: Vec<(Vec2, Node)>,
+        /// `(position, id, node)` per clone.
+        nodes: Vec<(Vec2, NodeId, Node)>,
         bindings: Vec<(InputPort, Binding)>,
         subscriptions: Vec<Subscription>,
     },
@@ -221,6 +222,7 @@ pub(crate) enum GraphStep {
     /// (library-subgraph instancing); `None` for plain func nodes.
     AddNode {
         pos: Vec2,
+        node_id: NodeId,
         node: Node,
         def: Option<Box<SubgraphDef>>,
         bindings: Vec<(InputPort, Binding)>,
@@ -231,7 +233,7 @@ pub(crate) enum GraphStep {
     /// `from_selection`. `nodes` carry fresh ids, so there's no prior
     /// state to capture beyond the selection.
     DuplicateNodes {
-        nodes: Vec<(Vec2, Node)>,
+        nodes: Vec<(Vec2, NodeId, Node)>,
         bindings: Vec<(InputPort, Binding)>,
         subscriptions: Vec<Subscription>,
         from_selection: BTreeSet<ItemRef>,

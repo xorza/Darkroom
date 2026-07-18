@@ -20,4 +20,9 @@ Scenarium is a Cargo workspace for a node-based data processing pipeline framewo
 
 ## Conventions
 
+**Compatibility.** Existing project files and APIs do not need backward
+compatibility for now. Change serialized shapes and break APIs freely when that
+simplifies the current design; do not add migrations, compatibility shims,
+legacy deserializers, or legacy-format tests.
+
 **UUIDs / IDs.** Every new UUID literal (a `TypeId`, `FuncId`, `SubgraphId`, or any other `id_type!`-backed id) must be generated with the real `uuidgen` tool, lowercased — `uuidgen | tr 'A-Z' 'a-z'` — never hand-typed or model-invented. Hand-made ids look unique but aren't drawn from any entropy source and risk silently colliding with an existing id. After adding one, `rg` the new value across the repo to confirm it's unique. These ids are the stable identity that persisted graphs bind to, so once an id ships in a saved document it must not change.

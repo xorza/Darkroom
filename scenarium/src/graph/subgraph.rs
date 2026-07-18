@@ -253,18 +253,13 @@ mod tests {
         let sum_id = library.by_name("sum").unwrap().id;
 
         let in_node = Node::new(NodeKind::SubgraphInput);
-        let in_id = in_node.id;
-
         let sum_node = Node::new(NodeKind::Func(sum_id));
-        let sum_node_id = sum_node.id;
-
         let out_node = Node::new(NodeKind::SubgraphOutput);
-        let out_id = out_node.id;
 
         let mut graph = Graph::default();
-        graph.add(in_node);
-        graph.add(sum_node);
-        graph.add(out_node);
+        let in_id = graph.add(in_node);
+        let sum_node_id = graph.add(sum_node);
+        let out_id = graph.add(out_node);
         graph.set_input_binding(InputPort::new(sum_node_id, 0), Binding::bind(in_id, 0));
         graph.set_input_binding(InputPort::new(sum_node_id, 1), Binding::bind(in_id, 1));
         graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_node_id, 0));
@@ -441,13 +436,11 @@ mod tests {
         let get_a_id = library.by_name("get_a").unwrap().id;
 
         let src = Node::new(NodeKind::Func(get_a_id));
-        let src_id = src.id;
         let out_node = Node::new(NodeKind::SubgraphOutput);
-        let out_id = out_node.id;
 
         let mut graph = Graph::default();
-        graph.add(src);
-        graph.add(out_node);
+        let src_id = graph.add(src);
+        let out_id = graph.add(out_node);
         graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(src_id, 0));
 
         let def = SubgraphDef::new(SubgraphId::unique(), "Source")
@@ -471,13 +464,11 @@ mod tests {
         let print_id = library.by_name("Print").unwrap().id;
 
         let in_node = Node::new(NodeKind::SubgraphInput);
-        let in_id = in_node.id;
         let print_node = Node::new(NodeKind::Func(print_id));
-        let print_node_id = print_node.id;
 
         let mut graph = Graph::default();
-        graph.add(in_node);
-        graph.add(print_node);
+        let in_id = graph.add(in_node);
+        let print_node_id = graph.add(print_node);
         graph.set_input_binding(InputPort::new(print_node_id, 0), Binding::bind(in_id, 0));
 
         let def = SubgraphDef::new(SubgraphId::unique(), "Sink")
@@ -532,9 +523,8 @@ mod tests {
 
         // def interior: a single `ticker` whose `tick` event is exposed.
         let emitter = Node::new(NodeKind::Func(ticker));
-        let emitter_id = emitter.id;
         let mut graph = Graph::default();
-        graph.add(emitter);
+        let emitter_id = graph.add(emitter);
 
         let def = SubgraphDef::new(SubgraphId::unique(), "Exposer")
             .category("Test")
