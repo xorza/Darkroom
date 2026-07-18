@@ -7,7 +7,7 @@
 //! projects them through the compile-phase `FlattenMap` (kept by the engine
 //! when it sent the run — the worker doesn't echo it back) to fold each
 //! outcome onto the authoring nodes: onto the node itself (unique per editor
-//! node — a def's interior aggregates across its instances) and onto every
+//! node — a graph's interior aggregates across its instances) and onto every
 //! ancestor composite instance, so an instance node reflects its whole
 //! subtree. Logs attribute the same way.
 //!
@@ -338,7 +338,7 @@ mod tests {
         assert_eq!(rs.status(nid(99)), ExecStatus::None);
     }
 
-    /// Two instances of one def → the interior node's flattened ids both
+    /// Two instances of one graph → the interior node's flattened ids both
     /// fold onto its authoring `interior` id, summing time; the instance
     /// nodes each get only their own run.
     #[test]

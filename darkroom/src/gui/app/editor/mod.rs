@@ -75,7 +75,7 @@ pub(crate) struct Editor {
     /// interface (see `requires_reconcile`); consumed by `rebuild_scene`,
     /// which reruns `reconcile_boundaries` only then. Derived state is
     /// recomputed on structural edits, not on every frame's projection
-    /// rebuild — idle/selection/viewport frames skip the per-def edge
+    /// rebuild — idle/selection/viewport frames skip the per-graph edge
     /// scan. Starts `true` so the first rebuild canonicalizes a freshly
     /// loaded (or hand-edited) document.
     needs_reconcile: bool,
@@ -183,7 +183,7 @@ impl Editor {
     }
 
     /// Add an imported graph to the document, flagging the reconcile
-    /// the import needs: an imported def's stored interface may not match
+    /// the import needs: an imported graph's stored interface may not match
     /// its interior wiring (hand-edited / older file), so it's re-derived
     /// on the next rebuild. Keeps the "import ⇒ reconcile" invariant here
     /// rather than on the caller.
@@ -454,8 +454,8 @@ impl Editor {
                 UiAction::OpenGraph(target) => self.open_graph(target),
                 UiAction::Dock(op) => self.intents.push(Intent::Dock(op)),
                 UiAction::NewGraph => {
-                    // Creating the def + instance isn't undoable (no undo
-                    // history references the fresh def, so the stack stays
+                    // Creating the graph + instance isn't undoable (no undo
+                    // history references the fresh graph, so the stack stays
                     // valid); `open_graph` still records the focus switch.
                     // Not routed through a step, so flag the edit directly.
                     let id = self.document.create_graph();

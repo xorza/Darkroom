@@ -25,7 +25,7 @@ default look just run the tests and commit the asset diff (see `theme.rs`).
 ## Dependencies / boundaries
 
 - **`scenarium`** — headless core. Owns `Graph`, `Node`, `Binding`, `Library`,
-  `Graph`, `StaticValue`, the headless `Worker` evaluator, serde formats.
+  `StaticValue`, the headless `Worker` evaluator, serde formats.
   darkroom never reimplements graph semantics; it edits a `scenarium::Graph`,
   resolves nodes against a `Library`, and runs the graph through `Worker`.
 - **`aperture`** — the GUI runtime. `App` implements once-only
@@ -147,11 +147,11 @@ One record pass:
 
 ### Source of truth: `Document` (`src/document/mod.rs`)
 The serialized, undoable unit. The graph *data* is one `scenarium::Graph`
-(`graph`), which already nests local graphs and their interior graphs.
+(`graph`), which already nests local graphs recursively.
 Everything else is editor view-state, split per graph:
 
-- **`GraphRef`** — `Main` (root graph) or `Local(GraphId)` (a graph
-  interior). The active-graph handle threaded through the whole edit pipeline.
+- **`GraphRef`** — `Main` (root graph) or `Local(GraphId)` (a local graph).
+  The active-graph handle threaded through the whole edit pipeline.
 - **`GraphView`** — per-graph view metadata: `item_placements`
   (`KeyIndexVec<ItemRef, CanvasItemPlacement>` of node-body and pinned-output
   preview positions whose *order* is the shared paint stack — later items

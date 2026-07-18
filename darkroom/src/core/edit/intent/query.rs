@@ -47,7 +47,7 @@ impl UndoStep {
             | GraphStep::DuplicateNodes { .. }
             | GraphStep::RemoveNode { .. }
             | GraphStep::RenameNode { .. }
-            // Forks an identical-interface def, so the node doesn't
+            // Forks an identical-interface graph, so the node doesn't
             // resize — but it's a structural edit and rare, so eat one
             // relayout rather than reason about it staying in lockstep.
             | GraphStep::DetachGraph { .. } => true,
@@ -88,7 +88,7 @@ impl UndoStep {
     }
 
     /// Whether applying this step can change a graph's *derived interface*
-    /// (`def.inputs`/`def.outputs`), so `reconcile_boundaries` must rerun
+    /// (`graph.inputs`/`graph.outputs`), so `reconcile_boundaries` must rerun
     /// before the next scene rebuild. Only interior boundary wiring and
     /// instance bindings feed that derivation, so any edit that touches a
     /// binding or the node set qualifies; pure view/selection/cache/tab edits
