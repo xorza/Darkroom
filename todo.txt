@@ -42,3 +42,5 @@ keyindexvec
 review testsuite
 
 grapuh public methods
+
+document validation like for graph
