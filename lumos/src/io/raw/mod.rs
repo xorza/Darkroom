@@ -26,6 +26,9 @@ use imaginarium::Buffer2;
 
 use normalize::{normalize_u16_to_f32_parallel, normalize_u16_to_f32_parallel_unclamped};
 
+/// Camera-RAW extensions accepted by this decoder.
+pub const RAW_EXTENSIONS: &[&str] = &["raf", "cr2", "cr3", "nef", "arw", "dng"];
+
 /// Allocate a Vec of given length without zeroing.
 ///
 /// SAFETY: Caller must ensure every element is written before it's read.

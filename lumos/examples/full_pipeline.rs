@@ -15,9 +15,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use common::CancelToken;
+use common::{CancelToken, file_utils};
 use lumos::{
-    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
+    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, RAW_EXTENSIONS,
     calibrate_align_stack,
 };
 use tracing_subscriber::EnvFilter;
@@ -42,7 +42,9 @@ fn main() {
 
     // Step 2 — raw lights → calibrated, registered, stacked master, in one call.
     // (`calibrate_align_stack` narrates its own load → detect → register → stack phases.)
-    let light_paths = common::file_utils::astro_image_files(&calibration_dir.join("Lights"));
+    let light_paths =
+        file_utils::files_with_extensions(&calibration_dir.join("Lights"), RAW_EXTENSIONS)
+            .expect("scan raw light frames");
     assert!(!light_paths.is_empty(), "no light frames found in Lights/");
     tracing::info!(
         lights = light_paths.len(),
@@ -94,7 +96,8 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
     let load = |subdir: &str| -> Vec<PathBuf> {
         let dir = calibration_dir.join(subdir);
         if dir.exists() {
-            common::file_utils::astro_image_files(&dir)
+            file_utils::files_with_extensions(&dir, RAW_EXTENSIONS)
+                .expect("scan raw calibration frames")
         } else {
             Vec::new()
         }

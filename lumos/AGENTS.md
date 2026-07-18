@@ -61,7 +61,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 | `image_ops::{denoise, hdr, local_contrast, color_calibration, background_extraction}` | `pub(crate)` (types re-exported) | Wavelet denoise, HDR tone-compression, local contrast, SCNR/background neutralization, gradient background extraction. |
 | `image_ops::ml` | `pub(crate)`, `#[cfg(feature = "ml")]` | ONNX-backed ML denoise + star removal (tiled inference). |
 | `io::astro_image` | `pub(crate)` (types re-exported) | `AstroImage` container, FITS/standard loading, metadata, CFA, sensor detection. |
-| `io::raw` | `pub(crate)` | libraw RAW decode + Bayer (RCD) / X-Trans (Markesteijn) demosaicing. |
+| `io::raw` | `pub(crate)` | libraw RAW decode + Bayer (RCD) / X-Trans (Markesteijn) demosaicing; owns the authoritative `RAW_EXTENSIONS` policy. |
 | `math` | `pub(crate)` | `DMat3`, half-open `Rect`/`URect`, compensated SIMD `sum`, robust statistics. (`Vec2us` lives in the workspace `common` crate.) |
 | `concurrency` | `pub(crate)` | `UnsafeSendPtr` (send raw pointers across rayon closures). |
 | `testing` | `#[cfg(test)]` | Forward-model synthetic generator (`synthetic/`: `Scene` → `Camera` → `observe::render` → `SimFrame{image, truth}`, graded by `metrics`) + `real_data/` fixtures, for tests/benches. |
@@ -73,7 +73,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 - `AstroImage` (`io/astro_image/mod.rs:248`): `metadata: AstroImageMetadata` + `dimensions: ImageDimensions` + `pixels: PixelData`.
 - `PixelData` (`mod.rs:154`): `L(Buffer2<f32>)` or `Rgb([Buffer2<f32>; 3])` — **planar**, one buffer per channel.
 - `BitPix` (`mod.rs:31`, FITS pixel type + `normalization_max()`), `ImageDimensions` (`mod.rs`, `size: Vec2us` + channels ∈ {1,3}), `AstroImageMetadata` (`mod.rs:103`, full FITS/EXIF header set + CFA/filter/gain/exposure/coords).
-- Entry points: `from_file` (`mod.rs:270`, dispatches FITS → `fits::load_fits`, RAW exts → `io::raw::load_raw`, else imaginarium), `from_pixels` (`mod.rs:300`, interleaved → planar), `from_planar_channels` (`mod.rs:329`). `mean()` (parallel Kahan).
+- Entry points: `from_file` (`mod.rs`, dispatches FITS → `fits::load_fits`, `io::raw::RAW_EXTENSIONS` → `io::raw::load_raw`, standard formats → imaginarium) and owns the public `ASTRO_IMAGE_EXTENSIONS` policy; `from_pixels` (interleaved → planar); `from_planar_channels` (planar input). `mean()` uses parallel Kahan summation.
 - The `Rgb` value struct (`mod.rs:216`, `.intensity()` / `.scale()`). Display transforms live in `image_ops` over the interleaved `imaginarium::Image`: per-pixel operations use `par_map_pixels`, intensity operations use `intensity_plane` / `apply_intensity_remap`, and spatial operations stream through `process_channels`. Full planar conversion is private to the optional ML backend's model boundary.
 - `cfa` (`CfaType` = `Mono | Bayer(CfaPattern) | XTrans([[u8;6];6])`; `CfaImage` un-demosaiced sensor data with in-place `subtract`/`divide_by_normalized` and `demosaic()` → `AstroImage`). Flat division uses **per-color-channel means** so non-white flats don't shift color.
 - `fits` (`fits-well` I/O, `physical()` BSCALE/BZERO scaling, NaN/Inf sanitization, ROWORDER/XBAYROFF flips), `sensor` (`detect_sensor_type(filters, colors)` from libraw metadata), `error` (`ImageError`).

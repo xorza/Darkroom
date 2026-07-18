@@ -22,7 +22,7 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 | `serde.rs` | Generic `serialize`/`deserialize` dispatching over `SerdeFormat`. |
 | `serde_rhai/` | Rhai text (de)serialization via a `serde_json::Value` intermediary. |
 | `file_format.rs` | `SerdeFormat` enum + extension-based format detection. |
-| `file_utils.rs` | Directory scanning for RAW/FITS astro image files. |
+| `file_utils.rs` | Generic fallible, sorted directory scanning by file extension. |
 | `cpu_features.rs` | `X86Features`: cached runtime SSE/AVX2/FMA detection (x86_64; stubbed elsewhere). |
 | `parallel.rs` | `par_map_limited` / `try_par_map_limited`: concurrency-capped parallel map. |
 | `fnv.rs` | `FnvHasher`: deterministic FNV-1a 64-bit hasher (fixed seed). |

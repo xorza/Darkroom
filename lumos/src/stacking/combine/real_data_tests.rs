@@ -1,4 +1,4 @@
-use common::CancelToken;
+use common::{CancelToken, file_utils};
 
 use crate::stacking::combine::config::{Normalization, StackConfig};
 use crate::stacking::combine::stack::stack;
@@ -18,8 +18,8 @@ fn test_stack_registered_lights() {
         "registered_lights directory not found — run registration tests first"
     );
 
-    let paths =
-        common::file_utils::files_with_extensions(&registered_dir, &["tiff", "tif", "fits", "fit"]);
+    let paths = file_utils::files_with_extensions(&registered_dir, &["tiff", "tif", "fits", "fit"])
+        .expect("scan registered light directory");
     assert!(!paths.is_empty(), "No registered light frames found");
     println!("Stacking {} registered light frames...", paths.len());
 

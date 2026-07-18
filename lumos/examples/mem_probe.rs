@@ -12,9 +12,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use common::CancelToken;
+use common::{CancelToken, file_utils};
 use lumos::{
-    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
+    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, RAW_EXTENSIONS,
     calibrate_align_stack,
 };
 
@@ -42,12 +42,8 @@ fn main() {
     let tier = std::env::var("LUMOS_TIER").expect("set LUMOS_TIER (ram|disk)");
 
     let lights_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/lumos_data/Lights");
-    let mut lights: Vec<PathBuf> = std::fs::read_dir(&lights_dir)
-        .expect("Lights dir")
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("RAF")))
-        .collect();
-    lights.sort();
+    let lights = file_utils::files_with_extensions(&lights_dir, RAW_EXTENSIONS)
+        .expect("scan RAW lights directory");
     let lights = &lights[..n.min(lights.len())];
 
     let empty: Vec<PathBuf> = Vec::new();

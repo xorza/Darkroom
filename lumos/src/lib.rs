@@ -34,9 +34,11 @@ pub mod testing;
 
 pub use io::astro_image::cfa::{CfaImage, CfaType};
 pub use io::astro_image::error::ImageError;
-pub use io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+pub use io::astro_image::{
+    ASTRO_IMAGE_EXTENSIONS, AstroImage, AstroImageMetadata, BitPix, ImageDimensions,
+};
 pub use io::raw::demosaic::bayer::CfaPattern;
-pub use io::raw::{load_raw, load_raw_cfa};
+pub use io::raw::{RAW_EXTENSIONS, load_raw, load_raw_cfa};
 pub use stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, NoiseEstimation};
 pub use stacking::calibration_masters::defect_map::DefectMap;
 

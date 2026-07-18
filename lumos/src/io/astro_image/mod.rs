@@ -18,9 +18,17 @@ use common::Rgb;
 use common::Vec2us;
 use imaginarium::{Buffer2, DeinterleavedImageData};
 
-use crate::io::raw::load_raw;
+use crate::io::raw;
 use crate::math::sum::sum_f32;
 use crate::stacking::frame_store::StackableImage;
+
+const FITS_EXTENSIONS: &[&str] = &["fits", "fit"];
+const STANDARD_IMAGE_EXTENSIONS: &[&str] = &["tiff", "tif", "png", "jpg", "jpeg"];
+
+/// Every file extension accepted by [`AstroImage::from_file`].
+pub const ASTRO_IMAGE_EXTENSIONS: &[&str] = &[
+    "fits", "fit", "raf", "cr2", "cr3", "nef", "arw", "dng", "tiff", "tif", "png", "jpg", "jpeg",
+];
 
 /// FITS BITPIX values representing pixel data types.
 ///
@@ -240,29 +248,30 @@ impl AstroImage {
             .unwrap_or("")
             .to_lowercase();
 
-        match ext.as_str() {
-            "fit" | "fits" => fits::load_fits(path),
-            "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => load_raw(path),
-            "tiff" | "tif" | "png" | "jpg" | "jpeg" => {
-                let image = Image::read_file(path).map_err(|e| ImageError::Image {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-                // Float TIFFs hold linear scientific data and are valid input; integer/8-bit standard
-                // formats (PNG/JPEG, 8-bit TIFF) are usually sRGB-gamma encoded, which corrupts the
-                // linear-domain pipeline. Only the latter is worth warning about.
-                if image.desc.color_format.channel_type != ChannelType::Float {
-                    tracing::warn!(
-                        path = %path.display(),
-                        format = %ext,
-                        "loading a non-float standard image as linear; PNG/JPEG and 8-bit/integer \
-                         TIFF are usually sRGB-gamma encoded — non-linear input corrupts \
-                         calibration, stacking, and photometry"
-                    );
-                }
-                Ok(image.into())
+        if FITS_EXTENSIONS.contains(&ext.as_str()) {
+            fits::load_fits(path)
+        } else if raw::RAW_EXTENSIONS.contains(&ext.as_str()) {
+            raw::load_raw(path)
+        } else if STANDARD_IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+            let image = Image::read_file(path).map_err(|e| ImageError::Image {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+            // Float TIFFs hold linear scientific data and are valid input; integer/8-bit standard
+            // formats (PNG/JPEG, 8-bit TIFF) are usually sRGB-gamma encoded, which corrupts the
+            // linear-domain pipeline. Only the latter is worth warning about.
+            if image.desc.color_format.channel_type != ChannelType::Float {
+                tracing::warn!(
+                    path = %path.display(),
+                    format = %ext,
+                    "loading a non-float standard image as linear; PNG/JPEG and 8-bit/integer \
+                     TIFF are usually sRGB-gamma encoded — non-linear input corrupts \
+                     calibration, stacking, and photometry"
+                );
             }
-            _ => Err(ImageError::UnsupportedFormat { extension: ext }),
+            Ok(image.into())
+        } else {
+            Err(ImageError::UnsupportedFormat { extension: ext })
         }
     }
 

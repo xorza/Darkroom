@@ -2,9 +2,21 @@ use common::Rgb;
 use common::test_utils::test_output_path;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 
+use crate::io::astro_image::*;
+use crate::io::raw;
 use crate::testing::{calibration_dir, init_tracing};
 
-use super::*;
+#[test]
+fn loadable_extensions_match_decoder_policies() {
+    let expected: Vec<&str> = FITS_EXTENSIONS
+        .iter()
+        .chain(raw::RAW_EXTENSIONS)
+        .chain(STANDARD_IMAGE_EXTENSIONS)
+        .copied()
+        .collect();
+
+    assert_eq!(ASTRO_IMAGE_EXTENSIONS, expected);
+}
 
 #[test]
 fn test_metadata_default() {
@@ -235,7 +247,8 @@ fn test_load_single_raw_from_env() {
         return;
     }
 
-    let files = common::file_utils::astro_image_files(&lights_dir);
+    let files = common::file_utils::files_with_extensions(&lights_dir, raw::RAW_EXTENSIONS)
+        .expect("scan RAW lights directory");
     let Some(first_file) = files.first() else {
         eprintln!("No image files in Lights, skipping test");
         return;

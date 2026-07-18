@@ -9,36 +9,17 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use ::quickbench::quick_bench;
+use common::file_utils;
 
+use crate::io::astro_image::{ASTRO_IMAGE_EXTENSIONS, AstroImage};
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::warp;
+use crate::stacking::registration::transform::TransformType;
 use crate::stacking::star_detection::config::{CentroidMethod, Config, NoiseModel};
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::calibration_dir;
-use crate::{AstroImage, TransformType};
-
-const IMAGE_EXTENSIONS: &[&str] = &["tiff", "tif", "fit", "fits", "png"];
-
-/// List image files in a directory, sorted by name.
-fn list_image_files(dir: &std::path::Path) -> Vec<PathBuf> {
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
-        .expect("Failed to read directory")
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let path = e.path();
-            if !path.is_file() {
-                return false;
-            }
-            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str())
-        })
-        .map(|e| e.path())
-        .collect();
-    files.sort();
-    files
-}
 
 /// Load the first and last calibrated light frames from the sample data directory.
 /// Returns None if there are fewer than 2 lights.
@@ -50,7 +31,8 @@ fn load_two_calibrated_lights() -> Option<(AstroImage, AstroImage)> {
         return None;
     }
 
-    let files = list_image_files(&lights_dir);
+    let files = file_utils::files_with_extensions(&lights_dir, ASTRO_IMAGE_EXTENSIONS)
+        .expect("scan calibrated light directory");
     if files.len() < 2 {
         eprintln!(
             "Need at least 2 calibrated lights, found {}, skipping test",
@@ -237,7 +219,8 @@ fn load_all_calibrated_lights() -> Option<(Vec<AstroImage>, Vec<PathBuf>)> {
         return None;
     }
 
-    let files = list_image_files(&lights_dir);
+    let files = file_utils::files_with_extensions(&lights_dir, ASTRO_IMAGE_EXTENSIONS)
+        .expect("scan calibrated light directory");
     if files.len() < 2 {
         eprintln!(
             "Need at least 2 calibrated lights, found {}, skipping",

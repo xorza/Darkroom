@@ -3,13 +3,14 @@
 use std::f32::consts::PI;
 use std::path::PathBuf;
 
+use common::file_utils;
 use common::test_utils::test_output_path;
 use imaginarium::Buffer2;
 use imaginarium::{ColorFormat, Image};
 
-use crate::AstroImage;
-use crate::io::astro_image::AstroImageMetadata;
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::io::astro_image::{ASTRO_IMAGE_EXTENSIONS, AstroImage, AstroImageMetadata};
+use crate::io::raw::RAW_EXTENSIONS;
 use crate::stacking::star_detection::background::{self, estimate::BackgroundEstimate};
 use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::BackgroundConfig;
@@ -162,7 +163,9 @@ pub fn load_calibration_images(subdir: &str) -> Option<Vec<AstroImage>> {
         return None;
     }
 
-    let images = common::file_utils::astro_image_files(&dir)
+    let paths = file_utils::files_with_extensions(&dir, ASTRO_IMAGE_EXTENSIONS)
+        .expect("scan calibration image directory");
+    let images = paths
         .iter()
         .map(|path| AstroImage::from_file(path).expect("Failed to load image"))
         .collect();
@@ -177,12 +180,13 @@ pub fn first_raw_file() -> Option<PathBuf> {
     if !lights.exists() {
         return None;
     }
-    common::file_utils::astro_image_files(&lights)
+    file_utils::files_with_extensions(&lights, RAW_EXTENSIONS)
+        .expect("scan RAW lights directory")
         .first()
         .cloned()
 }
 
-/// Returns paths to all images in a subdirectory of the calibration directory.
+/// Returns paths to all camera-RAW images in a calibration subdirectory.
 /// Returns None if the subdirectory does not exist.
 pub fn calibration_image_paths(subdir: &str) -> Option<Vec<PathBuf>> {
     let cal_dir = calibration_dir();
@@ -192,5 +196,8 @@ pub fn calibration_image_paths(subdir: &str) -> Option<Vec<PathBuf>> {
         return None;
     }
 
-    Some(common::file_utils::astro_image_files(&dir))
+    Some(
+        file_utils::files_with_extensions(&dir, RAW_EXTENSIONS)
+            .expect("scan RAW calibration directory"),
+    )
 }

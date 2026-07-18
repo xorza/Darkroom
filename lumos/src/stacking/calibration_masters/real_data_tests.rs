@@ -18,14 +18,13 @@ use std::hint::black_box;
 use std::path::PathBuf;
 
 use common::CancelToken;
-use common::file_utils::files_with_extensions;
+use common::file_utils;
 use quickbench::quick_bench;
 
 use crate::io::raw;
+use crate::stacking::calibration_masters::stack_cfa_master;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig};
-
-use super::stack_cfa_master;
 
 /// Bundled calibration frame paths grouped by role (no flat-darks in this set).
 #[derive(Debug)]
@@ -39,11 +38,14 @@ struct CalibrationPaths {
 /// directory is absent (so a bench/test without the `real-data` bundle skips cleanly).
 fn calibration_paths() -> Option<CalibrationPaths> {
     let dir = calibration_dir();
-    let raf = |sub: &str| files_with_extensions(&dir.join(sub), &["raf"]);
+    let raw = |sub: &str| {
+        file_utils::files_with_extensions(&dir.join(sub), raw::RAW_EXTENSIONS)
+            .expect("scan RAW calibration directory")
+    };
     let paths = CalibrationPaths {
-        darks: raf("Darks"),
-        flats: raf("Flats"),
-        bias: raf("Bias"),
+        darks: raw("Darks"),
+        flats: raw("Flats"),
+        bias: raw("Bias"),
     };
     if paths.darks.is_empty() || paths.flats.is_empty() || paths.bias.is_empty() {
         return None;

@@ -4,19 +4,21 @@
 //! nodes like `auto_stretch`. Heavy work runs off the worker via
 //! `spawn_blocking`; preset dropdowns live in [`crate::astro::presets`].
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock, RwLock};
 
+use anyhow::Context;
 use common::CancelToken;
-use common::file_utils::astro_image_files;
+use common::file_utils;
 use imaginarium::Buffer2;
 use imaginarium::Image as RawImage;
 use lumos::{
-    AlignStackConfig, AstroImage, CalibrationMasters, CalibrationSet, CfaImage,
-    DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, ImageDimensions, LocalContrast,
-    MlError, NeutralizeBackground, OpError, Reference, StackConfig, TiledOnnxConfig,
-    calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only, stack_cfa_master,
+    ASTRO_IMAGE_EXTENSIONS, AlignStackConfig, AstroImage, CalibrationMasters, CalibrationSet,
+    CfaImage, DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, ImageDimensions,
+    LocalContrast, MlError, NeutralizeBackground, OpError, RAW_EXTENSIONS, Reference, StackConfig,
+    TiledOnnxConfig, calibrate_align_stack, ml_denoise, remove_stars, remove_stars_starless_only,
+    stack_cfa_master,
 };
 use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::{Func, FuncInput, FuncOutput, ValueVariant};
@@ -34,15 +36,6 @@ use crate::astro::presets::{
 use crate::config_node::{ConfigValue, NodeConfig, add_config_builder, config_data_type};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use imaginarium::ProcessingContext;
-
-/// Every file extension `AstroImage::from_file` recognizes: FITS, camera
-/// RAW, and standard images. Kept in lockstep with that dispatch (note
-/// `fts` is *not* accepted, so it's absent here).
-const ASTRO_IMAGE_EXTENSIONS: [&str; 13] = [
-    "fits", "fit", // FITS
-    "raf", "cr2", "cr3", "nef", "arw", "dng", // camera RAW
-    "tiff", "tif", "png", "jpg", "jpeg", // standard
-];
 
 /// ONNX model paths for the ML nodes (`ml_denoise` / `remove_stars`). lumos ships no models, so these
 /// are caller-supplied and configured at runtime — darkroom's settings window sets them via
@@ -98,8 +91,7 @@ pub(crate) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new
 
 /// Reusable data type for a frame-folder input: an existing-directory
 /// picker (no extension filter). Shared by the masters / stacking nodes,
-/// which glob the directory for astro frames via
-/// [`common::file_utils::astro_image_files`].
+/// which scan the directory for camera-RAW frames.
 pub(crate) static ASTRO_DIR_DATA_TYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::Directory))));
 
@@ -263,28 +255,17 @@ pub fn astro_library() -> Library {
                     assert_eq!(inputs.len(), 6);
                     assert_eq!(outputs.len(), 3);
 
-                    let lights_dir = inputs[0].value.as_fs_path().map(PathBuf::from);
-                    let lights = lights_dir
-                        .as_deref()
-                        .map(astro_image_files)
-                        .unwrap_or_default();
-                    // Fail with a message that names the offending folder rather than
-                    // lumos's generic `NoFrames` ("no light frames provided"): the usual
-                    // cause is a stale/moved path, and knowing which folder is empty (and
-                    // whether it even exists) is what makes the error actionable.
+                    let Some(lights_dir) = inputs[0].value.as_fs_path().map(PathBuf::from) else {
+                        return Err(InvokeError::External(anyhow::anyhow!(
+                            "no light-frame folder is set"
+                        )));
+                    };
+                    let lights = raw_frame_files(&lights_dir).map_err(InvokeError::External)?;
                     if lights.is_empty() {
-                        let msg = match &lights_dir {
-                            Some(dir) if !dir.exists() => {
-                                format!("light-frame folder does not exist: '{}'", dir.display())
-                            }
-                            Some(dir) => format!(
-                                "no astro-image frames (FITS/RAW/standard) found in \
-                                 light-frame folder '{}'",
-                                dir.display()
-                            ),
-                            None => "no light-frame folder is set".to_owned(),
-                        };
-                        return Err(InvokeError::External(anyhow::anyhow!(msg)));
+                        return Err(InvokeError::External(anyhow::anyhow!(
+                            "no camera-RAW frames found in light-frame folder '{}'",
+                            lights_dir.display()
+                        )));
                     }
                     // Arc-clone the masters value so it can move into the
                     // blocking task; `Unbound` means "no calibration".
@@ -905,7 +886,7 @@ fn build_masters_cached(
         if cache && cache_path.exists() {
             return Ok(Some(CfaImage::load(&cache_path)?));
         }
-        let frames = astro_image_files(&dir);
+        let frames = raw_frame_files(&dir)?;
         let master =
             stack_cfa_master(&frames, config, cancel.clone()).map_err(anyhow::Error::from)?;
         if cache && let Some(master) = &master {
@@ -925,6 +906,11 @@ fn build_masters_cached(
         cancel,
     )
     .map_err(anyhow::Error::from)
+}
+
+fn raw_frame_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    file_utils::files_with_extensions(dir, RAW_EXTENSIONS)
+        .with_context(|| format!("failed to scan camera-RAW frame folder '{}'", dir.display()))
 }
 
 #[cfg(test)]

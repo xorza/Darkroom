@@ -1,103 +1,142 @@
 //! File utility functions for listing and filtering files.
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
-/// Supported RAW image file extensions.
-pub const RAW_EXTENSIONS: &[&str] = &["raf", "cr2", "cr3", "nef", "arw", "dng"];
+/// Returns sorted paths to all files in a directory matching the given extensions.
+///
+/// Extensions are matched case-insensitively. Directory, entry, and metadata
+/// errors are returned with the affected path.
+pub fn files_with_extensions(dir: &Path, extensions: &[&str]) -> io::Result<Vec<PathBuf>> {
+    let entries = fs::read_dir(dir).map_err(|error| {
+        path_error(
+            format!("failed to read directory '{}'", dir.display()),
+            error,
+        )
+    })?;
+    let mut files = Vec::new();
 
-/// Supported FITS file extensions.
-pub const FITS_EXTENSIONS: &[&str] = &["fit", "fits"];
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            path_error(
+                format!("failed to read entry in directory '{}'", dir.display()),
+                error,
+            )
+        })?;
+        let path = entry.path();
+        let metadata = fs::metadata(&path).map_err(|error| {
+            path_error(
+                format!("failed to read metadata for '{}'", path.display()),
+                error,
+            )
+        })?;
+        if !metadata.is_file() {
+            continue;
+        }
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        if extensions
+            .iter()
+            .any(|expected| extension.eq_ignore_ascii_case(expected))
+        {
+            files.push(path);
+        }
+    }
 
-/// Returns paths to all files in a directory matching the given extensions.
-/// Extensions are matched case-insensitively. An unreadable directory (missing,
-/// no permission, not a directory) yields an empty list rather than panicking.
-pub fn files_with_extensions(dir: &Path, extensions: &[&str]) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-
-    entries
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let path = e.path();
-            if !path.is_file() {
-                return false;
-            }
-            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            extensions
-                .iter()
-                .any(|&expected| ext.eq_ignore_ascii_case(expected))
-        })
-        .map(|e| e.path())
-        .collect()
+    files.sort();
+    Ok(files)
 }
 
-/// Returns paths to all RAW and FITS image files in the given directory.
-pub fn astro_image_files(dir: &Path) -> Vec<PathBuf> {
-    let extensions: Vec<&str> = RAW_EXTENSIONS
-        .iter()
-        .chain(FITS_EXTENSIONS)
-        .copied()
-        .collect();
-    files_with_extensions(dir, &extensions)
+fn path_error(message: String, source: io::Error) -> io::Error {
+    io::Error::new(source.kind(), format!("{message}: {source}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::fs;
+    use std::io;
+    use std::path::PathBuf;
 
-    // The crate manifest dir is a stable, always-present fixture: it holds
-    // `Cargo.toml` (a file) and `src/` (a subdir), exercised read-only below.
-    fn crate_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    use crate::file_utils::files_with_extensions;
+    use crate::test_utils::test_output_path;
+
+    fn fixture_dir(name: &str) -> PathBuf {
+        let dir = test_output_path(&format!("common/file_utils/{name}"));
+        if dir.exists() {
+            fs::remove_dir_all(&dir).expect("remove stale file-utils fixture");
+        }
+        fs::create_dir_all(&dir).expect("create file-utils fixture");
+        dir
     }
 
-    fn names(paths: &[PathBuf]) -> Vec<String> {
+    fn names(paths: &[PathBuf]) -> Vec<&str> {
         paths
             .iter()
-            .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+            .map(|path| path.file_name().unwrap().to_str().unwrap())
             .collect()
     }
 
     #[test]
-    fn missing_directory_returns_empty_instead_of_panicking() {
-        let files = files_with_extensions(&crate_dir().join("no_such_dir_xyz"), &["rs"]);
-        assert!(files.is_empty());
-        assert!(astro_image_files(&crate_dir().join("no_such_dir_xyz")).is_empty());
+    fn populated_directory_is_filtered_case_insensitively_and_sorted() {
+        let dir = fixture_dir("populated");
+        fs::write(dir.join("z.raf"), []).unwrap();
+        fs::write(dir.join("a.RAF"), []).unwrap();
+        fs::write(dir.join("ignored.fit"), []).unwrap();
+        fs::create_dir(dir.join("nested.raf")).unwrap();
+
+        let files = files_with_extensions(&dir, &["raf"]).unwrap();
+
+        assert_eq!(names(&files), ["a.RAF", "z.raf"]);
+        assert!(files.iter().all(|path| path.is_file()));
     }
 
     #[test]
-    fn passing_a_file_path_returns_empty() {
-        // `read_dir` on a regular file errors; we must swallow it, not panic.
-        let files = files_with_extensions(&crate_dir().join("Cargo.toml"), &["toml"]);
-        assert!(files.is_empty());
+    fn readable_empty_directory_is_distinct_from_scan_failure() {
+        let dir = fixture_dir("empty");
+        assert_eq!(
+            files_with_extensions(&dir, &["raf"]).unwrap(),
+            Vec::<PathBuf>::new()
+        );
     }
 
     #[test]
-    fn matches_extension_and_skips_subdirectories() {
-        let found = names(&files_with_extensions(&crate_dir(), &["toml"]));
-        // `Cargo.toml` is the only top-level `.toml`; `src/` is a dir and excluded.
-        assert_eq!(found, vec!["Cargo.toml"]);
+    fn missing_directory_returns_contextual_error() {
+        let dir = fixture_dir("missing");
+        fs::remove_dir(&dir).unwrap();
+
+        let error = files_with_extensions(&dir, &["raf"]).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(error.to_string().contains(&dir.display().to_string()));
     }
 
     #[test]
-    fn extension_match_is_case_insensitive() {
-        let upper = names(&files_with_extensions(&crate_dir(), &["TOML"]));
-        assert!(upper.contains(&"Cargo.toml".to_string()));
+    fn file_instead_of_directory_returns_contextual_error() {
+        let dir = fixture_dir("not_directory");
+        let path = dir.join("frame.raf");
+        fs::write(&path, []).unwrap();
+
+        let error = files_with_extensions(&path, &["raf"]).unwrap_err();
+
+        assert!(error.to_string().contains(&path.display().to_string()));
     }
 
+    #[cfg(unix)]
     #[test]
-    fn unmatched_extension_returns_empty() {
-        assert!(files_with_extensions(&crate_dir(), &["no_such_ext"]).is_empty());
-    }
+    fn unreadable_directory_returns_contextual_error() {
+        use std::os::unix::fs::PermissionsExt;
 
-    #[test]
-    fn only_regular_files_are_returned() {
-        // Sweep every extension present at the crate root; `src` (a dir) and any
-        // extensionless entry must never appear.
-        let all = files_with_extensions(&crate_dir(), &["rs", "toml", "md", "lock"]);
-        assert!(all.iter().all(|p| p.is_file()));
-        assert!(!names(&all).contains(&"src".to_string()));
+        let dir = fixture_dir("unreadable");
+        let original = fs::metadata(&dir).unwrap().permissions();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0)).unwrap();
+        let result = files_with_extensions(&dir, &["raf"]);
+        fs::set_permissions(&dir, original).unwrap();
+
+        let error = result.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().contains(&dir.display().to_string()));
     }
 }

@@ -1,11 +1,14 @@
 //! Registration tests for the astro library.
 
+use std::fs;
+use std::path::PathBuf;
+
 use scenarium::{
     AnyState, ContextManager, DynamicValue, FuncBehavior, InvokeInput, OutputDemand,
     SharedAnyState, StaticValue,
 };
 
-use super::*;
+use crate::astro::library::*;
 
 fn func<'a>(lib: &'a Library, name: &str) -> &'a Func {
     lib.funcs
@@ -65,6 +68,31 @@ fn astro_dir_is_an_existing_directory_picker() {
     };
     assert_eq!(cfg.mode, FsPathMode::Directory);
     assert!(cfg.extensions.is_empty());
+}
+
+#[test]
+fn raw_frame_scan_is_decoder_specific_sorted_and_contextual() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("test_output/lens/raw_frame_scan");
+    if dir.exists() {
+        fs::remove_dir_all(&dir).unwrap();
+    }
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("z.raf"), []).unwrap();
+    fs::write(dir.join("a.RAF"), []).unwrap();
+    fs::write(dir.join("ignored.fits"), []).unwrap();
+
+    let files = raw_frame_files(&dir).unwrap();
+
+    assert_eq!(files, [dir.join("a.RAF"), dir.join("z.raf")]);
+
+    fs::remove_dir_all(&dir).unwrap();
+    let error = raw_frame_files(&dir).unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("failed to scan camera-RAW frame folder"));
+    assert!(message.contains(&dir.display().to_string()));
 }
 
 #[test]
