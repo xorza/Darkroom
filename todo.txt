@@ -36,3 +36,5 @@ callback when eventloop stopped for gui
 invert removed retain logic to optimize
 
 mesh once registrations
+
+keyindexvec
