@@ -1,6 +1,6 @@
-//! `Graph` port-type resolution: declared input/output types, wildcard
-//! reroute following, and the edge-invalidation walk. Editor-only — the
-//! engine never type-checks.
+//! `Graph` node-interface and port-type resolution: input/output/event arity,
+//! declared types, wildcard reroute following, and edge invalidation. Shared
+//! by compile-time validation and the editor.
 
 use hashbrown::HashSet;
 
@@ -13,8 +13,7 @@ impl Graph {
     /// The declared type of input `port`, or `None` when it can't be resolved —
     /// a boundary node (its arity mirrors the enclosing interface, with no
     /// per-port type here) or a missing func/graph. The caller treats `None` as
-    /// the polymorphic `Any`. The engine never type-checks, so only the editor
-    /// calls this.
+    /// the polymorphic `Any`.
     pub fn input_type(&self, library: &Library, port: InputPort) -> Option<DataType> {
         self.input_spec(library, port).map(|i| i.data_type.clone())
     }
@@ -37,6 +36,42 @@ impl Graph {
         inputs.get(port.port_idx)
     }
 
+    pub(crate) fn input_count(&self, node: &Node, library: &Library) -> Option<usize> {
+        match &node.kind {
+            NodeKind::Func(id) => library.by_id(id).map(|function| function.inputs.len()),
+            NodeKind::Graph(reference) => self
+                .resolve_graph(*reference, library)
+                .map(|graph| graph.inputs.len()),
+            NodeKind::Special(special) => Some(special.func().inputs.len()),
+            NodeKind::GraphInput => Some(0),
+            NodeKind::GraphOutput => Some(self.outputs.len()),
+        }
+    }
+
+    pub(crate) fn output_count(&self, node: &Node, library: &Library) -> Option<usize> {
+        match &node.kind {
+            NodeKind::Func(id) => library.by_id(id).map(|function| function.outputs.len()),
+            NodeKind::Graph(reference) => self
+                .resolve_graph(*reference, library)
+                .map(|graph| graph.outputs.len()),
+            NodeKind::Special(special) => Some(special.func().outputs.len()),
+            NodeKind::GraphInput => Some(self.inputs.len()),
+            NodeKind::GraphOutput => Some(0),
+        }
+    }
+
+    pub(crate) fn event_count(&self, node: &Node, library: &Library) -> Option<usize> {
+        match &node.kind {
+            NodeKind::Func(id) => library.by_id(id).map(|function| function.events.len()),
+            NodeKind::Graph(reference) => self
+                .resolve_graph(*reference, library)
+                .map(|graph| graph.events.len()),
+            NodeKind::Special(special) => Some(special.func().events.len()),
+            NodeKind::GraphInput => Some(1),
+            NodeKind::GraphOutput => Some(0),
+        }
+    }
+
     /// The effective type produced at output `port`, following *wildcard*
     /// outputs up the graph: a wildcard output (e.g. a passthrough / reroute —
     /// see [`OutputType::Wildcard`](crate::node::definition::OutputType))
@@ -47,8 +82,7 @@ impl Graph {
     /// (`Any`-declared) input. The walk dead-ends polymorphic (`Any`) when the
     /// mirrored input is unbound, the producer is a boundary or missing, or a
     /// binding cycle is hit. Used by the editor for port-type display, connection
-    /// compatibility, and graph-interface inference; the engine never
-    /// type-checks, so it never calls this.
+    /// compatibility, graph-interface inference, and compile-time validation.
     pub fn resolve_output_type(&self, library: &Library, port: OutputPort) -> DataType {
         self.resolve_output_type_inner(library, port, &mut HashSet::new())
     }

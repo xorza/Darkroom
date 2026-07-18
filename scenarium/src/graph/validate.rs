@@ -95,7 +95,7 @@ impl<'a> GraphChecker<'a> {
                 .with_context(|| format!("binding on missing node {:?}", destination.node_id))?;
             if let Some(library) = self.library {
                 let input_count = graph
-                    .input_count_opt(consumer, library)
+                    .input_count(consumer, library)
                     .expect("node reference resolved before binding validation");
                 ensure!(
                     destination.port_idx < input_count,
@@ -124,7 +124,7 @@ impl<'a> GraphChecker<'a> {
                 })?;
                 if let Some(library) = self.library {
                     let output_count = graph
-                        .output_count_opt(producer, library)
+                        .output_count(producer, library)
                         .expect("node reference resolved before binding validation");
                     ensure!(
                         src.port_idx < output_count,
@@ -175,7 +175,7 @@ impl<'a> GraphChecker<'a> {
             );
             if let Some(library) = self.library {
                 let event_count = graph
-                    .event_count_opt(emitter, library)
+                    .event_count(emitter, library)
                     .expect("node reference resolved before subscription validation");
                 ensure!(
                     subscription.event_idx < event_count,
@@ -193,7 +193,7 @@ impl<'a> GraphChecker<'a> {
                 .with_context(|| format!("pinned output on missing node {:?}", port.node_id))?;
             if let Some(library) = self.library {
                 let output_count = graph
-                    .output_count_opt(node, library)
+                    .output_count(node, library)
                     .expect("node reference resolved before pinned-output validation");
                 ensure!(
                     port.port_idx < output_count,
@@ -213,7 +213,7 @@ impl<'a> GraphChecker<'a> {
             })?;
             if let Some(library) = self.library {
                 let event_count = graph
-                    .event_count_opt(emitter, library)
+                    .event_count(emitter, library)
                     .expect("node reference resolved before exposed-event validation");
                 ensure!(
                     event.emitter_event_idx < event_count,
