@@ -147,10 +147,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             bindings,
         } => {
             assert!(
-                scope
-                    .graph
-                    .find_node(node_id, NodeSearch::TopLevel)
-                    .is_none(),
+                scope.graph.find(node_id, NodeSearch::TopLevel).is_none(),
                 "apply AddNode expects node to be absent"
             );
             if let Some(def) = def {
@@ -185,7 +182,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             assert!(
                 scope
                     .graph
-                    .find_node(&detached.node_id, NodeSearch::TopLevel)
+                    .find(&detached.node_id, NodeSearch::TopLevel)
                     .is_some(),
                 "apply RemoveNode expects node to be present"
             );
@@ -202,7 +199,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::RenameNode { node_id, to, .. } => {
             scope
                 .graph
-                .find_node_mut(node_id, NodeSearch::TopLevel)
+                .find_mut(node_id, NodeSearch::TopLevel)
                 .unwrap()
                 .name = to.clone();
         }
@@ -222,7 +219,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.graph.subgraphs.add((**def).clone());
             scope
                 .graph
-                .find_node_mut(node_id, NodeSearch::TopLevel)
+                .find_mut(node_id, NodeSearch::TopLevel)
                 .unwrap()
                 .kind = NodeKind::Subgraph(SubgraphRef::Local(def.id));
         }
@@ -264,10 +261,7 @@ fn set_subscription(
 /// Write one [`NodeProperty`] into its node field. Shared by `apply_graph`
 /// (writes `to`) and `revert_graph` (writes `from`).
 fn set_node_property(scope: &mut EditScope<'_>, node_id: &NodeId, prop: NodeProperty) {
-    let node = scope
-        .graph
-        .find_node_mut(node_id, NodeSearch::TopLevel)
-        .unwrap();
+    let node = scope.graph.find_mut(node_id, NodeSearch::TopLevel).unwrap();
     match prop {
         NodeProperty::Disabled(v) => node.disabled = v,
         NodeProperty::RuntimeCache(v) => node.cache = v,
@@ -366,7 +360,7 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             assert!(
                 scope
                     .graph
-                    .find_node(&detached.node_id, NodeSearch::TopLevel)
+                    .find(&detached.node_id, NodeSearch::TopLevel)
                     .is_none(),
                 "revert RemoveNode expects removed node to be absent"
             );
@@ -399,7 +393,7 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::RenameNode { node_id, from, .. } => {
             scope
                 .graph
-                .find_node_mut(node_id, NodeSearch::TopLevel)
+                .find_mut(node_id, NodeSearch::TopLevel)
                 .unwrap()
                 .name = from.clone();
         }
@@ -424,7 +418,7 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         } => {
             scope
                 .graph
-                .find_node_mut(node_id, NodeSearch::TopLevel)
+                .find_mut(node_id, NodeSearch::TopLevel)
                 .unwrap()
                 .kind = NodeKind::Subgraph(SubgraphRef::Local(*from_id));
             scope.graph.subgraphs.remove_by_key(&def.id);

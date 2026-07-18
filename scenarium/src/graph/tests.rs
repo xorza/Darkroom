@@ -47,7 +47,7 @@ fn check_rejects_node_ids_reused_across_graph_levels() {
 #[test]
 fn pinned_outputs_roundtrip_serialization() -> anyhow::Result<()> {
     let mut graph = test_graph();
-    let sum_id = graph.by_name("sum").unwrap().id;
+    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     graph.set_output_pinned(OutputPort::new(sum_id, 0), true);
 
     for format in SerdeFormat::all_formats_for_testing() {
@@ -108,7 +108,9 @@ fn cache_mode_round_trips() {
             let bytes = graph.serialize(format).unwrap();
             let back = Graph::deserialize(&bytes, format).unwrap();
             assert_eq!(
-                back.by_name("get_a").unwrap().cache,
+                back.find_by_name("get_a", NodeSearch::TopLevel)
+                    .unwrap()
+                    .cache,
                 mode,
                 "{mode:?} via {format:?}"
             );
@@ -138,7 +140,7 @@ fn new_func_node_copies_its_func_default_cache_mode() {
     let mut graph = Graph::default();
     let id = graph.add_func_node(&hot);
     assert_eq!(
-        graph.find_node(&id, NodeSearch::TopLevel).unwrap().cache,
+        graph.find(&id, NodeSearch::TopLevel).unwrap().cache,
         CacheMode::Both
     );
 
@@ -152,7 +154,7 @@ fn new_func_node_copies_its_func_default_cache_mode() {
 #[test]
 fn check_rejects_dangling_binding() {
     let mut graph = test_graph();
-    let sum_id = graph.by_name("sum").unwrap().id;
+    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     // Repoint sum's input at a node that doesn't exist.
     graph.set_input_binding(
         InputPort::new(sum_id, 0),
@@ -563,7 +565,7 @@ fn input_type_resolves_declared_types_and_skips_boundaries() {
 #[test]
 fn deserialize_rejects_corrupt_graph() {
     let mut graph = test_graph();
-    let sum_id = graph.by_name("sum").unwrap().id;
+    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     graph.set_input_binding(
         InputPort::new(sum_id, 0),
         Binding::bind(NodeId::unique(), 0),
@@ -586,11 +588,27 @@ fn deserialize_rejects_corrupt_graph() {
 fn node_remove_test() -> anyhow::Result<()> {
     let mut graph = test_graph();
 
-    let node_id = graph.by_name("sum").unwrap().id;
+    let node_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+    graph
+        .find_mut(&node_id, NodeSearch::TopLevel)
+        .unwrap()
+        .cache = CacheMode::Ram;
+    assert_eq!(
+        graph
+            .find_by_name("sum", NodeSearch::TopLevel)
+            .unwrap()
+            .cache,
+        CacheMode::Ram
+    );
+    for node in graph.nodes.values_mut() {
+        node.disabled = true;
+    }
+    assert!(graph.iter().all(|node| node.disabled));
+
     graph.set_output_pinned(OutputPort::new(node_id, 0), true);
     graph.detach_node(node_id);
 
-    assert!(graph.by_name("sum").is_none());
+    assert!(graph.find_by_name("sum", NodeSearch::TopLevel).is_none());
     assert_eq!(graph.len(), 4);
 
     // No surviving edge references the removed node (as consumer or producer).
@@ -664,9 +682,15 @@ fn binding_conversions() {
 #[test]
 fn node_bindings_yields_ports_in_order_with_none_gaps() {
     let graph = test_graph();
-    let sum_id = graph.by_name("sum").unwrap().id;
-    let get_a_id = graph.by_name("get_a").unwrap().id;
-    let get_b_id = graph.by_name("get_b").unwrap().id;
+    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+    let get_a_id = graph
+        .find_by_name("get_a", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
+    let get_b_id = graph
+        .find_by_name("get_b", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
 
     // sum has two bound inputs; ask for arity 3 to exercise the unbound gap.
     let bindings: Vec<_> = graph.node_bindings(sum_id, 3).collect();
@@ -692,8 +716,11 @@ fn node_bindings_yields_ports_in_order_with_none_gaps() {
 #[test]
 fn subscribe_unsubscribe_is_subscribed() {
     let graph = test_graph();
-    let emitter = graph.by_name("get_a").unwrap().id;
-    let sub = graph.by_name("sum").unwrap().id;
+    let emitter = graph
+        .find_by_name("get_a", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
+    let sub = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     let mut graph = graph;
 
     assert!(!graph.is_subscribed(emitter, 0, sub));
@@ -715,10 +742,16 @@ fn subscribe_unsubscribe_is_subscribed() {
 #[test]
 fn subscribers_ranges_one_emitter_event() {
     let mut graph = test_graph();
-    let emitter = graph.by_name("get_a").unwrap().id;
-    let s1 = graph.by_name("sum").unwrap().id;
-    let s2 = graph.by_name("mult").unwrap().id;
-    let other = graph.by_name("Print").unwrap().id;
+    let emitter = graph
+        .find_by_name("get_a", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
+    let s1 = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+    let s2 = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+    let other = graph
+        .find_by_name("Print", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
 
     graph.subscribe(emitter, 0, s1);
     graph.subscribe(emitter, 0, s2);
@@ -740,7 +773,7 @@ fn subscribers_ranges_one_emitter_event() {
 #[test]
 fn set_output_pinned_and_is_output_pinned() {
     let mut graph = test_graph();
-    let sum_id = graph.by_name("sum").unwrap().id;
+    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     let port = OutputPort::new(sum_id, 0);
 
     assert!(!graph.is_output_pinned(port));
@@ -760,7 +793,7 @@ fn set_output_pinned_and_is_output_pinned() {
 #[test]
 fn with_fresh_node_ids_remaps_pinned_outputs() {
     let mut graph = test_graph();
-    let sum_id = graph.by_name("sum").unwrap().id;
+    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     graph.set_output_pinned(OutputPort::new(sum_id, 0), true);
 
     let fresh = graph.with_fresh_node_ids();
@@ -773,8 +806,11 @@ fn with_fresh_node_ids_remaps_pinned_outputs() {
 #[test]
 fn wiring_snapshot_round_trips_through_restore() {
     let mut graph = test_graph();
-    let sum_id = graph.by_name("sum").unwrap().id;
-    let get_a_id = graph.by_name("get_a").unwrap().id;
+    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+    let get_a_id = graph
+        .find_by_name("get_a", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
 
     // Add a subscription that touches `sum` so both arms are exercised.
     graph.subscribe(get_a_id, 0, sum_id);
@@ -808,10 +844,7 @@ fn add_func_node_seeds_default_const_binding() {
     let id = graph.add_func_node(&func);
 
     assert_eq!(
-        graph
-            .find_node(&id, NodeSearch::TopLevel)
-            .unwrap()
-            .func_id(),
+        graph.find(&id, NodeSearch::TopLevel).unwrap().func_id(),
         Some(func.id)
     );
     assert_eq!(
@@ -853,11 +886,12 @@ fn add_subgraph_node_seeds_default_const_binding() {
 }
 
 #[test]
-fn find_node_search_scope_gates_subgraph_interiors() {
+fn node_search_scope_gates_subgraph_interiors() {
     // A top-level node plus one two-levels-deep: a local def whose
     // interior holds another local def with the target node inside.
     let mut inner_graph = Graph::default();
-    let deep = Node::new(NodeKind::Func(FuncId::unique()));
+    let mut deep = Node::new(NodeKind::Func(FuncId::unique()));
+    deep.name = "deep".to_owned();
     let deep_id = inner_graph.add(deep);
     let inner = SubgraphDef::new(SubgraphId::unique(), "Inner").graph(inner_graph);
 
@@ -866,41 +900,73 @@ fn find_node_search_scope_gates_subgraph_interiors() {
     let outer = SubgraphDef::new(SubgraphId::unique(), "Outer").graph(outer_graph);
 
     let mut graph = Graph::default();
-    let top = Node::new(NodeKind::Func(FuncId::unique()));
+    let mut top = Node::new(NodeKind::Func(FuncId::unique()));
+    top.name = "top".to_owned();
     let top_id = graph.add(top);
     graph.subgraphs.add(outer);
 
     // Top-level node: found either way.
-    assert!(graph.find_node(&top_id, NodeSearch::TopLevel).is_some());
-    assert!(graph.find_node(&top_id, NodeSearch::Recursive).is_some());
+    assert!(graph.find(&top_id, NodeSearch::TopLevel).is_some());
+    assert!(graph.find(&top_id, NodeSearch::Recursive).is_some());
+    assert_eq!(
+        graph.find_by_name("top", NodeSearch::TopLevel).unwrap().id,
+        top_id
+    );
+    assert_eq!(
+        graph.find_by_name("top", NodeSearch::Recursive).unwrap().id,
+        top_id
+    );
     // Interior node: invisible to TopLevel, found two levels down by
     // Recursive; an unknown id misses both ways.
-    assert!(graph.find_node(&deep_id, NodeSearch::TopLevel).is_none());
-    assert!(graph.find_node(&deep_id, NodeSearch::Recursive).is_some());
+    assert!(graph.find(&deep_id, NodeSearch::TopLevel).is_none());
+    assert!(graph.find(&deep_id, NodeSearch::Recursive).is_some());
+    assert!(graph.find_by_name("deep", NodeSearch::TopLevel).is_none());
+    assert_eq!(
+        graph
+            .find_by_name("deep", NodeSearch::Recursive)
+            .unwrap()
+            .id,
+        deep_id
+    );
     assert!(
         graph
-            .find_node(&NodeId::unique(), NodeSearch::Recursive)
+            .find(&NodeId::unique(), NodeSearch::Recursive)
             .is_none()
+    );
+    assert!(
+        graph
+            .find_by_name("missing", NodeSearch::Recursive)
+            .is_none()
+    );
+
+    graph
+        .find_mut(&deep_id, NodeSearch::Recursive)
+        .unwrap()
+        .name = "top".to_owned();
+    assert_eq!(
+        graph.find_by_name("top", NodeSearch::Recursive).unwrap().id,
+        top_id
     );
 
     // The mutable lookup resolves identically and its edit lands on the
     // nested node.
     graph
-        .find_node_mut(&deep_id, NodeSearch::Recursive)
+        .find_mut(&deep_id, NodeSearch::Recursive)
         .unwrap()
         .name = "renamed".to_owned();
     assert_eq!(
-        graph
-            .find_node(&deep_id, NodeSearch::Recursive)
-            .unwrap()
-            .name,
+        graph.find(&deep_id, NodeSearch::Recursive).unwrap().name,
         "renamed"
     );
-    assert!(
+    assert!(graph.find_by_name("deep", NodeSearch::Recursive).is_none());
+    assert_eq!(
         graph
-            .find_node_mut(&deep_id, NodeSearch::TopLevel)
-            .is_none()
+            .find_by_name("renamed", NodeSearch::Recursive)
+            .unwrap()
+            .id,
+        deep_id
     );
+    assert!(graph.find_mut(&deep_id, NodeSearch::TopLevel).is_none());
 }
 
 #[test]

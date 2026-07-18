@@ -58,7 +58,7 @@ pub struct BindingEntry {
 
 impl Graph {
     pub fn snapshot_node(&self, node_id: NodeId) -> Option<DetachedNode> {
-        let node = self.find_node(&node_id, NodeSearch::TopLevel)?.clone();
+        let node = self.find(&node_id, NodeSearch::TopLevel)?.clone();
         Some(DetachedNode {
             node_id,
             node,

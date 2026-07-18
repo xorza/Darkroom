@@ -439,14 +439,14 @@ fn set_node_property_commits_and_reverts() {
     // Fresh nodes default to no caching (None) and enabled.
     assert_eq!(
         doc.graph
-            .find_node(&id, NodeSearch::TopLevel)
+            .find(&id, NodeSearch::TopLevel)
             .unwrap()
             .cache,
         CacheMode::None
     );
     assert!(
         !doc.graph
-            .find_node(&id, NodeSearch::TopLevel)
+            .find(&id, NodeSearch::TopLevel)
             .unwrap()
             .disabled
     );
@@ -468,7 +468,7 @@ fn set_node_property_commits_and_reverts() {
             GraphRef::Main,
         )
         .unwrap_or_else(|| panic!("{to:?} is a real change, not a no-op"));
-        let node = doc.graph.find_node(&id, NodeSearch::TopLevel).unwrap();
+        let node = doc.graph.find(&id, NodeSearch::TopLevel).unwrap();
         match to {
             NodeProperty::RuntimeCache(m) => assert_eq!(node.cache, m),
             NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
@@ -482,7 +482,7 @@ fn set_node_property_commits_and_reverts() {
             "each toggle is its own undo entry"
         );
         revert_step(&step, &mut doc, GraphRef::Main);
-        let node = doc.graph.find_node(&id, NodeSearch::TopLevel).unwrap();
+        let node = doc.graph.find(&id, NodeSearch::TopLevel).unwrap();
         assert_eq!(node.cache, CacheMode::None, "revert restores the cache");
         assert!(!node.disabled, "revert restores the disable flag");
     }

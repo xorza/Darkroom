@@ -35,7 +35,7 @@ pub(crate) fn publish_local_def(
     let Some((local_id, mut published, existing_lib)) = (|| {
         let scope = document.scope(target)?;
         let NodeKind::Subgraph(SubgraphRef::Local(local_id)) =
-            scope.graph.find_node(&node_id, NodeSearch::TopLevel)?.kind
+            scope.graph.find(&node_id, NodeSearch::TopLevel)?.kind
         else {
             return None;
         };
@@ -171,7 +171,7 @@ fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotab
             let ItemRef::Node(nid) = key else {
                 continue;
             };
-            if let Some(node) = graph.find_node(nid, NodeSearch::TopLevel)
+            if let Some(node) = graph.find(nid, NodeSearch::TopLevel)
                 && let NodeKind::Subgraph(sref) = node.kind
                 && graph.resolve_def(sref, library).is_some()
             {

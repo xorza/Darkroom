@@ -169,7 +169,7 @@ fn graph_at<'a>(root: &'a Graph, library: &'a Library, path: &[NodeId]) -> &'a G
     let mut graph = root;
     for id in path {
         let r = graph
-            .find_node(id, NodeSearch::TopLevel)
+            .find(id, NodeSearch::TopLevel)
             .unwrap()
             .kind
             .as_subgraph()
@@ -412,7 +412,7 @@ impl<'a> Run<'a> {
     /// it ultimately fires, following composite exposed-event mappings inward.
     fn resolve_emitter(&mut self, node_id: NodeId, event_idx: usize) -> Option<(NodeId, usize)> {
         let graph = self.current();
-        let node = graph.find_node(&node_id, NodeSearch::TopLevel)?;
+        let node = graph.find(&node_id, NodeSearch::TopLevel)?;
         if node.disabled {
             return None; // a disabled node fires no events
         }
@@ -441,13 +441,13 @@ impl<'a> Run<'a> {
         let graph = self.current();
         // A disabled node runs nothing, so it receives no events.
         if graph
-            .find_node(&node_id, NodeSearch::TopLevel)
+            .find(&node_id, NodeSearch::TopLevel)
             .is_some_and(|n| n.disabled)
         {
             return;
         }
         match graph
-            .find_node(&node_id, NodeSearch::TopLevel)
+            .find(&node_id, NodeSearch::TopLevel)
             .map(|n| &n.kind)
         {
             // A special node subscribes like a func: it flattens to one leaf and
@@ -520,7 +520,7 @@ impl<'a> Run<'a> {
         let OutputPort { node_id, port_idx } = port;
         let graph = self.current();
         let node = graph
-            .find_node(&node_id, NodeSearch::TopLevel)
+            .find(&node_id, NodeSearch::TopLevel)
             .expect("binding to a missing node");
         // A disabled producer emits nothing, so its outputs have no source:
         // treat the wire as unbound (matches `emit` skipping the node).

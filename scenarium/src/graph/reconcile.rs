@@ -22,13 +22,13 @@ impl Graph {
     }
 
     fn binding_live(&self, destination: InputPort, binding: &Binding, library: &Library) -> bool {
-        self.find_node(&destination.node_id, NodeSearch::TopLevel)
+        self.find(&destination.node_id, NodeSearch::TopLevel)
             .is_some_and(|consumer| {
                 self.port_in_range(consumer, destination.port_idx, true, library)
             })
             && match binding {
                 Binding::Bind(source) => self
-                    .find_node(&source.node_id, NodeSearch::TopLevel)
+                    .find(&source.node_id, NodeSearch::TopLevel)
                     .is_some_and(|producer| {
                         self.port_in_range(producer, source.port_idx, false, library)
                     }),
@@ -37,7 +37,7 @@ impl Graph {
     }
 
     fn subscription_live(&self, subscription: &Subscription, library: &Library) -> bool {
-        match self.find_node(&subscription.emitter, NodeSearch::TopLevel) {
+        match self.find(&subscription.emitter, NodeSearch::TopLevel) {
             None => false,
             Some(emitter) => self
                 .event_count_opt(emitter, library)

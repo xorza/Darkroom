@@ -268,7 +268,7 @@ impl Scene {
                     continue;
                 }
             };
-            let Some(node) = graph.find_node(&id, NodeSearch::TopLevel) else {
+            let Some(node) = graph.find(&id, NodeSearch::TopLevel) else {
                 continue;
             };
             // A node's interface (port names + input defaults) comes from

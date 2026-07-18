@@ -66,7 +66,7 @@ pub(crate) fn build_duplicate_intent_for(
     let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
     let mut nodes = Vec::new();
     for old_id in node_ids {
-        let Some(node) = graph.find_node(old_id, NodeSearch::TopLevel) else {
+        let Some(node) = graph.find(old_id, NodeSearch::TopLevel) else {
             continue;
         };
         let new_id = NodeId::unique();

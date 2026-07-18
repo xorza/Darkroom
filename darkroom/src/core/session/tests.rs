@@ -25,7 +25,7 @@ fn apply_intents_adds_node_and_flags_reconcile() {
     let reconcile = apply_intents(&mut doc, vec![intent], &Library::default());
     assert_eq!(doc.graph.len(), 1);
     assert!(
-        doc.graph.find_node(&id, NodeSearch::TopLevel).is_some(),
+        doc.graph.find(&id, NodeSearch::TopLevel).is_some(),
         "node landed in the graph"
     );
     assert!(reconcile, "AddNode can change the interface → reconcile");

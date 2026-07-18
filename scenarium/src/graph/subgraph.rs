@@ -171,7 +171,7 @@ impl SubgraphDef {
         for event in &self.events {
             ensure!(
                 self.graph
-                    .find_node(&event.emitter, NodeSearch::TopLevel)
+                    .find(&event.emitter, NodeSearch::TopLevel)
                     .is_some(),
                 "exposed event {:?} names missing emitter {:?}",
                 event.name,

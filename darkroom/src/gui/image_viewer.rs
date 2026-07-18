@@ -379,7 +379,7 @@ impl ImageViewer {
 pub(crate) fn port_label(doc: &Document, port: PortRef) -> String {
     let name = doc
         .graph
-        .find_node(&port.node_id, NodeSearch::Recursive)
+        .find(&port.node_id, NodeSearch::Recursive)
         .map(|n| n.name.as_str())
         .filter(|n| !n.is_empty())
         .unwrap_or("image");

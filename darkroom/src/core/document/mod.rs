@@ -338,9 +338,7 @@ fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
     match tab {
         TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
         TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(&id).is_some(),
-        TabRef::ImageViewer(port) => graph
-            .find_node(&port.node_id, NodeSearch::Recursive)
-            .is_some(),
+        TabRef::ImageViewer(port) => graph.find(&port.node_id, NodeSearch::Recursive).is_some(),
     }
 }
 
@@ -895,9 +893,7 @@ mod tests {
             "copy records its library origin"
         );
         assert!(
-            doc.graph
-                .find_node(&node_id, NodeSearch::TopLevel)
-                .is_some(),
+            doc.graph.find(&node_id, NodeSearch::TopLevel).is_some(),
             "instance node added"
         );
 
@@ -907,9 +903,7 @@ mod tests {
             "undo removes the def"
         );
         assert!(
-            doc.graph
-                .find_node(&node_id, NodeSearch::TopLevel)
-                .is_none(),
+            doc.graph.find(&node_id, NodeSearch::TopLevel).is_none(),
             "undo removes the instance node"
         );
     }
@@ -965,10 +959,7 @@ mod tests {
             "the second fresh copy was dropped"
         );
         assert_eq!(
-            doc.graph
-                .find_node(&node_b, NodeSearch::TopLevel)
-                .unwrap()
-                .kind,
+            doc.graph.find(&node_b, NodeSearch::TopLevel).unwrap().kind,
             NodeKind::Subgraph(SubgraphRef::Local(def_a_id)),
             "second instance points at the first instance's local def"
         );
@@ -1002,11 +993,8 @@ mod tests {
         apply_step(&step, &mut doc, GraphRef::Main);
 
         assert_eq!(doc.graph.subgraphs.len(), 2, "fork adds a second local def");
-        let NodeKind::Subgraph(SubgraphRef::Local(new_id)) = doc
-            .graph
-            .find_node(&node_id, NodeSearch::TopLevel)
-            .unwrap()
-            .kind
+        let NodeKind::Subgraph(SubgraphRef::Local(new_id)) =
+            doc.graph.find(&node_id, NodeSearch::TopLevel).unwrap().kind
         else {
             panic!("node should still be a local subgraph");
         };
@@ -1019,11 +1007,8 @@ mod tests {
 
         revert_step(&step, &mut doc, GraphRef::Main);
         assert_eq!(doc.graph.subgraphs.len(), 1, "undo drops the fork");
-        let NodeKind::Subgraph(SubgraphRef::Local(restored)) = doc
-            .graph
-            .find_node(&node_id, NodeSearch::TopLevel)
-            .unwrap()
-            .kind
+        let NodeKind::Subgraph(SubgraphRef::Local(restored)) =
+            doc.graph.find(&node_id, NodeSearch::TopLevel).unwrap().kind
         else {
             panic!("node should still be a local subgraph");
         };
@@ -1061,10 +1046,7 @@ mod tests {
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
         assert!(
-            !doc.graph
-                .find_node(&id, NodeSearch::TopLevel)
-                .unwrap()
-                .disabled,
+            !doc.graph.find(&id, NodeSearch::TopLevel).unwrap().disabled,
             "starts enabled"
         );
 
@@ -1079,19 +1061,13 @@ mod tests {
         .expect("builds");
         apply_step(&step, &mut doc, GraphRef::Main);
         assert!(
-            doc.graph
-                .find_node(&id, NodeSearch::TopLevel)
-                .unwrap()
-                .disabled,
+            doc.graph.find(&id, NodeSearch::TopLevel).unwrap().disabled,
             "apply disables"
         );
 
         revert_step(&step, &mut doc, GraphRef::Main);
         assert!(
-            !doc.graph
-                .find_node(&id, NodeSearch::TopLevel)
-                .unwrap()
-                .disabled,
+            !doc.graph.find(&id, NodeSearch::TopLevel).unwrap().disabled,
             "revert re-enables (restores the captured `from`)"
         );
     }
@@ -1364,7 +1340,7 @@ mod tests {
         // (`for_graph` seeds one; the edit layer does the same on pin) —
         // validates and round-trips, position, slot, and all.
         let mut graph = core_test_graph();
-        let node_id = graph.by_name("sum").unwrap().id;
+        let node_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         let port = OutputPort::new(node_id, 0);
         graph.set_output_pinned(port, true);
 
@@ -1395,7 +1371,10 @@ mod tests {
         // surfaces the drift rather than letting it crash later. Pin the
         // port *after* the view was built so nothing seeds the item.
         let graph = core_test_graph();
-        let port = OutputPort::new(graph.by_name("sum").unwrap().id, 0);
+        let port = OutputPort::new(
+            graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id,
+            0,
+        );
         let mut doc: Document = graph.into();
         doc.graph.set_output_pinned(port, true);
         let err = doc.check().unwrap_err();
