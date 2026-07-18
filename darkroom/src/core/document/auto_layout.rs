@@ -46,7 +46,7 @@ impl GraphView {
         }
 
         let mut row_in_col: HashMap<u32, u32> = HashMap::new();
-        for item in self.view_items.iter_mut() {
+        for item in self.item_placements.iter_mut() {
             let ItemRef::Node(id) = item.key else {
                 continue;
             };
@@ -63,14 +63,14 @@ impl GraphView {
         // Pins read their owner's just-assigned position, so this can't
         // fold into the mutable pass above; collect first, then write.
         let pin_positions: Vec<(ItemRef, Vec2)> = self
-            .view_items
+            .item_placements
             .iter()
             .filter_map(|item| {
                 let ItemRef::Pin(port) = item.key else {
                     return None;
                 };
                 let owner = self
-                    .view_items
+                    .item_placements
                     .by_key(&ItemRef::Node(port.node_id))
                     .map(|o| o.pos)
                     .unwrap_or(AUTO_LAYOUT_ORIGIN);
@@ -79,7 +79,7 @@ impl GraphView {
             })
             .collect();
         for (key, pos) in pin_positions {
-            self.view_items.by_key_mut(&key).unwrap().pos = pos;
+            self.item_placements.by_key_mut(&key).unwrap().pos = pos;
         }
     }
 }
@@ -119,7 +119,7 @@ mod tests {
         let mut view = GraphView::for_graph(&graph);
         view.auto_layout(&graph);
 
-        let pos = |key: ItemRef| view.view_items.by_key(&key).unwrap().pos;
+        let pos = |key: ItemRef| view.item_placements.by_key(&key).unwrap().pos;
         let source_pos = pos(ItemRef::Node(source_id));
         let middle_pos = pos(ItemRef::Node(middle_id));
         let downstream_pos = pos(ItemRef::Node(downstream_id));

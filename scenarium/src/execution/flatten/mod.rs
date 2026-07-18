@@ -446,10 +446,7 @@ impl<'a> Run<'a> {
         {
             return;
         }
-        match graph
-            .find(&node_id, NodeSearch::TopLevel)
-            .map(|n| &n.kind)
-        {
+        match graph.find(&node_id, NodeSearch::TopLevel).map(|n| &n.kind) {
             // A special node subscribes like a func: it flattens to one leaf and
             // becomes the flat subscriber. `RunSinks` in particular relies on
             // this edge so the planner sees it among a fired event's subscribers.

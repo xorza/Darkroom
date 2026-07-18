@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::*;
+use crate::core::document::canvas_item_placement::CanvasItemPlacement;
 use crate::core::document::dock::DockOp;
-use crate::core::document::view_item::ViewItem;
 use crate::core::document::{Document, ItemRef, TabRef};
 use crate::core::edit::intent::apply::apply_step;
 use crate::core::edit::intent::build::build_step;
@@ -219,7 +219,7 @@ fn consecutive_moves_coalesce_keeping_first_from() {
     let mut doc: Document = test_graph().into();
     let node = doc.graph.iter().next().unwrap().id;
     let key = ItemRef::Node(node);
-    let start = doc.main_view.view_items.by_key(&key).unwrap().pos;
+    let start = doc.main_view.item_placements.by_key(&key).unwrap().pos;
     let mut stack = ActionStack::new(1 << 20);
 
     let drag_to = |stack: &mut ActionStack, doc: &mut Document, to: Vec2| {
@@ -238,7 +238,7 @@ fn consecutive_moves_coalesce_keeping_first_from() {
     // undo restores the *original* position (the first `from`)...
     assert!(stack.undo(&mut doc, &mut |_| {}));
     assert_eq!(
-        doc.main_view.view_items.by_key(&key).unwrap().pos,
+        doc.main_view.item_placements.by_key(&key).unwrap().pos,
         start,
         "one undo reverts the whole drag"
     );
@@ -249,7 +249,7 @@ fn consecutive_moves_coalesce_keeping_first_from() {
     // ...and redo replays to the last `to`.
     assert!(stack.redo(&mut doc, &mut |_| {}));
     assert_eq!(
-        doc.main_view.view_items.by_key(&key).unwrap().pos,
+        doc.main_view.item_placements.by_key(&key).unwrap().pos,
         Vec2::new(20.0, 20.0),
     );
 }
@@ -331,15 +331,17 @@ fn group_drag_moves_all_and_undoes_as_one() {
     let a = doc.graph.iter().next().unwrap().id;
     let b = doc.graph.iter().nth(1).unwrap().id;
     let (ka, kb) = (ItemRef::Node(a), ItemRef::Node(b));
-    let a0 = doc.main_view.view_items.by_key(&ka).unwrap().pos;
-    let b0 = doc.main_view.view_items.by_key(&kb).unwrap().pos;
+    let a0 = doc.main_view.item_placements.by_key(&ka).unwrap().pos;
+    let b0 = doc.main_view.item_placements.by_key(&kb).unwrap().pos;
     // A pinned-output preview joins the group too — a mixed node+pin drag,
     // like grabbing a node that's multi-selected alongside a pin.
     let port = OutputPort::new(a, 0);
     let pin = ItemRef::Pin(port);
     let pin0 = Vec2::new(100.0, -50.0);
     doc.graph.set_output_pinned(port, true);
-    doc.main_view.view_items.add(ViewItem::pin(port, pin0));
+    doc.main_view
+        .item_placements
+        .add(CanvasItemPlacement::pin(port, pin0));
     let mut stack = ActionStack::new(1 << 20);
 
     // Two frames of a group drag (grabbed = a), each frame moving a, b,
@@ -358,7 +360,7 @@ fn group_drag_moves_all_and_undoes_as_one() {
 
     // All three ended at origin + last offset.
     let item_pos = |doc: &Document, key: &ItemRef| -> Vec2 {
-        doc.main_view.view_items.by_key(key).unwrap().pos
+        doc.main_view.item_placements.by_key(key).unwrap().pos
     };
     assert_eq!(item_pos(&doc, &ka), a0 + Vec2::new(25.0, 5.0));
     assert_eq!(item_pos(&doc, &kb), b0 + Vec2::new(25.0, 5.0));

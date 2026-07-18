@@ -108,7 +108,7 @@ impl NodeUI {
         pin_ui: &mut PinUi,
         out: &mut Vec<Intent>,
     ) {
-        // Paint in `scene.z_order` (mirrored from `view_items`) — later
+        // Paint in `scene.z_order` (mirrored from `item_placements`) — later
         // draws sit on top, so the last item in the list is frontmost, and
         // a pin preview can sit above or below any node body. The order is
         // persisted view state, so a raised item stays raised across

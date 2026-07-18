@@ -135,7 +135,7 @@ impl UndoStep {
             UndoStep::Doc(DocStep::Dock { structural, .. }) => *structural,
             // Navigation only — panning, zooming, selecting, or
             // restacking is view state the user doesn't "save".
-            // Stacking order rides in `view_items` and still writes on any
+            // Stacking order rides in `item_placements` and still writes on any
             // save (like selection), but a bare restack shouldn't nag on exit.
             UndoStep::Graph(
                 GraphStep::SetSelection { .. }

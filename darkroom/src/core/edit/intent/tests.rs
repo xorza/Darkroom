@@ -5,8 +5,8 @@ use scenarium::FuncId;
 use scenarium::StaticValue;
 use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort};
 
+use crate::core::document::canvas_item_placement::CanvasItemPlacement;
 use crate::core::document::dock::DockOp;
-use crate::core::document::view_item::ViewItem;
 use crate::core::document::{Document, GraphRef, ItemRef, Viewport};
 use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
 use crate::core::edit::intent::build::build_step;
@@ -23,7 +23,9 @@ use crate::core::edit::intent::types::{
 fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
     let node = Node::new(NodeKind::Func(FuncId::unique()));
     let id = doc.graph.add(node);
-    doc.main_view.view_items.add(ViewItem::node(id, pos));
+    doc.main_view
+        .item_placements
+        .add(CanvasItemPlacement::node(id, pos));
     id
 }
 
@@ -31,7 +33,7 @@ fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
 /// (i.e. isn't pinned).
 fn pin_pos(doc: &Document, port: OutputPort) -> Option<Vec2> {
     doc.main_view
-        .view_items
+        .item_placements
         .by_key(&ItemRef::Pin(port))
         .map(|item| item.pos)
 }
@@ -39,7 +41,7 @@ fn pin_pos(doc: &Document, port: OutputPort) -> Option<Vec2> {
 /// The main view's paint-stack order, back to front.
 fn stack_order(doc: &Document) -> Vec<ItemRef> {
     doc.main_view
-        .view_items
+        .item_placements
         .iter()
         .map(|item| item.key)
         .collect()
@@ -438,18 +440,10 @@ fn set_node_property_commits_and_reverts() {
     let id = add_node_at(&mut doc, Vec2::ZERO);
     // Fresh nodes default to no caching (None) and enabled.
     assert_eq!(
-        doc.graph
-            .find(&id, NodeSearch::TopLevel)
-            .unwrap()
-            .cache,
+        doc.graph.find(&id, NodeSearch::TopLevel).unwrap().cache,
         CacheMode::None
     );
-    assert!(
-        !doc.graph
-            .find(&id, NodeSearch::TopLevel)
-            .unwrap()
-            .disabled
-    );
+    assert!(!doc.graph.find(&id, NodeSearch::TopLevel).unwrap().disabled);
 
     // Both properties ride the one `SetNodeProperty` path. A representative flip
     // each (the cache header chips: None→Both/Ram/Disk; the disable chip: →on),
@@ -555,8 +549,8 @@ fn set_output_pinned_commits_reverts_and_no_ops() {
     // Bury the pin's widget at the *bottom* of the stack and give it a
     // real position, so the unpin→revert round-trip below has a
     // non-default slot and position to prove it restores.
-    doc.main_view.view_items.by_key_mut(&key).unwrap().pos = Vec2::new(40.0, -30.0);
-    doc.main_view.view_items.move_to_index(&key, 0);
+    doc.main_view.item_placements.by_key_mut(&key).unwrap().pos = Vec2::new(40.0, -30.0);
+    doc.main_view.item_placements.move_to_index(&key, 0);
     assert_eq!(stack_order(&doc), vec![key, ItemRef::Node(id)]);
 
     // Selecting the pin, then unpinning it, drops the selection — its
@@ -702,7 +696,7 @@ fn move_selection_repositions_a_pin_commits_reverts_and_coalesces() {
 
     // Dragging to the exact position it already holds is a no-op.
     doc.main_view
-        .view_items
+        .item_placements
         .by_key_mut(&ItemRef::Pin(port))
         .unwrap()
         .pos = Vec2::new(1.0, 2.0);
@@ -751,8 +745,8 @@ fn removing_a_node_captures_and_restores_its_pins() {
         GraphRef::Main,
     )
     .expect("pinning is a real change");
-    doc.main_view.view_items.by_key_mut(&key).unwrap().pos = Vec2::new(7.0, 8.0);
-    doc.main_view.view_items.move_to_index(&key, 1);
+    doc.main_view.item_placements.by_key_mut(&key).unwrap().pos = Vec2::new(7.0, 8.0);
+    doc.main_view.item_placements.move_to_index(&key, 1);
     doc.main_view.selected.insert(key);
     let expected = vec![ItemRef::Node(a), key, ItemRef::Node(b)];
     assert_eq!(stack_order(&doc), expected);
@@ -806,7 +800,7 @@ fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
         "seed order is insertion order"
     );
 
-    // Raise `a` (the back node) to the top — the end of `view_items`,
+    // Raise `a` (the back node) to the top — the end of `item_placements`,
     // painted last and so drawn in front.
     let step = commit_intent(Intent::Raise { key: a }, &mut doc, GraphRef::Main)
         .expect("raising a back node is a real reorder");

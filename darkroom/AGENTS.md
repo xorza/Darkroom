@@ -58,7 +58,7 @@ Root holds the entry point; implementation is grouped by responsibility:
   `prefs` / `edit` / `shell`; `mod.rs` is the dispatcher).
 - **`core/worker.rs`** — `WorkerBridge`: tokio worker + result channel.
 - **`core/document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
-  `EditScope`), `view_item.rs` (node/pin position and paint-stack records).
+  `EditScope`), `canvas_item_placement.rs` (node/pin position and paint-stack records).
 - **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
   `action_stack/` (packed undo history), `reconcile/` (derived subgraph-
   interface reconciliation).
@@ -152,8 +152,8 @@ Everything else is editor view-state, split per graph:
 
 - **`GraphRef`** — `Main` (root graph) or `Local(SubgraphId)` (a subgraph
   interior). The active-graph handle threaded through the whole edit pipeline.
-- **`GraphView`** — per-graph view metadata: `view_items`
-  (`KeyIndexVec<ItemRef, ViewItem>` of node-body and pinned-output
+- **`GraphView`** — per-graph view metadata: `item_placements`
+  (`KeyIndexVec<ItemRef, CanvasItemPlacement>` of node-body and pinned-output
   preview positions whose *order* is the shared paint stack — later items
   draw in front, `Intent::Raise` lifts either kind; `check()` asserts one
   `Node` item per graph node and one `Pin` item per pinned output),

@@ -73,7 +73,7 @@ pub(crate) fn build_duplicate_intent_for(
         id_map.insert(*old_id, new_id);
         let clone = node.clone();
         let pos = view
-            .view_items
+            .item_placements
             .by_key(&ItemRef::Node(*old_id))
             .expect("view holds a position for every graph node")
             .pos

@@ -17,13 +17,13 @@ use crate::gui::run_state::{ExecStatus, RunState};
 
 #[derive(Debug, Default)]
 pub(crate) struct Scene {
-    /// The shared paint stack, mirrored from `GraphView::view_items` order:
+    /// The shared paint stack, mirrored from `GraphView::item_placements` order:
     /// node bodies and pinned-output previews interleaved, later entries
     /// drawn in front. The canvas draw pass iterates this and dispatches on
     /// the key kind; everything else looks items up through `nodes`.
     pub z_order: Vec<ItemRef>,
     /// Keyed node projections (`by_key` is O(1)). Iteration order mirrors
-    /// the node items' relative order in `view_items`, but the paint pass
+    /// the node items' relative order in `item_placements`, but the paint pass
     /// walks [`Self::z_order`], not this.
     pub nodes: KeyIndexVec<NodeId, SceneNode>,
     pub connections: Vec<SceneConnection>,
@@ -125,7 +125,7 @@ pub(crate) struct SceneOutput {
     /// canvas-world coordinates — `Some` iff this output is pinned
     /// (kept computed and read even with no in-graph consumer — see
     /// [`scenarium::Graph::is_output_pinned`]). Mirrors the port's
-    /// `GraphView::view_items` entry, which exists exactly while pinned,
+    /// `GraphView::item_placements` entry, which exists exactly while pinned,
     /// so pinned-ness and position can't desync.
     pub pin_position: Option<Vec2>,
 }
@@ -258,7 +258,7 @@ impl Scene {
         self.events.clear();
         self.value_variants_pool.clear();
 
-        for item in view.view_items.iter() {
+        for item in view.item_placements.iter() {
             let id = match item.key {
                 ItemRef::Node(id) => id,
                 ItemRef::Pin(_) => {
@@ -446,7 +446,7 @@ impl Scene {
                             OutputType::Fixed(dt) => dt.clone(),
                         },
                         pin_position: view
-                            .view_items
+                            .item_placements
                             .by_key(&ItemRef::Pin(OutputPort::new(id, i)))
                             .map(|item| item.pos),
                     }),
@@ -921,7 +921,7 @@ mod tests {
 
         let mut view = GraphView::for_graph(&graph);
         let pin_key = ItemRef::Pin(port);
-        view.view_items.by_key_mut(&pin_key).unwrap().pos = Vec2::new(320.0, -40.0);
+        view.item_placements.by_key_mut(&pin_key).unwrap().pos = Vec2::new(320.0, -40.0);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
         scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
@@ -938,7 +938,7 @@ mod tests {
             "only the pinned port carries a position, projected from its item"
         );
 
-        // The shared paint stack mirrors `view_items` order — node then
+        // The shared paint stack mirrors `item_placements` order — node then
         // pin here (`for_graph` seeds pins after nodes)...
         assert_eq!(
             scene.z_order,
@@ -947,7 +947,7 @@ mod tests {
         );
 
         // ...and a reorder (pin buried beneath the node) projects verbatim.
-        view.view_items.move_to_index(&pin_key, 0);
+        view.item_placements.move_to_index(&pin_key, 0);
         scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
         assert_eq!(
             scene.z_order,

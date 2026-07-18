@@ -101,8 +101,8 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             let detached = graph.snapshot_node(node_id)?;
             // The node's own item plus its pinned outputs', each with its
             // paint-stack slot — ascending by construction (enumerate).
-            let view_items = view
-                .view_items
+            let item_placements = view
+                .item_placements
                 .iter()
                 .enumerate()
                 .filter(|(_, item)| item.key.belongs_to(node_id))
@@ -116,7 +116,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
                 .collect();
             GraphStep::RemoveNode {
                 detached,
-                view_items,
+                item_placements,
                 selected,
             }
         }
@@ -126,17 +126,14 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             let moves = moves
                 .into_iter()
                 .filter_map(|(key, to)| {
-                    let item = view.view_items.by_key(&key)?;
+                    let item = view.item_placements.by_key(&key)?;
                     Some((key, item.pos, to))
                 })
                 .collect();
             GraphStep::MoveSelection { grabbed, moves }
         }
         Intent::RenameNode { node_id, to } => GraphStep::RenameNode {
-            from: graph
-                .find(&node_id, NodeSearch::TopLevel)?
-                .name
-                .clone(),
+            from: graph.find(&node_id, NodeSearch::TopLevel)?.name.clone(),
             node_id,
             to,
         },
@@ -153,9 +150,9 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             to,
         },
         Intent::Raise { key } => {
-            let from_index = view.view_items.index_of_key(&key)?;
+            let from_index = view.item_placements.index_of_key(&key)?;
             // Top of the stack is the last slot — painted last, drawn in front.
-            let to_index = view.view_items.len() - 1;
+            let to_index = view.item_placements.len() - 1;
             GraphStep::Raise {
                 key,
                 from_index,
@@ -227,9 +224,9 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             // Present iff currently pinned; captured so reverting an unpin
             // puts the widget back in its exact paint-stack slot.
             let prior_slot = view
-                .view_items
+                .item_placements
                 .index_of_key(&key)
-                .map(|slot| (slot, view.view_items[slot].pos));
+                .map(|slot| (slot, view.item_placements[slot].pos));
             GraphStep::SetOutputPinned {
                 output,
                 from: graph.is_output_pinned(output),

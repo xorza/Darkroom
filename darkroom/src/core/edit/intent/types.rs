@@ -18,8 +18,8 @@ use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, OutputPort, Subscri
 use scenarium::{DetachedNode, SubgraphDef, SubgraphId};
 use serde::{Deserialize, Serialize};
 
+use crate::core::document::canvas_item_placement::CanvasItemPlacement;
 use crate::core::document::dock::{DockLayout, DockOp, DockPath};
-use crate::core::document::view_item::ViewItem;
 use crate::core::document::{BoundarySide, ItemRef, Viewport};
 
 /// One scalar node property an editor can toggle — the payload of
@@ -117,10 +117,10 @@ pub(crate) enum Intent {
         to: BTreeSet<ItemRef>,
     },
     /// Lift an item — a node body or a pinned output's preview widget —
-    /// to the top of its graph's paint stack: the end of `view_items`,
+    /// to the top of its graph's paint stack: the end of `item_placements`,
     /// which is drawn last and so sits in front. Emitted when either kind
     /// is clicked or grabbed, so clicking brings it forward. The stack
-    /// order lives in `view_items`, so it persists across save/load and
+    /// order lives in `item_placements`, so it persists across save/load and
     /// tab switches and walks with undo/redo — unlike the transient
     /// selection-recency stack it replaced.
     Raise {
@@ -248,7 +248,7 @@ pub(crate) enum GraphStep {
         /// undo restores positions, pins, *and* stacking exactly
         /// (re-inserting in ascending order reproduces the original
         /// interleaving).
-        view_items: Vec<(usize, ViewItem)>,
+        item_placements: Vec<(usize, CanvasItemPlacement)>,
         /// The selection members that lived on this node (its own key +
         /// any pinned-output keys) — removal prunes them, undo re-adds.
         selected: Vec<ItemRef>,
@@ -275,7 +275,7 @@ pub(crate) enum GraphStep {
         from: BTreeSet<ItemRef>,
         to: BTreeSet<ItemRef>,
     },
-    /// Reorder within `view_items` to raise an item (node body or pin
+    /// Reorder within `item_placements` to raise an item (node body or pin
     /// preview) to the top of the paint stack. `from_index`/`to_index` are
     /// its slot before/after the raise, so apply slides it to `to_index`
     /// and revert slides it back — a stable reorder that leaves every
