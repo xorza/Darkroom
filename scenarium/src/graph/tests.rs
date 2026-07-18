@@ -90,7 +90,7 @@ fn check_accepts_reusable_graph_while_compile_check_rejects_it_as_entry() {
 }
 
 #[test]
-fn check_for_execution_rejects_recursive_shared_graph() {
+fn check_for_execution_validates_shared_graph_structure_and_recursion() {
     let graph_id = GraphId::unique();
     let mut shared = Graph::new("recursive");
     shared.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
@@ -103,6 +103,20 @@ fn check_for_execution_rejects_recursive_shared_graph() {
 
     let error = graph.check_for_execution(&library).unwrap_err().to_string();
     assert!(error.contains("recursive"));
+
+    let graph_id = GraphId::unique();
+    let mut shared = Graph::new("structurally invalid");
+    shared.add(Node::new(NodeKind::GraphInput));
+    shared.add(Node::new(NodeKind::GraphInput));
+
+    let mut library = Library::default();
+    library.insert_graph(graph_id, shared);
+
+    let mut graph = Graph::default();
+    graph.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
+
+    let error = graph.check_for_execution(&library).unwrap_err().to_string();
+    assert!(error.contains("at most one GraphInput"));
 }
 
 #[test]
@@ -1108,16 +1122,28 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
         .collect();
     let (a, b, c, d, e) = (ids[0], ids[1], ids[2], ids[3], ids[4]);
     let ghost = NodeId::unique();
+    graph.inputs.push(FuncInput::optional("in", DataType::Int));
+    graph.outputs.push(FuncOutput::new("out", DataType::Int));
+    let graph_input = graph.add(Node::new(NodeKind::GraphInput));
+    let graph_output = graph.add(Node::new(NodeKind::GraphOutput));
 
     graph.set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0)); // fully valid
     graph.set_input_binding(InputPort::new(c, 5), Binding::bind(a, 0)); // consumer input out of range
     graph.set_input_binding(InputPort::new(d, 0), Binding::bind(a, 9)); // producer output out of range
     graph.set_input_binding(InputPort::new(e, 0), Binding::bind(ghost, 0)); // producer node gone
     graph.set_input_binding(InputPort::new(ghost, 0), Binding::bind(a, 0)); // consumer node gone
+    graph.set_input_binding(
+        InputPort::new(graph_output, 0),
+        Binding::bind(graph_input, 0),
+    );
+    graph.set_input_binding(
+        InputPort::new(graph_output, 1),
+        Binding::bind(graph_input, 0),
+    );
 
     let removed = graph.prune_dangling_wiring(&library);
     assert_eq!(
-        removed, 4,
+        removed, 5,
         "every dangling binding drops, the valid one stays"
     );
     assert!(matches!(
@@ -1132,6 +1158,14 @@ fn prune_bindings_drops_out_of_range_and_missing_endpoints() {
     ] {
         assert!(matches!(graph.input_binding(dead), Binding::None));
     }
+    assert!(matches!(
+        graph.input_binding(InputPort::new(graph_output, 0)),
+        Binding::Bind(_)
+    ));
+    assert!(matches!(
+        graph.input_binding(InputPort::new(graph_output, 1)),
+        Binding::None
+    ));
 
     // Const bindings are never structurally dangling — kept regardless.
     graph.set_input_binding(
