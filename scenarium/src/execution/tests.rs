@@ -2829,7 +2829,7 @@ mod composite_behavior {
         FuncOutput::new(name, DataType::Int)
     }
 
-    /// A subgraph def with no inputs and one output, whose interior is the
+    /// A graph with no inputs and one output, whose interior is the
     /// impure `get_b` (named `inner_name`) feeding `GraphOutput[0]`.
     fn impure_output_def(library: &Library, name: &str, inner_name: &str) -> Graph {
         let inner = func_node(library, "get_b", inner_name);
@@ -2884,7 +2884,7 @@ mod composite_behavior {
     }
 
     #[test]
-    fn update_rejects_func_missing_inside_subgraph() {
+    fn update_rejects_func_missing_inside_graph() {
         // The check descends composites: a func only the *interior*
         // references, absent from the lib, is still caught.
         let library = test_func_lib(TestFuncHooks::default());
@@ -2925,12 +2925,12 @@ mod composite_behavior {
         );
     }
 
-    /// A node seed can target a *subgraph-interior* node by its authoring id: the seed
+    /// A node seed can target a *graph-interior* node by its authoring id: the seed
     /// resolves through the flatten map (interior flat ids are hashed from the descent
     /// path), runs just that node, and its value reads back under the same authoring id.
     /// The sink `print` (panicking hook) never fires.
     #[tokio::test]
-    async fn seeding_a_subgraph_interior_node_runs_only_it() {
+    async fn seeding_a_graph_interior_node_runs_only_it() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         let get_b_calls = Arc::new(AtomicUsize::new(0));
@@ -4528,7 +4528,7 @@ mod topology {
     }
 }
 
-mod subgraph {
+mod graph {
     use super::*;
     use crate::graph::NodeKind;
     use crate::graph::Graph;
@@ -4773,7 +4773,7 @@ mod subgraph {
     /// The `FlattenMap` maps a flattened interior node back to the
     /// editor's authoring ids: `attribution` yields the node's own id
     /// inside the def's graph, then each enclosing composite instance.
-    /// This is what lets the editor show per-node stats inside a subgraph
+    /// This is what lets the editor show per-node stats inside a graph
     /// and accumulate them onto the instance node.
     #[test]
     fn flatten_map_attributes_interior_to_authoring_ids() {
@@ -5427,7 +5427,7 @@ mod compile_regressions {
         );
     }
 
-    /// Inspecting a node *inside* a subgraph goes by its authoring id — the flat id
+    /// Inspecting a node *inside* a graph goes by its authoring id — the flat id
     /// is hashed from the descent path, so the query must resolve through the
     /// flatten map instead of missing and silently returning nothing.
     #[tokio::test(flavor = "multi_thread")]

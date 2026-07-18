@@ -39,8 +39,8 @@ impl UndoStep {
         UndoStep::Doc(
             DocStep::Dock { .. }
             | DocStep::RenameBoundaryPort { .. }
-            // Subgraph rename changes the tab-strip label's width.
-            | DocStep::RenameSubgraph { .. },
+            // Graph rename changes the tab-strip label's width.
+            | DocStep::RenameGraph { .. },
         ) => true,
         UndoStep::Graph(g) => match g {
             GraphStep::AddNode { .. }
@@ -50,7 +50,7 @@ impl UndoStep {
             // Forks an identical-interface def, so the node doesn't
             // resize — but it's a structural edit and rare, so eat one
             // relayout rather than reason about it staying in lockstep.
-            | GraphStep::DetachSubgraph { .. } => true,
+            | GraphStep::DetachGraph { .. } => true,
             // A pin-only drag repositions a decoration drawn past the
             // node's own rect — no remeasure, same as a viewport pan. A
             // node move (alone or as part of a mixed group drag) does need
@@ -87,7 +87,7 @@ impl UndoStep {
     }
     }
 
-    /// Whether applying this step can change a subgraph's *derived interface*
+    /// Whether applying this step can change a graph's *derived interface*
     /// (`def.inputs`/`def.outputs`), so `reconcile_boundaries` must rerun
     /// before the next scene rebuild. Only interior boundary wiring and
     /// instance bindings feed that derivation, so any edit that touches a
@@ -103,7 +103,7 @@ impl UndoStep {
                 | GraphStep::RemoveNode { .. }
                 | GraphStep::DuplicateNodes { .. }
                 | GraphStep::SetInput { .. }
-                | GraphStep::DetachSubgraph { .. },
+                | GraphStep::DetachGraph { .. },
             ) => true,
             UndoStep::Graph(
                 GraphStep::MoveSelection { .. }
@@ -112,7 +112,7 @@ impl UndoStep {
                 | GraphStep::Raise { .. }
                 | GraphStep::SetNodeProperty { .. }
                 | GraphStep::SetViewport { .. }
-                // Subscriptions don't feed a subgraph's derived interface.
+                // Subscriptions don't feed a graph's derived interface.
                 | GraphStep::SetSubscription { .. }
                 // Nor does pinning an output — it's not wiring at all.
                 | GraphStep::SetOutputPinned { .. },
@@ -151,11 +151,11 @@ impl UndoStep {
                 | GraphStep::RenameNode { .. }
                 | GraphStep::SetInput { .. }
                 | GraphStep::SetNodeProperty { .. }
-                | GraphStep::DetachSubgraph { .. }
+                | GraphStep::DetachGraph { .. }
                 | GraphStep::SetSubscription { .. }
                 | GraphStep::SetOutputPinned { .. },
             )
-            | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameSubgraph { .. }) => {
+            | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameGraph { .. }) => {
                 true
             }
         }
@@ -185,11 +185,11 @@ impl UndoStep {
                 | GraphStep::SetSelection { .. }
                 | GraphStep::Raise { .. }
                 | GraphStep::SetNodeProperty { .. }
-                | GraphStep::DetachSubgraph { .. }
+                | GraphStep::DetachGraph { .. }
                 | GraphStep::SetSubscription { .. }
                 | GraphStep::SetOutputPinned { .. },
             )
-            | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameSubgraph { .. }) => {
+            | UndoStep::Doc(DocStep::RenameBoundaryPort { .. } | DocStep::RenameGraph { .. }) => {
                 None
             }
         }
@@ -269,7 +269,7 @@ impl GraphStep {
         match self {
             GraphStep::AddNode { .. }
             | GraphStep::RemoveNode { .. }
-            | GraphStep::DetachSubgraph { .. } => false,
+            | GraphStep::DetachGraph { .. } => false,
             GraphStep::DuplicateNodes { nodes, .. } => nodes.is_empty(),
             GraphStep::MoveSelection { moves, .. } => moves.iter().all(|(_, from, to)| from == to),
             GraphStep::RenameNode { from, to, .. } => from == to,
@@ -299,7 +299,7 @@ impl DocStep {
             // activation, a refused close/move, an unchanged ratio.
             DocStep::Dock { from, to, .. } => from == to,
             DocStep::RenameBoundaryPort { from, to, .. } => from == to,
-            DocStep::RenameSubgraph { from, to, .. } => from == to,
+            DocStep::RenameGraph { from, to, .. } => from == to,
         }
     }
 }

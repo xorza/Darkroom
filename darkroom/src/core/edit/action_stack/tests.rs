@@ -8,16 +8,16 @@ use crate::core::edit::intent::apply::apply_step;
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::Intent;
 use scenarium::NodeSearch;
-use scenarium::SubgraphId;
+use scenarium::GraphId;
 use scenarium::testing::test_graph;
 
 /// Three tabs with distinct `Local` targets in the primary group so an
 /// activation/close at a given index is observable. Dock steps are
 /// document-global (they only touch the layout, never resolve a graph),
-/// so the fabricated subgraph ids need no backing graph.
+/// so the fabricated graph ids need no backing graph.
 fn doc_with_distinct_tabs() -> Document {
-    let a: SubgraphId = "11111111-1111-1111-1111-111111111111".into();
-    let b: SubgraphId = "22222222-2222-2222-2222-222222222222".into();
+    let a: GraphId = "11111111-1111-1111-1111-111111111111".into();
+    let b: GraphId = "22222222-2222-2222-2222-222222222222".into();
     let mut doc: Document = test_graph().into();
     let primary = doc.layout.primary().id;
     doc.layout
@@ -410,7 +410,7 @@ fn consecutive_closes_do_not_coalesce() {
 
     close_at(&mut stack, &mut doc, 2);
     close_at(&mut stack, &mut doc, 1);
-    assert_eq!(primary_tabs(&doc).len(), 1, "both subgraph tabs closed");
+    assert_eq!(primary_tabs(&doc).len(), 1, "both graph tabs closed");
 
     stack.undo(&mut doc, &mut |_| {});
     assert_eq!(primary_tabs(&doc).len(), 2, "first undo restores one tab");
@@ -469,20 +469,20 @@ fn history_bounded_by_byte_budget() {
     );
 }
 
-/// A document carrying a subgraph def "S" with interface inputs
+/// A document carrying a graph "S" with interface inputs
 /// `[A]` and outputs `[R]`, plus that `Local` target.
 fn doc_with_def() -> (Document, GraphRef) {
     use scenarium::DataType;
-    use scenarium::SubgraphDef;
+    use scenarium::Graph;
     use scenarium::{FuncInput, FuncOutput};
 
     let mut doc: Document = test_graph().into();
-    let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000bb", "S")
-        .category("Subgraph")
+    let id: GraphId = "00000000-0000-0000-0000-0000000000bb".into();
+    let def = Graph::new("S")
+        .category("Graph")
         .input(FuncInput::optional("A", DataType::Int))
         .output(FuncOutput::new("R", DataType::Int));
-    let id = def.id;
-    doc.graph.subgraphs.add(def);
+    doc.graph.insert_graph(id, def);
     (doc, GraphRef::Local(id))
 }
 
@@ -508,13 +508,13 @@ fn rename_boundary_port_applies_and_reverts() {
 
     apply_step(&step, &mut doc, target);
     assert_eq!(
-        doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[0].name,
+        doc.graph.graphs.get(&def_id).unwrap().inputs[0].name,
         "alpha"
     );
 
     revert_step(&step, &mut doc, target);
     assert_eq!(
-        doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[0].name,
+        doc.graph.graphs.get(&def_id).unwrap().inputs[0].name,
         "A",
         "revert restores the captured `from` name"
     );
@@ -540,7 +540,7 @@ fn rename_boundary_port_renames_outputs_side() {
     .unwrap();
     apply_step(&step, &mut doc, target);
     assert_eq!(
-        doc.graph.subgraphs.by_key(&def_id).unwrap().outputs[0].name,
+        doc.graph.graphs.get(&def_id).unwrap().outputs[0].name,
         "result"
     );
 }
@@ -584,15 +584,15 @@ fn rename_undo_survives_interface_compaction() {
     use crate::core::edit::intent::apply::revert_step;
     use scenarium::DataType;
     use scenarium::FuncInput;
-    use scenarium::SubgraphDef;
+    use scenarium::Graph;
 
     let finput = |n: &str| FuncInput::optional(n, DataType::Int);
     let mut doc: Document = test_graph().into();
-    let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000cc", "S")
-        .category("Subgraph")
+    let def_id: GraphId = "00000000-0000-0000-0000-0000000000cc".into();
+    let def = Graph::new("S")
+        .category("Graph")
         .inputs([finput("A"), finput("B")]);
-    let def_id = def.id;
-    doc.graph.subgraphs.add(def);
+    doc.graph.insert_graph(def_id, def);
     let target = GraphRef::Local(def_id);
 
     // Rename inputs[1] "B" -> "beta".
@@ -608,20 +608,20 @@ fn rename_undo_survives_interface_compaction() {
     .unwrap();
     apply_step(&step, &mut doc, target);
     assert_eq!(
-        doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[1].name,
+        doc.graph.graphs.get(&def_id).unwrap().inputs[1].name,
         "beta"
     );
 
     // Simulate `reconcile_boundaries` compacting after input 0 ("A")
     // was disconnected: the survivor "beta" shifts from index 1 to 0.
     doc.graph
-        .subgraphs
-        .by_key_mut(&def_id)
+        .graphs
+        .get_mut(&def_id)
         .unwrap()
         .inputs
         .remove(0);
     assert_eq!(
-        doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[0].name,
+        doc.graph.graphs.get(&def_id).unwrap().inputs[0].name,
         "beta"
     );
 
@@ -630,7 +630,7 @@ fn rename_undo_survives_interface_compaction() {
     // the wrong slot.
     revert_step(&step, &mut doc, target);
     assert_eq!(
-        doc.graph.subgraphs.by_key(&def_id).unwrap().inputs[0].name,
+        doc.graph.graphs.get(&def_id).unwrap().inputs[0].name,
         "B"
     );
 }

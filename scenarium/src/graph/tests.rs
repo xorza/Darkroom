@@ -67,6 +67,19 @@ fn check_passes_for_valid_graph() {
 }
 
 #[test]
+fn check_accepts_reusable_graph_while_compile_check_rejects_it_as_entry() {
+    let mut graph = Graph::new("reusable")
+        .input(FuncInput::optional("value", DataType::Int))
+        .output(FuncOutput::new("result", DataType::Int));
+    graph.add(Node::new(NodeKind::GraphInput));
+    graph.add(Node::new(NodeKind::GraphOutput));
+
+    assert!(graph.check().is_ok());
+    let error = graph.check_with(&Default::default()).unwrap_err();
+    assert!(error.to_string().contains("entry graph"));
+}
+
+#[test]
 fn cache_mode_bits_and_from_bits_round_trip() {
     // The two storage bits, hand-tabulated per mode, plus `from_bits` as their inverse.
     let table = [

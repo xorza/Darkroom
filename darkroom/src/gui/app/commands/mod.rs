@@ -1,9 +1,9 @@
-//! [`AppCommand`] handling: file / subgraph / run / preferences / edit / shell
+//! [`AppCommand`] handling: file / graph / run / preferences / edit / shell
 //! side effects. Commands are produced by action input, which Aperture exposes
 //! only to the first record pass, so handlers can run directly after authoring.
 //!
 //! [`App::handle_command`] is a thin dispatcher — each top-level command group
-//! resolves to one submodule's `impl App` block (`file`, `subgraph`, `run`,
+//! resolves to one submodule's `impl App` block (`file`, `graph`, `run`,
 //! `prefs`, `edit`, `shell`). The commands are cross-subsystem coordination
 //! (they bridge `Document` / `Engine` / `Preferences` / dialogs), which is why
 //! they live on `App` rather than any one owner; the split is by concern.
@@ -17,24 +17,24 @@ pub(crate) mod file;
 pub(crate) mod prefs;
 pub(crate) mod run;
 pub(crate) mod shell;
-pub(crate) mod subgraph;
+pub(crate) mod graph;
 
 use edit::EditCommand;
 use file::FileCommand;
 use prefs::PrefsCommand;
 use run::RunCommand;
 use shell::ShellCommand;
-use subgraph::SubgraphCommand;
+use graph::GraphCommand;
 
 /// A command a UI surface (the menu bar, the graph toolbar, the Preferences
-/// tab, a node's S-badge, an inline path-picker) hands to [`App`]. The producing
+/// tab, a node's G-badge, an inline path-picker) hands to [`App`]. The producing
 /// UI never touches `Document` / `Theme` / `Engine` directly.
 #[derive(Clone, Debug)]
 pub(crate) enum AppCommand {
     /// Document file lifecycle — [`file`].
     File(FileCommand),
-    /// Subgraph → library publishing — [`subgraph`].
-    Subgraph(SubgraphCommand),
+    /// Graph → library publishing — [`graph`].
+    Graph(GraphCommand),
     /// Graph execution + worker event loop — [`run`].
     Run(RunCommand),
     /// Preferences edits — [`prefs`].
@@ -50,7 +50,7 @@ impl App {
     pub(crate) fn handle_command(&mut self, ui: &mut Ui, command: AppCommand) {
         match command {
             AppCommand::File(c) => self.handle_file(c),
-            AppCommand::Subgraph(c) => self.handle_subgraph(c),
+            AppCommand::Graph(c) => self.handle_graph(c),
             AppCommand::Run(c) => self.handle_run(c),
             AppCommand::Prefs(c) => self.handle_prefs(ui, c),
             AppCommand::Edit(c) => self.handle_edit(c),
