@@ -182,7 +182,7 @@ fn invalid_viewports_are_dropped_before_mutation() {
         "a finite positive viewport must commit"
     );
     assert_eq!(doc.main_view.viewport, valid);
-    doc.validate();
+    doc.debug_check();
 }
 
 #[test]
@@ -782,7 +782,7 @@ fn removing_a_node_captures_and_restores_its_pins() {
         doc.main_view.selected.contains(&key),
         "undo restores the pin's selection membership"
     );
-    doc.validate();
+    doc.debug_check();
 }
 
 #[test]

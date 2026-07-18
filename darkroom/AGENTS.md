@@ -58,7 +58,8 @@ Root holds the entry point; implementation is grouped by responsibility:
   `prefs` / `edit` / `shell`; `mod.rs` is the dispatcher).
 - **`core/worker.rs`** — `WorkerBridge`: tokio worker + result channel.
 - **`core/document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
-  `EditScope`), `canvas_item_placement.rs` (node/pin position and paint-stack records).
+  `EditScope`), `validate.rs` (document/view structural validation),
+  `canvas_item_placement.rs` (node/pin position and paint-stack records).
 - **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
   `action_stack/` (packed undo history), `reconcile/` (derived graph-
   interface reconciliation).
@@ -145,7 +146,7 @@ One record pass:
    inspector chip toggles) and a `MenuCommand` may surface.
 9. **drain (post-record)** + relayout request as needed.
 
-### Source of truth: `Document` (`src/document/mod.rs`)
+### Source of truth: `Document` (`src/core/document/mod.rs`)
 The serialized, undoable unit. The graph *data* is one `scenarium::Graph`
 (`graph`), which already nests local graphs recursively.
 Everything else is editor view-state, split per graph:
