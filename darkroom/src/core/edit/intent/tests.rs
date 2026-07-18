@@ -22,8 +22,7 @@ use crate::core::edit::intent::types::{
 /// `pos`, returning its id.
 fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
     let node = Node::new(NodeKind::Func(FuncId::unique()));
-    let id = node.id;
-    doc.graph.add(node);
+    let id = doc.graph.add(node);
     doc.main_view.view_items.add(ViewItem::node(id, pos));
     id
 }
@@ -301,15 +300,18 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     assert_eq!(nodes.len(), 2, "both selected nodes cloned");
     assert!(subscriptions.is_empty());
     // Fresh ids, offset positions.
-    let new_ids: BTreeSet<ItemRef> = nodes.iter().map(|(_, n)| ItemRef::Node(n.id)).collect();
+    let new_ids: BTreeSet<ItemRef> = nodes
+        .iter()
+        .map(|(_, node_id, _)| ItemRef::Node(*node_id))
+        .collect();
     assert!(
         new_ids.is_disjoint(&doc.main_view.selected),
         "clones get fresh ids"
     );
     let a_clone = nodes
         .iter()
-        .find(|(pos, _)| *pos == Vec2::new(0.0, 0.0) + DUPLICATE_OFFSET)
-        .map(|(_, n)| n.id)
+        .find(|(pos, _, _)| *pos == Vec2::new(0.0, 0.0) + DUPLICATE_OFFSET)
+        .map(|(_, node_id, _)| *node_id)
         .expect("a's clone offset from its origin");
 
     // Exactly two bindings survive: the internal a'->b' edge and the
@@ -317,8 +319,8 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     assert_eq!(bindings.len(), 2);
     let b_clone = nodes
         .iter()
-        .find(|(pos, _)| *pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
-        .map(|(_, n)| n.id)
+        .find(|(pos, _, _)| *pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
+        .map(|(_, node_id, _)| *node_id)
         .unwrap();
     let internal = bindings
         .iter()
@@ -357,8 +359,8 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     assert_eq!(incoming.len(), 3, "internal + const + kept external");
     let b_clone2 = incoming_nodes
         .iter()
-        .find(|(pos, _)| *pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
-        .map(|(_, n)| n.id)
+        .find(|(pos, _, _)| *pos == Vec2::new(100.0, 0.0) + DUPLICATE_OFFSET)
+        .map(|(_, node_id, _)| *node_id)
         .unwrap();
     let external = incoming
         .iter()
@@ -437,14 +439,14 @@ fn set_node_property_commits_and_reverts() {
     // Fresh nodes default to no caching (None) and enabled.
     assert_eq!(
         doc.graph
-            .find_node(&id, NodeSearch::TopLevel)
+            .find(&id, NodeSearch::TopLevel)
             .unwrap()
             .cache,
         CacheMode::None
     );
     assert!(
         !doc.graph
-            .find_node(&id, NodeSearch::TopLevel)
+            .find(&id, NodeSearch::TopLevel)
             .unwrap()
             .disabled
     );
@@ -466,7 +468,7 @@ fn set_node_property_commits_and_reverts() {
             GraphRef::Main,
         )
         .unwrap_or_else(|| panic!("{to:?} is a real change, not a no-op"));
-        let node = doc.graph.find_node(&id, NodeSearch::TopLevel).unwrap();
+        let node = doc.graph.find(&id, NodeSearch::TopLevel).unwrap();
         match to {
             NodeProperty::RuntimeCache(m) => assert_eq!(node.cache, m),
             NodeProperty::Disabled(d) => assert_eq!(node.disabled, d),
@@ -480,7 +482,7 @@ fn set_node_property_commits_and_reverts() {
             "each toggle is its own undo entry"
         );
         revert_step(&step, &mut doc, GraphRef::Main);
-        let node = doc.graph.find_node(&id, NodeSearch::TopLevel).unwrap();
+        let node = doc.graph.find(&id, NodeSearch::TopLevel).unwrap();
         assert_eq!(node.cache, CacheMode::None, "revert restores the cache");
         assert!(!node.disabled, "revert restores the disable flag");
     }

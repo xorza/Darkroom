@@ -25,19 +25,24 @@ const PIN_LAYOUT_STAGGER: Vec2 = Vec2::new(28.0, 28.0);
 impl GraphView {
     /// Assign positions using topological-depth columns: nodes with no
     /// bound inputs go in column 0, downstream nodes shift right by one
-    /// column per max-upstream-depth. Within a column, stack vertically
-    /// in graph insertion order. Pinned-output previews then park beside
-    /// their owner node.
+    /// column per max-upstream-depth. Within a column, stack vertically in
+    /// the current view order. Pinned-output previews then park beside their
+    /// owner node.
     pub(crate) fn auto_layout(&mut self, graph: &CoreGraph) {
-        let mut depth: HashMap<NodeId, u32> = HashMap::new();
-        for node in graph.iter() {
-            let d = graph
-                .edges()
-                .filter(|(dst, _)| dst.node_id == node.id)
-                .filter_map(|(_, src)| depth.get(&src.node_id).copied().map(|d| d + 1))
-                .max()
-                .unwrap_or(0);
-            depth.insert(node.id, d);
+        let mut depth: HashMap<NodeId, u32> = graph.iter().map(|node| (node.id, 0)).collect();
+        for _ in 0..graph.len().saturating_sub(1) {
+            let mut changed = false;
+            for (dst, src) in graph.edges() {
+                let candidate = depth.get(&src.node_id).copied().unwrap() + 1;
+                let current = depth.get_mut(&dst.node_id).unwrap();
+                if candidate > *current {
+                    *current = candidate;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
         }
 
         let mut row_in_col: HashMap<u32, u32> = HashMap::new();
@@ -88,16 +93,26 @@ mod tests {
 
     #[test]
     fn auto_layout_columns_nodes_and_parks_pins_beside_their_owner() {
-        // a → b: a lands in column 0, b in column 1. Two pins on b (ports
-        // 0 and 1) park at b + offset, staggered so they don't overlap.
         let mut graph = CoreGraph::default();
-        let a = Node::new(NodeKind::Func(FuncId::unique()));
-        let b = Node::new(NodeKind::Func(FuncId::unique()));
-        let (a_id, b_id) = (a.id, b.id);
-        graph.add(a);
-        graph.add(b);
-        graph.set_input_binding(InputPort::new(b_id, 0), Binding::bind(a_id, 0));
-        let (p0, p1) = (OutputPort::new(b_id, 0), OutputPort::new(b_id, 1));
+        for _ in 0..3 {
+            graph.add(Node::new(NodeKind::Func(FuncId::unique())));
+        }
+        let iteration_ids: [NodeId; 3] = graph
+            .iter()
+            .map(|node| node.id)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let [downstream_id, middle_id, source_id] = iteration_ids;
+        graph.set_input_binding(InputPort::new(middle_id, 0), Binding::bind(source_id, 0));
+        graph.set_input_binding(
+            InputPort::new(downstream_id, 0),
+            Binding::bind(middle_id, 0),
+        );
+        let (p0, p1) = (
+            OutputPort::new(downstream_id, 0),
+            OutputPort::new(downstream_id, 1),
+        );
         graph.set_output_pinned(p0, true);
         graph.set_output_pinned(p1, true);
 
@@ -105,25 +120,34 @@ mod tests {
         view.auto_layout(&graph);
 
         let pos = |key: ItemRef| view.view_items.by_key(&key).unwrap().pos;
-        let a_pos = pos(ItemRef::Node(a_id));
-        let b_pos = pos(ItemRef::Node(b_id));
-        assert_eq!(a_pos, AUTO_LAYOUT_ORIGIN, "source node in column 0, row 0");
+        let source_pos = pos(ItemRef::Node(source_id));
+        let middle_pos = pos(ItemRef::Node(middle_id));
+        let downstream_pos = pos(ItemRef::Node(downstream_id));
         assert_eq!(
-            b_pos,
+            source_pos, AUTO_LAYOUT_ORIGIN,
+            "source node in column 0, row 0"
+        );
+        assert_eq!(
+            middle_pos,
             AUTO_LAYOUT_ORIGIN + Vec2::new(AUTO_LAYOUT_COL_SPACING, 0.0),
-            "downstream node one column right"
+            "middle node one column right"
+        );
+        assert_eq!(
+            downstream_pos,
+            AUTO_LAYOUT_ORIGIN + Vec2::new(AUTO_LAYOUT_COL_SPACING * 2.0, 0.0),
+            "downstream node two columns right"
         );
 
         let pin0 = pos(ItemRef::Pin(p0));
         let pin1 = pos(ItemRef::Pin(p1));
         assert_eq!(
             pin0,
-            b_pos + PIN_LAYOUT_OFFSET,
+            downstream_pos + PIN_LAYOUT_OFFSET,
             "port 0 parks at the base offset"
         );
         assert_eq!(
             pin1,
-            b_pos + PIN_LAYOUT_OFFSET + PIN_LAYOUT_STAGGER,
+            downstream_pos + PIN_LAYOUT_OFFSET + PIN_LAYOUT_STAGGER,
             "port 1 staggers one step so the two previews don't stack"
         );
     }

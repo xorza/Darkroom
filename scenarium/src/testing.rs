@@ -139,25 +139,20 @@ pub fn test_graph() -> Graph {
     let mult_func = library.by_name("mult").unwrap();
     let print_func = library.by_name("Print").unwrap();
 
-    let mut get_a_node: Node = get_a_func.into();
-    get_a_node.id = get_a_node_id;
-    graph.add(get_a_node);
+    let get_a_node: Node = get_a_func.into();
+    graph.insert(get_a_node_id, get_a_node);
 
-    let mut get_b_node: Node = get_b_func.into();
-    get_b_node.id = get_b_node_id;
-    graph.add(get_b_node);
+    let get_b_node: Node = get_b_func.into();
+    graph.insert(get_b_node_id, get_b_node);
 
-    let mut sum_node: Node = sum_func.into();
-    sum_node.id = sum_node_id;
-    graph.add(sum_node);
+    let sum_node: Node = sum_func.into();
+    graph.insert(sum_node_id, sum_node);
 
-    let mut mult_node: Node = mult_func.into();
-    mult_node.id = mult_node_id;
-    graph.add(mult_node);
+    let mult_node: Node = mult_func.into();
+    graph.insert(mult_node_id, mult_node);
 
-    let mut print_node: Node = print_func.into();
-    print_node.id = print_node_id;
-    graph.add(print_node);
+    let print_node: Node = print_func.into();
+    graph.insert(print_node_id, print_node);
 
     graph.set_input_binding(
         InputPort::new(sum_node_id, 0),

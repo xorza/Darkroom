@@ -54,7 +54,10 @@ impl FrameHarness {
         library.merge(worker_events_library());
 
         let graph = log_frame_no_graph(&library);
-        let frame_event_node_id = graph.by_name("Frame Event").unwrap().id;
+        let frame_event_node_id = graph
+            .find_by_name("Frame Event", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         let library = Arc::new(library);
 
         let (worker, compute_rx) = finished_worker(cap);
@@ -101,17 +104,14 @@ fn log_frame_no_graph(library: &Library) -> Graph {
     let to_string_func = library.by_name("To String").unwrap();
     let print_func = library.by_name("Print").unwrap();
 
-    let mut frame_event_node: Node = frame_event_func.into();
-    frame_event_node.id = frame_event_node_id;
-    graph.add(frame_event_node);
+    let frame_event_node: Node = frame_event_func.into();
+    graph.insert(frame_event_node_id, frame_event_node);
 
-    let mut to_string_node: Node = to_string_func.into();
-    to_string_node.id = to_string_node_id;
-    graph.add(to_string_node);
+    let to_string_node: Node = to_string_func.into();
+    graph.insert(to_string_node_id, to_string_node);
 
-    let mut print_node: Node = print_func.into();
-    print_node.id = print_node_id;
-    graph.add(print_node);
+    let print_node: Node = print_func.into();
+    graph.insert(print_node_id, print_node);
 
     graph.set_input_binding(InputPort::new(frame_event_node_id, 0), 1.into());
     graph.subscribe(frame_event_node_id, 0, print_node_id);
@@ -132,10 +132,8 @@ fn log_frame_no_graph(library: &Library) -> Graph {
 /// log line, not the graph's shape.
 fn print_literal_graph(library: &Library, message: &str) -> (Graph, NodeId) {
     let mut graph = Graph::default();
-    let mut print_node: Node = library.by_name("Print").unwrap().into();
-    print_node.id = NodeId::unique();
-    let print_node_id = print_node.id;
-    graph.add(print_node);
+    let print_node: Node = library.by_name("Print").unwrap().into();
+    let print_node_id = graph.add(print_node);
     graph.set_input_binding(
         InputPort::new(print_node_id, 0),
         StaticValue::String(message.to_string()).into(),
@@ -558,10 +556,10 @@ async fn execute_nodes_runs_only_the_seeded_cone() {
         ..Default::default()
     });
     let mut graph = test_graph();
-    for node in graph.iter_mut() {
+    for node in graph.nodes.values_mut() {
         node.cache = CacheMode::None;
     }
-    let sum_id = graph.by_name("sum").unwrap().id;
+    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
 
     let (worker, mut rx) = finished_worker(8);
     worker
@@ -1205,11 +1203,17 @@ async fn disk_cache_persists_node_across_worker_restart() {
         let node: Node = lib.by_name(name).unwrap().into();
         graph.add(node);
     }
-    let get_a_id = graph.by_name("get_a").unwrap().id;
-    let mult_id = graph.by_name("mult").unwrap().id;
-    let print_id = graph.by_name("Print").unwrap().id;
+    let get_a_id = graph
+        .find_by_name("get_a", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
+    let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+    let print_id = graph
+        .find_by_name("Print", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
     graph
-        .find_node_mut(&mult_id, NodeSearch::TopLevel)
+        .find_mut(&mult_id, NodeSearch::TopLevel)
         .unwrap()
         .cache = CacheMode::Disk;
     graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
@@ -1291,11 +1295,17 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
         let node: Node = lib.by_name(name).unwrap().into();
         graph.add(node);
     }
-    let get_a_id = graph.by_name("get_a").unwrap().id;
-    let mult_id = graph.by_name("mult").unwrap().id;
-    let print_id = graph.by_name("Print").unwrap().id;
+    let get_a_id = graph
+        .find_by_name("get_a", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
+    let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+    let print_id = graph
+        .find_by_name("Print", NodeSearch::TopLevel)
+        .unwrap()
+        .id;
     graph
-        .find_node_mut(&mult_id, NodeSearch::TopLevel)
+        .find_mut(&mult_id, NodeSearch::TopLevel)
         .unwrap()
         .cache = CacheMode::Both;
     graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));

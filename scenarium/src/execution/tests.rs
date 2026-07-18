@@ -38,15 +38,16 @@ fn default_hooks() -> TestFuncHooks {
 }
 
 /// Instantiate a `Node` for `func_name` with a fixed id; caller wires bindings.
-fn node(library: &Library, func_name: &str, id: NodeId) -> Node {
-    let mut node: Node = library.by_name(func_name).unwrap().into();
-    node.id = id;
-    node
+fn node(library: &Library, func_name: &str) -> Node {
+    library.by_name(func_name).unwrap().into()
 }
 
 /// Set input `idx` of the named node's binding in the source graph.
 fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: Binding) {
-    let id = graph.by_name(node_name).unwrap().id;
+    let id = graph
+        .find_by_name(node_name, NodeSearch::TopLevel)
+        .unwrap()
+        .id;
     graph.set_input_binding(InputPort::new(id, idx), binding);
 }
 
@@ -118,13 +119,16 @@ mod cache_persistence {
         // get_a (pure source) → mult (pure, persist Disk) → print (sink).
         let lib = make_lib();
         let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a", NodeId::unique()));
-        let mut mult = node(&lib, "mult", NodeId::unique());
+        graph.add(node(&lib, "get_a"));
+        let mut mult = node(&lib, "mult");
         mult.cache = CacheMode::Disk;
         graph.add(mult);
-        graph.add(node(&lib, "Print", NodeId::unique()));
-        let get_a_id = graph.by_name("get_a").unwrap().id;
-        let mult_id = graph.by_name("mult").unwrap().id;
+        graph.add(node(&lib, "Print"));
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -208,16 +212,19 @@ mod cache_persistence {
         // get_a → mult(persist Disk) → print_mult ;  get_a → print_direct.
         let lib = make_lib();
         let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a", NodeId::unique()));
-        let mut mult = node(&lib, "mult", NodeId::unique());
+        graph.add(node(&lib, "get_a"));
+        let mut mult = node(&lib, "mult");
         mult.cache = CacheMode::Disk;
         graph.add(mult);
         let print_mult_id = NodeId::unique();
-        graph.add(node(&lib, "Print", print_mult_id));
+        graph.insert(print_mult_id, node(&lib, "Print"));
         let print_direct_id = NodeId::unique();
-        graph.add(node(&lib, "Print", print_direct_id));
-        let get_a_id = graph.by_name("get_a").unwrap().id;
-        let mult_id = graph.by_name("mult").unwrap().id;
+        graph.insert(print_direct_id, node(&lib, "Print"));
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
         graph.set_input_binding(InputPort::new(mult_id, 1), Binding::bind(get_a_id, 0));
         graph.set_input_binding(InputPort::new(print_mult_id, 0), Binding::bind(mult_id, 0));
@@ -278,17 +285,20 @@ mod cache_persistence {
         // that retention is what this test asserts (pure `Disk` would demote it).
         let lib = make_lib();
         let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a", NodeId::unique()));
-        let mut sum = node(&lib, "sum", NodeId::unique());
+        graph.add(node(&lib, "get_a"));
+        let mut sum = node(&lib, "sum");
         sum.cache = CacheMode::Both;
         graph.add(sum);
-        let mut mult = node(&lib, "mult", NodeId::unique());
+        let mut mult = node(&lib, "mult");
         mult.cache = CacheMode::Both;
         graph.add(mult);
-        graph.add(node(&lib, "Print", NodeId::unique()));
-        let get_a_id = graph.by_name("get_a").unwrap().id;
-        let sum_id = graph.by_name("sum").unwrap().id;
-        let mult_id = graph.by_name("mult").unwrap().id;
+        graph.add(node(&lib, "Print"));
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 0, Binding::bind(sum_id, 0));
@@ -359,17 +369,20 @@ mod cache_persistence {
         // (RAM + disk) keeps a used value resident and demotes an unused leftover —
         // the retain-vs-evict split this test asserts (pure `Disk` would demote both).
         let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a", NodeId::unique()));
-        let mut sum = node(&lib, "sum", NodeId::unique());
+        graph.add(node(&lib, "get_a"));
+        let mut sum = node(&lib, "sum");
         sum.cache = CacheMode::Both;
         graph.add(sum);
-        let mut mult = node(&lib, "mult", NodeId::unique());
+        let mut mult = node(&lib, "mult");
         mult.cache = CacheMode::Both;
         graph.add(mult);
-        graph.add(node(&lib, "Print", NodeId::unique()));
-        let get_a_id = graph.by_name("get_a").unwrap().id;
-        let sum_id = graph.by_name("sum").unwrap().id;
-        let mult_id = graph.by_name("mult").unwrap().id;
+        graph.add(node(&lib, "Print"));
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 0, Binding::bind(sum_id, 0));
@@ -456,13 +469,16 @@ mod cache_persistence {
 
         // get_a(1) → mult(mode) = 1*1 = 1 → print.
         let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a", NodeId::unique()));
-        let mut mult = node(&lib, "mult", NodeId::unique());
+        graph.add(node(&lib, "get_a"));
+        let mut mult = node(&lib, "mult");
         mult.cache = mode;
         graph.add(mult);
-        graph.add(node(&lib, "Print", NodeId::unique()));
-        let get_a_id = graph.by_name("get_a").unwrap().id;
-        let mult_id = graph.by_name("mult").unwrap().id;
+        graph.add(node(&lib, "Print"));
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -576,17 +592,20 @@ mod cache_persistence {
 
         // get_a(1) → A = sum(None) = 1+1 = 2 → B = mult(Disk) = 2*2 = 4 → print.
         let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a", NodeId::unique()));
-        let mut a = node(&lib, "sum", NodeId::unique());
+        graph.add(node(&lib, "get_a"));
+        let mut a = node(&lib, "sum");
         a.cache = CacheMode::None;
         graph.add(a);
-        let mut b = node(&lib, "mult", NodeId::unique());
+        let mut b = node(&lib, "mult");
         b.cache = CacheMode::Disk;
         graph.add(b);
-        graph.add(node(&lib, "Print", NodeId::unique()));
-        let get_a_id = graph.by_name("get_a").unwrap().id;
-        let a_id = graph.by_name("sum").unwrap().id;
-        let b_id = graph.by_name("mult").unwrap().id;
+        graph.add(node(&lib, "Print"));
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let a_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let b_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 0, Binding::bind(a_id, 0));
@@ -638,11 +657,11 @@ mod cache_persistence {
         // (and its resident value) survives each `update`.
         let build = |a: i64, b: i64, mode: CacheMode| {
             let mut graph = Graph::default();
-            let mut mult = node(&lib, "mult", NodeId::from_u128(1));
+            let mut mult = node(&lib, "mult");
             mult.cache = mode;
-            graph.add(mult);
-            graph.add(node(&lib, "Print", NodeId::from_u128(2)));
-            let mult_id = graph.by_name("mult").unwrap().id;
+            graph.insert(NodeId::from_u128(1), mult);
+            graph.insert(NodeId::from_u128(2), node(&lib, "Print"));
+            let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
             bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
             bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(b)));
             bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -719,11 +738,11 @@ mod cache_persistence {
         // mult(const 2, const 3) = 6, persist=Disk → print. Const binds detach mult
         // from any upstream, so only mult + print run.
         let mut graph = Graph::default();
-        let mut mult = node(&lib, "mult", NodeId::unique());
+        let mut mult = node(&lib, "mult");
         mult.cache = CacheMode::Disk;
         graph.add(mult);
-        graph.add(node(&lib, "Print", NodeId::unique()));
-        let mult_id = graph.by_name("mult").unwrap().id;
+        graph.add(node(&lib, "Print"));
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(2)));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -750,11 +769,11 @@ mod cache_persistence {
         // Fixed node ids so the slot (and its resident value) survives each update.
         let build = |persist: CacheMode| {
             let mut graph = Graph::default();
-            let mut mult = node(&lib, "mult", NodeId::from_u128(1));
+            let mut mult = node(&lib, "mult");
             mult.cache = persist;
-            graph.add(mult);
-            graph.add(node(&lib, "Print", NodeId::from_u128(2)));
-            let mult_id = graph.by_name("mult").unwrap().id;
+            graph.insert(NodeId::from_u128(1), mult);
+            graph.insert(NodeId::from_u128(2), node(&lib, "Print"));
+            let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
             bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(2)));
             bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
             bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -793,11 +812,11 @@ mod cache_persistence {
         // mult(persist=Disk) with const inputs → print; the consts drive mult's digest.
         let build = |a: i64, b: i64| {
             let mut graph = Graph::default();
-            let mut mult = node(&lib, "mult", NodeId::from_u128(1));
+            let mut mult = node(&lib, "mult");
             mult.cache = CacheMode::Disk;
-            graph.add(mult);
-            graph.add(node(&lib, "Print", NodeId::from_u128(2)));
-            let mult_id = graph.by_name("mult").unwrap().id;
+            graph.insert(NodeId::from_u128(1), mult);
+            graph.insert(NodeId::from_u128(2), node(&lib, "Print"));
+            let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
             bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
             bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(b)));
             bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -855,18 +874,21 @@ mod cache_persistence {
         // get_a → mult(persist=Disk) → print. mult reads get_a, so a mult cache hit
         // prunes get_a — its call count tracks whether mult actually recomputed.
         let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a", NodeId::from_u128(1)));
-        let mut mult = node(&lib, "mult", NodeId::from_u128(2));
+        graph.insert(NodeId::from_u128(1), node(&lib, "get_a"));
+        let mut mult = node(&lib, "mult");
         mult.cache = CacheMode::Disk;
-        graph.add(mult);
-        graph.add(node(&lib, "Print", NodeId::from_u128(3)));
-        let get_a_id = graph.by_name("get_a").unwrap().id;
-        let mult_id = graph.by_name("mult").unwrap().id;
+        graph.insert(NodeId::from_u128(2), mult);
+        graph.insert(NodeId::from_u128(3), node(&lib, "Print"));
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
 
-        let mult_id = graph.by_name("mult").unwrap().id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         let ran = |s: &ExecutionStats, id| s.executed_nodes.iter().any(|n| n.node_id == id);
 
         // Cold run: mult computes and stores its blob.
@@ -904,7 +926,10 @@ mod cache_persistence {
             let stats = engine.execute_sinks().await.unwrap();
             // The consumer reports the real reason — a failed cache load on its input,
             // not "an upstream dependency errored" (no upstream node holds an error).
-            let print_id = graph.by_name("Print").unwrap().id;
+            let print_id = graph
+                .find_by_name("Print", NodeSearch::TopLevel)
+                .unwrap()
+                .id;
             assert_eq!(stats.node_errors.len(), 1);
             assert_eq!(stats.node_errors[0].node_id, print_id);
             assert!(
@@ -962,13 +987,16 @@ mod cache_persistence {
         // frontier the run must load.
         let lib = make_lib();
         let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a", NodeId::unique()));
-        let mut sum = node(&lib, "sum", NodeId::unique());
+        graph.add(node(&lib, "get_a"));
+        let mut sum = node(&lib, "sum");
         sum.cache = CacheMode::Disk;
         graph.add(sum);
-        graph.add(node(&lib, "Print", NodeId::unique()));
-        let get_a_id = graph.by_name("get_a").unwrap().id;
-        let sum_id = graph.by_name("sum").unwrap().id;
+        graph.add(node(&lib, "Print"));
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(sum_id, 0));
@@ -1082,11 +1110,10 @@ mod cache_persistence {
         // produce(persist) → consume(sink).
         let int_lib = build_lib(false);
         let mut graph = Graph::default();
-        let mut produce_node = node(&int_lib, "produce", NodeId::unique());
+        let mut produce_node = node(&int_lib, "produce");
         produce_node.cache = CacheMode::Disk;
-        let produce_id = produce_node.id;
-        graph.add(produce_node);
-        graph.add(node(&int_lib, "consume", NodeId::unique()));
+        let produce_id = graph.add(produce_node);
+        graph.add(node(&int_lib, "consume"));
         bind(&mut graph, "consume", 0, Binding::bind(produce_id, 0));
 
         // Run 1 (Int): produce runs, stores its Int blob; consume sees 7.
@@ -1124,13 +1151,16 @@ mod cache_persistence {
 
         // get_b (impure) → mult (persist) → print. mult's cone is impure.
         let mut graph = Graph::default();
-        graph.add(node(&library, "get_b", NodeId::unique()));
-        let mut mult = node(&library, "mult", NodeId::unique());
+        graph.add(node(&library, "get_b"));
+        let mut mult = node(&library, "mult");
         mult.cache = CacheMode::Disk;
         graph.add(mult);
-        graph.add(node(&library, "Print", NodeId::unique()));
-        let get_b_id = graph.by_name("get_b").unwrap().id;
-        let mult_id = graph.by_name("mult").unwrap().id;
+        graph.add(node(&library, "Print"));
+        let get_b_id = graph
+            .find_by_name("get_b", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_b_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_b_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -1162,11 +1192,14 @@ mod cache_persistence {
 
         // get_a (pure) → mult (Memory, the default) → print.
         let mut graph = Graph::default();
-        graph.add(node(&library, "get_a", NodeId::unique()));
-        graph.add(node(&library, "mult", NodeId::unique()));
-        graph.add(node(&library, "Print", NodeId::unique()));
-        let get_a_id = graph.by_name("get_a").unwrap().id;
-        let mult_id = graph.by_name("mult").unwrap().id;
+        graph.add(node(&library, "get_a"));
+        graph.add(node(&library, "mult"));
+        graph.add(node(&library, "Print"));
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -1290,14 +1323,9 @@ mod cache_persistence {
         let recompute = Arc::new(AtomicUsize::new(0));
 
         let mut graph = Graph::default();
-        let mut blob_node = node(
-            &blob_lib(true, recompute.clone()),
-            "make_blob",
-            NodeId::unique(),
-        );
+        let mut blob_node = node(&blob_lib(true, recompute.clone()), "make_blob");
         blob_node.cache = CacheMode::Disk;
-        let blob_id = blob_node.id;
-        graph.add(blob_node);
+        let blob_id = graph.add(blob_node);
 
         // Run 1 (codec present): computes + writes the Blob to disk.
         let mut engine = disk_engine_with_lib(&dir, blob_lib(true, recompute.clone()));
@@ -1502,19 +1530,28 @@ mod resource_binds {
     /// same slots.
     fn path_graph(lib: &Library, data_path: &str, mode: CacheMode) -> PathFixture {
         let mut graph = Graph::default();
-        let mut make = node(lib, "make_path", NodeId::from_u128(1));
+        let mut make = node(lib, "make_path");
         make.cache = mode;
-        graph.add(make);
-        let mut load = node(lib, "load_text", NodeId::from_u128(2));
+        graph.insert(NodeId::from_u128(1), make);
+        let mut load = node(lib, "load_text");
         load.cache = mode;
-        graph.add(load);
-        let mut annotate = node(lib, "annotate", NodeId::from_u128(4));
+        graph.insert(NodeId::from_u128(2), load);
+        let mut annotate = node(lib, "annotate");
         annotate.cache = mode;
-        graph.add(annotate);
-        graph.add(node(lib, "capture", NodeId::from_u128(3)));
-        let make_id = graph.by_name("make_path").unwrap().id;
-        let load_id = graph.by_name("load_text").unwrap().id;
-        let annotate_id = graph.by_name("annotate").unwrap().id;
+        graph.insert(NodeId::from_u128(4), annotate);
+        graph.insert(NodeId::from_u128(3), node(lib, "capture"));
+        let make_id = graph
+            .find_by_name("make_path", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let load_id = graph
+            .find_by_name("load_text", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let annotate_id = graph
+            .find_by_name("annotate", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         bind(
             &mut graph,
             "make_path",
@@ -1776,15 +1813,21 @@ mod resource_binds {
 
         // make_handle(Ram) → read_store(Ram) → capture.
         let mut graph = Graph::default();
-        let mut make = node(&lib, "make_handle", NodeId::unique());
+        let mut make = node(&lib, "make_handle");
         make.cache = CacheMode::Ram;
         graph.add(make);
-        let mut read = node(&lib, "read_store", NodeId::unique());
+        let mut read = node(&lib, "read_store");
         read.cache = CacheMode::Ram;
         graph.add(read);
-        graph.add(node(&lib, "capture", NodeId::unique()));
-        let make_id = graph.by_name("make_handle").unwrap().id;
-        let read_id = graph.by_name("read_store").unwrap().id;
+        graph.add(node(&lib, "capture"));
+        let make_id = graph
+            .find_by_name("make_handle", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let read_id = graph
+            .find_by_name("read_store", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         bind(&mut graph, "read_store", 0, Binding::bind(make_id, 0));
         bind(&mut graph, "capture", 0, Binding::bind(read_id, 0));
 
@@ -1896,8 +1939,20 @@ mod graph_structure {
         execution_graph.update(&graph, &library).unwrap();
 
         // Rewire mult to get_a and get_b directly (bypassing sum)
-        let binding1 = Binding::bind(graph.by_name("get_a").unwrap().id, 0);
-        let binding2 = Binding::bind(graph.by_name("get_b").unwrap().id, 0);
+        let binding1 = Binding::bind(
+            graph
+                .find_by_name("get_a", NodeSearch::TopLevel)
+                .unwrap()
+                .id,
+            0,
+        );
+        let binding2 = Binding::bind(
+            graph
+                .find_by_name("get_b", NodeSearch::TopLevel)
+                .unwrap()
+                .id,
+            0,
+        );
         bind(&mut graph, "mult", 0, binding1);
         bind(&mut graph, "mult", 1, binding2);
 
@@ -2074,8 +2129,11 @@ mod missing_inputs {
         let mut graph = test_graph();
         let mut library = test_func_lib(default_hooks());
 
-        let get_b_id = graph.by_name("get_b").unwrap().id;
-        let sum_id = graph.by_name("sum").unwrap().id;
+        let get_b_id = graph
+            .find_by_name("get_b", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
 
         // sum's required input[0] unbound → sum missing-required → gated.
         bind(&mut graph, "sum", 0, Binding::None);
@@ -2113,9 +2171,9 @@ mod disabled_nodes {
         let mut graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
 
-        let sum_id = graph.by_name("sum").unwrap().id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         graph
-            .find_node_mut(&sum_id, NodeSearch::TopLevel)
+            .find_mut(&sum_id, NodeSearch::TopLevel)
             .unwrap()
             .disabled = true;
 
@@ -2158,9 +2216,9 @@ mod disabled_nodes {
         let mut graph = test_graph();
         let mut library = test_func_lib(TestFuncHooks::default());
 
-        let sum_id = graph.by_name("sum").unwrap().id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         graph
-            .find_node_mut(&sum_id, NodeSearch::TopLevel)
+            .find_mut(&sum_id, NodeSearch::TopLevel)
             .unwrap()
             .disabled = true;
         library.by_name_mut("mult").unwrap().inputs[0].required = false;
@@ -2310,7 +2368,10 @@ mod const_bindings {
         let mut graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
 
-        let get_b_id = graph.by_name_mut("get_b").unwrap().id;
+        let get_b_id = graph
+            .find_by_name("get_b", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         bind(&mut graph, "sum", 0, Binding::Const(33.into()));
 
         execution_graph.update(&graph, &library).unwrap();
@@ -2412,7 +2473,7 @@ mod behavior {
 
         // Cached mult must still hold the correct product, not a stale value:
         // sum = get_a(1) + get_b(11) = 12; mult = 12 * get_b(11) = 132
-        let mult_id = graph.by_name("mult").unwrap().id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         let vals = execution_graph.get_argument_values(&mult_id).unwrap();
         assert!(matches!(
             vals.outputs[0],
@@ -2456,7 +2517,12 @@ mod behavior {
         let name_of: std::collections::HashMap<NodeId, String> =
             ["get_a", "get_b", "sum", "mult", "Print"]
                 .iter()
-                .map(|n| (graph.by_name(n).unwrap().id, n.to_string()))
+                .map(|n| {
+                    (
+                        graph.find_by_name(n, NodeSearch::TopLevel).unwrap().id,
+                        n.to_string(),
+                    )
+                })
                 .collect();
 
         // Events come in Started→Finished pairs for the *same* node (the
@@ -2575,9 +2641,8 @@ mod behavior {
 
         let mut graph = Graph::default();
         let node_id: NodeId = "acb11422-9951-4fc6-9696-53b1a6699120".into();
-        let mut node: Node = library.by_name("self_cancel").unwrap().into();
-        node.id = node_id;
-        graph.add(node);
+        let node: Node = library.by_name("self_cancel").unwrap().into();
+        graph.insert(node_id, node);
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
@@ -2663,9 +2728,8 @@ mod behavior {
 
         let mut graph = Graph::default();
         let node_id: NodeId = "c791f8aa-3bf9-435d-8530-f3904b4b6a28".into();
-        let mut node: Node = library.by_name("always_cancel").unwrap().into();
-        node.id = node_id;
-        graph.add(node);
+        let node: Node = library.by_name("always_cancel").unwrap().into();
+        graph.insert(node_id, node);
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
@@ -2768,12 +2832,10 @@ mod composite_behavior {
     /// impure `get_b` (named `inner_name`) feeding `SubgraphOutput[0]`.
     fn impure_output_def(library: &Library, id: &str, name: &str, inner_name: &str) -> SubgraphDef {
         let inner = func_node(library, "get_b", inner_name);
-        let inner_id = inner.id;
         let so = Node::new(NodeKind::SubgraphOutput);
-        let so_id = so.id;
         let mut interior = Graph::default();
-        interior.add(inner);
-        interior.add(so);
+        let inner_id = interior.add(inner);
+        let so_id = interior.add(so);
         interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
         SubgraphDef::new(id, name)
             .graph(interior)
@@ -2787,8 +2849,7 @@ mod composite_behavior {
         graph.subgraphs.add(def.clone());
         let inst = graph.add_subgraph_node(&def, SubgraphRef::Local(def_id));
         let p = func_node(library, "Print", "p");
-        let p_id = p.id;
-        graph.add(p);
+        let p_id = graph.add(p);
         graph.set_input_binding(InputPort::new(p_id, 0), Binding::bind(inst, 0));
         graph
     }
@@ -2840,11 +2901,14 @@ mod composite_behavior {
             "inner",
         );
         let graph = main_with(&library, def);
-        // A `Local` def resolves from the graph itself, so the walk reaches
-        // the interior even with an empty library — and flags its `get_b`.
-        let mut eg = ExecutionEngine::default();
-        let CompileError { message } = eg.update(&graph, &Library::default()).unwrap_err();
         let get_b = library.by_name("get_b").unwrap().id;
+        let mut incomplete_library = library.clone();
+        incomplete_library.funcs.remove_by_key(&get_b).unwrap();
+
+        // A `Local` def resolves from the graph itself, so validation reaches
+        // its interior while every top-level func remains resolvable.
+        let mut eg = ExecutionEngine::default();
+        let CompileError { message } = eg.update(&graph, &incomplete_library).unwrap_err();
         assert!(
             message.contains(&format!("{get_b:?}")),
             "message should name the interior's missing func, got: {message}"
@@ -2868,8 +2932,7 @@ mod composite_behavior {
         outer_interior.subgraphs.add(inner_def.clone());
         let inner_inst = outer_interior.add_subgraph_node(&inner_def, SubgraphRef::Local(inner_id));
         let so = Node::new(NodeKind::SubgraphOutput);
-        let so_id = so.id;
-        outer_interior.add(so);
+        let so_id = outer_interior.add(so);
         outer_interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_inst, 0));
         let outer_def = SubgraphDef::new("00000000-0000-0000-0000-0000000000b2", "Outer")
             .graph(outer_interior)
@@ -2903,12 +2966,10 @@ mod composite_behavior {
 
         // `impure_output_def`'s interior by hand, keeping the interior node's id.
         let inner = func_node(&library, "get_b", "inner");
-        let inner_id = inner.id;
         let so = Node::new(NodeKind::SubgraphOutput);
-        let so_id = so.id;
         let mut interior = Graph::default();
-        interior.add(inner);
-        interior.add(so);
+        let inner_id = interior.add(inner);
+        let so_id = interior.add(so);
         interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
         let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000c1", "S")
             .graph(interior)
@@ -2949,7 +3010,7 @@ mod cycle_detection {
         let library = test_func_lib(TestFuncHooks::default());
 
         // Create cycle: sum[0] ← mult (mult already depends on sum)
-        let mult_node_id = graph.by_name("mult").unwrap().id;
+        let mult_node_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         bind(&mut graph, "sum", 0, Binding::bind(mult_node_id, 0));
 
         let mut execution_graph = ExecutionEngine::default();
@@ -3102,7 +3163,7 @@ mod execution {
         assert_ne!(run1, run2);
 
         // The cached product stays correct every run: sum(1+11=12) * get_b(11) = 132.
-        let mult_id = graph.by_name("mult").unwrap().id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         let vals = eg.get_argument_values(&mult_id).unwrap();
         assert!(matches!(
             vals.outputs[0],
@@ -3135,7 +3196,10 @@ mod execution {
         );
 
         // Switch back to bind from cached get_b — mult re-executes with cached upstream
-        let get_b_id = graph.by_name_mut("get_b").unwrap().id;
+        let get_b_id = graph
+            .find_by_name("get_b", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         bind(&mut graph, "mult", 0, Binding::bind(get_b_id, 0));
 
         execution_graph.update(&graph, &library).unwrap();
@@ -3185,11 +3249,10 @@ mod execution {
 
         let mut graph = Graph::default();
         let mut node: Node = library.by_name("partial_writer").unwrap().into();
-        node.id = "0b35e5e4-be30-4733-a5a2-9d474000de10".into();
         // Retain the output buffer across runs so the in-place reuse is observable;
         // nodes now default to `CacheMode::None`.
         node.cache = CacheMode::Ram;
-        graph.add(node);
+        graph.insert("0b35e5e4-be30-4733-a5a2-9d474000de10".into(), node);
         graph.validate();
 
         let mut eg = ExecutionEngine::default();
@@ -3240,7 +3303,7 @@ mod node_seeds {
     /// survives a run does so through the node-seed pin, not a retention mode.
     fn uncached_test_graph() -> Graph {
         let mut graph = test_graph();
-        for node in graph.iter_mut() {
+        for node in graph.nodes.values_mut() {
             node.cache = CacheMode::None;
         }
         graph
@@ -3261,7 +3324,7 @@ mod node_seeds {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let sum_id = graph.by_name("sum").unwrap().id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         let stats = eg.execute_nodes([NodeAddress::root(sum_id)]).await.unwrap();
         assert_eq!(stats.executed_nodes.len(), 3);
 
@@ -3272,7 +3335,10 @@ mod node_seeds {
         let values = eg.get_argument_values(&sum_id).unwrap();
         assert_eq!(values.outputs[0].as_i64(), Some(12), "1 + 11, retained");
 
-        let get_a_id = graph.by_name("get_a").unwrap().id;
+        let get_a_id = graph
+            .find_by_name("get_a", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         assert!(
             eg.get_argument_values(&get_a_id)
                 .unwrap()
@@ -3310,7 +3376,7 @@ mod node_seeds {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let sum_id = graph.by_name("sum").unwrap().id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         eg.execute_nodes([NodeAddress::root(sum_id)]).await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::Relaxed), 1);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
@@ -3346,7 +3412,7 @@ mod node_seeds {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let sum_id = graph.by_name("sum").unwrap().id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         eg.execute(
             RunSeeds {
                 sinks: true,
@@ -3365,7 +3431,7 @@ mod node_seeds {
             Some(12),
             "pinned value survives its real consumer's read"
         );
-        let mult_id = graph.by_name("mult").unwrap().id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         assert!(
             eg.get_argument_values(&mult_id).unwrap().outputs.is_empty(),
             "unpinned None-cache node is drained by its consumer"
@@ -3422,7 +3488,7 @@ mod argument_values {
 
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
-        let mult_id = graph.by_name("mult").unwrap().id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
 
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
@@ -3464,7 +3530,7 @@ mod argument_values {
         execution_graph.execute_sinks().await?;
 
         // sum: inputs are get_a(2.0) and get_b(5.0), output is 2+5=7
-        let sum_id = graph.by_name("sum").unwrap().id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         let values = execution_graph.get_argument_values(&sum_id).unwrap();
 
         assert_eq!(values.inputs.len(), 2);
@@ -3481,7 +3547,7 @@ mod argument_values {
         ));
 
         // mult: inputs are sum(7) and get_b(5.0), output is 7*5=35
-        let mult_id = graph.by_name("mult").unwrap().id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
         let values = execution_graph.get_argument_values(&mult_id).unwrap();
 
         assert_eq!(values.inputs.len(), 2);
@@ -3499,7 +3565,10 @@ mod argument_values {
         ));
 
         // print: input is mult(35), no outputs
-        let print_id = graph.by_name("Print").unwrap().id;
+        let print_id = graph
+            .find_by_name("Print", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         let values = execution_graph.get_argument_values(&print_id).unwrap();
 
         assert_eq!(values.inputs.len(), 1);
@@ -3521,7 +3590,7 @@ mod argument_values {
 
         library.by_name_mut("mult").unwrap().inputs[1].required = false;
         bind(&mut graph, "mult", 1, Binding::None);
-        let mult_id = graph.by_name("mult").unwrap().id;
+        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
 
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
@@ -3544,7 +3613,7 @@ mod argument_values {
 
         execution_graph.update(&graph, &library).unwrap();
 
-        let sum_id = graph.by_name("sum").unwrap().id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         let values = execution_graph.get_argument_values(&sum_id).unwrap();
 
         // Before execution: all inputs are None (no upstream values yet)
@@ -3642,7 +3711,7 @@ mod stats {
         let stats = execution_graph.execute_sinks().await?;
 
         // sum[0] should appear in missing_inputs
-        let sum_id = graph.by_name("sum").unwrap().id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         assert!(
             stats
                 .missing_inputs
@@ -3677,8 +3746,11 @@ mod stats {
         }
 
         // Verify specific node IDs are present
-        let sum_id = graph.by_name("sum").unwrap().id;
-        let print_id = graph.by_name("Print").unwrap().id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let print_id = graph
+            .find_by_name("Print", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         assert!(stats.executed_nodes.iter().any(|n| n.node_id == sum_id));
         assert!(stats.executed_nodes.iter().any(|n| n.node_id == print_id));
 
@@ -3747,8 +3819,8 @@ mod events {
         let recv_id = NodeId::unique();
 
         let mut graph = Graph::default();
-        graph.add(node(&library, "emit", emit_id));
-        graph.add(node(&library, "recv", recv_id));
+        graph.insert(emit_id, node(&library, "emit"));
+        graph.insert(recv_id, node(&library, "recv"));
         graph.subscribe(emit_id, 0, recv_id);
         graph.set_input_binding(InputPort::new(recv_id, 0), Binding::bind(emit_id, 0));
         graph.validate();
@@ -3845,7 +3917,11 @@ mod events {
         let mut f = build();
         // Drop the subscriber but keep emit reachable by making it a sink.
         let emit_id = f.emit_id;
-        let recv_id = f.graph.by_name("recv").unwrap().id;
+        let recv_id = f
+            .graph
+            .find_by_name("recv", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         f.graph.unsubscribe(emit_id, 0, recv_id);
         f.library.by_name_mut("emit").unwrap().sink = true;
 
@@ -3921,14 +3997,13 @@ mod events {
         let trigger_id = NodeId::unique();
 
         let mut graph = Graph::default();
-        graph.add(node(&library, "emit", emit_id));
-        graph.add(node(&library, "source", source_id));
-        graph.add(node(&library, "sink", sink_id));
+        graph.insert(emit_id, node(&library, "emit"));
+        graph.insert(source_id, node(&library, "source"));
+        graph.insert(sink_id, node(&library, "sink"));
         // The RunSinks sink — no ports; subscribes to emit's tick.
         let mut trigger = Node::new(NodeKind::Special(SpecialNode::RunSinks));
-        trigger.id = trigger_id;
         trigger.name = "trigger".to_string();
-        graph.add(trigger);
+        graph.insert(trigger_id, trigger);
 
         // The sink's cone (source → sink) is wholly independent of emit.
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(source_id, 0));
@@ -4007,9 +4082,9 @@ mod events {
         let sink_id = NodeId::unique();
 
         let mut graph = Graph::default();
-        graph.add(node(&library, "emit", emit_id));
-        graph.add(node(&library, "source", source_id));
-        graph.add(node(&library, "sink", sink_id));
+        graph.insert(emit_id, node(&library, "emit"));
+        graph.insert(source_id, node(&library, "source"));
+        graph.insert(sink_id, node(&library, "sink"));
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(source_id, 0));
         graph.validate_with(&library);
 
@@ -4066,8 +4141,8 @@ mod output_demand {
         let split_id = NodeId::unique();
         let sink_id = NodeId::unique();
         let mut graph = Graph::default();
-        graph.add(node(&library, "split", split_id));
-        graph.add(node(&library, "sink", sink_id));
+        graph.insert(split_id, node(&library, "split"));
+        graph.insert(sink_id, node(&library, "sink"));
         // Consume only output 0; output 1 has no consumer.
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(split_id, 0));
         graph.validate();
@@ -4123,8 +4198,8 @@ mod output_demand {
         let split_id = NodeId::unique();
         let sink_id = NodeId::unique();
         let mut graph = Graph::default();
-        graph.add(node(&library, "split", split_id));
-        graph.add(node(&library, "sink", sink_id));
+        graph.insert(split_id, node(&library, "split"));
+        graph.insert(sink_id, node(&library, "sink"));
         // Output 0 has a real consumer; output 1 has none, but is pinned.
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(split_id, 0));
         graph.set_output_pinned(OutputPort::new(split_id, 1), true);
@@ -4198,18 +4273,18 @@ mod output_demand {
         let split_id = NodeId::unique();
         let sink_a_id = NodeId::unique();
         let sink_b_id = NodeId::unique();
-        let mut split = node(&library, "split", split_id);
+        let mut split = node(&library, "split");
         split.cache = CacheMode::Ram;
         let mut graph = Graph::default();
-        graph.add(split);
-        graph.add(node(&library, "sink", sink_a_id));
+        graph.insert(split_id, split);
+        graph.insert(sink_a_id, node(&library, "sink"));
         graph.set_input_binding(InputPort::new(sink_a_id, 0), Binding::bind(split_id, 0));
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library)?;
         engine.execute_sinks().await?;
 
-        graph.add(node(&library, "sink", sink_b_id));
+        graph.insert(sink_b_id, node(&library, "sink"));
         graph.set_input_binding(InputPort::new(sink_b_id, 0), Binding::bind(split_id, 1));
         engine.update(&graph, &library)?;
         engine.execute_sinks().await?;
@@ -4243,7 +4318,10 @@ mod topology {
 
         // Remove get_b — a middle node feeding sum[1] and mult[1] (both optional).
         // Forces compaction and target_idx remapping for the survivors.
-        let get_b_id = graph.by_name("get_b").unwrap().id;
+        let get_b_id = graph
+            .find_by_name("get_b", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         graph.detach_node(get_b_id);
         graph.validate();
 
@@ -4257,7 +4335,7 @@ mod topology {
         assert_eq!(*printed.lock().await, 2);
 
         // sum's Bind to get_a still resolves after the index remap.
-        let sum_id = graph.by_name("sum").unwrap().id;
+        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         let vals = eg.get_argument_values(&sum_id).unwrap();
         assert!(
             matches!(vals.inputs[0], Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(2.0))
@@ -4306,10 +4384,10 @@ mod topology {
         let print2_id = NodeId::unique();
 
         let mut graph = Graph::default();
-        graph.add(node(&library, "get_a", get_a_id));
-        graph.add(node(&library, "get_b", get_b_id));
-        graph.add(node(&library, "Print", print1_id));
-        graph.add(node(&library, "Print", print2_id));
+        graph.insert(get_a_id, node(&library, "get_a"));
+        graph.insert(get_b_id, node(&library, "get_b"));
+        graph.insert(print1_id, node(&library, "Print"));
+        graph.insert(print2_id, node(&library, "Print"));
         graph.set_input_binding(InputPort::new(print1_id, 0), Binding::bind(get_a_id, 0));
         graph.set_input_binding(InputPort::new(print2_id, 0), Binding::bind(get_b_id, 0));
         graph.validate();
@@ -4329,34 +4407,35 @@ mod topology {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn cached_output_survives_compaction_reorder() -> anyhow::Result<()> {
-        // get_a is Pure → its output is cached across runs. We remove an
-        // earlier-inserted chain so compaction shifts get_a's slot, then verify
-        // its cached output (carried on the node) still resolves and it is NOT
-        // recomputed. Guards the SoA span / `output_values` carry-over across a
-        // `compact_insert` reorder.
+        // Both sources are Pure, so their outputs are cached across runs.
+        // Removing whichever chain compiled first guarantees that the other
+        // source shifts slots despite the authoring graph's unordered storage.
         let calls_a = Arc::new(Mutex::new(0));
         let calls_a_l = calls_a.clone();
+        let calls_b = Arc::new(Mutex::new(0));
+        let calls_b_l = calls_b.clone();
         let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || {
                 *calls_a_l.try_lock().unwrap() += 1;
                 Ok(2)
             }),
-            get_b: Arc::new(|| 5),
+            get_b: Arc::new(move || {
+                *calls_b_l.try_lock().unwrap() += 1;
+                5
+            }),
             print: Arc::new(|_| {}),
         });
 
-        // get_a's chain is inserted AFTER get_b's, so removing get_b's chain
-        // shifts get_a to a lower exec index on the next update.
         let get_b_id = NodeId::unique();
         let print_b_id = NodeId::unique();
         let get_a_id = NodeId::unique();
         let print_a_id = NodeId::unique();
 
         let mut graph = Graph::default();
-        graph.add(node(&library, "get_b", get_b_id));
-        graph.add(node(&library, "Print", print_b_id));
-        graph.add(node(&library, "get_a", get_a_id));
-        graph.add(node(&library, "Print", print_a_id));
+        graph.insert(get_b_id, node(&library, "get_b"));
+        graph.insert(print_b_id, node(&library, "Print"));
+        graph.insert(get_a_id, node(&library, "get_a"));
+        graph.insert(print_a_id, node(&library, "Print"));
         graph.set_input_binding(InputPort::new(print_b_id, 0), Binding::bind(get_b_id, 0));
         graph.set_input_binding(InputPort::new(print_a_id, 0), Binding::bind(get_a_id, 0));
         graph.validate();
@@ -4364,27 +4443,48 @@ mod topology {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
         eg.execute_sinks().await?;
-        assert_eq!(*calls_a.lock().await, 1); // get_a ran once
-        let idx_before = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
+        assert_eq!(*calls_a.lock().await, 1);
+        assert_eq!(*calls_b.lock().await, 1);
 
-        // Remove get_b's chain — get_a's slot compacts toward the front.
-        graph.detach_node(get_b_id);
-        graph.detach_node(print_b_id);
+        let get_a_idx = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
+        let get_b_idx = eg.compiled.program.e_nodes.index_of_key(&get_b_id).unwrap();
+        let (survivor_id, removed_source_id, removed_print_id, expected_value, survivor_calls) =
+            if get_a_idx > get_b_idx {
+                (get_a_id, get_b_id, print_b_id, 2.0, &calls_a)
+            } else {
+                (get_b_id, get_a_id, print_a_id, 5.0, &calls_b)
+            };
+        let idx_before = eg
+            .compiled
+            .program
+            .e_nodes
+            .index_of_key(&survivor_id)
+            .unwrap();
+
+        graph.detach_node(removed_source_id);
+        graph.detach_node(removed_print_id);
         graph.validate();
 
         eg.update(&graph, &library).unwrap();
-        let idx_after = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
-        assert_ne!(idx_before, idx_after, "get_a should have been reordered");
+        let idx_after = eg
+            .compiled
+            .program
+            .e_nodes
+            .index_of_key(&survivor_id)
+            .unwrap();
+        assert_ne!(idx_before, idx_after, "survivor should have been reordered");
 
         let stats = eg.execute_sinks().await?;
 
-        // get_a (Pure) stays cached, not re-executed, despite the reorder…
-        assert_eq!(*calls_a.lock().await, 1, "get_a recomputed after reorder");
-        assert!(stats.cached_nodes.contains(&get_a_id));
-        // …and its cached output still resolves to the correct value.
-        let vals = eg.get_argument_values(&get_a_id).unwrap();
+        assert_eq!(
+            *survivor_calls.lock().await,
+            1,
+            "survivor recomputed after reorder"
+        );
+        assert!(stats.cached_nodes.contains(&survivor_id));
+        let vals = eg.get_argument_values(&survivor_id).unwrap();
         assert!(
-            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Float(v)) if v.approximately_eq(2.0))
+            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Float(v)) if v.approximately_eq(expected_value))
         );
 
         Ok(())
@@ -4406,8 +4506,8 @@ mod topology {
         let get_a_id = NodeId::unique();
         let print_a_id = NodeId::unique();
         let mut graph = Graph::default();
-        graph.add(node(&library, "get_a", get_a_id));
-        graph.add(node(&library, "Print", print_a_id));
+        graph.insert(get_a_id, node(&library, "get_a"));
+        graph.insert(print_a_id, node(&library, "Print"));
         graph.set_input_binding(InputPort::new(print_a_id, 0), Binding::bind(get_a_id, 0));
         graph.validate();
 
@@ -4419,8 +4519,8 @@ mod topology {
             // Add a get_b → print chain.
             let gb = NodeId::unique();
             let pb = NodeId::unique();
-            graph.add(node(&library, "get_b", gb));
-            graph.add(node(&library, "Print", pb));
+            graph.insert(gb, node(&library, "get_b"));
+            graph.insert(pb, node(&library, "Print"));
             graph.set_input_binding(InputPort::new(pb, 0), Binding::bind(gb, 0));
             graph.validate();
             eg.update(&graph, &library).unwrap();
@@ -4469,16 +4569,13 @@ mod subgraph {
     /// `in(A,B) -> sum -> out(Sum)`.
     fn wrap_sum_def(library: &Library) -> SubgraphDef {
         let in_node = Node::new(NodeKind::SubgraphInput);
-        let in_id = in_node.id;
         let sum = fnode(library, "sum");
-        let sum_id = sum.id;
         let out = Node::new(NodeKind::SubgraphOutput);
-        let out_id = out.id;
 
         let mut graph = Graph::default();
-        graph.add(in_node);
-        graph.add(sum);
-        graph.add(out);
+        let in_id = graph.add(in_node);
+        let sum_id = graph.add(sum);
+        let out_id = graph.add(out);
         graph.set_input_binding(InputPort::new(sum_id, 0), Binding::bind(in_id, 0));
         graph.set_input_binding(InputPort::new(sum_id, 1), Binding::bind(in_id, 1));
         graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_id, 0));
@@ -4508,18 +4605,15 @@ mod subgraph {
 
         let get_a = fnode(&library, "get_a");
         let get_b = fnode(&library, "get_b");
-        let (a_id, b_id) = (get_a.id, get_b.id);
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        let c_id = c.id;
         let print = fnode(&library, "Print");
-        let print_id = print.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
-        graph.add(get_a);
-        graph.add(get_b);
-        graph.add(c);
-        graph.add(print);
+        let a_id = graph.add(get_a);
+        let b_id = graph.add(get_b);
+        let c_id = graph.add(c);
+        let print_id = graph.add(print);
         graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(a_id, 0));
         graph.set_input_binding(InputPort::new(c_id, 1), Binding::bind(b_id, 0));
         graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(c_id, 0));
@@ -4550,13 +4644,11 @@ mod subgraph {
         // def TwoSources: get_a -> out0, get_b -> out1 (no inputs).
         let src_a = fnode(&library, "get_a");
         let src_b = fnode(&library, "get_b");
-        let (sa, sb) = (src_a.id, src_b.id);
         let out = Node::new(NodeKind::SubgraphOutput);
-        let out_id = out.id;
         let mut def_graph = Graph::default();
-        def_graph.add(src_a);
-        def_graph.add(src_b);
-        def_graph.add(out);
+        let sa = def_graph.add(src_a);
+        let sb = def_graph.add(src_b);
+        let out_id = def_graph.add(out);
         def_graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(sa, 0));
         def_graph.set_input_binding(InputPort::new(out_id, 1), Binding::bind(sb, 0));
         let def = SubgraphDef::new(SubgraphId::unique(), "TwoSources")
@@ -4566,14 +4658,12 @@ mod subgraph {
 
         // parent: C, print <- C.out0 (out1 unused).
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        let c_id = c.id;
         let print = fnode(&library, "Print");
-        let print_id = print.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
-        graph.add(c);
-        graph.add(print);
+        let c_id = graph.add(c);
+        let print_id = graph.add(print);
         graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(c_id, 0));
 
         let mut eg = ExecutionEngine::default();
@@ -4594,14 +4684,12 @@ mod subgraph {
         // C.in0 <- C.out0 (self-cycle through the composite); print <- C.out0
         // so the cyclic node is reachable from a sink.
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        let c_id = c.id;
         let print = fnode(&library, "Print");
-        let print_id = print.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
-        graph.add(c);
-        graph.add(print);
+        let c_id = graph.add(c);
+        let print_id = graph.add(print);
         graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(c_id, 0));
         graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(c_id, 0));
 
@@ -4632,18 +4720,15 @@ mod subgraph {
 
         let get_a = fnode(&library, "get_a");
         let get_b = fnode(&library, "get_b");
-        let (a_id, b_id) = (get_a.id, get_b.id);
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        let c_id = c.id;
         let print = fnode(&library, "Print");
-        let print_id = print.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
-        graph.add(get_a);
-        graph.add(get_b);
-        graph.add(c);
-        graph.add(print);
+        let a_id = graph.add(get_a);
+        let b_id = graph.add(get_b);
+        let c_id = graph.add(c);
+        let print_id = graph.add(print);
         graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(a_id, 0));
         graph.set_input_binding(InputPort::new(c_id, 1), Binding::bind(b_id, 0));
         graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(c_id, 0));
@@ -4720,14 +4805,12 @@ mod subgraph {
         let interior_sum_id = def.graph.iter().find(|n| n.name == "sum").unwrap().id;
 
         let get_a = fnode(&library, "get_a");
-        let a_id = get_a.id;
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        let c_id = c.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
-        graph.add(get_a);
-        graph.add(c);
+        let a_id = graph.add(get_a);
+        let c_id = graph.add(c);
         graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(a_id, 0));
 
         let mut eg = ExecutionEngine::default();
@@ -4779,9 +4862,8 @@ mod subgraph {
         // def: a single `ticker`, its `tick` event exposed as the composite's
         // event 0.
         let emitter = fnode(&library, "ticker");
-        let emitter_id = emitter.id;
         let mut def_graph = Graph::default();
-        def_graph.add(emitter);
+        let emitter_id = def_graph.add(emitter);
         let def = SubgraphDef::new(SubgraphId::unique(), "Exposer")
             .category("Test")
             .graph(def_graph)
@@ -4793,14 +4875,12 @@ mod subgraph {
 
         // parent: composite C, and `listener` subscribing to C's event 0.
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        let c_id = c.id;
         let listener = fnode(&library, "Print");
-        let listener_id = listener.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
-        graph.add(c);
-        graph.add(listener);
+        let c_id = graph.add(c);
+        let listener_id = graph.add(listener);
         graph.subscribe(c_id, 0, listener_id);
 
         let mut eg = ExecutionEngine::default();
@@ -4819,12 +4899,10 @@ mod subgraph {
 
         // def: SubgraphInput trigger → interior `print` subscribes to it.
         let si = Node::new(NodeKind::SubgraphInput);
-        let si_id = si.id;
         let reactor = fnode(&library, "Print");
-        let reactor_id = reactor.id;
         let mut def_graph = Graph::default();
-        def_graph.add(si);
-        def_graph.add(reactor);
+        let si_id = def_graph.add(si);
+        let reactor_id = def_graph.add(reactor);
         def_graph.subscribe(si_id, 0, reactor_id);
         let def = SubgraphDef::new(SubgraphId::unique(), "Reactor")
             .category("Test")
@@ -4832,14 +4910,12 @@ mod subgraph {
 
         // parent: `ticker` emits; composite C subscribes to it.
         let emitter = fnode(&library, "ticker");
-        let emitter_id = emitter.id;
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        let c_id = c.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
-        graph.add(emitter);
-        graph.add(c);
+        let emitter_id = graph.add(emitter);
+        let c_id = graph.add(c);
         graph.subscribe(emitter_id, 0, c_id);
 
         let mut eg = ExecutionEngine::default();
@@ -4873,16 +4949,14 @@ mod subgraph {
         let def_ref = library.subgraph_by_id(&def_id).unwrap();
         let c1 = Node::subgraph_instance(def_ref, SubgraphRef::Linked(def_id));
         let c2 = Node::subgraph_instance(def_ref, SubgraphRef::Linked(def_id));
-        let (c1_id, c2_id) = (c1.id, c2.id);
         let p1 = fnode(&library, "Print");
         let p2 = fnode(&library, "Print");
-        let (p1_id, p2_id) = (p1.id, p2.id);
 
         let mut graph = Graph::default();
-        graph.add(c1);
-        graph.add(c2);
-        graph.add(p1);
-        graph.add(p2);
+        let c1_id = graph.add(c1);
+        let c2_id = graph.add(c2);
+        let p1_id = graph.add(p1);
+        let p2_id = graph.add(p2);
         graph.set_input_binding(InputPort::new(c1_id, 0), StaticValue::Int(1).into());
         graph.set_input_binding(InputPort::new(c1_id, 1), StaticValue::Int(2).into());
         graph.set_input_binding(InputPort::new(c2_id, 0), StaticValue::Int(10).into());
@@ -4969,12 +5043,10 @@ mod subgraph {
 
         // def Reactor: SubgraphInput trigger → interior `get_a` subscribes.
         let si = Node::new(NodeKind::SubgraphInput);
-        let si_id = si.id;
         let reactor = fnode(&library, "get_a");
-        let reactor_id = reactor.id;
         let mut def_graph = Graph::default();
-        def_graph.add(si);
-        def_graph.add(reactor);
+        let si_id = def_graph.add(si);
+        let reactor_id = def_graph.add(reactor);
         def_graph.subscribe(si_id, 0, reactor_id);
         let def = SubgraphDef::new(SubgraphId::unique(), "Reactor")
             .category("Test")
@@ -4982,14 +5054,12 @@ mod subgraph {
 
         // parent: `ticker` E; composite C subscribes to E's event.
         let emitter = fnode(&library, "ticker");
-        let emitter_id = emitter.id;
         let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        let c_id = c.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
-        graph.add(emitter);
-        graph.add(c);
+        let emitter_id = graph.add(emitter);
+        let c_id = graph.add(c);
         graph.subscribe(emitter_id, 0, c_id);
 
         let mut eg = ExecutionEngine::default();
@@ -5124,11 +5194,11 @@ mod mid_run_release {
         let sink_id = NodeId::unique();
         let mut graph = Graph::default();
         for &id in &relays {
-            let mut n = node(&library, "relay", id);
+            let mut n = node(&library, "relay");
             n.cache = relay_mode;
-            graph.add(n);
+            graph.insert(id, n);
         }
-        graph.add(node(&library, "sink", sink_id));
+        graph.insert(sink_id, node(&library, "sink"));
         for pair in relays.windows(2) {
             graph.set_input_binding(InputPort::new(pair[1], 0), Binding::bind(pair[0], 0));
         }
@@ -5206,12 +5276,12 @@ mod mid_run_release {
 
         let relay_id = NodeId::unique();
         let mut graph = Graph::default();
-        let mut relay = node(&library, "relay", relay_id);
+        let mut relay = node(&library, "relay");
         relay.cache = relay_mode;
-        graph.add(relay);
+        graph.insert(relay_id, relay);
         for _ in 0..n_probes {
             let probe_id = NodeId::unique();
-            graph.add(node(&library, "probe", probe_id));
+            graph.insert(probe_id, node(&library, "probe"));
             graph.set_input_binding(InputPort::new(probe_id, 0), Binding::bind(relay_id, 0));
         }
         graph.validate();
@@ -5301,11 +5371,14 @@ mod compile_regressions {
         // producer it binds — so `make_str` claims flat index 1 while its output span
         // is assigned last.
         let mut graph = Graph::default();
-        graph.add(node(&library, "sink", NodeId::unique()));
-        graph.add(node(&library, "make_int", NodeId::unique()));
-        graph.add(node(&library, "make_str", NodeId::unique()));
-        let sink_id = graph.by_name("sink").unwrap().id;
-        let str_id = graph.by_name("make_str").unwrap().id;
+        graph.add(node(&library, "sink"));
+        graph.add(node(&library, "make_int"));
+        graph.add(node(&library, "make_str"));
+        let sink_id = graph.find_by_name("sink", NodeSearch::TopLevel).unwrap().id;
+        let str_id = graph
+            .find_by_name("make_str", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(str_id, 0));
 
         let mut engine = ExecutionEngine::default();
@@ -5358,10 +5431,16 @@ mod compile_regressions {
 
         let lib_v1 = make_lib(0, 1, false);
         let mut graph = Graph::default();
-        graph.add(node(&lib_v1, "generate", NodeId::unique()));
-        graph.add(node(&lib_v1, "Print", NodeId::unique()));
-        let generate_id = graph.by_name("generate").unwrap().id;
-        let print_id = graph.by_name("Print").unwrap().id;
+        graph.add(node(&lib_v1, "generate"));
+        graph.add(node(&lib_v1, "Print"));
+        let generate_id = graph
+            .find_by_name("generate", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
+        let print_id = graph
+            .find_by_name("Print", NodeSearch::TopLevel)
+            .unwrap()
+            .id;
         graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(generate_id, 0));
 
         let mut engine = ExecutionEngine::default();
@@ -5400,15 +5479,12 @@ mod compile_regressions {
 
         // def: in(A,B) -> sum -> out
         let in_node = Node::new(NodeKind::SubgraphInput);
-        let in_id = in_node.id;
         let sum: Node = library.by_name("sum").unwrap().into();
-        let sum_interior_id = sum.id;
         let out = Node::new(NodeKind::SubgraphOutput);
-        let out_id = out.id;
         let mut def_graph = Graph::default();
-        def_graph.add(in_node);
-        def_graph.add(sum);
-        def_graph.add(out);
+        let in_id = def_graph.add(in_node);
+        let sum_interior_id = def_graph.add(sum);
+        let out_id = def_graph.add(out);
         def_graph.set_input_binding(InputPort::new(sum_interior_id, 0), Binding::bind(in_id, 0));
         def_graph.set_input_binding(InputPort::new(sum_interior_id, 1), Binding::bind(in_id, 1));
         def_graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_interior_id, 0));
@@ -5421,18 +5497,15 @@ mod compile_regressions {
 
         let get_a: Node = library.by_name("get_a").unwrap().into();
         let get_b: Node = library.by_name("get_b").unwrap().into();
-        let (a_id, b_id) = (get_a.id, get_b.id);
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
-        let inst_id = inst.id;
         let print: Node = library.by_name("Print").unwrap().into();
-        let print_id = print.id;
 
         let mut graph = Graph::default();
         graph.subgraphs.add(def);
-        graph.add(get_a);
-        graph.add(get_b);
-        graph.add(inst);
-        graph.add(print);
+        let a_id = graph.add(get_a);
+        let b_id = graph.add(get_b);
+        let inst_id = graph.add(inst);
+        let print_id = graph.add(print);
         graph.set_input_binding(InputPort::new(inst_id, 0), Binding::bind(a_id, 0));
         graph.set_input_binding(InputPort::new(inst_id, 1), Binding::bind(b_id, 0));
         graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(inst_id, 0));

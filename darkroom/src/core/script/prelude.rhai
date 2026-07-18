@@ -20,7 +20,7 @@
 fn create_node(func_id, x, y) {
     let action = host::make_add_node(func_id, x, y);
     apply(action);
-    action.AddNode.node.id
+    action.AddNode.node_id
 }
 
 // Remove `node_id` from the graph. The editor walks the graph at apply

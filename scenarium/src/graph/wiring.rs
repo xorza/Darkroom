@@ -43,6 +43,7 @@ pub fn closes_data_cycle(
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DetachedNode {
+    pub node_id: NodeId,
     pub node: Node,
     bindings: Vec<BindingEntry>,
     subscriptions: Vec<Subscription>,
@@ -57,8 +58,9 @@ pub struct BindingEntry {
 
 impl Graph {
     pub fn snapshot_node(&self, node_id: NodeId) -> Option<DetachedNode> {
-        let node = self.find_node(&node_id, NodeSearch::TopLevel)?.clone();
+        let node = self.find(&node_id, NodeSearch::TopLevel)?.clone();
         Some(DetachedNode {
+            node_id,
             node,
             bindings: self.bindings_touching(node_id),
             subscriptions: self
@@ -81,7 +83,7 @@ impl Graph {
         let detached = self
             .snapshot_node(node_id)
             .expect("cannot detach a node that is not in the graph");
-        self.nodes.remove_by_key(&node_id);
+        self.nodes.remove(&node_id);
         self.bindings
             .retain(|port, binding| !binding_touches(*port, binding, node_id));
         self.subscriptions
@@ -91,7 +93,7 @@ impl Graph {
     }
 
     pub fn attach_node(&mut self, detached: DetachedNode) {
-        self.add(detached.node);
+        self.insert(detached.node_id, detached.node);
         self.bindings.extend(
             detached
                 .bindings

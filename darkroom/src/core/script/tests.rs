@@ -138,6 +138,7 @@ fn create_node_known_id_enqueues_add_node() {
     match &actions[0] {
         Intent::AddNode {
             pos,
+            node_id,
             node,
             def,
             bindings,
@@ -147,8 +148,8 @@ fn create_node_known_id_enqueues_add_node() {
             assert_eq!(node.name, "alpha");
             assert_eq!(*pos, Vec2::new(12.5, -3.0));
             assert!(def.is_none(), "func nodes carry no subgraph def");
-            // The id `create_node` returned to Rhai matches the node id.
-            assert_eq!(returned_id, node.id.to_string());
+            // The id `create_node` returned to Rhai matches the map key.
+            assert_eq!(returned_id, node_id.to_string());
         }
         other => panic!("expected AddNode, got {other:?}"),
     }

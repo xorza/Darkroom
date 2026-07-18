@@ -33,7 +33,7 @@ pub use execution::{Error, Result, RunError};
 pub use graph::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
 pub use graph::wiring::{BindingEntry, DetachedNode, closes_data_cycle};
 pub use graph::{
-    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
+    Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeRef, NodeSearch, OutputPort,
     Subscription,
 };
 pub use library::{Library, TypeDecl, TypeEntry};

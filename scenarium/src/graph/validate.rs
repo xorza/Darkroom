@@ -66,13 +66,13 @@ impl Graph {
         // Resolve every node's func/def first (and recurse into composites):
         // the port-count helpers below look funcs/defs up infallibly, so this
         // pass must establish they all resolve before any count is taken.
-        for node in self.nodes.iter() {
+        for (node_id, node) in &self.nodes {
             match &node.kind {
                 NodeKind::Func(func_id) => {
                     ensure!(
                         library.by_id(func_id).is_some(),
                         "node {:?} references func {:?}, absent from the library",
-                        node.id,
+                        node_id,
                         func_id
                     );
                 }
@@ -80,7 +80,7 @@ impl Graph {
                     let def = self.resolve_def(*r, library).with_context(|| {
                         format!(
                             "node {:?} references a missing subgraph definition",
-                            node.id
+                            node_id
                         )
                     })?;
                     ensure!(
@@ -113,7 +113,7 @@ impl Graph {
         if let Some(def) = ctx_def {
             for event in &def.events {
                 let emitter = self
-                    .find_node(&event.emitter, NodeSearch::TopLevel)
+                    .find(&event.emitter, NodeSearch::TopLevel)
                     .with_context(|| {
                         format!("exposed event names missing emitter {:?}", event.emitter)
                     })?;
@@ -129,7 +129,7 @@ impl Graph {
         // Every binding addresses ports that exist on both ends.
         for (dst, binding) in self.bindings.iter() {
             let consumer = self
-                .find_node(&dst.node_id, NodeSearch::TopLevel)
+                .find(&dst.node_id, NodeSearch::TopLevel)
                 .with_context(|| format!("binding on missing node {:?}", dst.node_id))?;
             ensure!(
                 dst.port_idx < self.input_count(consumer, library, ctx_def),
@@ -145,7 +145,7 @@ impl Graph {
                     dst.node_id
                 );
                 let producer = self
-                    .find_node(&src.node_id, NodeSearch::TopLevel)
+                    .find(&src.node_id, NodeSearch::TopLevel)
                     .with_context(|| format!("binding from missing node {:?}", src.node_id))?;
                 ensure!(
                     src.port_idx < self.output_count(producer, library, ctx_def),
@@ -189,7 +189,7 @@ impl Graph {
         // Every subscription targets an event the emitter actually exposes.
         for s in self.subscriptions.iter() {
             let emitter = self
-                .find_node(&s.emitter, NodeSearch::TopLevel)
+                .find(&s.emitter, NodeSearch::TopLevel)
                 .with_context(|| format!("subscription from missing emitter {:?}", s.emitter))?;
             ensure!(
                 s.event_idx < self.event_count(emitter, library, ctx_def),
@@ -202,7 +202,7 @@ impl Graph {
         // Every pinned output addresses a port that actually exists.
         for port in self.pinned_outputs.iter() {
             let node = self
-                .find_node(&port.node_id, NodeSearch::TopLevel)
+                .find(&port.node_id, NodeSearch::TopLevel)
                 .with_context(|| format!("pinned output on missing node {:?}", port.node_id))?;
             ensure!(
                 port.port_idx < self.output_count(node, library, ctx_def),

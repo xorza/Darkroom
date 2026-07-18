@@ -8,11 +8,13 @@ crate-private, so downstream crates import public concepts directly from
 
 ## Models and identities
 
-The authoring `Graph` owns identity-only `Node`s plus side tables for input
+The authoring `Graph` owns `Node`s keyed by `NodeId` plus side tables for input
 bindings, event subscriptions, pinned outputs, and local subgraph definitions.
-It is the persisted model. `Graph::check` enforces node-id uniqueness across the
-whole reachable authoring tree. Node removal and restoration use `DetachedNode`,
-which keeps the node, all touching wiring, subscriptions, and pins together.
+Identity exists only in the map key; `Node` is authored data and does not store
+its id. `Graph` is the persisted model. `Graph::check` enforces node-id
+uniqueness across the whole reachable authoring tree. Node removal and
+restoration use `DetachedNode`, which keeps the id, node, all touching wiring,
+subscriptions, and pins together.
 
 Compilation produces a private, immutable `ExecutionProgram`. Composite nodes
 are dissolved into flat function nodes and SoA pools. Top-level nodes retain

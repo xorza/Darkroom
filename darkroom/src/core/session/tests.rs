@@ -13,9 +13,10 @@ fn apply_intents_adds_node_and_flags_reconcile() {
     assert_eq!(doc.graph.len(), 0);
 
     let node = Node::new(NodeKind::Func(FuncId::unique()));
-    let id = node.id;
+    let id = NodeId::unique();
     let intent = Intent::AddNode {
         pos: Vec2::new(10.0, 20.0),
+        node_id: id,
         node,
         def: None,
         bindings: vec![],
@@ -24,7 +25,7 @@ fn apply_intents_adds_node_and_flags_reconcile() {
     let reconcile = apply_intents(&mut doc, vec![intent], &Library::default());
     assert_eq!(doc.graph.len(), 1);
     assert!(
-        doc.graph.find_node(&id, NodeSearch::TopLevel).is_some(),
+        doc.graph.find(&id, NodeSearch::TopLevel).is_some(),
         "node landed in the graph"
     );
     assert!(reconcile, "AddNode can change the interface → reconcile");
@@ -34,10 +35,11 @@ fn apply_intents_adds_node_and_flags_reconcile() {
 fn apply_add_node_seeds_initial_bindings() {
     let mut doc = empty_document();
     let node = Node::new(NodeKind::Func(FuncId::unique()));
-    let id = node.id;
+    let id = NodeId::unique();
     let port = InputPort::new(id, 0);
     let intent = Intent::AddNode {
         pos: Vec2::ZERO,
+        node_id: id,
         node,
         def: None,
         bindings: vec![(port, Binding::Const(StaticValue::Float(5.0)))],
@@ -71,8 +73,7 @@ fn apply_intents_drops_stale_intent() {
 fn apply_intents_selection_skips_reconcile() {
     let mut doc = empty_document();
     let node = Node::new(NodeKind::Func(FuncId::unique()));
-    let id = node.id;
-    doc.graph.add(node);
+    let id = doc.graph.add(node);
     doc.main_view.view_items.add(ViewItem::node(id, Vec2::ZERO));
 
     // Selecting an existing node is a real change but a pure view edit —
@@ -96,6 +97,7 @@ fn apply_intents_batches_multiple() {
             let node = Node::new(NodeKind::Func(FuncId::unique()));
             Intent::AddNode {
                 pos: Vec2::new(i as f32 * 100.0, 0.0),
+                node_id: NodeId::unique(),
                 node,
                 def: None,
                 bindings: vec![],

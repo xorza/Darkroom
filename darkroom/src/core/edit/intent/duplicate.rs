@@ -66,20 +66,19 @@ pub(crate) fn build_duplicate_intent_for(
     let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
     let mut nodes = Vec::new();
     for old_id in node_ids {
-        let Some(node) = graph.find_node(old_id, NodeSearch::TopLevel) else {
+        let Some(node) = graph.find(old_id, NodeSearch::TopLevel) else {
             continue;
         };
         let new_id = NodeId::unique();
         id_map.insert(*old_id, new_id);
-        let mut clone = node.clone();
-        clone.id = new_id;
+        let clone = node.clone();
         let pos = view
             .view_items
             .by_key(&ItemRef::Node(*old_id))
             .expect("view holds a position for every graph node")
             .pos
             + DUPLICATE_OFFSET;
-        nodes.push((pos, clone));
+        nodes.push((pos, new_id, clone));
     }
 
     // Each cloned node's own input ports. Const/None copy verbatim; a `Bind`

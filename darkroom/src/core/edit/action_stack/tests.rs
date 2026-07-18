@@ -306,12 +306,12 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     }
     stack.push_current(GraphRef::Main, &batch);
 
-    assert!(doc.graph.find_node(&a, NodeSearch::TopLevel).is_none());
-    assert!(doc.graph.find_node(&b, NodeSearch::TopLevel).is_none());
+    assert!(doc.graph.find(&a, NodeSearch::TopLevel).is_none());
+    assert!(doc.graph.find(&b, NodeSearch::TopLevel).is_none());
 
     assert!(stack.undo(&mut doc, &mut |_| {}));
-    assert!(doc.graph.find_node(&a, NodeSearch::TopLevel).is_some());
-    assert!(doc.graph.find_node(&b, NodeSearch::TopLevel).is_some());
+    assert!(doc.graph.find(&a, NodeSearch::TopLevel).is_some());
+    assert!(doc.graph.find(&b, NodeSearch::TopLevel).is_some());
     match doc.graph.input_binding(InputPort::new(b, 0)) {
         Binding::Bind(src) => assert_eq!((src.node_id, src.port_idx), (a, 0)),
         other => panic!("expected restored a->b edge, got {other:?}"),

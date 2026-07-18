@@ -27,11 +27,10 @@ fn build_def(
     let sgin = Node::new(NodeKind::SubgraphInput);
     let sum = Node::new(NodeKind::Func(sum_id));
     let sgout = Node::new(NodeKind::SubgraphOutput);
-    let (sgin_id, sum_id_n, sgout_id) = (sgin.id, sum.id, sgout.id);
     let mut g = Graph::default();
-    g.add(sgin);
-    g.add(sum);
-    g.add(sgout);
+    let sgin_id = g.add(sgin);
+    let sum_id_n = g.add(sum);
+    let sgout_id = g.add(sgout);
     let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000aa", "S")
         .category("Subgraph")
         .graph(g)
@@ -251,10 +250,9 @@ fn passthrough_ports_are_null_typed() {
     let library = lib();
     let sgin = Node::new(NodeKind::SubgraphInput);
     let sgout = Node::new(NodeKind::SubgraphOutput);
-    let (sgin_id, sgout_id) = (sgin.id, sgout.id);
     let mut interior = Graph::default();
-    interior.add(sgin);
-    interior.add(sgout);
+    let sgin_id = interior.add(sgin);
+    let sgout_id = interior.add(sgout);
     // sgout.in0 <- sgin.out0
     interior.set_input_binding(InputPort::new(sgout_id, 0), Binding::bind(sgin_id, 0));
     let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000dd", "Pass")
@@ -302,12 +300,11 @@ fn passthrough_in_subgraph_exposes_the_resolved_output_type() {
     let sum = Node::new(NodeKind::Func(sum_id));
     let pass = Node::from(&pass_func);
     let sgout = Node::new(NodeKind::SubgraphOutput);
-    let (sgin_id, sum_n, pass_id, sgout_id) = (sgin.id, sum.id, pass.id, sgout.id);
     let mut interior = Graph::default();
-    interior.add(sgin);
-    interior.add(sum);
-    interior.add(pass);
-    interior.add(sgout);
+    let sgin_id = interior.add(sgin);
+    let sum_n = interior.add(sum);
+    let pass_id = interior.add(pass);
+    let sgout_id = interior.add(sgout);
     // sum reads the two boundary inputs; the passthrough caches sum's output;
     // the boundary output exposes the passthrough.
     bind(&mut interior, sum_n, 0, sgin_id, 0);

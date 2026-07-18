@@ -66,6 +66,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }
         Intent::AddNode {
             pos,
+            node_id,
             mut node,
             def,
             bindings,
@@ -73,6 +74,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             let def = reuse_local_subgraph(graph, &mut node, def);
             GraphStep::AddNode {
                 pos,
+                node_id,
                 node,
                 def,
                 bindings,
@@ -85,7 +87,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         } => {
             let to_selection = nodes
                 .iter()
-                .map(|(_, node)| ItemRef::Node(node.id))
+                .map(|(_, node_id, _)| ItemRef::Node(*node_id))
                 .collect();
             GraphStep::DuplicateNodes {
                 nodes,
@@ -132,14 +134,14 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }
         Intent::RenameNode { node_id, to } => GraphStep::RenameNode {
             from: graph
-                .find_node(&node_id, NodeSearch::TopLevel)?
+                .find(&node_id, NodeSearch::TopLevel)?
                 .name
                 .clone(),
             node_id,
             to,
         },
         Intent::SetInput { input, to } => {
-            graph.find_node(&input.node_id, NodeSearch::TopLevel)?;
+            graph.find(&input.node_id, NodeSearch::TopLevel)?;
             GraphStep::SetInput {
                 from: graph.input_binding(input),
                 input,
@@ -161,7 +163,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             }
         }
         Intent::SetNodeProperty { node_id, to } => {
-            let node = graph.find_node(&node_id, NodeSearch::TopLevel)?;
+            let node = graph.find(&node_id, NodeSearch::TopLevel)?;
             // Capture the *same* property's current value as `from` for revert.
             let from = match to {
                 NodeProperty::Disabled(_) => NodeProperty::Disabled(node.disabled),
@@ -171,7 +173,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
         }
         Intent::DetachSubgraph { node_id } => {
             let NodeKind::Subgraph(SubgraphRef::Local(from_id)) =
-                graph.find_node(&node_id, NodeSearch::TopLevel)?.kind
+                graph.find(&node_id, NodeSearch::TopLevel)?.kind
             else {
                 return None; // not a local subgraph instance — nothing to fork
             };
@@ -203,8 +205,8 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             // An unsubscribe of a vanished node no-ops naturally (nothing is
             // subscribed → from == to == false), so it needs no existence check.
             if subscribe {
-                graph.find_node(&emitter, NodeSearch::TopLevel)?;
-                graph.find_node(&subscriber, NodeSearch::TopLevel)?;
+                graph.find(&emitter, NodeSearch::TopLevel)?;
+                graph.find(&subscriber, NodeSearch::TopLevel)?;
             }
             GraphStep::SetSubscription {
                 from: graph.is_subscribed(emitter, event_idx, subscriber),
@@ -220,7 +222,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             // also reaches this variant directly, unchecked, from a script's
             // generic `apply()`/`apply_all()`, so a stale or bogus `node_id`
             // must drop like every other intent here, not assert.
-            graph.find_node(&output.node_id, NodeSearch::TopLevel)?;
+            graph.find(&output.node_id, NodeSearch::TopLevel)?;
             let key = ItemRef::Pin(output);
             // Present iff currently pinned; captured so reverting an unpin
             // puts the widget back in its exact paint-stack slot.

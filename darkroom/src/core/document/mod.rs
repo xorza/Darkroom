@@ -338,9 +338,7 @@ fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
     match tab {
         TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
         TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(&id).is_some(),
-        TabRef::ImageViewer(port) => graph
-            .find_node(&port.node_id, NodeSearch::Recursive)
-            .is_some(),
+        TabRef::ImageViewer(port) => graph.find(&port.node_id, NodeSearch::Recursive).is_some(),
     }
 }
 
@@ -542,9 +540,8 @@ impl Document {
         let mut graph = CoreGraph::default();
         let input = Node::new(NodeKind::SubgraphInput);
         let output = Node::new(NodeKind::SubgraphOutput);
-        let (input_id, output_id) = (input.id, output.id);
-        graph.add(input);
-        graph.add(output);
+        let input_id = graph.add(input);
+        let output_id = graph.add(output);
         let def = SubgraphDef::new(
             SubgraphId::unique(),
             format!("subgraph {}", self.graph.subgraphs.len() + 1),
@@ -556,11 +553,10 @@ impl Document {
         // before the def moves into the table (needs `&def`); the empty
         // interface means no input ports to seed.
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(id));
-        let inst_id = inst.id;
         let inst_pos =
             Vec2::new(60.0, 60.0) + Vec2::splat(36.0) * self.graph.subgraphs.len() as f32;
         self.graph.subgraphs.add(def);
-        self.graph.add(inst);
+        let inst_id = self.graph.add(inst);
         self.main_view
             .view_items
             .add(ViewItem::node(inst_id, inst_pos));
@@ -830,14 +826,13 @@ mod tests {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let sub_id = doc.create_subgraph();
-        let mut dup = Node::new(NodeKind::Func(FuncId::unique()));
-        dup.id = node_id;
+        let dup = Node::new(NodeKind::Func(FuncId::unique()));
         doc.graph
             .subgraphs
             .by_key_mut(&sub_id)
             .unwrap()
             .graph
-            .add(dup);
+            .insert(node_id, dup);
 
         let err = doc.check().unwrap_err();
         assert!(
@@ -871,12 +866,13 @@ mod tests {
         local.origin = Some(lib_id);
         let local_id = local.id;
         let node = Node::subgraph_instance(&local, SubgraphRef::Local(local_id));
-        let node_id = node.id;
+        let node_id = NodeId::unique();
 
         let mut doc = Document::default();
         let step = build_step(
             Intent::AddNode {
                 pos: Vec2::ZERO,
+                node_id,
                 node,
                 def: Some(Box::new(local)),
                 bindings: vec![],
@@ -897,9 +893,7 @@ mod tests {
             "copy records its library origin"
         );
         assert!(
-            doc.graph
-                .find_node(&node_id, NodeSearch::TopLevel)
-                .is_some(),
+            doc.graph.find(&node_id, NodeSearch::TopLevel).is_some(),
             "instance node added"
         );
 
@@ -909,9 +903,7 @@ mod tests {
             "undo removes the def"
         );
         assert!(
-            doc.graph
-                .find_node(&node_id, NodeSearch::TopLevel)
-                .is_none(),
+            doc.graph.find(&node_id, NodeSearch::TopLevel).is_none(),
             "undo removes the instance node"
         );
     }
@@ -928,10 +920,11 @@ mod tests {
         local.origin = Some(lib_id);
         let local_id = local.id;
         let node = Node::subgraph_instance(&local, SubgraphRef::Local(local_id));
-        let node_id = node.id;
+        let node_id = NodeId::unique();
         let step = build_step(
             Intent::AddNode {
                 pos: Vec2::ZERO,
+                node_id,
                 node,
                 def: Some(Box::new(local)),
                 bindings: vec![],
@@ -966,10 +959,7 @@ mod tests {
             "the second fresh copy was dropped"
         );
         assert_eq!(
-            doc.graph
-                .find_node(&node_b, NodeSearch::TopLevel)
-                .unwrap()
-                .kind,
+            doc.graph.find(&node_b, NodeSearch::TopLevel).unwrap().kind,
             NodeKind::Subgraph(SubgraphRef::Local(def_a_id)),
             "second instance points at the first instance's local def"
         );
@@ -993,8 +983,7 @@ mod tests {
             doc.graph.subgraphs.by_key(&local_id).unwrap(),
             SubgraphRef::Local(local_id),
         );
-        let node_id = node.id;
-        doc.graph.add(node);
+        let node_id = doc.graph.add(node);
         doc.main_view
             .view_items
             .add(ViewItem::node(node_id, Vec2::ZERO));
@@ -1004,11 +993,8 @@ mod tests {
         apply_step(&step, &mut doc, GraphRef::Main);
 
         assert_eq!(doc.graph.subgraphs.len(), 2, "fork adds a second local def");
-        let NodeKind::Subgraph(SubgraphRef::Local(new_id)) = doc
-            .graph
-            .find_node(&node_id, NodeSearch::TopLevel)
-            .unwrap()
-            .kind
+        let NodeKind::Subgraph(SubgraphRef::Local(new_id)) =
+            doc.graph.find(&node_id, NodeSearch::TopLevel).unwrap().kind
         else {
             panic!("node should still be a local subgraph");
         };
@@ -1021,11 +1007,8 @@ mod tests {
 
         revert_step(&step, &mut doc, GraphRef::Main);
         assert_eq!(doc.graph.subgraphs.len(), 1, "undo drops the fork");
-        let NodeKind::Subgraph(SubgraphRef::Local(restored)) = doc
-            .graph
-            .find_node(&node_id, NodeSearch::TopLevel)
-            .unwrap()
-            .kind
+        let NodeKind::Subgraph(SubgraphRef::Local(restored)) =
+            doc.graph.find(&node_id, NodeSearch::TopLevel).unwrap().kind
         else {
             panic!("node should still be a local subgraph");
         };
@@ -1049,8 +1032,7 @@ mod tests {
     /// `pos`, returning its id.
     fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
         let node = Node::new(NodeKind::Func(FuncId::unique()));
-        let id = node.id;
-        doc.graph.add(node);
+        let id = doc.graph.add(node);
         doc.main_view.view_items.add(ViewItem::node(id, pos));
         id
     }
@@ -1064,10 +1046,7 @@ mod tests {
         let mut doc = Document::default();
         let id = add_node_at(&mut doc, Vec2::ZERO);
         assert!(
-            !doc.graph
-                .find_node(&id, NodeSearch::TopLevel)
-                .unwrap()
-                .disabled,
+            !doc.graph.find(&id, NodeSearch::TopLevel).unwrap().disabled,
             "starts enabled"
         );
 
@@ -1082,19 +1061,13 @@ mod tests {
         .expect("builds");
         apply_step(&step, &mut doc, GraphRef::Main);
         assert!(
-            doc.graph
-                .find_node(&id, NodeSearch::TopLevel)
-                .unwrap()
-                .disabled,
+            doc.graph.find(&id, NodeSearch::TopLevel).unwrap().disabled,
             "apply disables"
         );
 
         revert_step(&step, &mut doc, GraphRef::Main);
         assert!(
-            !doc.graph
-                .find_node(&id, NodeSearch::TopLevel)
-                .unwrap()
-                .disabled,
+            !doc.graph.find(&id, NodeSearch::TopLevel).unwrap().disabled,
             "revert re-enables (restores the captured `from`)"
         );
     }
@@ -1198,9 +1171,9 @@ mod tests {
 
         let def_id = doc.create_subgraph();
         let nested_node = Node::new(NodeKind::Func(FuncId::unique()));
-        let nested_port = OutputPort::new(nested_node.id, 0);
         let definition = doc.graph.subgraphs.by_key_mut(&def_id).unwrap();
-        definition.graph.add(nested_node);
+        let nested_node_id = definition.graph.add(nested_node);
+        let nested_port = OutputPort::new(nested_node_id, 0);
         definition.graph.set_output_pinned(nested_port, true);
         assert!(
             doc.is_output_pinned(nested_port),
@@ -1367,7 +1340,7 @@ mod tests {
         // (`for_graph` seeds one; the edit layer does the same on pin) —
         // validates and round-trips, position, slot, and all.
         let mut graph = core_test_graph();
-        let node_id = graph.by_name("sum").unwrap().id;
+        let node_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
         let port = OutputPort::new(node_id, 0);
         graph.set_output_pinned(port, true);
 
@@ -1398,7 +1371,10 @@ mod tests {
         // surfaces the drift rather than letting it crash later. Pin the
         // port *after* the view was built so nothing seeds the item.
         let graph = core_test_graph();
-        let port = OutputPort::new(graph.by_name("sum").unwrap().id, 0);
+        let port = OutputPort::new(
+            graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id,
+            0,
+        );
         let mut doc: Document = graph.into();
         doc.graph.set_output_pinned(port, true);
         let err = doc.check().unwrap_err();

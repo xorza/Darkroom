@@ -35,7 +35,7 @@ pub(crate) fn publish_local_def(
     let Some((local_id, mut published, existing_lib)) = (|| {
         let scope = document.scope(target)?;
         let NodeKind::Subgraph(SubgraphRef::Local(local_id)) =
-            scope.graph.find_node(&node_id, NodeSearch::TopLevel)?.kind
+            scope.graph.find(&node_id, NodeSearch::TopLevel)?.kind
         else {
             return None;
         };
@@ -171,7 +171,7 @@ fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotab
             let ItemRef::Node(nid) = key else {
                 continue;
             };
-            if let Some(node) = graph.find_node(nid, NodeSearch::TopLevel)
+            if let Some(node) = graph.find(nid, NodeSearch::TopLevel)
                 && let NodeKind::Subgraph(sref) = node.kind
                 && graph.resolve_def(sref, library).is_some()
             {
@@ -205,9 +205,7 @@ mod tests {
             doc.graph.subgraphs.by_key(&local_id).unwrap(),
             SubgraphRef::Local(local_id),
         );
-        let node_id = node.id;
-        doc.graph.add(node);
-        node_id
+        doc.graph.add(node)
     }
 
     fn def(name: &str, origin: Option<SubgraphId>) -> SubgraphDef {
@@ -319,8 +317,7 @@ mod tests {
         let mut library = Library::default();
         let mut doc = Document::default();
         let node = Node::new(scenarium::NodeKind::Func(FuncId::unique()));
-        let node_id = node.id;
-        doc.graph.add(node);
+        let node_id = doc.graph.add(node);
 
         assert!(!publish_local_def(
             &mut doc,
