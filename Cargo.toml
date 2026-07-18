@@ -53,7 +53,7 @@ glam = { version = "0.33", features = ["serde"] }
 strum = { version = "0.28" }
 strum_macros = { version = "0.28" }
 rand = { version = "0.10" }
-tokio = { version = "1.52", features = ["full"] }
+tokio = { version = "1.53", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tracing = { version = "0.1" }
 # No "time" feature: 0.3.23's blanket `From<S: AsRef<str>> for EnvFilter`
