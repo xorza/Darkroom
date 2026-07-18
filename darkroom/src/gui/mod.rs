@@ -6,6 +6,7 @@ pub(crate) mod image_viewer;
 pub(crate) mod main_window;
 pub(crate) mod menu_bar;
 pub(crate) mod node;
+pub(crate) mod pinned_output;
 pub(crate) mod preferences_view;
 pub(crate) mod widgets;
 

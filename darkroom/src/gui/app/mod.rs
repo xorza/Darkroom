@@ -141,11 +141,11 @@ impl App {
     /// reprojects per-node `ExecStatus` (the status glow) and per-node
     /// logs (the inspector's Log section); a failed run clears both and
     /// surfaces in the status bar. A pinned output's live push lands in the
-    /// centralized `RunState`, which prepares its small image preview; visible
-    /// previews and viewers read the new revision during the frame already
-    /// scheduled by the worker's wake callback. Drained before the editor's
-    /// scene rebuild so they reflect the latest run.
-    fn drain_worker_events(&mut self) {
+    /// centralized pinned-output store, which uploads its small image preview;
+    /// visible previews and viewers read the new revision during the frame
+    /// already scheduled by the worker's wake callback. Drained before the
+    /// editor's scene rebuild so they reflect the latest run.
+    fn drain_worker_events(&mut self, ui: &Ui) {
         // Collect to drop the channel borrow before the status writes below
         // (both live on `self.engine`).
         let events: Vec<WorkerEvent> = self.engine.drain_worker().collect();
@@ -177,7 +177,10 @@ impl App {
                     .run_state
                     .apply_progress(&progress, &self.engine.flatten_map),
                 WorkerEvent::PinnedOutputs(pinned) => {
-                    self.editor.run_state.set_pinned_values(pinned);
+                    self.editor
+                        .run_state
+                        .pinned_outputs
+                        .ingest(ui, pinned, &self.editor.document);
                 }
             }
         }
@@ -322,7 +325,7 @@ impl aperture::App for App {
         // Drain anything the worker posted since last frame, before the
         // editor rebuilds its scene so the status/log projections it
         // reads reflect the latest run.
-        self.drain_worker_events();
+        self.drain_worker_events(ui);
 
         // Apply anything scripts pushed since the last frame (graph edits,
         // run, quit) before the editor rebuilds, so the scene reflects them.

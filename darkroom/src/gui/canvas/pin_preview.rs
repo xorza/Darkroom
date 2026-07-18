@@ -1,9 +1,9 @@
 //! The pinned-output preview widget's own look: a small card (fixed
 //! footprint, a header bar and — for an image — an info footer around the
-//! content area) plus its uploaded-texture cache. Sibling of
+//! content area). Sibling of
 //! [`crate::gui::canvas::pin_ui`], which owns the wire, the port-circle
 //! glyph, and the drag gesture — this file only knows how to paint the
-//! card and keep its thumbnail texture current.
+//! card from the thumbnail handle the pinned-output store owns.
 //!
 //! The card borrows a node body's fill/corner-radius/shadow so it reads as
 //! "a small floating surface" like the inspector panels. Its *border* is
@@ -14,21 +14,18 @@
 //! own outline too doubled up the color right next to it and read as
 //! over-decorated.
 
-use std::collections::HashMap;
-
 use aperture::{
     Align, Background, Color, Configure, Corners, CursorIcon, FontWeight, ImageFilter, ImageFit,
-    ImageHandle, Justify, Panel, Response, Sense, Shape, Sizing, Spacing, Stroke, Text, TextStyle,
-    TextWrap, Ui, VAlign, WidgetId,
+    Justify, Panel, Response, Sense, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui,
+    VAlign, WidgetId,
 };
-use glam::{UVec2, Vec2};
+use glam::Vec2;
 use imaginarium::ColorFormat;
 use scenarium::OutputPort;
-use scenarium::{DataType, DynamicValue, RamUsage};
 
 use crate::gui::format::fmt_bytes;
 use crate::gui::node::header::Badge;
-use crate::gui::run_state::PinnedOutputValue;
+use crate::gui::pinned_output::PinnedImage;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{
     CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, footer_background,
@@ -42,12 +39,6 @@ use crate::gui::widgets::support::{
 pub(crate) const PREVIEW_WIDTH: f32 = 280.0;
 pub(crate) const PREVIEW_HEIGHT: f32 = 200.0;
 
-/// Whether `ty` is an image value — the pinned output's preview widget
-/// shows a thumbnail for these, and its formatted text for everything else.
-pub(crate) fn is_image_type(ty: &DataType) -> bool {
-    matches!(ty, DataType::Custom(id) if *id == *lens::IMAGE_TYPE_ID)
-}
-
 /// A preview widget's title: the producing node's name, plus the output's
 /// own name when it says something the node's doesn't (a node can have
 /// several pinned outputs, so the port name disambiguates them).
@@ -56,95 +47,6 @@ pub(crate) fn preview_title(node_name: &str, output_name: &str) -> String {
         node_name.to_owned()
     } else {
         format!("{node_name} \u{b7} {output_name}")
-    }
-}
-
-/// A resolved image thumbnail: the uploaded texture plus the source facts
-/// its info footer reports. Cheap to clone (an `ImageHandle` is an `Rc`
-/// clone; the rest are small `Copy` values).
-#[derive(Clone, Debug)]
-pub(crate) struct ImagePreview {
-    handle: ImageHandle,
-    native_size: UVec2,
-    native_format: ColorFormat,
-    /// This value's resident memory, refreshed every [`PreviewCache::resolve`]
-    /// call regardless of whether the texture itself was cached — cheap
-    /// (`CustomValue::ram_bytes` just reads a stored size) and independent
-    /// of the prepared raster's metadata.
-    ram: RamUsage,
-}
-
-/// An uploaded preview texture, kept alive across frames (an `ImageHandle`
-/// frees its GPU texture when its last clone drops) and re-uploaded only
-/// when the pinned value it came from actually changed.
-#[derive(Debug)]
-struct CachedPreview {
-    revision: u64,
-    preview: ImagePreview,
-}
-
-/// Uploaded thumbnail textures for every pinned output currently showing
-/// one, keyed by port.
-#[derive(Default, Debug)]
-pub(crate) struct PreviewCache {
-    textures: HashMap<OutputPort, CachedPreview>,
-}
-
-impl PreviewCache {
-    /// The current thumbnail for `port`'s pinned image value, uploading the
-    /// already-prepared raster only when the centralized value's revision
-    /// changed or nothing's cached yet. `None` when `value` isn't a decodable
-    /// image — the caller falls back to text.
-    pub(crate) fn resolve(
-        &mut self,
-        ui: &Ui,
-        port: OutputPort,
-        value: &PinnedOutputValue,
-    ) -> Option<ImagePreview> {
-        let DynamicValue::Custom(data) = &value.value else {
-            self.textures.remove(&port);
-            return None;
-        };
-        let ram = data.ram_bytes();
-        if let Some(cached) = self.textures.get(&port)
-            && cached.revision == value.revision
-        {
-            return Some(ImagePreview {
-                ram,
-                ..cached.preview.clone()
-            });
-        }
-        let Some(rendered) = &value.preview else {
-            self.textures.remove(&port);
-            return None;
-        };
-        let image = aperture::Image::from_rgba8(
-            rendered.image.width,
-            rendered.image.height,
-            rendered.image.pixels.clone(),
-        );
-        let handle = ui.register_image(image);
-        let preview = ImagePreview {
-            handle,
-            native_size: rendered.native_size,
-            native_format: rendered.native_format,
-            ram,
-        };
-        self.textures.insert(
-            port,
-            CachedPreview {
-                revision: value.revision,
-                preview: preview.clone(),
-            },
-        );
-        Some(preview)
-    }
-
-    /// Drop cached textures for ports `keep` no longer includes (unpinned
-    /// or removed) — otherwise a session that pins/unpins/deletes many
-    /// nodes over time would leak textures indefinitely.
-    pub(crate) fn prune(&mut self, keep: impl Fn(OutputPort) -> bool) {
-        self.textures.retain(|&port, _| keep(port));
     }
 }
 
@@ -196,7 +98,7 @@ fn refresh_chip(ui: &mut Ui, theme: &Theme, port: OutputPort) {
 
 /// Paint one pinned output's preview widget: a header bar (the title) over
 /// a content area, plus — for an image — an info footer below it reporting
-/// resolution, format, and resident size. `border`/`border_width` are the
+/// resolution, format, and source size. `border`/`border_width` are the
 /// card's own outline (neutral, broken-red, or the selection halo) — never
 /// the port's data-type accent; that lives on the port-circle glyph
 /// [`super::pin_ui`] paints separately. Senses `CLICK | DRAG` so it doubles
@@ -211,7 +113,7 @@ pub(crate) fn draw_widget<'ui>(
     title: &str,
     border: Color,
     border_width: f32,
-    image: Option<&ImagePreview>,
+    image: Option<&PinnedImage>,
     text: Option<&str>,
     runnable: bool,
 ) -> Response<'ui> {
@@ -281,7 +183,7 @@ pub(crate) fn draw_widget<'ui>(
                         // needed here, unlike a lone image with nothing
                         // below it.
                         ui.add_shape(
-                            Shape::image(image.handle.clone())
+                            Shape::image(image.preview.clone())
                                 .fit(ImageFit::Contain)
                                 .filter(ImageFilter::Linear),
                         );
@@ -313,10 +215,10 @@ pub(crate) fn draw_widget<'ui>(
 }
 
 /// The pinned image's info footer: resolution, pixel format (channel
-/// layout + bit depth), and resident size — styled like a node body's
-/// memory footer ([`crate::gui::node::memory_row`]), so every read-only
-/// fact strip in the app reads as the same kind of thing.
-fn info_row(ui: &mut Ui, theme: &Theme, inner_r: f32, image: &ImagePreview) {
+/// layout + bit depth), and original source size — styled like a node body's
+/// memory footer ([`crate::gui::node::memory_row`]), so every read-only fact
+/// strip in the app reads as the same kind of thing.
+fn info_row(ui: &mut Ui, theme: &Theme, inner_r: f32, image: &PinnedImage) {
     Panel::hstack()
         .id_salt("info")
         .size((Sizing::FILL, Sizing::HUG))
@@ -339,7 +241,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, inner_r: f32, image: &ImagePreview) {
                 .gap(4.0)
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
-                    labeled_value(ui, theme, "Size", fmt_bytes(image.ram.total()));
+                    labeled_value(ui, theme, "Source", fmt_bytes(image.source_bytes));
                 });
         });
 }

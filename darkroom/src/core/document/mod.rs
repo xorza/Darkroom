@@ -429,6 +429,33 @@ impl Document {
         }
     }
 
+    pub(crate) fn is_output_pinned(&self, port: OutputPort) -> bool {
+        fn graph_contains(graph: &CoreGraph, port: OutputPort) -> bool {
+            graph.is_output_pinned(port)
+                || graph
+                    .subgraphs
+                    .iter()
+                    .any(|definition| graph_contains(&definition.graph, port))
+        }
+
+        graph_contains(&self.graph, port)
+    }
+
+    pub(crate) fn viewer_outputs(&self) -> impl Iterator<Item = OutputPort> + '_ {
+        self.layout.all_tabs().filter_map(|tab| match tab {
+            TabRef::ImageViewer(PortRef {
+                node_id,
+                kind: PortKind::Output,
+                port_idx,
+            }) => Some(OutputPort::new(node_id, port_idx)),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn retains_output_resource(&self, port: OutputPort) -> bool {
+        self.is_output_pinned(port) || self.viewer_outputs().any(|viewer_port| viewer_port == port)
+    }
+
     /// Ensure a `GraphView` exists for a local subgraph interior,
     /// auto-laying-out its nodes on first creation. Returns `false` if
     /// the subgraph no longer exists.
@@ -1155,6 +1182,31 @@ mod tests {
     /// All open tabs across the layout, for order-sensitive asserts.
     fn all_tabs(doc: &Document) -> Vec<TabRef> {
         doc.layout.all_tabs().collect()
+    }
+
+    #[test]
+    fn output_resources_follow_recursive_pins_and_open_viewers() {
+        let mut doc = Document::default();
+        let root_node = add_node_at(&mut doc, Vec2::ZERO);
+        let root_port = OutputPort::new(root_node, 0);
+        assert!(!doc.retains_output_resource(root_port));
+
+        let primary = doc.layout.primary().id;
+        doc.layout
+            .find_or_insert(TabRef::ImageViewer(out_port(root_node)), primary);
+        assert!(doc.retains_output_resource(root_port));
+
+        let def_id = doc.create_subgraph();
+        let nested_node = Node::new(NodeKind::Func(FuncId::unique()));
+        let nested_port = OutputPort::new(nested_node.id, 0);
+        let definition = doc.graph.subgraphs.by_key_mut(&def_id).unwrap();
+        definition.graph.add(nested_node);
+        definition.graph.set_output_pinned(nested_port, true);
+        assert!(
+            doc.is_output_pinned(nested_port),
+            "pins in nested authoring graphs retain their presentation resource"
+        );
+        assert!(doc.retains_output_resource(nested_port));
     }
 
     #[test]

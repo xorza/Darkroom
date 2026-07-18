@@ -377,7 +377,6 @@ impl GraphUI {
                             // paint stack, so either kind can sit above the
                             // other and clicking raises it. Only the pin
                             // wire (above) shares the other wires' z-order.
-                            pin_ui.prune_previews(scene);
                             node_ui.draw_all(ui, rcx, cull, &mut probe, pin_ui, out);
                         }
                         // Inspection panels paint after the node bodies so

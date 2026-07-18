@@ -224,6 +224,7 @@ impl Editor {
 
         // Tabs are settled: drop viewer state for closed tabs.
         self.sync_image_viewers();
+        self.run_state.pinned_outputs.reconcile(ui, &self.document);
         // `Some` for a graph pane, `None` for a non-graph view (Preferences):
         // the scene projection + canvas edit pipeline run only when a graph
         // tab is active.
@@ -483,8 +484,8 @@ impl Editor {
         self.push_activate(addr);
     }
 
-    /// Keep the viewer tabs in step with the document: drop viewer state
-    /// whose tab closed, freeing its texture.
+    /// Keep the viewer tabs in step with the document by dropping navigation
+    /// state whose tab closed.
     fn sync_image_viewers(&mut self) {
         let layout = &self.document.layout;
         self.main_window

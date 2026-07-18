@@ -1,44 +1,35 @@
 //! Full-resolution viewers for pinned ports' runtime images, one editor tab
 //! per port ([`TabRef::ImageViewer`], deduped on open). Each visible viewer
-//! reads its port's latest [`DynamicValue`] from the centralized [`RunState`]
-//! and keeps only derived texture and navigation state. Opening or restoring
-//! a tab therefore shows an already-received value without an editor-driven
-//! notification path.
+//! borrows its port's registered texture from the centralized pinned-output
+//! store and keeps only navigation state. Opening or restoring a tab therefore
+//! shows an already-received value without an editor-driven notification path.
 //!
-//! The full RGBA8 conversion and texture upload happen lazily when a visible
-//! viewer observes a new source revision. The buffer is CPU-resident by
-//! construction: pinned-output receipt already prepared a thumbnail and
-//! pulled it to the CPU in place (`ImageBuffer` interior mutability).
+//! The store materializes the full RGBA8 texture before the viewer records and
+//! releases the source value immediately after registration.
 //!
-//! [`RunState`]: crate::gui::run_state::RunState
 //! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
 
 use std::fmt::Write as _;
 
+#[cfg(test)]
+use aperture::Image as AptImage;
 use aperture::{
-    Align, Background, Color, Configure, HAlign, Image as AptImage, ImageFilter, ImageFit,
-    ImageHandle, Panel, Rect, Sense, Shape, Size, Sizing, Spacing, Text, TextInput, Ui, VAlign,
-    WidgetId,
+    Align, Background, Color, Configure, HAlign, ImageFilter, ImageFit, ImageHandle, Panel, Rect,
+    Sense, Shape, Size, Sizing, Spacing, Text, TextInput, Ui, VAlign, WidgetId,
 };
 use glam::{UVec2, Vec2};
-use imaginarium::{ColorFormat, Image as RawImage, Preview, ProcessingContext};
-use lens::Image as LensImage;
-use scenarium::DynamicValue;
+use imaginarium::ColorFormat;
 use scenarium::NodeSearch;
 
 use crate::core::document::{Document, PortKind, PortRef, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
 use crate::gui::canvas::pan_zoom::{PanAnchor, fold_scroll_zoom, zoom_about};
+use crate::gui::pinned_output::{FullImage, StoredContent, StoredOutput};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, filled_rect, muted_text, stroked_rect};
 use crate::gui::widgets::toolbar::{
     BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill, pill_background, pill_rule,
 };
-
-/// Longest texture side we upload. Conservative device
-/// `max_texture_dimension_2d` (aperture doesn't expose the real limit);
-/// larger images are area-downscaled to fit and the header says so.
-const MAX_TEXTURE_DIM: usize = 8192;
 
 /// Viewer zoom bounds — far wider than the canvas's: out to overview a
 /// texture-capped 8k frame in a small pane, in for pixel peeping.
@@ -59,13 +50,10 @@ pub(crate) struct ImageViewer {
     /// The port this viewer shows — keys the pane's widget id so two
     /// viewer tabs never share gesture responses.
     port: PortRef,
-    /// Revision of the centralized source reflected by `image` or `message`.
+    /// Revision of the centralized source reflected by the current framing.
     source_revision: Option<u64>,
-    /// The uploaded texture plus the source facts the header reports —
-    /// present exactly while the pane shows an image.
-    image: Option<ShownImage>,
-    /// Why the pane is empty, when it is.
-    message: Option<String>,
+    /// Texture dimensions used to decide whether a new revision needs a refit.
+    source_size: Option<UVec2>,
     /// Explicit viewport once the user pans/zooms; `None` = fit-to-pane
     /// (recomputed each frame, so it tracks pane resizes). The image's
     /// top-left offset in pane-local px plus the zoom (pane px per
@@ -81,27 +69,9 @@ pub(crate) struct ImageViewer {
     checker: Option<ImageHandle>,
 }
 
-/// The centralized source value a viewer borrows for one frame.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ImageSource<'a> {
-    pub(crate) revision: u64,
-    pub(crate) value: &'a DynamicValue,
-}
-
-/// A capped RGBA8 render of an image value, ready to register, plus the
-/// source dimensions and pixel format it was derived from.
-#[derive(Debug)]
-pub(crate) struct RenderedImage {
-    pub(crate) image: aperture::Image,
-    pub(crate) native_size: UVec2,
-    pub(crate) native_format: ColorFormat,
-}
-
-/// [`RenderedImage`] after upload: the texture handle plus the source
-/// facts the header readout reports.
-#[derive(Debug)]
-struct ShownImage {
-    handle: ImageHandle,
+struct ShownImage<'a> {
+    handle: &'a ImageHandle,
     /// Source dimensions before the texture-cap downscale.
     native_size: UVec2,
     /// Source pixel format before the RGBA8 view conversion.
@@ -114,8 +84,7 @@ impl ImageViewer {
         Self {
             port,
             source_revision: None,
-            image: None,
-            message: None,
+            source_size: None,
             view: None,
             pan_anchor: PanAnchor::default(),
             checker: None,
@@ -136,63 +105,56 @@ impl ImageViewer {
         self.view.unwrap_or_else(|| fit_viewport(img, pane))
     }
 
-    /// Refresh derived content when the centralized source changes. The
-    /// source itself is borrowed only for conversion and never retained by
-    /// the view.
-    fn sync_source(&mut self, source: Option<ImageSource<'_>>) -> Option<RenderedImage> {
-        let revision = source.map(|source| source.revision);
+    /// Keep framing across same-size revisions and refit when the displayed
+    /// texture dimensions change or the source disappears.
+    fn sync_source(&mut self, revision: Option<u64>, source_size: Option<UVec2>) {
         if revision == self.source_revision {
-            return None;
+            return;
         }
         self.source_revision = revision;
-        self.message = None;
-        match source {
-            Some(source) => match render_full(source.value) {
-                Ok(rendered) => Some(rendered),
-                Err(message) => {
-                    self.image = None;
-                    self.message = Some(message);
-                    None
-                }
-            },
-            None => {
-                self.image = None;
-                self.message = Some("pinned output has no image value".to_owned());
-                self.reset_framing();
-                None
-            }
+        if revision.is_none() || source_size != self.source_size {
+            self.reset_framing();
         }
+        self.source_size = source_size;
     }
 
-    /// Draw the viewer pane (the whole tab content). Synchronizes from the
-    /// borrowed source, uploads a newly derived raster, applies last frame's
-    /// pan/zoom gestures, then paints the image (or message), header, and
-    /// controls. Returns `true` when the shared viewer preferences changed.
+    /// Draw the viewer pane (the whole tab content). Borrows the centralized
+    /// texture, applies last frame's pan/zoom gestures, then paints the image
+    /// (or message), header, and controls. Returns `true` when the shared
+    /// viewer preferences changed.
     pub(crate) fn show(
         &mut self,
         ui: &mut Ui,
         theme: &Theme,
         prefs: &mut ViewerPreferences,
         title: &str,
-        source: Option<ImageSource<'_>>,
+        source: Option<&StoredOutput>,
     ) -> bool {
-        if let Some(rendered) = self.sync_source(source) {
-            // Keep the user's framing across a same-size refresh (A/B-ing a
-            // parameter tweak); refit when the dimensions changed.
-            let dims_changed = self
-                .image
-                .as_ref()
-                .is_none_or(|old| old.handle.size() != rendered.image_size());
-            if dims_changed {
-                self.reset_framing();
-            }
-            self.image = Some(ShownImage {
-                native_size: rendered.native_size,
-                native_format: rendered.native_format,
-                handle: ui.register_image(rendered.image),
-            });
-        }
-        self.apply_gestures(ui);
+        let (shown, message) = match source.map(|output| &output.content) {
+            Some(StoredContent::Image(image)) => match &image.full {
+                FullImage::Resident(handle) => (
+                    Some(ShownImage {
+                        handle,
+                        native_size: image.native_size,
+                        native_format: image.native_format,
+                    }),
+                    None,
+                ),
+                FullImage::Failed(message) => (None, Some(message.as_str())),
+                FullImage::Deferred(_) => {
+                    debug_assert!(false, "open image viewer source was not materialized");
+                    (None, Some("image is being prepared"))
+                }
+            },
+            Some(StoredContent::Error(message)) => (None, Some(message.as_str())),
+            Some(StoredContent::Text(_)) => (None, Some("pinned output has no image value")),
+            None => (None, None),
+        };
+        self.sync_source(
+            source.map(|output| output.revision),
+            shown.map(|image| image.handle.size()),
+        );
+        self.apply_gestures(ui, shown);
 
         let pane = pane_size(ui, self.port);
         let fill = match prefs.background {
@@ -213,7 +175,7 @@ impl ImageViewer {
                 {
                     self.draw_checker(ui, pane);
                 }
-                match (&self.image, pane) {
+                match (shown, pane) {
                     (Some(shown), Some(pane)) => {
                         let img = shown.handle.size().as_vec2();
                         let v = self.effective_view(img, pane);
@@ -233,9 +195,7 @@ impl ImageViewer {
                         );
                     }
                     (None, _) => {
-                        let hint = self
-                            .message
-                            .as_deref()
+                        let hint = message
                             .unwrap_or("the port's image appears here after the next graph run");
                         // On the frosted readout pill, so the hint stays
                         // legible over the checker/white backdrops too.
@@ -248,9 +208,9 @@ impl ImageViewer {
                         );
                     }
                 }
-                self.header(ui, theme, pane, title);
-                if self.image.is_some() {
-                    prefs_changed = self.controls(ui, theme, pane, prefs);
+                if let Some(shown) = shown {
+                    self.header(ui, theme, pane, title, shown);
+                    prefs_changed = self.controls(ui, theme, pane, prefs, shown);
                 }
             });
         prefs_changed
@@ -278,10 +238,14 @@ impl ImageViewer {
     /// The top-left readout: source port, native dimensions and pixel
     /// format, whether the view is texture-capped, and the current zoom.
     /// (`title` is never empty — `port_label` supplies the fallback.)
-    fn header(&self, ui: &mut Ui, theme: &Theme, pane: Option<Vec2>, title: &str) {
-        let Some(shown) = &self.image else {
-            return;
-        };
+    fn header(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        pane: Option<Vec2>,
+        title: &str,
+        shown: ShownImage<'_>,
+    ) {
         let mut text = format!(
             "{} · {} × {} · {}",
             title, shown.native_size.x, shown.native_size.y, shown.native_format,
@@ -324,6 +288,7 @@ impl ImageViewer {
         theme: &Theme,
         pane: Option<Vec2>,
         prefs: &mut ViewerPreferences,
+        shown: ShownImage<'_>,
     ) -> bool {
         let port = self.port;
         let mut changed = false;
@@ -342,7 +307,7 @@ impl ImageViewer {
                         self.reset_framing();
                     }
                     if Chip::new(control_wid(port, "100"), "Zoom to 100%").show(ui, theme, draw_100)
-                        && let (Some(shown), Some(pane)) = (&self.image, pane)
+                        && let Some(pane) = pane
                     {
                         let img = shown.handle.size().as_vec2();
                         let v = self.effective_view(img, pane);
@@ -372,8 +337,8 @@ impl ImageViewer {
     /// pans, wheel/pinch zooms about the cursor, two-finger scroll pans,
     /// double-click resets to fit. The fit viewport materializes into an
     /// explicit one on the first adjusting gesture.
-    fn apply_gestures(&mut self, ui: &Ui) {
-        let Some(shown) = &self.image else {
+    fn apply_gestures(&mut self, ui: &Ui, shown: Option<ShownImage<'_>>) {
+        let Some(shown) = shown else {
             return;
         };
         // Registered images have non-zero dims by construction, so the
@@ -404,12 +369,6 @@ impl ImageViewer {
         self.pan_anchor.apply(drag, &mut v.pan);
         fold_scroll_zoom(&mut v, ui, &resp, MIN_ZOOM, MAX_ZOOM);
         self.view = Some(v);
-    }
-}
-
-impl RenderedImage {
-    fn image_size(&self) -> UVec2 {
-        UVec2::new(self.image.width, self.image.height)
     }
 }
 
@@ -650,84 +609,9 @@ fn fit_viewport(img: Vec2, pane: Vec2) -> Viewport {
     }
 }
 
-/// Longest-side cap of `native` to `max_dim`, aspect-preserving, never
-/// upscaling, at least 1×1.
-fn capped_target(native: UVec2, max_dim: u32) -> UVec2 {
-    let scale = (max_dim as f32 / native.x.max(native.y) as f32).min(1.0);
-    UVec2::new(
-        (native.x as f32 * scale).round().max(1.0) as u32,
-        (native.y as f32 * scale).round().max(1.0) as u32,
-    )
-}
-
-/// Convert a held image value to an uploadable RGBA8 raster capped to
-/// `max_dim` on its longest side, plus the source's native size/format
-/// before that cap: downcast to the lens [`Image`](LensImage), read its CPU
-/// pixels (resident by construction — pinned-output preview preparation pulls
-/// the shared buffer to the CPU; the `cpu_only` context is only a formality for
-/// `make_cpu`'s signature), then cap + convert in one fused pass. `Err`
-/// carries the user-facing reason. Shared by the viewer's full-resolution
-/// render (capped to [`MAX_TEXTURE_DIM`]) and the canvas pin-preview
-/// thumbnail (capped much smaller).
-pub(crate) fn convert_image_value(
-    value: &DynamicValue,
-    max_dim: u32,
-) -> Result<RenderedImage, String> {
-    let image = value
-        .as_custom::<LensImage>()
-        .ok_or_else(|| "value is not an image".to_owned())?;
-    let ctx = ProcessingContext::cpu_only();
-    let cpu = image
-        .buffer
-        .make_cpu(&ctx)
-        .map_err(|e| format!("could not read image pixels: {e}"))?;
-    let native_size = UVec2::new(cpu.desc.width as u32, cpu.desc.height as u32);
-    if native_size.x == 0 || native_size.y == 0 {
-        return Err("image is empty".to_owned());
-    }
-    let native_format = cpu.desc.color_format;
-    let target = capped_target(native_size, max_dim);
-    // 1:1 passes through as a plain RGBA8 convert (Preview never upscales).
-    let rgba = Preview::new(target.x as usize, target.y as usize).to_rgba8(&cpu);
-    let image = rgba8_image(rgba).expect("Preview::to_rgba8 yields packed RGBA_U8");
-    Ok(RenderedImage {
-        image,
-        native_size,
-        native_format,
-    })
-}
-
-/// Convert a held image value to an uploadable RGBA8 raster capped to
-/// [`MAX_TEXTURE_DIM`], plus the source dimensions and pixel format it was
-/// derived from.
-fn render_full(value: &DynamicValue) -> Result<RenderedImage, String> {
-    convert_image_value(value, MAX_TEXTURE_DIM as u32)
-}
-
-/// Reinterpret a packed `RGBA_U8` imaginarium image as an uploadable
-/// aperture image. `None` for another format or a padded stride;
-/// imaginarium images are tightly packed, so for RGBA_U8 input `Some` is
-/// the norm and the bytes move without a repack.
-fn rgba8_image(image: RawImage) -> Option<AptImage> {
-    let desc = image.desc;
-    if desc.color_format != ColorFormat::RGBA_U8 {
-        return None;
-    }
-    let pixels = image.into_bytes();
-    if pixels.len() != desc.row_bytes() * desc.height {
-        return None;
-    }
-    Some(AptImage::from_rgba8(
-        desc.width as u32,
-        desc.height as u32,
-        pixels,
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use imaginarium::{ColorFormat, Image as RawImage, ImageBuffer, ImageDesc};
     use scenarium::NodeId;
 
     fn port() -> PortRef {
@@ -736,12 +620,6 @@ mod tests {
             kind: PortKind::Output,
             port_idx: 0,
         }
-    }
-
-    fn image_value(width: usize, height: usize) -> DynamicValue {
-        let desc = ImageDesc::new(width, height, ColorFormat::RGBA_U8);
-        let raw = RawImage::new_with_data(desc, vec![128; width * height * 4]).unwrap();
-        DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)))
     }
 
     #[test]
@@ -769,120 +647,42 @@ mod tests {
     }
 
     #[test]
-    fn capped_target_shrinks_only_oversized_images() {
-        let cap = MAX_TEXTURE_DIM as u32;
-        // Under the cap: unchanged.
-        assert_eq!(
-            capped_target(UVec2::new(6000, 4000), cap),
-            UVec2::new(6000, 4000)
-        );
-        // Exactly at the cap: unchanged.
-        assert_eq!(
-            capped_target(UVec2::new(8192, 100), cap),
-            UVec2::new(8192, 100)
-        );
-        // Over the cap: longest side pinned to 8192, aspect preserved
-        // (16384×8192 → 8192×4096).
-        assert_eq!(
-            capped_target(UVec2::new(16384, 8192), cap),
-            UVec2::new(8192, 4096)
-        );
-        // A degenerate-thin image never rounds to zero.
-        assert_eq!(
-            capped_target(UVec2::new(100_000, 1), cap),
-            UVec2::new(8192, 1)
-        );
-        // A smaller cap (the pin-preview thumbnail's use case) scales down
-        // the same way, independent of `MAX_TEXTURE_DIM`.
-        assert_eq!(
-            capped_target(UVec2::new(1024, 512), 256),
-            UVec2::new(256, 128)
-        );
-    }
-
-    #[test]
-    fn render_full_converts_a_cpu_image_and_rejects_non_images() {
-        // A 2×1 RGBA_U8 image passes through byte-identical (1:1 target,
-        // straight convert) and reports its native size.
-        let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_U8);
-        let bytes = vec![255, 0, 0, 255, 0, 255, 0, 255];
-        let raw = RawImage::new_with_data(desc, bytes.clone()).unwrap();
-        let value = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
-
-        let rendered = render_full(&value).expect("cpu image renders");
-        assert_eq!(rendered.native_size, UVec2::new(2, 1));
-        assert_eq!(rendered.native_format, ColorFormat::RGBA_U8);
-        assert_eq!(rendered.image.width, 2);
-        assert_eq!(rendered.image.height, 1);
-        assert_eq!(rendered.image.pixels, bytes);
-
-        // A non-RGBA8 source reports its own format — the header shows
-        // the source pixels, not the RGBA8 view conversion. One RGB_F32
-        // texel = 12 bytes.
-        let desc = ImageDesc::new(1, 1, ColorFormat::RGB_F32);
-        let raw = RawImage::new_with_data(desc, vec![0; 12]).unwrap();
-        let value = DynamicValue::from_custom(LensImage::new(ImageBuffer::from_cpu(raw)));
-        let rendered = render_full(&value).expect("f32 image renders");
-        assert_eq!(rendered.native_format, ColorFormat::RGB_F32);
-        assert_eq!(rendered.image.pixels.len(), 4, "converted to 1×1 RGBA8");
-
-        // Non-image values are refused with a reason, not a panic.
-        let err = render_full(&DynamicValue::from(42i64)).unwrap_err();
-        assert!(err.contains("not an image"), "unexpected message: {err}");
-    }
-
-    #[test]
-    fn sync_source_tracks_revisions_without_retaining_values() {
+    fn sync_source_refits_only_for_size_changes_or_removal() {
         let mut viewer = ImageViewer::new(port());
         viewer.view = Some(Viewport {
             pan: Vec2::ZERO,
             zoom: 3.0,
         });
-        let first = image_value(2, 2);
-
-        let rendered = viewer
-            .sync_source(Some(ImageSource {
-                revision: 1,
-                value: &first,
-            }))
-            .expect("a fresh source is rendered");
-        assert_eq!(rendered.image_size(), UVec2::new(2, 2));
+        viewer.sync_source(Some(1), Some(UVec2::new(2, 2)));
         assert_eq!(viewer.source_revision, Some(1));
+        assert!(
+            viewer.view.is_none(),
+            "first image establishes fresh framing"
+        );
+
+        viewer.view = Some(Viewport {
+            pan: Vec2::new(4.0, 5.0),
+            zoom: 2.0,
+        });
+        viewer.sync_source(Some(2), Some(UVec2::new(2, 2)));
         assert_eq!(
             viewer.view,
             Some(Viewport {
-                pan: Vec2::ZERO,
-                zoom: 3.0,
+                pan: Vec2::new(4.0, 5.0),
+                zoom: 2.0,
             }),
-            "conversion defers any refit until the raster is uploaded"
+            "same-size revisions preserve inspection framing"
         );
 
-        let same_revision = image_value(3, 1);
-        let rendered = viewer.sync_source(Some(ImageSource {
-            revision: 1,
-            value: &same_revision,
-        }));
-        assert!(
-            rendered.is_none(),
-            "an unchanged revision is not reconverted"
-        );
-
-        let rendered = viewer
-            .sync_source(Some(ImageSource {
-                revision: 2,
-                value: &same_revision,
-            }))
-            .expect("a newer revision is converted");
-        assert_eq!(rendered.image_size(), UVec2::new(3, 1));
-
-        assert!(viewer.sync_source(None).is_none());
+        viewer.sync_source(Some(3), Some(UVec2::new(3, 1)));
+        assert!(viewer.view.is_none(), "dimension changes refit");
+        viewer.view = Some(Viewport {
+            pan: Vec2::ZERO,
+            zoom: 4.0,
+        });
+        viewer.sync_source(None, None);
         assert_eq!(viewer.source_revision, None);
-        assert!(viewer.image.is_none());
         assert!(viewer.view.is_none(), "removing the source clears framing");
-        assert_eq!(
-            viewer.message.as_deref(),
-            Some("pinned output has no image value")
-        );
     }
 
     #[test]
@@ -909,7 +709,6 @@ mod tests {
     #[test]
     fn checker_image_is_one_2x2_period() {
         let img = checker_image();
-        assert_eq!((img.width, img.height), (2, 2));
         const L: u8 = CHECKER_LIGHT_U8;
         const D: u8 = CHECKER_DARK_U8;
         // Row-major light/dark, dark/light — one full checker period.
@@ -918,6 +717,6 @@ mod tests {
             L, L, L, 255,  D, D, D, 255,
             D, D, D, 255,  L, L, L, 255,
         ];
-        assert_eq!(img.pixels, expected);
+        assert_eq!(img, AptImage::from_rgba8(2, 2, expected.to_vec()));
     }
 }

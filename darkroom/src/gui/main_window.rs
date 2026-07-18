@@ -15,7 +15,7 @@ use crate::gui::canvas::GraphUI;
 use crate::gui::canvas::pin_ui::emit_pin_image_opens;
 use crate::gui::dock::DockUi;
 use crate::gui::graph_toolbar;
-use crate::gui::image_viewer::{self, ImageSource, ImageViewer};
+use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
 use crate::gui::node::prepass::emit_subgraph_opens;
 use crate::gui::preferences_view;
@@ -31,10 +31,9 @@ use crate::gui::status_bar;
 #[derive(Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
-    /// One full-resolution image-viewer pane per rendered viewer tab
-    /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Each pane pulls
-    /// its source from `RunState`; the editor prunes state whose tab closed,
-    /// dropping its texture.
+    /// One image-viewer navigation state per rendered viewer tab
+    /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Textures remain
+    /// centralized in the pinned-output store.
     pub(crate) image_viewers: HashMap<PortRef, ImageViewer>,
     dock: DockUi,
     first_frame: bool,
@@ -124,14 +123,9 @@ impl MainWindow {
                         let title = image_viewer::port_label(doc, port);
                         let source = ctx
                             .run_state
-                            .representative_pinned_output(OutputPort::new(
-                                port.node_id,
-                                port.port_idx,
-                            ))
-                            .map(|value| ImageSource {
-                                revision: value.revision,
-                                value: &value.value,
-                            });
+                            .pinned_outputs
+                            .entries
+                            .get(&OutputPort::new(port.node_id, port.port_idx));
                         let viewer = image_viewers
                             .entry(port)
                             .or_insert_with(|| ImageViewer::new(port));

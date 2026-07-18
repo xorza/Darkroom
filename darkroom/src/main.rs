@@ -7,7 +7,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use aperture::{WindowConfig, WindowIcon, WinitHost};
+use aperture::{Image, WindowConfig, WinitHost};
 use clap::{Parser, Subcommand};
 use common::is_debug;
 use tokio::runtime::Builder;
@@ -166,14 +166,14 @@ fn run_gui(script_cfg: ScriptConfig) {
 /// its Dock icon comes from the `.app` bundle (`[package.metadata.bundle]`
 /// in `Cargo.toml`). Returns `None` if the embedded asset ever fails to
 /// decode, degrading to the platform default rather than blocking startup.
-fn load_icon() -> Option<WindowIcon> {
+fn load_icon() -> Option<Image> {
     static ICON_PNG: &[u8] = include_bytes!("../assets/icons/darkroom-256.png");
     let rgba = image::load_from_memory(ICON_PNG)
         .inspect_err(|e| tracing::warn!("window icon decode failed: {e}"))
         .ok()?
         .to_rgba8();
     let (w, h) = rgba.dimensions();
-    Some(WindowIcon::from_rgba(rgba.into_raw(), w, h))
+    Some(Image::from_rgba8(w, h, rgba.into_raw()))
 }
 
 /// The non-GUI frontends, dispatched by [`run_terminal`].
@@ -226,12 +226,12 @@ mod tests {
 
     #[test]
     fn load_icon_decodes_embedded_png() {
-        // Guards the runtime window-icon path: the baked asset must decode
-        // to 256×256 RGBA8 so `WindowIcon::from_rgba`'s length invariant
-        // holds. Catches a swapped-in wrong-size or non-RGBA asset.
-        let icon = load_icon().expect("embedded window icon decodes");
-        assert_eq!((icon.width, icon.height), (256, 256));
-        assert_eq!(icon.rgba.len(), 256 * 256 * 4, "RGBA8 buffer length");
+        let rgba = image::load_from_memory(include_bytes!("../assets/icons/darkroom-256.png"))
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(rgba.dimensions(), (256, 256));
+        assert_eq!(rgba.as_raw().len(), 256 * 256 * 4);
+        assert!(load_icon().is_some());
     }
 
     #[test]

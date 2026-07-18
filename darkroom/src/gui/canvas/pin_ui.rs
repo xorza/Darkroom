@@ -1,5 +1,5 @@
 //! A pinned output's wire, port-circle glyph, and drag gesture. The
-//! widget's own look (the card, its header, its texture cache) lives in the
+//! widget's own look (the card, its header, and its image) lives in the
 //! sibling [`crate::gui::canvas::pin_preview`] — this file draws the bezier
 //! from the port to the widget's top-left corner, the port-circle glyph
 //! peeking from under that corner (the same corner-peek trick as
@@ -44,13 +44,14 @@ use crate::gui::canvas::drag_anchor::{GroupDragAnchor, selected_group_positions}
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::node_ports;
 use crate::gui::canvas::pin_preview::{
-    self, PREVIEW_HEIGHT, PREVIEW_WIDTH, PreviewCache, is_image_type, pin_preview_wid,
-    preview_image_wid, preview_title, refresh_badge_wid,
+    self, PREVIEW_HEIGHT, PREVIEW_WIDTH, pin_preview_wid, preview_image_wid, preview_title,
+    refresh_badge_wid,
 };
 use crate::gui::canvas::wire::{CubicHandles, WireEmphasis, add_cubic_wire, cubic_handles};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::port_row::port_circle_wid;
 use crate::gui::node::{RecordCtx, click_intents, set_output_pinned};
+use crate::gui::pinned_output::StoredContent;
 use crate::gui::scene::Scene;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::dot;
@@ -134,12 +135,11 @@ pub(crate) fn emit_pin_image_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiA
 /// pin, the preview widget for a reposition.
 type PinDragAnchor = GroupDragAnchor<OutputPort>;
 
-/// Pinned outputs' preview-widget drag state plus their uploaded thumbnail
-/// cache. Only one pin drag is ever in flight, so `drag` is a single slot.
+/// Pinned outputs' preview-widget drag state. Only one pin drag is ever in
+/// flight, so `drag` is a single slot.
 #[derive(Default, Debug)]
 pub(crate) struct PinUi {
     drag: Option<PinDragAnchor>,
-    previews: PreviewCache,
 }
 
 impl PinUi {
@@ -282,19 +282,6 @@ impl PinUi {
         }
     }
 
-    /// Drop cached preview textures for ports that are no longer pinned
-    /// (or whose node is gone). Once per frame, before the draw pass.
-    pub(crate) fn prune_previews(&mut self, scene: &Scene) {
-        self.previews.prune(|port| {
-            scene.nodes.by_key(&port.node_id).is_some_and(|n| {
-                scene
-                    .outputs(n.outputs)
-                    .get(port.port_idx)
-                    .is_some_and(|o| o.pin_position.is_some())
-            })
-        });
-    }
-
     /// Paint one pinned output's port-circle glyph + preview widget, at
     /// its own slot in the shared paint stack — called by
     /// [`crate::gui::node::NodeUI::draw_all`]'s z-order walk, interleaved
@@ -351,17 +338,18 @@ impl PinUi {
         // visual language across nodes and pin previews.
         let is_selected = rcx.selected.contains(&ItemRef::Pin(g.out_port));
         let border = theme.card_border(g.broken, is_selected);
-        let value = rcx.run_state.representative_pinned_output(g.out_port);
-        let image = if is_image_type(&output.ty) {
-            value.and_then(|v| self.previews.resolve(ui, g.out_port, v))
-        } else {
-            None
-        };
-        let text = image.is_none().then(|| {
-            value
-                .map(|value| value.value.to_string())
-                .unwrap_or_else(|| "not yet run".to_owned())
+        let value = rcx.run_state.pinned_outputs.entries.get(&g.out_port);
+        let image = value.and_then(|value| match &value.content {
+            StoredContent::Image(image) => Some(image),
+            StoredContent::Text(_) | StoredContent::Error(_) => None,
         });
+        let text = image
+            .is_none()
+            .then(|| match value.map(|value| &value.content) {
+                Some(StoredContent::Text(text) | StoredContent::Error(text)) => text.as_str(),
+                Some(StoredContent::Image(_)) => "image preview unavailable",
+                None => "not yet run",
+            });
         let title = {
             let node_name = n.name.borrow_str();
             let output_name = output.name.borrow_str();
@@ -375,8 +363,8 @@ impl PinUi {
             &title,
             border.color,
             border.width,
-            image.as_ref(),
-            text.as_deref(),
+            image,
+            text,
             n.runnable(),
         );
         // Click without drag → select + raise, exactly like a node body
