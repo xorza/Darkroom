@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Deref;
 
-use common::{KeyIndexKey, KeyIndexVec};
+use common::KeyIndexVec;
+use hashbrown::hash_map::Entry;
+use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::StaticValue;
@@ -11,7 +14,6 @@ use crate::node::special::SpecialNode;
 use anyhow::{Context, ensure};
 use common::id_type;
 use common::{Result, SerdeFormat, deserialize, serialize};
-use hashbrown::HashSet;
 
 id_type!(NodeId);
 
@@ -174,30 +176,37 @@ pub enum NodeKind {
     SubgraphOutput,
 }
 
-// A node is pure identity: its port/event *arity* comes from the func/def
-// (`NodeKind`), and its mutable wiring (input bindings, event subscriptions)
-// lives in `Graph`'s flat side-tables — never in per-node Vecs.
+// A node is pure authored data. Identity is its key in `Graph::nodes`; port/event
+// arity comes from the func/def, and wiring lives in `Graph`'s side tables.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Node {
-    pub id: NodeId,
     pub kind: NodeKind,
     pub name: String,
 
     /// Where this node's output is cached. See [`CacheMode`]. A fresh func node
     /// (`From<&Func>`) or special node (`Node::new`) copies its func's
     /// `default_cache_mode`; the remaining func-less constructors seed `None`.
-    /// `#[serde(default)]` → `None` (the [`CacheMode`] default) for a pre-field
-    /// (or pre-rename) document, so a legacy node caches nowhere until re-toggled.
-    #[serde(default)]
     pub cache: CacheMode,
 
     /// Disabled nodes are skipped at flatten time: they emit no execution
     /// node, and any binding resolving to one yields no producer, so a
     /// downstream consumer sees the wire as unbound (→ `MissingInputs` if
-    /// the input is required). `#[serde(default)]` → `false` keeps
-    /// pre-field documents enabled.
-    #[serde(default)]
+    /// the input is required).
     pub disabled: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NodeRef<'a> {
+    pub id: NodeId,
+    node: &'a Node,
+}
+
+impl Deref for NodeRef<'_> {
+    type Target = Node;
+
+    fn deref(&self) -> &Self::Target {
+        self.node
+    }
 }
 
 impl NodeKind {
@@ -230,7 +239,8 @@ impl Node {
 
 /// How deep a node lookup reaches: this graph's own nodes only, or also
 /// every local subgraph interior, recursively. The argument to
-/// [`Graph::find_node`] / [`Graph::find_node_mut`].
+/// [`Graph::find_node`], [`Graph::find_node_mut`], and
+/// [`Graph::find_node_by_name`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NodeSearch {
     TopLevel,
@@ -239,7 +249,7 @@ pub enum NodeSearch {
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
-    pub(crate) nodes: KeyIndexVec<NodeId, Node>,
+    pub(crate) nodes: HashMap<NodeId, Node>,
 
     /// Data wiring, keyed by consumer input port. Sparse: only `Const`/`Bind`
     /// ports appear; absent = `Binding::None`. A `BTreeMap` keeps
@@ -271,14 +281,22 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub fn add(&mut self, node: Node) {
-        assert!(!node.id.is_nil(), "cannot add a node with a nil id");
-        assert!(
-            self.nodes.by_key(&node.id).is_none(),
-            "node {:?} already exists; adds must use a fresh id",
-            node.id
-        );
-        self.nodes.add(node);
+    pub fn add(&mut self, node: Node) -> NodeId {
+        let node_id = NodeId::unique();
+        self.insert(node_id, node);
+        node_id
+    }
+
+    pub fn insert(&mut self, node_id: NodeId, node: Node) {
+        assert!(!node_id.is_nil(), "cannot add a node with a nil id");
+        match self.nodes.entry(node_id) {
+            Entry::Vacant(entry) => {
+                entry.insert(node);
+            }
+            Entry::Occupied(_) => {
+                panic!("node {node_id:?} already exists; adds must use a fresh id")
+            }
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -289,56 +307,64 @@ impl Graph {
         self.nodes.is_empty()
     }
 
-    /// Iterate nodes in insertion order. This order is load-bearing:
-    /// callers (editor rendering, action-stack replay) rely on it.
-    pub fn iter(&self) -> impl Iterator<Item = &Node> {
-        self.nodes.iter()
-    }
-
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Node> {
-        self.nodes.iter_mut()
-    }
-
-    pub fn by_name(&self, name: &str) -> Option<&Node> {
-        assert!(!name.is_empty());
-        self.nodes.iter().find(|node| node.name == name)
-    }
-    pub fn by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
-        assert!(!name.is_empty());
-        self.nodes.iter_mut().find(|node| node.name == name)
+    /// Iteration order is unspecified.
+    pub fn iter(&self) -> impl Iterator<Item = NodeRef<'_>> {
+        self.nodes
+            .iter()
+            .map(|(id, node)| NodeRef { id: *id, node })
     }
 
     /// The node with `id`, at the depth `search` selects. Node ids are
     /// unique across a whole document (subgraph interiors included), so a
     /// [`Recursive`](NodeSearch::Recursive) hit is unambiguous.
-    pub fn find_node(&self, id: &NodeId, search: NodeSearch) -> Option<&Node> {
+    pub fn find(&self, id: &NodeId, search: NodeSearch) -> Option<&Node> {
         assert!(!id.is_nil());
-        match self.nodes.by_key(id) {
+        match self.nodes.get(id) {
             Some(node) => Some(node),
             None => match search {
                 NodeSearch::TopLevel => None,
                 NodeSearch::Recursive => self
                     .subgraphs
                     .iter()
-                    .find_map(|d| d.graph.find_node(id, NodeSearch::Recursive)),
+                    .find_map(|d| d.graph.find(id, NodeSearch::Recursive)),
             },
         }
     }
 
-    /// Mutable counterpart of [`Self::find_node`].
-    pub fn find_node_mut(&mut self, id: &NodeId, search: NodeSearch) -> Option<&mut Node> {
-        assert!(!id.is_nil());
-        // Probe immutably first: returning the mutable borrow straight out
-        // of an `if let` would hold it for the whole function under NLL.
-        if self.nodes.by_key(id).is_some() {
-            return self.nodes.by_key_mut(id);
+    /// A node named `name`, at the depth `search` selects.
+    ///
+    /// Names are not unique, so this returns an arbitrary match. Recursive
+    /// searches prefer a match in this graph over one in a subgraph interior.
+    pub fn find_by_name(&self, name: &str, search: NodeSearch) -> Option<NodeRef<'_>> {
+        assert!(!name.is_empty());
+        if let Some((id, node)) = self.nodes.iter().find(|(_, node)| node.name == name) {
+            return Some(NodeRef { id: *id, node });
         }
+
         match search {
             NodeSearch::TopLevel => None,
             NodeSearch::Recursive => self
                 .subgraphs
-                .iter_mut()
-                .find_map(|d| d.graph.find_node_mut(id, NodeSearch::Recursive)),
+                .iter()
+                .find_map(|def| def.graph.find_by_name(name, NodeSearch::Recursive)),
+        }
+    }
+
+    /// Mutable counterpart of [`Self::find_node`].
+    pub fn find_mut(&mut self, id: &NodeId, search: NodeSearch) -> Option<&mut Node> {
+        assert!(!id.is_nil());
+        match search {
+            NodeSearch::TopLevel => self.nodes.get_mut(id),
+            NodeSearch::Recursive => {
+                let Self {
+                    nodes, subgraphs, ..
+                } = self;
+                nodes.get_mut(id).or_else(|| {
+                    subgraphs
+                        .iter_mut()
+                        .find_map(|d| d.graph.find_mut(id, NodeSearch::Recursive))
+                })
+            }
         }
     }
 
@@ -373,18 +399,18 @@ impl Graph {
             if !visited.insert(graph) {
                 return Ok(());
             }
-            for node in graph.nodes.iter() {
+            for node_id in graph.nodes.keys() {
                 ensure!(
-                    node_ids.insert(node.id),
+                    node_ids.insert(*node_id),
                     "node id {:?} occurs in more than one authoring graph",
-                    node.id
+                    node_id
                 );
             }
             for def in graph.subgraphs.iter() {
                 collect(&def.graph, library, visited, node_ids)?;
             }
             if let Some(library) = library {
-                for node in graph.nodes.iter() {
+                for node in graph.nodes.values() {
                     if let NodeKind::Subgraph(SubgraphRef::Linked(id)) = node.kind
                         && let Some(def) = library.subgraphs.by_key(&id)
                     {
@@ -406,19 +432,19 @@ impl Graph {
     pub(crate) fn check_impl(&self, is_def_interior: bool) -> Result<()> {
         let mut boundary_inputs = 0usize;
         let mut boundary_outputs = 0usize;
-        for node in self.nodes.iter() {
-            ensure!(!node.id.is_nil(), "graph contains a node with a nil id");
+        for (node_id, node) in &self.nodes {
+            ensure!(!node_id.is_nil(), "graph contains a node with a nil id");
             match &node.kind {
                 NodeKind::Func(func_id) => {
-                    ensure!(!func_id.is_nil(), "node {:?} has a nil func_id", node.id);
+                    ensure!(!func_id.is_nil(), "node {:?} has a nil func_id", node_id);
                 }
                 NodeKind::Subgraph(r) => {
-                    ensure!(!r.id().is_nil(), "node {:?} has a nil subgraph id", node.id);
+                    ensure!(!r.id().is_nil(), "node {:?} has a nil subgraph id", node_id);
                     if let SubgraphRef::Local(id) = r {
                         ensure!(
                             self.subgraphs.by_key(id).is_some(),
                             "node {:?} references missing local subgraph {:?}",
-                            node.id,
+                            node_id,
                             id
                         );
                     }
@@ -430,7 +456,7 @@ impl Graph {
                     ensure!(
                         is_def_interior,
                         "node {:?}: SubgraphInput is only valid inside a subgraph def",
-                        node.id
+                        node_id
                     );
                     boundary_inputs += 1;
                 }
@@ -438,7 +464,7 @@ impl Graph {
                     ensure!(
                         is_def_interior,
                         "node {:?}: SubgraphOutput is only valid inside a subgraph def",
-                        node.id
+                        node_id
                     );
                     boundary_outputs += 1;
                 }
@@ -455,13 +481,13 @@ impl Graph {
 
         for (dst, binding) in &self.bindings {
             ensure!(
-                self.nodes.by_key(&dst.node_id).is_some(),
+                self.nodes.contains_key(&dst.node_id),
                 "binding on missing node {:?}",
                 dst.node_id
             );
             if let Binding::Bind(src) = binding {
                 ensure!(
-                    self.nodes.by_key(&src.node_id).is_some(),
+                    self.nodes.contains_key(&src.node_id),
                     "node {:?} input {} binds to missing node {:?}",
                     dst.node_id,
                     dst.port_idx,
@@ -472,12 +498,12 @@ impl Graph {
 
         for s in &self.subscriptions {
             ensure!(
-                self.nodes.by_key(&s.emitter).is_some(),
+                self.nodes.contains_key(&s.emitter),
                 "subscription from missing emitter {:?}",
                 s.emitter
             );
             ensure!(
-                self.nodes.by_key(&s.subscriber).is_some(),
+                self.nodes.contains_key(&s.subscriber),
                 "node {:?} event {} has missing subscriber {:?}",
                 s.emitter,
                 s.event_idx,
@@ -487,7 +513,7 @@ impl Graph {
 
         for port in &self.pinned_outputs {
             ensure!(
-                self.nodes.by_key(&port.node_id).is_some(),
+                self.nodes.contains_key(&port.node_id),
                 "pinned output on missing node {:?}",
                 port.node_id
             );
@@ -518,8 +544,7 @@ impl Graph {
     /// Returns the new node id.
     pub fn add_func_node(&mut self, func: &Func) -> NodeId {
         let node = Node::from(func);
-        let node_id = node.id;
-        self.add(node);
+        let node_id = self.add(node);
         for (port_idx, func_input) in func.inputs.iter().enumerate() {
             if let Some(default) = &func_input.default_value {
                 self.set_input_binding(
@@ -535,8 +560,7 @@ impl Graph {
     /// from the def interface. `r` must reference `def`.
     pub fn add_subgraph_node(&mut self, def: &SubgraphDef, r: SubgraphRef) -> NodeId {
         let node = Node::subgraph_instance(def, r);
-        let node_id = node.id;
-        self.add(node);
+        let node_id = self.add(node);
         for (port_idx, io) in def.inputs.iter().enumerate() {
             if let Some(default) = &io.default_value {
                 self.set_input_binding(
@@ -550,18 +574,16 @@ impl Graph {
 }
 
 impl Node {
-    /// A fresh node of the given kind with a unique id and no inputs/events.
-    /// The id is minted here (the one RNG-touching constructor); callers fill
-    /// in wiring, or use `From<&Func>` / `subgraph_instance` for a node whose
-    /// ports are pre-shaped from its definition. A `Special` node copies its
-    /// hardcoded func's `default_cache_mode`; every other kind seeds `None`.
+    /// A fresh node of the given kind with no inputs/events. Callers fill in
+    /// wiring, or use `From<&Func>` / `subgraph_instance` for a node shaped
+    /// from its definition. A `Special` node copies its hardcoded func's
+    /// `default_cache_mode`; every other kind seeds `None`.
     pub fn new(kind: NodeKind) -> Self {
         let cache = match &kind {
             NodeKind::Special(s) => s.func().default_cache_mode,
             _ => CacheMode::None,
         };
         Node {
-            id: NodeId::unique(),
             kind,
             name: String::new(),
             cache,
@@ -569,14 +591,13 @@ impl Node {
         }
     }
 
-    /// A composite instance node shaped from a definition (just identity +
-    /// name; default input bindings are seeded by `Graph::add_subgraph_node`).
+    /// A composite instance node shaped from a definition. Default input
+    /// bindings are seeded by `Graph::add_subgraph_node`.
     /// `r` must reference `def`.
     pub fn subgraph_instance(def: &SubgraphDef, r: SubgraphRef) -> Self {
         assert_eq!(r.id(), def.id, "SubgraphRef must reference the given def");
 
         Node {
-            id: NodeId::unique(),
             kind: NodeKind::Subgraph(r),
             name: def.name.clone(),
             cache: CacheMode::None,
@@ -586,12 +607,10 @@ impl Node {
 }
 
 impl From<&Func> for Node {
-    /// A bare func instance (identity + name), copying the func's
-    /// `default_cache_mode` into its `cache`. Default input bindings are seeded
-    /// by `Graph::add_func_node`.
+    /// A bare func instance copying the func's `default_cache_mode` into its
+    /// `cache`. Default input bindings are seeded by `Graph::add_func_node`.
     fn from(func: &Func) -> Self {
         Node {
-            id: NodeId::unique(),
             kind: NodeKind::Func(func.id),
             name: func.name.clone(),
             cache: func.default_cache_mode,
@@ -619,12 +638,6 @@ impl Binding {
 
     pub fn is_none(&self) -> bool {
         matches!(self, Binding::None)
-    }
-}
-
-impl KeyIndexKey<NodeId> for Node {
-    fn key(&self) -> &NodeId {
-        &self.id
     }
 }
 
