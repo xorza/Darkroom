@@ -141,6 +141,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
     match step {
         GraphStep::AddNode {
             pos,
+            node_id,
             node,
             def,
             bindings,
@@ -148,18 +149,18 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             assert!(
                 scope
                     .graph
-                    .find_node(&node.id, NodeSearch::TopLevel)
+                    .find_node(node_id, NodeSearch::TopLevel)
                     .is_none(),
                 "apply AddNode expects node to be absent"
             );
             if let Some(def) = def {
                 scope.graph.subgraphs.add((**def).clone());
             }
-            scope.graph.add(node.clone());
+            scope.graph.insert(*node_id, node.clone());
             for (port, binding) in bindings {
                 scope.graph.set_input_binding(*port, binding.clone());
             }
-            scope.view.view_items.add(ViewItem::node(node.id, *pos));
+            scope.view.view_items.add(ViewItem::node(*node_id, *pos));
         }
         GraphStep::DuplicateNodes {
             nodes,
@@ -168,9 +169,9 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             to_selection,
             ..
         } => {
-            for (pos, node) in nodes {
-                scope.graph.add(node.clone());
-                scope.view.view_items.add(ViewItem::node(node.id, *pos));
+            for (pos, node_id, node) in nodes {
+                scope.graph.insert(*node_id, node.clone());
+                scope.view.view_items.add(ViewItem::node(*node_id, *pos));
             }
             for (port, binding) in bindings {
                 scope.graph.set_input_binding(*port, binding.clone());
@@ -184,11 +185,11 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             assert!(
                 scope
                     .graph
-                    .find_node(&detached.node.id, NodeSearch::TopLevel)
+                    .find_node(&detached.node_id, NodeSearch::TopLevel)
                     .is_some(),
                 "apply RemoveNode expects node to be present"
             );
-            let removed = scope.remove_node(&detached.node.id);
+            let removed = scope.remove_node(&detached.node_id);
             assert_eq!(&removed, detached, "removal snapshot changed before apply");
         }
         GraphStep::MoveSelection { moves, .. } => {
@@ -338,8 +339,8 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
 /// Backward-apply a graph-scoped step against its resolved `EditScope`.
 fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
     match step {
-        GraphStep::AddNode { node, def, .. } => {
-            scope.remove_node(&node.id);
+        GraphStep::AddNode { node_id, def, .. } => {
+            scope.remove_node(node_id);
             if let Some(def) = def {
                 scope.graph.subgraphs.remove_by_key(&def.id);
             }
@@ -352,8 +353,8 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             // Removing each added node cascade-drops the bindings and
             // subscriptions that referenced it, so the batch's wiring goes
             // with it — only the selection needs explicit restoring.
-            for (_, node) in nodes {
-                scope.remove_node(&node.id);
+            for (_, node_id, _) in nodes {
+                scope.remove_node(node_id);
             }
             scope.view.selected = from_selection.clone();
         }
@@ -365,7 +366,7 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             assert!(
                 scope
                     .graph
-                    .find_node(&detached.node.id, NodeSearch::TopLevel)
+                    .find_node(&detached.node_id, NodeSearch::TopLevel)
                     .is_none(),
                 "revert RemoveNode expects removed node to be absent"
             );
