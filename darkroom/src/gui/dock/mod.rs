@@ -343,8 +343,8 @@ fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
         TabRef::Graph(GraphRef::Main) => Cow::Borrowed("main"),
         TabRef::Graph(GraphRef::Local(id)) => doc
             .graph
-            .subgraphs
-            .by_key(&id)
+            .graphs
+            .get(&id)
             .map(|d| d.name.as_str())
             .unwrap_or("subgraph")
             .into(),

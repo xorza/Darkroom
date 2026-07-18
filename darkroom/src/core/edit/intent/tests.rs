@@ -51,7 +51,7 @@ fn stack_order(doc: &Document) -> Vec<ItemRef> {
 fn dirties_document_splits_edits_from_navigation() {
     use crate::core::document::TabRef;
     use crate::core::document::dock::{DockDrop, SplitSide};
-    use scenarium::SubgraphId;
+    use scenarium::GraphId;
 
     // A doc with a movable Preferences tab, for the dock steps below
     // (both built through the real `build_step` pipeline so the
@@ -118,7 +118,7 @@ fn dirties_document_splits_edits_from_navigation() {
             )],
         }),
         UndoStep::Doc(DocStep::RenameSubgraph {
-            id: SubgraphId::unique(),
+            id: GraphId::unique(),
             from: "s".into(),
             to: "t".into(),
         }),

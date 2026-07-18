@@ -11,7 +11,7 @@ use aperture::{
     Align, Background, Configure, ContextMenu, Corners, InternedStr, MenuItem, Panel, Sense,
     Sizing, Spacing, Text, TextStyle, Ui, VAlign, WidgetId,
 };
-use scenarium::SubgraphId;
+use scenarium::GraphId;
 
 use crate::core::document::dock::{DockDrop, DockOp, SplitSide, TabGroup, TabGroupId};
 use crate::core::document::{GraphRef, TabRef};
@@ -45,7 +45,7 @@ pub(crate) fn movable(tab: TabRef) -> bool {
 }
 
 /// The subgraph behind an inline-renamable tab (a `Local` graph tab).
-pub(crate) fn renamable_subgraph(tab: TabRef) -> Option<SubgraphId> {
+pub(crate) fn renamable_subgraph(tab: TabRef) -> Option<GraphId> {
     match tab {
         TabRef::Graph(GraphRef::Local(id)) => Some(id),
         _ => None,
@@ -79,7 +79,7 @@ fn tab_menu_wid(group: TabGroupId, index: usize) -> WidgetId {
 /// subgraph id (not group/index) so the editing state survives the tab
 /// moving or reordering. A click landing on the label is captured
 /// there, so the scan polls this id alongside the outer chip's.
-pub(crate) fn tab_rename_wid(sub_id: SubgraphId) -> WidgetId {
+pub(crate) fn tab_rename_wid(sub_id: GraphId) -> WidgetId {
     WidgetId::from_hash(("dock.tab_rename", sub_id))
 }
 

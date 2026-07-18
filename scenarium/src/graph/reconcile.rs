@@ -15,8 +15,8 @@ impl Graph {
         self.subscriptions = subscriptions;
         removed += before - self.subscriptions.len();
 
-        for definition in self.subgraphs.iter_mut() {
-            removed += definition.graph.prune_dangling_wiring(library);
+        for graph in self.graphs.values_mut() {
+            removed += graph.prune_dangling_wiring(library);
         }
         removed
     }
@@ -51,8 +51,8 @@ impl Graph {
             NodeKind::Func(id) => library
                 .by_id(id)
                 .is_none_or(|function| in_range(function.inputs.len(), function.outputs.len())),
-            NodeKind::Subgraph(reference) => {
-                self.resolve_def(*reference, library)
+            NodeKind::Graph(reference) => {
+                self.resolve_graph(*reference, library)
                     .is_none_or(|definition| {
                         in_range(definition.inputs.len(), definition.outputs.len())
                     })
@@ -61,19 +61,19 @@ impl Graph {
                 let function = special.func();
                 in_range(function.inputs.len(), function.outputs.len())
             }
-            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => true,
+            NodeKind::GraphInput | NodeKind::GraphOutput => true,
         }
     }
 
     pub(crate) fn event_count_opt(&self, node: &Node, library: &Library) -> Option<usize> {
         match &node.kind {
             NodeKind::Func(id) => library.by_id(id).map(|function| function.events.len()),
-            NodeKind::Subgraph(reference) => self
-                .resolve_def(*reference, library)
+            NodeKind::Graph(reference) => self
+                .resolve_graph(*reference, library)
                 .map(|definition| definition.events.len()),
             NodeKind::Special(special) => Some(special.func().events.len()),
-            NodeKind::SubgraphInput => Some(1),
-            NodeKind::SubgraphOutput => Some(0),
+            NodeKind::GraphInput => Some(1),
+            NodeKind::GraphOutput => Some(0),
         }
     }
 }

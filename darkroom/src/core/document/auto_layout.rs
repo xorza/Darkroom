@@ -11,7 +11,7 @@ use crate::core::document::{GraphView, ItemRef};
 
 const AUTO_LAYOUT_COL_SPACING: f32 = 220.0;
 const AUTO_LAYOUT_ROW_SPACING: f32 = 110.0;
-/// Also reused by `Document::create_subgraph`'s explicit boundary-node
+/// Also reused by `Document::create_graph`'s explicit boundary-node
 /// placement (its own `BOUNDARY_LAYOUT_GAP`), so this stays `pub(crate)`.
 pub(crate) const AUTO_LAYOUT_ORIGIN: Vec2 = Vec2::new(40.0, 40.0);
 

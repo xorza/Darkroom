@@ -1,4 +1,4 @@
-use crate::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
+use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{
     Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
 };
@@ -34,11 +34,12 @@ fn check_rejects_node_ids_reused_across_graph_levels() {
     let node_id = NodeId::unique();
     let mut interior = Graph::default();
     interior.insert(node_id, node.clone());
-    let def = SubgraphDef::new(SubgraphId::unique(), "duplicate id").graph(interior);
+    let graph_id = GraphId::unique();
+    interior.name = "duplicate id".into();
 
     let mut graph = Graph::default();
     graph.insert(node_id, node);
-    graph.subgraphs.add(def);
+    graph.insert_graph(graph_id, interior);
 
     let error = graph.check().unwrap_err().to_string();
     assert!(error.contains("occurs in more than one authoring graph"));
@@ -557,7 +558,7 @@ fn input_type_resolves_declared_types_and_skips_boundaries() {
     assert_eq!(graph.input_type(&library, InputPort::new(dst, 9)), None);
 
     // A boundary node carries no per-port type here → None (caller's Null).
-    let boundary = Node::new(NodeKind::SubgraphInput);
+    let boundary = Node::new(NodeKind::GraphInput);
     let b = graph.add(boundary);
     assert_eq!(graph.input_type(&library, InputPort::new(b, 0)), None);
 }
@@ -628,26 +629,26 @@ fn node_kind_accessors() {
     let func_id = "432b9bf1-f478-476c-a9c9-9a6e190124fc".into();
     let func = NodeKind::Func(func_id);
     assert_eq!(func.as_func(), Some(func_id));
-    assert_eq!(func.as_subgraph(), None);
+    assert_eq!(func.as_graph(), None);
     assert!(!func.is_boundary());
 
-    let sub_id = SubgraphId::unique();
-    let sub = NodeKind::Subgraph(SubgraphRef::Local(sub_id));
+    let sub_id = GraphId::unique();
+    let sub = NodeKind::Graph(GraphLink::Local(sub_id));
     assert_eq!(sub.as_func(), None);
-    assert_eq!(sub.as_subgraph().map(|r| r.id()), Some(sub_id));
+    assert_eq!(sub.as_graph().map(|r| r.id()), Some(sub_id));
     assert!(!sub.is_boundary());
 
-    assert!(NodeKind::SubgraphInput.is_boundary());
-    assert!(NodeKind::SubgraphOutput.is_boundary());
-    assert_eq!(NodeKind::SubgraphInput.as_func(), None);
-    assert_eq!(NodeKind::SubgraphOutput.as_subgraph(), None);
+    assert!(NodeKind::GraphInput.is_boundary());
+    assert!(NodeKind::GraphOutput.is_boundary());
+    assert_eq!(NodeKind::GraphInput.as_func(), None);
+    assert_eq!(NodeKind::GraphOutput.as_graph(), None);
 }
 
 #[test]
 fn node_func_id_shims_kind() {
     let func_id = "432b9bf1-f478-476c-a9c9-9a6e190124fc".into();
     assert_eq!(Node::new(NodeKind::Func(func_id)).func_id(), Some(func_id));
-    assert_eq!(Node::new(NodeKind::SubgraphInput).func_id(), None);
+    assert_eq!(Node::new(NodeKind::GraphInput).func_id(), None);
 }
 
 #[test]
@@ -791,16 +792,16 @@ fn set_output_pinned_and_is_output_pinned() {
 }
 
 #[test]
-fn with_fresh_node_ids_remaps_pinned_outputs() {
+fn fresh_copy_remaps_pinned_outputs() {
     let mut graph = test_graph();
     let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
     graph.set_output_pinned(OutputPort::new(sum_id, 0), true);
 
-    let fresh = graph.with_fresh_node_ids();
-    let new_sum_id = fresh.id_map[&sum_id];
+    let fresh = graph.fresh_copy();
+    let new_sum_id = fresh.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
 
-    assert!(!fresh.graph.is_output_pinned(OutputPort::new(sum_id, 0)));
-    assert!(fresh.graph.is_output_pinned(OutputPort::new(new_sum_id, 0)));
+    assert!(!fresh.is_output_pinned(OutputPort::new(sum_id, 0)));
+    assert!(fresh.is_output_pinned(OutputPort::new(new_sum_id, 0)));
 }
 
 #[test]
@@ -865,9 +866,10 @@ fn add_func_node_leaves_defaultless_inputs_unbound() {
 }
 
 #[test]
-fn add_subgraph_node_seeds_default_const_binding() {
+fn add_graph_node_seeds_default_const_binding() {
     let mut input = FuncInput::optional("A", DataType::Int).default(3i64);
-    let def = SubgraphDef::new(SubgraphId::unique(), "Def")
+    let graph_id = GraphId::unique();
+    let def = Graph::new("Def")
         .category("Test")
         .inputs([input.clone(), {
             input.default_value = None;
@@ -875,7 +877,7 @@ fn add_subgraph_node_seeds_default_const_binding() {
         }]);
 
     let mut graph = Graph::default();
-    let id = graph.add_subgraph_node(&def, SubgraphRef::Local(def.id));
+    let id = graph.add_graph_node(&def, GraphLink::Local(graph_id));
 
     // Port 0 had a default; port 1 did not.
     assert_eq!(
@@ -893,17 +895,19 @@ fn node_search_scope_gates_subgraph_interiors() {
     let mut deep = Node::new(NodeKind::Func(FuncId::unique()));
     deep.name = "deep".to_owned();
     let deep_id = inner_graph.add(deep);
-    let inner = SubgraphDef::new(SubgraphId::unique(), "Inner").graph(inner_graph);
+    let inner_id = GraphId::unique();
+    inner_graph.name = "Inner".into();
 
     let mut outer_graph = Graph::default();
-    outer_graph.subgraphs.add(inner);
-    let outer = SubgraphDef::new(SubgraphId::unique(), "Outer").graph(outer_graph);
+    outer_graph.insert_graph(inner_id, inner_graph);
+    let outer_id = GraphId::unique();
+    outer_graph.name = "Outer".into();
 
     let mut graph = Graph::default();
     let mut top = Node::new(NodeKind::Func(FuncId::unique()));
     top.name = "top".to_owned();
     let top_id = graph.add(top);
-    graph.subgraphs.add(outer);
+    graph.insert_graph(outer_id, outer_graph);
 
     // Top-level node: found either way.
     assert!(graph.find(&top_id, NodeSearch::TopLevel).is_some());
@@ -970,28 +974,26 @@ fn node_search_scope_gates_subgraph_interiors() {
 }
 
 #[test]
-fn resolve_def_picks_local_or_linked_source() {
+fn resolve_graph_picks_local_or_linked_source() {
     let mut library = test_func_lib(TestFuncHooks::default());
 
-    let linked_id = SubgraphId::unique();
-    library.insert_subgraph(SubgraphDef::new(linked_id, "Linked").category("Test"));
+    let linked_id = GraphId::unique();
+    library.insert_graph(linked_id, Graph::new("Linked").category("Test"));
 
     let mut graph = Graph::default();
-    let local_id = SubgraphId::unique();
-    graph
-        .subgraphs
-        .add(SubgraphDef::new(local_id, "Local").category("Test"));
+    let local_id = GraphId::unique();
+    graph.insert_graph(local_id, Graph::new("Local").category("Test"));
 
     assert_eq!(
         graph
-            .resolve_def(SubgraphRef::Local(local_id), &library)
+            .resolve_graph(GraphLink::Local(local_id), &library)
             .unwrap()
             .name,
         "Local"
     );
     assert_eq!(
         graph
-            .resolve_def(SubgraphRef::Linked(linked_id), &library)
+            .resolve_graph(GraphLink::Shared(linked_id), &library)
             .unwrap()
             .name,
         "Linked"
@@ -999,7 +1001,7 @@ fn resolve_def_picks_local_or_linked_source() {
     // A local ref whose id only exists in the library does not resolve.
     assert!(
         graph
-            .resolve_def(SubgraphRef::Local(linked_id), &library)
+            .resolve_graph(GraphLink::Local(linked_id), &library)
             .is_none()
     );
 }

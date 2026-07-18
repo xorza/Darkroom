@@ -11,7 +11,7 @@ use aperture::Ui;
 use scenarium::Binding;
 use scenarium::InputPort;
 use scenarium::NodeId;
-use scenarium::SubgraphRef;
+use scenarium::GraphLink;
 use scenarium::{DataType, FsPathConfig, StaticValue};
 
 use crate::core::document::GraphRef;
@@ -34,7 +34,7 @@ pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAc
     for n in &scene.nodes {
         // Instances are always `Local` (library subgraphs are localized on
         // instance), so the "S" chip opens the interior directly.
-        if let Some(SubgraphRef::Local(id)) = n.subgraph
+        if let Some(GraphLink::Local(id)) = n.subgraph
             && ui.response_for(subgraph_badge_wid(n.id)).left.clicked()
         {
             actions.push(UiAction::OpenGraph(GraphRef::Local(id)));

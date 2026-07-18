@@ -2,7 +2,7 @@
 //! swaps to a `TextEdit` on double-click (via the shared
 //! [`crate::gui::node::inline_rename`] widget); commit emits an
 //! [`Intent::RenameBoundaryPort`]. Used only by the boundary
-//! (`SubgraphInput`/`SubgraphOutput`) port rows in
+//! (`GraphInput`/`GraphOutput`) port rows in
 //! [`crate::gui::node::port_row`]; ordinary node ports render plain text.
 
 use aperture::{Configure, HAlign, InternedStr, Sense, Text, TextStyle, Tooltip, Ui, WidgetId};

@@ -61,9 +61,9 @@ impl Engine {
         // startup; `load_library` moved the file aside so nothing here can
         // overwrite it (reported below, once the status log exists).
         let load_error = match load_library() {
-            Ok(defs) => {
-                for def in defs {
-                    library.insert_subgraph(def);
+            Ok(graphs) => {
+                for (id, graph) in graphs {
+                    library.insert_graph(id, graph);
                 }
                 None
             }
@@ -112,7 +112,7 @@ impl Engine {
     pub(crate) fn edit_library(&mut self, edit: impl FnOnce(&mut Library) -> bool) -> bool {
         let changed = edit(Arc::make_mut(&mut self.library));
         if changed {
-            match save_library(self.library.subgraphs.iter()) {
+            match save_library(self.library.graphs.iter()) {
                 Ok(()) => self.status.error = None,
                 Err(err) => self.status.error(format!("library save failed: {err:#}")),
             }

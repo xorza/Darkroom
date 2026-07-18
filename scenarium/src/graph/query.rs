@@ -4,7 +4,7 @@
 
 use hashbrown::HashSet;
 
-use super::*;
+use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::{FuncInput, FuncOutput, OutputType};
 use crate::{DataType, StaticValue, closes_data_cycle};
@@ -30,9 +30,9 @@ impl Graph {
         let node = self.find(&port.node_id, NodeSearch::TopLevel)?;
         let inputs = match &node.kind {
             NodeKind::Func(func_id) => &library.by_id(func_id)?.inputs,
-            NodeKind::Subgraph(r) => &self.resolve_def(*r, library)?.inputs,
+            NodeKind::Graph(r) => &self.resolve_graph(*r, library)?.inputs,
             NodeKind::Special(s) => &s.func().inputs,
-            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => return None,
+            NodeKind::GraphInput | NodeKind::GraphOutput => return None,
         };
         inputs.get(port.port_idx)
     }
@@ -114,9 +114,9 @@ impl Graph {
     ) -> Option<&'a [FuncOutput]> {
         match &node.kind {
             NodeKind::Func(func_id) => library.by_id(func_id).map(|f| f.outputs.as_slice()),
-            NodeKind::Subgraph(r) => self.resolve_def(*r, library).map(|d| d.outputs.as_slice()),
+            NodeKind::Graph(r) => self.resolve_graph(*r, library).map(|d| d.outputs.as_slice()),
             NodeKind::Special(s) => Some(s.func().outputs.as_slice()),
-            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => None,
+            NodeKind::GraphInput | NodeKind::GraphOutput => None,
         }
     }
 

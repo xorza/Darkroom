@@ -1,6 +1,6 @@
 use aperture::{MenuItem, Ui};
 use scenarium::NodeId;
-use scenarium::SubgraphRef;
+use scenarium::GraphLink;
 
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::commands::AppCommand;
@@ -32,7 +32,7 @@ impl SubgraphMenuUi {
         // Latch on a secondary-click of any local-subgraph node's badge,
         // read from last frame's response (same timing as the open).
         for n in &scene.nodes {
-            if matches!(n.subgraph, Some(SubgraphRef::Local(_)))
+            if matches!(n.subgraph, Some(GraphLink::Local(_)))
                 && ui.response_for(subgraph_badge_wid(n.id)).right.clicked()
                 && let Some(p) = ui.pointer_pos()
             {

@@ -30,7 +30,7 @@ pub use execution::stats::{
     ExecutedNodeStats, ExecutionStats, LogEntry, LogLevel, NodeError, NodeRamUsage,
 };
 pub use execution::{Error, Result, RunError};
-pub use graph::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
+pub use graph::interface::{GraphEvent, GraphId, GraphLink};
 pub use graph::wiring::{BindingEntry, DetachedNode, closes_data_cycle};
 pub use graph::{
     Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeRef, NodeSearch, OutputPort,
