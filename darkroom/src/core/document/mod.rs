@@ -542,9 +542,8 @@ impl Document {
         let mut graph = CoreGraph::default();
         let input = Node::new(NodeKind::SubgraphInput);
         let output = Node::new(NodeKind::SubgraphOutput);
-        let (input_id, output_id) = (input.id, output.id);
-        graph.add(input);
-        graph.add(output);
+        let input_id = graph.add(input);
+        let output_id = graph.add(output);
         let def = SubgraphDef::new(
             SubgraphId::unique(),
             format!("subgraph {}", self.graph.subgraphs.len() + 1),
@@ -556,11 +555,10 @@ impl Document {
         // before the def moves into the table (needs `&def`); the empty
         // interface means no input ports to seed.
         let inst = Node::subgraph_instance(&def, SubgraphRef::Local(id));
-        let inst_id = inst.id;
         let inst_pos =
             Vec2::new(60.0, 60.0) + Vec2::splat(36.0) * self.graph.subgraphs.len() as f32;
         self.graph.subgraphs.add(def);
-        self.graph.add(inst);
+        let inst_id = self.graph.add(inst);
         self.main_view
             .view_items
             .add(ViewItem::node(inst_id, inst_pos));
@@ -830,14 +828,13 @@ mod tests {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
         let sub_id = doc.create_subgraph();
-        let mut dup = Node::new(NodeKind::Func(FuncId::unique()));
-        dup.id = node_id;
+        let dup = Node::new(NodeKind::Func(FuncId::unique()));
         doc.graph
             .subgraphs
             .by_key_mut(&sub_id)
             .unwrap()
             .graph
-            .add(dup);
+            .insert(node_id, dup);
 
         let err = doc.check().unwrap_err();
         assert!(
@@ -871,12 +868,13 @@ mod tests {
         local.origin = Some(lib_id);
         let local_id = local.id;
         let node = Node::subgraph_instance(&local, SubgraphRef::Local(local_id));
-        let node_id = node.id;
+        let node_id = NodeId::unique();
 
         let mut doc = Document::default();
         let step = build_step(
             Intent::AddNode {
                 pos: Vec2::ZERO,
+                node_id,
                 node,
                 def: Some(Box::new(local)),
                 bindings: vec![],
@@ -928,10 +926,11 @@ mod tests {
         local.origin = Some(lib_id);
         let local_id = local.id;
         let node = Node::subgraph_instance(&local, SubgraphRef::Local(local_id));
-        let node_id = node.id;
+        let node_id = NodeId::unique();
         let step = build_step(
             Intent::AddNode {
                 pos: Vec2::ZERO,
+                node_id,
                 node,
                 def: Some(Box::new(local)),
                 bindings: vec![],
@@ -993,8 +992,7 @@ mod tests {
             doc.graph.subgraphs.by_key(&local_id).unwrap(),
             SubgraphRef::Local(local_id),
         );
-        let node_id = node.id;
-        doc.graph.add(node);
+        let node_id = doc.graph.add(node);
         doc.main_view
             .view_items
             .add(ViewItem::node(node_id, Vec2::ZERO));
@@ -1049,8 +1047,7 @@ mod tests {
     /// `pos`, returning its id.
     fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
         let node = Node::new(NodeKind::Func(FuncId::unique()));
-        let id = node.id;
-        doc.graph.add(node);
+        let id = doc.graph.add(node);
         doc.main_view.view_items.add(ViewItem::node(id, pos));
         id
     }
@@ -1198,9 +1195,9 @@ mod tests {
 
         let def_id = doc.create_subgraph();
         let nested_node = Node::new(NodeKind::Func(FuncId::unique()));
-        let nested_port = OutputPort::new(nested_node.id, 0);
         let definition = doc.graph.subgraphs.by_key_mut(&def_id).unwrap();
-        definition.graph.add(nested_node);
+        let nested_node_id = definition.graph.add(nested_node);
+        let nested_port = OutputPort::new(nested_node_id, 0);
         definition.graph.set_output_pinned(nested_port, true);
         assert!(
             doc.is_output_pinned(nested_port),
