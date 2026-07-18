@@ -180,7 +180,7 @@ impl Inspectors {
         // "inspector held open" on both ends. A transient panel rides on its
         // shadow alone. Width stays constant so pin-cycling never reflows.
         let border = match mode {
-            InspectMode::Pinned => theme.colors.badge_subgraph,
+            InspectMode::Pinned => theme.colors.badge_graph,
             InspectMode::Open => Color::TRANSPARENT,
         };
         let chrome = Background::rounded(

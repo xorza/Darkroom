@@ -17,7 +17,7 @@ use crate::gui::dock::DockUi;
 use crate::gui::graph_toolbar;
 use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
-use crate::gui::node::prepass::emit_subgraph_opens;
+use crate::gui::node::prepass::emit_graph_opens;
 use crate::gui::preferences_view;
 use crate::gui::scene::Scene;
 use crate::gui::status_bar;
@@ -41,7 +41,7 @@ pub(crate) struct MainWindow {
 
 impl MainWindow {
     /// Navigation scan: surface tab activate/close/drag-drop and
-    /// subgraph-open requests from *last* frame's responses (`scene` is
+    /// graph-open requests from *last* frame's responses (`scene` is
     /// the last-rendered graph, which is what carried the clicked
     /// chips). `App` runs this at the top of the frame so a switch
     /// applies before the record — the switched-to graph records in
@@ -54,7 +54,7 @@ impl MainWindow {
         actions: &mut Vec<UiAction>,
     ) {
         self.dock.scan(ui, doc, actions);
-        emit_subgraph_opens(ui, scene, actions);
+        emit_graph_opens(ui, scene, actions);
         emit_pin_image_opens(ui, scene, actions);
     }
 

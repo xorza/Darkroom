@@ -68,7 +68,7 @@ pub(crate) struct DockUi {
 impl DockUi {
     /// Navigation-phase scan over last frame's chip responses, one pass
     /// over every strip: close clicks (which win over activation),
-    /// activation clicks (a subgraph tab's inner rename label captures
+    /// activation clicks (a graph tab's inner rename label captures
     /// the click, so its response is polled too), drag arming on a
     /// movable chip's latched drag — then the in-flight drag's
     /// lifecycle: cancel on Esc (or the tab vanishing under it), and on
@@ -94,7 +94,7 @@ impl DockUi {
                     }));
                     continue;
                 }
-                let label_clicked = strip::renamable_subgraph(tab)
+                let label_clicked = strip::renamable_graph(tab)
                     .is_some_and(|id| ui.response_for(strip::tab_rename_wid(id)).left.clicked());
                 if label_clicked
                     || ui
@@ -124,7 +124,7 @@ impl DockUi {
             }
         }
         if ui.response_for(strip::tab_new_wid()).left.clicked() {
-            actions.push(UiAction::NewSubgraph);
+            actions.push(UiAction::NewGraph);
         }
 
         let Some(dragged) = &self.tab_drag else {
@@ -346,7 +346,7 @@ fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
             .graphs
             .get(&id)
             .map(|d| d.name.as_str())
-            .unwrap_or("subgraph")
+            .unwrap_or("graph")
             .into(),
         TabRef::Preferences => Cow::Borrowed("preferences"),
         TabRef::ImageViewer(port) => image_viewer::port_label(doc, port).into(),

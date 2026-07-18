@@ -84,7 +84,7 @@ impl Compiler {
             });
         }
 
-        // Flatten subgraphs straight into execution nodes — no intermediate
+        // Flatten graphs straight into execution nodes — no intermediate
         // `Graph`. Everything downstream is boundary-agnostic (func nodes only).
         let mut program = ExecutionProgram::default();
         let mut flatten_map = FlattenMap::default();

@@ -1,5 +1,5 @@
 //! The compiled, flattened graph: topology + code, immutable across runs.
-//! Built by the compiler through subgraph flattening and installed as runtime
+//! Built by the compiler through graph flattening and installed as runtime
 //! state; it is deliberately not a persistence format. All mutable execution
 //! state lives in the [`Executor`](crate::execution::executor::Executor); all
 //! per-run scheduling state lives in the

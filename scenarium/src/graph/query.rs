@@ -47,7 +47,7 @@ impl Graph {
     /// (`Any`-declared) input. The walk dead-ends polymorphic (`Any`) when the
     /// mirrored input is unbound, the producer is a boundary or missing, or a
     /// binding cycle is hit. Used by the editor for port-type display, connection
-    /// compatibility, and subgraph-interface inference; the engine never
+    /// compatibility, and graph-interface inference; the engine never
     /// type-checks, so it never calls this.
     pub fn resolve_output_type(&self, library: &Library, port: OutputPort) -> DataType {
         self.resolve_output_type_inner(library, port, &mut HashSet::new())
@@ -105,7 +105,7 @@ impl Graph {
         resolved
     }
 
-    /// The output ports `node` declares (func / special spec, or subgraph
+    /// The output ports `node` declares (func / special spec, or graph
     /// graph interface), or `None` for a boundary / unresolved node.
     fn node_outputs<'a>(
         &'a self,

@@ -23,7 +23,7 @@ use crate::core::worker::{WorkerBridge, WorkerEvent};
 
 #[derive(Debug)]
 pub(crate) struct Engine {
-    /// The runtime library (builtins + the on-disk subgraph library),
+    /// The runtime library (builtins + the on-disk graph library),
     /// assembled once at startup. Private so every edit goes through
     /// [`Self::edit_library`] — the one place that propagates a change to
     /// every copy that could otherwise go stale. Read via [`Self::library`].
@@ -51,7 +51,7 @@ pub(crate) struct Engine {
 }
 
 impl Engine {
-    /// Assemble the func lib (builtins + the on-disk subgraph library), spin
+    /// Assemble the func lib (builtins + the on-disk graph library), spin
     /// up the evaluation worker, and start the script host (a no-op `None`
     /// unless `script_cfg` enabled a listener). The worker + script host are
     /// both woken through `wake`.
@@ -100,11 +100,11 @@ impl Engine {
     /// The single mutation path for the runtime library. Applies `edit`
     /// (copy-on-write when the script host still holds the startup `Arc`)
     /// and, when it reports a change, propagates to every copy that could
-    /// otherwise go stale: the subgraph library file on disk and the
+    /// otherwise go stale: the graph library file on disk and the
     /// worker's [`DiskStore`] (which carries a library snapshot for its
     /// codec table). The script host's frozen startup snapshot is exempt by
     /// design — scripts only read the func table, which no edit touches
-    /// (edits grow subgraph defs).
+    /// (edits grow graphs).
     ///
     /// Owns the persist outcome in [`Self::status`]: a saved change clears
     /// the sticky error, a failed save reports — callers must not overwrite

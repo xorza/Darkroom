@@ -24,7 +24,7 @@ pub(crate) struct NodeMenuUi {
     action: Option<NodeMenuAction>,
     /// Node whose body opened the menu — the "Run to this node" target,
     /// which is the clicked node regardless of the selection. Set at open,
-    /// read at pick (same latch as the subgraph menu's).
+    /// read at pick (same latch as the graph menu's).
     target: Option<NodeId>,
 }
 

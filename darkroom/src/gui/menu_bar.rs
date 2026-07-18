@@ -4,7 +4,7 @@ use glam::Vec2;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::shell::ShellCommand;
-use crate::gui::app::commands::subgraph::SubgraphCommand;
+use crate::gui::app::commands::graph::GraphCommand;
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
 /// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.
@@ -76,24 +76,24 @@ fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
     })
 }
 
-/// Subgraph import/export/promote actions. Hidden from the menu bar for
+/// Graph import/export/promote actions. Hidden from the menu bar for
 /// now — kept intact so it can be re-enabled without rebuilding it.
 #[allow(dead_code)]
-fn subgraph_menu(ui: &mut Ui) -> Option<AppCommand> {
-    dropdown(ui, "Subgraph", |ui, popup| {
+fn graph_menu(ui: &mut Ui) -> Option<AppCommand> {
+    dropdown(ui, "Graph", |ui, popup| {
         let mut command = None;
         if MenuItem::new("Export…").show(ui, popup).left.clicked() {
-            command = Some(AppCommand::Subgraph(SubgraphCommand::Export));
+            command = Some(AppCommand::Graph(GraphCommand::Export));
         }
         if MenuItem::new("Import…").show(ui, popup).left.clicked() {
-            command = Some(AppCommand::Subgraph(SubgraphCommand::Import));
+            command = Some(AppCommand::Graph(GraphCommand::Import));
         }
         if MenuItem::new("Promote to Library…")
             .show(ui, popup)
             .left
             .clicked()
         {
-            command = Some(AppCommand::Subgraph(SubgraphCommand::Promote));
+            command = Some(AppCommand::Graph(GraphCommand::Promote));
         }
         command
     })

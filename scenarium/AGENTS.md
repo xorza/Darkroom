@@ -9,7 +9,7 @@ crate-private, so downstream crates import public concepts directly from
 ## Models and identities
 
 The authoring `Graph` owns `Node`s keyed by `NodeId` plus side tables for input
-bindings, event subscriptions, pinned outputs, and local subgraph definitions.
+bindings, event subscriptions, pinned outputs, and local graphinitions.
 Identity exists only in the map key; `Node` is authored data and does not store
 its id. `Graph` is the persisted model. `Graph::check` enforces node-id
 uniqueness across the whole reachable authoring tree. Node removal and
@@ -20,7 +20,7 @@ Compilation produces a private, immutable `ExecutionProgram`. Composite nodes
 are dissolved into flat function nodes and SoA pools. Top-level nodes retain
 their `NodeId`; nested flat ids are derived with domain-separated BLAKE3.
 `FlattenMap` maps both directions between flat ids and exact `NodeAddress`
-values. A `NodeAddress` contains the subgraph-instance path plus the definition
+values. A `NodeAddress` contains the graph-instance path plus the definition
 node id; targeted runs and pinned-output delivery must use this scoped identity.
 Choosing a representative instance is an explicit host-side policy.
 
@@ -40,7 +40,7 @@ Choosing a representative instance is an explicit host-side policy.
 | `graph/clone.rs` | Deep copies with fresh node ids |
 | `graph/reconcile.rs` | Stale-library wiring cleanup |
 | `graph/query.rs` | Type and reachability queries |
-| `graph/subgraph.rs` | Composite definitions and references |
+| `graph/graph.rs` | Composite definitions and references |
 | `execution/compile.rs` | Host-side compiler and compiled artifact |
 | `execution/flatten/` | Composite lowering |
 | `execution/identity.rs` | Scoped authoring addresses and flatten provenance |

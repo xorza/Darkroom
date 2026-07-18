@@ -2,7 +2,7 @@ use aperture::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Spacing, Ui}
 use glam::Vec2;
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context
-/// popups (the node menu, subgraph-badge menu, and new-node palette). Owns
+/// popups (the node menu, graph-badge menu, and new-node palette). Owns
 /// only the surface-space anchor and the dismiss bookkeeping; each caller
 /// stores its own per-open extras (target node, drop position, …) as plain
 /// fields set at open-time and read at pick-time.

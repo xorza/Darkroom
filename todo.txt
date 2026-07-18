@@ -42,5 +42,3 @@ keyindexvec
 review testsuite
 
 grapuh public methods
-
-subgraph -> graph

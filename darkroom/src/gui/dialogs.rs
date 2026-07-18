@@ -1,5 +1,5 @@
 //! GUI-side OS shell integration: native file-picker dialogs (rfd) and
-//! opening URLs in the user's browser. The document/subgraph byte⇄type
+//! opening URLs in the user's browser. The document/graph byte⇄type
 //! plumbing lives in `crate::core::io::persistence` (no GUI deps); this side
 //! hands off to the OS. Failures degrade — a cancelled/failed pick returns
 //! `None`, a failed URL open logs — rather than crashing.

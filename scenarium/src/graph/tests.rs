@@ -632,10 +632,10 @@ fn node_kind_accessors() {
     assert_eq!(func.as_graph(), None);
     assert!(!func.is_boundary());
 
-    let sub_id = GraphId::unique();
-    let sub = NodeKind::Graph(GraphLink::Local(sub_id));
+    let graph_id = GraphId::unique();
+    let sub = NodeKind::Graph(GraphLink::Local(graph_id));
     assert_eq!(sub.as_func(), None);
-    assert_eq!(sub.as_graph().map(|r| r.id()), Some(sub_id));
+    assert_eq!(sub.as_graph().map(|r| r.id()), Some(graph_id));
     assert!(!sub.is_boundary());
 
     assert!(NodeKind::GraphInput.is_boundary());
@@ -888,9 +888,9 @@ fn add_graph_node_seeds_default_const_binding() {
 }
 
 #[test]
-fn node_search_scope_gates_subgraph_interiors() {
-    // A top-level node plus one two-levels-deep: a local def whose
-    // interior holds another local def with the target node inside.
+fn node_search_scope_gates_graph_interiors() {
+    // A top-level node plus one two-levels-deep: a local graph whose
+    // interior holds another local graph with the target node inside.
     let mut inner_graph = Graph::default();
     let mut deep = Node::new(NodeKind::Func(FuncId::unique()));
     deep.name = "deep".to_owned();

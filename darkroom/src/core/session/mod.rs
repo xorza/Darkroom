@@ -36,7 +36,7 @@ pub(crate) struct Session {
     /// [`StatusLog`](crate::core::status::StatusLog) the TUI `status`
     /// command renders).
     pub(crate) engine: Engine,
-    /// Set when a script edit can change a subgraph's derived interface;
+    /// Set when a script edit can change a graph's derived interface;
     /// the graph is reconciled before the next run / save.
     needs_reconcile: bool,
     /// Where `save` writes, if a document was opened at startup.
@@ -191,7 +191,7 @@ fn empty_document() -> Document {
 }
 
 /// Apply a batch of script-sourced `intents` to `document`, returning
-/// whether any of them can change a subgraph's derived interface (so the
+/// whether any of them can change a graph's derived interface (so the
 /// caller reconciles before the next run / save). No undo — the non-GUI
 /// frontends don't expose it. No-op and stale intents (anchor node already
 /// gone) are dropped per-intent; a `SetInput` that retypes a wildcard output

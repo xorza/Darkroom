@@ -115,7 +115,7 @@ fn input_cells(
             kind: PortKind::Input,
             port_idx: i,
         };
-        // A `GraphOutput` boundary node's input ports are the subgraph's
+        // A `GraphOutput` boundary node's input ports are the graph's
         // *outputs* — renameable, except the trailing "+" placeholder.
         let rename = (node.boundary && i + 1 < inputs.len()).then_some(BoundarySide::Output);
         input_label_cell(ui, rcx, port, node, input, rename, out);
@@ -133,7 +133,7 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec
             kind: PortKind::Output,
             port_idx: i,
         };
-        // A `GraphInput` boundary node's output ports are the subgraph's
+        // A `GraphInput` boundary node's output ports are the graph's
         // *inputs* — renameable, except the trailing "+" placeholder.
         let rename = (node.boundary && i + 1 < outputs.len()).then_some(BoundarySide::Input);
         output_cell(ui, rcx, port, output, rename, out);
