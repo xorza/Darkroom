@@ -4,24 +4,24 @@ use scenarium::GraphLink;
 
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::commands::AppCommand;
-use crate::gui::app::commands::subgraph::SubgraphCommand;
+use crate::gui::app::commands::graph::GraphCommand;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
-use crate::gui::node::header::subgraph_badge_wid;
+use crate::gui::node::header::graph_badge_wid;
 use crate::gui::scene::Scene;
 
-/// Right-click on a subgraph node's `S` badge → a small popup with
+/// Right-click on a graph node's `G` badge → a small popup with
 /// "Publish to library" and "Detach copy". Left-click still opens the
-/// subgraph (handled in `emit_subgraph_opens`); only the secondary click
+/// graph (handled in `emit_graph_opens`); only the secondary click
 /// reaches here. The open is latched off *last* frame's badge response;
 /// the shared [`AnchoredMenu`] handles the popup lifecycle.
 #[derive(Default, Debug)]
-pub(crate) struct SubgraphMenuUi {
+pub(crate) struct GraphMenuUi {
     menu: AnchoredMenu,
     /// Badge node the open menu targets — set at open, read at pick.
     node_id: Option<NodeId>,
 }
 
-impl SubgraphMenuUi {
+impl GraphMenuUi {
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
@@ -29,11 +29,11 @@ impl SubgraphMenuUi {
         out: &mut Vec<Intent>,
         cmd: &mut Option<AppCommand>,
     ) {
-        // Latch on a secondary-click of any local-subgraph node's badge,
+        // Latch on a secondary-click of any local-graph node's badge,
         // read from last frame's response (same timing as the open).
         for n in &scene.nodes {
-            if matches!(n.subgraph, Some(GraphLink::Local(_)))
-                && ui.response_for(subgraph_badge_wid(n.id)).right.clicked()
+            if matches!(n.graph, Some(GraphLink::Local(_)))
+                && ui.response_for(graph_badge_wid(n.id)).right.clicked()
                 && let Some(p) = ui.pointer_pos()
             {
                 self.node_id = Some(n.id);
@@ -41,7 +41,7 @@ impl SubgraphMenuUi {
             }
         }
 
-        let pick = self.menu.show(ui, "subgraph_node_menu", None, |ui, popup| {
+        let pick = self.menu.show(ui, "graph_node_menu", None, |ui, popup| {
             let mut chosen = None;
             if MenuItem::new("Publish to library")
                 .show(ui, popup)
@@ -62,11 +62,11 @@ impl SubgraphMenuUi {
         {
             match choice {
                 MenuChoice::Publish => {
-                    *cmd = Some(AppCommand::Subgraph(SubgraphCommand::PublishNode {
+                    *cmd = Some(AppCommand::Graph(GraphCommand::PublishNode {
                         node_id,
                     }));
                 }
-                MenuChoice::Detach => out.push(Intent::DetachSubgraph { node_id }),
+                MenuChoice::Detach => out.push(Intent::DetachGraph { node_id }),
             }
         }
     }

@@ -97,9 +97,9 @@ editor-only lineage pointing from a local graph to its shared source.
 
 ## A.5 Validation and recursion
 
-`Graph::check()` validates a reusable graph, including its interface, boundaries,
-nested graphs, and exposed events. `Graph::check_entry()` adds the root-only rule
-that the entry graph has no interface or boundary nodes.
+`Graph::check()` validates any graph, including its interface, boundaries, nested
+graphs, and exposed events. The compile and document boundaries additionally require
+the entry graph to have no interface or boundary nodes.
 
 Compilation validates links against the library and rejects recursive composition.
 Flattening also tracks graph ids on the active descent path, while a hard depth cap
