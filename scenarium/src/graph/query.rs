@@ -12,7 +12,7 @@ use crate::{DataType, StaticValue, closes_data_cycle};
 impl Graph {
     /// The declared type of input `port`, or `None` when it can't be resolved —
     /// a boundary node (its arity mirrors the enclosing interface, with no
-    /// per-port type here) or a missing func/def. The caller treats `None` as
+    /// per-port type here) or a missing func/graph. The caller treats `None` as
     /// the polymorphic `Any`. The engine never type-checks, so only the editor
     /// calls this.
     pub fn input_type(&self, library: &Library, port: InputPort) -> Option<DataType> {
@@ -106,7 +106,7 @@ impl Graph {
     }
 
     /// The output ports `node` declares (func / special spec, or subgraph
-    /// def interface), or `None` for a boundary / unresolved node.
+    /// graph interface), or `None` for a boundary / unresolved node.
     fn node_outputs<'a>(
         &'a self,
         library: &'a Library,
