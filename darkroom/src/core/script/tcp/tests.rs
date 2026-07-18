@@ -65,7 +65,7 @@ async fn no_auth_accepts_script_and_dual_sinks_print() {
     let reply = parse_reply(&read_reply(&mut s).await);
     assert_eq!(reply.print, "hi\n");
     // `print(...)` is a statement, so the final expression is Unit.
-    assert_eq!(reply.result.as_deref(), Some("()\n"));
+    assert_eq!(reply.result, serde_json::Value::Null);
     assert_eq!(reply.error, None);
 
     // Status sink: Session gets a tagged Print action.
@@ -90,7 +90,7 @@ async fn script_result_is_last_expression() {
     send_request(&mut s, None, b"40 + 2").await;
     let reply = parse_reply(&read_reply(&mut s).await);
     assert_eq!(reply.print, "");
-    assert_eq!(reply.result.as_deref(), Some("42\n"));
+    assert_eq!(reply.result, serde_json::json!(42));
     assert_eq!(reply.error, None);
     assert!(reply.session.is_some());
 }
@@ -103,11 +103,7 @@ async fn script_result_object_map() {
     let mut s = TcpStream::connect(addr).await.unwrap();
     send_request(&mut s, None, b"#{ a: 1, b: 2 }").await;
     let reply = parse_reply(&read_reply(&mut s).await);
-    let r = reply.result.expect("result present");
-    // serde_rhai orders map keys alphabetically via BTreeMap iteration.
-    assert!(r.starts_with("#{\n"), "got: {r}");
-    assert!(r.contains("a: 1,"));
-    assert!(r.contains("b: 2,"));
+    assert_eq!(reply.result, serde_json::json!({ "a": 1, "b": 2 }));
 }
 
 #[tokio::test]
@@ -125,7 +121,7 @@ async fn session_resume_preserves_scope_across_frames() {
     send_request(&mut s, Some(session), b"x").await;
     let reply2 = parse_reply(&read_reply(&mut s).await);
     assert_eq!(reply2.session, Some(session));
-    assert_eq!(reply2.result.as_deref(), Some("42\n"));
+    assert_eq!(reply2.result, serde_json::json!(42));
 }
 
 #[tokio::test]
@@ -138,7 +134,7 @@ async fn unknown_session_id_returns_error_and_echoes_id() {
     send_request(&mut s, Some(ghost), b"1").await;
     let reply = parse_reply(&read_reply(&mut s).await);
     assert_eq!(reply.session, Some(ghost));
-    assert!(reply.result.is_none());
+    assert!(reply.result.is_null());
     let err = reply.error.expect("error set");
     assert!(err.contains("unknown session"), "got: {err}");
 }
@@ -153,7 +149,7 @@ async fn script_error_populates_error_field() {
     send_request(&mut s, None, b"let = 1").await;
     let reply = parse_reply(&read_reply(&mut s).await);
     assert_eq!(reply.print, "");
-    assert!(reply.result.is_none(), "result should be null on error");
+    assert!(reply.result.is_null(), "result should be null on error");
     assert!(reply.error.is_some(), "error should be populated");
 }
 

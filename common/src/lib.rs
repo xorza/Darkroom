@@ -13,7 +13,6 @@ pub mod cpu_features;
 pub mod file_utils;
 pub mod parallel;
 pub mod serde;
-pub mod serde_rhai;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_utils;
 

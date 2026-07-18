@@ -89,7 +89,7 @@ def step(sock, label, source, session_id, *, sleep=STEP_DELAY):
     if reply.get("error"):
         print(f"  [{label}]  ERROR  {reply['error']}")
     else:
-        print(f"  [{label}]  {reply.get('result', '').rstrip()}")
+        print(f"  [{label}]  {json.dumps(reply.get('result'), ensure_ascii=False)}")
     time.sleep(sleep)
     return reply
 

@@ -379,8 +379,8 @@ Key cross-cutting mechanisms:
 ### Persistence + library (`src/io/`, `src/theme.rs`)
 `persistence.rs` is pure path⇄type I/O (dialogs + serde), no `App`/undo/preferences
 coupling — `commands.rs` orchestrates. Documents round-trip through any
-`SerdeFormat` (Rhai is canonical). `library.rs` reads/writes the shared
-graph library (`darkroom.library.rhai`): a set of `Graph`s loaded into
+`SerdeFormat` (JSON is the default text format). `library.rs` reads/writes the shared
+graph library (`darkroom.library.json`): a set of `Graph`s loaded into
 `Library` at startup and grown by the **promote/publish** menu commands. Local
 graphs track lineage via an `origin` field — "Publish" updates the
 linked library entry in place, else creates a new one.

@@ -81,7 +81,7 @@ pub struct Subscription {
 }
 
 /// Serialize `bindings` as a `(port, binding)` sequence: struct keys can't be
-/// map keys in string-keyed formats (JSON/TOML/Rhai). Order is deterministic
+/// map keys in string-keyed formats (JSON/TOML). Order is deterministic
 /// because the source is a `BTreeMap`.
 mod binding_map_serde {
     use crate::graph::{Binding, InputPort};
@@ -270,7 +270,7 @@ pub struct Graph {
     /// ports appear; absent = `Binding::None`. A `BTreeMap` keeps
     /// serialization deterministic and lets a node's ports range contiguously.
     /// Serialized as a sequence of `(port, binding)` pairs — struct keys aren't
-    /// valid map keys in string-keyed formats (JSON/TOML/Rhai).
+    /// valid map keys in string-keyed formats (JSON/TOML).
     #[serde(default, with = "binding_map_serde")]
     pub(crate) bindings: BTreeMap<InputPort, Binding>,
 

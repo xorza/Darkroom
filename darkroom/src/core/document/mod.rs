@@ -1175,8 +1175,8 @@ mod tests {
         doc.main_view.item_placements.by_key_mut(&key).unwrap().pos = pos;
         doc.debug_check();
 
-        let bytes = doc.serialize(SerdeFormat::Rhai).expect("serialize");
-        let reloaded = Document::deserialize(SerdeFormat::Rhai, &bytes).expect("load");
+        let bytes = doc.serialize(SerdeFormat::Json).expect("serialize");
+        let reloaded = Document::deserialize(SerdeFormat::Json, &bytes).expect("load");
         assert_eq!(
             reloaded
                 .main_view
@@ -1215,8 +1215,8 @@ mod tests {
         // The same gate guards deserialization in every build (release too):
         // encoding with bare serde bypasses `Document::serialize`'s debug
         // assert, and the load still refuses the malformed document.
-        let bytes = common::serialize(&doc, SerdeFormat::Rhai).expect("serialize");
-        let err = Document::deserialize(SerdeFormat::Rhai, &bytes).unwrap_err();
+        let bytes = common::serialize(&doc, SerdeFormat::Json).expect("serialize");
+        let err = Document::deserialize(SerdeFormat::Json, &bytes).unwrap_err();
         assert!(
             format!("{err:#}").contains("pinned output must have a view item"),
             "unexpected deserialize error: {err:#}"

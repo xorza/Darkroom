@@ -1,13 +1,8 @@
 scrolview on newnode popup
 
-review interned string impl
-darkroom string interning
-
 cleanup binary caches
 
 file name as argument clap
-
-try repair & broken document
 
 autoupdate image review and autorun node
 
@@ -31,8 +26,6 @@ audit allocations overshoot , see where reserve_exxact would be better
 
 pinned output makes node store outputs in ram
 
-callback when eventloop stopped for gui
-
 invert removed retain logic to optimize
 
 mesh once registrations
@@ -42,7 +35,6 @@ keyindexvec
 review testsuite
 
 grapuh public methods
+pub graph fields and node and func
 
-document validation like for graph
-
-remove rhai serializer
+project - json file in zip file

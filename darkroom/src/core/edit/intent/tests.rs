@@ -875,8 +875,8 @@ fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
     apply_step(&raise_pin, &mut doc, GraphRef::Main);
 
     // The whole point: the mixed render order round-trips through save/load.
-    let bytes = doc.serialize(SerdeFormat::Rhai).unwrap();
-    let reloaded = Document::deserialize(SerdeFormat::Rhai, &bytes).unwrap();
+    let bytes = doc.serialize(SerdeFormat::Json).unwrap();
+    let reloaded = Document::deserialize(SerdeFormat::Json, &bytes).unwrap();
     assert_eq!(
         stack_order(&reloaded),
         vec![b, a, c, pin],

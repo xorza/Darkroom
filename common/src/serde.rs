@@ -5,7 +5,6 @@ use serde::de::DeserializeOwned;
 
 use crate::file_format::SerdeFormat;
 use crate::normalize_string::NormalizeString;
-use crate::serde_rhai;
 
 pub type Result<T> = anyhow::Result<T>;
 
@@ -18,8 +17,8 @@ pub fn serialize<T: Serialize>(value: &T, format: SerdeFormat) -> Result<Vec<u8>
 
 /// `temp_buffer` is reusable scratch the caller threads across calls to avoid
 /// per-call allocation in hot paths (e.g. undo-step coalescing). Pass a
-/// long-lived `Vec` you reuse; it's cleared on entry. (Bitcode/JSON/Rhai don't
-/// touch it on serialize; the LZ4 arm uses it.)
+/// long-lived `Vec` you reuse; it's cleared on entry. (Bitcode/JSON don't touch
+/// it on serialize; the LZ4 arm uses it.)
 pub fn serialize_into<T: Serialize, W: Write>(
     value: T,
     format: SerdeFormat,
@@ -30,7 +29,6 @@ pub fn serialize_into<T: Serialize, W: Write>(
 
     match format {
         SerdeFormat::Json => serde_json::to_writer_pretty(writer, &value)?,
-        SerdeFormat::Rhai => serde_rhai::to_writer(writer, &value)?,
         SerdeFormat::Bitcode => {
             let encoded = bitcode::serialize(&value)?;
             writer.write_all(&encoded)?;
@@ -40,7 +38,7 @@ pub fn serialize_into<T: Serialize, W: Write>(
             writer.write_all(s.as_bytes())?;
         }
         SerdeFormat::Lz4 => {
-            serde_rhai::to_writer(temp_buffer, &value)?;
+            serde_json::to_writer(&mut *temp_buffer, &value)?;
 
             let uncompressed_size = temp_buffer.len();
             writer.write_all(&(uncompressed_size as u32).to_le_bytes())?;
@@ -73,7 +71,6 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
 
     match format {
         SerdeFormat::Json => Ok(serde_json::from_reader(reader)?),
-        SerdeFormat::Rhai => Ok(serde_rhai::from_reader(reader)?),
         SerdeFormat::Toml => {
             reader.read_to_end(temp_buffer)?;
             Ok(toml::from_slice(temp_buffer.as_slice())?)
@@ -116,7 +113,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
                 );
             }
 
-            Ok(serde_rhai::from_slice(decompressed_part)?)
+            Ok(serde_json::from_slice(decompressed_part)?)
         }
     }
 }
@@ -126,9 +123,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lz4_round_trips() {
+    fn lz4_round_trips_json_payload() {
         let value: Vec<i64> = vec![1, 2, 3, 1000, -42];
         let bytes = serialize(&value, SerdeFormat::Lz4).unwrap();
+        let expected_size = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+        let payload = lz4_flex::block::decompress(&bytes[4..], expected_size).unwrap();
+        assert_eq!(payload, br#"[1,2,3,1000,-42]"#);
         let back: Vec<i64> = deserialize(&bytes, SerdeFormat::Lz4).unwrap();
         assert_eq!(back, value);
     }

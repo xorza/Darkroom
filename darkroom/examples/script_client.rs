@@ -70,7 +70,7 @@ struct Discovery {
 struct ScriptReply {
     session: Option<String>,
     print: String,
-    result: Option<String>,
+    result: serde_json::Value,
     error: Option<String>,
 }
 
@@ -117,8 +117,8 @@ fn render_reply(reply: &ScriptReply) {
     }
     if let Some(err) = &reply.error {
         eprintln!("error: {err}");
-    } else if let Some(r) = &reply.result {
-        print!("{r}");
+    } else {
+        println!("{}", reply.result);
     }
     let _ = std::io::stdout().flush();
 }

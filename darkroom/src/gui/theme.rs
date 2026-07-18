@@ -344,7 +344,7 @@ impl ThemeChoice {
 /// override aperture's defaults.
 ///
 /// Serializable so the whole bundle (aperture palette + darkroom
-/// layout + colors) round-trips through Rhai for the Theme → Load /
+/// layout + colors) round-trips through serde for the Theme → Load /
 /// Export menu.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Theme {

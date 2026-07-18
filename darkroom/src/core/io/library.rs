@@ -1,7 +1,7 @@
 //! The shared graph library: graphs that live in the runtime `Library`
 //! (where `GraphLink::Shared` resolves) rather than in
 //! any one document, so they're reusable across documents. Persisted in
-//! the working dir as Rhai, like the preferences — loaded into
+//! the working dir as JSON — loaded into
 //! `library.graphs` at startup, saved when "promote" grows it. Failures
 //! surface through the caller (`Engine`) into the status log.
 //!
@@ -22,8 +22,7 @@ use scenarium::{Graph, GraphId};
 use crate::core::io::cwd_file;
 
 /// Library file name, resolved relative to the process working directory.
-/// Rhai so it's hand-editable and matches the doc / theme / preferences format.
-const LIBRARY_FILE: &str = "darkroom.library.rhai";
+const LIBRARY_FILE: &str = "darkroom.library.json";
 
 /// On-disk wrapper so the file is a named table rather than a bare
 /// collection (more robust to hand-edit and future fields). A plain
@@ -38,7 +37,7 @@ fn path() -> PathBuf {
 }
 
 /// Where a failed-to-load library file is moved so a later save can't
-/// destroy it: `darkroom.library.rhai` → `darkroom.library.rhai.broken`.
+/// destroy it: `darkroom.library.json` → `darkroom.library.json.broken`.
 fn broken_path(path: &Path) -> PathBuf {
     let mut name = path
         .file_name()
@@ -59,7 +58,7 @@ fn read_graphs(path: &Path) -> Result<HashMap<GraphId, Graph>> {
         Err(err) if err.kind() == ErrorKind::NotFound => return Ok(HashMap::new()),
         Err(err) => return Err(err).with_context(|| path.display().to_string()),
     };
-    let lib = deserialize::<LibraryFile>(&bytes, SerdeFormat::Rhai)
+    let lib = deserialize::<LibraryFile>(&bytes, SerdeFormat::Json)
         .with_context(|| path.display().to_string())?;
     for (graph_id, graph) in &lib.graphs {
         anyhow::ensure!(!graph_id.is_nil(), "{}: nil graph id", path.display());
@@ -115,7 +114,7 @@ fn save_library_to<'a>(
     let lib = LibraryFile {
         graphs: graphs.map(|(id, graph)| (*id, graph.clone())).collect(),
     };
-    let bytes = serialize(&lib, SerdeFormat::Rhai)?;
+    let bytes = serialize(&lib, SerdeFormat::Json)?;
     std::fs::write(path, &bytes).with_context(|| path.display().to_string())
 }
 
@@ -140,7 +139,7 @@ mod tests {
 
     #[test]
     fn save_load_roundtrip() {
-        let path = test_output_path("darkroom_library/roundtrip.rhai");
+        let path = test_output_path("darkroom_library/roundtrip.json");
         // A stale file from an earlier run would trip save's re-read guard.
         let _ = std::fs::remove_file(&path);
         let graphs = graphs(["blur", "sharpen"]);
@@ -151,15 +150,15 @@ mod tests {
 
     #[test]
     fn missing_file_is_empty_and_not_an_error() {
-        let path = test_output_path("darkroom_library/never-written.rhai");
+        let path = test_output_path("darkroom_library/never-written.json");
         assert_eq!(load_library_from(&path).unwrap(), HashMap::new());
     }
 
     #[test]
     fn corrupt_file_is_quarantined_and_the_slot_reusable() {
-        let path = test_output_path("darkroom_library/corrupt.rhai");
+        let path = test_output_path("darkroom_library/corrupt.json");
         let broken = broken_path(&path);
-        let garbage = "#{ graphs: [ truncated";
+        let garbage = r#"{"graphs": [ truncated"#;
         std::fs::write(&path, garbage).unwrap();
 
         let err = format!("{:#}", load_library_from(&path).unwrap_err());
@@ -187,7 +186,7 @@ mod tests {
         // Parses fine but fails `Graph::check` (dangling event
         // emitter): the load refuses it and moves the file aside, exactly
         // like syntactic corruption.
-        let path = test_output_path("darkroom_library/invalid-def.rhai");
+        let path = test_output_path("darkroom_library/invalid-def.json");
         // A stale file from an earlier run would trip save's re-read guard.
         let _ = std::fs::remove_file(&path);
         let mut bad = graph("dangling");
@@ -209,7 +208,7 @@ mod tests {
 
     #[test]
     fn save_refuses_to_overwrite_an_unreadable_file() {
-        let path = test_output_path("darkroom_library/corrupt-at-save.rhai");
+        let path = test_output_path("darkroom_library/corrupt-at-save.json");
         let garbage = "not a library";
         std::fs::write(&path, garbage).unwrap();
 
@@ -228,7 +227,7 @@ mod tests {
 
     #[test]
     fn unwritable_path_reports_save_failure() {
-        let path = test_output_path("darkroom_library/no-such-dir").join("lib.rhai");
+        let path = test_output_path("darkroom_library/no-such-dir").join("lib.json");
         let graphs = graphs(["x"]);
         let err = format!("{:#}", save_library_to(&path, graphs.iter()).unwrap_err());
         assert!(

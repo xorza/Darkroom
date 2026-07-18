@@ -19,7 +19,6 @@ fn get_file_extension(filename: &str) -> Option<&str> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SerdeFormat {
     Json,
-    Rhai,
     Bitcode,
     Toml,
     Lz4,
@@ -31,8 +30,6 @@ impl SerdeFormat {
 
         if ext.eq_ignore_ascii_case("json") {
             Ok(Self::Json)
-        } else if ext.eq_ignore_ascii_case("rhai") {
-            Ok(Self::Rhai)
         } else if ext.eq_ignore_ascii_case("bin") {
             Ok(Self::Bitcode)
         } else if ext.eq_ignore_ascii_case("lz4") {
@@ -54,8 +51,8 @@ impl SerdeFormat {
     /// All formats a round-trip test should sweep. Omits `Toml` deliberately:
     /// TOML can't serialize a top-level sequence, which several round-tripped
     /// types are.
-    pub fn all_formats_for_testing() -> [Self; 4] {
-        [Self::Json, Self::Rhai, Self::Bitcode, Self::Lz4]
+    pub fn all_formats_for_testing() -> [Self; 3] {
+        [Self::Json, Self::Bitcode, Self::Lz4]
     }
 }
 
@@ -82,10 +79,6 @@ mod tests {
             SerdeFormat::Json
         );
         assert_eq!(
-            SerdeFormat::from_file_name("a.rhai").unwrap(),
-            SerdeFormat::Rhai
-        );
-        assert_eq!(
             SerdeFormat::from_file_name("a.bin").unwrap(),
             SerdeFormat::Bitcode
         );
@@ -104,10 +97,6 @@ mod tests {
         assert_eq!(
             SerdeFormat::from_file_name("a.JSON").unwrap(),
             SerdeFormat::Json
-        );
-        assert_eq!(
-            SerdeFormat::from_file_name("a.Rhai").unwrap(),
-            SerdeFormat::Rhai
         );
         assert_eq!(
             SerdeFormat::from_file_name("a.BIN").unwrap(),
@@ -132,7 +121,16 @@ mod tests {
 
     #[test]
     fn test_all_formats_for_testing_count() {
-        assert_eq!(SerdeFormat::all_formats_for_testing().len(), 4);
+        assert_eq!(SerdeFormat::all_formats_for_testing().len(), 3);
+    }
+
+    #[test]
+    fn test_rhai_extension_is_unsupported() {
+        let err = SerdeFormat::from_file_name("legacy.rhai").unwrap_err();
+        assert!(matches!(
+            err,
+            FileExtensionError::UnsupportedFileExtension(_)
+        ));
     }
 
     #[test]

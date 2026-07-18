@@ -9,12 +9,11 @@ use std::process::Command;
 
 use scenarium::{FsPathConfig, FsPathMode};
 
-/// File-dialog extension filters. First entry is the default — Rhai is the
-/// canonical on-disk format for scenarium graphs.
+/// File-dialog extension filters. First entry is the default.
 const FILE_FILTERS: &[(&str, &[&str])] = &[
-    ("Rhai", &["rhai"]),
     ("JSON", &["json"]),
-    ("Lz4 compressed Rhai", &["lz4"]),
+    ("Lz4 compressed JSON", &["lz4"]),
+    ("Bitcode", &["bin"]),
     ("TOML", &["toml"]),
 ];
 

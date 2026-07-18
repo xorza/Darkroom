@@ -22,7 +22,7 @@ pub(crate) fn load_document(path: &Path) -> Result<Document> {
 }
 
 /// Serialize `doc` and write it to `path`, picking the format from its
-/// extension (defaulting to Rhai for unknown extensions).
+/// extension (defaulting to JSON for unknown extensions).
 pub(crate) fn save_document(doc: &Document, path: &Path) -> Result<()> {
     save_typed(path, |format| doc.serialize(format))
 }
@@ -52,10 +52,10 @@ fn load_typed<T>(path: &Path, parse: impl FnOnce(SerdeFormat, &[u8]) -> Result<T
     parse(format, &bytes).with_context(|| path.display().to_string())
 }
 
-/// Shared save shell: pick the format from the extension (Rhai default),
+/// Shared save shell: pick the format from the extension (JSON default),
 /// encode via `encode`, write the bytes.
 fn save_typed(path: &Path, encode: impl FnOnce(SerdeFormat) -> Result<Vec<u8>>) -> Result<()> {
-    let format = SerdeFormat::from_file_name(&path.to_string_lossy()).unwrap_or(SerdeFormat::Rhai);
+    let format = SerdeFormat::from_file_name(&path.to_string_lossy()).unwrap_or(SerdeFormat::Json);
     let bytes = encode(format)?;
     std::fs::write(path, &bytes).with_context(|| path.display().to_string())
 }
@@ -70,15 +70,21 @@ mod tests {
 
     #[test]
     fn graph_import_round_trips_and_gates_on_check() {
-        let path = test_output_path("darkroom_persistence/graph.rhai");
+        let path = test_output_path("darkroom_persistence/graph.json");
         let graph = Graph::new("ok").category("test");
         export_graph(&graph, &path).unwrap();
         assert_eq!(import_graph(&path).expect("valid graph imports"), graph);
 
+        let extensionless = test_output_path("darkroom_persistence/graph");
+        export_graph(&graph, &extensionless).unwrap();
+        let bytes = std::fs::read(extensionless).unwrap();
+        let decoded: Graph = deserialize(&bytes, SerdeFormat::Json).unwrap();
+        assert_eq!(decoded, graph, "unknown extensions default to JSON");
+
         // A graph that parses but fails `Graph::check` (dangling event
         // emitter) is refused at the import gate. Export doesn't gate —
         // it writes editor-built state.
-        let bad_path = test_output_path("darkroom_persistence/bad-graph.rhai");
+        let bad_path = test_output_path("darkroom_persistence/bad-graph.json");
         let mut bad = Graph::new("bad");
         bad.events.push(GraphEvent {
             name: "tick".into(),

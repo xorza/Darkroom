@@ -108,10 +108,10 @@ pub(crate) struct ScriptResult {
     /// Everything the script sent through Rhai's `print` during its run,
     /// with a `\n` after each call. Empty when no prints occurred.
     pub print: String,
-    /// Rhai-source serialization of the script's final expression value.
-    /// Always populated on success (a statement-terminated script yields
-    /// `"()\n"`). `None` only when `error` is `Some`.
-    pub result: Option<String>,
+    /// JSON representation of the script's final expression value. A
+    /// statement-terminated script and any failed request yield `null`;
+    /// `error` distinguishes failure.
+    pub result: serde_json::Value,
     pub error: Option<String>,
 }
 
@@ -273,7 +273,7 @@ async fn run_executor(
                 .unwrap_or_else(|_| ScriptResult {
                     session: req.session_id,
                     print: String::new(),
-                    result: None,
+                    result: serde_json::Value::Null,
                     error: Some("script execution panicked".to_string()),
                 });
                 let _ = req.reply.send(reply);
@@ -307,7 +307,7 @@ fn run_script(
             return ScriptResult {
                 session: echoed,
                 print: String::new(),
-                result: None,
+                result: serde_json::Value::Null,
                 error: Some(e.to_string()),
             };
         }
@@ -318,14 +318,14 @@ fn run_script(
     } = session_ref;
 
     let (result, error) = match engine.eval_with_scope::<Dynamic>(scope, &req.source) {
-        Ok(dynamic) => match common::serde_rhai::to_string(&dynamic) {
-            Ok(s) => (Some(s), None),
+        Ok(dynamic) => match serde_json::to_value(&dynamic) {
+            Ok(value) => (value, None),
             Err(e) => (
-                None,
+                serde_json::Value::Null,
                 Some(format!("failed to serialize script result: {e}")),
             ),
         },
-        Err(e) => (None, Some(e.to_string())),
+        Err(e) => (serde_json::Value::Null, Some(e.to_string())),
     };
 
     // Drain the hook's accumulator. `mem::take` leaves the buffer empty
