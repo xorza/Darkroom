@@ -11,7 +11,7 @@ use scenarium::Library;
 use scenarium::{DetachedNode, Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
 use scenarium::{Node, NodeKind};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use thiserror::Error;
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
@@ -643,26 +643,6 @@ impl Document {
             self.graph.iter().all(|node| !node.kind.is_boundary()),
             "entry graph cannot contain interface boundary nodes"
         );
-
-        // Node ids must be unique across the whole document, nested graphs
-        // included: `PortRef` carries no graph ref, and run state, inspectors,
-        // and widget ids all key nodes by bare `NodeId`. Every graph-copy
-        // boundary (import / localize / detach) severs identity via
-        // `Graph::fresh_copy`, so a duplicate is corrupt input.
-        fn collect_node_ids(graph: &CoreGraph, seen: &mut HashSet<NodeId>) -> Result<()> {
-            for node in graph.iter() {
-                ensure!(
-                    seen.insert(node.id),
-                    "node id {:?} appears in more than one graph",
-                    node.id
-                );
-            }
-            for nested in graph.graphs.values() {
-                collect_node_ids(nested, seen)?;
-            }
-            Ok(())
-        }
-        collect_node_ids(&self.graph, &mut HashSet::new())?;
 
         self.main_view.check(&self.graph).context("main view")?;
 
