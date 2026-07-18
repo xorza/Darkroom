@@ -1,6 +1,6 @@
 //! Node header bar: the title plus the node's indicator chips, split into two
 //! visual families so a toggle can't be mistaken for a fact. **Controls** are
-//! bordered, hover-lifting chips you act on — `S` subgraph-open, `D` disable,
+//! bordered, hover-lifting chips you act on — `S` graph-open, `D` disable,
 //! `R`/`↓` cache, and the `i` inspect chip. **Markers** are flat tinted pills
 //! that only describe the node — `■` sink and `~` impure. The markers ride
 //! in the [`header`] band beside the title; the run-time label (left) and the
@@ -181,7 +181,7 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
             if !node.boundary {
                 let mode = rcx.inspectors.mode(node.id);
                 let color = if mode.is_some() {
-                    theme.colors.badge_subgraph
+                    theme.colors.badge_graph
                 } else {
                     theme.colors.text_muted
                 };
@@ -198,7 +198,7 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
 }
 
 /// The strip under the header: the run-time label left-aligned, a `FILL`
-/// spacer, then the interactive chips right-aligned — `S` subgraph-open, `D`
+/// spacer, then the interactive chips right-aligned — `S` graph-open, `D`
 /// disable, `R`/`↓` cache. The controls group apart from the title's identity
 /// (header above); the run-time reads as the row's status counterweight. The
 /// disable chip always shows, so the row's height is reserved regardless.
@@ -244,18 +244,18 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // Interactive controls: what you can *do* to the node. Bordered
             // chips that lift on hover.
             //
-            // Subgraph chip is the open-in-tab affordance. We only *draw* it
+            // Graph chip is the open-in-tab affordance. We only *draw* it
             // here (with its stable id); the click is read next frame in
-            // `emit_subgraph_opens` (prepass) so the open applies before the
-            // record — letting the subgraph record a pass earlier and its
+            // `emit_graph_opens` (prepass) so the open applies before the
+            // record — letting the graph record a pass earlier and its
             // connections draw with no first-frame gap.
-            if node.subgraph.is_some() {
+            if node.graph.is_some() {
                 Badge::control(
-                    "S",
-                    theme.colors.badge_subgraph,
+                    "G",
+                    theme.colors.badge_graph,
                     true,
-                    subgraph_badge_wid(node.id),
-                    "Open subgraph",
+                    graph_badge_wid(node.id),
+                    "Open graph",
                 )
                 .show(ui);
             }
@@ -434,9 +434,9 @@ fn disk_badge_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node.disk_badge", node_id))
 }
 
-/// Stable id for a subgraph node's clickable open-in-tab chip.
-pub(crate) fn subgraph_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.subgraph_badge", node_id))
+/// Stable id for a graph node's clickable open-in-tab chip.
+pub(crate) fn graph_badge_wid(node_id: NodeId) -> WidgetId {
+    WidgetId::from_hash(("graph.node.graph_badge", node_id))
 }
 
 /// Which visual family a chip belongs to, plus the per-family data — split in
@@ -447,7 +447,7 @@ pub(crate) fn subgraph_badge_wid(node_id: NodeId) -> WidgetId {
 enum BadgeKind {
     /// Interactive: a bordered square that lifts a faint fill on hover
     /// (pressable). `wid` makes it clickable; `filled` deepens the tint for
-    /// the "on" state. Toggles (`C`/`D`) and actions (`S`/`i`).
+    /// the "on" state. Toggles (`C`/`D`) and actions (`G`/`i`).
     Control { wid: WidgetId, filled: bool },
     /// Read-only descriptor: a borderless, tinted pill with its glyph inked in
     /// its own color. Never clickable — `salt` just gives it a stable id for the

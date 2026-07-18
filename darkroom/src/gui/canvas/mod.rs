@@ -432,7 +432,7 @@ pub(crate) enum CanvasGesture {
 ///
 /// This only ever sees presses that *missed* every node and port: a
 /// node/badge widget captures its own press, so a right-click on a node
-/// body or `S` badge routes to `node_menu` / `graph_menu` (which read
+/// body or `G` badge routes to `node_menu` / `graph_menu` (which read
 /// those widgets' `secondary_clicked` directly) and never reaches here —
 /// `NewNode` is therefore right-click-on-*empty*-canvas by construction.
 pub(crate) fn classify_canvas_gesture(ui: &mut Ui) -> Option<CanvasGesture> {

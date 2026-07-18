@@ -342,7 +342,7 @@ gesture state + the pure pointer→drop-zone classification. The rest:
 - **`gui/node/`** — the node-body widget: `mod.rs` is `NodeUI` (node bodies +
   drag; emits `MoveNodes`, graph-open requests, port-disconnect
   double-clicks), with sub-widgets `header` (play chip + title +
-  `S`/`■`/`D`/`R`/`↓`/`i` badges: run-to-node / graph / sink / disable /
+  `G`/`■`/`D`/`R`/`↓`/`i` badges: run-to-node / graph / sink / disable /
   RAM-cache / disk-cache / inspect; the
   `R` and `↓` chips flip the two bits of `Node::cache` (`CacheMode`
   `None`/`Ram`/`Disk`/`Both`) via `SetCacheMode`), `port_row` (the two port
