@@ -50,9 +50,7 @@ pub(crate) fn mono_text(ui: &Ui, px: f32) -> TextStyle {
 /// ([`crate::gui::node::memory_row::meter`]) and the pin-preview widget's
 /// image-info facts.
 pub(crate) fn labeled_value(ui: &mut Ui, theme: &Theme, label: &str, value: String) {
-    Text::new(label.to_owned())
-        .style(muted_text(ui, theme, 8.5))
-        .show(ui);
+    Text::new(label).style(muted_text(ui, theme, 8.5)).show(ui);
     Text::new(value).style(mono_text(ui, 10.5)).show(ui);
 }
 

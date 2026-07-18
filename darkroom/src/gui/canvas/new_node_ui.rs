@@ -253,7 +253,7 @@ fn category_column(
         .size((Sizing::HUG, Sizing::HUG))
         .gap(4.0)
         .show(ui, |ui| {
-            Text::new(category.to_owned())
+            Text::new(category)
                 .id_salt(("new_node_cat", category))
                 .show(ui);
             Panel::vstack()
@@ -301,10 +301,10 @@ fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
 /// One palette row for a library `Func`: on click, the node it spawns plus its
 /// declared input defaults. Hovering shows the func's description.
 fn func_entry(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> Option<ChosenNode> {
-    let resp = MenuItem::new(func.name.clone()).show(ui, popup);
+    let resp = MenuItem::new(&func.name).show(ui, popup);
     let clicked = resp.left.clicked();
     if let Some(desc) = &func.description {
-        Tooltip::on(&resp.snapshot()).text(desc.clone()).show(ui);
+        Tooltip::on(&resp.snapshot()).text(desc).show(ui);
     }
     clicked.then(|| {
         let node: Node = func.into();
@@ -321,11 +321,7 @@ fn func_entry(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> Option<ChosenNod
 /// editable `Local` copy of the def that records its library `origin`, so the
 /// instance localizes rather than staying linked to the library entry.
 fn subgraph_entry(ui: &mut Ui, popup: &PopupHandle, def: &SubgraphDef) -> Option<ChosenNode> {
-    if !MenuItem::new(def.name.clone())
-        .show(ui, popup)
-        .left
-        .clicked()
-    {
+    if !MenuItem::new(&def.name).show(ui, popup).left.clicked() {
         return None;
     }
     let mut local = def.fresh_copy();
@@ -345,10 +341,10 @@ fn subgraph_entry(ui: &mut Ui, popup: &PopupHandle, def: &SubgraphDef) -> Option
 /// seeded like a func node.
 fn special_entry(ui: &mut Ui, popup: &PopupHandle, special: SpecialNode) -> Option<ChosenNode> {
     let func = special.func();
-    let resp = MenuItem::new(func.name.clone()).show(ui, popup);
+    let resp = MenuItem::new(&func.name).show(ui, popup);
     let clicked = resp.left.clicked();
     if let Some(desc) = &func.description {
-        Tooltip::on(&resp.snapshot()).text(desc.clone()).show(ui);
+        Tooltip::on(&resp.snapshot()).text(desc).show(ui);
     }
     if !clicked {
         return None;

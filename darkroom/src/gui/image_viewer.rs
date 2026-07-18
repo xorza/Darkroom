@@ -17,7 +17,7 @@ use std::fmt::Write as _;
 
 use aperture::{
     Align, Background, Color, Configure, HAlign, Image as AptImage, ImageFilter, ImageFit,
-    ImageHandle, InternedStr, Panel, Rect, Sense, Shape, Size, Sizing, Spacing, Text, Ui, VAlign,
+    ImageHandle, Panel, Rect, Sense, Shape, Size, Sizing, Spacing, Text, TextInput, Ui, VAlign,
     WidgetId,
 };
 use glam::{UVec2, Vec2};
@@ -482,7 +482,7 @@ fn background_swatch(
 /// dressing `panel` (caller-configured id + placement) in the shared
 /// chrome around one line of muted text. Used by the header readout and
 /// the empty-pane hint.
-fn readout_pill(ui: &mut Ui, theme: &Theme, panel: Panel, text: impl Into<InternedStr>) {
+fn readout_pill<'a>(ui: &mut Ui, theme: &Theme, panel: Panel, text: impl Into<TextInput<'a>>) {
     let text = text.into();
     panel
         .size((Sizing::HUG, Sizing::HUG))

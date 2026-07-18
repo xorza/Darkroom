@@ -8,8 +8,8 @@
 //! buffered-text core in [`crate::gui::widgets::buffered_edit`].
 
 use aperture::{
-    Align, Configure, HAlign, Justify, Key, Panel, Sense, Shortcut, Sizing, SmolStr, Spacing, Text,
-    TextEdit, TextEditTheme, TextStyle, Ui, VAlign, WidgetId,
+    Align, Configure, HAlign, InternedStr, Justify, Key, Panel, Sense, Shortcut, Sizing, Spacing,
+    Text, TextEdit, TextEditTheme, TextStyle, Ui, VAlign, WidgetId,
 };
 
 use crate::gui::theme::InlineRenameTheme;
@@ -32,6 +32,7 @@ struct RenameState {
 /// value was accepted) never co-occur — the first only fires while idle,
 /// the second only while editing — but a single struct keeps the caller's
 /// match flat.
+#[derive(Debug)]
 pub(crate) struct RenameEvent {
     pub(crate) clicked: bool,
     pub(crate) committed: Option<String>,
@@ -52,9 +53,10 @@ const DEFAULT_MAX_CHARS: usize = 64;
 /// aperture keeps the state row alive — pick something stable per
 /// underlying domain item (node id, port id, subgraph id, …).
 ///
+#[derive(Debug)]
 pub(crate) struct InlineRename<'a> {
     id: WidgetId,
-    name: SmolStr,
+    name: InternedStr,
     theme: &'a InlineRenameTheme,
     max_chars: usize,
     style: Option<TextStyle>,
@@ -62,15 +64,11 @@ pub(crate) struct InlineRename<'a> {
 }
 
 impl<'a> InlineRename<'a> {
-    pub(crate) fn new(
-        id: WidgetId,
-        name: impl Into<SmolStr>,
-        theme: &'a InlineRenameTheme,
-    ) -> Self {
+    pub(crate) fn new(id: WidgetId, name: InternedStr, theme: &'a InlineRenameTheme) -> Self {
         Self {
             id,
             theme,
-            name: name.into(),
+            name,
             max_chars: DEFAULT_MAX_CHARS,
             style: None,
             halign: HAlign::Left,
@@ -172,9 +170,6 @@ impl<'a> InlineRename<'a> {
                 .child_align(Align::v(VAlign::Center))
                 .sense(Sense::CLICK | Sense::DRAG)
                 .show(ui, |ui| {
-                    // `SmolStr::clone` is allocation-free (inline or
-                    // `Arc` bump) and `Into<InternedStr>` wraps it as
-                    // `Owned` without copying, so this is cheap per frame.
                     let mut t = Text::new(name.clone());
                     if let Some(s) = style {
                         t = t.style(s);
@@ -188,7 +183,7 @@ impl<'a> InlineRename<'a> {
                 let st = ui.state_mut::<RenameState>(id);
                 st.active = true;
                 st.edit.reset_latch();
-                st.edit.text = name.as_str().to_owned();
+                st.edit.text = name.borrow_str().to_owned();
                 ui.request_focus(Some(id));
             }
             return RenameEvent {
@@ -228,7 +223,7 @@ impl<'a> InlineRename<'a> {
         ui.request_focus(None);
         RenameEvent {
             clicked: false,
-            committed: (commit && draft != name.as_str()).then_some(draft),
+            committed: (commit && draft.as_str() != &*name.borrow_str()).then_some(draft),
         }
     }
 }

@@ -23,8 +23,8 @@
 use std::collections::HashMap;
 
 use aperture::{
-    Background, Color, Configure, Corners, FontWeight, Panel, Sense, Shadow, Sizing, Spacing,
-    Stroke, Text, TextStyle, TextWrap, Ui, WidgetId,
+    Background, Color, Configure, Corners, FontWeight, InternedStr, Panel, Sense, Shadow, Sizing,
+    Spacing, Stroke, Text, TextInput, TextStyle, TextWrap, Ui, WidgetId,
 };
 use glam::Vec2;
 use scenarium::DataType;
@@ -204,16 +204,23 @@ impl Inspectors {
             .gap(3.0)
             .background(chrome)
             .show(ui, |ui| {
-                let title = if node.name.is_empty() {
-                    "(unnamed)"
-                } else {
-                    node.name.as_str()
+                let repeated_kind = {
+                    let kind = node.kind_label.borrow_str();
+                    if node.name.is_empty() {
+                        kind.eq_ignore_ascii_case("(unnamed)")
+                    } else {
+                        kind.eq_ignore_ascii_case(&node.name.borrow_str())
+                    }
                 };
-                line(ui, title, title_style(ui));
+                if node.name.is_empty() {
+                    line(ui, "(unnamed)", title_style(ui));
+                } else {
+                    line(ui, node.name.clone(), title_style(ui));
+                }
                 // The kind line earns its row only when it says something the
                 // title doesn't — an unrenamed node repeats its func name.
-                if !node.kind_label.eq_ignore_ascii_case(title) {
-                    line(ui, node.kind_label.as_str(), muted_style(theme, ui));
+                if !repeated_kind {
+                    line(ui, node.kind_label.clone(), muted_style(theme, ui));
                 }
 
                 // Status right under the title — the most-glanceable fact.
@@ -222,7 +229,7 @@ impl Inspectors {
                     exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
                 line(
                     ui,
-                    &status_text(node.exec_status),
+                    status_text(node.exec_status),
                     TextStyle {
                         color: status_color,
                         ..body_style(ui)
@@ -244,9 +251,8 @@ impl Inspectors {
                 if node.sink {
                     line(ui, "sink", muted_style(theme, ui));
                 }
-                let description = node.description.as_str();
-                if !description.is_empty() {
-                    line(ui, description, muted_style(theme, ui));
+                if !node.description.is_empty() {
+                    line(ui, node.description.clone(), muted_style(theme, ui));
                 }
 
                 let inputs = scene.inputs(node.inputs);
@@ -258,7 +264,7 @@ impl Inspectors {
                             ui,
                             theme,
                             ctx.library,
-                            input.name.as_str(),
+                            &input.name,
                             &input.ty,
                             Some(val.as_str()),
                         );
@@ -269,14 +275,7 @@ impl Inspectors {
                 if !outputs.is_empty() {
                     section(ui, theme, "Outputs");
                     for output in outputs {
-                        port_row(
-                            ui,
-                            theme,
-                            ctx.library,
-                            output.name.as_str(),
-                            &output.ty,
-                            None,
-                        );
+                        port_row(ui, theme, ctx.library, &output.name, &output.ty, None);
                     }
                 }
 
@@ -333,8 +332,8 @@ fn outside_action(ui: &Ui, scene: &Scene) -> bool {
     canvas_acted || node_acted
 }
 
-fn line(ui: &mut Ui, text: &str, style: TextStyle) {
-    Text::new(text.to_owned())
+fn line<'a>(ui: &mut Ui, text: impl Into<TextInput<'a>>, style: TextStyle) {
+    Text::new(text)
         .style(style)
         .text_wrap(TextWrap::Wrap)
         .show(ui);
@@ -361,15 +360,12 @@ fn port_row(
     ui: &mut Ui,
     theme: &Theme,
     library: &Library,
-    name: &str,
+    name: &InternedStr,
     ty: &DataType,
     val: Option<&str>,
 ) {
-    line(
-        ui,
-        &port_label_text(library, name, ty),
-        muted_style(theme, ui),
-    );
+    let label = port_label_text(library, &name.borrow_str(), ty);
+    line(ui, label, muted_style(theme, ui));
     if let Some(v) = val {
         line(ui, v, body_style(ui));
     }

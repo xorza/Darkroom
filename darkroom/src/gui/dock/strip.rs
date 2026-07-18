@@ -8,8 +8,8 @@
 //! document.
 
 use aperture::{
-    Align, Background, Configure, ContextMenu, Corners, MenuItem, Panel, Sense, Sizing, SmolStr,
-    Spacing, Text, TextStyle, Ui, VAlign, WidgetId,
+    Align, Background, Configure, ContextMenu, Corners, InternedStr, MenuItem, Panel, Sense,
+    Sizing, Spacing, Text, TextStyle, Ui, VAlign, WidgetId,
 };
 use scenarium::SubgraphId;
 
@@ -27,9 +27,10 @@ const SUBGRAPH_NAME_MAX_CHARS: usize = 32;
 /// tab plus its resolved label text (the one projection that needs the
 /// `Document`). Everything else a chip renders — closability,
 /// movability, renamability — is derived from the tab itself.
+#[derive(Debug)]
 pub(crate) struct TabLabel {
     pub(crate) tab: TabRef,
-    pub(crate) text: SmolStr,
+    pub(crate) text: InternedStr,
 }
 
 /// Every tab except the pinned `Main` graph carries a close button.
@@ -140,6 +141,7 @@ fn hover_bg(hovered: bool, theme: &Theme, corners: Corners) -> Background {
 
 /// One strip's shared draw state, threaded through its chips (the
 /// [`crate::gui::node::RecordCtx`] pattern, strip-scoped).
+#[derive(Debug)]
 struct StripCtx<'a> {
     theme: &'a Theme,
     group: TabGroupId,

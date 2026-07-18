@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
-use aperture::SmolStr;
+use aperture::{InternedStr, Ui};
 use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
 use scenarium::Library;
@@ -87,10 +87,10 @@ impl From<&Binding> for InputBindingView {
 /// per port (so an AoS pool beats parallel columns here).
 #[derive(Debug)]
 pub(crate) struct SceneInput {
-    pub name: SmolStr,
+    pub name: InternedStr,
     /// Port tooltip from the func's [`FuncInput::description`]; empty when the
     /// port declares none.
-    pub description: SmolStr,
+    pub description: InternedStr,
     pub ty: DataType,
     /// Per-frame snapshot of the input's [`Binding`].
     pub binding: InputBindingView,
@@ -116,10 +116,10 @@ pub(crate) struct SceneInput {
 /// wires on an input change is handled at edit time, not from the projection.
 #[derive(Debug)]
 pub(crate) struct SceneOutput {
-    pub name: SmolStr,
+    pub name: InternedStr,
     /// Port tooltip from the func's [`FuncOutput::description`]; empty when the
     /// port declares none.
-    pub description: SmolStr,
+    pub description: InternedStr,
     pub ty: DataType,
     /// The pinned preview widget's top-left corner in absolute
     /// canvas-world coordinates — `Some` iff this output is pinned
@@ -134,21 +134,21 @@ pub(crate) struct SceneOutput {
 /// type — they are pure triggers — so a name is all the UI needs to list them.
 #[derive(Debug)]
 pub(crate) struct SceneEvent {
-    pub name: SmolStr,
+    pub name: InternedStr,
 }
 
 #[derive(Debug)]
 pub(crate) struct SceneNode {
     pub id: NodeId,
     pub pos: Vec2,
-    pub name: SmolStr,
+    pub name: InternedStr,
     /// Human-readable type identity: the func name, the subgraph def
     /// name, or the boundary role (`Input`/`Output`). Shown by the
     /// inspection panel.
-    pub kind_label: SmolStr,
+    pub kind_label: InternedStr,
     /// The func's [`Func::description`] (empty for subgraph/boundary nodes).
     /// Shown by the inspection panel and the new-node palette tooltip.
-    pub description: SmolStr,
+    pub description: InternedStr,
     /// Span into [`Scene::inputs`].
     pub inputs: Span,
     /// Span into [`Scene::outputs`].
@@ -225,9 +225,10 @@ pub(crate) struct SceneConnection {
 }
 
 impl Scene {
-    /// Names live in aperture's per-frame text arena, which clears at
-    /// the next `Ui::frame` — so `Scene` must be rebuilt every frame
-    /// before any widget consumes it. `App::record` enforces this.
+    /// Names are arena-backed handles authored through this record pass's
+    /// `Ui`. Rebuilding keeps the projection synchronized with the graph and
+    /// lets the previous pass's text arena be recycled. `App::record` enforces
+    /// this before widgets consume the scene.
     ///
     /// `ctx_def` is the enclosing `SubgraphDef` when `graph` is a
     /// subgraph interior, `None` for the root. It's the only source of
@@ -235,6 +236,7 @@ impl Scene {
     /// (they carry no func) — their ports mirror the def's interface.
     pub(crate) fn rebuild(
         &mut self,
+        ui: &mut Ui,
         graph: &Graph,
         view: &GraphView,
         library: &Library,
@@ -276,22 +278,22 @@ impl Scene {
             // mirrored from the enclosing `ctx_def`'s interface.
             let interface = match &node.kind {
                 NodeKind::Func(func_id) => library.by_id(func_id).map(|f| NodeInterface {
-                    kind_label: f.name.clone().into(),
-                    description: f.description.clone().unwrap_or_default().into(),
+                    kind_label: ui.intern(&f.name),
+                    description: ui.intern(f.description.as_deref().unwrap_or_default()),
                     inputs: Cow::Borrowed(&f.inputs),
                     outputs: Cow::Borrowed(&f.outputs),
-                    events: f.events.iter().map(|e| e.name.clone().into()).collect(),
+                    events: f.events.iter().map(|e| ui.intern(&e.name)).collect(),
                     subgraph: None,
                     sink: f.sink,
                     uncacheable: f.uncacheable,
                     impure: f.behavior == FuncBehavior::Impure,
                 }),
                 NodeKind::Subgraph(r) => graph.resolve_def(*r, library).map(|d| NodeInterface {
-                    kind_label: d.name.clone().into(),
-                    description: "".into(),
+                    kind_label: ui.intern(&d.name),
+                    description: ui.intern(""),
                     inputs: Cow::Borrowed(&d.inputs),
                     outputs: Cow::Borrowed(&d.outputs),
-                    events: d.events.iter().map(|e| e.name.clone().into()).collect(),
+                    events: d.events.iter().map(|e| ui.intern(&e.name)).collect(),
                     subgraph: Some(*r),
                     // A composite's sink-ness is derived at flatten
                     // time, not stored on the def; treat "no exposed
@@ -308,11 +310,11 @@ impl Scene {
                 NodeKind::Special(s) => {
                     let f = s.func();
                     Some(NodeInterface {
-                        kind_label: f.name.clone().into(),
-                        description: f.description.clone().unwrap_or_default().into(),
+                        kind_label: ui.intern(&f.name),
+                        description: ui.intern(f.description.as_deref().unwrap_or_default()),
                         inputs: Cow::Borrowed(&f.inputs),
                         outputs: Cow::Borrowed(&f.outputs),
-                        events: f.events.iter().map(|e| e.name.clone().into()).collect(),
+                        events: f.events.iter().map(|e| ui.intern(&e.name)).collect(),
                         subgraph: None,
                         sink: f.sink,
                         uncacheable: f.uncacheable,
@@ -329,8 +331,8 @@ impl Scene {
                         d.inputs.iter().map(boundary_output).collect();
                     outputs.push(placeholder_output());
                     NodeInterface {
-                        kind_label: "Input".into(),
-                        description: "".into(),
+                        kind_label: ui.intern("Input"),
+                        description: ui.intern(""),
                         inputs: Cow::Borrowed(&[]),
                         outputs: Cow::Owned(outputs),
                         events: Vec::new(),
@@ -348,8 +350,8 @@ impl Scene {
                     let mut inputs: Vec<FuncInput> = d.outputs.iter().map(boundary_input).collect();
                     inputs.push(placeholder_input());
                     NodeInterface {
-                        kind_label: "Output".into(),
-                        description: "".into(),
+                        kind_label: ui.intern("Output"),
+                        description: ui.intern(""),
                         inputs: Cow::Owned(inputs),
                         outputs: Cow::Borrowed(&[]),
                         events: Vec::new(),
@@ -384,8 +386,8 @@ impl Scene {
                         | NodeKind::SubgraphOutput => continue,
                     };
                     NodeInterface {
-                        kind_label: kind_label.into(),
-                        description: "".into(),
+                        kind_label: ui.intern(kind_label),
+                        description: ui.intern(""),
                         inputs: Cow::Borrowed(&[]),
                         outputs: Cow::Borrowed(&[]),
                         events: Vec::new(),
@@ -411,8 +413,8 @@ impl Scene {
                     input.value_variants.iter().cloned(),
                 );
                 self.inputs.push(SceneInput {
-                    name: input.name.clone().into(),
-                    description: input.description.clone().unwrap_or_default().into(),
+                    name: ui.intern(&input.name),
+                    description: ui.intern(input.description.as_deref().unwrap_or_default()),
                     ty: input.data_type.clone(),
                     binding: InputBindingView::from(&node_binding.binding),
                     default: default_static_value(library, input),
@@ -432,8 +434,8 @@ impl Scene {
                     .iter()
                     .enumerate()
                     .map(|(i, o)| SceneOutput {
-                        name: o.name.clone().into(),
-                        description: o.description.clone().unwrap_or_default().into(),
+                        name: ui.intern(&o.name),
+                        description: ui.intern(o.description.as_deref().unwrap_or_default()),
                         // A wildcard output (passthrough / reroute) reports the type
                         // resolved through the input it mirrors; a fixed output uses
                         // its declared type.
@@ -458,10 +460,10 @@ impl Scene {
             );
             // Boundary nodes carry no name in the model; label them by
             // role so the interior header isn't a blank bar.
-            let name: SmolStr = match (&node.kind, node.name.is_empty()) {
-                (NodeKind::SubgraphInput, true) => "Inputs".into(),
-                (NodeKind::SubgraphOutput, true) => "Outputs".into(),
-                _ => node.name.clone().into(),
+            let name = match (&node.kind, node.name.is_empty()) {
+                (NodeKind::SubgraphInput, true) => ui.intern("Inputs"),
+                (NodeKind::SubgraphOutput, true) => ui.intern("Outputs"),
+                _ => ui.intern(&node.name),
             };
             self.nodes.add(SceneNode {
                 id,
@@ -556,17 +558,18 @@ fn slice_pool<T>(pool: &[T], span: Span) -> &[T] {
 /// Inputs are usually borrowed from a func/def; the `SubgraphOutput`
 /// boundary node synthesizes them from the def's `FuncOutput`s, hence
 /// `Cow`.
+#[derive(Debug)]
 struct NodeInterface<'a> {
-    kind_label: SmolStr,
+    kind_label: InternedStr,
     /// The func's description (empty for subgraphs/boundaries/missing stubs).
-    description: SmolStr,
+    description: InternedStr,
     inputs: Cow<'a, [FuncInput]>,
     outputs: Cow<'a, [FuncOutput]>,
     /// Event (emitter) port names, in declaration order. `FuncEvent` and
     /// `SubgraphEvent` differ in type but both expose a `name`, and the UI
     /// only lists the name — so the interface flattens them to owned
     /// names rather than threading a third `Cow<[_]>` of incompatible types.
-    events: Vec<SmolStr>,
+    events: Vec<InternedStr>,
     subgraph: Option<SubgraphRef>,
     sink: bool,
     /// Node manages its own caching (or has no output to cache), so the editor's
@@ -643,13 +646,13 @@ pub(crate) mod test_support {
 
     /// Minimal node for viewport/bounds math tests: identity + position
     /// only, every render field defaulted.
-    pub(crate) fn scene_node_stub(id: NodeId, pos: Vec2) -> SceneNode {
+    pub(crate) fn scene_node_stub(ui: &mut Ui, id: NodeId, pos: Vec2) -> SceneNode {
         SceneNode {
             id,
             pos,
-            name: SmolStr::default(),
-            kind_label: SmolStr::default(),
-            description: SmolStr::default(),
+            name: ui.intern(""),
+            kind_label: ui.intern(""),
+            description: ui.intern(""),
             inputs: Span::default(),
             outputs: Span::default(),
             events: Span::default(),
@@ -705,7 +708,9 @@ mod tests {
         let (def, in_id, out_id) = adder_def();
         let view = GraphView::for_graph(&def.graph);
         let mut scene = Scene::default();
+        let mut ui = Ui::default();
         scene.rebuild(
+            &mut ui,
             &def.graph,
             &view,
             &Library::default(),
@@ -718,8 +723,8 @@ mod tests {
         let output_node = scene.nodes.iter().find(|n| n.id == out_id).unwrap();
 
         // Boundary nodes are labeled by role.
-        assert_eq!(input_node.kind_label.as_str(), "Input");
-        assert_eq!(output_node.kind_label.as_str(), "Output");
+        assert_eq!(&*input_node.kind_label.borrow_str(), "Input");
+        assert_eq!(&*output_node.kind_label.borrow_str(), "Output");
 
         // SubgraphInput's outputs mirror the def inputs (A:Int, B:Float)
         // plus the untyped "+" placeholder — types align with names.
@@ -741,10 +746,10 @@ mod tests {
         // SubgraphInput: 0 inputs; one output per def *input*, named to
         // match, plus the trailing "+" placeholder.
         assert_eq!(scene.inputs(input_node.inputs).len(), 0);
-        let in_out_names: Vec<&str> = scene
+        let in_out_names: Vec<String> = scene
             .outputs(input_node.outputs)
             .iter()
-            .map(|o| o.name.as_str())
+            .map(|o| o.name.borrow_str().to_owned())
             .collect();
         assert_eq!(in_out_names, ["A", "B", "+"]);
         assert!(input_node.subgraph.is_none() && !input_node.sink);
@@ -760,10 +765,10 @@ mod tests {
         // SubgraphOutput: one input per def *output* plus the "+"
         // placeholder; 0 outputs.
         assert_eq!(scene.outputs(output_node.outputs).len(), 0);
-        let out_in_names: Vec<&str> = scene
+        let out_in_names: Vec<String> = scene
             .inputs(output_node.inputs)
             .iter()
-            .map(|i| i.name.as_str())
+            .map(|i| i.name.borrow_str().to_owned())
             .collect();
         assert_eq!(out_in_names, ["Sum", "+"]);
 
@@ -782,7 +787,9 @@ mod tests {
         let (def, _in, _out) = adder_def();
         let view = GraphView::for_graph(&def.graph);
         let mut scene = Scene::default();
+        let mut ui = Ui::default();
         scene.rebuild(
+            &mut ui,
             &def.graph,
             &view,
             &Library::default(),
@@ -824,7 +831,8 @@ mod tests {
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
-        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+        let mut ui = Ui::default();
+        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
 
         // Every node renders, not silently dropped — so the unresolvable ones
         // stay selectable and deletable to repair the document.
@@ -836,14 +844,14 @@ mod tests {
         // The flag tracks resolution; the label names what's missing.
         assert!(!known_node.missing, "a resolved func is not a stub");
         assert!(ghost_func_node.missing && ghost_sub_node.missing);
-        assert_eq!(ghost_func_node.kind_label.as_str(), "missing func");
-        assert_eq!(ghost_sub_node.kind_label.as_str(), "missing subgraph");
+        assert_eq!(&*ghost_func_node.kind_label.borrow_str(), "missing func");
+        assert_eq!(&*ghost_sub_node.kind_label.borrow_str(), "missing subgraph");
 
         // Both stubs keep their saved name and carry no ports — and the
         // subgraph stub drops its `subgraph` ref so the "open in tab" action
         // isn't offered for a def that isn't there.
-        assert_eq!(ghost_func_node.name.as_str(), "astro_to_image");
-        assert_eq!(ghost_sub_node.name.as_str(), "removed_subgraph");
+        assert_eq!(&*ghost_func_node.name.borrow_str(), "astro_to_image");
+        assert_eq!(&*ghost_sub_node.name.borrow_str(), "removed_subgraph");
         assert!(ghost_sub_node.subgraph.is_none());
         for stub in [ghost_func_node, ghost_sub_node] {
             assert_eq!(scene.inputs(stub.inputs).len(), 0, "stub has no inputs");
@@ -880,20 +888,21 @@ mod tests {
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
-        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+        let mut ui = Ui::default();
+        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
 
         let n = scene.nodes.iter().find(|n| n.id == node_id).unwrap();
-        let event_names: Vec<&str> = scene
+        let event_names: Vec<String> = scene
             .events(n.events)
             .iter()
-            .map(|e| e.name.as_str())
+            .map(|e| e.name.borrow_str().to_owned())
             .collect();
         assert_eq!(event_names, ["Always", "FPS"], "events project in order");
 
-        let output_names: Vec<&str> = scene
+        let output_names: Vec<String> = scene
             .outputs(n.outputs)
             .iter()
-            .map(|o| o.name.as_str())
+            .map(|o| o.name.borrow_str().to_owned())
             .collect();
         assert_eq!(
             output_names,
@@ -921,7 +930,8 @@ mod tests {
         let pin_key = ItemRef::Pin(port);
         view.view_items.by_key_mut(&pin_key).unwrap().pos = Vec2::new(320.0, -40.0);
         let mut scene = Scene::default();
-        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+        let mut ui = Ui::default();
+        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
 
         let n = scene.nodes.iter().find(|n| n.id == node_id).unwrap();
         let pins: Vec<Option<Vec2>> = scene
@@ -945,7 +955,7 @@ mod tests {
 
         // ...and a reorder (pin buried beneath the node) projects verbatim.
         view.view_items.move_to_index(&pin_key, 0);
-        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
         assert_eq!(
             scene.z_order,
             vec![pin_key, ItemRef::Node(node_id)],
@@ -971,7 +981,8 @@ mod tests {
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
-        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+        let mut ui = Ui::default();
+        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
 
         assert_eq!(scene.subscriptions.len(), 1);
         let s = &scene.subscriptions[0];
@@ -1003,7 +1014,8 @@ mod tests {
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
-        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+        let mut ui = Ui::default();
+        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
 
         for (id, mode) in ids {
             let projected = scene.nodes.iter().find(|n| n.id == id).unwrap();
@@ -1036,7 +1048,8 @@ mod tests {
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
-        scene.rebuild(&graph, &view, &library, None, &RunState::default());
+        let mut ui = Ui::default();
+        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
 
         let pure = scene.nodes.iter().find(|n| n.id == pure_id).unwrap();
         let impure = scene.nodes.iter().find(|n| n.id == impure_id).unwrap();

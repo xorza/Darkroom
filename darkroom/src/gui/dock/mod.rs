@@ -21,9 +21,11 @@
 pub(crate) mod drag;
 pub(crate) mod strip;
 
+use std::borrow::Cow;
+
 use aperture::{
-    Background, Configure, Corners, CursorIcon, Layer, Panel, Rect, Sizing, SmolStr, Spacing,
-    SplitHalf, Splitter, Stroke, Text, Ui, WidgetId,
+    Background, Configure, Corners, CursorIcon, Layer, Panel, Rect, Sizing, Spacing, SplitHalf,
+    Splitter, Stroke, Text, Ui, WidgetId,
 };
 use glam::Vec2;
 
@@ -116,7 +118,7 @@ impl DockUi {
                     self.tab_drag = Some(TabDrag {
                         tab,
                         source: (group.id, index),
-                        text: tab_text(doc, tab),
+                        text: tab_text(doc, tab).into_owned(),
                     });
                 }
             }
@@ -236,7 +238,7 @@ fn render_group<F: FnMut(&mut Ui, TabRef, &mut Vec<Intent>)>(
     out: &mut Vec<Intent>,
     content: &mut F,
 ) {
-    let labels = tab_labels(doc, group);
+    let labels = tab_labels(ui, doc, group);
     let focused = doc.layout.focused == group.id;
     Panel::vstack()
         .id(pane_wid(group.id))
@@ -303,7 +305,7 @@ fn draw_drag_feedback(ui: &mut Ui, theme: &Theme, doc: &Document, dragged: &TabD
         });
     }
     if let Some(p) = ui.pointer_pos() {
-        let text = dragged.text.clone();
+        let text = dragged.text.as_str();
         let label_style = sized_text(ui, 13.0);
         ui.layer(Layer::Tooltip, p + Vec2::new(14.0, 18.0), None, |ui| {
             Panel::hstack()
@@ -323,22 +325,22 @@ fn draw_drag_feedback(ui: &mut Ui, theme: &Theme, doc: &Document, dragged: &TabD
 
 /// Project one group's tabs into the strip's per-tab labels — the label
 /// text is the one thing the strip needs the `Document` for.
-fn tab_labels(doc: &Document, group: &TabGroup) -> Vec<TabLabel> {
+fn tab_labels(ui: &mut Ui, doc: &Document, group: &TabGroup) -> Vec<TabLabel> {
     group
         .tabs
         .iter()
         .map(|&tab| TabLabel {
             tab,
-            text: tab_text(doc, tab),
+            text: ui.intern(&tab_text(doc, tab)),
         })
         .collect()
 }
 
 /// A tab's display text — shared by the strip labels and the drag's
 /// ghost chip.
-fn tab_text(doc: &Document, tab: TabRef) -> SmolStr {
+fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
     match tab {
-        TabRef::Graph(GraphRef::Main) => "main".into(),
+        TabRef::Graph(GraphRef::Main) => Cow::Borrowed("main"),
         TabRef::Graph(GraphRef::Local(id)) => doc
             .graph
             .subgraphs
@@ -346,7 +348,7 @@ fn tab_text(doc: &Document, tab: TabRef) -> SmolStr {
             .map(|d| d.name.as_str())
             .unwrap_or("subgraph")
             .into(),
-        TabRef::Preferences => "preferences".into(),
+        TabRef::Preferences => Cow::Borrowed("preferences"),
         TabRef::ImageViewer(port) => image_viewer::port_label(doc, port).into(),
     }
 }

@@ -7,7 +7,7 @@
 //! decision-shaped lives here as rect math so it's testable without a
 //! `Ui`.
 
-use aperture::{Rect, SmolStr};
+use aperture::Rect;
 use glam::Vec2;
 
 use crate::core::document::TabRef;
@@ -23,7 +23,7 @@ pub(crate) struct TabDrag {
     /// stays valid).
     pub(crate) source: (TabGroupId, usize),
     /// Label for the ghost chip, snapshotted at arm time.
-    pub(crate) text: SmolStr,
+    pub(crate) text: String,
 }
 
 /// Where a drop over a pane would land, plus the region to highlight

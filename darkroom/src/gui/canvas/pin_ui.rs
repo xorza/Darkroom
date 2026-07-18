@@ -362,12 +362,17 @@ impl PinUi {
                 .map(|value| value.value.to_string())
                 .unwrap_or_else(|| "not yet run".to_owned())
         });
+        let title = {
+            let node_name = n.name.borrow_str();
+            let output_name = output.name.borrow_str();
+            preview_title(&node_name, &output_name)
+        };
         let response = pin_preview::draw_widget(
             ui,
             theme,
             g.out_port,
             g.top_left,
-            &preview_title(n.name.as_str(), output.name.as_str()),
+            &title,
             border.color,
             border.width,
             image.as_ref(),

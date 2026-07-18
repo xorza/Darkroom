@@ -128,10 +128,10 @@ One record pass:
    target is fixed for the rest of the frame.
 3. **sync_target** — if the active graph changed since last frame, drop
    transient gesture state and flag a relayout. Does not rebuild.
-4. **rebuild #1 (pre-prepass)** — `rebuild_scene(target)`, **unconditional**,
-   because `Scene` re-interns port names into aperture's per-frame text arena
-   (cleared each `Ui::frame`), so the projection must be regenerated every
-   frame regardless. Clears `scene_dirty`.
+4. **rebuild #1 (pre-prepass)** — `rebuild_scene(ui, target)`,
+   **unconditional**, because `Scene` re-interns names into aperture's active
+   record-pass text arena and refreshes the graph projection. Clears
+   `scene_dirty`.
 5. **edit prepass** — read aperture's *current* input state (drag deltas,
    pan/zoom, connection release) and push `Intent`s. No drawing.
    Layout-changing edits (node drag, connection commit) are emitted here so
@@ -238,12 +238,13 @@ slots, remaps indices in the interior graph and across all instance bindings.
 Idempotent — a no-op on an already-canonical document.
 
 ### Render projection: `Scene` (`src/scene.rs`)
-A flat, per-frame snapshot rebuilt from the *active* graph+view every frame
-(`Scene::rebuild(graph, view, library, ctx_def, run_state)` — see
-`Editor::rebuild_scene`). Port names live in aperture's per-frame text arena,
-so it *must* be rebuilt before any widget reads it. Port names, types, and
-input-binding snapshots are flattened into pooled `Vec`s sliced per node (zero
-per-node allocation in steady state). Each `SceneNode` carries its
+A flat, per-record snapshot rebuilt from the *active* graph+view
+(`Scene::rebuild(ui, graph, view, library, ctx_def, run_state)` — see
+`Editor::rebuild_scene`). Names are `InternedStr` handles into aperture's
+active text arena, so the rebuild both refreshes the projection and allows the
+previous arena to recycle. Port names, types, and input-binding snapshots are
+flattened into pooled `Vec`s sliced per node (zero per-node allocation in
+steady state). Each `SceneNode` carries its
 `exec_status` (copied from `run_state`) to drive the status glow + run-time
 label. Scene is read-only mirror state — viewport/selection are copied *from*
 the active `GraphView` each rebuild; the gesture writes back via intents.

@@ -235,9 +235,9 @@ impl Editor {
             // Rebuild the projection for this frame, after the navigation
             // phase has fully settled the document — so prepass and
             // `CanvasGeometry` never read a stale graph. Unconditional for a
-            // graph tab: `Scene` re-interns port names into aperture's
-            // per-frame text arena (cleared each `Ui::frame`).
-            self.rebuild_scene(target, library);
+            // graph tab: `Scene` re-interns port names into the active
+            // record-pass text arena.
+            self.rebuild_scene(ui, target, library);
             self.scene_dirty = false;
 
             // Prepass emits input-derived graph mutations (drag, pan/zoom,
@@ -255,7 +255,7 @@ impl Editor {
         // bare tab switch leaves `scene_dirty` false and skips it.
         if self.scene_dirty {
             if let Some(target) = graph_target {
-                self.rebuild_scene(target, library);
+                self.rebuild_scene(ui, target, library);
             }
             self.scene_dirty = false;
         }
@@ -385,7 +385,7 @@ impl Editor {
     /// structural edit, undo/redo, or document replacement since the last
     /// reconcile). Idle/selection/viewport frames skip it: the interface
     /// can't have changed, and reconcile is idempotent there anyway.
-    pub(crate) fn rebuild_scene(&mut self, target: GraphRef, library: &Library) {
+    pub(crate) fn rebuild_scene(&mut self, ui: &mut Ui, target: GraphRef, library: &Library) {
         if self.needs_reconcile {
             self.document.reconcile_boundaries(library);
             // Same pass: drop bindings/subscriptions left dangling by a library
@@ -405,7 +405,7 @@ impl Editor {
             GraphRef::Local(id) => self.document.graph.subgraphs.by_key(&id),
         };
         self.scene
-            .rebuild(graph, view, library, ctx_def, &self.run_state);
+            .rebuild(ui, graph, view, library, ctx_def, &self.run_state);
     }
 
     /// Drain `intents`, applying each non-no-op intent to `document`,

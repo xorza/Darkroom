@@ -36,7 +36,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) {
         .show(ui, |ui| {
             if let Some(msg) = ctx.status_error {
                 let style = colored_text(ui, colors.exec_errored_glow, FONT);
-                Text::new(msg.to_string()).style(style).show(ui);
+                Text::new(msg).style(style).show(ui);
             }
             // Spacer: pins the message to the left edge and the memory
             // readout to the right.

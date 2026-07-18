@@ -257,7 +257,7 @@ pub(crate) fn draw_widget<'ui>(
                     // — the theme's base text, bold — so the two header bars
                     // read as one style at two widths, not two independently
                     // tuned looks.
-                    Text::new(title.to_owned())
+                    Text::new(title)
                         .style(TextStyle {
                             weight: FontWeight::Bold,
                             ..ui.theme.text
@@ -293,7 +293,7 @@ pub(crate) fn draw_widget<'ui>(
                             .child_align(Align::CENTER)
                             .justify(Justify::Center)
                             .show(ui, |ui| {
-                                Text::new(text.to_owned())
+                                Text::new(text)
                                     .style(sized_text(ui, 11.0))
                                     .text_wrap(TextWrap::Wrap)
                                     .show(ui);

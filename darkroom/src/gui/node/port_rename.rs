@@ -5,7 +5,7 @@
 //! (`SubgraphInput`/`SubgraphOutput`) port rows in
 //! [`crate::gui::node::port_row`]; ordinary node ports render plain text.
 
-use aperture::{Configure, HAlign, Sense, SmolStr, Text, TextStyle, Tooltip, Ui, WidgetId};
+use aperture::{Configure, HAlign, InternedStr, Sense, Text, TextStyle, Tooltip, Ui, WidgetId};
 
 use crate::core::document::BoundarySide;
 use crate::core::document::ItemRef;
@@ -39,7 +39,7 @@ pub(crate) fn port_label(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     port: PortRef,
-    name: SmolStr,
+    name: InternedStr,
     tip: &str,
     rename: Option<BoundarySide>,
     out: &mut Vec<Intent>,
@@ -58,7 +58,7 @@ pub(crate) fn port_label(
             .show(ui)
             .snapshot();
         if !tip.is_empty() {
-            Tooltip::on(&snapshot).text(tip.to_owned()).show(ui);
+            Tooltip::on(&snapshot).text(tip).show(ui);
         }
         return;
     };

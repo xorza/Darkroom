@@ -317,11 +317,16 @@ mod tests {
         //   c: (-50,300) never measured — contributes a point
         let (a, b, c) = (NodeId::unique(), NodeId::unique(), NodeId::unique());
         let mut scene = Scene::default();
-        scene.nodes.add(scene_node_stub(a, Vec2::new(0.0, 0.0)));
+        let mut ui = Ui::default();
         scene
             .nodes
-            .add(scene_node_stub(b, Vec2::new(1000.0, 500.0)));
-        scene.nodes.add(scene_node_stub(c, Vec2::new(-50.0, 300.0)));
+            .add(scene_node_stub(&mut ui, a, Vec2::new(0.0, 0.0)));
+        scene
+            .nodes
+            .add(scene_node_stub(&mut ui, b, Vec2::new(1000.0, 500.0)));
+        scene
+            .nodes
+            .add(scene_node_stub(&mut ui, c, Vec2::new(-50.0, 300.0)));
         let mut geometry = CanvasGeometry::default();
         geometry.seed_node_size(a, Size::new(150.0, 80.0));
         geometry.seed_node_size(b, Size::new(200.0, 100.0));
