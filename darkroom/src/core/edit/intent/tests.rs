@@ -117,7 +117,7 @@ fn dirties_document_splits_edits_from_navigation() {
                 Vec2::new(5.0, 5.0),
             )],
         }),
-        UndoStep::Doc(DocStep::RenameSubgraph {
+        UndoStep::Doc(DocStep::RenameGraph {
             id: GraphId::unique(),
             from: "s".into(),
             to: "t".into(),
@@ -811,7 +811,7 @@ fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
     );
 
     // Stacking is view-state: undoable + persisted, but not dirty-worthy,
-    // and it neither remeasures nor reshapes a subgraph interface.
+    // and it neither remeasures nor reshapes a graph interface.
     assert!(
         !step.dirties_document(),
         "a bare restack shouldn't nag on save"

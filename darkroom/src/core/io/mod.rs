@@ -1,5 +1,5 @@
 //! On-disk I/O and session state: file-dialog [`persistence`] for
-//! documents/themes/subgraphs, the [`preferences`] that remembers the last theme +
+//! documents/themes/graphs, the [`preferences`] that remembers the last theme +
 //! document across launches, and the per-document disk-[`cache`] location.
 
 use std::path::PathBuf;

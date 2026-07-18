@@ -1,5 +1,5 @@
 //! Topological-column auto-layout: seeds a fresh view's node positions when
-//! no saved layout exists yet (a freshly loaded root, a subgraph interior on
+//! no saved layout exists yet (a freshly loaded root, a graph interior on
 //! first open).
 
 use std::collections::HashMap;
