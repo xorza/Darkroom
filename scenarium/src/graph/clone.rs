@@ -9,12 +9,6 @@ impl Graph {
     /// Copy this graph with fresh node identities throughout its local graph
     /// tree. The returned value has no library lineage.
     pub fn fresh_copy(&self) -> Graph {
-        let mut graph = self.with_fresh_node_ids();
-        graph.origin = None;
-        graph
-    }
-
-    fn with_fresh_node_ids(&self) -> Graph {
         let mut id_map = HashMap::with_capacity(self.nodes.len());
         let mut nodes = NodeMap::with_capacity(self.nodes.len());
         for (node_id, node) in &self.nodes {
@@ -60,7 +54,7 @@ impl Graph {
         let graphs = self
             .graphs
             .iter()
-            .map(|(graph_id, graph)| (*graph_id, graph.with_fresh_node_ids()))
+            .map(|(graph_id, graph)| (*graph_id, graph.fresh_copy()))
             .collect();
         Graph {
             name: self.name.clone(),
@@ -68,7 +62,7 @@ impl Graph {
             inputs: self.inputs.clone(),
             outputs: self.outputs.clone(),
             events,
-            origin: self.origin,
+            origin: None,
             nodes,
             bindings,
             subscriptions,

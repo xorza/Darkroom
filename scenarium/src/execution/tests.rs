@@ -2843,7 +2843,10 @@ mod composite_behavior {
 
     /// Main graph: one instance of `def` whose output feeds a sink `print`.
     fn main_with(library: &Library, def: Graph) -> Graph {
-        let def_id = GraphId::unique();
+        main_with_id(library, GraphId::unique(), def)
+    }
+
+    fn main_with_id(library: &Library, def_id: GraphId, def: Graph) -> Graph {
         let mut graph = Graph::default();
         graph.insert_graph(def_id, def.clone());
         let inst = graph.add_graph_node(&def, GraphLink::Local(def_id));
@@ -2905,20 +2908,20 @@ mod composite_behavior {
     }
 
     #[test]
-    fn nested_impure_interior_reruns() {
+    fn nested_impure_interior_reruns_when_local_graph_ids_repeat() {
         // A doubly-nested impure node recomputes — flattening preserves its
-        // impurity through two composite levels.
+        // impurity through two composite levels whose map-local ids coincide.
         let mut library = test_func_lib(TestFuncHooks::default());
         library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
         let inner_def = impure_output_def(&library, "Inner", "deep");
-        let inner_id = GraphId::unique();
+        let repeated_id = GraphId::unique();
         let mut outer_interior = Graph::new("Outer").output(int_output("Out"));
-        outer_interior.insert_graph(inner_id, inner_def.clone());
-        let inner_inst = outer_interior.add_graph_node(&inner_def, GraphLink::Local(inner_id));
+        outer_interior.insert_graph(repeated_id, inner_def.clone());
+        let inner_inst = outer_interior.add_graph_node(&inner_def, GraphLink::Local(repeated_id));
         let so = Node::new(NodeKind::GraphOutput);
         let so_id = outer_interior.add(so);
         outer_interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_inst, 0));
-        let graph = main_with(&library, outer_interior);
+        let graph = main_with_id(&library, repeated_id, outer_interior);
         assert!(
             reruns_with_cache(&graph, &library, "deep"),
             "doubly-nested impure interior recomputes"

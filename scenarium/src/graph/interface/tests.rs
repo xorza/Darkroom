@@ -13,10 +13,12 @@ fn graph_link_preserves_registry_and_identity() {
 #[test]
 fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
     let child_id = GraphId::unique();
-    let mut child = Graph::new("child");
+    let child_origin = GraphId::unique();
+    let mut child = Graph::new("child").origin(child_origin);
     let child_node = child.add(Node::new(NodeKind::Func(FuncId::unique())));
 
-    let mut graph = Graph::new("parent");
+    let graph_origin = GraphId::unique();
+    let mut graph = Graph::new("parent").origin(graph_origin);
     let emitter = graph.add(Node::new(NodeKind::Func(FuncId::unique())));
     graph.events.push(GraphEvent {
         name: "done".into(),
@@ -26,6 +28,7 @@ fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
     graph.insert_graph(child_id, child);
 
     let copy = graph.fresh_copy();
+    assert_eq!(copy.origin, None);
     let copied_emitter = copy.events[0].emitter;
     assert_ne!(copied_emitter, emitter);
     assert!(
@@ -33,6 +36,7 @@ fn fresh_copy_remaps_nodes_events_and_nested_graphs() {
         "event emitter follows the copied node"
     );
     let copied_child = &copy.graphs[&child_id];
+    assert_eq!(copied_child.origin, None);
     assert!(
         copied_child
             .find(&child_node, NodeSearch::TopLevel)

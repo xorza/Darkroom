@@ -46,6 +46,15 @@ fn check_rejects_node_ids_reused_across_graph_levels() {
 }
 
 #[test]
+fn insert_graph_replaces_existing_graph() {
+    let graph_id = GraphId::unique();
+    let mut graph = Graph::default();
+    graph.insert_graph(graph_id, Graph::new("original"));
+    graph.insert_graph(graph_id, Graph::new("replacement"));
+    assert_eq!(graph.graphs[&graph_id].name, "replacement");
+}
+
+#[test]
 fn pinned_outputs_roundtrip_serialization() -> anyhow::Result<()> {
     let mut graph = test_graph();
     let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
