@@ -20,6 +20,7 @@ use crate::gui::scene::Scene;
 /// def to add alongside it, and the default input bindings to seed with it.
 #[derive(Debug)]
 struct ChosenNode {
+    node_id: NodeId,
     node: Node,
     def: Option<Box<SubgraphDef>>,
     bindings: Vec<(InputPort, Binding)>,
@@ -118,6 +119,7 @@ impl NewNodeUi {
             });
 
         if let Some(ChosenNode {
+            node_id,
             node,
             def,
             bindings,
@@ -125,6 +127,7 @@ impl NewNodeUi {
         {
             out.push(Intent::AddNode {
                 pos: self.world_pos,
+                node_id,
                 node,
                 def,
                 bindings,
@@ -307,9 +310,11 @@ fn func_entry(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> Option<ChosenNod
         Tooltip::on(&resp.snapshot()).text(desc).show(ui);
     }
     clicked.then(|| {
+        let node_id = NodeId::unique();
         let node: Node = func.into();
-        let bindings = default_bindings(node.id, &func.inputs);
+        let bindings = default_bindings(node_id, &func.inputs);
         ChosenNode {
+            node_id,
             node,
             def: None,
             bindings,
@@ -326,9 +331,11 @@ fn subgraph_entry(ui: &mut Ui, popup: &PopupHandle, def: &SubgraphDef) -> Option
     }
     let mut local = def.fresh_copy();
     local.origin = Some(def.id);
+    let node_id = NodeId::unique();
     let node = Node::subgraph_instance(&local, SubgraphRef::Local(local.id));
-    let bindings = default_bindings(node.id, &local.inputs);
+    let bindings = default_bindings(node_id, &local.inputs);
     Some(ChosenNode {
+        node_id,
         node,
         def: Some(Box::new(local)),
         bindings,
@@ -349,10 +356,12 @@ fn special_entry(ui: &mut Ui, popup: &PopupHandle, special: SpecialNode) -> Opti
     if !clicked {
         return None;
     }
+    let node_id = NodeId::unique();
     let mut node = Node::new(NodeKind::Special(special));
     node.name = func.name.clone();
-    let bindings = default_bindings(node.id, &func.inputs);
+    let bindings = default_bindings(node_id, &func.inputs);
     Some(ChosenNode {
+        node_id,
         node,
         def: None,
         bindings,

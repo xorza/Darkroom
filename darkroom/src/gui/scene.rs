@@ -406,7 +406,7 @@ impl Scene {
             for (input, node_binding) in interface
                 .inputs
                 .iter()
-                .zip(graph.node_bindings(node.id, interface.inputs.len()))
+                .zip(graph.node_bindings(id, interface.inputs.len()))
             {
                 let value_variants = extend_pool(
                     &mut self.value_variants_pool,
@@ -441,13 +441,13 @@ impl Scene {
                         // its declared type.
                         ty: match &o.ty {
                             OutputType::Wildcard { .. } => {
-                                graph.resolve_output_type(library, OutputPort::new(node.id, i))
+                                graph.resolve_output_type(library, OutputPort::new(id, i))
                             }
                             OutputType::Fixed(dt) => dt.clone(),
                         },
                         pin_position: view
                             .view_items
-                            .by_key(&ItemRef::Pin(OutputPort::new(node.id, i)))
+                            .by_key(&ItemRef::Pin(OutputPort::new(id, i)))
                             .map(|item| item.pos),
                     }),
             );
@@ -687,12 +687,10 @@ mod tests {
     /// plus the two boundary node ids so tests can locate them in `Scene`.
     fn adder_def() -> (SubgraphDef, NodeId, NodeId) {
         let in_node = Node::new(NodeKind::SubgraphInput);
-        let in_id = in_node.id;
         let out_node = Node::new(NodeKind::SubgraphOutput);
-        let out_id = out_node.id;
         let mut inner = Graph::default();
-        inner.add(in_node);
-        inner.add(out_node);
+        let in_id = inner.add(in_node);
+        let out_id = inner.add(out_node);
         inner.set_input_binding(InputPort::new(out_id, 0), Binding::bind(in_id, 0));
 
         let def = SubgraphDef::new("00000000-0000-0000-0000-000000000000", "Adder")
@@ -814,20 +812,17 @@ mod tests {
         let library = math_library();
         let mut graph = Graph::default();
         let known: Node = library.by_name("Add").unwrap().into();
-        let known_id = known.id;
         let mut ghost_func = Node::new(NodeKind::Func(
             "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
         ));
         ghost_func.name = "astro_to_image".into();
-        let ghost_func_id = ghost_func.id;
         let mut ghost_sub = Node::new(NodeKind::Subgraph(SubgraphRef::Linked(
             "00000000-0000-0000-0000-0000000000ff".into(),
         )));
         ghost_sub.name = "removed_subgraph".into();
-        let ghost_sub_id = ghost_sub.id;
-        graph.add(known);
-        graph.add(ghost_func);
-        graph.add(ghost_sub);
+        let known_id = graph.add(known);
+        let ghost_func_id = graph.add(ghost_func);
+        let ghost_sub_id = graph.add(ghost_sub);
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
@@ -883,8 +878,7 @@ mod tests {
         let library = worker_events_library();
         let mut graph = Graph::default();
         let node: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
-        let node_id = node.id;
-        graph.add(node);
+        let node_id = graph.add(node);
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
@@ -921,8 +915,7 @@ mod tests {
         let library = worker_events_library();
         let mut graph = Graph::default();
         let node: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
-        let node_id = node.id;
-        graph.add(node);
+        let node_id = graph.add(node);
         let port = OutputPort::new(node_id, 1);
         graph.set_output_pinned(port, true);
 
@@ -972,11 +965,9 @@ mod tests {
         let library = worker_events_library();
         let mut graph = Graph::default();
         let emitter: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
-        let emitter_id = emitter.id;
-        graph.add(emitter);
+        let emitter_id = graph.add(emitter);
         let subscriber: Node = library.by_id(&FRAME_EVENT_FUNC_ID).unwrap().into();
-        let subscriber_id = subscriber.id;
-        graph.add(subscriber);
+        let subscriber_id = graph.add(subscriber);
         graph.subscribe(emitter_id, 1, subscriber_id);
 
         let view = GraphView::for_graph(&graph);
@@ -1008,8 +999,8 @@ mod tests {
         ] {
             let mut node: Node = library.by_name("Add").unwrap().into();
             node.cache = mode;
-            ids.push((node.id, mode));
-            graph.add(node);
+            let node_id = graph.add(node);
+            ids.push((node_id, mode));
         }
 
         let view = GraphView::for_graph(&graph);
