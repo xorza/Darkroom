@@ -159,7 +159,7 @@ Everything else is editor view-state, split per graph:
   `Node` item per graph node and one `Pin` item per pinned output),
   `viewport`, and `selected` (a `BTreeSet` so equality/serde are
   order-independent). Root lives in `main_view`; each opened graph in
-  `sub_views` (lazily seeded + auto-laid-out on first open). **All of this
+  `local_views` (lazily seeded + auto-laid-out on first open). **All of this
   is persisted and undoable by design** — reopening restores camera +
   selection, and Ctrl+Z walks them alongside structural edits.
 - **`layout: DockLayout`** (`src/document/dock.rs`) — the pane arrangement:
@@ -221,7 +221,7 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
 - Every variant is emitted by some UI (node-title rename →
   `RenameNode`, tab-strip rename → `RenameGraph`, etc.). Promote/publish/
   export resolution (`graph_to_export` / `promote_to_library` /
-  `publish_local_def`) is pure document↔library logic in
+  `publish_local_graph`) is pure document↔library logic in
   `core/edit/publish.rs` (unit-tested against bare types, `&mut Library` in /
   `bool` changed out), not on `Document`; `app/commands/graph.rs` is the
   thin GUI orchestration (dialogs + dirty flag), running the mutators through
@@ -239,7 +239,7 @@ Idempotent — a no-op on an already-canonical document.
 
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-record snapshot rebuilt from the *active* graph+view
-(`Scene::rebuild(ui, graph, view, library, ctx_def, run_state)` — see
+(`Scene::rebuild(ui, graph, view, library, run_state)` — see
 `Editor::rebuild_scene`). Names are `InternedStr` handles into aperture's
 active text arena, so the rebuild both refreshes the projection and allows the
 previous arena to recycle. Port names, types, and input-binding snapshots are
