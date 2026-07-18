@@ -1,9 +1,10 @@
 pub(crate) mod auto_layout;
 pub(crate) mod canvas_item_placement;
 pub(crate) mod dock;
+pub(crate) mod validate;
 
-use anyhow::{Context, Result, bail, ensure};
-use common::{KeyIndexVec, SerdeFormat, is_debug};
+use anyhow::{Result, bail};
+use common::{KeyIndexVec, SerdeFormat};
 use glam::Vec2;
 use scenarium::GraphId;
 use scenarium::GraphLink;
@@ -12,7 +13,6 @@ use scenarium::{DetachedNode, Graph as CoreGraph, NodeId, NodeSearch, OutputPort
 use scenarium::{Node, NodeKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
-use thiserror::Error;
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
 use crate::core::document::canvas_item_placement::CanvasItemPlacement;
@@ -24,17 +24,6 @@ use crate::core::edit::reconcile::reconcile_graph;
 /// level with it (instead of the generic auto-layout stacking the two
 /// unconnected nodes in one column).
 const BOUNDARY_LAYOUT_GAP: f32 = 520.0;
-
-/// The document is structurally invalid: a file read from disk is untrusted
-/// input (hand-edited, corrupt, or stale against the editor), so
-/// [`Document::check`] surfaces a violation as this recoverable error rather
-/// than panicking. The load-path counterpart of scenarium's `CompileError`;
-/// only `check` produces it.
-#[derive(Debug, Error)]
-#[error("invalid document: {message}")]
-pub(crate) struct DocumentError {
-    pub message: String,
-}
 
 /// Which graph an editor tab is pointed at. `Main` is the document root;
 /// `Local(id)` addresses a nested graph in `Document::graph.graphs`.
@@ -213,65 +202,6 @@ impl GraphView {
             item_placements,
             ..Default::default()
         }
-    }
-
-    fn check(&self, graph: &CoreGraph) -> Result<()> {
-        ensure!(
-            self.viewport.is_valid(),
-            "graph viewport must have finite pan and positive finite zoom"
-        );
-
-        // Item-set match, both kinds. Duplicate keys are rejected at
-        // deserialize and unrepresentable by construction (`KeyIndexVec`),
-        // so per-kind count matches plus one-way containment prove set
-        // equality: exactly one `Node` item per graph node, exactly one
-        // `Pin` item per currently-pinned output. Pin items track the
-        // pinned set exactly — the edit layer removes the item on unpin
-        // (its undo step restores it), so a `Pin` item for an unpinned
-        // port is corrupt input, and a pinned port without an item would
-        // break the `MoveSelection` lookup in `build_step`.
-        let mut node_items = 0usize;
-        for item in self.item_placements.iter() {
-            ensure!(
-                item.pos.is_finite(),
-                "view item {:?} position must be finite",
-                item.key
-            );
-            match item.key {
-                ItemRef::Node(_) => node_items += 1,
-                ItemRef::Pin(port) => ensure!(
-                    graph.is_output_pinned(port),
-                    "view item references an output that isn't pinned"
-                ),
-            }
-        }
-        ensure!(
-            node_items == graph.len(),
-            "view node items must match graph nodes"
-        );
-        for node in graph.iter() {
-            ensure!(
-                self.item_placements
-                    .by_key(&ItemRef::Node(node.id))
-                    .is_some(),
-                "graph view missing a position for node {:?}",
-                node.id
-            );
-        }
-        for port in graph.pinned_outputs() {
-            ensure!(
-                self.item_placements.by_key(&ItemRef::Pin(port)).is_some(),
-                "pinned output must have a view item"
-            );
-        }
-
-        for key in &self.selected {
-            ensure!(
-                self.item_placements.by_key(key).is_some(),
-                "selected item {key:?} has no view item"
-            );
-        }
-        Ok(())
     }
 }
 
@@ -618,71 +548,8 @@ impl Document {
         self.graph.prune_dangling_wiring(library);
     }
 
-    /// Full structural validation, in all builds. A document read from disk
-    /// is untrusted input, so a violation is a recoverable [`DocumentError`]
-    /// the caller surfaces — not a panic. The debug-only assert form for
-    /// documents the editor itself built is [`Self::validate`].
-    pub(crate) fn check(&self) -> Result<(), DocumentError> {
-        self.check_inner().map_err(|e| DocumentError {
-            message: format!("{e:#}"),
-        })
-    }
-
-    /// The anyhow-backed body of [`Self::check`], kept separate so the
-    /// individual checks compose with `ensure!`/`context` and only the
-    /// boundary converts to the typed error.
-    fn check_inner(&self) -> Result<()> {
-        self.graph.check()?;
-        ensure!(
-            self.graph.inputs.is_empty()
-                && self.graph.outputs.is_empty()
-                && self.graph.events.is_empty(),
-            "entry graph cannot expose an interface"
-        );
-        ensure!(
-            self.graph.iter().all(|node| !node.kind.is_boundary()),
-            "entry graph cannot contain interface boundary nodes"
-        );
-
-        self.main_view.check(&self.graph).context("main view")?;
-
-        // Each opened graph view must match its interior graph; a
-        // view whose graph was deleted is a stale entry.
-        for (id, view) in &self.local_views {
-            let graph = self.graph.graphs.get(id).with_context(|| {
-                format!("local_views entry references missing local graph {id:?}")
-            })?;
-            view.check(graph)
-                .with_context(|| format!("graph {id:?} view"))?;
-        }
-
-        self.layout.check()?;
-        for tab in self.layout.all_tabs() {
-            if let TabRef::Graph(g) = tab {
-                ensure!(
-                    self.graph_for(g).is_some(),
-                    "open tab references a missing graph {g:?}"
-                );
-            }
-        }
-        Ok(())
-    }
-
-    /// Debug-only assert form of [`Self::check`]: a violation in a document
-    /// the editor itself built is our bug, caught loudly in development and
-    /// free in release. Untrusted (deserialized) documents go through `check`
-    /// in every build.
-    pub(crate) fn validate(&self) {
-        if !is_debug() {
-            return;
-        }
-        if let Err(err) = self.check() {
-            panic!("{err}");
-        }
-    }
-
     pub(crate) fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {
-        self.validate();
+        self.debug_check();
         common::serialize(self, format)
     }
 
@@ -791,9 +658,8 @@ mod tests {
 
         let err = doc.check().unwrap_err();
         assert!(
-            err.message
-                .contains("occurs in more than one authoring graph"),
-            "unexpected check error: {err}"
+            format!("{err:#}").contains("occurs in more than one authoring graph"),
+            "unexpected check error: {err:#}"
         );
     }
 
@@ -1162,7 +1028,7 @@ mod tests {
             ]
         );
         assert_eq!(doc.layout.primary().active, 2);
-        doc.validate();
+        doc.debug_check();
     }
 
     #[test]
@@ -1212,6 +1078,11 @@ mod tests {
         // Delete the node: the viewer tab dies with it (like a graph
         // tab whose def vanished).
         doc.scope_mut(GraphRef::Main).unwrap().remove_node(&node_id);
+        let err = doc.check().unwrap_err();
+        assert!(
+            format!("{err:#}").contains("open tab references a missing target"),
+            "unexpected check error: {err:#}"
+        );
         doc.ensure_valid_layout();
         assert_eq!(all_tabs(&doc), vec![TabRef::Graph(GraphRef::Main)]);
         assert_eq!(doc.layout.primary().active, 0);
@@ -1247,9 +1118,9 @@ mod tests {
     }
 
     #[test]
-    fn document_validates() {
+    fn document_passes_debug_check() {
         let doc = build_test_doc();
-        doc.validate();
+        doc.debug_check();
     }
 
     #[test]
@@ -1281,7 +1152,7 @@ mod tests {
         );
         let deserialized = Document::deserialize(format, &serialized)
             .expect("document deserialization should succeed for test payload");
-        deserialized.validate();
+        deserialized.debug_check();
         assert_eq!(
             doc, deserialized,
             "the complete document should round-trip through {format:?}"
@@ -1289,7 +1160,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_accepts_and_round_trips_a_pinned_output_with_its_item() {
+    fn check_accepts_and_round_trips_a_pinned_output_with_its_item() {
         // A well-formed document — every pinned output carries a view item
         // (`for_graph` seeds one; the edit layer does the same on pin) —
         // validates and round-trips, position, slot, and all.
@@ -1302,7 +1173,7 @@ mod tests {
         let key = ItemRef::Pin(port);
         let pos = Vec2::new(5.0, 6.0);
         doc.main_view.item_placements.by_key_mut(&key).unwrap().pos = pos;
-        doc.validate();
+        doc.debug_check();
 
         let bytes = doc.serialize(SerdeFormat::Rhai).expect("serialize");
         let reloaded = Document::deserialize(SerdeFormat::Rhai, &bytes).expect("load");
@@ -1337,8 +1208,8 @@ mod tests {
         doc.graph.set_output_pinned(port, true);
         let err = doc.check().unwrap_err();
         assert!(
-            err.message.contains("pinned output must have a view item"),
-            "unexpected check error: {err}"
+            format!("{err:#}").contains("pinned output must have a view item"),
+            "unexpected check error: {err:#}"
         );
 
         // The same gate guards deserialization in every build (release too):
@@ -1360,9 +1231,8 @@ mod tests {
             .add(CanvasItemPlacement::pin(port, Vec2::ZERO));
         let err = doc.check().unwrap_err();
         assert!(
-            err.message
-                .contains("view item references an output that isn't pinned"),
-            "unexpected check error: {err}"
+            format!("{err:#}").contains("view item references an output that isn't pinned"),
+            "unexpected check error: {err:#}"
         );
     }
 }
