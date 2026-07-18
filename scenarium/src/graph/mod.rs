@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
-use hashbrown::hash_map::Entry;
 use hashbrown::HashMap;
+use hashbrown::hash_map::Entry;
 use serde::{Deserialize, Serialize};
 
 use crate::StaticValue;
