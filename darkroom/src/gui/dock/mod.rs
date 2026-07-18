@@ -331,7 +331,7 @@ fn tab_labels(ui: &mut Ui, doc: &Document, group: &TabGroup) -> Vec<TabLabel> {
         .iter()
         .map(|&tab| TabLabel {
             tab,
-            text: ui.intern(&tab_text(doc, tab)),
+            text: ui.intern(tab_text(doc, tab)),
         })
         .collect()
 }
