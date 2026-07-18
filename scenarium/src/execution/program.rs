@@ -236,7 +236,7 @@ impl ExecutionProgram {
 
     /// Fill the `output_types` pool by resolving each node's declared output types
     /// (wildcards followed through bindings) from the full `library` — done once at
-    /// flatten, where every compiled node's func is guaranteed present (`check_with`
+    /// flatten, where every compiled node's func is guaranteed present (`check_for_execution`
     /// resolved them). An unresolved wildcard port stores `DataType::Any`. Builds
     /// into a fresh buffer first so the per-node reads don't alias the write-back.
     /// Each node's types are written through its *span*: spans are assigned in
@@ -268,7 +268,7 @@ const MAX_WILDCARD_DEPTH: usize = 64;
 /// *only* for an output with no concrete type — a wildcard whose mirror isn't a
 /// `Bind` (a const/unbound mirror is never a custom value), an out-of-range port, or
 /// a cyclic chain past [`MAX_WILDCARD_DEPTH`]. An **absent func is not a `None` case**:
-/// every compiled node's func resolved at `check_with`, so its absence is an invariant
+/// every compiled node's func resolved at `check_for_execution`, so its absence is an invariant
 /// violation that panics rather than silently degrading.
 fn effective_output_type(
     program: &ExecutionProgram,
@@ -281,7 +281,7 @@ fn effective_output_type(
         return None;
     }
     let func = node_func(program, library, idx)
-        .expect("a compiled node's func is registered in the library (validated at check_with)");
+        .expect("a compiled node's func is registered in the library (validated at check_for_execution)");
     match &func.outputs.get(port)?.ty {
         OutputType::Fixed(data_type) => Some(data_type.clone()),
         OutputType::Wildcard { mirrors } => {
@@ -302,7 +302,7 @@ fn effective_output_type(
 
 /// The func backing node `idx`: a special node's hardcoded spec, else the library
 /// entry for its `func_id`. `None` only if the library doesn't carry the func — which,
-/// for the program's own (`check_with`-validated) library, never happens.
+/// for the program's own (`check_for_execution`-validated) library, never happens.
 fn node_func<'a>(
     program: &'a ExecutionProgram,
     library: &'a Library,

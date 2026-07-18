@@ -85,12 +85,12 @@ fn check_accepts_reusable_graph_while_compile_check_rejects_it_as_entry() {
     graph.add(Node::new(NodeKind::GraphOutput));
 
     assert!(graph.check().is_ok());
-    let error = graph.check_with(&Default::default()).unwrap_err();
+    let error = graph.check_for_execution(&Default::default()).unwrap_err();
     assert!(error.to_string().contains("entry graph"));
 }
 
 #[test]
-fn check_with_rejects_recursive_shared_graph() {
+fn check_for_execution_rejects_recursive_shared_graph() {
     let graph_id = GraphId::unique();
     let mut shared = Graph::new("recursive");
     shared.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
@@ -101,7 +101,7 @@ fn check_with_rejects_recursive_shared_graph() {
     let mut graph = Graph::default();
     graph.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
 
-    let error = graph.check_with(&library).unwrap_err().to_string();
+    let error = graph.check_for_execution(&library).unwrap_err().to_string();
     assert!(error.contains("recursive"));
 }
 
@@ -225,7 +225,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
         let producer = graph.add_func_node(&func);
         let consumer = graph.add_func_node(&func);
         graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-        graph.check_with(&library)
+        graph.check_for_execution(&library)
     };
 
     assert!(
@@ -240,7 +240,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 }
 
 #[test]
-fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
+fn check_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
     use crate::library::Library;
     use crate::{DataType, StaticValue};
 
@@ -267,7 +267,7 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
     let f = g.add_func_node(&str_sink);
     g.set_input_binding(InputPort::new(f, 0), Binding::bind(s, 0));
     let err = g
-        .check_with(&library)
+        .check_for_execution(&library)
         .expect_err("Int into a String input must be rejected");
     assert!(
         err.to_string().contains("incompatible"),
@@ -279,7 +279,7 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
     let s = g.add_func_node(&int_src);
     let i = g.add_func_node(&int_sink);
     g.set_input_binding(InputPort::new(i, 0), Binding::bind(s, 0));
-    assert!(g.check_with(&library).is_ok());
+    assert!(g.check_for_execution(&library).is_ok());
 
     // The check resolves *through* a passthrough: Int → pass → Int is fine,
     // Int → pass → String is rejected (the wildcard carries the real type).
@@ -290,7 +290,7 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
     let i = g.add_func_node(&int_sink);
     g.set_input_binding(InputPort::new(i, 0), Binding::bind(pid, 0));
     assert!(
-        g.check_with(&library).is_ok(),
+        g.check_for_execution(&library).is_ok(),
         "Int through a passthrough into Int is compatible"
     );
 
@@ -298,7 +298,7 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
     let f = g.add_func_node(&str_sink);
     g.set_input_binding(InputPort::new(f, 0), Binding::bind(pid, 0));
     assert!(
-        g.check_with(&library)
+        g.check_for_execution(&library)
             .is_err_and(|e| e.to_string().contains("incompatible")),
         "Int through a passthrough into String must be rejected"
     );
@@ -312,7 +312,7 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
         Binding::Const(StaticValue::String("x".into())),
     );
     assert!(
-        g.check_with(&library)
+        g.check_for_execution(&library)
             .is_err_and(|e| e.to_string().contains("incompatible")),
         "a String constant on an Int input must be rejected"
     );
@@ -321,13 +321,13 @@ fn check_with_rejects_type_mismatched_bindings_through_passthroughs() {
         Binding::Const(StaticValue::Float(2.5)),
     );
     assert!(
-        g.check_with(&library).is_ok(),
+        g.check_for_execution(&library).is_ok(),
         "a numeric constant satisfies a numeric input"
     );
 }
 
 #[test]
-fn check_with_rejects_out_of_range_pinned_output() {
+fn check_for_execution_rejects_out_of_range_pinned_output() {
     use crate::library::Library;
 
     let func = Func::new(FuncId::unique(), "one_out").output(FuncOutput::new("o", DataType::Int));
@@ -338,11 +338,11 @@ fn check_with_rejects_out_of_range_pinned_output() {
     let id = graph.add_func_node(&func);
 
     graph.set_output_pinned(OutputPort::new(id, 0), true);
-    assert!(graph.check_with(&library).is_ok());
+    assert!(graph.check_for_execution(&library).is_ok());
 
     graph.set_output_pinned(OutputPort::new(id, 1), true);
     let err = graph
-        .check_with(&library)
+        .check_for_execution(&library)
         .expect_err("output 1 doesn't exist on a one-output func");
     assert!(err.to_string().contains("out of range"), "{err}");
 }

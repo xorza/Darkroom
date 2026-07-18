@@ -35,7 +35,8 @@ Choosing a representative instance is an explicit host-side policy.
 | `node/definition.rs` | Function declarations and port metadata |
 | `node/lambda.rs` | Function invocation ABI and output demand |
 | `node/event.rs` | Event-lambda ABI |
-| `graph/mod.rs` | Core authoring structs, construction, serialization, and validation |
+| `graph/mod.rs` | Core authoring structs, construction, and serialization |
+| `graph/validate.rs` | Standalone and execution-entry graph validation |
 | `graph/wiring.rs` | Wiring mutation, scoped node detach/attach, cycle checks |
 | `graph/clone.rs` | Deep copies with fresh node ids |
 | `graph/reconcile.rs` | Stale-library wiring cleanup |

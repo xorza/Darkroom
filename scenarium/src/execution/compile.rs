@@ -77,7 +77,7 @@ impl Compiler {
         // Validate before building anything: the graph+library pair is untrusted
         // input, and a passing check lets the flatten pass resolve every
         // reference infallibly.
-        if let Err(e) = graph.check_with(library) {
+        if let Err(e) = graph.check_for_execution(library) {
             tracing::error!(error = %e, "compile rejected: invalid graph");
             return Err(CompileError {
                 message: e.to_string(),
@@ -101,7 +101,7 @@ impl Compiler {
         );
 
         // Resolve the program's output-type pool from the full library (every func
-        // is present — `check_with` validated them), making the compiled program
+        // is present — `check_for_execution` validated them), making the compiled program
         // self-describing: the digest and the disk cache's codec check read it
         // with no library at run time.
         program.resolve_output_types(library);

@@ -29,7 +29,7 @@ use crate::node::definition::Func;
 use crate::node::special::SpecialNode;
 use crate::{DataType, StaticValue};
 
-/// Hard cap on nesting depth — a release backstop after `check_with` has
+/// Hard cap on nesting depth — a release backstop after `check_for_execution` has
 /// rejected recursive graphs.
 const MAX_DEPTH: usize = 256;
 
@@ -271,7 +271,7 @@ impl<'a> Run<'a> {
                 NodeKind::Func(func_id) => (
                     library
                         .by_id(func_id)
-                        .expect("func resolved by update's check_with validation"),
+                        .expect("func resolved by update's check_for_execution validation"),
                     None,
                 ),
                 NodeKind::Special(s) => (s.func(), Some(*s)),
