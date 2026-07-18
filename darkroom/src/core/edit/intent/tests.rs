@@ -51,7 +51,7 @@ fn stack_order(doc: &Document) -> Vec<ItemRef> {
 fn dirties_document_splits_edits_from_navigation() {
     use crate::core::document::TabRef;
     use crate::core::document::dock::{DockDrop, SplitSide};
-    use scenarium::SubgraphId;
+    use scenarium::GraphId;
 
     // A doc with a movable Preferences tab, for the dock steps below
     // (both built through the real `build_step` pipeline so the
@@ -117,8 +117,8 @@ fn dirties_document_splits_edits_from_navigation() {
                 Vec2::new(5.0, 5.0),
             )],
         }),
-        UndoStep::Doc(DocStep::RenameSubgraph {
-            id: SubgraphId::unique(),
+        UndoStep::Doc(DocStep::RenameGraph {
+            id: GraphId::unique(),
             from: "s".into(),
             to: "t".into(),
         }),
@@ -182,7 +182,7 @@ fn invalid_viewports_are_dropped_before_mutation() {
         "a finite positive viewport must commit"
     );
     assert_eq!(doc.main_view.viewport, valid);
-    doc.validate();
+    doc.debug_check();
 }
 
 #[test]
@@ -782,7 +782,7 @@ fn removing_a_node_captures_and_restores_its_pins() {
         doc.main_view.selected.contains(&key),
         "undo restores the pin's selection membership"
     );
-    doc.validate();
+    doc.debug_check();
 }
 
 #[test]
@@ -811,7 +811,7 @@ fn raise_reorders_persists_and_undoes_for_nodes_and_pins() {
     );
 
     // Stacking is view-state: undoable + persisted, but not dirty-worthy,
-    // and it neither remeasures nor reshapes a subgraph interface.
+    // and it neither remeasures nor reshapes a graph interface.
     assert!(
         !step.dirties_document(),
         "a bare restack shouldn't nag on save"

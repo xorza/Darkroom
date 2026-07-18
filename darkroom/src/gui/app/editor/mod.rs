@@ -12,8 +12,8 @@
 //! [`App`]: crate::gui::app::App
 
 use aperture::Ui;
+use scenarium::Graph;
 use scenarium::Library;
-use scenarium::SubgraphDef;
 
 use crate::core::document::dock::{DockOp, TabAddress};
 use crate::core::document::{Document, GraphRef, PortKind, PortRef, TabRef};
@@ -49,7 +49,7 @@ pub(crate) struct Editor {
     pub(crate) document: Document,
     /// Unsaved-changes flag: set whenever a content-changing step is
     /// applied (via [`Document`]'s edit paths — new edits, undo/redo
-    /// replay, and the direct subgraph mutations), cleared on save. Only
+    /// replay, and the direct graph mutations), cleared on save. Only
     /// steps that alter saved content flip it — pure navigation (camera,
     /// selection, tab focus) doesn't (see [`UndoStep::dirties_document`]).
     /// Read by `App` on exit to decide whether to prompt. It can read
@@ -71,11 +71,11 @@ pub(crate) struct Editor {
     /// window between the unconditional pre-prepass rebuild (which clears
     /// it) and the pre-record rebuild.
     scene_dirty: bool,
-    /// Set when an applied/undone step can change a subgraph's derived
+    /// Set when an applied/undone step can change a graph's derived
     /// interface (see `requires_reconcile`); consumed by `rebuild_scene`,
     /// which reruns `reconcile_boundaries` only then. Derived state is
     /// recomputed on structural edits, not on every frame's projection
-    /// rebuild — idle/selection/viewport frames skip the per-def edge
+    /// rebuild — idle/selection/viewport frames skip the per-graph edge
     /// scan. Starts `true` so the first rebuild canonicalizes a freshly
     /// loaded (or hand-edited) document.
     needs_reconcile: bool,
@@ -102,7 +102,7 @@ pub(crate) struct Editor {
     /// cross-frame state — kept only to reuse the allocation.
     actions: Vec<UiAction>,
     /// The last completed run's per-node state, keyed by the document's
-    /// `NodeId`s so it resolves against any tab (root or subgraph
+    /// `NodeId`s so it resolves against any tab (root or graph
     /// interior): execution status (the glow + header time, projected into
     /// each `SceneNode::exec_status` at rebuild) and log lines. `App` drives
     /// it as it drains the worker (`RunState::set_results` / `apply_progress`
@@ -182,13 +182,13 @@ impl Editor {
         applied
     }
 
-    /// Add an imported subgraph def to the document, flagging the reconcile
-    /// the import needs: an imported def's stored interface may not match
+    /// Add an imported graph to the document, flagging the reconcile
+    /// the import needs: an imported graph's stored interface may not match
     /// its interior wiring (hand-edited / older file), so it's re-derived
     /// on the next rebuild. Keeps the "import ⇒ reconcile" invariant here
     /// rather than on the caller.
-    pub(crate) fn import_subgraph(&mut self, def: SubgraphDef) {
-        self.document.import_subgraph(def);
+    pub(crate) fn import_graph(&mut self, graph: Graph) {
+        self.document.import_graph(graph);
         self.needs_reconcile = true;
         self.dirty = true;
     }
@@ -199,7 +199,7 @@ impl Editor {
     ///
     /// The frame splits into a **navigation phase** (settle *which* graph
     /// is active, from frame-top inputs) and an **edit phase** (mutate that
-    /// graph), because input that switches tabs/opens subgraphs comes from
+    /// graph), because input that switches tabs/opens graphs comes from
     /// *last* frame's click responses and must resolve before anything
     /// edits or records.
     #[allow(clippy::too_many_arguments)]
@@ -333,7 +333,7 @@ impl Editor {
 
     /// Settle which graph is active for this frame, from inputs all
     /// available before the record: keyboard undo/redo (which can replay
-    /// a dock-layout change) and tab/subgraph-open clicks read from
+    /// a dock-layout change) and tab/graph-open clicks read from
     /// *last* frame's responses.
     ///
     /// Done up front so the edit pipeline runs against a fixed target and
@@ -376,10 +376,10 @@ impl Editor {
 
     /// Rebuild the `Scene` projection from the graph + view the `target`
     /// points at. For a `Local` target, also hands the scene the enclosing
-    /// `SubgraphDef` so the interior's boundary nodes can mirror its
+    /// `Graph` so the interior's boundary nodes can mirror its
     /// interface as their ports.
     ///
-    /// Reconciles every subgraph's interface against its interior wiring
+    /// Reconciles every graph's interface against its interior wiring
     /// first (derived state, like the scene itself) so boundary nodes
     /// render the right ports + placeholder and the doc is consistent
     /// before any save — but only when `needs_reconcile` is set (a
@@ -401,12 +401,8 @@ impl Editor {
             .graph_for(target)
             .expect("active tab graph exists");
         let view = self.document.view(target).expect("active tab view exists");
-        let ctx_def = match target {
-            GraphRef::Main => None,
-            GraphRef::Local(id) => self.document.graph.subgraphs.by_key(&id),
-        };
         self.scene
-            .rebuild(ui, graph, view, library, ctx_def, &self.run_state);
+            .rebuild(ui, graph, view, library, &self.run_state);
     }
 
     /// Drain `intents`, applying each non-no-op intent to `document`,
@@ -457,12 +453,12 @@ impl Editor {
             match action {
                 UiAction::OpenGraph(target) => self.open_graph(target),
                 UiAction::Dock(op) => self.intents.push(Intent::Dock(op)),
-                UiAction::NewSubgraph => {
-                    // Creating the def + instance isn't undoable (no undo
-                    // history references the fresh def, so the stack stays
+                UiAction::NewGraph => {
+                    // Creating the graph + instance isn't undoable (no undo
+                    // history references the fresh graph, so the stack stays
                     // valid); `open_graph` still records the focus switch.
                     // Not routed through a step, so flag the edit directly.
-                    let id = self.document.create_subgraph();
+                    let id = self.document.create_graph();
                     self.dirty = true;
                     self.open_graph(GraphRef::Local(id));
                 }
@@ -512,7 +508,7 @@ impl Editor {
         if let GraphRef::Local(id) = target
             && !self.document.ensure_sub_view(id)
         {
-            return; // subgraph vanished — nothing to open
+            return; // graph vanished — nothing to open
         }
         let group = self.document.layout.primary().id;
         let addr = self
@@ -617,11 +613,11 @@ mod tests {
             "selecting a node must not dirty the document"
         );
 
-        // Creating a subgraph takes the direct (non-undoable) path, which
+        // Creating a graph takes the direct (non-undoable) path, which
         // must still flag the edit.
-        editor.actions.push(UiAction::NewSubgraph);
+        editor.actions.push(UiAction::NewGraph);
         editor.apply_view_actions();
-        assert!(editor.dirty, "creating a subgraph is unsaved work");
+        assert!(editor.dirty, "creating a graph is unsaved work");
     }
 
     #[test]
@@ -707,8 +703,8 @@ mod tests {
     #[test]
     fn opening_a_graph_records_an_undoable_focus_switch() {
         let mut editor = Editor::new(Document::default());
-        let a = editor.document.create_subgraph();
-        let b = editor.document.create_subgraph();
+        let a = editor.document.create_graph();
+        let b = editor.document.create_graph();
         let tabs = |editor: &Editor| editor.document.layout.all_tabs().collect::<Vec<_>>();
         let active = |editor: &Editor| editor.document.layout.primary().active;
 

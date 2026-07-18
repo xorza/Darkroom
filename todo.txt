@@ -43,4 +43,4 @@ review testsuite
 
 grapuh public methods
 
-subgraph -> graph
+document validation like for graph

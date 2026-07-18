@@ -1,10 +1,10 @@
-//! `Graph` port-type resolution: declared input/output types, wildcard
-//! reroute following, and the edge-invalidation walk. Editor-only — the
-//! engine never type-checks.
+//! `Graph` node-interface and port-type resolution: input/output/event arity,
+//! declared types, wildcard reroute following, and edge invalidation. Shared
+//! by compile-time validation and the editor.
 
 use hashbrown::HashSet;
 
-use super::*;
+use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::{FuncInput, FuncOutput, OutputType};
 use crate::{DataType, StaticValue, closes_data_cycle};
@@ -12,9 +12,8 @@ use crate::{DataType, StaticValue, closes_data_cycle};
 impl Graph {
     /// The declared type of input `port`, or `None` when it can't be resolved —
     /// a boundary node (its arity mirrors the enclosing interface, with no
-    /// per-port type here) or a missing func/def. The caller treats `None` as
-    /// the polymorphic `Any`. The engine never type-checks, so only the editor
-    /// calls this.
+    /// per-port type here) or a missing func/graph. The caller treats `None` as
+    /// the polymorphic `Any`.
     pub fn input_type(&self, library: &Library, port: InputPort) -> Option<DataType> {
         self.input_spec(library, port).map(|i| i.data_type.clone())
     }
@@ -30,11 +29,47 @@ impl Graph {
         let node = self.find(&port.node_id, NodeSearch::TopLevel)?;
         let inputs = match &node.kind {
             NodeKind::Func(func_id) => &library.by_id(func_id)?.inputs,
-            NodeKind::Subgraph(r) => &self.resolve_def(*r, library)?.inputs,
+            NodeKind::Graph(r) => &self.resolve_graph(*r, library)?.inputs,
             NodeKind::Special(s) => &s.func().inputs,
-            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => return None,
+            NodeKind::GraphInput | NodeKind::GraphOutput => return None,
         };
         inputs.get(port.port_idx)
+    }
+
+    pub(crate) fn input_count(&self, node: &Node, library: &Library) -> Option<usize> {
+        match &node.kind {
+            NodeKind::Func(id) => library.by_id(id).map(|function| function.inputs.len()),
+            NodeKind::Graph(reference) => self
+                .resolve_graph(*reference, library)
+                .map(|graph| graph.inputs.len()),
+            NodeKind::Special(special) => Some(special.func().inputs.len()),
+            NodeKind::GraphInput => Some(0),
+            NodeKind::GraphOutput => Some(self.outputs.len()),
+        }
+    }
+
+    pub(crate) fn output_count(&self, node: &Node, library: &Library) -> Option<usize> {
+        match &node.kind {
+            NodeKind::Func(id) => library.by_id(id).map(|function| function.outputs.len()),
+            NodeKind::Graph(reference) => self
+                .resolve_graph(*reference, library)
+                .map(|graph| graph.outputs.len()),
+            NodeKind::Special(special) => Some(special.func().outputs.len()),
+            NodeKind::GraphInput => Some(self.inputs.len()),
+            NodeKind::GraphOutput => Some(0),
+        }
+    }
+
+    pub(crate) fn event_count(&self, node: &Node, library: &Library) -> Option<usize> {
+        match &node.kind {
+            NodeKind::Func(id) => library.by_id(id).map(|function| function.events.len()),
+            NodeKind::Graph(reference) => self
+                .resolve_graph(*reference, library)
+                .map(|graph| graph.events.len()),
+            NodeKind::Special(special) => Some(special.func().events.len()),
+            NodeKind::GraphInput => Some(1),
+            NodeKind::GraphOutput => Some(0),
+        }
     }
 
     /// The effective type produced at output `port`, following *wildcard*
@@ -47,8 +82,7 @@ impl Graph {
     /// (`Any`-declared) input. The walk dead-ends polymorphic (`Any`) when the
     /// mirrored input is unbound, the producer is a boundary or missing, or a
     /// binding cycle is hit. Used by the editor for port-type display, connection
-    /// compatibility, and subgraph-interface inference; the engine never
-    /// type-checks, so it never calls this.
+    /// compatibility, graph-interface inference, and compile-time validation.
     pub fn resolve_output_type(&self, library: &Library, port: OutputPort) -> DataType {
         self.resolve_output_type_inner(library, port, &mut HashSet::new())
     }
@@ -105,8 +139,8 @@ impl Graph {
         resolved
     }
 
-    /// The output ports `node` declares (func / special spec, or subgraph
-    /// def interface), or `None` for a boundary / unresolved node.
+    /// The output ports `node` declares (func / special spec, or graph
+    /// graph interface), or `None` for a boundary / unresolved node.
     fn node_outputs<'a>(
         &'a self,
         library: &'a Library,
@@ -114,9 +148,11 @@ impl Graph {
     ) -> Option<&'a [FuncOutput]> {
         match &node.kind {
             NodeKind::Func(func_id) => library.by_id(func_id).map(|f| f.outputs.as_slice()),
-            NodeKind::Subgraph(r) => self.resolve_def(*r, library).map(|d| d.outputs.as_slice()),
+            NodeKind::Graph(r) => self
+                .resolve_graph(*r, library)
+                .map(|d| d.outputs.as_slice()),
             NodeKind::Special(s) => Some(s.func().outputs.as_slice()),
-            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => None,
+            NodeKind::GraphInput | NodeKind::GraphOutput => None,
         }
     }
 

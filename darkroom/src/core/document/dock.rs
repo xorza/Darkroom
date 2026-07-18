@@ -1107,7 +1107,7 @@ mod tests {
 
     #[test]
     fn check_rejects_each_corruption() {
-        use scenarium::SubgraphId;
+        use scenarium::GraphId;
 
         // Base: a valid two-pane layout — [split, primary(Main, Prefs),
         // viewer-pane(viewer 1)] — corrupted one invariant at a time via
@@ -1213,7 +1213,7 @@ mod tests {
                         panic!("slot 2 is the split-off viewer pane");
                     };
                     g.tabs
-                        .push(TabRef::Graph(GraphRef::Local(SubgraphId::from_u128(7))));
+                        .push(TabRef::Graph(GraphRef::Local(GraphId::from_u128(7))));
                 },
                 "outside the primary group",
             ),

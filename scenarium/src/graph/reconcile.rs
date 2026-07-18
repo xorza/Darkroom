@@ -1,4 +1,4 @@
-use crate::graph::{Binding, Graph, InputPort, Node, NodeKind, NodeSearch, Subscription};
+use crate::graph::{Binding, Graph, InputPort, Node, NodeSearch, Subscription};
 use crate::library::Library;
 
 impl Graph {
@@ -15,8 +15,8 @@ impl Graph {
         self.subscriptions = subscriptions;
         removed += before - self.subscriptions.len();
 
-        for definition in self.subgraphs.iter_mut() {
-            removed += definition.graph.prune_dangling_wiring(library);
+        for graph in self.graphs.values_mut() {
+            removed += graph.prune_dangling_wiring(library);
         }
         removed
     }
@@ -40,40 +40,17 @@ impl Graph {
         match self.find(&subscription.emitter, NodeSearch::TopLevel) {
             None => false,
             Some(emitter) => self
-                .event_count_opt(emitter, library)
+                .event_count(emitter, library)
                 .is_none_or(|count| subscription.event_idx < count),
         }
     }
 
     fn port_in_range(&self, node: &Node, idx: usize, input: bool, library: &Library) -> bool {
-        let in_range = |inputs: usize, outputs: usize| idx < if input { inputs } else { outputs };
-        match &node.kind {
-            NodeKind::Func(id) => library
-                .by_id(id)
-                .is_none_or(|function| in_range(function.inputs.len(), function.outputs.len())),
-            NodeKind::Subgraph(reference) => {
-                self.resolve_def(*reference, library)
-                    .is_none_or(|definition| {
-                        in_range(definition.inputs.len(), definition.outputs.len())
-                    })
-            }
-            NodeKind::Special(special) => {
-                let function = special.func();
-                in_range(function.inputs.len(), function.outputs.len())
-            }
-            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => true,
-        }
-    }
-
-    pub(crate) fn event_count_opt(&self, node: &Node, library: &Library) -> Option<usize> {
-        match &node.kind {
-            NodeKind::Func(id) => library.by_id(id).map(|function| function.events.len()),
-            NodeKind::Subgraph(reference) => self
-                .resolve_def(*reference, library)
-                .map(|definition| definition.events.len()),
-            NodeKind::Special(special) => Some(special.func().events.len()),
-            NodeKind::SubgraphInput => Some(1),
-            NodeKind::SubgraphOutput => Some(0),
-        }
+        let count = if input {
+            self.input_count(node, library)
+        } else {
+            self.output_count(node, library)
+        };
+        count.is_none_or(|count| idx < count)
     }
 }

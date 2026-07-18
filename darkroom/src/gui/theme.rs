@@ -77,7 +77,7 @@ pub(crate) mod dark {
     // label on the band.
     pub(crate) const TAB_INACTIVE: Color = Color::hex(0x2e2e2e);
 
-    pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x9adbfb);
+    pub(crate) const BADGE_GRAPH: Color = Color::hex(0x9adbfb);
     pub(crate) const BADGE_SINK: Color = Color::hex(0xff5e44);
     // cache (persist-to-disk) chip — palette `warning` yellow.
     pub(crate) const BADGE_CACHE: Color = Color::hex(0xffd44a);
@@ -173,7 +173,7 @@ pub(crate) mod light {
 
     // header badges — accent / error / a deeper amber than the palette's
     // warning yellow (#f1ad49 was barely visible on a light surface).
-    pub(crate) const BADGE_SUBGRAPH: Color = Color::hex(0x3b9ee5);
+    pub(crate) const BADGE_GRAPH: Color = Color::hex(0x3b9ee5);
     pub(crate) const BADGE_SINK: Color = Color::hex(0xef7271);
     // cache (persist-to-disk) chip — palette `warning` yellow.
     pub(crate) const BADGE_CACHE: Color = Color::hex(0xf1ad49);
@@ -417,7 +417,7 @@ pub(crate) struct Theme {
     pub static_value_editor_revealed: StaticValueEditorTheme,
 
     /// Look for the inline-rename widget (node title, boundary port,
-    /// subgraph tab).
+    /// graph tab).
     pub inline_rename: InlineRenameTheme,
 
     /// Aperture-side widget theme. Pushed onto `Ui::theme` once at
@@ -492,7 +492,7 @@ impl StaticValueEditorTheme {
 }
 
 /// Per-widget theme bundle for the inline-rename label⇄field widget
-/// (node title, boundary-port name, subgraph tab). The `text_edit`
+/// (node title, boundary-port name, graph tab). The `text_edit`
 /// look is stripped to the bare editor surface (no padding/margin, no
 /// border, transparent fill) so the field's `Hug` height equals its
 /// plain `Text` twin and the row doesn't reshape on a swap.
@@ -633,7 +633,7 @@ palette_struct! {
     /// Muted secondary foreground (palette `text_muted`, `#aaaaa8`). The
     /// de-emphasized accent shared across chrome: inactive/disabled header
     /// chips, the pinned-inspector outline, and active-tab text — visible
-    /// without competing with the bright accent (`badge_subgraph`) or
+    /// without competing with the bright accent (`badge_graph`) or
     /// full-strength text.
     text_muted: Color => TEXT_MUTED,
     /// Port + event label ink — de-emphasized against the full-strength
@@ -655,8 +655,8 @@ palette_struct! {
     /// bare label; the active tab uses `canvas_bg` + a `selection_rect`
     /// accent top-line instead.
     tab_inactive: Color => TAB_INACTIVE,
-    /// Subgraph (composite instance) chip — accent cyan.
-    badge_subgraph: Color => BADGE_SUBGRAPH,
+    /// Graph (composite instance) chip — accent cyan.
+    badge_graph: Color => BADGE_GRAPH,
     /// Sink chip — error red.
     badge_sink: Color => BADGE_SINK,
     /// RuntimeCache (persist-to-disk) chip — warning yellow.

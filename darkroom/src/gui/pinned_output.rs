@@ -75,7 +75,7 @@ impl PinnedOutputStore {
             if !document.retains_output_resource(port) {
                 continue;
             }
-            // PortRef cannot identify a particular subgraph instance, so the
+            // PortRef cannot identify a particular graph instance, so the
             // latest push is the only value the UI can consistently present.
             self.entries.insert(
                 port,

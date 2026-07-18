@@ -34,7 +34,7 @@ cargo run                 # launches Darkroom (the default member)
 - **Node-graph canvas** — pan/zoom, rubber-band select, drag between ports to
   wire nodes, a right-click spawn menu, and a "breaker" scribble that severs
   wires and deletes nodes in one gesture.
-- **Subgraphs** — collapse a selection into a reusable composite, edit its
+- **Graphs** — collapse a selection into a reusable composite, edit its
   interior in its own tab, and promote it to a shared library.
 - **Live async execution** — the graph runs on a background tokio worker; each
   node glows with its status (running / cached / executed / errored) and shows

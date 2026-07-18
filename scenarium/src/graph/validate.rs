@@ -1,124 +1,222 @@
-//! `Graph` structural validation against a `Library`: the recursive
-//! `check_with`/`check_level` pass (references resolve, no recursion, ports in
-//! range, types compatible) and the debug-only `validate` asserts. The
-//! library-free `check` lives on the core type in `mod.rs`.
+//! `Graph` structural validation, including library-independent checks,
+//! recursive validation against a `Library`, and debug-only invariant asserts.
 
-use anyhow::{Context, ensure};
+use anyhow::{self, Context, ensure};
 use common::{Result, is_debug};
 use hashbrown::HashSet;
 
-use super::*;
-use crate::graph::subgraph::{SubgraphDef, SubgraphId};
+use crate::graph::interface::{GraphId, GraphLink};
+use crate::graph::{Binding, Graph, NodeId, NodeKind};
 use crate::library::Library;
 use crate::node::definition::FuncInput;
 use crate::{DataType, StaticValue};
 
-impl Graph {
-    /// Debug-only internal-invariant gate (compiled out in release, so the
-    /// per-edit / per-`update` callers pay nothing there). Shares its
-    /// structural definition with `check`; panics because a violation here is
-    /// our bug, not bad input.
-    pub fn validate(&self) {
-        if !is_debug() {
-            return;
+#[derive(Debug)]
+struct GraphChecker<'a> {
+    library: Option<&'a Library>,
+    node_ids: HashSet<NodeId>,
+    checked_shared: HashSet<GraphId>,
+    shared_path: HashSet<GraphId>,
+}
+
+impl<'a> GraphChecker<'a> {
+    fn new(library: Option<&'a Library>) -> Self {
+        Self {
+            library,
+            node_ids: HashSet::new(),
+            checked_shared: HashSet::new(),
+            shared_path: HashSet::new(),
         }
-        self.check().expect("graph structural invariant violated");
     }
 
-    /// Debug-only assert form of [`check_with`]: a violation surfaces as a
-    /// panic so a graph the editor itself built wrong is caught loudly in
-    /// development. The release-safe, error-returning gate is `check_with`,
-    /// which `ExecutionEngine::update` runs in every build.
-    pub fn validate_with(&self, library: &Library) {
-        if !is_debug() {
-            return;
-        }
-        self.check_with(library)
-            .expect("graph structural invariant violated");
-    }
-
-    /// Full structural validation against `library`, in all builds. Extends
-    /// [`check`] (which can't see the library) with every library-dependent
-    /// check: each func/subgraph reference resolves, no subgraph contains
-    /// itself, boundary nodes sit inside a def, and every binding/subscription
-    /// port index is in range. A graph+library is untrusted input at the
-    /// compile boundary (a document can be stale against an evolved library),
-    /// so an invalid one is a recoverable error the caller surfaces — not a
-    /// panic. With this passing, flattening resolves every reference infallibly.
-    pub fn check_with(&self, library: &Library) -> Result<()> {
-        self.check()?;
-        self.check_unique_node_ids(Some(library))?;
-        let mut visited: HashSet<SubgraphId> = HashSet::new();
-        self.check_level(library, None, &mut visited)
-    }
-
-    /// Recursive per-level half of [`check_with`]. `ctx_def` is the enclosing
-    /// subgraph definition when checking a def's interior (so boundary nodes
-    /// can be checked against the interface), `None` at the top level.
-    /// `visited` is the descent path of `SubgraphId`s — re-entering one is the
-    /// recursion error.
-    fn check_level(
-        &self,
-        library: &Library,
-        ctx_def: Option<&SubgraphDef>,
-        visited: &mut HashSet<SubgraphId>,
-    ) -> Result<()> {
-        // Resolve every node's func/def first (and recurse into composites):
-        // the port-count helpers below look funcs/defs up infallibly, so this
-        // pass must establish they all resolve before any count is taken.
-        for (node_id, node) in &self.nodes {
+    fn check_graph(&mut self, graph: &Graph) -> Result<()> {
+        let mut boundary_inputs = 0usize;
+        let mut boundary_outputs = 0usize;
+        for (node_id, node) in &graph.nodes {
+            ensure!(!node_id.is_nil(), "graph contains a node with a nil id");
+            ensure!(
+                self.node_ids.insert(*node_id),
+                "node id {:?} occurs in more than one authoring graph",
+                node_id
+            );
             match &node.kind {
                 NodeKind::Func(func_id) => {
-                    ensure!(
-                        library.by_id(func_id).is_some(),
-                        "node {:?} references func {:?}, absent from the library",
-                        node_id,
-                        func_id
-                    );
+                    ensure!(!func_id.is_nil(), "node {:?} has a nil func_id", node_id);
+                    if let Some(library) = self.library {
+                        ensure!(
+                            library.by_id(func_id).is_some(),
+                            "node {:?} references func {:?}, absent from the library",
+                            node_id,
+                            func_id
+                        );
+                    }
                 }
-                NodeKind::Subgraph(r) => {
-                    let def = self.resolve_def(*r, library).with_context(|| {
-                        format!(
-                            "node {:?} references a missing subgraph definition",
-                            node_id
-                        )
-                    })?;
-                    ensure!(
-                        visited.insert(def.id),
-                        "subgraph {:?} is recursive (contains itself)",
-                        def.id
-                    );
-                    def.graph.check_level(library, Some(def), visited)?;
-                    visited.remove(&def.id);
+                NodeKind::Graph(link) => {
+                    ensure!(!link.id().is_nil(), "node {:?} has a nil graph id", node_id);
+                    if let GraphLink::Local(id) = link {
+                        ensure!(
+                            graph.graphs.contains_key(id),
+                            "node {:?} references missing local graph {:?}",
+                            node_id,
+                            id
+                        );
+                    }
+                    if let Some(library) = self.library {
+                        let nested = graph.resolve_graph(*link, library).with_context(|| {
+                            format!("node {:?} references a missing graph", node_id)
+                        })?;
+                        if let GraphLink::Shared(id) = link {
+                            self.check_shared(*id, nested)?;
+                        }
+                    }
                 }
-                NodeKind::SubgraphInput => {
-                    ensure!(
-                        ctx_def.is_some(),
-                        "SubgraphInput node is only valid inside a subgraph"
-                    );
-                }
-                NodeKind::SubgraphOutput => {
-                    ensure!(
-                        ctx_def.is_some(),
-                        "SubgraphOutput is only valid inside a subgraph"
-                    );
-                }
-                // Hardcoded declaration — nothing to resolve or recurse into.
                 NodeKind::Special(_) => {}
+                NodeKind::GraphInput => {
+                    boundary_inputs += 1;
+                }
+                NodeKind::GraphOutput => {
+                    boundary_outputs += 1;
+                }
+            }
+        }
+        ensure!(
+            boundary_inputs <= 1,
+            "a graph holds at most one GraphInput, found {boundary_inputs}"
+        );
+        ensure!(
+            boundary_outputs <= 1,
+            "a graph holds at most one GraphOutput, found {boundary_outputs}"
+        );
+
+        for (destination, binding) in &graph.bindings {
+            let consumer = graph
+                .nodes
+                .get(&destination.node_id)
+                .with_context(|| format!("binding on missing node {:?}", destination.node_id))?;
+            if let Some(library) = self.library {
+                let input_count = graph
+                    .input_count(consumer, library)
+                    .expect("node reference resolved before binding validation");
+                ensure!(
+                    destination.port_idx < input_count,
+                    "binding on node {:?} input {} is out of range",
+                    destination.node_id,
+                    destination.port_idx
+                );
+                if let Binding::Bind(_) = binding {
+                    ensure!(
+                        !graph
+                            .input_spec(library, *destination)
+                            .is_some_and(|input| input.const_only),
+                        "input {} on node {:?} is const-only and cannot be wired to an upstream output",
+                        destination.port_idx,
+                        destination.node_id
+                    );
+                }
+            }
+
+            if let Binding::Bind(src) = binding {
+                let producer = graph.nodes.get(&src.node_id).with_context(|| {
+                    format!(
+                        "node {:?} input {} binds to missing node {:?}",
+                        destination.node_id, destination.port_idx, src.node_id
+                    )
+                })?;
+                if let Some(library) = self.library {
+                    let output_count = graph
+                        .output_count(producer, library)
+                        .expect("node reference resolved before binding validation");
+                    ensure!(
+                        src.port_idx < output_count,
+                        "binding from node {:?} output {} is out of range",
+                        src.node_id,
+                        src.port_idx
+                    );
+                    if let Some(sink_ty) = graph.input_type(library, *destination) {
+                        let source_ty = graph.resolve_output_type(library, *src);
+                        ensure!(
+                            sink_ty.compatible_with(&source_ty),
+                            "node {:?} input {} expects {:?} but is wired from an incompatible {:?}",
+                            destination.node_id,
+                            destination.port_idx,
+                            sink_ty,
+                            source_ty
+                        );
+                    }
+                }
+            }
+
+            if let (Some(library), Binding::Const(value)) = (self.library, binding)
+                && let Some(spec) = graph.input_spec(library, *destination)
+            {
+                ensure!(
+                    const_satisfies(library, spec, value),
+                    "node {:?} input {} holds a constant incompatible with its type {:?}",
+                    destination.node_id,
+                    destination.port_idx,
+                    spec.data_type
+                );
             }
         }
 
-        // When checking a def's interior, each exposed event must name an
-        // interior emitter that actually exposes that event.
-        if let Some(def) = ctx_def {
-            for event in &def.events {
-                let emitter = self
-                    .find(&event.emitter, NodeSearch::TopLevel)
-                    .with_context(|| {
-                        format!("exposed event names missing emitter {:?}", event.emitter)
-                    })?;
+        for subscription in &graph.subscriptions {
+            let emitter = graph.nodes.get(&subscription.emitter).with_context(|| {
+                format!(
+                    "subscription from missing emitter {:?}",
+                    subscription.emitter
+                )
+            })?;
+            ensure!(
+                graph.nodes.contains_key(&subscription.subscriber),
+                "node {:?} event {} has missing subscriber {:?}",
+                subscription.emitter,
+                subscription.event_idx,
+                subscription.subscriber
+            );
+            if let Some(library) = self.library {
+                let event_count = graph
+                    .event_count(emitter, library)
+                    .expect("node reference resolved before subscription validation");
                 ensure!(
-                    event.emitter_event_idx < self.event_count(emitter, library, ctx_def),
+                    subscription.event_idx < event_count,
+                    "subscription event index {} out of range on {:?}",
+                    subscription.event_idx,
+                    subscription.emitter
+                );
+            }
+        }
+
+        for port in &graph.pinned_outputs {
+            let node = graph
+                .nodes
+                .get(&port.node_id)
+                .with_context(|| format!("pinned output on missing node {:?}", port.node_id))?;
+            if let Some(library) = self.library {
+                let output_count = graph
+                    .output_count(node, library)
+                    .expect("node reference resolved before pinned-output validation");
+                ensure!(
+                    port.port_idx < output_count,
+                    "pinned output on node {:?} output {} is out of range",
+                    port.node_id,
+                    port.port_idx
+                );
+            }
+        }
+
+        for event in &graph.events {
+            let emitter = graph.nodes.get(&event.emitter).with_context(|| {
+                format!(
+                    "exposed event {:?} names missing emitter {:?}",
+                    event.name, event.emitter
+                )
+            })?;
+            if let Some(library) = self.library {
+                let event_count = graph
+                    .event_count(emitter, library)
+                    .expect("node reference resolved before exposed-event validation");
+                ensure!(
+                    event.emitter_event_idx < event_count,
                     "exposed event index {} out of range on {:?}",
                     event.emitter_event_idx,
                     event.emitter
@@ -126,142 +224,69 @@ impl Graph {
             }
         }
 
-        // Every binding addresses ports that exist on both ends.
-        for (dst, binding) in self.bindings.iter() {
-            let consumer = self
-                .find(&dst.node_id, NodeSearch::TopLevel)
-                .with_context(|| format!("binding on missing node {:?}", dst.node_id))?;
-            ensure!(
-                dst.port_idx < self.input_count(consumer, library, ctx_def),
-                "binding on node {:?} input {} is out of range",
-                dst.node_id,
-                dst.port_idx
-            );
-            if let Binding::Bind(src) = binding {
-                ensure!(
-                    !self.input_is_const_only(consumer, dst.port_idx, library),
-                    "input {} on node {:?} is const-only and cannot be wired to an upstream output",
-                    dst.port_idx,
-                    dst.node_id
-                );
-                let producer = self
-                    .find(&src.node_id, NodeSearch::TopLevel)
-                    .with_context(|| format!("binding from missing node {:?}", src.node_id))?;
-                ensure!(
-                    src.port_idx < self.output_count(producer, library, ctx_def),
-                    "binding from node {:?} output {} is out of range",
-                    src.node_id,
-                    src.port_idx
-                );
-                // Types on both ends must be compatible (`Any` is the wildcard —
-                // a passthrough/reroute port). This is the engine-side boundary
-                // check: with it a wired binding can't deliver the wrong type to
-                // a node function, so lambdas may trust their input types. Edges
-                // touching a boundary node have no concrete port type here
-                // (`None`/`Any`), so they're skipped — the interface types them.
-                if let Some(sink_ty) = self.input_type(library, *dst) {
-                    let source_ty = self.resolve_output_type(library, *src);
-                    ensure!(
-                        sink_ty.compatible_with(&source_ty),
-                        "node {:?} input {} expects {:?} but is wired from an incompatible {:?}",
-                        dst.node_id,
-                        dst.port_idx,
-                        sink_ty,
-                        source_ty
-                    );
-                }
-            }
-            // A `Const` literal must fit the port too, so a lambda can trust the
-            // type of a constant input as much as a wired one.
-            if let Binding::Const(value) = binding
-                && let Some(spec) = self.input_spec(library, *dst)
-            {
-                ensure!(
-                    const_satisfies(library, spec, value),
-                    "node {:?} input {} holds a constant incompatible with its type {:?}",
-                    dst.node_id,
-                    dst.port_idx,
-                    spec.data_type
-                );
-            }
+        for (graph_id, nested) in &graph.graphs {
+            ensure!(!graph_id.is_nil(), "local graph has a nil id");
+            self.check_graph(nested)
+                .map_err(|error| anyhow::anyhow!("in local graph {:?}: {error:#}", nested.name))?;
         }
 
-        // Every subscription targets an event the emitter actually exposes.
-        for s in self.subscriptions.iter() {
-            let emitter = self
-                .find(&s.emitter, NodeSearch::TopLevel)
-                .with_context(|| format!("subscription from missing emitter {:?}", s.emitter))?;
-            ensure!(
-                s.event_idx < self.event_count(emitter, library, ctx_def),
-                "subscription event index {} out of range on {:?}",
-                s.event_idx,
-                s.emitter
-            );
-        }
-
-        // Every pinned output addresses a port that actually exists.
-        for port in self.pinned_outputs.iter() {
-            let node = self
-                .find(&port.node_id, NodeSearch::TopLevel)
-                .with_context(|| format!("pinned output on missing node {:?}", port.node_id))?;
-            ensure!(
-                port.port_idx < self.output_count(node, library, ctx_def),
-                "pinned output on node {:?} output {} is out of range",
-                port.node_id,
-                port.port_idx
-            );
-        }
         Ok(())
     }
 
-    /// Number of input ports a node exposes — by kind. `ctx_def` is the
-    /// enclosing def, needed only for `SubgraphOutput` (whose inputs are the
-    /// def's exposed outputs).
-    /// Whether the consumer port `(node, port_idx)` is declared const-only — it
-    /// may hold a `Const` literal but must not be wired to an upstream output.
-    /// Boundary nodes route the interface (no literals), so they're never
-    /// const-only. Resolution mirrors [`Self::input_count`].
-    fn input_is_const_only(&self, node: &Node, port_idx: usize, library: &Library) -> bool {
-        let inputs = match &node.kind {
-            NodeKind::Func(func_id) => &library.by_id(func_id).unwrap().inputs,
-            NodeKind::Subgraph(r) => &self.resolve_def(*r, library).unwrap().inputs,
-            NodeKind::Special(s) => &s.func().inputs,
-            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => return false,
-        };
-        inputs.get(port_idx).is_some_and(|i| i.const_only)
-    }
-
-    fn input_count(&self, node: &Node, library: &Library, ctx_def: Option<&SubgraphDef>) -> usize {
-        match &node.kind {
-            NodeKind::Func(func_id) => library.by_id(func_id).unwrap().inputs.len(),
-            NodeKind::Subgraph(r) => self.resolve_def(*r, library).unwrap().inputs.len(),
-            NodeKind::Special(s) => s.func().inputs.len(),
-            NodeKind::SubgraphInput => 0,
-            NodeKind::SubgraphOutput => ctx_def.unwrap().outputs.len(),
+    fn check_shared(&mut self, graph_id: GraphId, graph: &Graph) -> Result<()> {
+        if self.checked_shared.contains(&graph_id) {
+            return Ok(());
         }
+        ensure!(
+            self.shared_path.insert(graph_id),
+            "graph {:?} is recursive (contains itself)",
+            graph.name
+        );
+        let result = self
+            .check_graph(graph)
+            .map_err(|error| anyhow::anyhow!("in shared graph {:?}: {error:#}", graph.name));
+        self.shared_path.remove(&graph_id);
+        result?;
+        self.checked_shared.insert(graph_id);
+        Ok(())
+    }
+}
+
+impl Graph {
+    /// Validate this reusable graph and its complete local graph tree.
+    pub fn check(&self) -> Result<()> {
+        GraphChecker::new(None).check_graph(self)
     }
 
-    /// Number of output ports a node exposes — by kind. `ctx_def` is the
-    /// enclosing definition, needed only for `SubgraphInput` (whose outputs
-    /// are the def's exposed inputs).
-    fn output_count(&self, node: &Node, library: &Library, ctx_def: Option<&SubgraphDef>) -> usize {
-        match &node.kind {
-            NodeKind::Func(func_id) => library.by_id(func_id).unwrap().outputs.len(),
-            NodeKind::Subgraph(r) => self.resolve_def(*r, library).unwrap().outputs.len(),
-            NodeKind::Special(s) => s.func().outputs.len(),
-            NodeKind::SubgraphInput => ctx_def.unwrap().inputs.len(),
-            NodeKind::SubgraphOutput => 0,
+    /// Debug-only assert form of [`Self::check`].
+    pub fn debug_check(&self) {
+        if !is_debug() {
+            return;
         }
+        self.check().expect("graph structural invariant violated");
     }
 
-    /// Number of events a node exposes. `SubgraphInput` exposes exactly one —
-    /// the trigger that interior nodes subscribe to so they fire when the
-    /// enclosing composite is triggered. Infallible peer of
-    /// [`Self::event_count_opt`]; callers (e.g. `check_with`) resolve every
-    /// func/def first, so the lookup can't miss.
-    fn event_count(&self, node: &Node, library: &Library, _ctx_def: Option<&SubgraphDef>) -> usize {
-        self.event_count_opt(node, library)
-            .expect("event_count on a node whose func/def is unresolved")
+    /// Validate an execution entry and every local or reachable shared graph
+    /// against `library`.
+    pub fn check_for_execution(&self, library: &Library) -> Result<()> {
+        ensure!(
+            self.inputs.is_empty() && self.outputs.is_empty() && self.events.is_empty(),
+            "entry graph cannot expose an interface"
+        );
+        ensure!(
+            self.nodes.values().all(|node| !node.kind.is_boundary()),
+            "entry graph cannot contain interface boundary nodes"
+        );
+        GraphChecker::new(Some(library)).check_graph(self)
+    }
+
+    /// Debug-only assert form of [`Self::check_for_execution`].
+    pub fn debug_check_for_execution(&self, library: &Library) {
+        if !is_debug() {
+            return;
+        }
+        self.check_for_execution(library)
+            .expect("graph structural invariant violated");
     }
 }
 

@@ -9,9 +9,9 @@ use std::sync::Arc;
 
 use aperture::Ui;
 use scenarium::Binding;
+use scenarium::GraphLink;
 use scenarium::InputPort;
 use scenarium::NodeId;
-use scenarium::SubgraphRef;
 use scenarium::{DataType, FsPathConfig, StaticValue};
 
 use crate::core::document::GraphRef;
@@ -19,23 +19,23 @@ use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::UiAction;
 use crate::gui::canvas::node_ports;
-use crate::gui::node::header::{play_badge_wid, subgraph_badge_wid};
+use crate::gui::node::header::{graph_badge_wid, play_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid};
 use crate::gui::node::set_input;
 use crate::gui::scene::{InputBindingView, Scene};
 
-/// Prepass scan: surface an `OpenGraph` for any subgraph node whose `S`
+/// Prepass scan: surface an `OpenGraph` for any graph node whose `G`
 /// chip was clicked (read from last frame's response). Detecting the
 /// open here — *before* the record — lets `App` switch the active graph
-/// ahead of Pass A, so the subgraph records a pass earlier and its
-/// connections draw with no first-frame gap. Linked subgraphs aren't
+/// ahead of Pass A, so the graph records a pass earlier and its
+/// connections draw with no first-frame gap. Linked graphs aren't
 /// editable targets yet, so only `Local` opens.
-pub(crate) fn emit_subgraph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
+pub(crate) fn emit_graph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
     for n in &scene.nodes {
-        // Instances are always `Local` (library subgraphs are localized on
-        // instance), so the "S" chip opens the interior directly.
-        if let Some(SubgraphRef::Local(id)) = n.subgraph
-            && ui.response_for(subgraph_badge_wid(n.id)).left.clicked()
+        // Instances are always `Local` (library graphs are localized on
+        // instance), so the "G" chip opens the graph directly.
+        if let Some(GraphLink::Local(id)) = n.graph
+            && ui.response_for(graph_badge_wid(n.id)).left.clicked()
         {
             actions.push(UiAction::OpenGraph(GraphRef::Local(id)));
         }

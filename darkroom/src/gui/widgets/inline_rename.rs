@@ -1,7 +1,7 @@
 //! Reusable inline-rename label. Renders plain text that swaps to a
 //! fixed-width `TextEdit` on double-click; Enter / focus-loss commits the
 //! edited string, Esc cancels. Used by the node-header title
-//! ([`crate::gui::node::header`]) and the subgraph boundary-port names
+//! ([`crate::gui::node::header`]) and the graph boundary-port names
 //! ([`crate::gui::node::port_rename`]); each maps the returned
 //! [`RenameEvent`] onto its own intent. Mirrors the per-widget split of
 //! [`crate::gui::node::value_editor`]; both share the blur-edge /
@@ -51,7 +51,7 @@ const DEFAULT_MAX_CHARS: usize = 64;
 /// text width (grows as you type). Enter or blur commits, Esc cancels.
 /// The same `id` is recorded every frame across the label⇄editor swap so
 /// aperture keeps the state row alive — pick something stable per
-/// underlying domain item (node id, port id, subgraph id, …).
+/// underlying domain item (node id, port id, graph id, …).
 ///
 #[derive(Debug)]
 pub(crate) struct InlineRename<'a> {

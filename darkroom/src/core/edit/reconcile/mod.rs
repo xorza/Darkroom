@@ -1,10 +1,9 @@
-//! Keep each local subgraph's interface (`def.inputs` / `def.outputs`)
-//! in lockstep with its interior wiring.
+//! Keep each local graph's interface in lockstep with its boundary wiring.
 //!
-//! The `SubgraphInput` / `SubgraphOutput` boundary nodes have no stored
-//! ports — their arity is the def's interface. We treat that interface
-//! as **derived state**: a def has exactly one interface input per *used*
-//! `SubgraphInput` output, one interface output per *used* `SubgraphOutput`
+//! The `GraphInput` / `GraphOutput` boundary nodes have no stored
+//! ports — their arity is the graph interface. We treat that interface
+//! as **derived state**: a graph has exactly one interface input per *used*
+//! `GraphInput` output, one interface output per *used* `GraphOutput`
 //! input, and the used slots are compacted to a contiguous `0..n`. The
 //! Scene then draws those ports plus one trailing placeholder, so dragging
 //! a connection onto the placeholder is a plain `Intent::SetInput` (no
@@ -20,16 +19,17 @@
 use std::collections::HashMap;
 
 use scenarium::DataType;
+use scenarium::GraphId;
 use scenarium::Library;
 use scenarium::NodeId;
 use scenarium::{Binding, Graph, InputPort, NodeKind};
 use scenarium::{FuncInput, FuncOutput};
-use scenarium::{SubgraphDef, SubgraphId};
 
 use crate::core::document::{Document, GraphRef};
 
 /// Per-side plan: the new interface vec plus the `old_idx → new_idx` map
 /// applied to every binding that addresses this boundary by index.
+#[derive(Debug)]
 struct SidePlan<T> {
     boundary: NodeId,
     interface: Vec<T>,
@@ -40,15 +40,15 @@ struct SidePlan<T> {
     changed: bool,
 }
 
-/// Reconcile one subgraph def's interface against its interior wiring.
+/// Reconcile one nested graph's interface against its boundary wiring.
 /// Entry point is [`Document::reconcile_boundaries`] (in `document.rs`),
-/// which loops this over every local def.
-pub(crate) fn reconcile_def(doc: &mut Document, def_id: SubgraphId, library: &Library) {
+/// which loops this over every local graph.
+pub(crate) fn reconcile_graph(doc: &mut Document, graph_id: GraphId, library: &Library) {
     let (inputs, outputs) = {
-        let Some(def) = doc.graph.subgraphs.by_key(&def_id) else {
+        let Some(graph) = doc.graph.graphs.get(&graph_id) else {
             return;
         };
-        (plan_inputs(def, library), plan_outputs(def, library))
+        (plan_inputs(graph, library), plan_outputs(graph, library))
     };
     let input_changed = inputs.as_ref().is_some_and(|p| p.changed);
     let output_changed = outputs.as_ref().is_some_and(|p| p.changed);
@@ -58,17 +58,17 @@ pub(crate) fn reconcile_def(doc: &mut Document, def_id: SubgraphId, library: &Li
 
     // Locate instances before mutating, so the walk reads a consistent
     // document. Instances live in Main and inside other defs' interiors.
-    let instances = instances_of(doc, def_id);
+    let instances = instances_of(doc, graph_id);
 
-    // Interior + interface, under a single `&mut def` borrow.
-    if let Some(def) = doc.graph.subgraphs.by_key_mut(&def_id) {
+    // Interior + interface, under a single `&mut graph` borrow.
+    if let Some(graph) = doc.graph.graphs.get_mut(&graph_id) {
         if let Some(p) = &inputs {
-            remap_source_edges(&mut def.graph, p.boundary, &p.remap);
-            def.inputs = p.interface.clone();
+            remap_source_edges(graph, p.boundary, &p.remap);
+            graph.inputs = p.interface.clone();
         }
         if let Some(p) = &outputs {
-            remap_target_bindings(&mut def.graph, p.boundary, &p.remap);
-            def.outputs = p.interface.clone();
+            remap_target_bindings(graph, p.boundary, &p.remap);
+            graph.outputs = p.interface.clone();
         }
     }
 
@@ -86,16 +86,16 @@ pub(crate) fn reconcile_def(doc: &mut Document, def_id: SubgraphId, library: &Li
     }
 }
 
-/// Plan the inputs side: one interface input per used `SubgraphInput`
+/// Plan the inputs side: one interface input per used `GraphInput`
 /// output, compacted. Existing entries keep their name/type (so authored
 /// names survive); a freshly-used slot is synthesized with the type of
 /// the interior port it now feeds. `None` when the interior has no
-/// `SubgraphInput` node (nothing to derive — leave `def.inputs` alone).
-fn plan_inputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncInput>> {
-    let interior = &def.graph;
+/// `GraphInput` node (nothing to derive — leave `graph.inputs` alone).
+fn plan_inputs(graph: &Graph, library: &Library) -> Option<SidePlan<FuncInput>> {
+    let interior = graph;
     let boundary = interior
         .iter()
-        .find(|n| matches!(n.kind, NodeKind::SubgraphInput))
+        .find(|n| matches!(n.kind, NodeKind::GraphInput))
         .map(|n| n.id)?;
     let used = used_sorted(
         interior
@@ -111,7 +111,7 @@ fn plan_inputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncInpu
         // authored fields are preserved. A passthrough / unwired-to-a-real
         // port resolves to `Any` (polymorphic — see `infer_used_input_type`).
         let data_type = infer_used_input_type(interior, library, boundary, old);
-        interface.push(match def.inputs.get(old) {
+        interface.push(match graph.inputs.get(old) {
             Some(existing) => FuncInput {
                 data_type,
                 ..existing.clone()
@@ -119,7 +119,7 @@ fn plan_inputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncInpu
             None => synth_input(new_idx, data_type),
         });
     }
-    let changed = interface != def.inputs || remap.iter().any(|(o, n)| o != n);
+    let changed = interface != graph.inputs || remap.iter().any(|(o, n)| o != n);
     Some(SidePlan {
         boundary,
         interface,
@@ -128,13 +128,13 @@ fn plan_inputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncInpu
     })
 }
 
-/// Plan the outputs side: one interface output per used `SubgraphOutput`
+/// Plan the outputs side: one interface output per used `GraphOutput`
 /// input, compacted. Mirror of [`plan_inputs`].
-fn plan_outputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncOutput>> {
-    let interior = &def.graph;
+fn plan_outputs(graph: &Graph, library: &Library) -> Option<SidePlan<FuncOutput>> {
+    let interior = graph;
     let boundary = interior
         .iter()
-        .find(|n| matches!(n.kind, NodeKind::SubgraphOutput))
+        .find(|n| matches!(n.kind, NodeKind::GraphOutput))
         .map(|n| n.id)?;
     let used = used_sorted(
         interior
@@ -149,13 +149,13 @@ fn plan_outputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncOut
         // Re-derive the type from the wired producer each pass; preserve
         // the name. Passthrough / unwired-to-a-real producer → `Any`.
         let data_type = infer_used_output_type(interior, library, boundary, old);
-        let name = match def.outputs.get(old) {
+        let name = match graph.outputs.get(old) {
             Some(existing) => existing.name.clone(),
             None => format!("output{new_idx}"),
         };
         interface.push(FuncOutput::new(name, data_type));
     }
-    let changed = interface != def.outputs || remap.iter().any(|(o, n)| o != n);
+    let changed = interface != graph.outputs || remap.iter().any(|(o, n)| o != n);
     Some(SidePlan {
         boundary,
         interface,
@@ -166,7 +166,7 @@ fn plan_outputs(def: &SubgraphDef, library: &Library) -> Option<SidePlan<FuncOut
 
 /// Remap every binding whose **source** is `(node, old)` to `(node, new)`,
 /// clearing those whose source index was dropped from `remap`. Used for
-/// the interior `SubgraphInput` (feeds interior nodes) and for instance
+/// the interior `GraphInput` (feeds interior nodes) and for instance
 /// output ports (feed parent-graph consumers).
 fn remap_source_edges(graph: &mut Graph, node: NodeId, remap: &HashMap<usize, usize>) {
     let edges: Vec<(InputPort, usize)> = graph
@@ -185,7 +185,7 @@ fn remap_source_edges(graph: &mut Graph, node: NodeId, remap: &HashMap<usize, us
 
 /// Remap every binding whose **target** is `(node, old)` to `(node, new)`,
 /// dropping those whose index was removed. Used for the interior
-/// `SubgraphOutput` (collects interior results) and for instance input
+/// `GraphOutput` (collects interior results) and for instance input
 /// ports. Clears the whole set first so a compacting shift can't collide.
 fn remap_target_bindings(graph: &mut Graph, node: NodeId, remap: &HashMap<usize, usize>) {
     let current: Vec<(usize, Binding)> = graph
@@ -208,21 +208,21 @@ fn remap_target_bindings(graph: &mut Graph, node: NodeId, remap: &HashMap<usize,
 }
 
 /// Every node across the document (Main + each local interior) that is an
-/// instance of `def_id`, as `(graph it lives in, node id)`.
-fn instances_of(doc: &Document, def_id: SubgraphId) -> Vec<(GraphRef, NodeId)> {
+/// instance of `graph_id`, as `(graph it lives in, node id)`.
+fn instances_of(doc: &Document, graph_id: GraphId) -> Vec<(GraphRef, NodeId)> {
     let mut out = Vec::new();
     let mut scan = |target: GraphRef, graph: &Graph| {
         for node in graph.iter() {
-            if let NodeKind::Subgraph(r) = &node.kind
-                && r.id() == def_id
+            if let NodeKind::Graph(r) = &node.kind
+                && r.id() == graph_id
             {
                 out.push((target, node.id));
             }
         }
     };
     scan(GraphRef::Main, &doc.graph);
-    for def in doc.graph.subgraphs.iter() {
-        scan(GraphRef::Local(def.id), &def.graph);
+    for (graph_id, graph) in &doc.graph.graphs {
+        scan(GraphRef::Local(*graph_id), graph);
     }
     out
 }
@@ -240,7 +240,7 @@ fn synth_input(idx: usize, data_type: DataType) -> FuncInput {
     FuncInput::optional(format!("input{idx}"), data_type)
 }
 
-/// Type of subgraph input `old`: the type the interior consumer it feeds
+/// Type of graph input `old`: the type the interior consumer it feeds
 /// expects. Falls back to `Any` when no consumer resolves (a placeholder
 /// with no destination shouldn't reach here, but stay total).
 fn infer_used_input_type(
@@ -256,8 +256,8 @@ fn infer_used_input_type(
         .unwrap_or_default()
 }
 
-/// Type of subgraph output `old`: the type of the interior producer bound
-/// into `SubgraphOutput` input `old`. Resolved via
+/// Type of graph output `old`: the type of the interior producer bound
+/// into `GraphOutput` input `old`. Resolved via
 /// [`Graph::resolve_output_type`], so a producing wildcard passthrough reports
 /// the type wired through it rather than its declared `Any` — the composite's
 /// exposed output keeps the value's real type.

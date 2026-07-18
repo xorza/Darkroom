@@ -3,227 +3,133 @@
 The compile→plan→execute pipeline and its caches. This README is the long-form
 design home that the module's `//!` docs point at. Two parts:
 
-- **A. Subgraphs** — how composite nodes are authored and flattened away
-  (`flatten/`; authoring types in `graph/subgraph.rs` and `graph/`).
-- **B. Disk cache** — the node-keyed, digest-stamped output cache for disk-backed (`Disk`/`Both`) nodes
-  (`digest.rs`, `cache.rs`, `disk_store.rs`, `codec.rs`). The `RuntimeCache`
-  (`cache.rs`) owns the RAM slots *and* the `DiskStore` (`disk_store.rs`, pure blob I/O) and runs
-  the caching policy — reuse, hydration, persistence, eviction — over both.
+- **A. Composite graphs** — how graphs used as nodes are authored and flattened
+  away (`flatten/`; authoring types in `graph/`).
+- **B. Disk cache** — the node-keyed, digest-stamped output cache for disk-backed
+  (`Disk`/`Both`) nodes (`digest.rs`, `cache.rs`, `disk_store.rs`, `codec.rs`).
+  `RuntimeCache` owns the RAM slots and `DiskStore` and applies the caching policy
+  across both.
+
 ---
 
-# Part A — Subgraphs (composite nodes)
+# Part A — Composite graphs
 
-How a reusable composite — a sub-graph packaged as a single node — is authored,
-referenced, and lowered to flat execution nodes.
+## A.1 Authoring and execution representations
 
-## A.1 The problem
+`Graph` is the only authoring graph entity. It owns its nodes and wiring, its
+exposed interface (`inputs`, `outputs`, and `events`), its editor metadata, and a
+map of nested local graphs:
 
-A user wants to package a chunk of a graph (several wired nodes) into one reusable
-node with a clean interface, instance it many times, and nest instances. The runtime
-must not pay for any of that abstraction: scheduling, caching, dead-branch pruning,
-and cycle detection all operate on a flat func-only graph. So composites exist **only
-in the authoring model** and are dissolved before execution.
-
-## A.2 Two representations
-
-- **Authoring graph** (`Graph`, `graph/`) — what the editor edits. Holds composite
-  instances (`NodeKind::Subgraph`), boundary nodes, and nested definitions.
-  Serializable.
-- **Execution program** (`ExecutionProgram`, `program.rs`) — the compiled, flattened,
-  immutable form. No composites, no boundaries: flat func nodes only.
-
-The compile step (§A.5) lowers the first into the second. Everything below the
-compile boundary is composite-agnostic.
-
-## A.3 Authoring representation
-
-A **`SubgraphDef`** (`graph/subgraph.rs`) is a reusable definition: an interior `Graph` plus
-the interface it exposes.
-
-```
-SubgraphDef {
-    id, name, category,
-    graph:   Graph,            // the interior
-    inputs:  Vec<FuncInput>,   // exposed inputs  (port order)
-    outputs: Vec<FuncOutput>,  // exposed outputs (port order)
-    events:  Vec<SubgraphEvent>,
-    origin:  Option<SubgraphId>,
+```text
+Graph {
+    name, category,
+    inputs: Vec<FuncInput>,
+    outputs: Vec<FuncOutput>,
+    events: Vec<GraphEvent>,
+    origin: Option<GraphId>,
+    nodes, bindings, subscriptions,
+    graphs: HashMap<GraphId, Graph>,
 }
 ```
 
-A **composite instance** is a `Node` whose `kind` is `NodeKind::Subgraph(SubgraphRef)`.
-Its port/event arity is shaped from the referenced def's interface, exactly as a func
-node is shaped from a `Func` — see `Node::subgraph_instance`.
+The root document value is a `Graph` with no exposed interface or boundary nodes.
+A reusable graph is the same type stored under an external `GraphId`. There is no
+definition wrapper and no duplicate id inside the mapped value.
 
-## A.4 Definitions and references
+Compilation lowers the authoring graph into an immutable `ExecutionProgram`.
+Composite instances and boundaries disappear, leaving only flat func nodes for
+scheduling, caching, pruning, and cycle detection.
 
-### §4.1 The interface is a function signature
+## A.2 Interfaces and boundary nodes
 
-A composite's interface is structurally a function signature, so it reuses the func
-types: exposed inputs are `FuncInput` (name / type / required / default), exposed
-outputs are `FuncOutput` (name / type). An output carries no `required`/`default`,
-which is exactly the func distinction — reusing the types keeps that asymmetry and
-lets an instance node be shaped from a def like a func node is shaped from a `Func`.
+A graph interface reuses `FuncInput` and `FuncOutput`, so graph and func instances
+have the same port semantics. Behavior and sink-ness are derived while flattening
+instead of being stored independently.
 
-Behavior (`Pure`/`Impure`) and sink-ness are **derived from the interior at
-flatten time, never stored on the def** — so they can't drift from the interior.
+Two node kinds route values across a reusable graph's boundary:
 
-### §4.2 Boundary nodes
+- `NodeKind::GraphInput` has one output per `Graph.inputs` entry.
+- `NodeKind::GraphOutput` has one input per `Graph.outputs` entry.
 
-Two node kinds may appear *only* inside a `SubgraphDef.graph`:
+Either boundary may be absent when that side of the interface is empty. Boundaries
+are routing only and emit no execution node. Validation reads their arity directly
+from the containing `Graph`; it does not require an enclosing definition object.
 
-- `NodeKind::SubgraphInput` — the inbound boundary. Its **outputs** are the def's
-  exposed inputs: interior node bound to `SubgraphInput` output port *i* reads exposed
-  input *i*.
-- `NodeKind::SubgraphOutput` — the outbound boundary. Its **inputs** are the def's
-  exposed outputs: exposed output *j* is whatever feeds `SubgraphOutput` input *j*.
+## A.3 Graph instances and lookup
 
-Their port arity comes from the enclosing def's interface, not from a func. Each is
-**optional**: a def that exposes no inputs omits `SubgraphInput`; one that exposes no
-outputs omits `SubgraphOutput`. Boundaries are routing only — they emit no execution
-node.
+A composite instance is a node with `NodeKind::Graph(GraphLink)`.
+`Node::graph_instance(graph, link)` shapes its visible interface from the referenced
+graph. `GraphLink` identifies both the key and its owning registry:
 
-### §4.3 Instancing a definition
-
-`Node::subgraph_instance(def, ref)` builds an instance node whose interface mirrors
-`def`. The instance is wired in its parent graph like any node: its input ports take
-bindings, its exposed-event ports take subscribers.
-
-### §4.4 Local vs. shared definitions
-
-A reference resolves a def from one of two places, and *that* is the only difference
-between a private and a shared composite:
-
-- **Local** — the def lives in the owning `Graph.subgraphs`
-  (`KeyIndexVec<SubgraphId, SubgraphDef>`, `graph.rs`). Private to this graph; editing
-  it affects only this graph; it travels with the document on serialize.
-- **Shared (linked)** — the def lives in `Library.subgraphs` (`library.rs`). One def,
-  many instances across many documents; editing it propagates to **every** linked
-  instance.
-
-Resolution is `Graph::resolve_def(ref, library)`: `Local` → `Graph.subgraphs`,
-`Linked` → `Library.subgraphs`.
-
-### §4.5 References (`SubgraphRef`) and exposed events (`SubgraphEvent`)
-
-`SubgraphRef` *is* the local/shared distinction — the variant carries the
-`SubgraphId` and says where to resolve it:
-
-```
-enum SubgraphRef { Linked(SubgraphId), Local(SubgraphId) }
+```text
+enum GraphLink {
+    Local(GraphId),
+    Shared(GraphId),
+}
 ```
 
-**Exposed events are always outgoing.** A `SubgraphEvent` re-exports an interior
-emitter outward so a parent node can subscribe to the composite:
+- `Local(id)` resolves through the containing `Graph.graphs`.
+- `Shared(id)` resolves through `Library.graphs`.
 
+Both registries are `HashMap<GraphId, Graph>`. `Graph::resolve_graph` returns the
+`&Graph` value directly.
+
+## A.4 Events, copying, and lineage
+
+`GraphEvent` re-exports an interior emitter:
+
+```text
+GraphEvent {
+    name,
+    emitter: NodeId,
+    emitter_event_idx: usize,
+}
 ```
-SubgraphEvent { name, emitter: NodeId, emitter_event_idx: usize }
-```
 
-`emitter` names an interior node in `SubgraphDef.graph` and which of its events. An
-instance node carries one event port per `SubgraphEvent`, holding the parent's
-subscribers — exactly like a func node's events.
+An instance has one outgoing event port per entry. Incoming events use ordinary
+subscriptions; flattening expands a composite subscriber into the interior nodes
+subscribed to its `GraphInput` trigger.
 
-There is **no incoming-event interface element**. Routing an event *into* a composite
-is just the ordinary subscriber mechanism: the composite node, like any node, can be
-subscribed to a parent event; which interior subnodes then fire is the subgraph's
-internal wiring — interior nodes subscribing to the def's `SubgraphInput` node (its
-"trigger"), not an exposed port. Flatten resolves both directions across the boundary
-(§A.5).
+`Graph::fresh_copy()` preserves metadata and interface while assigning fresh node
+ids throughout the copied graph tree and remapping event emitters. The caller
+chooses a fresh `GraphId` when inserting that value. `origin: Option<GraphId>` is
+editor-only lineage pointing from a local graph to its shared source.
 
-### §4.6 Copying, localizing, lineage
+## A.5 Validation and recursion
 
-`SubgraphDef::fresh_copy()` produces an independent copy with a fresh def id and fresh
-interior node ids (exposed-event emitters remapped to match), preserving the
-interface. It's used to *localize* a `Linked` instance (turn a shared def into a
-private one) or to make an instance's identity unique.
+`Graph::check()` validates any graph, including its interface, boundaries, nested
+graphs, and exposed events. `Graph::check_for_execution()` additionally resolves
+the complete local/shared graph tree against the library and requires the entry
+graph to have no interface or boundary nodes. The document boundary applies the
+same entry constraints without requiring a runtime library.
 
-`origin: Option<SubgraphId>` is lineage metadata only — "this local def was copied
-from that library def." Editors use it; the runtime ignores it.
+Compilation validates links against the library and rejects recursive composition.
+Flattening also tracks graph ids on the active descent path, while a hard depth cap
+backs up boundary-resolution walks.
 
-### §4.7 Validation and the recursion guard
+## A.6 Flattening
 
-`Graph::validate_with(library)` recurses per composite level. A def that (directly or
-transitively) instances itself is rejected — the flatten pass tracks the set of defs
-on the current descent path (`seen`) and asserts a def never appears twice
-(`flatten.rs`), and validation surfaces it as an error rather than looping. A hard
-depth cap (`MAX_DEPTH`) backstops the output-resolution walks the `seen` guard doesn't
-cover.
+`Flattener::build` walks each graph level:
 
-## A.5 Flattening (`flatten.rs`)
+- func and special nodes emit flat execution nodes;
+- graph nodes push the instance id onto the path and recurse into the resolved
+  `Graph`;
+- boundary and disabled nodes emit nothing.
 
-Compile expands every composite into its interior func nodes and writes them straight
-into the execution program — **no intermediate `Graph` is materialized**. Boundary
-nodes and composites dissolve; their edges are short-circuited so the result is a
-flat, func-only graph the scheduler handles unchanged.
+Top-level nodes keep their authoring `NodeId`. Nested ids are deterministic hashes
+of the descent path and interior id, so stable instances retain cache identity.
 
-### §5.1 The descent walk
+Data bindings cross boundaries as follows:
 
-`Flattener::build` walks the root graph; `emit` iterates a level's nodes:
+- a func or special producer resolves to its flat producer id;
+- a graph producer descends through the matching `GraphOutput` input;
+- a `GraphInput` producer ascends through the enclosing instance input;
+- a disabled producer resolves to no source.
 
-- a **func** or **special** node emits one flat execution node (both resolve to a
-  `&Func` spec — `library.by_id` vs the hardcoded `SpecialNode::func` — so the emit
-  body is shared);
-- a **subgraph** node descends: push the instance id onto the descent `path`, recurse
-  into the resolved def's interior, pop;
-- **boundary** and **disabled** nodes emit nothing.
-
-The `Flattener`'s only persistent state is the descent `path`; the current graph at
-each level is re-derived from it on demand (`graph_at`), which keeps the scratch free
-of borrowed references so it can be reused across builds.
-
-### §5.2 Stable flattened identity (`flatten_id`)
-
-Each emitted node gets a deterministic flat `NodeId`:
-
-- **Top-level** nodes (empty descent path) keep their **own id verbatim** — so a
-  func-only graph maps to itself and per-node caches survive edits elsewhere.
-- **Nested** nodes get the first 128 bits of a domain-separated BLAKE3 digest over
-  the descent-path ids and interior id. This is stable across builds, distinct from
-  the bare interior id, and sensitive to both the path and the interior id. Every
-  insertion into `FlattenMap` asserts that the flat id and scoped authoring address
-  are both unique, so a collision is a hard logic failure rather than silent aliasing.
-
-### §5.3 Resolving data bindings across boundaries
-
-When an interior input binds to an output, `resolve` follows the wire to a concrete
-flat producer:
-
-- a func/special producer → `Source::Producer { flatten_id(path, node), port }`;
-- a **subgraph** producer → follow into its `SubgraphOutput` input `port`, one level
-  **down**;
-- a **`SubgraphInput`** producer → the enclosing instance's exposed input `port`, one
-  level **up** (pop the instance off the path, resolve in the parent, push it back);
-- a **disabled** producer → `Source::None` (the wire reads unbound downstream).
-
-So a binding that crosses any number of boundaries lands on the real flat producer,
-and the execution program contains only func-to-func edges.
-
-### §5.4 Resolving event edges across boundaries
-
-Event subscriptions are resolved into flat `(emitter, event_idx, subscriber)` edges
-during the walk and applied after the node pass (when every flat node exists and is
-addressable by key):
-
-- `resolve_emitter` follows a composite's `SubgraphEvent` mapping **inward** to the
-  concrete interior func event it ultimately fires;
-- `resolve_subscriber` expands a composite subscriber **into** the interior nodes
-  wired to its `SubgraphInput` trigger — those are the nodes that actually run when the
-  composite is triggered.
-
-Subscriptions emitted *by* a `SubgraphInput` (the trigger) are consumed when the
-enclosing instance is resolved as a subscriber, so they aren't emitted as standalone
-edges.
-
-### §5.5 Caching survives across the boundary
-
-Because top-level node ids are preserved (§5.2) and a nested node's flat id is a pure
-function of its descent path + interior id, an edit that doesn't touch a given node
-leaves its flat id — and therefore its content digest and cached output — unchanged.
-Editing a shared (linked) def re-flattens every instance, and each instance's interior
-nodes keep their per-instance flat ids, so unaffected instances keep their caches.
-Disk and RAM caching then work across composite boundaries with no special handling
-(Part B).
+Event resolution similarly maps `GraphEvent` inward to a concrete emitter and
+expands composite subscribers through `GraphInput`. The resulting execution program
+contains only flat func-to-func data and event edges. Disk and RAM caching therefore
+need no composite-specific behavior.
 
 ---
 

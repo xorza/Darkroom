@@ -432,7 +432,7 @@ fn scan_snap_target(
     if input_const_only(scene, start) {
         return None;
     }
-    // A passthrough (subgraph input boundary wired straight to the output
+    // A passthrough (graph input boundary wired straight to the output
     // boundary) leaves the relayed value untyped at execution and panics
     // the worker — disallow it by never snapping one boundary node onto
     // the other. The only boundary→boundary link possible is exactly that

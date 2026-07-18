@@ -8,7 +8,7 @@ use scenarium::system_library;
 use scenarium::worker_events_library;
 
 /// Assemble the built-in runtime function library. Builtins carry no
-/// subgraph defs — the on-disk subgraph library is folded in by
+/// graphs — the on-disk graph library is folded in by
 /// [`Engine::new`](crate::core::engine::Engine), which owns the library
 /// file's whole lifecycle (load outcome reporting, persist-on-edit).
 pub(crate) fn runtime_func_lib() -> Library {

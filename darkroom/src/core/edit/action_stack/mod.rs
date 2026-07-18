@@ -125,7 +125,7 @@ impl ActionStack {
         }
         self.cursor -= 1;
         // `revert_step` resolves the right graph+view from `target` and
-        // no-ops if it's gone (subgraph deleted). The entry stays in the
+        // no-ops if it's gone (graph deleted). The entry stays in the
         // buffer — it just moved into the redoable region.
         let entry = &self.entries[self.cursor];
         let target = entry.target;

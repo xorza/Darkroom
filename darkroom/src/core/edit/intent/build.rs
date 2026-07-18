@@ -2,8 +2,7 @@
 //! [`Intent`] into a complete [`UndoStep`] — the diff-capture half of the
 //! intent pipeline. Pure: never writes to the graph.
 
-use scenarium::{Graph, Node, NodeKind, NodeSearch};
-use scenarium::{SubgraphDef, SubgraphRef};
+use scenarium::{Graph, GraphId, GraphLink, Node, NodeKind, NodeSearch};
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, EditScopeRef, GraphRef, ItemRef};
@@ -40,19 +39,19 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             structural,
         }));
     }
-    if let Intent::RenameSubgraph { id, to } = intent {
-        let from = doc.graph.subgraphs.by_key(&id)?.name.clone();
-        return Some(UndoStep::Doc(DocStep::RenameSubgraph { id, from, to }));
+    if let Intent::RenameGraph { id, to } = intent {
+        let from = doc.graph.graphs.get(&id)?.name.clone();
+        return Some(UndoStep::Doc(DocStep::RenameGraph { id, from, to }));
     }
     if let Intent::RenameBoundaryPort { side, idx, to } = intent {
-        // Boundary ports only exist in a subgraph interior; the def is
+        // Boundary ports only exist in a graph interior; the graph is
         // the active `Local` target's. Drop the rename otherwise.
-        let GraphRef::Local(sub_id) = target else {
+        let GraphRef::Local(graph_id) = target else {
             return None;
         };
-        let from = doc.boundary_port_name(sub_id, side, idx)?.to_owned();
+        let from = doc.boundary_port_name(graph_id, side, idx)?.to_owned();
         return Some(UndoStep::Doc(DocStep::RenameBoundaryPort {
-            sub_id,
+            graph_id,
             side,
             idx,
             from,
@@ -61,22 +60,22 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
     }
     let EditScopeRef { graph, view } = doc.scope(target)?;
     let step = match intent {
-        Intent::Dock(_) | Intent::RenameBoundaryPort { .. } | Intent::RenameSubgraph { .. } => {
+        Intent::Dock(_) | Intent::RenameBoundaryPort { .. } | Intent::RenameGraph { .. } => {
             unreachable!("document-global intents handled above")
         }
         Intent::AddNode {
             pos,
             node_id,
             mut node,
-            def,
+            graph: nested_graph,
             bindings,
         } => {
-            let def = reuse_local_subgraph(graph, &mut node, def);
+            let nested_graph = reuse_local_graph(graph, &mut node, nested_graph);
             GraphStep::AddNode {
                 pos,
                 node_id,
                 node,
-                def,
+                graph: nested_graph,
                 bindings,
             }
         }
@@ -168,18 +167,20 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             };
             GraphStep::SetNodeProperty { node_id, from, to }
         }
-        Intent::DetachSubgraph { node_id } => {
-            let NodeKind::Subgraph(SubgraphRef::Local(from_id)) =
+        Intent::DetachGraph { node_id } => {
+            let NodeKind::Graph(GraphLink::Local(from_id)) =
                 graph.find(&node_id, NodeSearch::TopLevel)?.kind
             else {
-                return None; // not a local subgraph instance — nothing to fork
+                return None; // not a local graph instance — nothing to fork
             };
-            let mut copy = graph.subgraphs.by_key(&from_id)?.fresh_copy();
+            let to_id = GraphId::unique();
+            let mut copy = graph.graphs.get(&from_id)?.fresh_copy();
             copy.origin = None; // detach severs the library lineage
-            GraphStep::DetachSubgraph {
+            GraphStep::DetachGraph {
                 node_id,
                 from_id,
-                def: Box::new(copy),
+                to_id,
+                graph: Box::new(copy),
             }
         }
         Intent::SetViewport { to } => {
@@ -239,28 +240,25 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
     Some(UndoStep::Graph(step))
 }
 
-/// Library subgraphs are localized on instance: the new-node menu drops
-/// a fresh `Local` copy tagged with the library def it came from
-/// (`origin`). If `graph` already holds a local def from the same
-/// library source, re-point `node` at that existing def and drop the
-/// duplicate copy — one editable local def, many instances. Otherwise
-/// return `def` untouched (the first instance materializes the copy).
-fn reuse_local_subgraph(
+/// Reuse an existing local copy when it has the same shared origin.
+fn reuse_local_graph(
     graph: &Graph,
     node: &mut Node,
-    def: Option<Box<SubgraphDef>>,
-) -> Option<Box<SubgraphDef>> {
-    let def = def?;
-    // No library lineage (hand-authored local def, e.g. collapse-to-
-    // subgraph) → always its own copy; nothing to dedup against.
-    let Some(origin) = def.origin else {
-        return Some(def);
+    pending: Option<(GraphId, Box<Graph>)>,
+) -> Option<(GraphId, Box<Graph>)> {
+    let (graph_id, pending) = pending?;
+    let Some(origin) = pending.origin else {
+        return Some((graph_id, pending));
     };
-    match graph.subgraphs.iter().find(|d| d.origin == Some(origin)) {
-        Some(existing) => {
-            node.kind = NodeKind::Subgraph(SubgraphRef::Local(existing.id));
+    match graph
+        .graphs
+        .iter()
+        .find(|(_, existing)| existing.origin == Some(origin))
+    {
+        Some((existing_id, _)) => {
+            node.kind = NodeKind::Graph(GraphLink::Local(*existing_id));
             None
         }
-        None => Some(def),
+        None => Some((graph_id, pending)),
     }
 }

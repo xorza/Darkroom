@@ -30,7 +30,7 @@ use crate::runtime::context::ContextManager;
 /// empty library ⇒ no codecs, disk-backed nodes memory-only.
 ///
 /// The snapshot is fine to hold across library swaps: codecs are registered once at assembly
-/// and never change (only subgraphs grow), so a held snapshot keeps every codec it will ever
+/// and never change (only graphs grow), so a held snapshot keeps every codec it will ever
 /// need.
 #[derive(Debug, Default)]
 pub struct DiskStore {

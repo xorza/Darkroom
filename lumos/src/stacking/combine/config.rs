@@ -249,7 +249,7 @@ impl StackConfig {
         Self {
             method: CombineMethod::Mean(Rejection::sigma_clip(3.0)),
             normalization: Normalization::Multiplicative,
-            // Stricter quality floor than the library default: a master flat from < 8 frames uses the
+            // Stricter quality floor than the library graphault: a master flat from < 8 frames uses the
             // median, since σ-clip statistics on so few smooth flats aren't worth the noise.
             small_n: SmallN::median_below(8),
             ..Default::default()

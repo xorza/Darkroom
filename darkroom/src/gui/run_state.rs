@@ -2,12 +2,12 @@
 //! and logs, plus the latest worker-pushed values for pinned outputs. One
 //! [`RunState`] per [`Editor`], updated as worker reports arrive.
 //!
-//! Execution dissolves subgraphs and remaps interior node ids, so a run's
+//! Execution dissolves graphs and remaps interior node ids, so a run's
 //! raw `ExecutionStats` are keyed by *flattened* ids. [`RunState::set_results`]
 //! projects them through the compile-phase `FlattenMap` (kept by the engine
 //! when it sent the run — the worker doesn't echo it back) to fold each
 //! outcome onto the authoring nodes: onto the node itself (unique per editor
-//! node — a def's interior aggregates across its instances) and onto every
+//! node — a graph's interior aggregates across its instances) and onto every
 //! ancestor composite instance, so an instance node reflects its whole
 //! subtree. Logs attribute the same way.
 //!
@@ -42,7 +42,7 @@ pub(crate) enum ExecStatus {
 
 impl ExecStatus {
     /// Severity rank, for folding several outcomes onto one editor node
-    /// (a subgraph def's interior node runs once per instance; an
+    /// (a graph's interior node runs once per instance; an
     /// instance node aggregates its whole subtree). Higher wins. `Running`
     /// is live-only — it's set directly, never folded through `merged`.
     fn severity(self) -> u8 {
@@ -74,12 +74,12 @@ pub(crate) struct NodeRunState {
     pub(crate) status: ExecStatus,
     pub(crate) logs: Vec<LogEntry>,
     /// Human-readable messages for this run's failures, folded on the same
-    /// attribution as `status` (a subgraph instance collects its subtree's).
+    /// attribution as `status` (a graph instance collects its subtree's).
     /// Empty unless the node errored; drives the inspector's error detail so
     /// a failed node reads e.g. "no light frames provided", not just "errored".
     pub(crate) errors: Vec<String>,
     /// RAM this node's cached output holds after the last run (system vs GPU),
-    /// summed across its flattened contributors — a subgraph instance aggregates
+    /// summed across its flattened contributors — a graph instance aggregates
     /// its interior. Zero unless the node retains a value; drives the node body's
     /// memory readout.
     pub(crate) ram: RamUsage,
@@ -201,7 +201,7 @@ impl RunState {
     /// Fold one run error's message onto the errored node and every enclosing
     /// composite instance (same attribution as `record_status`), so the
     /// inspector can show the actual failure cause instead of a bare "errored".
-    /// A subgraph instance accumulates its whole subtree's failures.
+    /// A graph instance accumulates its whole subtree's failures.
     fn record_error(&mut self, flatten: &FlattenMap, flat_id: NodeId, error: &RunError) {
         let message = error.to_string();
         for node_id in flatten.attribution(flat_id) {
@@ -338,7 +338,7 @@ mod tests {
         assert_eq!(rs.status(nid(99)), ExecStatus::None);
     }
 
-    /// Two instances of one def → the interior node's flattened ids both
+    /// Two instances of one graph → the interior node's flattened ids both
     /// fold onto its authoring `interior` id, summing time; the instance
     /// nodes each get only their own run.
     #[test]
@@ -396,7 +396,7 @@ mod tests {
     }
 
     /// A failure's message folds onto the errored interior node *and* its
-    /// enclosing subgraph instance (same attribution as the status), while a
+    /// enclosing graph instance (same attribution as the status), while a
     /// `Cancelled` "error" records neither status nor message (a cancel is not
     /// a failure).
     #[test]
@@ -443,7 +443,7 @@ mod tests {
         assert!(rs.errors(cancelled_interior).is_empty());
     }
 
-    /// A log line emitted inside a subgraph instance attributes to both
+    /// A log line emitted inside a graph instance attributes to both
     /// the interior node and the enclosing instance, preserving level +
     /// message, re-keyed to each editor node.
     #[test]

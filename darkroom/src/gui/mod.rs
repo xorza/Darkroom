@@ -47,9 +47,9 @@ pub(crate) enum UiAction {
     /// Record a dock-layout mutation — a tab activation or close from a
     /// strip, or a finished drag's move/split.
     Dock(DockOp),
-    /// Create a fresh empty subgraph and open it in a new tab (the "+"
+    /// Create a fresh empty graph and open it in a new tab (the "+"
     /// chip at the end of the strip).
-    NewSubgraph,
+    NewGraph,
     /// Show this pinned output's full runtime image in its viewer tab.
     OpenImageViewer(PortRef),
 }

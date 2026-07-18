@@ -1,6 +1,6 @@
 //! Record-time visibility culling for the graph canvas. Only items that
 //! intersect the viewport are recorded, so an off-screen
-//! subgraph costs no measure/arrange/paint work. Pure world-space math;
+//! graph costs no measure/arrange/paint work. Pure world-space math;
 //! [`crate::gui::canvas::GraphUI::frame`] resolves one [`CullRegion`] per
 //! frame and threads the same policy through every recorded canvas item.
 

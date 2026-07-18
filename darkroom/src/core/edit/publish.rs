@@ -1,4 +1,4 @@
-//! Publishing local subgraph defs into the shared [`Library`]: the pure
+//! Publishing local graphs into the shared [`Library`]: the pure
 //! document↔library resolution + mutation behind the GUI's
 //! export / promote / publish commands. Operates only on [`Document`] +
 //! [`Library`] (no GUI, dialogs, or persistence), so it's unit-testable
@@ -8,160 +8,136 @@
 //! file and propagates the grown library to its downstream copies.
 
 use scenarium::Library;
+use scenarium::{Graph, GraphId, GraphLink};
 use scenarium::{NodeId, NodeKind, NodeSearch};
-use scenarium::{SubgraphDef, SubgraphId, SubgraphRef};
 
 use crate::core::document::{Document, GraphRef, ItemRef};
 
-/// Publish/refresh `node_id`'s local subgraph def into `library`
+/// Publish `node_id`'s local graph into `library`
 /// (no disk write — the caller persists on success). Returns `false`
-/// when the node isn't a local subgraph instance in `target`.
+/// when the node isn't a local graph instance in `target`.
 ///
-/// When the local def is linked to a still-present library def
-/// (`origin` resolves), that def is **updated in place** (its id is
-/// reused so `insert_subgraph` overwrites it and `Linked` instances pick
-/// up the new content). Otherwise a fresh-id copy joins the library and
-/// the local def's `origin` is re-pointed at it, so a later publish
+/// When its `origin` still resolves, that shared graph is updated in
+/// place so existing instances keep their link.
+/// Otherwise a fresh-id copy joins the library and the local graph's
+/// `origin` is re-pointed at it, so a later publish
 /// updates rather than re-adds. The `origin` write is lineage metadata,
 /// deliberately *not* routed through undo.
-pub(crate) fn publish_local_def(
+pub(crate) fn publish_local_graph(
     document: &mut Document,
     library: &mut Library,
     target: GraphRef,
     node_id: NodeId,
 ) -> bool {
-    // `fresh_copy` already gives fresh interior ids + `origin: None` — the
-    // shape a library def wants; we keep or override its id below.
-    let Some((local_id, mut published, existing_lib)) = (|| {
+    let Some((local_id, published, existing_lib)) = (|| {
         let scope = document.scope(target)?;
-        let NodeKind::Subgraph(SubgraphRef::Local(local_id)) =
+        let NodeKind::Graph(GraphLink::Local(local_id)) =
             scope.graph.find(&node_id, NodeSearch::TopLevel)?.kind
         else {
             return None;
         };
-        let local = scope.graph.subgraphs.by_key(&local_id)?;
-        let existing_lib = local
-            .origin
-            .filter(|id| library.subgraph_by_id(id).is_some());
+        let local = scope.graph.graphs.get(&local_id)?;
+        let existing_lib = local.origin.filter(|id| library.graph_by_id(id).is_some());
         Some((local_id, local.fresh_copy(), existing_lib))
     })() else {
         return false;
     };
 
-    // Keep the linked entry's id (update in place) or the fresh copy's own.
-    let new_origin = existing_lib.unwrap_or(published.id);
-    published.id = new_origin;
-    library.insert_subgraph(published);
+    let new_origin = existing_lib.unwrap_or_else(GraphId::unique);
+    library.insert_graph(new_origin, published);
     set_origin(document, target, local_id, new_origin);
     true
 }
 
-/// Promote the active/selected subgraph into `library` as a new entry
+/// Promote the active/selected graph into `library` as a new entry
 /// (no disk write — the caller persists on success). Returns `false`
-/// when nothing resolves. On success the source local def's `origin` is
+/// when nothing resolves. On success the source local graph's `origin` is
 /// re-pointed at the new library entry, so it tracks its lineage.
 pub(crate) fn promote_to_library(document: &mut Document, library: &mut Library) -> bool {
     let Some(source) = promote_source(document, library) else {
         return false;
     };
-    let published = source.def.fresh_copy();
-    let lib_id = published.id;
-    library.insert_subgraph(published);
+    let published = source.graph.fresh_copy();
+    let lib_id = GraphId::unique();
+    library.insert_graph(lib_id, published);
     if let Some(relink) = source.relink {
-        set_origin(document, relink.holder, relink.def_id, lib_id);
+        set_origin(document, relink.holder, relink.graph_id, lib_id);
     }
     true
 }
 
-/// Point the local subgraph def `def_id` (in `holder`'s graph) at the
-/// library entry `origin`. No-op if the def is gone. Lineage metadata —
+/// Point the local graph at the library entry `origin`. Lineage metadata —
 /// not routed through undo.
-fn set_origin(document: &mut Document, holder: GraphRef, def_id: SubgraphId, origin: SubgraphId) {
+fn set_origin(document: &mut Document, holder: GraphRef, graph_id: GraphId, origin: GraphId) {
     if let Some(graph) = document.graph_mut(holder)
-        && let Some(def) = graph.subgraphs.by_key_mut(&def_id)
+        && let Some(nested) = graph.graphs.get_mut(&graph_id)
     {
-        def.origin = Some(origin);
+        nested.origin = Some(origin);
     }
 }
 
-/// A subgraph resolved for promotion into the library: the def to
-/// publish (owned copy) plus where to re-link its `origin` afterward.
+#[derive(Debug)]
 struct PromoteSource {
-    def: SubgraphDef,
-    /// Where the source local def lives, so we can point its `origin` at
+    graph: Graph,
+    /// Where the source local graph lives, so we can point its `origin` at
     /// the freshly-created library entry. `None` when the source is a
-    /// library (`Linked`) def — nothing in the document to re-link.
+    /// shared graph — nothing in the document to re-link.
     relink: Option<RelinkLocal>,
 }
 
-/// Locates a local subgraph def for an `origin` re-link: the graph
-/// whose local table holds it, plus the def's id.
+#[derive(Debug)]
 struct RelinkLocal {
     holder: GraphRef,
-    def_id: SubgraphId,
+    graph_id: GraphId,
 }
 
-/// Internal resolution result shared by export + promote.
+#[derive(Debug)]
 enum Promotable {
-    /// First selected subgraph-instance node in the active graph.
-    Node { graph: GraphRef, sref: SubgraphRef },
-    /// The open subgraph interior (its def lives in the root table).
-    OpenTab { id: SubgraphId },
+    Node { graph: GraphRef, link: GraphLink },
+    OpenTab { id: GraphId },
 }
 
-/// Resolve which subgraph def an export targets: the first selected
-/// subgraph-instance node in the active graph (resolved against that
-/// graph's own `Local` table or the shared `Library` for `Linked`), else
-/// the currently open subgraph when inside one. `None` when neither
-/// resolves. Pure resolution over the document — kept here with its only
-/// callers rather than on the `Document` model.
-pub(crate) fn subgraph_to_export<'a>(
+/// Resolve the graph targeted by export.
+pub(crate) fn graph_to_export<'a>(
     document: &'a Document,
     library: &'a Library,
-) -> Option<&'a SubgraphDef> {
+) -> Option<&'a Graph> {
     match resolve_promotable(document, library)? {
-        Promotable::Node { graph, sref } => document.graph_for(graph)?.resolve_def(sref, library),
-        Promotable::OpenTab { id } => document.graph.subgraphs.by_key(&id),
+        Promotable::Node { graph, link } => document.graph_for(graph)?.resolve_graph(link, library),
+        Promotable::OpenTab { id } => document.graph.graphs.get(&id),
     }
 }
 
-/// Like [`subgraph_to_export`], but for promoting into the library:
-/// returns an owned copy of the resolved def plus, when the source is a
-/// `Local` def in this document, where to re-link its `origin` after the
-/// library entry is created. `None` (no relink) for a `Linked` source —
-/// there's no in-document def to own it.
+/// Like [`graph_to_export`], but for promoting into the library:
+/// returns an owned copy and, for a local source, where to update lineage.
 fn promote_source(document: &Document, library: &Library) -> Option<PromoteSource> {
-    let (def, relink) = match resolve_promotable(document, library)? {
-        Promotable::Node { graph, sref } => {
-            let def = document
+    let (graph, relink) = match resolve_promotable(document, library)? {
+        Promotable::Node { graph, link } => {
+            let nested = document
                 .graph_for(graph)?
-                .resolve_def(sref, library)?
+                .resolve_graph(link, library)?
                 .clone();
-            let relink = match sref {
-                SubgraphRef::Local(id) => Some(RelinkLocal {
+            let relink = match link {
+                GraphLink::Local(id) => Some(RelinkLocal {
                     holder: graph,
-                    def_id: id,
+                    graph_id: id,
                 }),
-                SubgraphRef::Linked(_) => None,
+                GraphLink::Shared(_) => None,
             };
-            (def, relink)
+            (nested, relink)
         }
-        // An open subgraph tab is always a `Local` def living in the root
-        // table, regardless of which interior is shown.
         Promotable::OpenTab { id } => (
-            document.graph.subgraphs.by_key(&id)?.clone(),
+            document.graph.graphs.get(&id)?.clone(),
             Some(RelinkLocal {
                 holder: GraphRef::Main,
-                def_id: id,
+                graph_id: id,
             }),
         ),
     };
-    Some(PromoteSource { def, relink })
+    Some(PromoteSource { graph, relink })
 }
 
-/// Shared resolution for export / promote: the first selected
-/// subgraph-instance node in the active graph (whose def resolves), else
-/// the open subgraph interior. `None` when neither applies.
+/// Shared resolution for export and promote.
 fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotable> {
     // Export/promote act on the active graph; a non-graph tab has none.
     let target = document.active_target()?;
@@ -172,18 +148,18 @@ fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotab
                 continue;
             };
             if let Some(node) = graph.find(nid, NodeSearch::TopLevel)
-                && let NodeKind::Subgraph(sref) = node.kind
-                && graph.resolve_def(sref, library).is_some()
+                && let NodeKind::Graph(link) = node.kind
+                && graph.resolve_graph(link, library).is_some()
             {
                 return Some(Promotable::Node {
                     graph: target,
-                    sref,
+                    link,
                 });
             }
         }
     }
     match target {
-        GraphRef::Local(id) if document.graph.subgraphs.by_key(&id).is_some() => {
+        GraphRef::Local(id) if document.graph.graphs.contains_key(&id) => {
             Some(Promotable::OpenTab { id })
         }
         _ => None,
@@ -193,57 +169,62 @@ fn resolve_promotable(document: &Document, library: &Library) -> Option<Promotab
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scenarium::Graph;
     use scenarium::Node;
-    use scenarium::SubgraphDef;
 
-    /// Add a local subgraph def `def` to `doc`'s root graph plus an
-    /// instance node referencing it; return the node id.
-    fn add_local_instance(doc: &mut Document, def: SubgraphDef) -> NodeId {
-        let local_id = def.id;
-        doc.graph.subgraphs.add(def);
-        let node = Node::subgraph_instance(
-            doc.graph.subgraphs.by_key(&local_id).unwrap(),
-            SubgraphRef::Local(local_id),
-        );
-        doc.graph.add(node)
+    #[derive(Debug)]
+    struct LocalInstance {
+        graph_id: GraphId,
+        node_id: NodeId,
     }
 
-    fn def(name: &str, origin: Option<SubgraphId>) -> SubgraphDef {
-        let mut def = SubgraphDef::new(SubgraphId::unique(), name);
-        def.origin = origin;
-        def
+    fn add_local_instance(doc: &mut Document, graph: Graph) -> LocalInstance {
+        let graph_id = GraphId::unique();
+        doc.graph.insert_graph(graph_id, graph);
+        let node = Node::graph_instance(
+            doc.graph.graphs.get(&graph_id).unwrap(),
+            GraphLink::Local(graph_id),
+        );
+        LocalInstance {
+            graph_id,
+            node_id: doc.graph.add(node),
+        }
+    }
+
+    fn graph(name: &str, origin: Option<GraphId>) -> Graph {
+        let mut graph = Graph::new(name);
+        graph.origin = origin;
+        graph
     }
 
     #[test]
     fn publish_updates_linked_library_def_in_place() {
-        let lib_id = SubgraphId::unique();
+        let lib_id = GraphId::unique();
         let mut library = Library::default();
-        library.insert_subgraph(SubgraphDef::new(lib_id, "Old"));
+        library.insert_graph(lib_id, Graph::new("Old"));
 
-        // Local copy linked to that library def, with diverged content.
+        // Local copy linked to that library graph, with diverged content.
         let mut doc = Document::default();
-        let local = def("New", Some(lib_id));
-        let local_id = local.id;
-        let node_id = add_local_instance(&mut doc, local);
+        let local = add_local_instance(&mut doc, graph("New", Some(lib_id)));
 
-        assert!(publish_local_def(
+        assert!(publish_local_graph(
             &mut doc,
             &mut library,
             GraphRef::Main,
-            node_id
+            local.node_id
         ));
         assert_eq!(
-            library.subgraphs.len(),
+            library.graphs.len(),
             1,
             "update in place — no new library entry"
         );
         assert_eq!(
-            library.subgraph_by_id(&lib_id).unwrap().name,
+            library.graph_by_id(&lib_id).unwrap().name,
             "New",
-            "library def took the local def's content"
+            "library graph took the local graph's content"
         );
         assert_eq!(
-            doc.graph.subgraphs.by_key(&local_id).unwrap().origin,
+            doc.graph.graphs.get(&local.graph_id).unwrap().origin,
             Some(lib_id),
             "lineage preserved"
         );
@@ -253,27 +234,25 @@ mod tests {
     fn publish_without_origin_creates_entry_and_links_it() {
         let mut library = Library::default();
         let mut doc = Document::default();
-        let local = def("Standalone", None);
-        let local_id = local.id;
-        let node_id = add_local_instance(&mut doc, local);
+        let local = add_local_instance(&mut doc, graph("Standalone", None));
 
-        assert!(publish_local_def(
+        assert!(publish_local_graph(
             &mut doc,
             &mut library,
             GraphRef::Main,
-            node_id
+            local.node_id
         ));
-        assert_eq!(library.subgraphs.len(), 1, "a new library entry was added");
+        assert_eq!(library.graphs.len(), 1, "a new library entry was added");
         let linked = doc
             .graph
-            .subgraphs
-            .by_key(&local_id)
+            .graphs
+            .get(&local.graph_id)
             .unwrap()
             .origin
-            .expect("local def linked to the new entry");
+            .expect("local graph linked to the new entry");
         assert!(
-            library.subgraph_by_id(&linked).is_some(),
-            "origin points at the freshly-created library def"
+            library.graph_by_id(&linked).is_some(),
+            "origin points at the freshly-created library graph"
         );
     }
 
@@ -281,24 +260,22 @@ mod tests {
     fn promote_links_source_local_def_to_new_library_entry() {
         let mut library = Library::default();
         let mut doc = Document::default();
-        // A local subgraph instance (no library lineage yet), selected
+        // A local graph instance (no library lineage yet), selected
         // so `promote_source` resolves it from the active graph.
-        let local = def("Widget", None);
-        let local_id = local.id;
-        let node_id = add_local_instance(&mut doc, local);
-        doc.main_view.selected.insert(ItemRef::Node(node_id));
+        let local = add_local_instance(&mut doc, graph("Widget", None));
+        doc.main_view.selected.insert(ItemRef::Node(local.node_id));
 
         assert!(promote_to_library(&mut doc, &mut library));
-        assert_eq!(library.subgraphs.len(), 1, "a new library entry is added");
+        assert_eq!(library.graphs.len(), 1, "a new library entry is added");
         let owner = doc
             .graph
-            .subgraphs
-            .by_key(&local_id)
+            .graphs
+            .get(&local.graph_id)
             .unwrap()
             .origin
-            .expect("source local def now carries an origin");
+            .expect("source local graph now carries an origin");
         assert!(
-            library.subgraph_by_id(&owner).is_some(),
+            library.graph_by_id(&owner).is_some(),
             "origin points at the freshly-promoted library entry"
         );
     }
@@ -308,23 +285,23 @@ mod tests {
         let mut library = Library::default();
         let mut doc = Document::default();
         assert!(!promote_to_library(&mut doc, &mut library));
-        assert_eq!(library.subgraphs.len(), 0);
+        assert_eq!(library.graphs.len(), 0);
     }
 
     #[test]
-    fn publish_non_subgraph_node_is_a_noop() {
+    fn publish_non_graph_node_is_a_noop() {
         use scenarium::FuncId;
         let mut library = Library::default();
         let mut doc = Document::default();
         let node = Node::new(scenarium::NodeKind::Func(FuncId::unique()));
         let node_id = doc.graph.add(node);
 
-        assert!(!publish_local_def(
+        assert!(!publish_local_graph(
             &mut doc,
             &mut library,
             GraphRef::Main,
             node_id
         ));
-        assert_eq!(library.subgraphs.len(), 0, "nothing published");
+        assert_eq!(library.graphs.len(), 0, "nothing published");
     }
 }

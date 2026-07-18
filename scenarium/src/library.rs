@@ -2,11 +2,13 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::graph::subgraph::{SubgraphDef, SubgraphId};
+use crate::graph::Graph;
+use crate::graph::interface::GraphId;
 use crate::node::definition::{Func, FuncId};
 use crate::{CustomValueCodec, ResourceStamper};
 use crate::{DataType, EnumVariants, TypeId};
 use common::KeyIndexVec;
+use hashbrown::HashMap as GraphMap;
 
 /// The metadata of a registered nominal type — a `Custom`
 /// app-extension type or an `Enum`. Identity is the [`TypeId`] it's keyed by in
@@ -101,7 +103,7 @@ impl TypeEntry {
 }
 
 /// The runtime registry every frontend resolves against: the [`Func`]s nodes
-/// instantiate, the shared subgraph definitions, and the nominal types (with
+/// instantiate, the shared graphs, and the nominal types (with
 /// their disk codecs). This is runtime registry state, not a persistence format;
 /// authored graphs serialize function and type ids and resolve them against a
 /// process-assembled library.
@@ -109,10 +111,8 @@ impl TypeEntry {
 pub struct Library {
     pub funcs: KeyIndexVec<FuncId, Func>,
 
-    /// Shared (linked) subgraph definitions. A node with
-    /// `NodeKind::Subgraph(SubgraphRef::Linked(id))` resolves here; editing a
-    /// def propagates to every linked instance. See `execution/README.md` Part A.
-    pub subgraphs: KeyIndexVec<SubgraphId, SubgraphDef>,
+    /// Shared graphs. Editing one propagates to every shared instance.
+    pub graphs: GraphMap<GraphId, Graph>,
 
     /// Registered nominal types (`Custom`/`Enum`), keyed by [`TypeId`]. The home
     /// for type metadata and the disk codecs the output cache dispatches through.
@@ -140,15 +140,15 @@ impl Library {
         self.funcs.add(func);
     }
 
-    pub fn subgraph_by_id(&self, id: &SubgraphId) -> Option<&SubgraphDef> {
+    pub fn graph_by_id(&self, id: &GraphId) -> Option<&Graph> {
         assert!(!id.is_nil());
-        self.subgraphs.by_key(id)
+        self.graphs.get(id)
     }
 
-    /// Inserts a shared subgraph, replacing the definition with the same id.
-    pub fn insert_subgraph(&mut self, def: SubgraphDef) {
-        assert!(!def.id.is_nil());
-        self.subgraphs.add(def);
+    /// Inserts a shared graph, replacing the graph with the same id.
+    pub fn insert_graph(&mut self, id: GraphId, graph: Graph) {
+        assert!(!id.is_nil());
+        self.graphs.insert(id, graph);
     }
 
     /// Register a nominal type. Panics on a duplicate id — two decls for one type
@@ -201,8 +201,8 @@ impl Library {
         for func in other.funcs {
             self.add(func);
         }
-        for def in other.subgraphs {
-            self.insert_subgraph(def);
+        for (id, graph) in other.graphs {
+            self.insert_graph(id, graph);
         }
         for (type_id, entry) in other.types {
             self.register_type(type_id, entry);
@@ -225,7 +225,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::graph::subgraph::{SubgraphDef, SubgraphId};
+    use crate::graph::Graph;
+    use crate::graph::interface::GraphId;
     use crate::library::Library;
     use crate::node::lambda::{InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
@@ -235,17 +236,17 @@ mod tests {
     use crate::{DynamicValue, StaticValue};
 
     #[test]
-    fn insert_subgraph_replaces_definition_with_same_id() {
-        let id = SubgraphId::unique();
+    fn insert_graph_replaces_definition_with_same_id() {
+        let id = GraphId::unique();
         let mut library = Library::default();
 
-        library.insert_subgraph(SubgraphDef::new(id, "Before"));
-        assert_eq!(library.subgraphs.len(), 1);
-        assert_eq!(library.subgraph_by_id(&id).unwrap().name, "Before");
+        library.insert_graph(id, Graph::new("Before"));
+        assert_eq!(library.graphs.len(), 1);
+        assert_eq!(library.graph_by_id(&id).unwrap().name, "Before");
 
-        library.insert_subgraph(SubgraphDef::new(id, "After"));
-        assert_eq!(library.subgraphs.len(), 1);
-        assert_eq!(library.subgraph_by_id(&id).unwrap().name, "After");
+        library.insert_graph(id, Graph::new("After"));
+        assert_eq!(library.graphs.len(), 1);
+        assert_eq!(library.graph_by_id(&id).unwrap().name, "After");
     }
 
     #[tokio::test]

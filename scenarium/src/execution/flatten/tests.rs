@@ -38,7 +38,7 @@ fn flatten_id_nested_is_deterministic_and_path_sensitive() {
     );
 
     // A different *instance* of the same composite (distinct leading id) yields
-    // a distinct flat id — two copies of one subgraph don't share cache slots.
+    // a distinct flat id — two copies of one graph don't share cache slots.
     let single = [NodeId::from_u128(1)];
     let other_single = [NodeId::from_u128(9)];
     assert_ne!(

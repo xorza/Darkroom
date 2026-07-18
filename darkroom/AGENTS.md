@@ -25,7 +25,7 @@ default look just run the tests and commit the asset diff (see `theme.rs`).
 ## Dependencies / boundaries
 
 - **`scenarium`** — headless core. Owns `Graph`, `Node`, `Binding`, `Library`,
-  `SubgraphDef`, `StaticValue`, the headless `Worker` evaluator, serde formats.
+  `StaticValue`, the headless `Worker` evaluator, serde formats.
   darkroom never reimplements graph semantics; it edits a `scenarium::Graph`,
   resolves nodes against a `Library`, and runs the graph through `Worker`.
 - **`aperture`** — the GUI runtime. `App` implements once-only
@@ -54,16 +54,17 @@ Root holds the entry point; implementation is grouped by responsibility:
   the edit pipeline; `shortcuts.rs` maps chords → intents/commands),
   `commands/`
   (`AppCommand` side effects, run *outside* the record — grouped into nested
-  sub-enums with one handler submodule each: `file` / `subgraph` / `run` /
+  sub-enums with one handler submodule each: `file` / `graph` / `run` /
   `prefs` / `edit` / `shell`; `mod.rs` is the dispatcher).
 - **`core/worker.rs`** — `WorkerBridge`: tokio worker + result channel.
 - **`core/document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
-  `EditScope`), `canvas_item_placement.rs` (node/pin position and paint-stack records).
+  `EditScope`), `validate.rs` (document/view structural validation),
+  `canvas_item_placement.rs` (node/pin position and paint-stack records).
 - **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
-  `action_stack/` (packed undo history), `reconcile/` (derived subgraph-
+  `action_stack/` (packed undo history), `reconcile/` (derived graph-
   interface reconciliation).
 - **`core/io/`** — `persistence.rs` (file-dialog + serde I/O), `preferences.rs`
-  (`Preferences` session state), `library.rs` (shared subgraph library file),
+  (`Preferences` session state), `library.rs` (shared graph library file),
   `cache.rs` (per-document disk-cache root: `<stem>.darkroom-cache/` beside the
   file, with a self-ignoring `.gitignore`).
 - **`gui/`** — the UI tree: `canvas/` (the graph canvas + its gestures/
@@ -107,7 +108,7 @@ down the UI tree so child widgets don't grow a parameter fan-out.
 darkroom is immediate-mode but routes **all** graph mutations through an
 intent/undo layer rather than mutating the document inline. The frame splits
 into a **navigation phase** (settle *which* graph is active) and an **edit
-phase** (mutate that graph), because input that switches tabs/opens subgraphs
+phase** (mutate that graph), because input that switches tabs/opens graphs
 comes from *last* frame's click responses and must resolve before anything
 edits or records. `Editor` owns the pipeline state:
 
@@ -122,7 +123,7 @@ One record pass:
 
 1. **clear scratch** — `intents` + `actions`.
 2. **navigate** — apply keyboard undo/redo (which can replay a dock-layout
-   change), then surface tab activate/close + subgraph-open/new clicks off
+   change), then surface tab activate/close + graph-open/new clicks off
    last frame's responses as `UiAction`s. Open mutates the layout directly;
    activate/close queue undoable `Intent::Dock` ops. After this the active
    target is fixed for the rest of the frame.
@@ -145,21 +146,21 @@ One record pass:
    inspector chip toggles) and a `MenuCommand` may surface.
 9. **drain (post-record)** + relayout request as needed.
 
-### Source of truth: `Document` (`src/document/mod.rs`)
+### Source of truth: `Document` (`src/core/document/mod.rs`)
 The serialized, undoable unit. The graph *data* is one `scenarium::Graph`
-(`graph`), which already nests local subgraph defs and their interior graphs.
+(`graph`), which already nests local graphs recursively.
 Everything else is editor view-state, split per graph:
 
-- **`GraphRef`** — `Main` (root graph) or `Local(SubgraphId)` (a subgraph
-  interior). The active-graph handle threaded through the whole edit pipeline.
+- **`GraphRef`** — `Main` (root graph) or `Local(GraphId)` (a local graph).
+  The active-graph handle threaded through the whole edit pipeline.
 - **`GraphView`** — per-graph view metadata: `item_placements`
   (`KeyIndexVec<ItemRef, CanvasItemPlacement>` of node-body and pinned-output
   preview positions whose *order* is the shared paint stack — later items
   draw in front, `Intent::Raise` lifts either kind; `check()` asserts one
   `Node` item per graph node and one `Pin` item per pinned output),
   `viewport`, and `selected` (a `BTreeSet` so equality/serde are
-  order-independent). Root lives in `main_view`; each opened subgraph in
-  `sub_views` (lazily seeded + auto-laid-out on first open). **All of this
+  order-independent). Root lives in `main_view`; each opened graph in
+  `local_views` (lazily seeded + auto-laid-out on first open). **All of this
   is persisted and undoable by design** — reopening restores camera +
   selection, and Ctrl+Z walks them alongside structural edits.
 - **`layout: DockLayout`** (`src/document/dock.rs`) — the pane arrangement:
@@ -196,7 +197,7 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   paint-stack item — node body or pin preview), `SetNodeProperty`
   (a `NodeProperty::Disabled`/`Cache` — one intent backs both scalar toggles),
   `SetSubscription` (`subscribe: bool` — one intent backs subscribe + unsubscribe),
-  `DetachSubgraph`, `SetViewport`, `RenameBoundaryPort`, `RenameSubgraph`,
+  `DetachGraph`, `SetViewport`, `RenameBoundaryPort`, `RenameGraph`,
   plus document-global `Dock(DockOp)` (`ActivateTab` / `CloseTab` /
   `MoveTab` / `SetRatio` — activations coalesce as a switch burst, one
   divider's drag coalesces per `DockPath`).
@@ -210,7 +211,7 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   coalesce in place (a node drag = many `MoveNodes` intents → one undo entry).
 - **`UiAction`** (`gui/mod.rs`) is the navigation-request transport from the
   UI layer to `Editor`: `ActivateTab`/`CloseTab` (group-keyed) become
-  undoable `Intent::Dock` ops. `OpenGraph`/`NewSubgraph`/`OpenImageViewer`
+  undoable `Intent::Dock` ops. `OpenGraph`/`NewGraph`/`OpenImageViewer`
   add the tab via `DockLayout::find_or_insert` (graph tabs into the primary
   group, others into the focused one) — that part isn't undoable — but
   focus the tab through the same recorded activation, so undo faithfully
@@ -219,11 +220,11 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
   `gesture_key`, `coalesce`) are methods on `UndoStep`, exhaustive over the
   variants so a new one won't compile until it declares its behavior.
 - Every variant is emitted by some UI (node-title rename →
-  `RenameNode`, tab-strip rename → `RenameSubgraph`, etc.). Promote/publish/
-  export resolution (`subgraph_to_export` / `promote_to_library` /
-  `publish_local_def`) is pure document↔library logic in
+  `RenameNode`, tab-strip rename → `RenameGraph`, etc.). Promote/publish/
+  export resolution (`graph_to_export` / `promote_to_library` /
+  `publish_local_graph`) is pure document↔library logic in
   `core/edit/publish.rs` (unit-tested against bare types, `&mut Library` in /
-  `bool` changed out), not on `Document`; `app/commands/subgraph.rs` is the
+  `bool` changed out), not on `Document`; `app/commands/graph.rs` is the
   thin GUI orchestration (dialogs + dirty flag), running the mutators through
   `Engine::edit_library` — the **single** library-mutation path, which
   persists the library file and re-pushes the worker's `DiskStore` (its codec
@@ -233,13 +234,13 @@ graph (`auto_layout_default`); there is no checked-in sample graph.
 ### Reconciliation (`src/edit/reconcile/`)
 Derived state, like `Scene`. Runs in the pre-record drain when
 `needs_reconcile` is set (any structural edit). Synchronizes each local
-subgraph's interface against its interior wiring: compacts unused boundary
+graph's interface against its interior wiring: compacts unused boundary
 slots, remaps indices in the interior graph and across all instance bindings.
 Idempotent — a no-op on an already-canonical document.
 
 ### Render projection: `Scene` (`src/scene.rs`)
 A flat, per-record snapshot rebuilt from the *active* graph+view
-(`Scene::rebuild(ui, graph, view, library, ctx_def, run_state)` — see
+(`Scene::rebuild(ui, graph, view, library, run_state)` — see
 `Editor::rebuild_scene`). Names are `InternedStr` handles into aperture's
 active text arena, so the rebuild both refreshes the projection and allows the
 previous arena to recycle. Port names, types, and input-binding snapshots are
@@ -282,7 +283,7 @@ multi-thread `Runtime`, scenarium's headless `Worker`, and an mpsc channel:
   so the node header shows a `aperture::Spinner` + live elapsed-so-far
   (`App::record` repaints ~20fps while `run_state.is_running()`);
   `ExecutionFinished` → `set_results`
-  folds the final `ExecutionStats` (including nested-subgraph attribution) onto
+  folds the final `ExecutionStats` (including nested-graph attribution) onto
   authoring nodes: per-node `ExecStatus`
   (`None`/`Cached`/`Executed(secs)`/`Running`/`MissingInputs`/`Errored`) + logs.
 - **Cancel** (coarse): **Run ▸ Cancel Run** shows while `run_state.is_running()`
@@ -311,7 +312,7 @@ the record (the recursive dock-tree walk — splits as aperture `Splitter`s
 whose ratio drags surface as `DockOp::SetRatio`, groups as
 strip-over-content panes — plus the drag's drop-zone highlight, ghost
 chip, and grabbing cursor). `dock/strip.rs` is the chip row (close
-buttons, inline subgraph rename, the right-click split menu; the focused
+buttons, inline graph rename, the right-click split menu; the focused
 group's active tab wears the full accent cap); `dock/drag.rs` is the
 gesture state + the pure pointer→drop-zone classification. The rest:
 
@@ -320,8 +321,8 @@ gesture state + the pure pointer→drop-zone classification. The rest:
   cache, `inspectors` open-panel set — survive tab switches) from a resettable
   `Gestures` bundle: `NodeUI` (node bodies + drag), `ConnectionUI` (wires +
   in-flight drag + snap), `BreakerUI` (RMB/Cmd+LMB scribble that severs wires /
-  deletes nodes), `NewNodeUi` (right-click spawn popup), `SubgraphMenuUi`
-  (RMB context menu on subgraph-instance nodes), `SelectionUI` (rubber-band),
+  deletes nodes), `NewNodeUi` (right-click spawn popup), `GraphMenuUi`
+  (RMB context menu on graph-instance nodes), `SelectionUI` (rubber-band),
   and the pan anchor. `pan_zoom` holds the viewport gesture + zoom math
   (unit-tested). `cull.rs` is record-time viewport culling (unit-tested): only
   nodes and wires intersecting the visible world rect are recorded (off-screen
@@ -340,9 +341,9 @@ gesture state + the pure pointer→drop-zone classification. The rest:
   in the current scene. Sections: identity, status (outcome + elapsed),
   inputs (live values when fetched, else static bindings), outputs, log tail.
 - **`gui/node/`** — the node-body widget: `mod.rs` is `NodeUI` (node bodies +
-  drag; emits `MoveNodes`, subgraph-open requests, port-disconnect
+  drag; emits `MoveNodes`, graph-open requests, port-disconnect
   double-clicks), with sub-widgets `header` (play chip + title +
-  `S`/`■`/`D`/`R`/`↓`/`i` badges: run-to-node / subgraph / sink / disable /
+  `G`/`■`/`D`/`R`/`↓`/`i` badges: run-to-node / graph / sink / disable /
   RAM-cache / disk-cache / inspect; the
   `R` and `↓` chips flip the two bits of `Node::cache` (`CacheMode`
   `None`/`Ram`/`Disk`/`Both`) via `SetCacheMode`), `port_row` (the two port
@@ -350,7 +351,7 @@ gesture state + the pure pointer→drop-zone classification. The rest:
   missing/warning color only once a run flagged its node `MissingInputs` —
   `SceneInput::required` + `node.exec_status` + `exec_missing_glow` — so the
   port keeps its data-type color while editing), `port_rename` (inline
-  boundary-port rename in subgraph
+  boundary-port rename in graph
   interiors), and `value_editor` (inline `Const` editing; an input with
   `value_variants` renders a preset dropdown over them regardless of type — carried
   on the flat `Scene::value_variants_pool` sliced per input by
@@ -379,9 +380,9 @@ Key cross-cutting mechanisms:
 `persistence.rs` is pure path⇄type I/O (dialogs + serde), no `App`/undo/preferences
 coupling — `commands.rs` orchestrates. Documents round-trip through any
 `SerdeFormat` (Rhai is canonical). `library.rs` reads/writes the shared
-subgraph library (`darkroom.library.rhai`): a set of `SubgraphDef`s loaded into
+graph library (`darkroom.library.rhai`): a set of `Graph`s loaded into
 `Library` at startup and grown by the **promote/publish** menu commands. Local
-subgraph defs track lineage via an `origin` field — "Publish" updates the
+graphs track lineage via an `origin` field — "Publish" updates the
 linked library entry in place, else creates a new one.
 
 `Preferences` (`darkroom.preferences.toml` in cwd) persists last-theme-name +
@@ -395,11 +396,11 @@ plus a sticky `error` slot holding the last failure
 bar until a subsequent success of the same family (a run kick, a finished
 run, a file op) assigns `None`. Compile failures report themselves from
 `Engine::compile`; frontends report their own outcomes (run results, file
-ops, subgraph ops).
+ops, graph ops).
 
 ### Theme (`src/theme.rs`)
 The look is **code-defined**, not embedded TOML. Module consts hold every
-color (`CANVAS_BG`, `NODE_FILL`, `BADGE_SUBGRAPH`, `EXEC_EXECUTED_GLOW`,
+color (`CANVAS_BG`, `NODE_FILL`, `BADGE_GRAPH`, `EXEC_EXECUTED_GLOW`,
 `INPUT_PORT`, …) and layout dimension (`NODE_MIN_WIDTH`, `PORT_SIZE`,
 `CANVAS_DOT_SPACING`, …). `Theme::default()` assembles them. `Theme` bundles
 darkroom's own fields *and* the nested `aperture::Theme` (scalar fields first,

@@ -11,7 +11,7 @@ use aperture::{
     Align, Background, Configure, ContextMenu, Corners, InternedStr, MenuItem, Panel, Sense,
     Sizing, Spacing, Text, TextStyle, Ui, VAlign, WidgetId,
 };
-use scenarium::SubgraphId;
+use scenarium::GraphId;
 
 use crate::core::document::dock::{DockDrop, DockOp, SplitSide, TabGroup, TabGroupId};
 use crate::core::document::{GraphRef, TabRef};
@@ -20,8 +20,8 @@ use crate::gui::theme::Theme;
 use crate::gui::widgets::inline_rename::InlineRename;
 use crate::gui::widgets::support::{colored_text, muted_text};
 
-/// Character cap for a subgraph name in the inline rename editor.
-const SUBGRAPH_NAME_MAX_CHARS: usize = 32;
+/// Character cap for a graph name in the inline rename editor.
+const GRAPH_NAME_MAX_CHARS: usize = 32;
 
 /// One tab's display state, built by `main_window` from its group: the
 /// tab plus its resolved label text (the one projection that needs the
@@ -44,8 +44,8 @@ pub(crate) fn movable(tab: TabRef) -> bool {
     !matches!(tab, TabRef::Graph(_))
 }
 
-/// The subgraph behind an inline-renamable tab (a `Local` graph tab).
-pub(crate) fn renamable_subgraph(tab: TabRef) -> Option<SubgraphId> {
+/// The graph behind an inline-renamable tab (a `Local` graph tab).
+pub(crate) fn renamable_graph(tab: TabRef) -> Option<GraphId> {
     match tab {
         TabRef::Graph(GraphRef::Local(id)) => Some(id),
         _ => None,
@@ -75,15 +75,15 @@ fn tab_menu_wid(group: TabGroupId, index: usize) -> WidgetId {
     WidgetId::from_hash(("dock.tab_menu", group, index))
 }
 
-/// Stable id for the rename editor on a subgraph tab. Keyed on the
-/// subgraph id (not group/index) so the editing state survives the tab
+/// Stable id for the rename editor on a graph tab. Keyed on the
+/// graph id (not group/index) so the editing state survives the tab
 /// moving or reordering. A click landing on the label is captured
 /// there, so the scan polls this id alongside the outer chip's.
-pub(crate) fn tab_rename_wid(sub_id: SubgraphId) -> WidgetId {
-    WidgetId::from_hash(("dock.tab_rename", sub_id))
+pub(crate) fn tab_rename_wid(graph_id: GraphId) -> WidgetId {
+    WidgetId::from_hash(("dock.tab_rename", graph_id))
 }
 
-/// Stable id for the trailing "+" new-subgraph chip (currently hidden —
+/// Stable id for the trailing "+" new-graph chip (currently hidden —
 /// see [`new_tab_chip`]).
 pub(crate) fn tab_new_wid() -> WidgetId {
     WidgetId::from_hash("dock.tab_new")
@@ -94,7 +94,7 @@ pub(crate) fn tab_new_wid() -> WidgetId {
 /// stands exactly as tall as a tab while being square.
 const NEW_TAB_CHIP_SIDE: f32 = 13.0 * 1.2 + 8.0;
 
-/// The trailing "+" chip that creates and opens a fresh subgraph. A square,
+/// The trailing "+" chip that creates and opens a fresh graph. A square,
 /// tab-shaped chip (top corners rounded like the tabs, bottom square) that
 /// reads as an inactive tab; the click is consumed in [`DockUi::scan`](super::DockUi::scan).
 ///
@@ -152,7 +152,7 @@ struct StripCtx<'a> {
 }
 
 /// Draw one group's strip. Tab activate / close clicks are handled in
-/// [`DockUi::scan`](super::DockUi::scan) (prepass); subgraph-rename commits and split-menu
+/// [`DockUi::scan`](super::DockUi::scan) (prepass); graph-rename commits and split-menu
 /// picks push directly into `out` this frame.
 pub(crate) fn show(
     ui: &mut Ui,
@@ -257,12 +257,12 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
                 .child_align(Align::v(VAlign::Center))
                 .background(inner_bg)
                 .show(ui, |ui| {
-                    // Subgraph tab: inline-renamable label. Double-click swaps
+                    // Graph tab: inline-renamable label. Double-click swaps
                     // to a `TextEdit`; Enter / blur commits. A single click on
                     // the label also switches tab (the label's own panel
                     // captures it, so the outer chip's click handler in
                     // `DockUi::scan` wouldn't see it).
-                    if let Some(sub_id) = renamable_subgraph(label.tab) {
+                    if let Some(graph_id) = renamable_graph(label.tab) {
                         // `clicked` is *not* forwarded to an activation intent
                         // here — `DockUi::scan` polls the same response in
                         // the prepass and pushes the activation as a
@@ -272,15 +272,15 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
                         // in Pass B with no measured layouts and dropping its
                         // connections for a frame.
                         let ev = InlineRename::new(
-                            tab_rename_wid(sub_id),
+                            tab_rename_wid(graph_id),
                             label.text.clone(),
                             &theme.inline_rename,
                         )
-                        .max_chars(SUBGRAPH_NAME_MAX_CHARS)
+                        .max_chars(GRAPH_NAME_MAX_CHARS)
                         .style(label_style)
                         .show(ui);
                         if let Some(to) = ev.committed {
-                            s.out.push(Intent::RenameSubgraph { id: sub_id, to });
+                            s.out.push(Intent::RenameGraph { id: graph_id, to });
                         }
                     } else {
                         // Main / non-graph tab: plain label, activation handled

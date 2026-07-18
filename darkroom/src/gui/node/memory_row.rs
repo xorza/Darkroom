@@ -50,7 +50,7 @@ pub(crate) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode) {
                         meter(ui, theme, theme.colors.badge_cache, "RAM", ram.cpu);
                     }
                     if ram.gpu > 0 {
-                        meter(ui, theme, theme.colors.badge_subgraph, "VRAM", ram.gpu);
+                        meter(ui, theme, theme.colors.badge_graph, "VRAM", ram.gpu);
                     }
                 });
             proportion_bar(ui, theme, ram);
@@ -93,7 +93,7 @@ fn proportion_bar(ui: &mut Ui, theme: &Theme, ram: RamUsage) {
                 bar_segment(ui, "ram", theme.colors.badge_cache, ram.cpu as f32);
             }
             if ram.gpu > 0 {
-                bar_segment(ui, "vram", theme.colors.badge_subgraph, ram.gpu as f32);
+                bar_segment(ui, "vram", theme.colors.badge_graph, ram.gpu as f32);
             }
         });
 }

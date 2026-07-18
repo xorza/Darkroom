@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, OutputPort, Subscription};
-use scenarium::{DetachedNode, SubgraphDef, SubgraphId};
+use scenarium::{DetachedNode, Graph, GraphId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::canvas_item_placement::CanvasItemPlacement;
@@ -24,7 +24,7 @@ use crate::core::document::{BoundarySide, ItemRef, Viewport};
 
 /// One scalar node property an editor can toggle — the payload of
 /// [`Intent::SetNodeProperty`]. Both variants are geometry-neutral (changing
-/// one never remeasures the node or reshapes a subgraph interface) and dirty
+/// one never remeasures the node or reshapes a graph interface) and dirty
 /// the document, so they share one intent / step rather than a variant each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum NodeProperty {
@@ -65,11 +65,9 @@ pub(crate) enum Intent {
         pos: Vec2,
         node_id: NodeId,
         node: Node,
-        /// Local subgraph def to add alongside the node — set when the
-        /// node is a `Subgraph(Local(_))` instance whose def the caller
-        /// just created (e.g. instancing a library subgraph, which drops
-        /// a localized copy). `None` for plain func nodes.
-        def: Option<Box<SubgraphDef>>,
+        /// Local graph to add alongside a new `Graph(Local(_))` instance.
+        /// `None` for nodes that do not materialize a nested graph.
+        graph: Option<(GraphId, Box<Graph>)>,
         /// Initial input bindings to seed alongside the node — the caller
         /// fills these with each input's func-declared default
         /// (`Binding::Const`) so a fresh node lands ready to run instead of
@@ -135,13 +133,13 @@ pub(crate) enum Intent {
         node_id: NodeId,
         to: NodeProperty,
     },
-    /// Fork a private standalone copy of a `Subgraph(Local(_))` node's
-    /// def and re-point the node at it (the S-badge "Detach" action).
+    /// Fork a private standalone copy of a `Graph(Local(_))` node's
+    /// nested graph and re-point the node at it (the G-badge "Detach" action).
     /// The copy gets fresh ids and a cleared `origin`, so it diverges
     /// from any sibling instances *and* from the library it came from.
-    /// `build_step` reads the source def from the active graph; dropped
-    /// when the node isn't a local subgraph instance.
-    DetachSubgraph {
+    /// `build_step` reads the source graph from the active graph; dropped
+    /// when the node isn't a local graph instance.
+    DetachGraph {
         node_id: NodeId,
     },
     SetViewport {
@@ -152,22 +150,22 @@ pub(crate) enum Intent {
     /// the whole layout before/after (it's tiny), so every dock op is
     /// one uniform, trivially reversible step.
     Dock(DockOp),
-    /// Rename a subgraph interface port (`def.inputs[idx]` for
-    /// `side = Input`, `def.outputs[idx]` for `Output`). Scoped to the
-    /// active `Local` target — `build_step` reads the `SubgraphId` from
+    /// Rename a graph interface port (`graph.inputs[idx]` for
+    /// `side = Input`, `graph.outputs[idx]` for `Output`). Scoped to the
+    /// active `Local` target — `build_step` reads the `GraphId` from
     /// the drain `target`, so the intent only carries the side + index +
-    /// new name. Dropped when the target isn't a subgraph interior.
+    /// new name. Dropped when the target isn't a graph interior.
     RenameBoundaryPort {
         side: BoundarySide,
         idx: usize,
         to: String,
     },
-    /// Rename a local subgraph def (`graph.subgraphs[id].name`).
+    /// Rename a local graph (`graph.graphs[id].name`).
     /// Document-global (not scoped to any one graph) so it works
     /// regardless of which tab is active. Drives the tab-strip's
     /// double-click-to-rename label.
-    RenameSubgraph {
-        id: SubgraphId,
+    RenameGraph {
+        id: GraphId,
         to: String,
     },
     /// Add (`subscribe = true`) or remove (`false`) an event subscription:
@@ -217,14 +215,12 @@ pub(crate) enum UndoStep {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum GraphStep {
     /// Pure creation: the "from" state is "node absent", which is
-    /// implicit — undo removes the node by id (and `def` if present).
-    /// `def` is a `Local` subgraph def added alongside the instance node
-    /// (library-subgraph instancing); `None` for plain func nodes.
+    /// implicit — undo removes the node by id and its new nested graph.
     AddNode {
         pos: Vec2,
         node_id: NodeId,
         node: Node,
-        def: Option<Box<SubgraphDef>>,
+        graph: Option<(GraphId, Box<Graph>)>,
         bindings: Vec<(InputPort, Binding)>,
     },
     /// Add a batch of nodes + their internal wiring and swap the
@@ -293,13 +289,13 @@ pub(crate) enum GraphStep {
         from: NodeProperty,
         to: NodeProperty,
     },
-    /// Fork + re-point: `def` (a fresh standalone copy) joins the
-    /// graph's local defs and the node swaps from `from_id` to `def.id`.
-    /// Undo restores the `from_id` ref and drops `def`.
-    DetachSubgraph {
+    /// Fork + re-point: a fresh graph joins the local map and the node
+    /// swaps from `from_id` to `to_id`. Undo restores the old link.
+    DetachGraph {
         node_id: NodeId,
-        from_id: SubgraphId,
-        def: Box<SubgraphDef>,
+        from_id: GraphId,
+        to_id: GraphId,
+        graph: Box<Graph>,
     },
     SetViewport {
         from: Viewport,
@@ -337,7 +333,7 @@ pub(crate) enum GraphStep {
 }
 
 /// Document-global steps — they mutate fields that aren't scoped to a
-/// single graph (active tab, the tab list, a subgraph's interface), so
+/// single graph (active tab, the tab list, a graph's interface), so
 /// they bypass the `EditScope` resolution entirely.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DocStep {
@@ -355,7 +351,7 @@ pub(crate) enum DocStep {
         key: Option<GestureKey>,
         structural: bool,
     },
-    /// `sub_id` is resolved at build time so apply/revert are
+    /// `graph_id` is resolved at build time so apply/revert are
     /// self-contained (don't need the drain target). Carries both names.
     ///
     /// `idx` is only a *hint*: apply/revert resolve the slot by name
@@ -367,16 +363,16 @@ pub(crate) enum DocStep {
     /// ambiguity only under duplicate names *and* compaction together —
     /// rare and user-created.
     RenameBoundaryPort {
-        sub_id: SubgraphId,
+        graph_id: GraphId,
         side: BoundarySide,
         idx: usize,
         from: String,
         to: String,
     },
-    /// Rename a local subgraph def. Self-contained on the step (both
+    /// Rename a local graph. Self-contained on the step (both
     /// names) so apply/revert don't need to re-read the doc.
-    RenameSubgraph {
-        id: SubgraphId,
+    RenameGraph {
+        id: GraphId,
         from: String,
         to: String,
     },

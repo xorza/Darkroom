@@ -1,18 +1,14 @@
 use std::collections::HashMap;
 
-use common::KeyIndexVec;
 use hashbrown::HashMap as NodeMap;
 
+use crate::graph::interface::GraphEvent;
 use crate::graph::{Binding, Graph, InputPort, NodeId, OutputPort, Subscription};
 
-#[derive(Debug)]
-pub(crate) struct FreshGraph {
-    pub(crate) graph: Graph,
-    pub(crate) id_map: HashMap<NodeId, NodeId>,
-}
-
 impl Graph {
-    pub(crate) fn with_fresh_node_ids(&self) -> FreshGraph {
+    /// Copy this graph with fresh node identities throughout its local graph
+    /// tree. The returned value has no library lineage.
+    pub fn fresh_copy(&self) -> Graph {
         let mut id_map = HashMap::with_capacity(self.nodes.len());
         let mut nodes = NodeMap::with_capacity(self.nodes.len());
         for (node_id, node) in &self.nodes {
@@ -47,17 +43,31 @@ impl Graph {
             .iter()
             .map(|port| OutputPort::new(remap(port.node_id), port.port_idx))
             .collect();
-        let mut subgraphs = KeyIndexVec::with_capacity(self.subgraphs.len());
-        for definition in self.subgraphs.iter() {
-            subgraphs.add(definition.remapped_interior());
-        }
-        let graph = Graph {
+        let events = self
+            .events
+            .iter()
+            .map(|event| GraphEvent {
+                emitter: remap(event.emitter),
+                ..event.clone()
+            })
+            .collect();
+        let graphs = self
+            .graphs
+            .iter()
+            .map(|(graph_id, graph)| (*graph_id, graph.fresh_copy()))
+            .collect();
+        Graph {
+            name: self.name.clone(),
+            category: self.category.clone(),
+            inputs: self.inputs.clone(),
+            outputs: self.outputs.clone(),
+            events,
+            origin: None,
             nodes,
             bindings,
             subscriptions,
             pinned_outputs,
-            subgraphs,
-        };
-        FreshGraph { graph, id_map }
+            graphs,
+        }
     }
 }

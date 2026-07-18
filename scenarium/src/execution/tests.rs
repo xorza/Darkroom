@@ -2643,7 +2643,7 @@ mod behavior {
         let node_id: NodeId = "acb11422-9951-4fc6-9696-53b1a6699120".into();
         let node: Node = library.by_name("self_cancel").unwrap().into();
         graph.insert(node_id, node);
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -2730,7 +2730,7 @@ mod behavior {
         let node_id: NodeId = "c791f8aa-3bf9-435d-8530-f3904b4b6a28".into();
         let node: Node = library.by_name("always_cancel").unwrap().into();
         graph.insert(node_id, node);
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -2813,8 +2813,9 @@ mod behavior {
 
 mod composite_behavior {
     use super::*;
+    use crate::graph::Graph;
     use crate::graph::NodeKind;
-    use crate::graph::subgraph::{SubgraphDef, SubgraphRef};
+    use crate::graph::interface::{GraphId, GraphLink};
     use crate::node::definition::FuncOutput;
 
     fn func_node(library: &Library, func_name: &str, node_name: &str) -> Node {
@@ -2828,26 +2829,27 @@ mod composite_behavior {
         FuncOutput::new(name, DataType::Int)
     }
 
-    /// A subgraph def with no inputs and one output, whose interior is the
-    /// impure `get_b` (named `inner_name`) feeding `SubgraphOutput[0]`.
-    fn impure_output_def(library: &Library, id: &str, name: &str, inner_name: &str) -> SubgraphDef {
+    /// A graph with no inputs and one output, whose interior is the
+    /// impure `get_b` (named `inner_name`) feeding `GraphOutput[0]`.
+    fn impure_output_def(library: &Library, name: &str, inner_name: &str) -> Graph {
         let inner = func_node(library, "get_b", inner_name);
-        let so = Node::new(NodeKind::SubgraphOutput);
-        let mut interior = Graph::default();
-        let inner_id = interior.add(inner);
-        let so_id = interior.add(so);
-        interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
-        SubgraphDef::new(id, name)
-            .graph(interior)
-            .output(int_output("Out"))
+        let so = Node::new(NodeKind::GraphOutput);
+        let mut graph = Graph::new(name).output(int_output("Out"));
+        let inner_id = graph.add(inner);
+        let so_id = graph.add(so);
+        graph.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
+        graph
     }
 
     /// Main graph: one instance of `def` whose output feeds a sink `print`.
-    fn main_with(library: &Library, def: SubgraphDef) -> Graph {
-        let def_id = def.id;
+    fn main_with(library: &Library, def: Graph) -> Graph {
+        main_with_id(library, GraphId::unique(), def)
+    }
+
+    fn main_with_id(library: &Library, def_id: GraphId, def: Graph) -> Graph {
         let mut graph = Graph::default();
-        graph.subgraphs.add(def.clone());
-        let inst = graph.add_subgraph_node(&def, SubgraphRef::Local(def_id));
+        graph.insert_graph(def_id, def.clone());
+        let inst = graph.add_graph_node(&def, GraphLink::Local(def_id));
         let p = func_node(library, "Print", "p");
         let p_id = graph.add(p);
         graph.set_input_binding(InputPort::new(p_id, 0), Binding::bind(inst, 0));
@@ -2876,12 +2878,7 @@ mod composite_behavior {
         // impure node — flattening must preserve its impurity.
         let mut library = test_func_lib(TestFuncHooks::default());
         library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
-        let def = impure_output_def(
-            &library,
-            "00000000-0000-0000-0000-0000000000a1",
-            "S",
-            "inner",
-        );
+        let def = impure_output_def(&library, "S", "inner");
         let graph = main_with(&library, def);
         assert!(
             reruns_with_cache(&graph, &library, "inner"),
@@ -2890,16 +2887,11 @@ mod composite_behavior {
     }
 
     #[test]
-    fn update_rejects_func_missing_inside_subgraph() {
+    fn update_rejects_func_missing_inside_graph() {
         // The check descends composites: a func only the *interior*
         // references, absent from the lib, is still caught.
         let library = test_func_lib(TestFuncHooks::default());
-        let def = impure_output_def(
-            &library,
-            "00000000-0000-0000-0000-0000000000a1",
-            "S",
-            "inner",
-        );
+        let def = impure_output_def(&library, "S", "inner");
         let graph = main_with(&library, def);
         let get_b = library.by_name("get_b").unwrap().id;
         let mut incomplete_library = library.clone();
@@ -2916,40 +2908,32 @@ mod composite_behavior {
     }
 
     #[test]
-    fn nested_impure_interior_reruns() {
+    fn nested_impure_interior_reruns_when_local_graph_ids_repeat() {
         // A doubly-nested impure node recomputes — flattening preserves its
-        // impurity through two composite levels.
+        // impurity through two composite levels whose map-local ids coincide.
         let mut library = test_func_lib(TestFuncHooks::default());
         library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
-        let inner_def = impure_output_def(
-            &library,
-            "00000000-0000-0000-0000-0000000000b1",
-            "Inner",
-            "deep",
-        );
-        let inner_id = inner_def.id;
-        let mut outer_interior = Graph::default();
-        outer_interior.subgraphs.add(inner_def.clone());
-        let inner_inst = outer_interior.add_subgraph_node(&inner_def, SubgraphRef::Local(inner_id));
-        let so = Node::new(NodeKind::SubgraphOutput);
+        let inner_def = impure_output_def(&library, "Inner", "deep");
+        let repeated_id = GraphId::unique();
+        let mut outer_interior = Graph::new("Outer").output(int_output("Out"));
+        outer_interior.insert_graph(repeated_id, inner_def.clone());
+        let inner_inst = outer_interior.add_graph_node(&inner_def, GraphLink::Local(repeated_id));
+        let so = Node::new(NodeKind::GraphOutput);
         let so_id = outer_interior.add(so);
         outer_interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_inst, 0));
-        let outer_def = SubgraphDef::new("00000000-0000-0000-0000-0000000000b2", "Outer")
-            .graph(outer_interior)
-            .output(int_output("Out"));
-        let graph = main_with(&library, outer_def);
+        let graph = main_with_id(&library, repeated_id, outer_interior);
         assert!(
             reruns_with_cache(&graph, &library, "deep"),
             "doubly-nested impure interior recomputes"
         );
     }
 
-    /// A node seed can target a *subgraph-interior* node by its authoring id: the seed
+    /// A node seed can target a *graph-interior* node by its authoring id: the seed
     /// resolves through the flatten map (interior flat ids are hashed from the descent
     /// path), runs just that node, and its value reads back under the same authoring id.
     /// The sink `print` (panicking hook) never fires.
     #[tokio::test]
-    async fn seeding_a_subgraph_interior_node_runs_only_it() {
+    async fn seeding_a_graph_interior_node_runs_only_it() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         let get_b_calls = Arc::new(AtomicUsize::new(0));
@@ -2966,18 +2950,15 @@ mod composite_behavior {
 
         // `impure_output_def`'s interior by hand, keeping the interior node's id.
         let inner = func_node(&library, "get_b", "inner");
-        let so = Node::new(NodeKind::SubgraphOutput);
-        let mut interior = Graph::default();
+        let so = Node::new(NodeKind::GraphOutput);
+        let mut interior = Graph::new("S").output(int_output("Out"));
         let inner_id = interior.add(inner);
         let so_id = interior.add(so);
         interior.set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
-        let def = SubgraphDef::new("00000000-0000-0000-0000-0000000000c1", "S")
-            .graph(interior)
-            .output(int_output("Out"));
-        let graph = main_with(&library, def);
+        let graph = main_with(&library, interior);
         let instance_id = graph
             .iter()
-            .find(|node| matches!(node.kind, NodeKind::Subgraph(_)))
+            .find(|node| matches!(node.kind, NodeKind::Graph(_)))
             .unwrap()
             .id;
 
@@ -3253,7 +3234,7 @@ mod execution {
         // nodes now default to `CacheMode::None`.
         node.cache = CacheMode::Ram;
         graph.insert("0b35e5e4-be30-4733-a5a2-9d474000de10".into(), node);
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -3823,7 +3804,7 @@ mod events {
         graph.insert(recv_id, node(&library, "recv"));
         graph.subscribe(emit_id, 0, recv_id);
         graph.set_input_binding(InputPort::new(recv_id, 0), Binding::bind(emit_id, 0));
-        graph.validate();
+        graph.debug_check();
 
         EventFixture {
             library,
@@ -4008,7 +3989,7 @@ mod events {
         // The sink's cone (source → sink) is wholly independent of emit.
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(source_id, 0));
         graph.subscribe(emit_id, 0, trigger_id);
-        graph.validate_with(&library);
+        graph.debug_check_for_execution(&library);
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library)?;
@@ -4086,7 +4067,7 @@ mod events {
         graph.insert(source_id, node(&library, "source"));
         graph.insert(sink_id, node(&library, "sink"));
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(source_id, 0));
-        graph.validate_with(&library);
+        graph.debug_check_for_execution(&library);
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library)?;
@@ -4145,7 +4126,7 @@ mod output_demand {
         graph.insert(sink_id, node(&library, "sink"));
         // Consume only output 0; output 1 has no consumer.
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(split_id, 0));
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -4203,7 +4184,7 @@ mod output_demand {
         // Output 0 has a real consumer; output 1 has none, but is pinned.
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(split_id, 0));
         graph.set_output_pinned(OutputPort::new(split_id, 1), true);
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -4323,7 +4304,7 @@ mod topology {
             .unwrap()
             .id;
         graph.detach_node(get_b_id);
-        graph.validate();
+        graph.debug_check();
 
         eg.update(&graph, &library).unwrap();
         assert_eq!(eg.compiled.program.e_nodes.len(), 4);
@@ -4390,7 +4371,7 @@ mod topology {
         graph.insert(print2_id, node(&library, "Print"));
         graph.set_input_binding(InputPort::new(print1_id, 0), Binding::bind(get_a_id, 0));
         graph.set_input_binding(InputPort::new(print2_id, 0), Binding::bind(get_b_id, 0));
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -4438,7 +4419,7 @@ mod topology {
         graph.insert(print_a_id, node(&library, "Print"));
         graph.set_input_binding(InputPort::new(print_b_id, 0), Binding::bind(get_b_id, 0));
         graph.set_input_binding(InputPort::new(print_a_id, 0), Binding::bind(get_a_id, 0));
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -4463,7 +4444,7 @@ mod topology {
 
         graph.detach_node(removed_source_id);
         graph.detach_node(removed_print_id);
-        graph.validate();
+        graph.debug_check();
 
         eg.update(&graph, &library).unwrap();
         let idx_after = eg
@@ -4509,7 +4490,7 @@ mod topology {
         graph.insert(get_a_id, node(&library, "get_a"));
         graph.insert(print_a_id, node(&library, "Print"));
         graph.set_input_binding(InputPort::new(print_a_id, 0), Binding::bind(get_a_id, 0));
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -4522,7 +4503,7 @@ mod topology {
             graph.insert(gb, node(&library, "get_b"));
             graph.insert(pb, node(&library, "Print"));
             graph.set_input_binding(InputPort::new(pb, 0), Binding::bind(gb, 0));
-            graph.validate();
+            graph.debug_check();
             eg.update(&graph, &library).unwrap();
             assert_eq!(eg.compiled.program.e_nodes.len(), 4, "round {round} grow");
             printed.lock().await.clear();
@@ -4534,7 +4515,7 @@ mod topology {
             // Remove it again.
             graph.detach_node(gb);
             graph.detach_node(pb);
-            graph.validate();
+            graph.debug_check();
             eg.update(&graph, &library).unwrap();
             assert_eq!(eg.compiled.program.e_nodes.len(), 2, "round {round} shrink");
             printed.lock().await.clear();
@@ -4550,10 +4531,11 @@ mod topology {
     }
 }
 
-mod subgraph {
+mod graph {
     use super::*;
+    use crate::graph::Graph;
     use crate::graph::NodeKind;
-    use crate::graph::subgraph::{SubgraphDef, SubgraphEvent, SubgraphId, SubgraphRef};
+    use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
     use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
     use crate::node::event::EventLambda;
     use std::sync::Mutex as StdMutex;
@@ -4567,12 +4549,16 @@ mod subgraph {
     }
 
     /// `in(A,B) -> sum -> out(Sum)`.
-    fn wrap_sum_def(library: &Library) -> SubgraphDef {
-        let in_node = Node::new(NodeKind::SubgraphInput);
+    fn wrap_sum_def(library: &Library) -> Graph {
+        let in_node = Node::new(NodeKind::GraphInput);
         let sum = fnode(library, "sum");
-        let out = Node::new(NodeKind::SubgraphOutput);
+        let out = Node::new(NodeKind::GraphOutput);
 
-        let mut graph = Graph::default();
+        let mut graph = Graph::new("WrapSum")
+            .category("Test")
+            .input(FuncInput::required("A", DataType::Int))
+            .input(FuncInput::optional("B", DataType::Int))
+            .output(int_out("Sum"));
         let in_id = graph.add(in_node);
         let sum_id = graph.add(sum);
         let out_id = graph.add(out);
@@ -4580,12 +4566,14 @@ mod subgraph {
         graph.set_input_binding(InputPort::new(sum_id, 1), Binding::bind(in_id, 1));
         graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_id, 0));
 
-        SubgraphDef::new(SubgraphId::unique(), "WrapSum")
-            .category("Test")
-            .graph(graph)
-            .input(FuncInput::required("A", DataType::Int))
-            .input(FuncInput::optional("B", DataType::Int))
-            .output(int_out("Sum"))
+        graph
+    }
+
+    fn local_instance(parent: &mut Graph, graph: Graph) -> Node {
+        let graph_id = GraphId::unique();
+        let node = Node::graph_instance(&graph, GraphLink::Local(graph_id));
+        parent.insert_graph(graph_id, graph);
+        node
     }
 
     /// A composite computes through the flattened interior end to end.
@@ -4605,11 +4593,10 @@ mod subgraph {
 
         let get_a = fnode(&library, "get_a");
         let get_b = fnode(&library, "get_b");
-        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let print = fnode(&library, "Print");
 
         let mut graph = Graph::default();
-        graph.subgraphs.add(def);
+        let c = local_instance(&mut graph, def);
         let a_id = graph.add(get_a);
         let b_id = graph.add(get_b);
         let c_id = graph.add(c);
@@ -4644,24 +4631,20 @@ mod subgraph {
         // def TwoSources: get_a -> out0, get_b -> out1 (no inputs).
         let src_a = fnode(&library, "get_a");
         let src_b = fnode(&library, "get_b");
-        let out = Node::new(NodeKind::SubgraphOutput);
-        let mut def_graph = Graph::default();
+        let out = Node::new(NodeKind::GraphOutput);
+        let mut def_graph = Graph::new("TwoSources")
+            .category("Test")
+            .outputs([int_out("O0"), int_out("O1")]);
         let sa = def_graph.add(src_a);
         let sb = def_graph.add(src_b);
         let out_id = def_graph.add(out);
         def_graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(sa, 0));
         def_graph.set_input_binding(InputPort::new(out_id, 1), Binding::bind(sb, 0));
-        let def = SubgraphDef::new(SubgraphId::unique(), "TwoSources")
-            .category("Test")
-            .graph(def_graph)
-            .outputs([int_out("O0"), int_out("O1")]);
-
         // parent: C, print <- C.out0 (out1 unused).
-        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let print = fnode(&library, "Print");
 
         let mut graph = Graph::default();
-        graph.subgraphs.add(def);
+        let c = local_instance(&mut graph, def_graph);
         let c_id = graph.add(c);
         let print_id = graph.add(print);
         graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(c_id, 0));
@@ -4683,11 +4666,10 @@ mod subgraph {
 
         // C.in0 <- C.out0 (self-cycle through the composite); print <- C.out0
         // so the cyclic node is reachable from a sink.
-        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let print = fnode(&library, "Print");
 
         let mut graph = Graph::default();
-        graph.subgraphs.add(def);
+        let c = local_instance(&mut graph, def);
         let c_id = graph.add(c);
         let print_id = graph.add(print);
         graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(c_id, 0));
@@ -4720,11 +4702,10 @@ mod subgraph {
 
         let get_a = fnode(&library, "get_a");
         let get_b = fnode(&library, "get_b");
-        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let print = fnode(&library, "Print");
 
         let mut graph = Graph::default();
-        graph.subgraphs.add(def);
+        let c = local_instance(&mut graph, def);
         let a_id = graph.add(get_a);
         let b_id = graph.add(get_b);
         let c_id = graph.add(c);
@@ -4763,19 +4744,13 @@ mod subgraph {
     fn two_instances_get_distinct_leaf_ids() {
         let mut library = test_func_lib(TestFuncHooks::default());
         let def = wrap_sum_def(&library);
-        let def_id = def.id;
-        library.insert_subgraph(def);
+        let def_id = GraphId::unique();
+        library.insert_graph(def_id, def);
 
         let mut graph = Graph::default();
-        let def_ref = library.subgraph_by_id(&def_id).unwrap();
-        graph.add(Node::subgraph_instance(
-            def_ref,
-            SubgraphRef::Linked(def_id),
-        ));
-        graph.add(Node::subgraph_instance(
-            def_ref,
-            SubgraphRef::Linked(def_id),
-        ));
+        let def_ref = library.graph_by_id(&def_id).unwrap();
+        graph.add(Node::graph_instance(def_ref, GraphLink::Shared(def_id)));
+        graph.add(Node::graph_instance(def_ref, GraphLink::Shared(def_id)));
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -4795,20 +4770,19 @@ mod subgraph {
     /// The `FlattenMap` maps a flattened interior node back to the
     /// editor's authoring ids: `attribution` yields the node's own id
     /// inside the def's graph, then each enclosing composite instance.
-    /// This is what lets the editor show per-node stats inside a subgraph
+    /// This is what lets the editor show per-node stats inside a graph
     /// and accumulate them onto the instance node.
     #[test]
     fn flatten_map_attributes_interior_to_authoring_ids() {
         let library = test_func_lib(TestFuncHooks::default());
         let def = wrap_sum_def(&library);
         // The id the editor knows the interior node by (in the def graph).
-        let interior_sum_id = def.graph.iter().find(|n| n.name == "sum").unwrap().id;
+        let interior_sum_id = def.iter().find(|n| n.name == "sum").unwrap().id;
 
         let get_a = fnode(&library, "get_a");
-        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
 
         let mut graph = Graph::default();
-        graph.subgraphs.add(def);
+        let c = local_instance(&mut graph, def);
         let a_id = graph.add(get_a);
         let c_id = graph.add(c);
         graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(a_id, 0));
@@ -4862,23 +4836,19 @@ mod subgraph {
         // def: a single `ticker`, its `tick` event exposed as the composite's
         // event 0.
         let emitter = fnode(&library, "ticker");
-        let mut def_graph = Graph::default();
+        let mut def_graph = Graph::new("Exposer").category("Test");
         let emitter_id = def_graph.add(emitter);
-        let def = SubgraphDef::new(SubgraphId::unique(), "Exposer")
-            .category("Test")
-            .graph(def_graph)
-            .event(SubgraphEvent {
-                name: "tick".into(),
-                emitter: emitter_id,
-                emitter_event_idx: 0,
-            });
+        def_graph.events.push(GraphEvent {
+            name: "tick".into(),
+            emitter: emitter_id,
+            emitter_event_idx: 0,
+        });
 
         // parent: composite C, and `listener` subscribing to C's event 0.
-        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
         let listener = fnode(&library, "Print");
 
         let mut graph = Graph::default();
-        graph.subgraphs.add(def);
+        let c = local_instance(&mut graph, def_graph);
         let c_id = graph.add(c);
         let listener_id = graph.add(listener);
         graph.subscribe(c_id, 0, listener_id);
@@ -4892,28 +4862,23 @@ mod subgraph {
     }
 
     /// Triggering a composite (as a subscriber) reaches the interior nodes
-    /// wired to its `SubgraphInput` trigger.
+    /// wired to its `GraphInput` trigger.
     #[test]
     fn triggering_composite_reaches_interior_subscribers() {
         let library = func_lib_with_ticker();
 
-        // def: SubgraphInput trigger → interior `print` subscribes to it.
-        let si = Node::new(NodeKind::SubgraphInput);
+        // def: GraphInput trigger → interior `print` subscribes to it.
+        let si = Node::new(NodeKind::GraphInput);
         let reactor = fnode(&library, "Print");
-        let mut def_graph = Graph::default();
+        let mut def_graph = Graph::new("Reactor").category("Test");
         let si_id = def_graph.add(si);
         let reactor_id = def_graph.add(reactor);
         def_graph.subscribe(si_id, 0, reactor_id);
-        let def = SubgraphDef::new(SubgraphId::unique(), "Reactor")
-            .category("Test")
-            .graph(def_graph);
-
         // parent: `ticker` emits; composite C subscribes to it.
         let emitter = fnode(&library, "ticker");
-        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
 
         let mut graph = Graph::default();
-        graph.subgraphs.add(def);
+        let c = local_instance(&mut graph, def_graph);
         let emitter_id = graph.add(emitter);
         let c_id = graph.add(c);
         graph.subscribe(emitter_id, 0, c_id);
@@ -4942,13 +4907,13 @@ mod subgraph {
         };
         let mut library = test_func_lib(hooks);
         let def = wrap_sum_def(&library);
-        let def_id = def.id;
-        library.insert_subgraph(def);
+        let def_id = GraphId::unique();
+        library.insert_graph(def_id, def);
 
         // Two linked instances with const inputs, each feeding a print.
-        let def_ref = library.subgraph_by_id(&def_id).unwrap();
-        let c1 = Node::subgraph_instance(def_ref, SubgraphRef::Linked(def_id));
-        let c2 = Node::subgraph_instance(def_ref, SubgraphRef::Linked(def_id));
+        let def_ref = library.graph_by_id(&def_id).unwrap();
+        let c1 = Node::graph_instance(def_ref, GraphLink::Shared(def_id));
+        let c2 = Node::graph_instance(def_ref, GraphLink::Shared(def_id));
         let p1 = fnode(&library, "Print");
         let p2 = fnode(&library, "Print");
 
@@ -4992,21 +4957,18 @@ mod subgraph {
         // Edit the linked def: route the exposed output straight from input A
         // (passthrough) instead of `sum`. Affects both instances.
         {
-            let def = library.subgraphs.by_key_mut(&def_id).unwrap();
-            let si = def
-                .graph
+            let graph = library.graphs.get_mut(&def_id).unwrap();
+            let si = graph
                 .iter()
-                .find(|n| matches!(n.kind, NodeKind::SubgraphInput))
+                .find(|n| matches!(n.kind, NodeKind::GraphInput))
                 .unwrap()
                 .id;
-            let so = def
-                .graph
+            let so = graph
                 .iter()
-                .find(|n| matches!(n.kind, NodeKind::SubgraphOutput))
+                .find(|n| matches!(n.kind, NodeKind::GraphOutput))
                 .unwrap()
                 .id;
-            def.graph
-                .set_input_binding(InputPort::new(so, 0), Binding::bind(si, 0));
+            graph.set_input_binding(InputPort::new(so, 0), Binding::bind(si, 0));
         }
 
         eg.update(&graph, &library).unwrap();
@@ -5041,23 +5003,18 @@ mod subgraph {
         let mut library = test_func_lib(hooks);
         add_ticker(&mut library);
 
-        // def Reactor: SubgraphInput trigger → interior `get_a` subscribes.
-        let si = Node::new(NodeKind::SubgraphInput);
+        // def Reactor: GraphInput trigger → interior `get_a` subscribes.
+        let si = Node::new(NodeKind::GraphInput);
         let reactor = fnode(&library, "get_a");
-        let mut def_graph = Graph::default();
+        let mut def_graph = Graph::new("Reactor").category("Test");
         let si_id = def_graph.add(si);
         let reactor_id = def_graph.add(reactor);
         def_graph.subscribe(si_id, 0, reactor_id);
-        let def = SubgraphDef::new(SubgraphId::unique(), "Reactor")
-            .category("Test")
-            .graph(def_graph);
-
         // parent: `ticker` E; composite C subscribes to E's event.
         let emitter = fnode(&library, "ticker");
-        let c = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
 
         let mut graph = Graph::default();
-        graph.subgraphs.add(def);
+        let c = local_instance(&mut graph, def_graph);
         let emitter_id = graph.add(emitter);
         let c_id = graph.add(c);
         graph.subscribe(emitter_id, 0, c_id);
@@ -5203,7 +5160,7 @@ mod mid_run_release {
             graph.set_input_binding(InputPort::new(pair[1], 0), Binding::bind(pair[0], 0));
         }
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(relays[3], 0));
-        graph.validate();
+        graph.debug_check();
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library).unwrap();
@@ -5284,7 +5241,7 @@ mod mid_run_release {
             graph.insert(probe_id, node(&library, "probe"));
             graph.set_input_binding(InputPort::new(probe_id, 0), Binding::bind(relay_id, 0));
         }
-        graph.validate();
+        graph.debug_check();
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library).unwrap();
@@ -5331,8 +5288,9 @@ mod mid_run_release {
 mod compile_regressions {
     use super::*;
     use crate::async_lambda;
+    use crate::graph::Graph;
     use crate::graph::NodeKind;
-    use crate::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
+    use crate::graph::interface::{GraphId, GraphLink};
     use crate::node::definition::{Func, FuncInput, FuncOutput};
     use std::sync::Mutex as StdMutex;
 
@@ -5466,7 +5424,7 @@ mod compile_regressions {
         );
     }
 
-    /// Inspecting a node *inside* a subgraph goes by its authoring id — the flat id
+    /// Inspecting a node *inside* a graph goes by its authoring id — the flat id
     /// is hashed from the descent path, so the query must resolve through the
     /// flatten map instead of missing and silently returning nothing.
     #[tokio::test(flavor = "multi_thread")]
@@ -5478,30 +5436,28 @@ mod compile_regressions {
         });
 
         // def: in(A,B) -> sum -> out
-        let in_node = Node::new(NodeKind::SubgraphInput);
+        let in_node = Node::new(NodeKind::GraphInput);
         let sum: Node = library.by_name("sum").unwrap().into();
-        let out = Node::new(NodeKind::SubgraphOutput);
-        let mut def_graph = Graph::default();
+        let out = Node::new(NodeKind::GraphOutput);
+        let mut def_graph = Graph::new("WrapSum")
+            .category("Test")
+            .input(FuncInput::required("A", DataType::Int))
+            .input(FuncInput::optional("B", DataType::Int))
+            .output(FuncOutput::new("Sum", DataType::Int));
         let in_id = def_graph.add(in_node);
         let sum_interior_id = def_graph.add(sum);
         let out_id = def_graph.add(out);
         def_graph.set_input_binding(InputPort::new(sum_interior_id, 0), Binding::bind(in_id, 0));
         def_graph.set_input_binding(InputPort::new(sum_interior_id, 1), Binding::bind(in_id, 1));
         def_graph.set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_interior_id, 0));
-        let def = SubgraphDef::new(SubgraphId::unique(), "WrapSum")
-            .category("Test")
-            .graph(def_graph)
-            .input(FuncInput::required("A", DataType::Int))
-            .input(FuncInput::optional("B", DataType::Int))
-            .output(FuncOutput::new("Sum", DataType::Int));
-
         let get_a: Node = library.by_name("get_a").unwrap().into();
         let get_b: Node = library.by_name("get_b").unwrap().into();
-        let inst = Node::subgraph_instance(&def, SubgraphRef::Local(def.id));
+        let graph_id = GraphId::unique();
+        let inst = Node::graph_instance(&def_graph, GraphLink::Local(graph_id));
         let print: Node = library.by_name("Print").unwrap().into();
 
         let mut graph = Graph::default();
-        graph.subgraphs.add(def);
+        graph.insert_graph(graph_id, def_graph);
         let a_id = graph.add(get_a);
         let b_id = graph.add(get_b);
         let inst_id = graph.add(inst);

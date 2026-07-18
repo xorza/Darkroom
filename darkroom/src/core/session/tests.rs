@@ -18,7 +18,7 @@ fn apply_intents_adds_node_and_flags_reconcile() {
         pos: Vec2::new(10.0, 20.0),
         node_id: id,
         node,
-        def: None,
+        graph: None,
         bindings: vec![],
     };
 
@@ -41,7 +41,7 @@ fn apply_add_node_seeds_initial_bindings() {
         pos: Vec2::ZERO,
         node_id: id,
         node,
-        def: None,
+        graph: None,
         bindings: vec![(port, Binding::Const(StaticValue::Float(5.0)))],
     };
 
@@ -101,7 +101,7 @@ fn apply_intents_batches_multiple() {
                 pos: Vec2::new(i as f32 * 100.0, 0.0),
                 node_id: NodeId::unique(),
                 node,
-                def: None,
+                graph: None,
                 bindings: vec![],
             }
         })

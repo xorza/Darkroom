@@ -5,6 +5,7 @@ pub(crate) mod connection_ui;
 pub(crate) mod cull;
 pub(crate) mod drag_anchor;
 pub(crate) mod geometry;
+pub(crate) mod graph_menu;
 pub(crate) mod inspector;
 pub(crate) mod new_node_ui;
 pub(crate) mod node_menu;
@@ -12,7 +13,6 @@ pub(crate) mod pan_zoom;
 pub(crate) mod pin_preview;
 pub(crate) mod pin_ui;
 pub(crate) mod selection_ui;
-pub(crate) mod subgraph_menu;
 pub(crate) mod subscription_ui;
 pub(crate) mod wire;
 
@@ -34,13 +34,13 @@ use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
 use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::CanvasGeometry;
+use crate::gui::canvas::graph_menu::GraphMenuUi;
 use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::canvas::new_node_ui::NewNodeUi;
 use crate::gui::canvas::node_menu::{NodeMenuAction, NodeMenuUi};
 use crate::gui::canvas::pan_zoom::PanAnchor;
 use crate::gui::canvas::pin_ui::PinUi;
 use crate::gui::canvas::selection_ui::SelectionUI;
-use crate::gui::canvas::subgraph_menu::SubgraphMenuUi;
 use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::canvas::wire::WireEmphasis;
 use crate::gui::node::prepass::{emit_path_picks, emit_play_clicks, emit_port_dblclicks};
@@ -93,7 +93,7 @@ struct Gestures {
     pin_ui: PinUi,
     subscription_ui: SubscriptionUI,
     new_node_ui: NewNodeUi,
-    subgraph_menu: SubgraphMenuUi,
+    graph_menu: GraphMenuUi,
     node_menu: NodeMenuUi,
     selection_ui: SelectionUI,
     /// `Scene::pan` snapshot captured at the frame the active pan-drag
@@ -212,7 +212,7 @@ impl GraphUI {
         self.gestures
             .new_node_ui
             .apply(ui, ctx, scene, popup_gesture, pending_connection, out);
-        self.gestures.subgraph_menu.apply(ui, scene, out, cmd);
+        self.gestures.graph_menu.apply(ui, scene, out, cmd);
         self.gestures.node_menu.apply(ui, scene, out, cmd);
         // A click on an FsPath input's pick button surfaces a PickInputPath
         // command that App handles after authoring.
@@ -273,7 +273,7 @@ impl GraphUI {
                     pin_ui,
                     subscription_ui,
                     new_node_ui: _,
-                    subgraph_menu: _,
+                    graph_menu: _,
                     node_menu: _,
                     selection_ui,
                     pan_anchor: _,
@@ -432,7 +432,7 @@ pub(crate) enum CanvasGesture {
 ///
 /// This only ever sees presses that *missed* every node and port: a
 /// node/badge widget captures its own press, so a right-click on a node
-/// body or `S` badge routes to `node_menu` / `subgraph_menu` (which read
+/// body or `G` badge routes to `node_menu` / `graph_menu` (which read
 /// those widgets' `secondary_clicked` directly) and never reaches here —
 /// `NewNode` is therefore right-click-on-*empty*-canvas by construction.
 pub(crate) fn classify_canvas_gesture(ui: &mut Ui) -> Option<CanvasGesture> {
