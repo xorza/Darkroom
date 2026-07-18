@@ -44,3 +44,5 @@ review testsuite
 grapuh public methods
 
 document validation like for graph
+
+remove rhai serializer
