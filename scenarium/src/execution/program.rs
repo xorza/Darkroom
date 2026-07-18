@@ -280,8 +280,9 @@ fn effective_output_type(
     if depth > MAX_WILDCARD_DEPTH {
         return None;
     }
-    let func = node_func(program, library, idx)
-        .expect("a compiled node's func is registered in the library (validated at check_for_execution)");
+    let func = node_func(program, library, idx).expect(
+        "a compiled node's func is registered in the library (validated at check_for_execution)",
+    );
     match &func.outputs.get(port)?.ty {
         OutputType::Fixed(data_type) => Some(data_type.clone()),
         OutputType::Wildcard { mirrors } => {
