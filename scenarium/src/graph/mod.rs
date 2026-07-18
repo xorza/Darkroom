@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
 use hashbrown::hash_map::Entry;
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::StaticValue;
@@ -11,7 +11,6 @@ use crate::library::Library;
 use crate::node::definition::{Func, FuncId};
 use crate::node::definition::{FuncInput, FuncOutput};
 use crate::node::special::SpecialNode;
-use anyhow::{Context, ensure};
 use common::id_type;
 use common::{Result, SerdeFormat, deserialize, serialize};
 
@@ -344,8 +343,7 @@ impl Graph {
 
     pub fn insert_graph(&mut self, graph_id: GraphId, graph: Graph) {
         assert!(!graph_id.is_nil(), "cannot insert a graph with a nil id");
-        let previous = self.graphs.insert(graph_id, graph);
-        assert!(previous.is_none(), "graph {graph_id:?} already exists");
+        self.graphs.insert(graph_id, graph);
     }
 
     pub fn add(&mut self, node: Node) -> NodeId {
@@ -440,146 +438,6 @@ impl Graph {
         let graph: Self = deserialize(serialized, format)?;
         graph.check()?;
         Ok(graph)
-    }
-
-    /// Structural validation of a graph value.
-    pub fn check(&self) -> Result<()> {
-        self.check_impl()?;
-        self.check_unique_node_ids(None)
-    }
-
-    pub(crate) fn check_unique_node_ids(&self, library: Option<&Library>) -> Result<()> {
-        fn collect(
-            graph: &Graph,
-            library: Option<&Library>,
-            visited: &mut HashSet<*const Graph>,
-            node_ids: &mut HashSet<NodeId>,
-        ) -> Result<()> {
-            if !visited.insert(graph) {
-                return Ok(());
-            }
-            for node_id in graph.nodes.keys() {
-                ensure!(
-                    node_ids.insert(*node_id),
-                    "node id {:?} occurs in more than one authoring graph",
-                    node_id
-                );
-            }
-            for nested in graph.graphs.values() {
-                collect(nested, library, visited, node_ids)?;
-            }
-            if let Some(library) = library {
-                for node in graph.nodes.values() {
-                    if let NodeKind::Graph(GraphLink::Shared(id)) = node.kind
-                        && let Some(shared) = library.graphs.get(&id)
-                    {
-                        collect(shared, Some(library), visited, node_ids)?;
-                    }
-                }
-            }
-            Ok(())
-        }
-
-        collect(self, library, &mut HashSet::new(), &mut HashSet::new())
-    }
-
-    pub(crate) fn check_impl(&self) -> Result<()> {
-        let mut boundary_inputs = 0usize;
-        let mut boundary_outputs = 0usize;
-        for (node_id, node) in &self.nodes {
-            ensure!(!node_id.is_nil(), "graph contains a node with a nil id");
-            match &node.kind {
-                NodeKind::Func(func_id) => {
-                    ensure!(!func_id.is_nil(), "node {:?} has a nil func_id", node_id);
-                }
-                NodeKind::Graph(r) => {
-                    ensure!(!r.id().is_nil(), "node {:?} has a nil graph id", node_id);
-                    if let GraphLink::Local(id) = r {
-                        ensure!(
-                            self.graphs.contains_key(id),
-                            "node {:?} references missing local graph {:?}",
-                            node_id,
-                            id
-                        );
-                    }
-                }
-                // Special nodes carry no id to validate; their declaration is
-                // hardcoded and always resolves.
-                NodeKind::Special(_) => {}
-                NodeKind::GraphInput => {
-                    boundary_inputs += 1;
-                }
-                NodeKind::GraphOutput => {
-                    boundary_outputs += 1;
-                }
-            }
-        }
-        ensure!(
-            boundary_inputs <= 1,
-            "a graph holds at most one GraphInput, found {boundary_inputs}"
-        );
-        ensure!(
-            boundary_outputs <= 1,
-            "a graph holds at most one GraphOutput, found {boundary_outputs}"
-        );
-
-        for (dst, binding) in &self.bindings {
-            ensure!(
-                self.nodes.contains_key(&dst.node_id),
-                "binding on missing node {:?}",
-                dst.node_id
-            );
-            if let Binding::Bind(src) = binding {
-                ensure!(
-                    self.nodes.contains_key(&src.node_id),
-                    "node {:?} input {} binds to missing node {:?}",
-                    dst.node_id,
-                    dst.port_idx,
-                    src.node_id
-                );
-            }
-        }
-
-        for s in &self.subscriptions {
-            ensure!(
-                self.nodes.contains_key(&s.emitter),
-                "subscription from missing emitter {:?}",
-                s.emitter
-            );
-            ensure!(
-                self.nodes.contains_key(&s.subscriber),
-                "node {:?} event {} has missing subscriber {:?}",
-                s.emitter,
-                s.event_idx,
-                s.subscriber
-            );
-        }
-
-        for port in &self.pinned_outputs {
-            ensure!(
-                self.nodes.contains_key(&port.node_id),
-                "pinned output on missing node {:?}",
-                port.node_id
-            );
-        }
-
-        for event in &self.events {
-            ensure!(
-                self.nodes.contains_key(&event.emitter),
-                "exposed event {:?} names missing emitter {:?}",
-                event.name,
-                event.emitter
-            );
-        }
-
-        for (graph_id, graph) in &self.graphs {
-            ensure!(!graph_id.is_nil(), "local graph has a nil id");
-            graph
-                .check_impl()
-                .with_context(|| format!("in local graph {:?}", graph.name))?;
-        }
-
-        Ok(())
     }
 
     /// Resolve a graph instance link from this graph or the shared library.

@@ -2,6 +2,7 @@ use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{
     Binding, CacheMode, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort,
 };
+use crate::library::Library;
 use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use crate::{BindingEntry, DataType, closes_data_cycle};
@@ -86,6 +87,22 @@ fn check_accepts_reusable_graph_while_compile_check_rejects_it_as_entry() {
     assert!(graph.check().is_ok());
     let error = graph.check_with(&Default::default()).unwrap_err();
     assert!(error.to_string().contains("entry graph"));
+}
+
+#[test]
+fn check_with_rejects_recursive_shared_graph() {
+    let graph_id = GraphId::unique();
+    let mut shared = Graph::new("recursive");
+    shared.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
+
+    let mut library = Library::default();
+    library.insert_graph(graph_id, shared);
+
+    let mut graph = Graph::default();
+    graph.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
+
+    let error = graph.check_with(&library).unwrap_err().to_string();
+    assert!(error.contains("recursive"));
 }
 
 #[test]

@@ -2643,7 +2643,7 @@ mod behavior {
         let node_id: NodeId = "acb11422-9951-4fc6-9696-53b1a6699120".into();
         let node: Node = library.by_name("self_cancel").unwrap().into();
         graph.insert(node_id, node);
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -2730,7 +2730,7 @@ mod behavior {
         let node_id: NodeId = "c791f8aa-3bf9-435d-8530-f3904b4b6a28".into();
         let node: Node = library.by_name("always_cancel").unwrap().into();
         graph.insert(node_id, node);
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -3234,7 +3234,7 @@ mod execution {
         // nodes now default to `CacheMode::None`.
         node.cache = CacheMode::Ram;
         graph.insert("0b35e5e4-be30-4733-a5a2-9d474000de10".into(), node);
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -3804,7 +3804,7 @@ mod events {
         graph.insert(recv_id, node(&library, "recv"));
         graph.subscribe(emit_id, 0, recv_id);
         graph.set_input_binding(InputPort::new(recv_id, 0), Binding::bind(emit_id, 0));
-        graph.validate();
+        graph.debug_check();
 
         EventFixture {
             library,
@@ -3989,7 +3989,7 @@ mod events {
         // The sink's cone (source → sink) is wholly independent of emit.
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(source_id, 0));
         graph.subscribe(emit_id, 0, trigger_id);
-        graph.validate_with(&library);
+        graph.debug_check_with(&library);
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library)?;
@@ -4067,7 +4067,7 @@ mod events {
         graph.insert(source_id, node(&library, "source"));
         graph.insert(sink_id, node(&library, "sink"));
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(source_id, 0));
-        graph.validate_with(&library);
+        graph.debug_check_with(&library);
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library)?;
@@ -4126,7 +4126,7 @@ mod output_demand {
         graph.insert(sink_id, node(&library, "sink"));
         // Consume only output 0; output 1 has no consumer.
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(split_id, 0));
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -4184,7 +4184,7 @@ mod output_demand {
         // Output 0 has a real consumer; output 1 has none, but is pinned.
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(split_id, 0));
         graph.set_output_pinned(OutputPort::new(split_id, 1), true);
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -4304,7 +4304,7 @@ mod topology {
             .unwrap()
             .id;
         graph.detach_node(get_b_id);
-        graph.validate();
+        graph.debug_check();
 
         eg.update(&graph, &library).unwrap();
         assert_eq!(eg.compiled.program.e_nodes.len(), 4);
@@ -4371,7 +4371,7 @@ mod topology {
         graph.insert(print2_id, node(&library, "Print"));
         graph.set_input_binding(InputPort::new(print1_id, 0), Binding::bind(get_a_id, 0));
         graph.set_input_binding(InputPort::new(print2_id, 0), Binding::bind(get_b_id, 0));
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -4419,7 +4419,7 @@ mod topology {
         graph.insert(print_a_id, node(&library, "Print"));
         graph.set_input_binding(InputPort::new(print_b_id, 0), Binding::bind(get_b_id, 0));
         graph.set_input_binding(InputPort::new(print_a_id, 0), Binding::bind(get_a_id, 0));
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -4444,7 +4444,7 @@ mod topology {
 
         graph.detach_node(removed_source_id);
         graph.detach_node(removed_print_id);
-        graph.validate();
+        graph.debug_check();
 
         eg.update(&graph, &library).unwrap();
         let idx_after = eg
@@ -4490,7 +4490,7 @@ mod topology {
         graph.insert(get_a_id, node(&library, "get_a"));
         graph.insert(print_a_id, node(&library, "Print"));
         graph.set_input_binding(InputPort::new(print_a_id, 0), Binding::bind(get_a_id, 0));
-        graph.validate();
+        graph.debug_check();
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -4503,7 +4503,7 @@ mod topology {
             graph.insert(gb, node(&library, "get_b"));
             graph.insert(pb, node(&library, "Print"));
             graph.set_input_binding(InputPort::new(pb, 0), Binding::bind(gb, 0));
-            graph.validate();
+            graph.debug_check();
             eg.update(&graph, &library).unwrap();
             assert_eq!(eg.compiled.program.e_nodes.len(), 4, "round {round} grow");
             printed.lock().await.clear();
@@ -4515,7 +4515,7 @@ mod topology {
             // Remove it again.
             graph.detach_node(gb);
             graph.detach_node(pb);
-            graph.validate();
+            graph.debug_check();
             eg.update(&graph, &library).unwrap();
             assert_eq!(eg.compiled.program.e_nodes.len(), 2, "round {round} shrink");
             printed.lock().await.clear();
@@ -5160,7 +5160,7 @@ mod mid_run_release {
             graph.set_input_binding(InputPort::new(pair[1], 0), Binding::bind(pair[0], 0));
         }
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(relays[3], 0));
-        graph.validate();
+        graph.debug_check();
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library).unwrap();
@@ -5241,7 +5241,7 @@ mod mid_run_release {
             graph.insert(probe_id, node(&library, "probe"));
             graph.set_input_binding(InputPort::new(probe_id, 0), Binding::bind(relay_id, 0));
         }
-        graph.validate();
+        graph.debug_check();
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library).unwrap();
