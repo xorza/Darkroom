@@ -1,14 +1,14 @@
-//! Subgraph flattening, fused into execution-node building. Walks the
+//! Graph flattening, fused into execution-node building. Walks the
 //! authoring `Graph`, expands every composite instance into its interior func
 //! nodes, and writes them straight into the execution graph's `CompactInsert`
 //! — no intermediate `Graph` is materialized. Boundary nodes
-//! (`SubgraphInput`/`SubgraphOutput`) and composites dissolve; their edges are
+//! (`GraphInput`/`GraphOutput`) and composites dissolve; their edges are
 //! short-circuited so the result is a flat, func-only execution graph on which
 //! the existing scheduler (dead-branch pruning, caching, cycle detection)
 //! works across composite boundaries unchanged. Both data bindings and event
 //! subscriptions are short-circuited across boundaries (exposed events resolve
 //! to their interior emitter; triggering a composite reaches the interior
-//! nodes wired to its `SubgraphInput`).
+//! nodes wired to its `GraphInput`).
 //!
 //! See `README.md` Part A §5.
 
@@ -20,7 +20,7 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
     InputStamper,
 };
-use crate::graph::subgraph::SubgraphId;
+use crate::graph::interface::GraphId;
 use crate::graph::{
     Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
 };
@@ -46,9 +46,9 @@ pub(crate) struct Flattener {
     /// `FlattenMap` scope indices parallel to the emit-descent in `path` —
     /// the scope each level's nodes live in. Reused across builds.
     scope_stack: Vec<u32>,
-    /// Subgraph defs currently on the emit-descent path — a def appearing
+    /// Graph ids currently on the emit-descent path — an id appearing
     /// twice is recursion (it contains itself). Reused across builds.
-    seen: HashSet<SubgraphId>,
+    seen: HashSet<GraphId>,
     /// Resolved flat event edges (with flattened ids), collected during the
     /// walk and applied after the node pass (when `e_nodes` is final and
     /// addressable by key). Reused across builds.
@@ -164,7 +164,7 @@ fn input_stamper(ty: &DataType, library: &Library) -> Option<InputStamper> {
 }
 
 /// The graph at the level addressed by `path` — descend from `root`, resolving
-/// each composite instance through its (linked or local) definition.
+/// each composite instance through its shared or local graph.
 fn graph_at<'a>(root: &'a Graph, library: &'a Library, path: &[NodeId]) -> &'a Graph {
     let mut graph = root;
     for id in path {
@@ -172,12 +172,11 @@ fn graph_at<'a>(root: &'a Graph, library: &'a Library, path: &[NodeId]) -> &'a G
             .find(id, NodeSearch::TopLevel)
             .unwrap()
             .kind
-            .as_subgraph()
+            .as_graph()
             .expect("descent path id must be a composite");
-        graph = &graph
-            .resolve_def(r, library)
-            .expect("subgraph node references a missing definition")
-            .graph;
+        graph = graph
+            .resolve_graph(r, library)
+            .expect("graph node references a missing graph");
     }
     graph
 }
@@ -222,7 +221,7 @@ struct Run<'a> {
     /// The flatten map being built — leaves recorded per func node, scopes
     /// pushed per composite descent.
     flatten: &'a mut FlattenMap,
-    seen: &'a mut HashSet<SubgraphId>,
+    seen: &'a mut HashSet<GraphId>,
     subs: &'a mut Vec<Subscription>,
     compact: CompactInsert<'a, NodeId, ExecutionNode>,
     /// Index of the leaf currently being filled. Stable across the target
@@ -250,7 +249,7 @@ impl<'a> Run<'a> {
     fn push_level(&mut self, instance_id: NodeId) {
         assert!(
             self.path.len() < MAX_DEPTH,
-            "subgraph nesting exceeds {MAX_DEPTH} levels (recursive definition?)"
+            "graph nesting exceeds {MAX_DEPTH} levels (recursive definition?)"
         );
         self.path.push(instance_id);
     }
@@ -268,7 +267,7 @@ impl<'a> Run<'a> {
             if node.disabled {
                 continue;
             }
-            // A subgraph recurses; boundary nodes emit nothing. A func or a
+            // A graph recurses; boundary nodes emit nothing. A func or a
             // special node both resolve to a `&Func` spec and emit one leaf —
             // the spec is the only difference (`library` vs. the hardcoded
             // `SpecialNode::func`), so the emit body below is shared.
@@ -281,10 +280,10 @@ impl<'a> Run<'a> {
                     None,
                 ),
                 NodeKind::Special(s) => (s.func(), Some(*s)),
-                NodeKind::Subgraph(r) => {
+                NodeKind::Graph(r) => {
                     assert!(
                         self.seen.insert(r.id()),
-                        "recursive subgraph {:?} (it contains itself)",
+                        "recursive graph {:?} (it contains itself)",
                         r.id()
                     );
                     self.push_level(node.id);
@@ -299,7 +298,7 @@ impl<'a> Run<'a> {
                     self.seen.remove(&r.id());
                     continue;
                 }
-                NodeKind::SubgraphInput | NodeKind::SubgraphOutput => continue,
+                NodeKind::GraphInput | NodeKind::GraphOutput => continue,
             };
 
             let flat_id = flatten_id(self.path.as_slice(), node.id);
@@ -379,12 +378,12 @@ impl<'a> Run<'a> {
 
     /// Resolve this level's event subscriptions across composite boundaries
     /// into flat `(emitter, event_idx, subscriber)` edges. Subscriptions
-    /// emitted *by* a `SubgraphInput` (the trigger) are consumed when the
+    /// emitted *by* a `GraphInput` (the trigger) are consumed when the
     /// enclosing instance is resolved as a subscriber, so they are skipped here.
     fn collect_subscriptions(&mut self, graph: &'a Graph) {
         let trigger = graph
             .iter()
-            .find(|n| matches!(n.kind, NodeKind::SubgraphInput))
+            .find(|n| matches!(n.kind, NodeKind::GraphInput))
             .map(|n| n.id);
 
         for sub in graph.subscriptions() {
@@ -420,22 +419,22 @@ impl<'a> Run<'a> {
             NodeKind::Func(_) | NodeKind::Special(_) => {
                 Some((flatten_id(self.path.as_slice(), node_id), event_idx))
             }
-            NodeKind::Subgraph(r) => {
-                let def = graph.resolve_def(*r, self.library)?;
-                let exposed = def.events.get(event_idx)?;
+            NodeKind::Graph(r) => {
+                let nested = graph.resolve_graph(*r, self.library)?;
+                let exposed = nested.events.get(event_idx)?;
                 let (interior, interior_idx) = (exposed.emitter, exposed.emitter_event_idx);
                 self.push_level(node_id);
                 let resolved = self.resolve_emitter(interior, interior_idx);
                 self.path.pop();
                 resolved
             }
-            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => None,
+            NodeKind::GraphInput | NodeKind::GraphOutput => None,
         }
     }
 
     /// Resolve a subscriber to the concrete flat func nodes that actually run,
     /// pushing `(emitter, event_idx, flat_subscriber)` for each. A composite
-    /// subscriber expands to the interior nodes wired to its `SubgraphInput`
+    /// subscriber expands to the interior nodes wired to its `GraphInput`
     /// trigger.
     fn resolve_subscriber(&mut self, node_id: NodeId, emitter: NodeId, event_idx: usize) {
         let graph = self.current();
@@ -454,20 +453,18 @@ impl<'a> Run<'a> {
                 let flat = flatten_id(self.path.as_slice(), node_id);
                 self.push_edge(emitter, event_idx, flat);
             }
-            Some(NodeKind::Subgraph(r)) => {
-                let Some(def) = graph.resolve_def(*r, self.library) else {
+            Some(NodeKind::Graph(r)) => {
+                let Some(nested) = graph.resolve_graph(*r, self.library) else {
                     return;
                 };
-                let Some(trigger) = def
-                    .graph
+                let Some(trigger) = nested
                     .iter()
-                    .find(|n| matches!(n.kind, NodeKind::SubgraphInput))
+                    .find(|n| matches!(n.kind, NodeKind::GraphInput))
                     .map(|n| n.id)
                 else {
                     return;
                 };
-                let interior: Vec<NodeId> = def
-                    .graph
+                let interior: Vec<NodeId> = nested
                     .subscriptions()
                     .filter(|s| s.emitter == trigger)
                     .map(|s| s.subscriber)
@@ -530,28 +527,27 @@ impl<'a> Run<'a> {
                 port_idx,
             )),
             // Follow into the composite: its output `port_idx` is wired by the
-            // SubgraphOutput node's input `port_idx`.
-            NodeKind::Subgraph(r) => {
-                let def = graph
-                    .resolve_def(*r, self.library)
-                    .expect("subgraph node references a missing definition");
-                let Some(so) = def
-                    .graph
+            // GraphOutput node's input `port_idx`.
+            NodeKind::Graph(r) => {
+                let nested = graph
+                    .resolve_graph(*r, self.library)
+                    .expect("graph node references a missing graph");
+                let Some(output) = nested
                     .iter()
-                    .find(|n| matches!(n.kind, NodeKind::SubgraphOutput))
+                    .find(|n| matches!(n.kind, NodeKind::GraphOutput))
                 else {
                     return Source::None;
                 };
-                let binding = def.graph.input_binding(InputPort::new(so.id, port_idx));
+                let binding = nested.input_binding(InputPort::new(output.id, port_idx));
                 self.push_level(node_id);
                 let source = self.resolve_binding(&binding);
                 self.path.pop();
                 source
             }
-            // Follow out: this SubgraphInput output `port_idx` is the enclosing
+            // Follow out: this GraphInput output `port_idx` is the enclosing
             // instance's exposed input `port_idx`; resolve it one level up.
-            NodeKind::SubgraphInput => {
-                let instance_id = self.path.pop().expect("SubgraphInput at the root level");
+            NodeKind::GraphInput => {
+                let instance_id = self.path.pop().expect("GraphInput at the root level");
                 let binding = self
                     .current()
                     .input_binding(InputPort::new(instance_id, port_idx));
@@ -559,7 +555,7 @@ impl<'a> Run<'a> {
                 self.path.push(instance_id);
                 source
             }
-            NodeKind::SubgraphOutput => Source::None,
+            NodeKind::GraphOutput => Source::None,
         }
     }
 

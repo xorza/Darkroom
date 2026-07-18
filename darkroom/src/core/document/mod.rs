@@ -5,11 +5,11 @@ pub(crate) mod dock;
 use anyhow::{Context, Result, bail, ensure};
 use common::{KeyIndexVec, SerdeFormat, is_debug};
 use glam::Vec2;
+use scenarium::GraphId;
+use scenarium::GraphLink;
 use scenarium::Library;
-use scenarium::SubgraphRef;
 use scenarium::{DetachedNode, Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
 use scenarium::{Node, NodeKind};
-use scenarium::{SubgraphDef, SubgraphId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use thiserror::Error;
@@ -17,9 +17,9 @@ use thiserror::Error;
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
 use crate::core::document::canvas_item_placement::CanvasItemPlacement;
 use crate::core::document::dock::DockLayout;
-use crate::core::edit::reconcile::reconcile_def;
+use crate::core::edit::reconcile::reconcile_graph;
 
-/// Initial placement of a fresh subgraph's boundary nodes: the input
+/// Initial placement of a fresh graph's boundary nodes: the input
 /// boundary at the origin, the output boundary one gap to the right and
 /// level with it (instead of the generic auto-layout stacking the two
 /// unconnected nodes in one column).
@@ -36,15 +36,12 @@ pub(crate) struct DocumentError {
     pub message: String,
 }
 
-/// Which graph an editor tab is pointed at. `Main` is the document's
-/// root graph; `Local(id)` is a local subgraph def's interior graph
-/// (`Document::graph.subgraphs[id].graph`). Linked subgraphs are shared
-/// library assets in the `Library` — not editable in place; to edit one
-/// you localize it (copy into the doc as a `Local` def) first.
+/// Which graph an editor tab is pointed at. `Main` is the document root;
+/// `Local(id)` addresses a nested graph in `Document::graph.graphs`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum GraphRef {
     Main,
-    Local(SubgraphId),
+    Local(GraphId),
 }
 
 /// Whether a port consumes a binding (`Input`) or produces a value
@@ -70,9 +67,9 @@ impl PortKind {
 /// its `WidgetId` (see `crate::gui::node::port_row::port_circle_wid`)
 /// without threading a cache, and serializable so a persisted tab
 /// ([`TabRef::ImageViewer`]) can bind to it. Node ids are unique across
-/// the whole document (subgraph interiors included), so no graph ref is
-/// needed alongside — upheld by `SubgraphDef::fresh_copy` at every
-/// def-copy boundary (import/localize/detach) and enforced by
+/// the whole document (graph interiors included), so no graph ref is
+/// needed alongside — upheld by `Graph::fresh_copy` at every copy
+/// boundary (import/localize/detach) and enforced by
 /// [`Document::check`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct PortRef {
@@ -82,13 +79,13 @@ pub(crate) struct PortRef {
 }
 
 /// What an editor tab shows. Most tabs are graphs — the root and any
-/// opened subgraph interiors ([`TabRef::Graph`]) — but a tab can also be
+/// opened graph interiors ([`TabRef::Graph`]) — but a tab can also be
 /// a non-graph app view like [`TabRef::Preferences`] (the settings window).
 /// Persisted + undoable like the rest of the tab/view state, so reopening
 /// a document restores its open tabs and Ctrl+Z walks tab open/close.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum TabRef {
-    /// A graph pane (root or a local subgraph interior).
+    /// A graph pane (root or a local graph interior).
     Graph(GraphRef),
     /// The app-preferences / settings view — no graph, no canvas.
     Preferences,
@@ -96,17 +93,15 @@ pub(crate) enum TabRef {
     /// port, deduped on open. Content is runtime-only
     /// (`crate::gui::image_viewer`): a restored tab pulls any current value
     /// from `RunState` when drawn. Pruned when its node is deleted, like a
-    /// subgraph tab whose def vanished.
+    /// graph tab whose def vanished.
     ImageViewer(PortRef),
 }
 
-/// Which side of a subgraph def's interface a boundary-port edit targets:
-/// `Input` → `def.inputs` (the `SubgraphInput` node's output ports),
-/// `Output` → `def.outputs` (the `SubgraphOutput` node's input ports).
+/// Which side of a graph interface a boundary-port edit targets.
 ///
 /// The side names the *interface*, not the UI column it shows in: a
-/// boundary node mirrors the interface, so the `SubgraphOutput` node's
-/// *input column* edits the `Output` side and the `SubgraphInput` node's
+/// boundary node mirrors the interface, so the `GraphOutput` node's
+/// *input column* edits the `Output` side and the `GraphInput` node's
 /// *output column* edits the `Input` side (see `gui::node::port_row`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum BoundarySide {
@@ -169,8 +164,8 @@ impl Default for Viewport {
 
 /// Editor-side view metadata for one graph: per-item positions and paint
 /// order, the viewport, and the selection. One of these exists per
-/// open/edited graph (the root in `Document::main_view`, each subgraph
-/// interior in `Document::sub_views`). The graph *data* itself lives in
+/// open/edited graph (the root in `Document::main_view`, each graph
+/// interior in `Document::local_views`). The graph *data* itself lives in
 /// the core `Graph`; this is purely how the editor presents and
 /// navigates it.
 ///
@@ -310,19 +305,18 @@ impl EditScope<'_> {
     }
 }
 
-/// The thing being edited: the core `Graph` (which already nests local
-/// subgraph defs and their interior graphs) plus the editor view
+/// The thing being edited: the root `Graph` plus the editor view
 /// metadata for each graph the user has open — the root in `main_view`,
-/// every opened subgraph interior in `sub_views`. The `Library` it
+/// every opened graph interior in `local_views`. The `Library` it
 /// resolves against lives one level up on `App` (runtime-owned).
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Document {
     pub graph: CoreGraph,
     pub main_view: GraphView,
-    /// View metadata for local subgraph interiors, created lazily when a
-    /// subgraph is first opened in a tab. Keyed by `SubgraphId`.
+    /// View metadata for local graph interiors, created lazily when a
+    /// graph is first opened in a tab. Keyed by `GraphId`.
     #[serde(default)]
-    pub sub_views: HashMap<SubgraphId, GraphView>,
+    pub local_views: HashMap<GraphId, GraphView>,
     /// The pane arrangement: open tabs grouped into split panes, plus
     /// the focused group. Persisted + undoable like the rest of the view
     /// state (every layout mutation is an undoable `Intent::Dock`).
@@ -331,15 +325,14 @@ pub(crate) struct Document {
 }
 
 /// Whether a tab still resolves against the graph: `Main` and
-/// `Preferences` always do, a subgraph tab lives with its def, and a
-/// viewer tab dies with its node (mirroring a subgraph tab whose def
-/// vanished). The single predicate behind
+/// `Preferences` always do, a local graph tab lives with its map entry,
+/// and a viewer tab dies with its node. The single predicate behind
 /// [`Document::ensure_valid_layout`]'s fast-path *and* its prune, so
 /// the two can't drift.
 fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
     match tab {
         TabRef::Graph(GraphRef::Main) | TabRef::Preferences => true,
-        TabRef::Graph(GraphRef::Local(id)) => graph.subgraphs.by_key(&id).is_some(),
+        TabRef::Graph(GraphRef::Local(id)) => graph.graphs.contains_key(&id),
         TabRef::ImageViewer(port) => graph.find(&port.node_id, NodeSearch::Recursive).is_some(),
     }
 }
@@ -363,11 +356,11 @@ fn resolve_named_slot<T>(
 
 impl Document {
     /// The graph a target points at, or `None` if it no longer exists
-    /// (e.g. a subgraph deleted while its tab was open).
+    /// (e.g. a graph deleted while its tab was open).
     pub(crate) fn graph_for(&self, target: GraphRef) -> Option<&CoreGraph> {
         match target {
             GraphRef::Main => Some(&self.graph),
-            GraphRef::Local(id) => self.graph.subgraphs.by_key(&id).map(|d| &d.graph),
+            GraphRef::Local(id) => self.graph.graphs.get(&id),
         }
     }
 
@@ -375,11 +368,11 @@ impl Document {
     pub(crate) fn view(&self, target: GraphRef) -> Option<&GraphView> {
         match target {
             GraphRef::Main => Some(&self.main_view),
-            GraphRef::Local(id) => self.sub_views.get(&id),
+            GraphRef::Local(id) => self.local_views.get(&id),
         }
     }
 
-    /// Mutable graph for a target — the root graph or a local subgraph
+    /// Mutable graph for a target — the root graph or a local graph
     /// interior. Unlike `scope_mut` this hands back only the graph (no
     /// view), so callers that rewire bindings across *several* graphs in
     /// one pass (e.g. boundary reconcile remapping instance bindings) can
@@ -387,7 +380,7 @@ impl Document {
     pub(crate) fn graph_mut(&mut self, target: GraphRef) -> Option<&mut CoreGraph> {
         match target {
             GraphRef::Main => Some(&mut self.graph),
-            GraphRef::Local(id) => self.graph.subgraphs.by_key_mut(&id).map(|d| &mut d.graph),
+            GraphRef::Local(id) => self.graph.graphs.get_mut(&id),
         }
     }
 
@@ -399,12 +392,9 @@ impl Document {
                 view: &mut self.main_view,
             }),
             GraphRef::Local(id) => {
-                let def = self.graph.subgraphs.by_key_mut(&id)?;
-                let view = self.sub_views.get_mut(&id)?;
-                Some(EditScope {
-                    graph: &mut def.graph,
-                    view,
-                })
+                let graph = self.graph.graphs.get_mut(&id)?;
+                let view = self.local_views.get_mut(&id)?;
+                Some(EditScope { graph, view })
             }
         }
     }
@@ -433,9 +423,9 @@ impl Document {
         fn graph_contains(graph: &CoreGraph, port: OutputPort) -> bool {
             graph.is_output_pinned(port)
                 || graph
-                    .subgraphs
-                    .iter()
-                    .any(|definition| graph_contains(&definition.graph, port))
+                    .graphs
+                    .values()
+                    .any(|nested| graph_contains(nested, port))
         }
 
         graph_contains(&self.graph, port)
@@ -456,22 +446,22 @@ impl Document {
         self.is_output_pinned(port) || self.viewer_outputs().any(|viewer_port| viewer_port == port)
     }
 
-    /// Ensure a `GraphView` exists for a local subgraph interior,
+    /// Ensure a `GraphView` exists for a local graph interior,
     /// auto-laying-out its nodes on first creation. Returns `false` if
-    /// the subgraph no longer exists.
-    pub(crate) fn ensure_sub_view(&mut self, id: SubgraphId) -> bool {
-        if self.sub_views.contains_key(&id) {
+    /// the graph no longer exists.
+    pub(crate) fn ensure_sub_view(&mut self, id: GraphId) -> bool {
+        if self.local_views.contains_key(&id) {
             return true;
         }
         let view = {
-            let Some(def) = self.graph.subgraphs.by_key(&id) else {
+            let Some(graph) = self.graph.graphs.get(&id) else {
                 return false;
             };
-            let mut view = GraphView::for_graph(&def.graph);
-            view.auto_layout(&def.graph);
+            let mut view = GraphView::for_graph(graph);
+            view.auto_layout(graph);
             view
         };
-        self.sub_views.insert(id, view);
+        self.local_views.insert(id, view);
         true
     }
 
@@ -482,9 +472,9 @@ impl Document {
     /// is infallible and `main_view` always exists).
     ///
     /// The view-seeding covers a desync hazard: the layout and
-    /// `sub_views` are independent serialized fields, so a deserialized
+    /// `local_views` are independent serialized fields, so a deserialized
     /// (or hand-edited) document can carry a `Local` tab with no matching
-    /// `sub_views` entry. Seeding it here recovers gracefully instead of
+    /// `local_views` entry. Seeding it here recovers gracefully instead of
     /// panicking on a later `view(target).expect(..)`.
     pub(crate) fn ensure_valid_layout(&mut self) {
         // Common case: every tab still resolves — touch nothing (no
@@ -498,13 +488,13 @@ impl Document {
         // Seed views for any `Local` tab missing one. Guarded by `any`
         // so the common (all-seeded) case allocates nothing.
         if self.layout.all_tabs().any(
-            |t| matches!(t, TabRef::Graph(GraphRef::Local(id)) if !self.sub_views.contains_key(&id)),
+            |t| matches!(t, TabRef::Graph(GraphRef::Local(id)) if !self.local_views.contains_key(&id)),
         ) {
-            let missing: Vec<SubgraphId> = self
+            let missing: Vec<GraphId> = self
                 .layout
                 .all_tabs()
                 .filter_map(|t| match t {
-                    TabRef::Graph(GraphRef::Local(id)) if !self.sub_views.contains_key(&id) => {
+                    TabRef::Graph(GraphRef::Local(id)) if !self.local_views.contains_key(&id) => {
                         Some(id)
                     }
                     _ => None,
@@ -516,56 +506,37 @@ impl Document {
         }
     }
 
-    /// Add an imported subgraph `def` to this document's local defs,
-    /// returning its assigned id. The copy takes fresh identity end to
-    /// end via [`SubgraphDef::fresh_copy`]: a fresh def id so an import
-    /// never overwrites an existing def, and fresh interior node ids —
-    /// nested defs included — so re-importing the same file can't break
-    /// the document-wide node-id uniqueness [`PortRef`] relies on
-    /// (nested def ids are level-scoped and ride along unchanged).
+    /// Add an imported graph to this document's local graph map.
+    /// [`Graph::fresh_copy`] gives every copied node fresh identity so
+    /// repeated imports preserve document-wide node-id uniqueness.
     /// `origin` is carried over so a re-imported asset keeps its library
     /// lineage for Publish. The undo stack is unaffected: no existing
-    /// history references the freshly added def.
-    pub(crate) fn import_subgraph(&mut self, def: SubgraphDef) -> SubgraphId {
-        let mut copy = def.fresh_copy();
-        copy.origin = def.origin;
-        let id = copy.id;
-        self.graph.subgraphs.add(copy);
+    /// history references the freshly added graph.
+    pub(crate) fn import_graph(&mut self, graph: CoreGraph) -> GraphId {
+        let id = GraphId::unique();
+        let origin = graph.origin;
+        let mut copy = graph.fresh_copy();
+        copy.origin = origin;
+        self.graph.insert_graph(id, copy);
         id
     }
 
-    /// Create a fresh, empty local subgraph — just the two boundary nodes
-    /// (`SubgraphInput`/`SubgraphOutput`), no interface yet (it's derived
-    /// from interior wiring, so an unwired pair exposes nothing). Returns
-    /// the new id for the caller to open in a tab.
-    pub(crate) fn create_subgraph(&mut self) -> SubgraphId {
-        let mut graph = CoreGraph::default();
-        let input = Node::new(NodeKind::SubgraphInput);
-        let output = Node::new(NodeKind::SubgraphOutput);
+    /// Create a fresh, empty local graph with its two boundary nodes.
+    pub(crate) fn create_graph(&mut self) -> GraphId {
+        let id = GraphId::unique();
+        let mut graph = CoreGraph::new(format!("graph {}", self.graph.graphs.len() + 1));
+        let input = Node::new(NodeKind::GraphInput);
+        let output = Node::new(NodeKind::GraphOutput);
         let input_id = graph.add(input);
         let output_id = graph.add(output);
-        let def = SubgraphDef::new(
-            SubgraphId::unique(),
-            format!("subgraph {}", self.graph.subgraphs.len() + 1),
-        )
-        .graph(graph);
-        let id = def.id;
-        // Drop an instance of the new subgraph into the root graph,
-        // staggered so repeated creates don't perfectly overlap. Built
-        // before the def moves into the table (needs `&def`); the empty
-        // interface means no input ports to seed.
-        let inst = Node::subgraph_instance(&def, SubgraphRef::Local(id));
-        let inst_pos =
-            Vec2::new(60.0, 60.0) + Vec2::splat(36.0) * self.graph.subgraphs.len() as f32;
-        self.graph.subgraphs.add(def);
+        let inst = Node::graph_instance(&graph, GraphLink::Local(id));
+        let inst_pos = Vec2::new(60.0, 60.0) + Vec2::splat(36.0) * self.graph.graphs.len() as f32;
+        self.graph.insert_graph(id, graph);
         let inst_id = self.graph.add(inst);
         self.main_view
             .item_placements
             .add(CanvasItemPlacement::node(inst_id, inst_pos));
 
-        // Seed the interior view explicitly so the pair opens input-left /
-        // output-right; `ensure_sub_view` then finds it and skips the
-        // generic auto-layout that would stack them.
         let mut view = GraphView::default();
         view.item_placements
             .add(CanvasItemPlacement::node(input_id, AUTO_LAYOUT_ORIGIN));
@@ -573,24 +544,22 @@ impl Document {
             output_id,
             AUTO_LAYOUT_ORIGIN + Vec2::new(BOUNDARY_LAYOUT_GAP, 0.0),
         ));
-        self.sub_views.insert(id, view);
+        self.local_views.insert(id, view);
 
         id
     }
 
-    /// Current name of a subgraph interface port (`inputs[idx]` for
-    /// `Input`, `outputs[idx]` for `Output`), or `None` if the def /
-    /// side / index doesn't resolve.
+    /// Current name of a nested graph interface port.
     pub(crate) fn boundary_port_name(
         &self,
-        sub_id: SubgraphId,
+        graph_id: GraphId,
         side: BoundarySide,
         idx: usize,
     ) -> Option<&str> {
-        let def = self.graph.subgraphs.by_key(&sub_id)?;
+        let graph = self.graph.graphs.get(&graph_id)?;
         let name = match side {
-            BoundarySide::Input => &def.inputs.get(idx)?.name,
-            BoundarySide::Output => &def.outputs.get(idx)?.name,
+            BoundarySide::Input => &graph.inputs.get(idx)?.name,
+            BoundarySide::Output => &graph.outputs.get(idx)?.name,
         };
         Some(name)
     }
@@ -605,21 +574,23 @@ impl Document {
     /// was disconnected away entirely).
     pub(crate) fn rename_boundary_port(
         &mut self,
-        sub_id: SubgraphId,
+        graph_id: GraphId,
         side: BoundarySide,
         idx_hint: usize,
         expected: &str,
         new: &str,
     ) {
-        let Some(def) = self.graph.subgraphs.by_key_mut(&sub_id) else {
+        let Some(graph) = self.graph.graphs.get_mut(&graph_id) else {
             return;
         };
         let slot = match side {
-            BoundarySide::Input => resolve_named_slot(&def.inputs, idx_hint, expected, |i| &i.name)
-                .map(|i| &mut def.inputs[i].name),
+            BoundarySide::Input => {
+                resolve_named_slot(&graph.inputs, idx_hint, expected, |i| &i.name)
+                    .map(|i| &mut graph.inputs[i].name)
+            }
             BoundarySide::Output => {
-                resolve_named_slot(&def.outputs, idx_hint, expected, |o| &o.name)
-                    .map(|i| &mut def.outputs[i].name)
+                resolve_named_slot(&graph.outputs, idx_hint, expected, |o| &o.name)
+                    .map(|i| &mut graph.outputs[i].name)
             }
         };
         if let Some(slot) = slot {
@@ -627,25 +598,22 @@ impl Document {
         }
     }
 
-    /// Reconcile every local subgraph def's interface (`inputs`/`outputs`)
-    /// against its interior wiring — derived state, recomputed like the
-    /// scene rather than stored as undo steps. See `crate::core::edit::reconcile` for
-    /// the per-def logic and rationale (placeholder ports, compaction).
+    /// Reconcile every local graph interface against its boundary wiring.
     pub(crate) fn reconcile_boundaries(&mut self, library: &Library) {
-        if self.graph.subgraphs.is_empty() {
+        if self.graph.graphs.is_empty() {
             return;
         }
-        let def_ids: Vec<SubgraphId> = self.graph.subgraphs.iter().map(|d| d.id).collect();
-        for id in def_ids {
-            reconcile_def(self, id, library);
+        let graph_ids: Vec<GraphId> = self.graph.graphs.keys().copied().collect();
+        for id in graph_ids {
+            reconcile_graph(self, id, library);
         }
     }
 
-    /// Drop wiring left dangling when a node's func/def changed its interface
+    /// Drop wiring left dangling when a node's target changed its interface
     /// (e.g. a document loaded against a newer library): data bindings whose
     /// port is now out of range, and event subscriptions whose event is gone.
     /// Derived-validity fixup run alongside [`Self::reconcile_boundaries`];
-    /// both recurse into local subgraph defs.
+    /// both recurse into local graphs.
     pub(crate) fn prune_dangling_wiring(&mut self, library: &Library) {
         self.graph.prune_dangling_wiring(library);
     }
@@ -665,12 +633,22 @@ impl Document {
     /// boundary converts to the typed error.
     fn check_inner(&self) -> Result<()> {
         self.graph.check()?;
+        ensure!(
+            self.graph.inputs.is_empty()
+                && self.graph.outputs.is_empty()
+                && self.graph.events.is_empty(),
+            "entry graph cannot expose an interface"
+        );
+        ensure!(
+            self.graph.iter().all(|node| !node.kind.is_boundary()),
+            "entry graph cannot contain interface boundary nodes"
+        );
 
-        // Node ids must be unique across the whole document, def interiors
+        // Node ids must be unique across the whole document, nested graphs
         // included: `PortRef` carries no graph ref, and run state, inspectors,
-        // and widget ids all key nodes by bare `NodeId`. Every def-copy
+        // and widget ids all key nodes by bare `NodeId`. Every graph-copy
         // boundary (import / localize / detach) severs identity via
-        // `SubgraphDef::fresh_copy`, so a duplicate is corrupt input.
+        // `Graph::fresh_copy`, so a duplicate is corrupt input.
         fn collect_node_ids(graph: &CoreGraph, seen: &mut HashSet<NodeId>) -> Result<()> {
             for node in graph.iter() {
                 ensure!(
@@ -679,8 +657,8 @@ impl Document {
                     node.id
                 );
             }
-            for def in graph.subgraphs.iter() {
-                collect_node_ids(&def.graph, seen)?;
+            for nested in graph.graphs.values() {
+                collect_node_ids(nested, seen)?;
             }
             Ok(())
         }
@@ -688,14 +666,14 @@ impl Document {
 
         self.main_view.check(&self.graph).context("main view")?;
 
-        // Each opened subgraph view must match its interior graph; a
-        // view whose subgraph was deleted is a stale entry.
-        for (id, view) in &self.sub_views {
-            let def = self.graph.subgraphs.by_key(id).with_context(|| {
-                format!("sub_views entry references missing local subgraph {id:?}")
+        // Each opened graph view must match its interior graph; a
+        // view whose graph was deleted is a stale entry.
+        for (id, view) in &self.local_views {
+            let graph = self.graph.graphs.get(id).with_context(|| {
+                format!("local_views entry references missing local graph {id:?}")
             })?;
-            view.check(&def.graph)
-                .with_context(|| format!("subgraph {id:?} view"))?;
+            view.check(graph)
+                .with_context(|| format!("graph {id:?} view"))?;
         }
 
         self.layout.check()?;
@@ -748,7 +726,7 @@ impl From<CoreGraph> for Document {
         Self {
             graph,
             main_view,
-            sub_views: HashMap::new(),
+            local_views: HashMap::new(),
             layout: DockLayout::default(),
         }
     }
@@ -760,51 +738,47 @@ mod tests {
     use scenarium::FuncId;
     use scenarium::testing::test_graph as core_test_graph;
 
-    /// A childless local def with the given id/name.
-    fn leaf_def(id: SubgraphId, name: &str) -> SubgraphDef {
-        SubgraphDef::new(id, name)
+    fn leaf_graph(name: &str) -> CoreGraph {
+        CoreGraph::new(name)
     }
 
     #[test]
     fn import_regenerates_ids_and_keeps_nested_def_ids() {
         // Real storage shape: a child def lives in its *parent's* interior
-        // `graph.subgraphs`, instanced by an interior node — not in a flat
+        // `graph.graphs`, instanced by an interior node — not in a flat
         // root table. Importing the parent carries the child with it.
-        let child_id = SubgraphId::unique();
-        let parent_id = SubgraphId::unique();
-        let origin_id = SubgraphId::unique();
-        let mut interior = CoreGraph::default();
-        interior.subgraphs.add(leaf_def(child_id, "child"));
-        interior.add(Node::new(NodeKind::Subgraph(SubgraphRef::Local(child_id))));
-        let parent = SubgraphDef::new(parent_id, "parent")
-            .graph(interior)
-            .origin(origin_id);
-        let source_ids: Vec<NodeId> = parent.graph.iter().map(|n| n.id).collect();
+        let child_id = GraphId::unique();
+        let parent_id = GraphId::unique();
+        let origin_id = GraphId::unique();
+        let mut parent = CoreGraph::new("parent").origin(origin_id);
+        parent.insert_graph(child_id, leaf_graph("child"));
+        parent.add(Node::new(NodeKind::Graph(GraphLink::Local(child_id))));
+        let source_ids: Vec<NodeId> = parent.iter().map(|n| n.id).collect();
 
         let mut doc = Document::default();
-        let id_a = doc.import_subgraph(parent.clone());
-        let id_b = doc.import_subgraph(parent);
+        let id_a = doc.import_graph(parent.clone());
+        let id_b = doc.import_graph(parent);
 
         assert_ne!(id_a, parent_id, "top-level id is regenerated");
         assert_ne!(id_a, id_b, "each import is its own def");
         assert!(
-            doc.graph.subgraphs.by_key(&parent_id).is_none(),
+            doc.graph.graphs.get(&parent_id).is_none(),
             "original top id is not reused"
         );
-        let interior_ids = |id: SubgraphId| -> Vec<NodeId> {
-            let def = doc.graph.subgraphs.by_key(&id).expect("def resolves");
+        let interior_ids = |id: GraphId| -> Vec<NodeId> {
+            let def = doc.graph.graphs.get(&id).expect("def resolves");
             assert_eq!(
                 def.origin,
                 Some(origin_id),
                 "library lineage is carried over"
             );
             // The nested child def rides along under its (level-scoped) id.
-            assert_eq!(def.graph.subgraphs.len(), 1);
+            assert_eq!(def.graphs.len(), 1);
             assert!(
-                def.graph.subgraphs.by_key(&child_id).is_some(),
+                def.graphs.contains_key(&child_id),
                 "nested child def is preserved with its original id"
             );
-            def.graph.iter().map(|n| n.id).collect()
+            def.iter().map(|n| n.id).collect()
         };
         // Interior node ids are freshly generated per import: the copies
         // share none with the source file or each other, so the
@@ -827,13 +801,12 @@ mod tests {
         // identity via `fresh_copy`), so it's corrupt input `check` refuses.
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
-        let sub_id = doc.create_subgraph();
+        let graph_id = doc.create_graph();
         let dup = Node::new(NodeKind::Func(FuncId::unique()));
         doc.graph
-            .subgraphs
-            .by_key_mut(&sub_id)
+            .graphs
+            .get_mut(&graph_id)
             .unwrap()
-            .graph
             .insert(node_id, dup);
 
         let err = doc.check().unwrap_err();
@@ -846,12 +819,11 @@ mod tests {
 
     #[test]
     fn importing_same_def_twice_makes_two_copies() {
-        let id = SubgraphId::unique();
         let mut doc = Document::default();
-        let a = doc.import_subgraph(leaf_def(id, "x"));
-        let b = doc.import_subgraph(leaf_def(id, "x"));
+        let a = doc.import_graph(leaf_graph("x"));
+        let b = doc.import_graph(leaf_graph("x"));
         assert_ne!(a, b, "each import gets its own id");
-        assert_eq!(doc.graph.subgraphs.len(), 2, "no silent overwrite");
+        assert_eq!(doc.graph.graphs.len(), 2, "no silent overwrite");
     }
 
     #[test]
@@ -860,14 +832,14 @@ mod tests {
         use crate::core::edit::intent::build::build_step;
         use crate::core::edit::intent::types::Intent;
 
-        // Instancing a library subgraph localizes it: a `Local` def copy
+        // Instancing a library graph localizes it: a `Local` def copy
         // (recording its `origin`) is added alongside the instance node, as
         // one undoable `AddNode`.
-        let lib_id = SubgraphId::unique();
-        let mut local = leaf_def(lib_id, "Lib").fresh_copy();
+        let lib_id = GraphId::unique();
+        let mut local = leaf_graph("Lib").fresh_copy();
         local.origin = Some(lib_id);
-        let local_id = local.id;
-        let node = Node::subgraph_instance(&local, SubgraphRef::Local(local_id));
+        let local_id = GraphId::unique();
+        let node = Node::graph_instance(&local, GraphLink::Local(local_id));
         let node_id = NodeId::unique();
 
         let mut doc = Document::default();
@@ -876,7 +848,7 @@ mod tests {
                 pos: Vec2::ZERO,
                 node_id,
                 node,
-                def: Some(Box::new(local)),
+                graph: Some((local_id, Box::new(local))),
                 bindings: vec![],
             },
             &doc,
@@ -886,11 +858,11 @@ mod tests {
 
         apply_step(&step, &mut doc, GraphRef::Main);
         assert!(
-            doc.graph.subgraphs.by_key(&local_id).is_some(),
-            "local def added alongside the instance"
+            doc.graph.graphs.get(&local_id).is_some(),
+            "local graph added alongside the instance"
         );
         assert_eq!(
-            doc.graph.subgraphs.by_key(&local_id).unwrap().origin,
+            doc.graph.graphs.get(&local_id).unwrap().origin,
             Some(lib_id),
             "copy records its library origin"
         );
@@ -901,7 +873,7 @@ mod tests {
 
         revert_step(&step, &mut doc, GraphRef::Main);
         assert!(
-            doc.graph.subgraphs.by_key(&local_id).is_none(),
+            doc.graph.graphs.get(&local_id).is_none(),
             "undo removes the def"
         );
         assert!(
@@ -913,22 +885,22 @@ mod tests {
     /// Localize one library instance into `doc`'s root graph and return
     /// `(node_id, local_def_id)`. `origin` tags the copy's library
     /// lineage so a later instance can dedup against it.
-    fn add_library_instance(doc: &mut Document, lib_id: SubgraphId) -> (NodeId, SubgraphId) {
+    fn add_library_instance(doc: &mut Document, lib_id: GraphId) -> (NodeId, GraphId) {
         use crate::core::edit::intent::apply::apply_step;
         use crate::core::edit::intent::build::build_step;
         use crate::core::edit::intent::types::Intent;
 
-        let mut local = leaf_def(lib_id, "Lib").fresh_copy();
+        let mut local = leaf_graph("Lib").fresh_copy();
         local.origin = Some(lib_id);
-        let local_id = local.id;
-        let node = Node::subgraph_instance(&local, SubgraphRef::Local(local_id));
+        let local_id = GraphId::unique();
+        let node = Node::graph_instance(&local, GraphLink::Local(local_id));
         let node_id = NodeId::unique();
         let step = build_step(
             Intent::AddNode {
                 pos: Vec2::ZERO,
                 node_id,
                 node,
-                def: Some(Box::new(local)),
+                graph: Some((local_id, Box::new(local))),
                 bindings: vec![],
             },
             doc,
@@ -941,29 +913,29 @@ mod tests {
 
     #[test]
     fn second_instance_reuses_existing_local_def() {
-        // Two instances of the same library subgraph dropped into one
-        // graph must share a single local def: the first materializes the
+        // Two instances of the same library graph dropped into one
+        // graph must share a single local graph: the first materializes the
         // localized copy, the second re-points at it (no duplicate def).
-        let lib_id = SubgraphId::unique();
+        let lib_id = GraphId::unique();
         let mut doc = Document::default();
 
         let (_node_a, def_a_id) = add_library_instance(&mut doc, lib_id);
-        assert_eq!(doc.graph.subgraphs.len(), 1, "first instance adds the def");
+        assert_eq!(doc.graph.graphs.len(), 1, "first instance adds the def");
 
         let (node_b, def_b_id) = add_library_instance(&mut doc, lib_id);
         assert_eq!(
-            doc.graph.subgraphs.len(),
+            doc.graph.graphs.len(),
             1,
             "second instance reuses the def — no duplicate"
         );
         assert!(
-            doc.graph.subgraphs.by_key(&def_b_id).is_none(),
+            doc.graph.graphs.get(&def_b_id).is_none(),
             "the second fresh copy was dropped"
         );
         assert_eq!(
             doc.graph.find(&node_b, NodeSearch::TopLevel).unwrap().kind,
-            NodeKind::Subgraph(SubgraphRef::Local(def_a_id)),
-            "second instance points at the first instance's local def"
+            NodeKind::Graph(GraphLink::Local(def_a_id)),
+            "second instance points at the first instance's local graph"
         );
     }
 
@@ -973,60 +945,60 @@ mod tests {
         use crate::core::edit::intent::build::build_step;
         use crate::core::edit::intent::types::Intent;
 
-        // A node on a library-linked local def. Detach must fork a fresh
+        // A node on a library-linked local graph. Detach must fork a fresh
         // standalone copy (origin cleared), add it, and repoint the node.
-        let lib_id = SubgraphId::unique();
+        let lib_id = GraphId::unique();
         let mut doc = Document::default();
-        let mut local = leaf_def(SubgraphId::unique(), "Lib");
+        let mut local = leaf_graph("Lib");
         local.origin = Some(lib_id);
-        let local_id = local.id;
-        doc.graph.subgraphs.add(local);
-        let node = Node::subgraph_instance(
-            doc.graph.subgraphs.by_key(&local_id).unwrap(),
-            SubgraphRef::Local(local_id),
+        let local_id = GraphId::unique();
+        doc.graph.insert_graph(local_id, local);
+        let node = Node::graph_instance(
+            doc.graph.graphs.get(&local_id).unwrap(),
+            GraphLink::Local(local_id),
         );
         let node_id = doc.graph.add(node);
         doc.main_view
             .item_placements
             .add(CanvasItemPlacement::node(node_id, Vec2::ZERO));
 
-        let step = build_step(Intent::DetachSubgraph { node_id }, &doc, GraphRef::Main)
+        let step = build_step(Intent::DetachGraph { node_id }, &doc, GraphRef::Main)
             .expect("detach builds");
         apply_step(&step, &mut doc, GraphRef::Main);
 
-        assert_eq!(doc.graph.subgraphs.len(), 2, "fork adds a second local def");
-        let NodeKind::Subgraph(SubgraphRef::Local(new_id)) =
+        assert_eq!(doc.graph.graphs.len(), 2, "fork adds a second local graph");
+        let NodeKind::Graph(GraphLink::Local(new_id)) =
             doc.graph.find(&node_id, NodeSearch::TopLevel).unwrap().kind
         else {
-            panic!("node should still be a local subgraph");
+            panic!("node should still be a local graph");
         };
         assert_ne!(new_id, local_id, "node now points at the fork");
         assert_eq!(
-            doc.graph.subgraphs.by_key(&new_id).unwrap().origin,
+            doc.graph.graphs.get(&new_id).unwrap().origin,
             None,
             "detach clears the library lineage"
         );
 
         revert_step(&step, &mut doc, GraphRef::Main);
-        assert_eq!(doc.graph.subgraphs.len(), 1, "undo drops the fork");
-        let NodeKind::Subgraph(SubgraphRef::Local(restored)) =
+        assert_eq!(doc.graph.graphs.len(), 1, "undo drops the fork");
+        let NodeKind::Graph(GraphLink::Local(restored)) =
             doc.graph.find(&node_id, NodeSearch::TopLevel).unwrap().kind
         else {
-            panic!("node should still be a local subgraph");
+            panic!("node should still be a local graph");
         };
         assert_eq!(restored, local_id, "undo restores the original ref");
     }
 
     #[test]
     fn instances_of_different_library_defs_stay_separate() {
-        // Different library sources must NOT collapse into one local def.
+        // Different library sources must NOT collapse into one local graph.
         let mut doc = Document::default();
-        add_library_instance(&mut doc, SubgraphId::unique());
-        add_library_instance(&mut doc, SubgraphId::unique());
+        add_library_instance(&mut doc, GraphId::unique());
+        add_library_instance(&mut doc, GraphId::unique());
         assert_eq!(
-            doc.graph.subgraphs.len(),
+            doc.graph.graphs.len(),
             2,
-            "distinct library origins keep distinct local defs"
+            "distinct library origins keep distinct local graphs"
         );
     }
 
@@ -1077,24 +1049,22 @@ mod tests {
     }
 
     #[test]
-    fn create_subgraph_has_only_boundary_nodes() {
+    fn create_graph_has_only_boundary_nodes() {
         let mut doc = Document::default();
-        let id = doc.create_subgraph();
-        let def = doc.graph.subgraphs.by_key(&id).expect("def added");
+        let id = doc.create_graph();
+        let def = doc.graph.graphs.get(&id).expect("def added");
 
         // Exactly the two boundary nodes, nothing else, empty interface.
-        assert_eq!(def.graph.len(), 2);
+        assert_eq!(def.len(), 2);
         assert_eq!(
-            def.graph
-                .iter()
-                .filter(|n| matches!(n.kind, NodeKind::SubgraphInput))
+            def.iter()
+                .filter(|n| matches!(n.kind, NodeKind::GraphInput))
                 .count(),
             1
         );
         assert_eq!(
-            def.graph
-                .iter()
-                .filter(|n| matches!(n.kind, NodeKind::SubgraphOutput))
+            def.iter()
+                .filter(|n| matches!(n.kind, NodeKind::GraphOutput))
                 .count(),
             1
         );
@@ -1102,18 +1072,16 @@ mod tests {
 
         // Boundary nodes are placed input-left / output-right, level.
         let input_id = def
-            .graph
             .iter()
-            .find(|n| matches!(n.kind, NodeKind::SubgraphInput))
+            .find(|n| matches!(n.kind, NodeKind::GraphInput))
             .unwrap()
             .id;
         let output_id = def
-            .graph
             .iter()
-            .find(|n| matches!(n.kind, NodeKind::SubgraphOutput))
+            .find(|n| matches!(n.kind, NodeKind::GraphOutput))
             .unwrap()
             .id;
-        let view = doc.sub_views.get(&id).expect("view seeded on create");
+        let view = doc.local_views.get(&id).expect("view seeded on create");
         let ip = view
             .item_placements
             .by_key(&ItemRef::Node(input_id))
@@ -1127,11 +1095,11 @@ mod tests {
         assert!(op.x > ip.x, "output boundary sits right of input");
         assert_eq!(ip.y, op.y, "boundaries are level");
 
-        // Creating also drops an instance of the new subgraph into root.
+        // Creating also drops an instance of the new graph into root.
         let inst = doc
             .graph
             .iter()
-            .find(|n| matches!(n.kind, NodeKind::Subgraph(SubgraphRef::Local(sid)) if sid == id))
+            .find(|n| matches!(n.kind, NodeKind::Graph(GraphLink::Local(sid)) if sid == id))
             .expect("instance added to main graph");
         assert!(
             doc.main_view
@@ -1142,9 +1110,9 @@ mod tests {
         );
 
         // Each create mints a distinct id (no overwrite).
-        let id2 = doc.create_subgraph();
+        let id2 = doc.create_graph();
         assert_ne!(id, id2);
-        assert_eq!(doc.graph.subgraphs.len(), 2);
+        assert_eq!(doc.graph.graphs.len(), 2);
     }
 
     /// An output-0 [`PortRef`] on `node_id`, for viewer-tab tests.
@@ -1173,12 +1141,12 @@ mod tests {
             .find_or_insert(TabRef::ImageViewer(out_port(root_node)), primary);
         assert!(doc.retains_output_resource(root_port));
 
-        let def_id = doc.create_subgraph();
+        let def_id = doc.create_graph();
         let nested_node = Node::new(NodeKind::Func(FuncId::unique()));
-        let definition = doc.graph.subgraphs.by_key_mut(&def_id).unwrap();
-        let nested_node_id = definition.graph.add(nested_node);
+        let definition = doc.graph.graphs.get_mut(&def_id).unwrap();
+        let nested_node_id = definition.add(nested_node);
         let nested_port = OutputPort::new(nested_node_id, 0);
-        definition.graph.set_output_pinned(nested_port, true);
+        definition.set_output_pinned(nested_port, true);
         assert!(
             doc.is_output_pinned(nested_port),
             "pins in nested authoring graphs retain their presentation resource"
@@ -1218,10 +1186,10 @@ mod tests {
     }
 
     #[test]
-    fn ensure_valid_layout_keeps_non_graph_tabs_when_a_subgraph_tab_vanishes() {
+    fn ensure_valid_layout_keeps_non_graph_tabs_when_a_graph_tab_vanishes() {
         let mut doc = Document::default();
         let node_id = add_node_at(&mut doc, Vec2::ZERO);
-        let id = doc.create_subgraph();
+        let id = doc.create_graph();
         let primary = doc.layout.primary().id;
         doc.layout
             .find_or_insert(TabRef::Graph(GraphRef::Local(id)), primary);
@@ -1229,11 +1197,11 @@ mod tests {
         doc.layout
             .find_or_insert(TabRef::ImageViewer(out_port(node_id)), primary);
         doc.layout.activate(primary, 3); // viewing the image tab
-        // Drop the subgraph out from under its open tab.
-        doc.graph.subgraphs.remove_by_key(&id);
+        // Drop the graph out from under its open tab.
+        doc.graph.graphs.remove(&id);
 
         doc.ensure_valid_layout();
-        // The dead subgraph tab is pruned; Main + the non-graph tabs
+        // The dead graph tab is pruned; Main + the non-graph tabs
         // remain, and the clamped active still points at the image tab
         // (it slid left one slot with the removal).
         assert_eq!(
@@ -1261,7 +1229,7 @@ mod tests {
             "tab survives while the node exists"
         );
 
-        // Delete the node: the viewer tab dies with it (like a subgraph
+        // Delete the node: the viewer tab dies with it (like a graph
         // tab whose def vanished).
         doc.scope_mut(GraphRef::Main).unwrap().remove_node(&node_id);
         doc.ensure_valid_layout();

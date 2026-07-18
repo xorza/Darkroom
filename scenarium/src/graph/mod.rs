@@ -1,15 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
-use common::KeyIndexVec;
 use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::StaticValue;
-use crate::graph::subgraph::{SubgraphDef, SubgraphId, SubgraphRef};
+use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
 use crate::library::Library;
 use crate::node::definition::{Func, FuncId};
+use crate::node::definition::{FuncInput, FuncOutput};
 use crate::node::special::SpecialNode;
 use anyhow::{Context, ensure};
 use common::id_type;
@@ -18,9 +18,9 @@ use common::{Result, SerdeFormat, deserialize, serialize};
 id_type!(NodeId);
 
 pub(crate) mod clone;
+pub(crate) mod interface;
 mod query;
 pub(crate) mod reconcile;
-pub(crate) mod subgraph;
 #[cfg(test)]
 mod tests;
 mod validate;
@@ -158,26 +158,24 @@ impl CacheMode {
     }
 }
 
-/// What a node *is*. A plain `Func` instance, a composite `Subgraph`
+/// What a node *is*. A plain `Func` instance, a nested `Graph`
 /// instance, a built-in [`SpecialNode`] (hardcoded declaration, recognized by
-/// the engine), or one of the two interface boundary nodes that may appear only
-/// inside a `SubgraphDef.graph` (their port arity comes from the enclosing def's
-/// interface, not from a func).
+/// the engine), or one of the two graph-interface boundary nodes.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NodeKind {
     Func(FuncId),
-    Subgraph(SubgraphRef),
+    Graph(GraphLink),
     /// A built-in special node; its interface comes from
     /// [`SpecialNode::func`].
     Special(SpecialNode),
-    /// Inbound boundary: outputs = enclosing def's exposed inputs.
-    SubgraphInput,
-    /// Outbound boundary: inputs = enclosing def's exposed outputs.
-    SubgraphOutput,
+    /// Inbound boundary: outputs = the graph's exposed inputs.
+    GraphInput,
+    /// Outbound boundary: inputs = the graph's exposed outputs.
+    GraphOutput,
 }
 
 // A node is pure authored data. Identity is its key in `Graph::nodes`; port/event
-// arity comes from the func/def, and wiring lives in `Graph`'s side tables.
+// arity comes from the func or graph interface, and wiring lives in side tables.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Node {
     pub kind: NodeKind,
@@ -217,28 +215,27 @@ impl NodeKind {
         }
     }
 
-    pub fn as_subgraph(&self) -> Option<SubgraphRef> {
+    pub fn as_graph(&self) -> Option<GraphLink> {
         match self {
-            NodeKind::Subgraph(r) => Some(*r),
+            NodeKind::Graph(link) => Some(*link),
             _ => None,
         }
     }
 
     pub fn is_boundary(&self) -> bool {
-        matches!(self, NodeKind::SubgraphInput | NodeKind::SubgraphOutput)
+        matches!(self, NodeKind::GraphInput | NodeKind::GraphOutput)
     }
 }
 
 impl Node {
-    /// The func this node instantiates, or `None` for subgraph/boundary
-    /// nodes. Convenience shim over `kind`.
+    /// The func this node instantiates, or `None` for graph/boundary nodes.
     pub fn func_id(&self) -> Option<FuncId> {
         self.kind.as_func()
     }
 }
 
-/// How deep a node lookup reaches: this graph's own nodes only, or also
-/// every local subgraph interior, recursively. The argument to
+/// How deep a node lookup reaches: this graph's own nodes only, or also every
+/// local nested graph, recursively. The argument to
 /// [`Graph::find_node`], [`Graph::find_node_mut`], and
 /// [`Graph::find_node_by_name`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -249,6 +246,25 @@ pub enum NodeSearch {
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
+    pub name: String,
+    pub category: String,
+
+    /// Interface in port order. `inputs[i]` corresponds to `GraphInput`
+    /// output port `i`; `outputs[j]` corresponds to `GraphOutput` input port
+    /// `j`.
+    #[serde(default)]
+    pub inputs: Vec<FuncInput>,
+    #[serde(default)]
+    pub outputs: Vec<FuncOutput>,
+
+    /// Exposed outgoing events re-exported from interior emitters.
+    #[serde(default)]
+    pub events: Vec<GraphEvent>,
+
+    /// Shared-library graph this value was copied from, if any.
+    #[serde(default)]
+    pub origin: Option<GraphId>,
+
     pub(crate) nodes: HashMap<NodeId, Node>,
 
     /// Data wiring, keyed by consumer input port. Sparse: only `Const`/`Bind`
@@ -272,15 +288,66 @@ pub struct Graph {
     #[serde(default)]
     pub(crate) pinned_outputs: BTreeSet<OutputPort>,
 
-    /// Local (per-instance) subgraph definitions referenced by this graph's
-    /// `NodeKind::Subgraph(SubgraphRef::Local(_))` nodes. Editing one of
-    /// these affects only this graph. Shared definitions live in
-    /// `Library.subgraphs` instead. See `execution/README.md` Part A §4.4.
+    /// Local graphs referenced by this graph's `GraphLink::Local` instances.
+    /// Shared graphs live in `Library::graphs`.
     #[serde(default)]
-    pub subgraphs: KeyIndexVec<SubgraphId, SubgraphDef>,
+    pub graphs: HashMap<GraphId, Graph>,
 }
 
 impl Graph {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn category(mut self, category: impl Into<String>) -> Self {
+        self.category = category.into();
+        self
+    }
+
+    pub fn input(mut self, input: FuncInput) -> Self {
+        self.inputs.push(input);
+        self
+    }
+
+    pub fn inputs(mut self, inputs: impl IntoIterator<Item = FuncInput>) -> Self {
+        self.inputs.extend(inputs);
+        self
+    }
+
+    pub fn output(mut self, output: FuncOutput) -> Self {
+        self.outputs.push(output);
+        self
+    }
+
+    pub fn outputs(mut self, outputs: impl IntoIterator<Item = FuncOutput>) -> Self {
+        self.outputs.extend(outputs);
+        self
+    }
+
+    pub fn event(mut self, event: GraphEvent) -> Self {
+        self.events.push(event);
+        self
+    }
+
+    pub fn events(mut self, events: impl IntoIterator<Item = GraphEvent>) -> Self {
+        self.events.extend(events);
+        self
+    }
+
+    pub fn origin(mut self, origin: GraphId) -> Self {
+        self.origin = Some(origin);
+        self
+    }
+
+    pub fn insert_graph(&mut self, graph_id: GraphId, graph: Graph) {
+        assert!(!graph_id.is_nil(), "cannot insert a graph with a nil id");
+        let previous = self.graphs.insert(graph_id, graph);
+        assert!(previous.is_none(), "graph {graph_id:?} already exists");
+    }
+
     pub fn add(&mut self, node: Node) -> NodeId {
         let node_id = NodeId::unique();
         self.insert(node_id, node);
@@ -314,8 +381,8 @@ impl Graph {
             .map(|(id, node)| NodeRef { id: *id, node })
     }
 
-    /// The node with `id`, at the depth `search` selects. Node ids are
-    /// unique across a whole document (subgraph interiors included), so a
+    /// The node with `id`, at the depth `search` selects. Node ids are unique
+    /// across a whole document (nested graphs included), so a
     /// [`Recursive`](NodeSearch::Recursive) hit is unambiguous.
     pub fn find(&self, id: &NodeId, search: NodeSearch) -> Option<&Node> {
         assert!(!id.is_nil());
@@ -324,9 +391,9 @@ impl Graph {
             None => match search {
                 NodeSearch::TopLevel => None,
                 NodeSearch::Recursive => self
-                    .subgraphs
-                    .iter()
-                    .find_map(|d| d.graph.find(id, NodeSearch::Recursive)),
+                    .graphs
+                    .values()
+                    .find_map(|graph| graph.find(id, NodeSearch::Recursive)),
             },
         }
     }
@@ -334,7 +401,7 @@ impl Graph {
     /// A node named `name`, at the depth `search` selects.
     ///
     /// Names are not unique, so this returns an arbitrary match. Recursive
-    /// searches prefer a match in this graph over one in a subgraph interior.
+    /// searches prefer a match in this graph over one in a nested graph.
     pub fn find_by_name(&self, name: &str, search: NodeSearch) -> Option<NodeRef<'_>> {
         assert!(!name.is_empty());
         if let Some((id, node)) = self.nodes.iter().find(|(_, node)| node.name == name) {
@@ -344,9 +411,9 @@ impl Graph {
         match search {
             NodeSearch::TopLevel => None,
             NodeSearch::Recursive => self
-                .subgraphs
-                .iter()
-                .find_map(|def| def.graph.find_by_name(name, NodeSearch::Recursive)),
+                .graphs
+                .values()
+                .find_map(|graph| graph.find_by_name(name, NodeSearch::Recursive)),
         }
     }
 
@@ -356,13 +423,11 @@ impl Graph {
         match search {
             NodeSearch::TopLevel => self.nodes.get_mut(id),
             NodeSearch::Recursive => {
-                let Self {
-                    nodes, subgraphs, ..
-                } = self;
+                let Self { nodes, graphs, .. } = self;
                 nodes.get_mut(id).or_else(|| {
-                    subgraphs
-                        .iter_mut()
-                        .find_map(|d| d.graph.find_mut(id, NodeSearch::Recursive))
+                    graphs
+                        .values_mut()
+                        .find_map(|graph| graph.find_mut(id, NodeSearch::Recursive))
                 })
             }
         }
@@ -377,19 +442,13 @@ impl Graph {
         Ok(graph)
     }
 
-    /// Structural validation of a (possibly untrusted) graph — runs in all
-    /// builds and returns an error rather than panicking. `validate` below is
-    /// the debug-only internal-invariant check; this is the load-path guard.
-    /// Treats `self` as a root graph (boundary nodes are invalid at this
-    /// level); nested defs are checked via [`SubgraphDef::check`], which
-    /// re-enters in def-interior mode. Port-index ranges (and anything else
-    /// needing a `Library`) are checked by `check_with`, not here.
+    /// Structural validation of a graph value.
     pub fn check(&self) -> Result<()> {
-        self.check_impl(false)?;
+        self.check_impl()?;
         self.check_unique_node_ids(None)
     }
 
-    fn check_unique_node_ids(&self, library: Option<&Library>) -> Result<()> {
+    pub(crate) fn check_unique_node_ids(&self, library: Option<&Library>) -> Result<()> {
         fn collect(
             graph: &Graph,
             library: Option<&Library>,
@@ -406,15 +465,15 @@ impl Graph {
                     node_id
                 );
             }
-            for def in graph.subgraphs.iter() {
-                collect(&def.graph, library, visited, node_ids)?;
+            for nested in graph.graphs.values() {
+                collect(nested, library, visited, node_ids)?;
             }
             if let Some(library) = library {
                 for node in graph.nodes.values() {
-                    if let NodeKind::Subgraph(SubgraphRef::Linked(id)) = node.kind
-                        && let Some(def) = library.subgraphs.by_key(&id)
+                    if let NodeKind::Graph(GraphLink::Shared(id)) = node.kind
+                        && let Some(shared) = library.graphs.get(&id)
                     {
-                        collect(&def.graph, Some(library), visited, node_ids)?;
+                        collect(shared, Some(library), visited, node_ids)?;
                     }
                 }
             }
@@ -424,12 +483,7 @@ impl Graph {
         collect(self, library, &mut HashSet::new(), &mut HashSet::new())
     }
 
-    /// The recursive body of [`Self::check`]. `is_def_interior` toggles the
-    /// one context-dependent rule: `SubgraphInput`/`SubgraphOutput` are valid
-    /// only inside a subgraph def, at most one of each — flattening routes
-    /// through the *first* boundary node of a kind, so a duplicate would
-    /// silently misroute rather than fail.
-    pub(crate) fn check_impl(&self, is_def_interior: bool) -> Result<()> {
+    pub(crate) fn check_impl(&self) -> Result<()> {
         let mut boundary_inputs = 0usize;
         let mut boundary_outputs = 0usize;
         for (node_id, node) in &self.nodes {
@@ -438,12 +492,12 @@ impl Graph {
                 NodeKind::Func(func_id) => {
                     ensure!(!func_id.is_nil(), "node {:?} has a nil func_id", node_id);
                 }
-                NodeKind::Subgraph(r) => {
-                    ensure!(!r.id().is_nil(), "node {:?} has a nil subgraph id", node_id);
-                    if let SubgraphRef::Local(id) = r {
+                NodeKind::Graph(r) => {
+                    ensure!(!r.id().is_nil(), "node {:?} has a nil graph id", node_id);
+                    if let GraphLink::Local(id) = r {
                         ensure!(
-                            self.subgraphs.by_key(id).is_some(),
-                            "node {:?} references missing local subgraph {:?}",
+                            self.graphs.contains_key(id),
+                            "node {:?} references missing local graph {:?}",
                             node_id,
                             id
                         );
@@ -452,31 +506,21 @@ impl Graph {
                 // Special nodes carry no id to validate; their declaration is
                 // hardcoded and always resolves.
                 NodeKind::Special(_) => {}
-                NodeKind::SubgraphInput => {
-                    ensure!(
-                        is_def_interior,
-                        "node {:?}: SubgraphInput is only valid inside a subgraph def",
-                        node_id
-                    );
+                NodeKind::GraphInput => {
                     boundary_inputs += 1;
                 }
-                NodeKind::SubgraphOutput => {
-                    ensure!(
-                        is_def_interior,
-                        "node {:?}: SubgraphOutput is only valid inside a subgraph def",
-                        node_id
-                    );
+                NodeKind::GraphOutput => {
                     boundary_outputs += 1;
                 }
             }
         }
         ensure!(
             boundary_inputs <= 1,
-            "a def interior holds at most one SubgraphInput, found {boundary_inputs}"
+            "a graph holds at most one GraphInput, found {boundary_inputs}"
         );
         ensure!(
             boundary_outputs <= 1,
-            "a def interior holds at most one SubgraphOutput, found {boundary_outputs}"
+            "a graph holds at most one GraphOutput, found {boundary_outputs}"
         );
 
         for (dst, binding) in &self.bindings {
@@ -519,24 +563,30 @@ impl Graph {
             );
         }
 
-        for def in self.subgraphs.iter() {
-            def.check()
-                .with_context(|| format!("in local subgraph {:?}", def.name))?;
+        for event in &self.events {
+            ensure!(
+                self.nodes.contains_key(&event.emitter),
+                "exposed event {:?} names missing emitter {:?}",
+                event.name,
+                event.emitter
+            );
+        }
+
+        for (graph_id, graph) in &self.graphs {
+            ensure!(!graph_id.is_nil(), "local graph has a nil id");
+            graph
+                .check_impl()
+                .with_context(|| format!("in local graph {:?}", graph.name))?;
         }
 
         Ok(())
     }
 
-    /// Resolve a `SubgraphRef` to its definition: `Local` from this graph's
-    /// own table, `Linked` from the shared `Library`.
-    pub fn resolve_def<'a>(
-        &'a self,
-        r: SubgraphRef,
-        library: &'a Library,
-    ) -> Option<&'a SubgraphDef> {
-        match r {
-            SubgraphRef::Local(id) => self.subgraphs.by_key(&id),
-            SubgraphRef::Linked(id) => library.subgraphs.by_key(&id),
+    /// Resolve a graph instance link from this graph or the shared library.
+    pub fn resolve_graph<'a>(&'a self, link: GraphLink, library: &'a Library) -> Option<&'a Graph> {
+        match link {
+            GraphLink::Local(id) => self.graphs.get(&id),
+            GraphLink::Shared(id) => library.graphs.get(&id),
         }
     }
 
@@ -556,12 +606,11 @@ impl Graph {
         node_id
     }
 
-    /// Add a composite instance and seed its inputs' default const bindings
-    /// from the def interface. `r` must reference `def`.
-    pub fn add_subgraph_node(&mut self, def: &SubgraphDef, r: SubgraphRef) -> NodeId {
-        let node = Node::subgraph_instance(def, r);
+    /// Add a graph instance and seed its inputs' default const bindings.
+    pub fn add_graph_node(&mut self, graph: &Graph, link: GraphLink) -> NodeId {
+        let node = Node::graph_instance(graph, link);
         let node_id = self.add(node);
-        for (port_idx, io) in def.inputs.iter().enumerate() {
+        for (port_idx, io) in graph.inputs.iter().enumerate() {
             if let Some(default) = &io.default_value {
                 self.set_input_binding(
                     InputPort::new(node_id, port_idx),
@@ -575,7 +624,7 @@ impl Graph {
 
 impl Node {
     /// A fresh node of the given kind with no inputs/events. Callers fill in
-    /// wiring, or use `From<&Func>` / `subgraph_instance` for a node shaped
+    /// wiring, or use `From<&Func>` / `graph_instance` for a node shaped
     /// from its definition. A `Special` node copies its hardcoded func's
     /// `default_cache_mode`; every other kind seeds `None`.
     pub fn new(kind: NodeKind) -> Self {
@@ -591,15 +640,11 @@ impl Node {
         }
     }
 
-    /// A composite instance node shaped from a definition. Default input
-    /// bindings are seeded by `Graph::add_subgraph_node`.
-    /// `r` must reference `def`.
-    pub fn subgraph_instance(def: &SubgraphDef, r: SubgraphRef) -> Self {
-        assert_eq!(r.id(), def.id, "SubgraphRef must reference the given def");
-
+    /// A graph instance node shaped from the referenced graph.
+    pub fn graph_instance(graph: &Graph, link: GraphLink) -> Self {
         Node {
-            kind: NodeKind::Subgraph(r),
-            name: def.name.clone(),
+            kind: NodeKind::Graph(link),
+            name: graph.name.clone(),
             cache: CacheMode::None,
             disabled: false,
         }

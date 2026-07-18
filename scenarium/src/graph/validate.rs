@@ -7,8 +7,7 @@ use anyhow::{Context, ensure};
 use common::{Result, is_debug};
 use hashbrown::HashSet;
 
-use super::*;
-use crate::graph::subgraph::{SubgraphDef, SubgraphId};
+use crate::graph::{Binding, Graph, Node, NodeKind, NodeSearch};
 use crate::library::Library;
 use crate::node::definition::FuncInput;
 use crate::{DataType, StaticValue};
@@ -39,32 +38,32 @@ impl Graph {
 
     /// Full structural validation against `library`, in all builds. Extends
     /// [`check`] (which can't see the library) with every library-dependent
-    /// check: each func/subgraph reference resolves, no subgraph contains
-    /// itself, boundary nodes sit inside a def, and every binding/subscription
+    /// check: each func/graph reference resolves, no graph contains itself,
+    /// and every binding/subscription
     /// port index is in range. A graph+library is untrusted input at the
     /// compile boundary (a document can be stale against an evolved library),
     /// so an invalid one is a recoverable error the caller surfaces — not a
     /// panic. With this passing, flattening resolves every reference infallibly.
     pub fn check_with(&self, library: &Library) -> Result<()> {
         self.check()?;
+        ensure!(
+            self.inputs.is_empty() && self.outputs.is_empty() && self.events.is_empty(),
+            "entry graph cannot expose an interface"
+        );
+        ensure!(
+            self.nodes.values().all(|node| !node.kind.is_boundary()),
+            "entry graph cannot contain interface boundary nodes"
+        );
         self.check_unique_node_ids(Some(library))?;
-        let mut visited: HashSet<SubgraphId> = HashSet::new();
-        self.check_level(library, None, &mut visited)
+        let mut visited = HashSet::new();
+        visited.insert(std::ptr::from_ref(self));
+        self.check_level(library, &mut visited)
     }
 
-    /// Recursive per-level half of [`check_with`]. `ctx_def` is the enclosing
-    /// subgraph definition when checking a def's interior (so boundary nodes
-    /// can be checked against the interface), `None` at the top level.
-    /// `visited` is the descent path of `SubgraphId`s — re-entering one is the
-    /// recursion error.
-    fn check_level(
-        &self,
-        library: &Library,
-        ctx_def: Option<&SubgraphDef>,
-        visited: &mut HashSet<SubgraphId>,
-    ) -> Result<()> {
-        // Resolve every node's func/def first (and recurse into composites):
-        // the port-count helpers below look funcs/defs up infallibly, so this
+    /// Recursive per-level half of [`check_with`].
+    fn check_level(&self, library: &Library, visited: &mut HashSet<*const Graph>) -> Result<()> {
+        // Resolve every node's func/graph first (and recurse into composites):
+        // the port-count helpers below look them up infallibly, so this
         // pass must establish they all resolve before any count is taken.
         for (node_id, node) in &self.nodes {
             match &node.kind {
@@ -76,54 +75,37 @@ impl Graph {
                         func_id
                     );
                 }
-                NodeKind::Subgraph(r) => {
-                    let def = self.resolve_def(*r, library).with_context(|| {
-                        format!(
-                            "node {:?} references a missing subgraph definition",
-                            node_id
-                        )
+                NodeKind::Graph(link) => {
+                    let graph = self.resolve_graph(*link, library).with_context(|| {
+                        format!("node {:?} references a missing graph", node_id)
                     })?;
+                    let graph_ptr = std::ptr::from_ref(graph);
                     ensure!(
-                        visited.insert(def.id),
-                        "subgraph {:?} is recursive (contains itself)",
-                        def.id
+                        visited.insert(graph_ptr),
+                        "graph {:?} is recursive (contains itself)",
+                        graph.name
                     );
-                    def.graph.check_level(library, Some(def), visited)?;
-                    visited.remove(&def.id);
+                    graph.check_level(library, visited)?;
+                    visited.remove(&graph_ptr);
                 }
-                NodeKind::SubgraphInput => {
-                    ensure!(
-                        ctx_def.is_some(),
-                        "SubgraphInput node is only valid inside a subgraph"
-                    );
-                }
-                NodeKind::SubgraphOutput => {
-                    ensure!(
-                        ctx_def.is_some(),
-                        "SubgraphOutput is only valid inside a subgraph"
-                    );
-                }
+                NodeKind::GraphInput | NodeKind::GraphOutput => {}
                 // Hardcoded declaration — nothing to resolve or recurse into.
                 NodeKind::Special(_) => {}
             }
         }
 
-        // When checking a def's interior, each exposed event must name an
-        // interior emitter that actually exposes that event.
-        if let Some(def) = ctx_def {
-            for event in &def.events {
-                let emitter = self
-                    .find(&event.emitter, NodeSearch::TopLevel)
-                    .with_context(|| {
-                        format!("exposed event names missing emitter {:?}", event.emitter)
-                    })?;
-                ensure!(
-                    event.emitter_event_idx < self.event_count(emitter, library, ctx_def),
-                    "exposed event index {} out of range on {:?}",
-                    event.emitter_event_idx,
-                    event.emitter
-                );
-            }
+        for event in &self.events {
+            let emitter = self
+                .find(&event.emitter, NodeSearch::TopLevel)
+                .with_context(|| {
+                    format!("exposed event names missing emitter {:?}", event.emitter)
+                })?;
+            ensure!(
+                event.emitter_event_idx < self.event_count(emitter, library),
+                "exposed event index {} out of range on {:?}",
+                event.emitter_event_idx,
+                event.emitter
+            );
         }
 
         // Every binding addresses ports that exist on both ends.
@@ -132,7 +114,7 @@ impl Graph {
                 .find(&dst.node_id, NodeSearch::TopLevel)
                 .with_context(|| format!("binding on missing node {:?}", dst.node_id))?;
             ensure!(
-                dst.port_idx < self.input_count(consumer, library, ctx_def),
+                dst.port_idx < self.input_count(consumer, library),
                 "binding on node {:?} input {} is out of range",
                 dst.node_id,
                 dst.port_idx
@@ -148,7 +130,7 @@ impl Graph {
                     .find(&src.node_id, NodeSearch::TopLevel)
                     .with_context(|| format!("binding from missing node {:?}", src.node_id))?;
                 ensure!(
-                    src.port_idx < self.output_count(producer, library, ctx_def),
+                    src.port_idx < self.output_count(producer, library),
                     "binding from node {:?} output {} is out of range",
                     src.node_id,
                     src.port_idx
@@ -192,7 +174,7 @@ impl Graph {
                 .find(&s.emitter, NodeSearch::TopLevel)
                 .with_context(|| format!("subscription from missing emitter {:?}", s.emitter))?;
             ensure!(
-                s.event_idx < self.event_count(emitter, library, ctx_def),
+                s.event_idx < self.event_count(emitter, library),
                 "subscription event index {} out of range on {:?}",
                 s.event_idx,
                 s.emitter
@@ -205,7 +187,7 @@ impl Graph {
                 .find(&port.node_id, NodeSearch::TopLevel)
                 .with_context(|| format!("pinned output on missing node {:?}", port.node_id))?;
             ensure!(
-                port.port_idx < self.output_count(node, library, ctx_def),
+                port.port_idx < self.output_count(node, library),
                 "pinned output on node {:?} output {} is out of range",
                 port.node_id,
                 port.port_idx
@@ -214,9 +196,6 @@ impl Graph {
         Ok(())
     }
 
-    /// Number of input ports a node exposes — by kind. `ctx_def` is the
-    /// enclosing def, needed only for `SubgraphOutput` (whose inputs are the
-    /// def's exposed outputs).
     /// Whether the consumer port `(node, port_idx)` is declared const-only — it
     /// may hold a `Const` literal but must not be wired to an upstream output.
     /// Boundary nodes route the interface (no literals), so they're never
@@ -224,44 +203,41 @@ impl Graph {
     fn input_is_const_only(&self, node: &Node, port_idx: usize, library: &Library) -> bool {
         let inputs = match &node.kind {
             NodeKind::Func(func_id) => &library.by_id(func_id).unwrap().inputs,
-            NodeKind::Subgraph(r) => &self.resolve_def(*r, library).unwrap().inputs,
+            NodeKind::Graph(r) => &self.resolve_graph(*r, library).unwrap().inputs,
             NodeKind::Special(s) => &s.func().inputs,
-            NodeKind::SubgraphInput | NodeKind::SubgraphOutput => return false,
+            NodeKind::GraphInput | NodeKind::GraphOutput => return false,
         };
         inputs.get(port_idx).is_some_and(|i| i.const_only)
     }
 
-    fn input_count(&self, node: &Node, library: &Library, ctx_def: Option<&SubgraphDef>) -> usize {
+    fn input_count(&self, node: &Node, library: &Library) -> usize {
         match &node.kind {
             NodeKind::Func(func_id) => library.by_id(func_id).unwrap().inputs.len(),
-            NodeKind::Subgraph(r) => self.resolve_def(*r, library).unwrap().inputs.len(),
+            NodeKind::Graph(r) => self.resolve_graph(*r, library).unwrap().inputs.len(),
             NodeKind::Special(s) => s.func().inputs.len(),
-            NodeKind::SubgraphInput => 0,
-            NodeKind::SubgraphOutput => ctx_def.unwrap().outputs.len(),
+            NodeKind::GraphInput => 0,
+            NodeKind::GraphOutput => self.outputs.len(),
         }
     }
 
-    /// Number of output ports a node exposes — by kind. `ctx_def` is the
-    /// enclosing definition, needed only for `SubgraphInput` (whose outputs
-    /// are the def's exposed inputs).
-    fn output_count(&self, node: &Node, library: &Library, ctx_def: Option<&SubgraphDef>) -> usize {
+    fn output_count(&self, node: &Node, library: &Library) -> usize {
         match &node.kind {
             NodeKind::Func(func_id) => library.by_id(func_id).unwrap().outputs.len(),
-            NodeKind::Subgraph(r) => self.resolve_def(*r, library).unwrap().outputs.len(),
+            NodeKind::Graph(r) => self.resolve_graph(*r, library).unwrap().outputs.len(),
             NodeKind::Special(s) => s.func().outputs.len(),
-            NodeKind::SubgraphInput => ctx_def.unwrap().inputs.len(),
-            NodeKind::SubgraphOutput => 0,
+            NodeKind::GraphInput => self.inputs.len(),
+            NodeKind::GraphOutput => 0,
         }
     }
 
-    /// Number of events a node exposes. `SubgraphInput` exposes exactly one —
+    /// Number of events a node exposes. `GraphInput` exposes exactly one —
     /// the trigger that interior nodes subscribe to so they fire when the
     /// enclosing composite is triggered. Infallible peer of
     /// [`Self::event_count_opt`]; callers (e.g. `check_with`) resolve every
-    /// func/def first, so the lookup can't miss.
-    fn event_count(&self, node: &Node, library: &Library, _ctx_def: Option<&SubgraphDef>) -> usize {
+    /// func or graph first, so the lookup can't miss.
+    fn event_count(&self, node: &Node, library: &Library) -> usize {
         self.event_count_opt(node, library)
-            .expect("event_count on a node whose func/def is unresolved")
+            .expect("event_count on a node whose func or graph is unresolved")
     }
 }
 

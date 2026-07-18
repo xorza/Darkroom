@@ -4,13 +4,13 @@ use std::collections::BTreeSet;
 use aperture::{InternedStr, Ui};
 use common::{KeyIndexKey, KeyIndexVec, Span};
 use glam::Vec2;
+use scenarium::GraphLink;
 use scenarium::Library;
 use scenarium::{
     Binding, CacheMode, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
 };
 use scenarium::{DataType, RamUsage, StaticValue};
 use scenarium::{FuncBehavior, FuncInput, FuncOutput, OutputType, ValueVariant};
-use scenarium::{SubgraphDef, SubgraphRef};
 
 use crate::core::document::{GraphView, ItemRef, Viewport};
 use crate::gui::run_state::{ExecStatus, RunState};
@@ -94,7 +94,7 @@ pub(crate) struct SceneInput {
     pub ty: DataType,
     /// Per-frame snapshot of the input's [`Binding`].
     pub binding: InputBindingView,
-    /// Default literal (from the func/def interface), resolved once per rebuild
+    /// Default literal (from the func/graph interface), resolved once per rebuild
     /// so the UI can offer "set constant" without re-resolving the func lib.
     /// `None` for types with no `StaticValue` (a `Custom` image port).
     pub default: Option<StaticValue>,
@@ -142,11 +142,11 @@ pub(crate) struct SceneNode {
     pub id: NodeId,
     pub pos: Vec2,
     pub name: InternedStr,
-    /// Human-readable type identity: the func name, the subgraph def
+    /// Human-readable type identity: the func name, the graph
     /// name, or the boundary role (`Input`/`Output`). Shown by the
     /// inspection panel.
     pub kind_label: InternedStr,
-    /// The func's [`Func::description`] (empty for subgraph/boundary nodes).
+    /// The func's [`Func::description`] (empty for graph/boundary nodes).
     /// Shown by the inspection panel and the new-node palette tooltip.
     pub description: InternedStr,
     /// Span into [`Scene::inputs`].
@@ -155,10 +155,10 @@ pub(crate) struct SceneNode {
     pub outputs: Span,
     /// Span into [`Scene::events`]. Listed under the output ports.
     pub events: Span,
-    /// `Some` for a composite (`NodeKind::Subgraph`) instance — carries
-    /// the ref so the header's open-in-tab action knows which def to
+    /// `Some` for a composite (`NodeKind::Graph`) instance — carries
+    /// the ref so the header's open-in-tab action knows which graph to
     /// target. `None` for a plain func node.
-    pub subgraph: Option<SubgraphRef>,
+    pub graph: Option<GraphLink>,
     /// Sink node (its func is `sink` — no outputs feed downstream).
     pub sink: bool,
     /// Excluded from execution (`Node::disabled`). The header badge
@@ -179,8 +179,8 @@ pub(crate) struct SceneNode {
     /// paints the `~` marker off this flag to say *why* it has no cache chips.
     /// `false` for composites and boundary nodes.
     pub impure: bool,
-    /// A `SubgraphInput`/`SubgraphOutput` interface boundary node. Its
-    /// ports route the subgraph interface rather than carry literal
+    /// A `GraphInput`/`GraphOutput` interface boundary node. Its
+    /// ports route the graph interface rather than carry literal
     /// values, so the const-value affordances (inline editor, "Set
     /// constant" menu, drag-to-own-body) are suppressed on them.
     pub boundary: bool,
@@ -193,7 +193,7 @@ pub(crate) struct SceneNode {
     /// mirrored from `run_state`. Non-zero only for nodes that retain a value;
     /// drives the node body's memory readout, hidden when zero.
     pub ram: RamUsage,
-    /// The node's func/subgraph def is absent from the library (e.g. a
+    /// The node's func/graph is absent from the library (e.g. a
     /// document saved against an older library), so its interface can't be
     /// resolved. Rendered as a portless error stub the user can still
     /// select and delete — never silently dropped.
@@ -206,7 +206,7 @@ impl SceneNode {
     /// out of the program, an instance/boundary node has no flat identity,
     /// and a `missing` stub resolves to nothing — none makes a valid seed.
     pub(crate) fn runnable(&self) -> bool {
-        !self.boundary && !self.disabled && !self.missing && self.subgraph.is_none()
+        !self.boundary && !self.disabled && !self.missing && self.graph.is_none()
     }
 }
 
@@ -230,17 +230,12 @@ impl Scene {
     /// lets the previous pass's text arena be recycled. `App::record` enforces
     /// this before widgets consume the scene.
     ///
-    /// `ctx_def` is the enclosing `SubgraphDef` when `graph` is a
-    /// subgraph interior, `None` for the root. It's the only source of
-    /// port arity for the `SubgraphInput`/`SubgraphOutput` boundary nodes
-    /// (they carry no func) — their ports mirror the def's interface.
     pub(crate) fn rebuild(
         &mut self,
         ui: &mut Ui,
         graph: &Graph,
         view: &GraphView,
         library: &Library,
-        ctx_def: Option<&SubgraphDef>,
         run_state: &RunState,
     ) {
         self.selected = view.selected.clone();
@@ -271,11 +266,8 @@ impl Scene {
             let Some(node) = graph.find(&id, NodeSearch::TopLevel) else {
                 continue;
             };
-            // A node's interface (port names + input defaults) comes from
-            // its func or its subgraph def — both expose `FuncInput`s /
-            // `FuncOutput`s. The two boundary kinds only exist inside a
-            // def's interior; they carry no func, so their port arity is
-            // mirrored from the enclosing `ctx_def`'s interface.
+            // A node's interface comes from its func, referenced graph, or
+            // the containing graph when the node is a boundary.
             let interface = match &node.kind {
                 NodeKind::Func(func_id) => library.by_id(func_id).map(|f| NodeInterface {
                     kind_label: ui.intern(&f.name),
@@ -283,20 +275,20 @@ impl Scene {
                     inputs: Cow::Borrowed(&f.inputs),
                     outputs: Cow::Borrowed(&f.outputs),
                     events: f.events.iter().map(|e| ui.intern(&e.name)).collect(),
-                    subgraph: None,
+                    graph: None,
                     sink: f.sink,
                     uncacheable: f.uncacheable,
                     impure: f.behavior == FuncBehavior::Impure,
                 }),
-                NodeKind::Subgraph(r) => graph.resolve_def(*r, library).map(|d| NodeInterface {
+                NodeKind::Graph(r) => graph.resolve_graph(*r, library).map(|d| NodeInterface {
                     kind_label: ui.intern(&d.name),
                     description: ui.intern(""),
                     inputs: Cow::Borrowed(&d.inputs),
                     outputs: Cow::Borrowed(&d.outputs),
                     events: d.events.iter().map(|e| ui.intern(&e.name)).collect(),
-                    subgraph: Some(*r),
+                    graph: Some(*r),
                     // A composite's sink-ness is derived at flatten
-                    // time, not stored on the def; treat "no exposed
+                    // time, not stored separately; treat "no exposed
                     // outputs" as the visible sink signal.
                     sink: d.outputs.is_empty(),
                     uncacheable: false,
@@ -315,75 +307,72 @@ impl Scene {
                         inputs: Cow::Borrowed(&f.inputs),
                         outputs: Cow::Borrowed(&f.outputs),
                         events: f.events.iter().map(|e| ui.intern(&e.name)).collect(),
-                        subgraph: None,
+                        graph: None,
                         sink: f.sink,
                         uncacheable: f.uncacheable,
                         impure: f.behavior == FuncBehavior::Impure,
                     })
                 }
-                // Inbound boundary: no inputs; one output per def input,
+                // Inbound boundary: no inputs; one output per graph input,
                 // plus a trailing placeholder output. Dragging from the
                 // placeholder commits a normal `SetInput` binding to its
-                // index; `reconcile_boundaries` then grows `def.inputs` to
+                // index; `reconcile_boundaries` then grows `graph.inputs` to
                 // match and a fresh placeholder appears next frame.
-                NodeKind::SubgraphInput => ctx_def.map(|d| {
+                NodeKind::GraphInput => {
                     let mut outputs: Vec<FuncOutput> =
-                        d.inputs.iter().map(boundary_output).collect();
+                        graph.inputs.iter().map(boundary_output).collect();
                     outputs.push(placeholder_output());
-                    NodeInterface {
+                    Some(NodeInterface {
                         kind_label: ui.intern("Input"),
                         description: ui.intern(""),
                         inputs: Cow::Borrowed(&[]),
                         outputs: Cow::Owned(outputs),
                         events: Vec::new(),
-                        subgraph: None,
+                        graph: None,
                         sink: false,
                         uncacheable: true,
                         impure: false,
-                    }
-                }),
-                // Outbound boundary: one input per def output (synthesized
+                    })
+                }
+                // Outbound boundary: one input per graph output (synthesized
                 // as `FuncInput`s for names + zero defaults), plus a
                 // trailing placeholder input. Symmetric to the inbound
-                // case — wiring the placeholder grows `def.outputs`.
-                NodeKind::SubgraphOutput => ctx_def.map(|d| {
-                    let mut inputs: Vec<FuncInput> = d.outputs.iter().map(boundary_input).collect();
+                // case — wiring the placeholder grows `graph.outputs`.
+                NodeKind::GraphOutput => {
+                    let mut inputs: Vec<FuncInput> =
+                        graph.outputs.iter().map(boundary_input).collect();
                     inputs.push(placeholder_input());
-                    NodeInterface {
+                    Some(NodeInterface {
                         kind_label: ui.intern("Output"),
                         description: ui.intern(""),
                         inputs: Cow::Owned(inputs),
                         outputs: Cow::Borrowed(&[]),
                         events: Vec::new(),
-                        subgraph: None,
+                        graph: None,
                         sink: false,
                         uncacheable: true,
                         impure: false,
-                    }
-                }),
+                    })
+                }
             };
-            // A Func/Subgraph node whose func/def is absent from the library
+            // A func or graph node whose target is absent
             // has no interface to project. Dropping it would make it
             // invisible — and so impossible to select and delete — silently
             // corrupting the document. Render it as a portless error stub
-            // instead. Boundary nodes only fail to resolve when misplaced at
-            // the root (no enclosing `ctx_def`), which still skips.
+            // instead.
             let missing = interface.is_none();
             let interface = match interface {
                 Some(interface) => interface,
                 None => {
-                    // Label the stub by what's missing — a func vs a subgraph
-                    // def. Boundary nodes only fail to resolve when misplaced
-                    // at the root (no enclosing `ctx_def`); nothing to render.
                     let kind_label = match node.kind {
                         NodeKind::Func(_) => "missing func",
-                        NodeKind::Subgraph(_) => "missing subgraph",
+                        NodeKind::Graph(_) => "missing graph",
                         // A special node's spec always resolves, so it never
-                        // reaches this `None` branch; boundary nodes only fail at
-                        // the root. Nothing to render either way.
-                        NodeKind::Special(_)
-                        | NodeKind::SubgraphInput
-                        | NodeKind::SubgraphOutput => continue,
+                        // reaches this `None` branch, and boundary interfaces
+                        // always come from the containing graph.
+                        NodeKind::Special(_) | NodeKind::GraphInput | NodeKind::GraphOutput => {
+                            unreachable!("special and boundary interfaces always resolve")
+                        }
                     };
                     NodeInterface {
                         kind_label: ui.intern(kind_label),
@@ -391,7 +380,7 @@ impl Scene {
                         inputs: Cow::Borrowed(&[]),
                         outputs: Cow::Borrowed(&[]),
                         events: Vec::new(),
-                        subgraph: None,
+                        graph: None,
                         sink: false,
                         uncacheable: true,
                         impure: false,
@@ -461,8 +450,8 @@ impl Scene {
             // Boundary nodes carry no name in the model; label them by
             // role so the interior header isn't a blank bar.
             let name = match (&node.kind, node.name.is_empty()) {
-                (NodeKind::SubgraphInput, true) => ui.intern("Inputs"),
-                (NodeKind::SubgraphOutput, true) => ui.intern("Outputs"),
+                (NodeKind::GraphInput, true) => ui.intern("Inputs"),
+                (NodeKind::GraphOutput, true) => ui.intern("Outputs"),
                 _ => ui.intern(&node.name),
             };
             self.nodes.add(SceneNode {
@@ -474,7 +463,7 @@ impl Scene {
                 inputs,
                 outputs,
                 events,
-                subgraph: interface.subgraph,
+                graph: interface.graph,
                 sink: interface.sink,
                 disabled: node.disabled,
                 cache: node.cache,
@@ -482,10 +471,7 @@ impl Scene {
                     && !interface.outputs.is_empty()
                     && !interface.impure,
                 impure: interface.impure,
-                boundary: matches!(
-                    node.kind,
-                    NodeKind::SubgraphInput | NodeKind::SubgraphOutput
-                ),
+                boundary: matches!(node.kind, NodeKind::GraphInput | NodeKind::GraphOutput),
                 exec_status: run_state.status(id),
                 ram: run_state.ram(id),
                 missing,
@@ -555,22 +541,22 @@ fn slice_pool<T>(pool: &[T], span: Span) -> &[T] {
 
 /// View of a node's interface during a single rebuild: the input ports
 /// (whole `FuncInput`, for names + defaults) and the output port names.
-/// Inputs are usually borrowed from a func/def; the `SubgraphOutput`
-/// boundary node synthesizes them from the def's `FuncOutput`s, hence
+/// Inputs are usually borrowed from a func/graph; the `GraphOutput`
+/// boundary node synthesizes them from the graph's `FuncOutput`s, hence
 /// `Cow`.
 #[derive(Debug)]
 struct NodeInterface<'a> {
     kind_label: InternedStr,
-    /// The func's description (empty for subgraphs/boundaries/missing stubs).
+    /// The func's description (empty for graphs/boundaries/missing stubs).
     description: InternedStr,
     inputs: Cow<'a, [FuncInput]>,
     outputs: Cow<'a, [FuncOutput]>,
     /// Event (emitter) port names, in declaration order. `FuncEvent` and
-    /// `SubgraphEvent` differ in type but both expose a `name`, and the UI
+    /// `GraphEvent` differ in type but both expose a `name`, and the UI
     /// only lists the name — so the interface flattens them to owned
     /// names rather than threading a third `Cow<[_]>` of incompatible types.
     events: Vec<InternedStr>,
-    subgraph: Option<SubgraphRef>,
+    graph: Option<GraphLink>,
     sink: bool,
     /// Node manages its own caching (or has no output to cache), so the editor's
     /// cache chips are hidden — see [`SceneNode::uncacheable`].
@@ -604,21 +590,21 @@ fn default_static_value(library: &Library, input: &FuncInput) -> Option<StaticVa
     })
 }
 
-/// Synthesize a `FuncInput` for a `SubgraphOutput`'s input port from the
-/// def output it mirrors — name + type carry over; it's not user-set, so
+/// Synthesize a `FuncInput` for a `GraphOutput`'s input port from the
+/// graph output it mirrors — name + type carry over; it's not user-set, so
 /// it has no declared default and no value options.
 fn boundary_input(output: &FuncOutput) -> FuncInput {
     FuncInput::optional(output.name.clone(), output.ty.declared())
 }
 
-/// Synthesize a `FuncOutput` for a `SubgraphInput`'s output port from the
-/// def input it mirrors — name + type carry over.
+/// Synthesize a `FuncOutput` for a `GraphInput`'s output port from the
+/// graph input it mirrors — name + type carry over.
 fn boundary_output(input: &FuncInput) -> FuncOutput {
     FuncOutput::new(input.name.clone(), input.data_type.clone())
 }
 
 /// The trailing "connect here to add a port" placeholder output on the
-/// `SubgraphInput` boundary node: untyped until something connects.
+/// `GraphInput` boundary node: untyped until something connects.
 fn placeholder_output() -> FuncOutput {
     FuncOutput::new(PLACEHOLDER_PORT, DataType::default())
 }
@@ -627,9 +613,9 @@ fn placeholder_output() -> FuncOutput {
 /// boundary node.
 const PLACEHOLDER_PORT: &str = "+";
 
-/// The placeholder input port for a `SubgraphOutput`: unbound, untyped
+/// The placeholder input port for a `GraphOutput`: unbound, untyped
 /// until something connects (at which point reconcile materializes a real
-/// `def.outputs` entry from the wired producer's type).
+/// `graph.outputs` entry from the wired producer's type).
 fn placeholder_input() -> FuncInput {
     FuncInput::optional(PLACEHOLDER_PORT, DataType::default())
 }
@@ -656,7 +642,7 @@ pub(crate) mod test_support {
             inputs: Span::default(),
             outputs: Span::default(),
             events: Span::default(),
-            subgraph: None,
+            graph: None,
             sink: false,
             disabled: false,
             cache: CacheMode::None,
@@ -674,60 +660,63 @@ pub(crate) mod test_support {
 mod tests {
     use super::*;
     use scenarium::DataType;
-    use scenarium::SubgraphDef;
+    use scenarium::Graph;
     use scenarium::{InputPort, Node, OutputPort};
 
     fn finput(name: &str, ty: DataType) -> FuncInput {
         FuncInput::optional(name, ty)
     }
 
-    /// `def`: inputs A:Int, B:Float → outputs Sum:Int. Interior wires the
-    /// inbound boundary straight to the outbound one
-    /// (`SubgraphInput.out[0]` → `SubgraphOutput.in[0]`). Returns the def
-    /// plus the two boundary node ids so tests can locate them in `Scene`.
-    fn adder_def() -> (SubgraphDef, NodeId, NodeId) {
-        let in_node = Node::new(NodeKind::SubgraphInput);
-        let out_node = Node::new(NodeKind::SubgraphOutput);
-        let mut inner = Graph::default();
-        let in_id = inner.add(in_node);
-        let out_id = inner.add(out_node);
-        inner.set_input_binding(InputPort::new(out_id, 0), Binding::bind(in_id, 0));
+    #[derive(Debug)]
+    struct AdderGraph {
+        graph: Graph,
+        input: NodeId,
+        output: NodeId,
+    }
 
-        let def = SubgraphDef::new("00000000-0000-0000-0000-000000000000", "Adder")
-            .category("Subgraph")
-            .graph(inner)
+    fn adder_graph() -> AdderGraph {
+        let in_node = Node::new(NodeKind::GraphInput);
+        let out_node = Node::new(NodeKind::GraphOutput);
+        let mut graph = Graph::new("Adder")
+            .category("Graph")
             .inputs([finput("A", DataType::Int), finput("B", DataType::Float)])
             .output(FuncOutput::new("Sum", DataType::Int));
-        (def, in_id, out_id)
+        let input = graph.add(in_node);
+        let output = graph.add(out_node);
+        graph.set_input_binding(InputPort::new(output, 0), Binding::bind(input, 0));
+        AdderGraph {
+            graph,
+            input,
+            output,
+        }
     }
 
     #[test]
-    fn boundary_nodes_mirror_def_interface() {
-        let (def, in_id, out_id) = adder_def();
-        let view = GraphView::for_graph(&def.graph);
+    fn boundary_nodes_mirror_graph_interface() {
+        let fixture = adder_graph();
+        let view = GraphView::for_graph(&fixture.graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
         scene.rebuild(
             &mut ui,
-            &def.graph,
+            &fixture.graph,
             &view,
             &Library::default(),
-            Some(&def),
             &RunState::default(),
         );
 
         assert_eq!(scene.nodes.len(), 2, "both boundary nodes render");
-        let input_node = scene.nodes.iter().find(|n| n.id == in_id).unwrap();
-        let output_node = scene.nodes.iter().find(|n| n.id == out_id).unwrap();
+        let input_node = scene.nodes.iter().find(|n| n.id == fixture.input).unwrap();
+        let output_node = scene.nodes.iter().find(|n| n.id == fixture.output).unwrap();
 
         // Boundary nodes are labeled by role.
         assert_eq!(&*input_node.kind_label.borrow_str(), "Input");
         assert_eq!(&*output_node.kind_label.borrow_str(), "Output");
 
-        // SubgraphInput's outputs mirror the def inputs (A:Int, B:Float)
+        // GraphInput's outputs mirror the graph inputs (A:Int, B:Float)
         // plus the untyped "+" placeholder — types align with names.
         let in_outs = scene.outputs(input_node.outputs);
-        assert_eq!(in_outs.len(), 3, "two def inputs + placeholder");
+        assert_eq!(in_outs.len(), 3, "two graph inputs + placeholder");
         assert!(matches!(in_outs[0].ty, DataType::Int));
         assert!(matches!(in_outs[1].ty, DataType::Float));
         assert!(
@@ -735,13 +724,13 @@ mod tests {
             "placeholder untyped"
         );
 
-        // SubgraphOutput's inputs mirror the def output (Sum:Int) plus a
+        // GraphOutput's inputs mirror the graph output (Sum:Int) plus a
         // placeholder.
         let out_ins = scene.inputs(output_node.inputs);
-        assert_eq!(out_ins.len(), 2, "one def output + placeholder");
+        assert_eq!(out_ins.len(), 2, "one graph output + placeholder");
         assert!(matches!(out_ins[0].ty, DataType::Int));
 
-        // SubgraphInput: 0 inputs; one output per def *input*, named to
+        // GraphInput: 0 inputs; one output per graph *input*, named to
         // match, plus the trailing "+" placeholder.
         assert_eq!(scene.inputs(input_node.inputs).len(), 0);
         let in_out_names: Vec<String> = scene
@@ -750,7 +739,7 @@ mod tests {
             .map(|o| o.name.borrow_str().to_owned())
             .collect();
         assert_eq!(in_out_names, ["A", "B", "+"]);
-        assert!(input_node.subgraph.is_none() && !input_node.sink);
+        assert!(input_node.graph.is_none() && !input_node.sink);
         assert!(
             input_node.boundary && output_node.boundary,
             "boundary nodes are flagged so const affordances are suppressed"
@@ -760,7 +749,7 @@ mod tests {
             "boundary nodes offer no run affordance — they have no flat identity"
         );
 
-        // SubgraphOutput: one input per def *output* plus the "+"
+        // GraphOutput: one input per graph *output* plus the "+"
         // placeholder; 0 outputs.
         assert_eq!(scene.outputs(output_node.outputs).len(), 0);
         let out_in_names: Vec<String> = scene
@@ -773,42 +762,17 @@ mod tests {
         // The interior wire shows up as a connection between the boundaries.
         assert_eq!(scene.connections.len(), 1);
         let c = &scene.connections[0];
-        assert_eq!(c.src, OutputPort::new(in_id, 0));
-        assert_eq!(c.tgt, InputPort::new(out_id, 0));
+        assert_eq!(c.src, OutputPort::new(fixture.input, 0));
+        assert_eq!(c.tgt, InputPort::new(fixture.output, 0));
     }
 
     #[test]
-    fn boundary_nodes_skipped_without_ctx_def() {
-        // With no enclosing def (e.g. rendered at the root) a boundary
-        // node has no derivable interface, so it's dropped rather than
-        // rendered with phantom ports.
-        let (def, _in, _out) = adder_def();
-        let view = GraphView::for_graph(&def.graph);
-        let mut scene = Scene::default();
-        let mut ui = Ui::default();
-        scene.rebuild(
-            &mut ui,
-            &def.graph,
-            &view,
-            &Library::default(),
-            None,
-            &RunState::default(),
-        );
-
-        assert_eq!(scene.nodes.len(), 0, "no ctx_def → no boundary nodes");
-        // The wire's endpoints aren't rendered, but `edges()` still yields
-        // it; the draw layer skips wires whose ports don't resolve.
-        assert_eq!(scene.connections.len(), 1);
-    }
-
-    #[test]
-    fn missing_func_and_subgraph_render_as_deletable_stubs() {
-        use scenarium::SubgraphRef;
+    fn missing_func_and_graph_render_as_deletable_stubs() {
+        use scenarium::GraphLink;
         use scenarium::math_library;
 
         // A resolvable func, plus two unresolvable nodes (e.g. a document
-        // saved against an older library): a func id and a linked subgraph
-        // def id the library no longer defines.
+        // saved against an older library): a func id and a shared graph id.
         let library = math_library();
         let mut graph = Graph::default();
         let known: Node = library.by_name("Add").unwrap().into();
@@ -816,39 +780,38 @@ mod tests {
             "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
         ));
         ghost_func.name = "astro_to_image".into();
-        let mut ghost_sub = Node::new(NodeKind::Subgraph(SubgraphRef::Linked(
+        let mut ghost_graph = Node::new(NodeKind::Graph(GraphLink::Shared(
             "00000000-0000-0000-0000-0000000000ff".into(),
         )));
-        ghost_sub.name = "removed_subgraph".into();
+        ghost_graph.name = "removed_graph".into();
         let known_id = graph.add(known);
         let ghost_func_id = graph.add(ghost_func);
-        let ghost_sub_id = graph.add(ghost_sub);
+        let ghost_graph_id = graph.add(ghost_graph);
 
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
 
         // Every node renders, not silently dropped — so the unresolvable ones
         // stay selectable and deletable to repair the document.
         assert_eq!(scene.nodes.len(), 3, "all nodes render");
         let known_node = scene.nodes.iter().find(|n| n.id == known_id).unwrap();
         let ghost_func_node = scene.nodes.iter().find(|n| n.id == ghost_func_id).unwrap();
-        let ghost_sub_node = scene.nodes.iter().find(|n| n.id == ghost_sub_id).unwrap();
+        let ghost_graph_node = scene.nodes.iter().find(|n| n.id == ghost_graph_id).unwrap();
 
         // The flag tracks resolution; the label names what's missing.
         assert!(!known_node.missing, "a resolved func is not a stub");
-        assert!(ghost_func_node.missing && ghost_sub_node.missing);
+        assert!(ghost_func_node.missing && ghost_graph_node.missing);
         assert_eq!(&*ghost_func_node.kind_label.borrow_str(), "missing func");
-        assert_eq!(&*ghost_sub_node.kind_label.borrow_str(), "missing subgraph");
+        assert_eq!(&*ghost_graph_node.kind_label.borrow_str(), "missing graph");
 
         // Both stubs keep their saved name and carry no ports — and the
-        // subgraph stub drops its `subgraph` ref so the "open in tab" action
-        // isn't offered for a def that isn't there.
+        // graph stub drops its link so "open in tab" is unavailable.
         assert_eq!(&*ghost_func_node.name.borrow_str(), "astro_to_image");
-        assert_eq!(&*ghost_sub_node.name.borrow_str(), "removed_subgraph");
-        assert!(ghost_sub_node.subgraph.is_none());
-        for stub in [ghost_func_node, ghost_sub_node] {
+        assert_eq!(&*ghost_graph_node.name.borrow_str(), "removed_graph");
+        assert!(ghost_graph_node.graph.is_none());
+        for stub in [ghost_func_node, ghost_graph_node] {
             assert_eq!(scene.inputs(stub.inputs).len(), 0, "stub has no inputs");
             assert_eq!(scene.outputs(stub.outputs).len(), 0, "stub has no outputs");
         }
@@ -860,10 +823,10 @@ mod tests {
         );
 
         // Run seeding follows resolution: the resolved func can be run to,
-        // the stubs (and any subgraph instance) can't.
+        // the stubs (and any graph instance) can't.
         assert!(known_node.runnable(), "a resolved func node is runnable");
         assert!(
-            !ghost_func_node.runnable() && !ghost_sub_node.runnable(),
+            !ghost_func_node.runnable() && !ghost_graph_node.runnable(),
             "stubs offer no run affordance — they resolve to nothing"
         );
     }
@@ -883,7 +846,7 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
 
         let n = scene.nodes.iter().find(|n| n.id == node_id).unwrap();
         let event_names: Vec<String> = scene
@@ -924,7 +887,7 @@ mod tests {
         view.item_placements.by_key_mut(&pin_key).unwrap().pos = Vec2::new(320.0, -40.0);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
 
         let n = scene.nodes.iter().find(|n| n.id == node_id).unwrap();
         let pins: Vec<Option<Vec2>> = scene
@@ -948,7 +911,7 @@ mod tests {
 
         // ...and a reorder (pin buried beneath the node) projects verbatim.
         view.item_placements.move_to_index(&pin_key, 0);
-        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
         assert_eq!(
             scene.z_order,
             vec![pin_key, ItemRef::Node(node_id)],
@@ -973,7 +936,7 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
 
         assert_eq!(scene.subscriptions.len(), 1);
         let s = &scene.subscriptions[0];
@@ -1006,7 +969,7 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
 
         for (id, mode) in ids {
             let projected = scene.nodes.iter().find(|n| n.id == id).unwrap();
@@ -1040,7 +1003,7 @@ mod tests {
         let view = GraphView::for_graph(&graph);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
-        scene.rebuild(&mut ui, &graph, &view, &library, None, &RunState::default());
+        scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
 
         let pure = scene.nodes.iter().find(|n| n.id == pure_id).unwrap();
         let impure = scene.nodes.iter().find(|n| n.id == impure_id).unwrap();

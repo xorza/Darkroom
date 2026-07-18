@@ -1,4 +1,4 @@
-//! Byte ⇄ type plumbing for documents and subgraphs — the GUI-free half
+//! Byte ⇄ type plumbing for documents and reusable graphs — the GUI-free half
 //! of on-disk I/O. The file-picker dialogs and theme I/O live in
 //! `crate::gui::dialogs`. Pure persistence — no app state, no undo stack,
 //! no preferences; callers orchestrate (when to load/save, what to do with the
@@ -10,7 +10,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use common::{SerdeFormat, deserialize, serialize};
-use scenarium::SubgraphDef;
+use scenarium::Graph;
 
 use crate::core::document::Document;
 
@@ -27,30 +27,24 @@ pub(crate) fn save_document(doc: &Document, path: &Path) -> Result<()> {
     save_typed(path, |format| doc.serialize(format))
 }
 
-/// Serialize a subgraph `def` and write it to `path`, picking the format
-/// from its extension (defaulting to Rhai). The def's interior `Graph`
-/// carries its own nested subgraph table, so nested defs travel along
-/// automatically.
-pub(crate) fn export_subgraph(def: &SubgraphDef, path: &Path) -> Result<()> {
-    save_typed(path, |format| serialize(def, format))
+/// Serialize a reusable graph and its nested graphs.
+pub(crate) fn export_graph(graph: &Graph, path: &Path) -> Result<()> {
+    save_typed(path, |format| serialize(graph, format))
 }
 
-/// Read + deserialize a subgraph def from `path`. Errors on an unsupported
-/// extension, an unreadable file, a parse failure, or a def that fails
-/// [`SubgraphDef::check`] — an imported file is untrusted input, gated
-/// like a document.
-pub(crate) fn import_subgraph(path: &Path) -> Result<SubgraphDef> {
+/// Read and validate a reusable graph from `path`.
+pub(crate) fn import_graph(path: &Path) -> Result<Graph> {
     load_typed(path, |format, bytes| {
-        let def = deserialize::<SubgraphDef>(bytes, format)?;
-        def.check()?;
-        Ok(def)
+        let graph = deserialize::<Graph>(bytes, format)?;
+        graph.check()?;
+        Ok(graph)
     })
 }
 
 /// Shared load shell: pick the format from the extension, read the file,
 /// hand both to `parse`. `parse` is a closure (not plain `deserialize`)
 /// because each type routes through its validating gate —
-/// [`Document::deserialize`] / [`SubgraphDef::check`].
+/// [`Document::deserialize`] / [`Graph::check`].
 fn load_typed<T>(path: &Path, parse: impl FnOnce(SerdeFormat, &[u8]) -> Result<T>) -> Result<T> {
     let format =
         SerdeFormat::from_file_name(&path.to_string_lossy()).context("unsupported file")?;
@@ -69,34 +63,33 @@ fn save_typed(path: &Path, encode: impl FnOnce(SerdeFormat) -> Result<Vec<u8>>) 
 #[cfg(test)]
 mod tests {
     use common::test_utils::test_output_path;
+    use scenarium::GraphEvent;
     use scenarium::NodeId;
-    use scenarium::{SubgraphEvent, SubgraphId};
 
     use super::*;
 
     #[test]
-    fn subgraph_import_round_trips_and_gates_on_check() {
-        // A well-formed def survives the export → import round trip.
-        let path = test_output_path("darkroom_persistence/def.rhai");
-        let def = SubgraphDef::new(SubgraphId::unique(), "ok").category("test");
-        export_subgraph(&def, &path).unwrap();
-        assert_eq!(import_subgraph(&path).expect("valid def imports"), def);
+    fn graph_import_round_trips_and_gates_on_check() {
+        let path = test_output_path("darkroom_persistence/graph.rhai");
+        let graph = Graph::new("ok").category("test");
+        export_graph(&graph, &path).unwrap();
+        assert_eq!(import_graph(&path).expect("valid graph imports"), graph);
 
-        // A def that parses but fails `SubgraphDef::check` (dangling event
+        // A graph that parses but fails `Graph::check` (dangling event
         // emitter) is refused at the import gate. Export doesn't gate —
         // it writes editor-built state.
-        let bad_path = test_output_path("darkroom_persistence/bad-def.rhai");
-        let mut bad = SubgraphDef::new(SubgraphId::unique(), "bad");
-        bad.events.push(SubgraphEvent {
+        let bad_path = test_output_path("darkroom_persistence/bad-graph.rhai");
+        let mut bad = Graph::new("bad");
+        bad.events.push(GraphEvent {
             name: "tick".into(),
             emitter: NodeId::unique(),
             emitter_event_idx: 0,
         });
-        export_subgraph(&bad, &bad_path).unwrap();
-        let err = format!("{:#}", import_subgraph(&bad_path).unwrap_err());
+        export_graph(&bad, &bad_path).unwrap();
+        let err = format!("{:#}", import_graph(&bad_path).unwrap_err());
         assert!(
             err.contains("names missing emitter"),
-            "structurally invalid def must not import: {err}"
+            "structurally invalid graph must not import: {err}"
         );
     }
 }

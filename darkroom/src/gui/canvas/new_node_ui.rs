@@ -6,8 +6,8 @@ use glam::Vec2;
 use scenarium::NodeId;
 use scenarium::{Binding, InputPort, Node, NodeKind};
 use scenarium::{Func, FuncInput};
+use scenarium::{Graph, GraphId, GraphLink};
 use scenarium::{SPECIAL_NODES, SpecialNode};
-use scenarium::{SubgraphDef, SubgraphRef};
 
 use crate::core::document::PortRef;
 use crate::core::edit::intent::types::Intent;
@@ -16,23 +16,22 @@ use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::Scene;
 
-/// A chosen palette entry: the node to spawn, an optional `Local` subgraph
-/// def to add alongside it, and the default input bindings to seed with it.
+/// A chosen palette entry and the state created atomically with it.
 #[derive(Debug)]
 struct ChosenNode {
     node_id: NodeId,
     node: Node,
-    def: Option<Box<SubgraphDef>>,
+    graph: Option<(GraphId, Box<Graph>)>,
     bindings: Vec<(InputPort, Binding)>,
 }
 
 /// One row of a category's palette list: a library `Func`, a built-in special
-/// node, or a shared subgraph def. Collecting the three into one type lets a
+/// node, or a shared graph. Collecting the three into one type lets a
 /// category's rows be sorted by name into a single alphabetical list.
 enum PaletteEntry<'a> {
     Func(&'a Func),
     Special(SpecialNode),
-    Subgraph(&'a SubgraphDef),
+    Graph(GraphId, &'a Graph),
 }
 
 impl PaletteEntry<'_> {
@@ -40,7 +39,7 @@ impl PaletteEntry<'_> {
         match self {
             PaletteEntry::Func(f) => &f.name,
             PaletteEntry::Special(s) => &s.func().name,
-            PaletteEntry::Subgraph(d) => &d.name,
+            PaletteEntry::Graph(_, graph) => &graph.name,
         }
     }
 }
@@ -121,7 +120,7 @@ impl NewNodeUi {
         if let Some(ChosenNode {
             node_id,
             node,
-            def,
+            graph,
             bindings,
         }) = chosen
         {
@@ -129,7 +128,7 @@ impl NewNodeUi {
                 pos: self.world_pos,
                 node_id,
                 node,
-                def,
+                graph,
                 bindings,
             });
             // If a dropped connection opened this popup, hand its source
@@ -210,7 +209,7 @@ fn palette_body(
 }
 
 /// One category's palette column: the category name above its entries — funcs,
-/// built-in special nodes, and shared subgraph defs — filtered by the query,
+/// built-in special nodes, and shared graphs — filtered by the query,
 /// merged, and sorted by name into a single alphabetical list. Returns `None`
 /// (and renders nothing) when nothing in the category matches. A matching
 /// *category* name reveals the whole column; otherwise each entry is filtered
@@ -239,10 +238,10 @@ fn category_column(
         )
         .chain(
             ctx.library
-                .subgraphs
+                .graphs
                 .iter()
-                .filter(|d| d.category == category && shows(&d.name))
-                .map(PaletteEntry::Subgraph),
+                .filter(|(_, graph)| graph.category == category && shows(&graph.name))
+                .map(|(id, graph)| PaletteEntry::Graph(*id, graph)),
         )
         .collect();
     if entries.is_empty() {
@@ -268,7 +267,7 @@ fn category_column(
                         let picked = match entry {
                             PaletteEntry::Func(func) => func_entry(ui, popup, func),
                             PaletteEntry::Special(special) => special_entry(ui, popup, special),
-                            PaletteEntry::Subgraph(def) => subgraph_entry(ui, popup, def),
+                            PaletteEntry::Graph(id, graph) => graph_entry(ui, popup, id, graph),
                         };
                         if let Some(picked) = picked {
                             chosen = Some(picked);
@@ -286,14 +285,19 @@ fn name_matches(name: &str, query_lc: &str) -> bool {
 }
 
 /// Every category that has a func, a built-in special node, or a shared
-/// subgraph def, sorted + deduped — one popup column each.
+/// graph, sorted + deduped — one popup column each.
 fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
     let mut cats: Vec<&str> = ctx
         .library
         .funcs
         .iter()
         .map(|f| f.category.as_str())
-        .chain(ctx.library.subgraphs.iter().map(|d| d.category.as_str()))
+        .chain(
+            ctx.library
+                .graphs
+                .values()
+                .map(|graph| graph.category.as_str()),
+        )
         .chain(SPECIAL_NODES.iter().map(|s| s.func().category.as_str()))
         .collect();
     cats.sort();
@@ -316,28 +320,34 @@ fn func_entry(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> Option<ChosenNod
         ChosenNode {
             node_id,
             node,
-            def: None,
+            graph: None,
             bindings,
         }
     })
 }
 
-/// One palette row for a shared subgraph def: on click, an instance node plus an
-/// editable `Local` copy of the def that records its library `origin`, so the
+/// One palette row for a shared graph: on click, an instance node plus an
+/// editable `Local` copy of the graph that records its library `origin`, so the
 /// instance localizes rather than staying linked to the library entry.
-fn subgraph_entry(ui: &mut Ui, popup: &PopupHandle, def: &SubgraphDef) -> Option<ChosenNode> {
-    if !MenuItem::new(&def.name).show(ui, popup).left.clicked() {
+fn graph_entry(
+    ui: &mut Ui,
+    popup: &PopupHandle,
+    shared_id: GraphId,
+    graph: &Graph,
+) -> Option<ChosenNode> {
+    if !MenuItem::new(&graph.name).show(ui, popup).left.clicked() {
         return None;
     }
-    let mut local = def.fresh_copy();
-    local.origin = Some(def.id);
+    let local_id = GraphId::unique();
+    let mut local = graph.fresh_copy();
+    local.origin = Some(shared_id);
     let node_id = NodeId::unique();
-    let node = Node::subgraph_instance(&local, SubgraphRef::Local(local.id));
+    let node = Node::graph_instance(&local, GraphLink::Local(local_id));
     let bindings = default_bindings(node_id, &local.inputs);
     Some(ChosenNode {
         node_id,
         node,
-        def: Some(Box::new(local)),
+        graph: Some((local_id, Box::new(local))),
         bindings,
     })
 }
@@ -363,7 +373,7 @@ fn special_entry(ui: &mut Ui, popup: &PopupHandle, special: SpecialNode) -> Opti
     Some(ChosenNode {
         node_id,
         node,
-        def: None,
+        graph: None,
         bindings,
     })
 }
