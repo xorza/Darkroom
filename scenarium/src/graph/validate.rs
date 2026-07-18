@@ -66,7 +66,7 @@ impl Graph {
         // Resolve every node's func/def first (and recurse into composites):
         // the port-count helpers below look funcs/defs up infallibly, so this
         // pass must establish they all resolve before any count is taken.
-        for node in self.nodes.iter() {
+        for node in self.nodes.values() {
             match &node.kind {
                 NodeKind::Func(func_id) => {
                     ensure!(

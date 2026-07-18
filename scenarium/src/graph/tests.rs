@@ -18,22 +18,12 @@ fn passthrough_func() -> Func {
 #[test]
 fn roundtrip_serialization() -> anyhow::Result<()> {
     let graph = test_graph();
-    let mut reordered = graph.clone();
-    let first_id = reordered.iter().next().unwrap().id;
-    let last_index = reordered.len() - 1;
-    reordered.nodes.move_to_index(&first_id, last_index);
-    assert_ne!(graph, reordered);
 
     for format in SerdeFormat::all_formats_for_testing() {
         let serialized = graph.serialize(format)?;
         let deserialized = Graph::deserialize(&serialized, format)?;
-        let serialized_again = deserialized.serialize(format)?;
-        assert_eq!(serialized, serialized_again);
+        assert_eq!(graph, deserialized);
     }
-
-    let bin = graph.serialize(SerdeFormat::Bitcode)?;
-    let deserialized = Graph::deserialize(&bin, SerdeFormat::Bitcode)?;
-    assert_eq!(graph, deserialized);
 
     Ok(())
 }
@@ -51,6 +41,19 @@ fn check_rejects_node_ids_reused_across_graph_levels() {
 
     let error = graph.check().unwrap_err().to_string();
     assert!(error.contains("occurs in more than one authoring graph"));
+}
+
+#[test]
+fn check_rejects_node_id_key_drift() {
+    let mut graph = test_graph();
+    let stored_id = graph.by_name("sum").unwrap().id;
+    graph
+        .find_node_mut(&stored_id, NodeSearch::TopLevel)
+        .unwrap()
+        .id = NodeId::unique();
+
+    let error = graph.check().unwrap_err().to_string();
+    assert!(error.contains("disagrees with its id"));
 }
 
 #[test]
@@ -592,6 +595,25 @@ fn deserialize_rejects_corrupt_graph() {
     // (the release-path structural guard, not a debug-only assert).
     let bytes = graph.serialize(SerdeFormat::Bitcode).unwrap();
     assert!(Graph::deserialize(&bytes, SerdeFormat::Bitcode).is_err());
+
+    let duplicate_nodes = br#"{
+        "nodes": [
+            {
+                "id": "00000000-0000-0000-0000-000000000001",
+                "kind": { "Func": "00000000-0000-0000-0000-000000000002" },
+                "name": "a"
+            },
+            {
+                "id": "00000000-0000-0000-0000-000000000001",
+                "kind": { "Func": "00000000-0000-0000-0000-000000000003" },
+                "name": "b"
+            }
+        ]
+    }"#;
+    let error = Graph::deserialize(duplicate_nodes, SerdeFormat::Json)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("duplicate node id"));
 }
 
 #[test]

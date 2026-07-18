@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use common::KeyIndexVec;
+use hashbrown::HashMap as NodeMap;
 
 use crate::graph::{Binding, Graph, InputPort, NodeId, OutputPort, Subscription};
 
@@ -13,13 +14,13 @@ pub(crate) struct FreshGraph {
 impl Graph {
     pub(crate) fn with_fresh_node_ids(&self) -> FreshGraph {
         let mut id_map = HashMap::with_capacity(self.nodes.len());
-        let mut nodes = KeyIndexVec::with_capacity(self.nodes.len());
-        for node in self.nodes.iter() {
+        let mut nodes = NodeMap::with_capacity(self.nodes.len());
+        for node in self.nodes.values() {
             let new_id = NodeId::unique();
             id_map.insert(node.id, new_id);
             let mut clone = node.clone();
             clone.id = new_id;
-            nodes.add(clone);
+            nodes.insert(new_id, clone);
         }
         let remap = |id: NodeId| id_map.get(&id).copied().unwrap_or(id);
         let bindings = self

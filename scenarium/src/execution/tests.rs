@@ -2840,11 +2840,14 @@ mod composite_behavior {
             "inner",
         );
         let graph = main_with(&library, def);
-        // A `Local` def resolves from the graph itself, so the walk reaches
-        // the interior even with an empty library — and flags its `get_b`.
-        let mut eg = ExecutionEngine::default();
-        let CompileError { message } = eg.update(&graph, &Library::default()).unwrap_err();
         let get_b = library.by_name("get_b").unwrap().id;
+        let mut incomplete_library = library.clone();
+        incomplete_library.funcs.remove_by_key(&get_b).unwrap();
+
+        // A `Local` def resolves from the graph itself, so validation reaches
+        // its interior while every top-level func remains resolvable.
+        let mut eg = ExecutionEngine::default();
+        let CompileError { message } = eg.update(&graph, &incomplete_library).unwrap_err();
         assert!(
             message.contains(&format!("{get_b:?}")),
             "message should name the interior's missing func, got: {message}"
@@ -4329,24 +4332,25 @@ mod topology {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn cached_output_survives_compaction_reorder() -> anyhow::Result<()> {
-        // get_a is Pure → its output is cached across runs. We remove an
-        // earlier-inserted chain so compaction shifts get_a's slot, then verify
-        // its cached output (carried on the node) still resolves and it is NOT
-        // recomputed. Guards the SoA span / `output_values` carry-over across a
-        // `compact_insert` reorder.
+        // Both sources are Pure, so their outputs are cached across runs.
+        // Removing whichever chain compiled first guarantees that the other
+        // source shifts slots despite the authoring graph's unordered storage.
         let calls_a = Arc::new(Mutex::new(0));
         let calls_a_l = calls_a.clone();
+        let calls_b = Arc::new(Mutex::new(0));
+        let calls_b_l = calls_b.clone();
         let library = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || {
                 *calls_a_l.try_lock().unwrap() += 1;
                 Ok(2)
             }),
-            get_b: Arc::new(|| 5),
+            get_b: Arc::new(move || {
+                *calls_b_l.try_lock().unwrap() += 1;
+                5
+            }),
             print: Arc::new(|_| {}),
         });
 
-        // get_a's chain is inserted AFTER get_b's, so removing get_b's chain
-        // shifts get_a to a lower exec index on the next update.
         let get_b_id = NodeId::unique();
         let print_b_id = NodeId::unique();
         let get_a_id = NodeId::unique();
@@ -4364,27 +4368,48 @@ mod topology {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
         eg.execute_sinks().await?;
-        assert_eq!(*calls_a.lock().await, 1); // get_a ran once
-        let idx_before = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
+        assert_eq!(*calls_a.lock().await, 1);
+        assert_eq!(*calls_b.lock().await, 1);
 
-        // Remove get_b's chain — get_a's slot compacts toward the front.
-        graph.detach_node(get_b_id);
-        graph.detach_node(print_b_id);
+        let get_a_idx = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
+        let get_b_idx = eg.compiled.program.e_nodes.index_of_key(&get_b_id).unwrap();
+        let (survivor_id, removed_source_id, removed_print_id, expected_value, survivor_calls) =
+            if get_a_idx > get_b_idx {
+                (get_a_id, get_b_id, print_b_id, 2.0, &calls_a)
+            } else {
+                (get_b_id, get_a_id, print_a_id, 5.0, &calls_b)
+            };
+        let idx_before = eg
+            .compiled
+            .program
+            .e_nodes
+            .index_of_key(&survivor_id)
+            .unwrap();
+
+        graph.detach_node(removed_source_id);
+        graph.detach_node(removed_print_id);
         graph.validate();
 
         eg.update(&graph, &library).unwrap();
-        let idx_after = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
-        assert_ne!(idx_before, idx_after, "get_a should have been reordered");
+        let idx_after = eg
+            .compiled
+            .program
+            .e_nodes
+            .index_of_key(&survivor_id)
+            .unwrap();
+        assert_ne!(idx_before, idx_after, "survivor should have been reordered");
 
         let stats = eg.execute_sinks().await?;
 
-        // get_a (Pure) stays cached, not re-executed, despite the reorder…
-        assert_eq!(*calls_a.lock().await, 1, "get_a recomputed after reorder");
-        assert!(stats.cached_nodes.contains(&get_a_id));
-        // …and its cached output still resolves to the correct value.
-        let vals = eg.get_argument_values(&get_a_id).unwrap();
+        assert_eq!(
+            *survivor_calls.lock().await,
+            1,
+            "survivor recomputed after reorder"
+        );
+        assert!(stats.cached_nodes.contains(&survivor_id));
+        let vals = eg.get_argument_values(&survivor_id).unwrap();
         assert!(
-            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Float(v)) if v.approximately_eq(2.0))
+            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Float(v)) if v.approximately_eq(expected_value))
         );
 
         Ok(())

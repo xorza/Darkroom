@@ -81,7 +81,7 @@ impl Graph {
         let detached = self
             .snapshot_node(node_id)
             .expect("cannot detach a node that is not in the graph");
-        self.nodes.remove_by_key(&node_id);
+        self.nodes.remove(&node_id);
         self.bindings
             .retain(|port, binding| !binding_touches(*port, binding, node_id));
         self.subscriptions
