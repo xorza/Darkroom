@@ -19,7 +19,7 @@ use crate::core::document::{Document, GraphRef, ItemRef};
 ///
 /// When the local def is linked to a still-present library def
 /// (`origin` resolves), that def is **updated in place** (its id is
-/// reused so `add_subgraph` overwrites it and `Linked` instances pick
+/// reused so `insert_subgraph` overwrites it and `Linked` instances pick
 /// up the new content). Otherwise a fresh-id copy joins the library and
 /// the local def's `origin` is re-pointed at it, so a later publish
 /// updates rather than re-adds. The `origin` write is lineage metadata,
@@ -51,7 +51,7 @@ pub(crate) fn publish_local_def(
     // Keep the linked entry's id (update in place) or the fresh copy's own.
     let new_origin = existing_lib.unwrap_or(published.id);
     published.id = new_origin;
-    library.add_subgraph(published);
+    library.insert_subgraph(published);
     set_origin(document, target, local_id, new_origin);
     true
 }
@@ -66,7 +66,7 @@ pub(crate) fn promote_to_library(document: &mut Document, library: &mut Library)
     };
     let published = source.def.fresh_copy();
     let lib_id = published.id;
-    library.add_subgraph(published);
+    library.insert_subgraph(published);
     if let Some(relink) = source.relink {
         set_origin(document, relink.holder, relink.def_id, lib_id);
     }
@@ -218,7 +218,7 @@ mod tests {
     fn publish_updates_linked_library_def_in_place() {
         let lib_id = SubgraphId::unique();
         let mut library = Library::default();
-        library.add_subgraph(SubgraphDef::new(lib_id, "Old"));
+        library.insert_subgraph(SubgraphDef::new(lib_id, "Old"));
 
         // Local copy linked to that library def, with diverged content.
         let mut doc = Document::default();

@@ -4764,7 +4764,7 @@ mod subgraph {
         let mut library = test_func_lib(TestFuncHooks::default());
         let def = wrap_sum_def(&library);
         let def_id = def.id;
-        library.add_subgraph(def);
+        library.insert_subgraph(def);
 
         let mut graph = Graph::default();
         let def_ref = library.subgraph_by_id(&def_id).unwrap();
@@ -4943,7 +4943,7 @@ mod subgraph {
         let mut library = test_func_lib(hooks);
         let def = wrap_sum_def(&library);
         let def_id = def.id;
-        library.add_subgraph(def);
+        library.insert_subgraph(def);
 
         // Two linked instances with const inputs, each feeding a print.
         let def_ref = library.subgraph_by_id(&def_id).unwrap();

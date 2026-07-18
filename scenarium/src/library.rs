@@ -145,7 +145,8 @@ impl Library {
         self.subgraphs.by_key(id)
     }
 
-    pub fn add_subgraph(&mut self, def: SubgraphDef) {
+    /// Inserts a shared subgraph, replacing the definition with the same id.
+    pub fn insert_subgraph(&mut self, def: SubgraphDef) {
         assert!(!def.id.is_nil());
         self.subgraphs.add(def);
     }
@@ -201,7 +202,7 @@ impl Library {
             self.add(func);
         }
         for def in other.subgraphs {
-            self.add_subgraph(def);
+            self.insert_subgraph(def);
         }
         for (type_id, entry) in other.types {
             self.register_type(type_id, entry);
@@ -224,12 +225,29 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::graph::subgraph::{SubgraphDef, SubgraphId};
+    use crate::library::Library;
     use crate::node::lambda::{InvokeInput, OutputDemand};
     use crate::runtime::any_state::AnyState;
     use crate::runtime::context::ContextManager;
     use crate::runtime::shared_any_state::SharedAnyState;
     use crate::testing::{TestFuncHooks, test_func_lib};
     use crate::{DynamicValue, StaticValue};
+
+    #[test]
+    fn insert_subgraph_replaces_definition_with_same_id() {
+        let id = SubgraphId::unique();
+        let mut library = Library::default();
+
+        library.insert_subgraph(SubgraphDef::new(id, "Before"));
+        assert_eq!(library.subgraphs.len(), 1);
+        assert_eq!(library.subgraph_by_id(&id).unwrap().name, "Before");
+
+        library.insert_subgraph(SubgraphDef::new(id, "After"));
+        assert_eq!(library.subgraphs.len(), 1);
+        assert_eq!(library.subgraph_by_id(&id).unwrap().name, "After");
+    }
+
     #[tokio::test]
     async fn invoke_by_id_and_index() -> anyhow::Result<()> {
         let library = test_func_lib(TestFuncHooks::default());

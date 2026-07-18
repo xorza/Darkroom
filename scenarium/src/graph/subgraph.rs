@@ -419,7 +419,7 @@ mod tests {
         let mut library = test_func_lib(TestFuncHooks::default());
         let def = wrap_sum(&library);
         let def_id = def.id;
-        library.add_subgraph(def);
+        library.insert_subgraph(def);
 
         let mut parent = Graph::default();
         let def_ref = library.subgraph_by_id(&def_id).unwrap();
@@ -494,7 +494,7 @@ mod tests {
         let a_id = SubgraphId::unique();
         let mut inner = Graph::default();
         inner.add(Node::new(NodeKind::Subgraph(SubgraphRef::Linked(a_id))));
-        library.add_subgraph(SubgraphDef::new(a_id, "A").category("Test").graph(inner));
+        library.insert_subgraph(SubgraphDef::new(a_id, "A").category("Test").graph(inner));
 
         let mut parent = Graph::default();
         parent.add(Node::new(NodeKind::Subgraph(SubgraphRef::Linked(a_id))));

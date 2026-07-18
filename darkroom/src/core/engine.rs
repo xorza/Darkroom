@@ -63,7 +63,7 @@ impl Engine {
         let load_error = match load_library() {
             Ok(defs) => {
                 for def in defs {
-                    library.add_subgraph(def);
+                    library.insert_subgraph(def);
                 }
                 None
             }

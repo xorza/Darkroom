@@ -27,7 +27,7 @@ const LIBRARY_FILE: &str = "darkroom.library.rhai";
 /// On-disk wrapper so the file is a named table rather than a bare
 /// collection (more robust to hand-edit and future fields). A plain
 /// `Vec` — each def carries its own `id`, and we only ever iterate to
-/// feed `Library::add_subgraph`.
+/// feed `Library::insert_subgraph`.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct LibraryFile {
     #[serde(default)]

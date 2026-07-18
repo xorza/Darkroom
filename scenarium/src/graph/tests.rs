@@ -974,7 +974,7 @@ fn resolve_def_picks_local_or_linked_source() {
     let mut library = test_func_lib(TestFuncHooks::default());
 
     let linked_id = SubgraphId::unique();
-    library.add_subgraph(SubgraphDef::new(linked_id, "Linked").category("Test"));
+    library.insert_subgraph(SubgraphDef::new(linked_id, "Linked").category("Test"));
 
     let mut graph = Graph::default();
     let local_id = SubgraphId::unique();
