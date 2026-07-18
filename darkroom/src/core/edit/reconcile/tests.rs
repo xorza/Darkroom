@@ -1,6 +1,6 @@
 use super::*;
-use scenarium::GraphLink;
 use scenarium::Graph;
+use scenarium::GraphLink;
 use scenarium::Node;
 use scenarium::StaticValue;
 use scenarium::testing::{TestFuncHooks, test_func_lib};
@@ -102,8 +102,7 @@ fn fully_wired_interface_is_preserved_and_idempotent() {
     // Authored names A,B both used → reconcile must not rename or
     // resize, and a second pass must be a no-op.
     let library = lib();
-    let mut fixture =
-        build_graph(&library, vec![int_input("A"), int_input("B")], vec![]);
+    let mut fixture = build_graph(&library, vec![int_input("A"), int_input("B")], vec![]);
     bind(&mut fixture.graph, fixture.sum, 0, fixture.input, 0);
     bind(&mut fixture.graph, fixture.sum, 1, fixture.input, 1);
     let graph_id = GraphId::unique();
@@ -209,8 +208,7 @@ fn middle_disconnect_compacts_interior_and_instance_bindings() {
 fn unused_graph_input_shrinks_interface() {
     // Authored [A,B] but only output 0 is wired → B is dropped.
     let library = lib();
-    let mut fixture =
-        build_graph(&library, vec![int_input("A"), int_input("B")], vec![]);
+    let mut fixture = build_graph(&library, vec![int_input("A"), int_input("B")], vec![]);
     bind(&mut fixture.graph, fixture.sum, 0, fixture.input, 0);
     let graph_id = GraphId::unique();
     let mut graph = Graph::default();

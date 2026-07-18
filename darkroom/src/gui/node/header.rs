@@ -1,6 +1,6 @@
 //! Node header bar: the title plus the node's indicator chips, split into two
 //! visual families so a toggle can't be mistaken for a fact. **Controls** are
-//! bordered, hover-lifting chips you act on — `S` graph-open, `D` disable,
+//! bordered, hover-lifting chips you act on — `G` graph-open, `D` disable,
 //! `R`/`↓` cache, and the `i` inspect chip. **Markers** are flat tinted pills
 //! that only describe the node — `■` sink and `~` impure. The markers ride
 //! in the [`header`] band beside the title; the run-time label (left) and the
@@ -198,7 +198,7 @@ pub(crate) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
 }
 
 /// The strip under the header: the run-time label left-aligned, a `FILL`
-/// spacer, then the interactive chips right-aligned — `S` graph-open, `D`
+/// spacer, then the interactive chips right-aligned — `G` graph-open, `D`
 /// disable, `R`/`↓` cache. The controls group apart from the title's identity
 /// (header above); the run-time reads as the row's status counterweight. The
 /// disable chip always shows, so the row's height is reserved regardless.

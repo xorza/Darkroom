@@ -882,12 +882,10 @@ fn add_func_node_leaves_defaultless_inputs_unbound() {
 fn add_graph_node_seeds_default_const_binding() {
     let mut input = FuncInput::optional("A", DataType::Int).default(3i64);
     let graph_id = GraphId::unique();
-    let def = Graph::new("Def")
-        .category("Test")
-        .inputs([input.clone(), {
-            input.default_value = None;
-            input
-        }]);
+    let def = Graph::new("Def").category("Test").inputs([input.clone(), {
+        input.default_value = None;
+        input
+    }]);
 
     let mut graph = Graph::default();
     let id = graph.add_graph_node(&def, GraphLink::Local(graph_id));

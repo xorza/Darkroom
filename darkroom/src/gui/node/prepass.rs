@@ -9,9 +9,9 @@ use std::sync::Arc;
 
 use aperture::Ui;
 use scenarium::Binding;
+use scenarium::GraphLink;
 use scenarium::InputPort;
 use scenarium::NodeId;
-use scenarium::GraphLink;
 use scenarium::{DataType, FsPathConfig, StaticValue};
 
 use crate::core::document::GraphRef;
@@ -19,12 +19,12 @@ use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::Intent;
 use crate::gui::UiAction;
 use crate::gui::canvas::node_ports;
-use crate::gui::node::header::{play_badge_wid, graph_badge_wid};
+use crate::gui::node::header::{graph_badge_wid, play_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid, port_circle_wid};
 use crate::gui::node::set_input;
 use crate::gui::scene::{InputBindingView, Scene};
 
-/// Prepass scan: surface an `OpenGraph` for any graph node whose `S`
+/// Prepass scan: surface an `OpenGraph` for any graph node whose `G`
 /// chip was clicked (read from last frame's response). Detecting the
 /// open here — *before* the record — lets `App` switch the active graph
 /// ahead of Pass A, so the graph records a pass earlier and its
@@ -33,7 +33,7 @@ use crate::gui::scene::{InputBindingView, Scene};
 pub(crate) fn emit_graph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
     for n in &scene.nodes {
         // Instances are always `Local` (library graphs are localized on
-        // instance), so the "S" chip opens the interior directly.
+        // instance), so the "G" chip opens the graph directly.
         if let Some(GraphLink::Local(id)) = n.graph
             && ui.response_for(graph_badge_wid(n.id)).left.clicked()
         {

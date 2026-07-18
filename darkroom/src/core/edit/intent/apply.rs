@@ -6,8 +6,8 @@
 //! undo-stack redo, which applies a *stored* step without rebuilding it.
 
 use glam::Vec2;
+use scenarium::GraphLink;
 use scenarium::Library;
-use scenarium::SubgraphRef;
 use scenarium::{Binding, NodeId, NodeKind, NodeSearch, OutputPort};
 
 use crate::core::document::canvas_item_placement::CanvasItemPlacement;
@@ -99,7 +99,7 @@ pub(crate) fn commit_intent_cascading(
 }
 
 /// Resolve the right graph+view for a scoped step, run `body`, and
-/// no-op if the target graph has since disappeared (a subgraph deleted
+/// no-op if the target graph has since disappeared (a graph deleted
 /// while its undo entries linger).
 fn with_scope(doc: &mut Document, target: GraphRef, body: impl FnOnce(&mut EditScope<'_>)) {
     if let Some(mut scope) = doc.scope_mut(target) {
@@ -122,15 +122,15 @@ fn apply_doc(step: &DocStep, doc: &mut Document) {
     match step {
         DocStep::Dock { to, .. } => doc.layout = to.clone(),
         DocStep::RenameBoundaryPort {
-            sub_id,
+            graph_id,
             side,
             idx,
             from,
             to,
-        } => doc.rename_boundary_port(*sub_id, *side, *idx, from, to),
-        DocStep::RenameSubgraph { id, to, .. } => {
-            if let Some(def) = doc.graph.subgraphs.by_key_mut(id) {
-                def.name = to.clone();
+        } => doc.rename_boundary_port(*graph_id, *side, *idx, from, to),
+        DocStep::RenameGraph { id, to, .. } => {
+            if let Some(graph) = doc.graph.graphs.get_mut(id) {
+                graph.name = to.clone();
             }
         }
     }
@@ -143,15 +143,17 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             pos,
             node_id,
             node,
-            def,
+            graph,
             bindings,
         } => {
             assert!(
                 scope.graph.find(node_id, NodeSearch::TopLevel).is_none(),
                 "apply AddNode expects node to be absent"
             );
-            if let Some(def) = def {
-                scope.graph.subgraphs.add((**def).clone());
+            if let Some((graph_id, nested_graph)) = graph {
+                scope
+                    .graph
+                    .insert_graph(*graph_id, (**nested_graph).clone());
             }
             scope.graph.insert(*node_id, node.clone());
             for (port, binding) in bindings {
@@ -221,13 +223,18 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetNodeProperty { node_id, to, .. } => {
             set_node_property(scope, node_id, *to);
         }
-        GraphStep::DetachSubgraph { node_id, def, .. } => {
-            scope.graph.subgraphs.add((**def).clone());
+        GraphStep::DetachGraph {
+            node_id,
+            to_id,
+            graph,
+            ..
+        } => {
+            scope.graph.insert_graph(*to_id, (**graph).clone());
             scope
                 .graph
                 .find_mut(node_id, NodeSearch::TopLevel)
                 .unwrap()
-                .kind = NodeKind::Subgraph(SubgraphRef::Local(def.id));
+                .kind = NodeKind::Graph(GraphLink::Local(*to_id));
         }
         GraphStep::SetViewport { to, .. } => {
             scope.view.viewport = *to;
@@ -325,15 +332,15 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
     match step {
         DocStep::Dock { from, .. } => doc.layout = from.clone(),
         DocStep::RenameBoundaryPort {
-            sub_id,
+            graph_id,
             side,
             idx,
             from,
             to,
-        } => doc.rename_boundary_port(*sub_id, *side, *idx, to, from),
-        DocStep::RenameSubgraph { id, from, .. } => {
-            if let Some(def) = doc.graph.subgraphs.by_key_mut(id) {
-                def.name = from.clone();
+        } => doc.rename_boundary_port(*graph_id, *side, *idx, to, from),
+        DocStep::RenameGraph { id, from, .. } => {
+            if let Some(graph) = doc.graph.graphs.get_mut(id) {
+                graph.name = from.clone();
             }
         }
     }
@@ -342,10 +349,10 @@ fn revert_doc(step: &DocStep, doc: &mut Document) {
 /// Backward-apply a graph-scoped step against its resolved `EditScope`.
 fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
     match step {
-        GraphStep::AddNode { node_id, def, .. } => {
+        GraphStep::AddNode { node_id, graph, .. } => {
             scope.remove_node(node_id);
-            if let Some(def) = def {
-                scope.graph.subgraphs.remove_by_key(&def.id);
+            if let Some((graph_id, _)) = graph {
+                scope.graph.graphs.remove(graph_id);
             }
         }
         GraphStep::DuplicateNodes {
@@ -420,17 +427,18 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::SetNodeProperty { node_id, from, .. } => {
             set_node_property(scope, node_id, *from);
         }
-        GraphStep::DetachSubgraph {
+        GraphStep::DetachGraph {
             node_id,
             from_id,
-            def,
+            to_id,
+            ..
         } => {
             scope
                 .graph
                 .find_mut(node_id, NodeSearch::TopLevel)
                 .unwrap()
-                .kind = NodeKind::Subgraph(SubgraphRef::Local(*from_id));
-            scope.graph.subgraphs.remove_by_key(&def.id);
+                .kind = NodeKind::Graph(GraphLink::Local(*from_id));
+            scope.graph.graphs.remove(to_id);
         }
         GraphStep::SetViewport { from, .. } => {
             scope.view.viewport = *from;

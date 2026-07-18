@@ -1,6 +1,6 @@
 use aperture::{MenuItem, Ui};
-use scenarium::NodeId;
 use scenarium::GraphLink;
+use scenarium::NodeId;
 
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::commands::AppCommand;
@@ -62,9 +62,7 @@ impl GraphMenuUi {
         {
             match choice {
                 MenuChoice::Publish => {
-                    *cmd = Some(AppCommand::Graph(GraphCommand::PublishNode {
-                        node_id,
-                    }));
+                    *cmd = Some(AppCommand::Graph(GraphCommand::PublishNode { node_id }));
                 }
                 MenuChoice::Detach => out.push(Intent::DetachGraph { node_id }),
             }

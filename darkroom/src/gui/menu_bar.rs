@@ -3,8 +3,8 @@ use glam::Vec2;
 
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
-use crate::gui::app::commands::shell::ShellCommand;
 use crate::gui::app::commands::graph::GraphCommand;
+use crate::gui::app::commands::shell::ShellCommand;
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
 /// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.

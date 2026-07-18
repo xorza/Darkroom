@@ -2813,8 +2813,8 @@ mod behavior {
 
 mod composite_behavior {
     use super::*;
-    use crate::graph::NodeKind;
     use crate::graph::Graph;
+    use crate::graph::NodeKind;
     use crate::graph::interface::{GraphId, GraphLink};
     use crate::node::definition::FuncOutput;
 
@@ -4530,8 +4530,8 @@ mod topology {
 
 mod graph {
     use super::*;
-    use crate::graph::NodeKind;
     use crate::graph::Graph;
+    use crate::graph::NodeKind;
     use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
     use crate::node::definition::{Func, FuncId, FuncInput, FuncOutput};
     use crate::node::event::EventLambda;
@@ -4746,14 +4746,8 @@ mod graph {
 
         let mut graph = Graph::default();
         let def_ref = library.graph_by_id(&def_id).unwrap();
-        graph.add(Node::graph_instance(
-            def_ref,
-            GraphLink::Shared(def_id),
-        ));
-        graph.add(Node::graph_instance(
-            def_ref,
-            GraphLink::Shared(def_id),
-        ));
+        graph.add(Node::graph_instance(def_ref, GraphLink::Shared(def_id)));
+        graph.add(Node::graph_instance(def_ref, GraphLink::Shared(def_id)));
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
@@ -5291,8 +5285,8 @@ mod mid_run_release {
 mod compile_regressions {
     use super::*;
     use crate::async_lambda;
-    use crate::graph::NodeKind;
     use crate::graph::Graph;
+    use crate::graph::NodeKind;
     use crate::graph::interface::{GraphId, GraphLink};
     use crate::node::definition::{Func, FuncInput, FuncOutput};
     use std::sync::Mutex as StdMutex;

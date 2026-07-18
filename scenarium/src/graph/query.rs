@@ -114,7 +114,9 @@ impl Graph {
     ) -> Option<&'a [FuncOutput]> {
         match &node.kind {
             NodeKind::Func(func_id) => library.by_id(func_id).map(|f| f.outputs.as_slice()),
-            NodeKind::Graph(r) => self.resolve_graph(*r, library).map(|d| d.outputs.as_slice()),
+            NodeKind::Graph(r) => self
+                .resolve_graph(*r, library)
+                .map(|d| d.outputs.as_slice()),
             NodeKind::Special(s) => Some(s.func().outputs.as_slice()),
             NodeKind::GraphInput | NodeKind::GraphOutput => None,
         }

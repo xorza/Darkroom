@@ -7,8 +7,8 @@ use crate::core::document::{Document, ItemRef, TabRef};
 use crate::core::edit::intent::apply::apply_step;
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::Intent;
-use scenarium::NodeSearch;
 use scenarium::GraphId;
+use scenarium::NodeSearch;
 use scenarium::testing::test_graph;
 
 /// Three tabs with distinct `Local` targets in the primary group so an
@@ -614,12 +614,7 @@ fn rename_undo_survives_interface_compaction() {
 
     // Simulate `reconcile_boundaries` compacting after input 0 ("A")
     // was disconnected: the survivor "beta" shifts from index 1 to 0.
-    doc.graph
-        .graphs
-        .get_mut(&def_id)
-        .unwrap()
-        .inputs
-        .remove(0);
+    doc.graph.graphs.get_mut(&def_id).unwrap().inputs.remove(0);
     assert_eq!(
         doc.graph.graphs.get(&def_id).unwrap().inputs[0].name,
         "beta"
@@ -629,8 +624,5 @@ fn rename_undo_survives_interface_compaction() {
     // by name at its new index 0 and restores "B" — not a no-op, not
     // the wrong slot.
     revert_step(&step, &mut doc, target);
-    assert_eq!(
-        doc.graph.graphs.get(&def_id).unwrap().inputs[0].name,
-        "B"
-    );
+    assert_eq!(doc.graph.graphs.get(&def_id).unwrap().inputs[0].name, "B");
 }

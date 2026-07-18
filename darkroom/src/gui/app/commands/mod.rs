@@ -14,17 +14,17 @@ use crate::gui::app::App;
 
 pub(crate) mod edit;
 pub(crate) mod file;
+pub(crate) mod graph;
 pub(crate) mod prefs;
 pub(crate) mod run;
 pub(crate) mod shell;
-pub(crate) mod graph;
 
 use edit::EditCommand;
 use file::FileCommand;
+use graph::GraphCommand;
 use prefs::PrefsCommand;
 use run::RunCommand;
 use shell::ShellCommand;
-use graph::GraphCommand;
 
 /// A command a UI surface (the menu bar, the graph toolbar, the Preferences
 /// tab, a node's G-badge, an inline path-picker) hands to [`App`]. The producing

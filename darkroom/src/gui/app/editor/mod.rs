@@ -12,8 +12,8 @@
 //! [`App`]: crate::gui::app::App
 
 use aperture::Ui;
-use scenarium::Library;
 use scenarium::Graph;
+use scenarium::Library;
 
 use crate::core::document::dock::{DockOp, TabAddress};
 use crate::core::document::{Document, GraphRef, PortKind, PortRef, TabRef};
