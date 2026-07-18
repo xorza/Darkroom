@@ -20,7 +20,7 @@ use crate::execution::program::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionPortAddress,
     InputStamper,
 };
-use crate::graph::interface::GraphId;
+use crate::graph::interface::{GraphId, GraphLink};
 use crate::graph::{
     Binding, Graph, InputPort, NodeId, NodeKind, NodeSearch, OutputPort, Subscription,
 };
@@ -29,10 +29,8 @@ use crate::node::definition::Func;
 use crate::node::special::SpecialNode;
 use crate::{DataType, StaticValue};
 
-/// Hard cap on nesting depth — a release backstop for the output-resolution
-/// walk (which follows composite edges and isn't covered by the emit-descent
-/// recursion guard), so a pathological recursive definition can't loop
-/// forever. The emit descent rejects recursion precisely via `seen` first.
+/// Hard cap on nesting depth — a release backstop after `check_with` has
+/// rejected recursive graphs.
 const MAX_DEPTH: usize = 256;
 
 /// Reusable flattening scratch, owned by the [`Compiler`](crate::execution::compile::Compiler)
@@ -46,9 +44,8 @@ pub(crate) struct Flattener {
     /// `FlattenMap` scope indices parallel to the emit-descent in `path` —
     /// the scope each level's nodes live in. Reused across builds.
     scope_stack: Vec<u32>,
-    /// Graph ids currently on the emit-descent path — an id appearing
-    /// twice is recursion (it contains itself). Reused across builds.
-    seen: HashSet<GraphId>,
+    /// Shared graphs currently on the emit-descent path. Reused across builds.
+    seen_shared: HashSet<GraphId>,
     /// Resolved flat event edges (with flattened ids), collected during the
     /// walk and applied after the node pass (when `e_nodes` is final and
     /// addressable by key). Reused across builds.
@@ -84,7 +81,7 @@ impl Flattener {
         flatten: &mut FlattenMap,
     ) {
         self.path.clear();
-        self.seen.clear();
+        self.seen_shared.clear();
         self.subs.clear();
         // Reset to a lone root scope; emit pushes child scopes as it
         // descends composites (scope 0 is the root the stack starts on).
@@ -103,7 +100,7 @@ impl Flattener {
                 path: &mut self.path,
                 scope_stack: &mut self.scope_stack,
                 flatten,
-                seen: &mut self.seen,
+                seen_shared: &mut self.seen_shared,
                 subs: &mut self.subs,
                 compact: e_nodes.compact_insert_start(),
                 cur_idx: 0,
@@ -221,7 +218,7 @@ struct Run<'a> {
     /// The flatten map being built — leaves recorded per func node, scopes
     /// pushed per composite descent.
     flatten: &'a mut FlattenMap,
-    seen: &'a mut HashSet<GraphId>,
+    seen_shared: &'a mut HashSet<GraphId>,
     subs: &'a mut Vec<Subscription>,
     compact: CompactInsert<'a, NodeId, ExecutionNode>,
     /// Index of the leaf currently being filled. Stable across the target
@@ -243,9 +240,7 @@ impl<'a> Run<'a> {
         graph_at(self.root, self.library, self.path.as_slice())
     }
 
-    /// Descend one composite level. The depth cap is a backstop for the
-    /// output-resolution walks (which the `seen` recursion guard in `emit`
-    /// doesn't cover); a legitimate graph never nests this deep.
+    /// Descend one composite level. A legitimate graph never nests this deep.
     fn push_level(&mut self, instance_id: NodeId) {
         assert!(
             self.path.len() < MAX_DEPTH,
@@ -280,12 +275,16 @@ impl<'a> Run<'a> {
                     None,
                 ),
                 NodeKind::Special(s) => (s.func(), Some(*s)),
-                NodeKind::Graph(r) => {
-                    assert!(
-                        self.seen.insert(r.id()),
-                        "recursive graph {:?} (it contains itself)",
-                        r.id()
-                    );
+                NodeKind::Graph(link) => {
+                    let shared_id = match link {
+                        GraphLink::Shared(id) => Some(*id),
+                        GraphLink::Local(_) => None,
+                    };
+                    if let Some(id) = shared_id
+                        && !self.seen_shared.insert(id)
+                    {
+                        panic!("recursive shared graph {id:?} (it contains itself)");
+                    }
                     self.push_level(node.id);
                     // Open this instance's scope under the current one; its
                     // interior nodes record their leaves against it.
@@ -295,7 +294,9 @@ impl<'a> Run<'a> {
                     self.emit();
                     self.scope_stack.pop();
                     self.path.pop();
-                    self.seen.remove(&r.id());
+                    if let Some(id) = shared_id {
+                        self.seen_shared.remove(&id);
+                    }
                     continue;
                 }
                 NodeKind::GraphInput | NodeKind::GraphOutput => continue,
