@@ -34,3 +34,5 @@ pinned output makes node store outputs in ram
 callback when eventloop stopped for gui
 
 invert removed retain logic to optimize
+
+mesh once registrations
