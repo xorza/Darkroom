@@ -3,8 +3,9 @@
 //!
 //! Generates `impl common::Introspect`: `fields()` (a [`common::FieldDesc`] per
 //! struct field — name, label, kind, default, required) and `from_fields()`
-//! (rebuild `Self` from neutral [`common::FieldValue`]s, typed, falling back to
-//! the field's `Default` on a missing/mismatched value).
+//! (rebuild `Self` from neutral [`common::FieldValue`]s, checking numeric
+//! conversions and falling back to the field's `Default` on a
+//! missing/mismatched value).
 //!
 //! Field types map to a [`common::FieldKind`]: integers → `Int`, floats →
 //! `Float`, `bool` → `Bool`, `String` → `Str`, `Option<T>` → `T` but not
@@ -59,9 +60,11 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
                 ::std::vec![ #(#descriptors),* ]
             }
 
-            fn from_fields(values: &[::common::FieldValue]) -> Self {
+            fn from_fields(
+                values: &[::common::FieldValue],
+            ) -> ::core::result::Result<Self, ::common::IntrospectError> {
                 let d = <Self as ::core::default::Default>::default();
-                Self { #(#builders),* }
+                ::core::result::Result::Ok(Self { #(#builders),* })
             }
         }
     }
@@ -120,8 +123,8 @@ fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
     .into())
 }
 
-/// Reflected field kind. `Int`/`Float` carry the concrete numeric type (for the
-/// cast), `Enum` its type, `Option` its inner kind + inner type.
+/// Reflected field kind. `Int`/`Float` carry the concrete numeric type,
+/// `Enum` its type, `Option` its inner kind + inner type.
 enum Kind {
     Int(Type),
     Float(Type),
@@ -192,8 +195,12 @@ fn descriptor(fname: &Ident, label: &str, kind: &Kind) -> TokenStream2 {
 
 fn kind_tokens(kind: &Kind) -> TokenStream2 {
     match kind {
-        Kind::Int(_) => quote!(::common::FieldKind::Int),
-        Kind::Float(_) => quote!(::common::FieldKind::Float),
+        Kind::Int(ty) => {
+            quote!(::common::FieldKind::Int(<#ty as ::common::IntrospectInteger>::KIND))
+        }
+        Kind::Float(ty) => {
+            quote!(::common::FieldKind::Float(<#ty as ::common::IntrospectFloat>::KIND))
+        }
         Kind::Bool => quote!(::common::FieldKind::Bool),
         Kind::Str => quote!(::common::FieldKind::Str),
         Kind::Option(inner, _) => {
@@ -216,8 +223,16 @@ fn kind_tokens(kind: &Kind) -> TokenStream2 {
 /// `Option`'s payload).
 fn default_scalar(kind: &Kind, place: TokenStream2) -> TokenStream2 {
     match kind {
-        Kind::Int(_) => quote!(::common::FieldValue::Int(#place as i64)),
-        Kind::Float(_) => quote!(::common::FieldValue::Float(#place as f64)),
+        Kind::Int(ty) => quote! {
+            ::common::FieldValue::Int(
+                <#ty as ::core::convert::Into<::common::IntegerValue>>::into(#place)
+            )
+        },
+        Kind::Float(ty) => quote! {
+            ::common::FieldValue::Float(
+                <#ty as ::common::IntrospectFloat>::into_field_value(#place)
+            )
+        },
         Kind::Bool => quote!(::common::FieldValue::Bool(#place)),
         Kind::Str => quote!(::common::FieldValue::Str(#place.clone())),
         Kind::Enum(_) => {
@@ -251,13 +266,23 @@ fn read_tokens(index: usize, fname: &Ident, kind: &Kind) -> TokenStream2 {
     match kind {
         Kind::Int(ty) => quote! {
             match #get {
-                ::core::option::Option::Some(::common::FieldValue::Int(n)) => *n as #ty,
+                ::core::option::Option::Some(::common::FieldValue::Int(n)) => {
+                    <#ty as ::common::IntrospectInteger>::from_field_value(
+                        ::core::stringify!(#fname),
+                        *n,
+                    )?
+                }
                 _ => d.#fname,
             }
         },
         Kind::Float(ty) => quote! {
             match #get {
-                ::core::option::Option::Some(::common::FieldValue::Float(f)) => *f as #ty,
+                ::core::option::Option::Some(::common::FieldValue::Float(f)) => {
+                    <#ty as ::common::IntrospectFloat>::from_field_value(
+                        ::core::stringify!(#fname),
+                        *f,
+                    )?
+                }
                 _ => d.#fname,
             }
         },
@@ -290,11 +315,21 @@ fn option_read(get: &TokenStream2, fname: &Ident, inner: &Kind, inner_ty: &Type)
     let some = match inner {
         Kind::Int(_) => quote! {
             ::core::option::Option::Some(::common::FieldValue::Int(n)) =>
-                ::core::option::Option::Some(*n as #inner_ty),
+                ::core::option::Option::Some(
+                    <#inner_ty as ::common::IntrospectInteger>::from_field_value(
+                        ::core::stringify!(#fname),
+                        *n,
+                    )?
+                ),
         },
         Kind::Float(_) => quote! {
             ::core::option::Option::Some(::common::FieldValue::Float(f)) =>
-                ::core::option::Option::Some(*f as #inner_ty),
+                ::core::option::Option::Some(
+                    <#inner_ty as ::common::IntrospectFloat>::from_field_value(
+                        ::core::stringify!(#fname),
+                        *f,
+                    )?
+                ),
         },
         Kind::Bool => quote! {
             ::core::option::Option::Some(::common::FieldValue::Bool(b)) =>

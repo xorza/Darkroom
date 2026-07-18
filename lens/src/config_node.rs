@@ -21,7 +21,7 @@ use common::{FieldKind, FieldValue, Introspect};
 use scenarium::FuncLambda;
 use scenarium::{CustomValue, DataType, DynamicValue, EnumVariants, StaticValue, TypeId};
 use scenarium::{Func, FuncInput, FuncOutput};
-use scenarium::{Library, TypeEntry};
+use scenarium::{InvokeError, Library, TypeEntry};
 
 /// A config type that can back a config-builder node: introspectable, plus a
 /// stable identity for the value it travels on.
@@ -115,7 +115,9 @@ pub(crate) fn add_config_builder<T: NodeConfig>(
                     .zip(inputs)
                     .map(|(kind, input)| field_value(kind, &input.value))
                     .collect();
-                outputs[0] = DynamicValue::from_custom(ConfigValue(T::from_fields(&values)));
+                let config =
+                    T::from_fields(&values).map_err(|error| InvokeError::External(error.into()))?;
+                outputs[0] = DynamicValue::from_custom(ConfigValue(config));
                 Ok(())
             })
         }));
@@ -127,8 +129,8 @@ pub(crate) fn add_config_builder<T: NodeConfig>(
 /// [`register_field_enum`].
 fn data_type(kind: &FieldKind) -> DataType {
     match kind {
-        FieldKind::Int => DataType::Int,
-        FieldKind::Float => DataType::Float,
+        FieldKind::Int(_) => DataType::Int,
+        FieldKind::Float(_) => DataType::Float,
         FieldKind::Bool => DataType::Bool,
         FieldKind::Str => DataType::String,
         FieldKind::Enum { type_id, .. } => DataType::Enum(type_id.as_str().into()),
@@ -166,7 +168,10 @@ fn register_field_enum(library: &mut Library, kind: &FieldKind) {
 /// A neutral field default → an authored constant.
 fn static_value(value: &FieldValue) -> StaticValue {
     match value {
-        FieldValue::Int(n) => StaticValue::Int(*n),
+        FieldValue::Int(n) => StaticValue::Int(
+            i64::try_from(*n)
+                .expect("introspected integer defaults must fit Scenarium's i64 value model"),
+        ),
         FieldValue::Float(f) => StaticValue::Float(*f),
         FieldValue::Bool(b) => StaticValue::Bool(*b),
         FieldValue::Str(s) => StaticValue::String(s.clone()),
@@ -180,11 +185,11 @@ fn static_value(value: &FieldValue) -> StaticValue {
 /// fall back to their default while optional fields clear to `None`.
 fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
     match kind {
-        FieldKind::Int => value
+        FieldKind::Int(_) => value
             .as_i64()
-            .map(FieldValue::Int)
+            .map(|value| FieldValue::Int(value.into()))
             .unwrap_or(FieldValue::Null),
-        FieldKind::Float => value
+        FieldKind::Float(_) => value
             .as_f64()
             .map(FieldValue::Float)
             .unwrap_or(FieldValue::Null),
@@ -207,14 +212,19 @@ fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use common::{FloatKind, IntegerKind, IntegerValue};
 
     #[test]
     fn maps_field_kinds_to_port_types() {
-        assert!(matches!(data_type(&FieldKind::Int), DataType::Int));
-        assert!(matches!(data_type(&FieldKind::Bool), DataType::Bool));
-        // An Option port takes the inner type.
         assert!(matches!(
-            data_type(&FieldKind::Option(Box::new(FieldKind::Float))),
+            data_type(&FieldKind::Int(IntegerKind::Usize)),
+            DataType::Int
+        ));
+        assert!(matches!(data_type(&FieldKind::Bool), DataType::Bool));
+        assert!(matches!(
+            data_type(&FieldKind::Option(Box::new(FieldKind::Float(
+                FloatKind::F32
+            )))),
             DataType::Float
         ));
         let type_id = TypeId::unique().to_string();
@@ -266,19 +276,21 @@ mod tests {
     #[test]
     fn reads_dynamic_values_by_kind() {
         assert_eq!(
-            field_value(&FieldKind::Int, &DynamicValue::Static(StaticValue::Int(5))),
-            FieldValue::Int(5)
+            field_value(
+                &FieldKind::Int(IntegerKind::Usize),
+                &DynamicValue::Static(StaticValue::Int(5))
+            ),
+            FieldValue::Int(IntegerValue::Signed(5))
         );
         assert_eq!(
             field_value(
-                &FieldKind::Option(Box::new(FieldKind::Int)),
+                &FieldKind::Option(Box::new(FieldKind::Int(IntegerKind::U32))),
                 &DynamicValue::Static(StaticValue::Int(7))
             ),
-            FieldValue::Int(7)
+            FieldValue::Int(IntegerValue::Signed(7))
         );
-        // Unset → Null (rebuild then keeps the field default).
         assert_eq!(
-            field_value(&FieldKind::Float, &DynamicValue::Unbound),
+            field_value(&FieldKind::Float(FloatKind::F64), &DynamicValue::Unbound),
             FieldValue::Null
         );
     }

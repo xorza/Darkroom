@@ -1,7 +1,9 @@
 //! Registration tests for the astro library.
 
-use scenarium::FuncBehavior;
-use scenarium::StaticValue;
+use scenarium::{
+    AnyState, ContextManager, DynamicValue, FuncBehavior, InvokeInput, OutputDemand,
+    SharedAnyState, StaticValue,
+};
 
 use super::*;
 
@@ -340,8 +342,8 @@ fn preset_nodes_use_value_variant_picks_with_build_overrides() {
     }
 }
 
-#[test]
-fn build_background_config_reflects_fields_and_feeds_background_extract() {
+#[tokio::test]
+async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
     let lib = astro_library();
     // The builder exposes one labeled input per BackgroundConfig field, in
     // struct order; all required (none are `Option`s).
@@ -382,6 +384,33 @@ fn build_background_config_reflects_fields_and_feeds_background_extract() {
         .map(|o| o.name.as_str())
         .collect();
     assert_eq!(modes, ["subtract", "divide"]);
+
+    let mut inputs: Vec<InvokeInput> = builder
+        .inputs
+        .iter()
+        .map(|input| InvokeInput {
+            value: input.default_value.clone().unwrap().into(),
+        })
+        .collect();
+    inputs[0].value = StaticValue::Int(-1).into();
+    let mut outputs = vec![DynamicValue::Unbound; builder.outputs.len()];
+    let error = builder
+        .lambda
+        .invoke(
+            &mut ContextManager::default(),
+            &mut AnyState::default(),
+            &SharedAnyState::default(),
+            &mut inputs,
+            &[OutputDemand::Produce],
+            &mut outputs,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "field `tile_size` value -1 cannot be represented as usize"
+    );
+    assert!(matches!(outputs[0], DynamicValue::Unbound));
 }
 
 #[test]

@@ -43,7 +43,10 @@ pub use debug::is_debug;
 pub use file_format::{FileExtensionError, FileFormatResult, SerdeFormat};
 pub use float_ext::FloatExt;
 pub use fnv::FnvHasher;
-pub use introspect::{FieldDesc, FieldKind, FieldValue, Introspect, IntrospectEnum};
+pub use introspect::{
+    FieldDesc, FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect,
+    IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,
+};
 pub use key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 pub use normalize_string::NormalizeString;
 pub use pause_gate::{PauseGate, PauseGateCloseGuard};
