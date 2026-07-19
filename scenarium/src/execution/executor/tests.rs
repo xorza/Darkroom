@@ -483,7 +483,7 @@ async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
         Ok(())
     });
     let a = p.node(&[], 1, producer);
-    p.set_cache(a, CacheMode::None); // not Ram — retain[] must not be why it survives
+    p.set_cache(a, CacheMode::None); // not Ram — retention must not be why it survives
     p.set_output_pinned(a, 0, true);
 
     let mut plan = plan_with_readers(&p.program, vec![0]);

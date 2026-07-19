@@ -14,12 +14,12 @@ use std::sync::Arc;
 
 use hashbrown::HashMap;
 
-use crate::execution::NodeMap;
 use crate::execution::digest::{Digest, node_digest};
 use crate::execution::disk_store::DiskStore;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::resolve::Disposition;
 use crate::execution::stats::NodeRamUsage;
+use crate::execution::{NodeMap, NodeSet};
 use crate::graph::NodeId;
 use crate::node::lambda::OutputDemand;
 use crate::runtime::any_state::AnyState;
@@ -632,7 +632,7 @@ impl RuntimeCache {
         &mut self,
         program: &ExecutionProgram,
         disposition: &NodeMap<Disposition>,
-        retain: &NodeMap<bool>,
+        retain: &NodeSet,
     ) {
         for node_id in program.node_ids() {
             if self.slots[&node_id].output_values().is_none() {
@@ -640,7 +640,7 @@ impl RuntimeCache {
             }
             // A retained node on the active frontier stays hot for the next run's RAM hit.
             // (A pinned root is always on the frontier — roots seed the disposition walk.)
-            if retain[&node_id] && disposition[&node_id].needed() {
+            if retain.contains(&node_id) && disposition[&node_id].needed() {
                 continue;
             }
             self.reclaim_slot(program, node_id);

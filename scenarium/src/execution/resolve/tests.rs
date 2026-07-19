@@ -50,6 +50,7 @@ impl Fix {
 /// Run the backward cut over `fix` with the given roots and per-node resolution,
 /// returning each node's merged [`Disposition`].
 fn dispositions_of(fix: &Fix, roots: &[NodeId], reused: &[bool]) -> Vec<Disposition> {
+    assert_eq!(reused.len(), fix.program.e_nodes.len());
     let verdicts = fix
         .program
         .node_ids()
@@ -67,7 +68,12 @@ fn dispositions_of(fix: &Fix, roots: &[NodeId], reused: &[bool]) -> Vec<Disposit
         roots: roots.to_vec(),
         pinned: Vec::new(),
     };
-    let reused: NodeMap<bool> = fix.program.node_ids().zip(reused.iter().copied()).collect();
+    let reused: NodeSet = fix
+        .program
+        .node_ids()
+        .zip(reused.iter().copied())
+        .filter_map(|(node_id, reused)| reused.then_some(node_id))
+        .collect();
     let mut disposition = NodeMap::default();
     compute_disposition(&fix.program, &plan, &reused, &mut disposition);
     fix.program

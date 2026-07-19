@@ -22,7 +22,7 @@
 use crate::execution::cache::RuntimeCache;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::execution::{NodeMap, reset_node_map};
+use crate::execution::{NodeMap, NodeSet, reset_node_map};
 
 /// What the run loop does with one node — the resolver's single exposed column, merging the
 /// reuse verdict with the backward cut so the three states are mutually exclusive by
@@ -61,7 +61,7 @@ impl Disposition {
 pub(crate) struct Resolver {
     /// Pass-1 cache-hit scratch, read when the sweep promotes a node onto the frontier.
     /// Internal — everything downstream reads `disposition`.
-    reused: NodeMap<bool>,
+    reused: NodeSet,
     /// The run's authoritative per-node verdicts (see [`Disposition`]), read by the
     /// executor's run loop and the end-of-run eviction.
     pub(crate) disposition: NodeMap<Disposition>,
@@ -91,9 +91,9 @@ fn resolve_structural(
     program: &ExecutionProgram,
     cache: &mut RuntimeCache,
     plan: &ExecutionPlan,
-    reused: &mut NodeMap<bool>,
+    reused: &mut NodeSet,
 ) {
-    reset_node_map(reused, program.node_ids(), false);
+    reused.clear();
     for &node_id in &plan.process_order {
         // A node blocked on a missing required input can't run and isn't a reuse hit; leave it
         // `Run` so the backward cut keeps its cone alive.
@@ -104,7 +104,9 @@ fn resolve_structural(
         // one verdict for the run; the run loop reads the merged `disposition` rather than
         // re-deriving.
         let demand = plan.outputs.demand.slice(program.e_nodes[&node_id].outputs);
-        *reused.get_mut(&node_id).unwrap() = cache.stamp_and_check_reuse(program, node_id, demand);
+        if cache.stamp_and_check_reuse(program, node_id, demand) {
+            reused.insert(node_id);
+        }
     }
 }
 
@@ -118,7 +120,7 @@ fn resolve_structural(
 fn compute_disposition(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
-    reused: &NodeMap<bool>,
+    reused: &NodeSet,
     disposition: &mut NodeMap<Disposition>,
 ) {
     fn promote(reused: bool) -> Disposition {
@@ -130,7 +132,7 @@ fn compute_disposition(
     }
     reset_node_map(disposition, program.node_ids(), Disposition::Cut);
     for &root in &plan.roots {
-        *disposition.get_mut(&root).unwrap() = promote(reused[&root]);
+        *disposition.get_mut(&root).unwrap() = promote(reused.contains(&root));
     }
     for &node_id in plan.process_order.iter().rev() {
         // Only a running node reads its producers: `Reuse` serves a cache and `Cut` is
@@ -140,7 +142,8 @@ fn compute_disposition(
         }
         for input in &program.inputs[program.e_nodes[&node_id].inputs.range()] {
             if let ExecutionBinding::Bind(addr) = &input.binding {
-                *disposition.get_mut(&addr.target).unwrap() = promote(reused[&addr.target]);
+                *disposition.get_mut(&addr.target).unwrap() =
+                    promote(reused.contains(&addr.target));
             }
         }
     }

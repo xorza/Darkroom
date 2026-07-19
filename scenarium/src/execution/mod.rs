@@ -22,7 +22,7 @@ use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
 use common::{CancelToken, Span};
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
@@ -124,6 +124,7 @@ impl<I: ColumnIndex, T> IndexMut<I> for Column<I, T> {
 }
 
 pub(crate) type NodeMap<T> = HashMap<NodeId, T>;
+pub(crate) type NodeSet = HashSet<NodeId>;
 
 fn reset_node_map<T: Clone>(
     map: &mut NodeMap<T>,
