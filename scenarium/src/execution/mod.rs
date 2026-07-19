@@ -272,7 +272,7 @@ impl ExecutionEngine {
     /// stored after a run. The RAM cache is keyed by node id + digest, independent of the
     /// root, so swapping keeps any warm in-memory outputs.
     pub(crate) fn set_disk_store(&mut self, disk_store: DiskStore) {
-        self.cache.disk_store = disk_store;
+        self.cache.set_disk_store(disk_store);
     }
 
     /// Install a host-compiled [`CompiledGraph`] as the current program.

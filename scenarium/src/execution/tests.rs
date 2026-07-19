@@ -59,6 +59,7 @@ fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: Binding) {
 mod cache_persistence {
     use super::*;
     use crate::execution::cache::ValueState;
+    use crate::execution::disk_store::DiskStore;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -89,7 +90,6 @@ mod cache_persistence {
     /// (simulating a reopen when called twice against the same dir). The default
     /// empty library is fine — these tests cache plain values.
     fn disk_engine(dir: &TempDir) -> ExecutionEngine {
-        use crate::execution::disk_store::DiskStore;
         use crate::library::Library;
         use std::sync::Arc;
         let mut engine = ExecutionEngine::default();
@@ -354,6 +354,42 @@ mod cache_persistence {
         assert!(
             sum_on_disk,
             "the deeper cache is still flagged available on disk"
+        );
+
+        let empty_dir = TempDir::new("chain-empty");
+        engine.set_disk_store(DiskStore::new(
+            Arc::new(Library::default()),
+            Some(empty_dir.0.clone()),
+        ));
+        assert!(
+            matches!(
+                engine.runtime_slot(engine.by_name("sum").unwrap()).value,
+                ValueState::Empty
+            ),
+            "switching stores clears availability claimed by the old store"
+        );
+        assert!(
+            engine
+                .runtime_slot(engine.by_name("mult").unwrap())
+                .output_values()
+                .is_some(),
+            "switching stores preserves resident values"
+        );
+
+        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
+        engine.update(&graph, &make_lib()).unwrap();
+        let stats = engine.execute_sinks().await.unwrap();
+        assert!(
+            stats
+                .executed_nodes
+                .iter()
+                .any(|node| node.node_id == sum_id),
+            "a value absent from the new store recomputes when needed"
+        );
+        assert_eq!(
+            get_a_calls.load(Ordering::SeqCst),
+            2,
+            "recomputing sum also restores its pruned memory-only input"
         );
     }
 
@@ -1042,7 +1078,6 @@ mod cache_persistence {
         use std::sync::Mutex;
 
         use crate::async_lambda;
-        use crate::execution::disk_store::DiskStore;
         use crate::library::Library;
         use crate::node::definition::{Func, FuncInput, FuncOutput};
 
@@ -1316,7 +1351,6 @@ mod cache_persistence {
         };
 
         let disk_engine_with_lib = |dir: &TempDir, library: Library| {
-            use crate::execution::disk_store::DiskStore;
             let mut engine = ExecutionEngine::default();
             engine.set_disk_store(DiskStore::new(Arc::new(library), Some(dir.0.clone())));
             engine

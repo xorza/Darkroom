@@ -272,12 +272,23 @@ impl RuntimeSlot {
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeCache {
     pub(crate) slots: HashMap<NodeId, RuntimeSlot>,
-    pub(crate) disk_store: DiskStore,
+    disk_store: DiskStore,
 }
 
 impl RuntimeCache {
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
+    }
+
+    /// Replace the disk backing without retaining availability claims from the
+    /// previous store. Resident values are independent of the store and stay warm.
+    pub(crate) fn set_disk_store(&mut self, disk_store: DiskStore) {
+        for slot in self.slots.values_mut() {
+            if matches!(&slot.value, ValueState::OnDisk { .. }) {
+                slot.clear_output();
+            }
+        }
+        self.disk_store = disk_store;
     }
 
     /// The RAM held by every *resident* value across all slots, split into system
