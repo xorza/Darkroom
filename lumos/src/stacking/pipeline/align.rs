@@ -125,10 +125,10 @@ pub fn align_and_stack(
                     tracing::info!(
                         frame = n,
                         total = reg_total,
-                        inliers = result.num_inliers,
-                        rms = format!("{:.3}", result.rms_error),
-                        quality = format!("{:.3}", result.quality_score),
-                        transform = %result.transform,
+                        inliers = result.num_inliers(),
+                        rms = format!("{:.3}", result.rms_error()),
+                        quality = format!("{:.3}", result.quality_score()),
+                        transform = %result.transform(),
                         "registered"
                     );
                     let warped = warp(

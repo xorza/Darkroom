@@ -250,7 +250,7 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
                 tracing::info!(
                     frame = n,
                     total = total - 1,
-                    inliers = registration.num_inliers,
+                    inliers = registration.num_inliers(),
                     "registered (streaming)"
                 );
                 store_light_frame(cache_dir, &name, warped.image, Some(warped.coverage))

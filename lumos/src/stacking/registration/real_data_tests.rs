@@ -102,21 +102,21 @@ fn test_register_two_calibrated_lights() {
     let result =
         register(&result1.stars, &result2.stars, &reg_config).expect("Registration should succeed");
 
-    let baseline_rms = result.rms_error;
+    let baseline_rms = result.rms_error();
 
     println!("Registration result:");
-    println!("  Matched stars: {}", result.num_inliers);
+    println!("  Matched stars: {}", result.num_inliers());
     println!("  RMS error:     {:.4} pixels", baseline_rms);
-    println!("  Elapsed:       {:.1} ms", result.elapsed_ms);
+    println!("  Elapsed:       {:.1} ms", result.elapsed_ms());
 
-    let t = result.transform.translation_components();
+    let t = result.transform().translation_components();
     println!("  Translation:   ({:.2}, {:.2})", t.x, t.y);
     println!(
         "  Rotation:      {:.4} rad ({:.2} deg)",
-        result.transform.rotation_angle(),
-        result.transform.rotation_angle().to_degrees()
+        result.transform().rotation_angle(),
+        result.transform().rotation_angle().to_degrees()
     );
-    println!("  Scale:         {:.6}", result.transform.scale_factor());
+    println!("  Scale:         {:.6}", result.transform().scale_factor());
 
     // Now fit SIP on the SAME inliers from the SAME RANSAC run for fair comparison.
     // Reconstruct inlier positions from match indices.
@@ -135,12 +135,12 @@ fn test_register_two_calibrated_lights() {
         .collect();
 
     let inlier_ref: Vec<glam::DVec2> = result
-        .matched_stars
+        .matched_stars()
         .iter()
         .map(|star_match| ref_positions[star_match.reference])
         .collect();
     let inlier_target: Vec<glam::DVec2> = result
-        .matched_stars
+        .matched_stars()
         .iter()
         .map(|star_match| target_positions[star_match.target])
         .collect();
@@ -154,14 +154,16 @@ fn test_register_two_calibrated_lights() {
     let sip = SipPolynomial::fit_from_transform(
         &inlier_ref,
         &inlier_target,
-        &result.transform,
+        &result.transform(),
         &sip_config,
     )
     .unwrap();
 
-    let corrected_residuals =
-        sip.polynomial
-            .compute_corrected_residuals(&inlier_ref, &inlier_target, &result.transform);
+    let corrected_residuals = sip.polynomial.compute_corrected_residuals(
+        &inlier_ref,
+        &inlier_target,
+        &result.transform(),
+    );
     let sip_rms = (corrected_residuals.iter().map(|r| r * r).sum::<f64>()
         / corrected_residuals.len() as f64)
         .sqrt();
@@ -186,14 +188,14 @@ fn test_register_two_calibrated_lights() {
     );
 
     assert!(
-        result.num_inliers >= 5,
+        result.num_inliers() >= 5,
         "Expected at least 5 inlier matches, got {}",
-        result.num_inliers
+        result.num_inliers()
     );
     assert!(
-        result.rms_error < 1.5,
+        result.rms_error() < 1.5,
         "Expected RMS error < 1.5 pixels, got {:.4}",
-        result.rms_error
+        result.rms_error()
     );
 
     // Warp img2 to align with img1 and measure time
@@ -286,7 +288,10 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
 
             println!(
                 "  {:?}: {} inliers, RMS {:.4} px, {:.1} ms",
-                name, result.num_inliers, result.rms_error, result.elapsed_ms,
+                name,
+                result.num_inliers(),
+                result.rms_error(),
+                result.elapsed_ms(),
             );
 
             let warped = warp(&images[i], &result.warp_transform(), &reg_config.warp).image;
@@ -357,7 +362,7 @@ fn test_weighted_fit_registration_rms() {
             ..RegistrationConfig::default()
         };
         let r = register(&s1, &s2, &reg_config).expect("registration should succeed");
-        (r.rms_error, r.num_inliers)
+        (r.rms_error(), r.num_inliers())
     };
 
     let (unweighted_rms, unweighted_n) = register_with(None);

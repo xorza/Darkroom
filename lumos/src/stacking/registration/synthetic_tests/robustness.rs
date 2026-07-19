@@ -65,7 +65,7 @@ fn test_outlier_rejection_spurious_stars() {
     let result = register(&ref_stars, &target_with_spurious, &config)
         .expect("Registration should succeed despite spurious stars");
 
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
 
     assert!(
         (recovered.x - dx).abs() < 1.0,
@@ -80,9 +80,9 @@ fn test_outlier_rejection_spurious_stars() {
         recovered.y
     );
     assert!(
-        result.rms_error < 2.0,
+        result.rms_error() < 2.0,
         "RMS error too large: {}",
-        result.rms_error
+        result.rms_error()
     );
 }
 
@@ -103,7 +103,7 @@ fn test_outlier_rejection_missing_stars() {
     let result = register(&ref_stars, &target_with_missing, &config)
         .expect("Registration should succeed despite missing stars");
 
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
 
     assert!(
         (recovered.x - dx).abs() < 1.0,
@@ -138,7 +138,7 @@ fn test_outlier_rejection_combined() {
     let result = register(&ref_stars, &target_modified, &config)
         .expect("Registration should succeed despite combined outliers");
 
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
 
     assert!(
         (recovered.x - dx).abs() < 1.5,
@@ -176,7 +176,7 @@ fn test_outlier_rejection_20_percent_spurious() {
     // Verify by applying transform
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(ref_star.pos);
+        let t = result.transform().apply(ref_star.pos);
         let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
@@ -214,7 +214,7 @@ fn test_partial_overlap_75_percent() {
     let result = register(&ref_in_overlap, &target_stars, &config)
         .expect("Registration should succeed with 75% overlap");
 
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
 
     assert!(
         (recovered.x - dx).abs() < 1.0,
@@ -256,7 +256,7 @@ fn test_partial_overlap_50_percent() {
     let result = register(&ref_in_overlap, &target_stars, &config)
         .expect("Registration should succeed with 50% overlap");
 
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
 
     assert!(
         (recovered.x - dx).abs() < 1.0,
@@ -295,7 +295,7 @@ fn test_partial_overlap_diagonal() {
     let result = register(&ref_in_overlap, &target_stars, &config)
         .expect("Registration should succeed with diagonal overlap");
 
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
     let recovered_dx = recovered.x;
     let recovered_dy = recovered.y;
 
@@ -326,7 +326,7 @@ fn test_subpixel_translation_quarter_pixel() {
 
     let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
     let recovered_dx = recovered.x;
     let recovered_dy = recovered.y;
 
@@ -359,7 +359,7 @@ fn test_subpixel_translation_half_pixel() {
 
     let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
     let recovered_dx = recovered.x;
     let recovered_dy = recovered.y;
 
@@ -390,7 +390,7 @@ fn test_subpixel_rotation() {
 
     let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
-    let recovered_angle = result.transform.rotation_angle();
+    let recovered_angle = result.transform().rotation_angle();
     let angle_error_deg = (recovered_angle - angle_rad).abs().to_degrees();
 
     // Should recover 0.1 degree rotation within 0.01 degrees
@@ -415,7 +415,7 @@ fn test_subpixel_scale() {
 
     let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
-    let recovered_scale = result.transform.scale_factor();
+    let recovered_scale = result.transform().scale_factor();
     let scale_error = (recovered_scale - scale).abs();
 
     // Should recover 0.1% scale within 0.05%
@@ -447,7 +447,7 @@ fn test_minimum_stars_translation() {
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with 6 stars");
 
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
     let recovered_dx = recovered.x;
     let recovered_dy = recovered.y;
 
@@ -489,7 +489,7 @@ fn test_minimum_stars_similarity() {
     // Verify transform accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(ref_star.pos);
+        let t = result.transform().apply(ref_star.pos);
         let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
@@ -550,7 +550,7 @@ fn test_stress_transform_noise_outliers() {
         .expect("Registration should succeed under stress conditions");
 
     // Verify rotation
-    let recovered_angle = result.transform.rotation_angle();
+    let recovered_angle = result.transform().rotation_angle();
     let rotation_error = (recovered_angle - angle_rad).abs();
 
     assert!(
@@ -561,9 +561,9 @@ fn test_stress_transform_noise_outliers() {
     );
 
     assert!(
-        result.rms_error < 3.0,
+        result.rms_error() < 3.0,
         "RMS error under stress: {}",
-        result.rms_error
+        result.rms_error()
     );
 }
 
@@ -617,7 +617,7 @@ fn test_stress_partial_overlap_with_noise() {
     let result = register(&ref_in_overlap, &target_noisy, &config)
         .expect("Registration should succeed with partial overlap and noise");
 
-    let recovered_angle = result.transform.rotation_angle();
+    let recovered_angle = result.transform().rotation_angle();
     let rotation_error = (recovered_angle - angle_rad).abs();
 
     assert!(
@@ -647,7 +647,7 @@ fn test_stress_dense_field_large_transform() {
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with dense field");
 
-    let recovered_scale = result.transform.scale_factor();
+    let recovered_scale = result.transform().scale_factor();
     let scale_error = (recovered_scale - scale).abs();
 
     assert!(
@@ -659,9 +659,9 @@ fn test_stress_dense_field_large_transform() {
 
     // Should match many stars in dense field
     assert!(
-        result.num_inliers >= 100,
+        result.num_inliers() >= 100,
         "Expected many inliers in dense field, got {}",
-        result.num_inliers
+        result.num_inliers()
     );
 }
 
@@ -684,7 +684,7 @@ fn test_large_rotation_45_degrees() {
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with 45° rotation");
 
-    let recovered_angle = result.transform.rotation_angle();
+    let recovered_angle = result.transform().rotation_angle();
     let rotation_error_deg = (recovered_angle - angle_rad).abs().to_degrees();
 
     assert!(
@@ -698,7 +698,7 @@ fn test_large_rotation_45_degrees() {
     // Validate transform accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(ref_star.pos);
+        let t = result.transform().apply(ref_star.pos);
         let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
@@ -729,7 +729,7 @@ fn test_large_rotation_90_degrees() {
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with 90° rotation");
 
-    let recovered_angle = result.transform.rotation_angle();
+    let recovered_angle = result.transform().rotation_angle();
     let rotation_error_deg = (recovered_angle - angle_rad).abs().to_degrees();
 
     assert!(
@@ -742,7 +742,7 @@ fn test_large_rotation_90_degrees() {
 
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(ref_star.pos);
+        let t = result.transform().apply(ref_star.pos);
         let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
@@ -772,7 +772,7 @@ fn test_large_rotation_negative_45_degrees() {
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with -45° rotation");
 
-    let recovered_angle = result.transform.rotation_angle();
+    let recovered_angle = result.transform().rotation_angle();
     let rotation_error_deg = (recovered_angle - angle_rad).abs().to_degrees();
 
     assert!(
@@ -801,7 +801,7 @@ fn test_extreme_scale_2x() {
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with 2x scale");
 
-    let recovered_scale = result.transform.scale_factor();
+    let recovered_scale = result.transform().scale_factor();
     let scale_error = (recovered_scale - scale).abs();
 
     assert!(
@@ -815,7 +815,7 @@ fn test_extreme_scale_2x() {
     // Validate transform accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(ref_star.pos);
+        let t = result.transform().apply(ref_star.pos);
         let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
@@ -843,7 +843,7 @@ fn test_extreme_scale_half() {
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with 0.5x scale");
 
-    let recovered_scale = result.transform.scale_factor();
+    let recovered_scale = result.transform().scale_factor();
     let scale_error = (recovered_scale - scale).abs();
 
     assert!(
@@ -856,7 +856,7 @@ fn test_extreme_scale_half() {
 
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(ref_star.pos);
+        let t = result.transform().apply(ref_star.pos);
         let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
@@ -889,7 +889,7 @@ fn test_extreme_scale_with_rotation() {
     let result = register(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed with 1.5x scale + 30° rotation");
 
-    let recovered_scale = result.transform.scale_factor();
+    let recovered_scale = result.transform().scale_factor();
     let scale_error = (recovered_scale - scale).abs();
 
     assert!(
@@ -899,7 +899,7 @@ fn test_extreme_scale_with_rotation() {
         recovered_scale
     );
 
-    let recovered_angle = result.transform.rotation_angle();
+    let recovered_angle = result.transform().rotation_angle();
     let rotation_error_deg = (recovered_angle - angle_rad).abs().to_degrees();
 
     assert!(
@@ -933,12 +933,12 @@ fn test_affine_with_outliers() {
     let result = register(&ref_stars, &target_with_spurious, &config)
         .expect("Affine registration should succeed with 15% spurious stars");
 
-    assert_eq!(result.transform.transform_type(), TransformType::Affine);
+    assert_eq!(result.transform().transform_type(), TransformType::Affine);
 
     // Validate transform accuracy on original (non-spurious) stars
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(ref_star.pos);
+        let t = result.transform().apply(ref_star.pos);
         let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
@@ -974,11 +974,11 @@ fn test_affine_with_noise_and_missing() {
     let result = register(&ref_stars, &target_modified, &config)
         .expect("Affine registration should succeed with noise and missing stars");
 
-    assert_eq!(result.transform.transform_type(), TransformType::Affine);
+    assert_eq!(result.transform().transform_type(), TransformType::Affine);
     assert!(
-        result.rms_error < 3.0,
+        result.rms_error() < 3.0,
         "Affine RMS error with noise: {}",
-        result.rms_error
+        result.rms_error()
     );
 }
 
@@ -1011,12 +1011,15 @@ fn test_homography_with_outliers() {
     let result = register(&ref_stars, &target_with_spurious, &config)
         .expect("Homography registration should succeed with outliers");
 
-    assert_eq!(result.transform.transform_type(), TransformType::Homography);
+    assert_eq!(
+        result.transform().transform_type(),
+        TransformType::Homography
+    );
 
     // Validate transform accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(ref_star.pos);
+        let t = result.transform().apply(ref_star.pos);
         let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
@@ -1067,10 +1070,13 @@ fn test_homography_with_noise_and_partial_overlap() {
     let result = register(&ref_in_overlap, &target_noisy, &config)
         .expect("Homography should succeed with noise and partial overlap");
 
-    assert_eq!(result.transform.transform_type(), TransformType::Homography);
+    assert_eq!(
+        result.transform().transform_type(),
+        TransformType::Homography
+    );
     assert!(
-        result.rms_error < 3.0,
+        result.rms_error() < 3.0,
         "Homography RMS error with noise and overlap: {}",
-        result.rms_error
+        result.rms_error()
     );
 }

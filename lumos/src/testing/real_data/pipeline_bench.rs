@@ -179,7 +179,10 @@ fn bench_full_pipeline() {
             let warp_ms = warp_start.elapsed().as_secs_f64() * 1000.0;
             println!(
                 "  {} inliers, RMS={:.3}px, reg={:.1}ms, warp={:.1}ms",
-                result.num_inliers, result.rms_error, result.elapsed_ms, warp_ms,
+                result.num_inliers(),
+                result.rms_error(),
+                result.elapsed_ms(),
+                warp_ms,
             );
             warped
         });

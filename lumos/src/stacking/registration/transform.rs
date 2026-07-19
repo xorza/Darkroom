@@ -259,7 +259,7 @@ impl Transform {
     ///
     /// ```ignore
     /// let result = registrator.register_stars(&ref_stars, &target_stars)?;
-    /// let transform = result.transform;
+    /// let transform = result.transform();
     ///
     /// // Map a reference point to its corresponding target location
     /// let target_pos = transform.apply(ref_pos);

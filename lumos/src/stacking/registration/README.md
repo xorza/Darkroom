@@ -42,7 +42,9 @@ weight, excluding extrapolated borders from rejection and combination.
 6. Recover additional matches by nearest-neighbor search under the fitted transform and refit until
    the match set stabilizes or five passes complete.
 7. If configured, fit a sigma-clipped SIP polynomial to the remaining residuals.
-8. Apply `max_rms_error` and return the transform, matches, residuals, fit diagnostics, and timing.
+8. Apply `max_rms_error` and return immutable transform/SIP state plus one coherent collection of
+   star matches carrying their final residuals. RMS, maximum error, inlier count, and quality are
+   derived from that collection.
 
 The fitted `Transform` maps reference coordinates to target coordinates. `WarpTransform` combines
 that linear mapping with the optional SIP correction and supplies the output-to-input sampling path
@@ -107,7 +109,7 @@ because negative-lobe kernels require signed in-sampler weight accounting for ex
 |------|-----------|
 | `mod.rs` | Catalog registration and match recovery |
 | `config.rs` | Composed public configuration and validation |
-| `result.rs` | Public registration result and errors |
+| `result/` | Public registration result and errors |
 | `transform.rs` | Linear transforms and `WarpTransform` |
 | `resample.rs` | Public image warp and coverage orchestration |
 | `triangle/` | Pattern formation, invariant matching, and voting |

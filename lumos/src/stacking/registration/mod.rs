@@ -10,7 +10,11 @@
 //!
 //! // Register stars from two images
 //! let result = register(&ref_stars, &target_stars, &RegistrationConfig::default())?;
-//! println!("Matched {} stars, RMS = {:.2}px", result.num_inliers, result.rms_error);
+//! println!(
+//!     "Matched {} stars, RMS = {:.2}px",
+//!     result.num_inliers(),
+//!     result.rms_error()
+//! );
 //!
 //! // Warp target image in place to align with reference
 //! let config = RegistrationConfig::default();
@@ -100,8 +104,8 @@ use triangle::voting::PointMatch;
 /// };
 /// let result = register(&ref_stars, &target_stars, &config)?;
 ///
-/// println!("Matched {} stars", result.num_inliers);
-/// println!("RMS error: {:.2} pixels", result.rms_error);
+/// println!("Matched {} stars", result.num_inliers());
+/// println!("RMS error: {:.2} pixels", result.rms_error());
 /// ```
 pub fn register(
     ref_stars: &[Star],
@@ -179,10 +183,11 @@ pub fn register(
     }?;
 
     let result = result.with_elapsed(start.elapsed().as_secs_f64() * 1000.0);
+    let rms_error = result.rms_error();
 
-    if result.rms_error > config.max_rms_error {
+    if rms_error > config.max_rms_error {
         return Err(RegistrationError::AccuracyTooLow {
-            rms_error: result.rms_error,
+            rms_error,
             max_allowed: config.max_rms_error,
         });
     }
@@ -254,7 +259,7 @@ fn auto_ladder(
             model,
             max_sigma,
             config,
-        ) && result.rms_error <= AUTO_UPGRADE_THRESHOLD
+        ) && result.rms_error() <= AUTO_UPGRADE_THRESHOLD
         {
             return Ok(result);
         }
@@ -295,7 +300,7 @@ fn estimate_and_refine(
     let inlier_matches: Vec<_> = ransac_result
         .inliers
         .iter()
-        .map(|&i| StarMatch {
+        .map(|&i| MatchIndices {
             reference: matches[i].ref_idx,
             target: matches[i].target_idx,
         })
@@ -340,17 +345,21 @@ fn estimate_and_refine(
 
     let sip_polynomial = sip_fit.as_ref().map(|r| &r.polynomial);
 
-    let residuals: Vec<f64> = inlier_matches
+    let matched_stars: Vec<StarMatch> = inlier_matches
         .iter()
-        .map(|star_match| {
-            let ref_pos = ref_stars[star_match.reference];
-            let target_pos = target_stars[star_match.target];
+        .map(|indices| {
+            let ref_pos = ref_stars[indices.reference];
+            let target_pos = target_stars[indices.target];
             let corrected_r = match sip_polynomial {
                 Some(sip) => sip.correct(ref_pos),
                 None => ref_pos,
             };
             let p = transform.apply(corrected_r);
-            (p - target_pos).length()
+            StarMatch {
+                reference: indices.reference,
+                target: indices.target,
+                residual: (p - target_pos).length(),
+            }
         })
         .collect();
 
@@ -363,26 +372,30 @@ fn estimate_and_refine(
         "Registration sub-step timing"
     );
 
-    let mut result = RegistrationResult::new(transform, inlier_matches, residuals);
-    result.sip_fit = sip_fit;
-    Ok(result)
+    Ok(RegistrationResult::new(transform, sip_fit, matched_stars))
 }
 
 /// Maximum iterations for iterative match recovery.
 /// Convergence is typically reached in 2-3 passes; diminishing returns after that.
 const RECOVERY_MAX_ITERATIONS: usize = 5;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MatchIndices {
+    reference: usize,
+    target: usize,
+}
+
 #[derive(Debug)]
 struct RecoveredMatches {
     transform: Transform,
-    matches: Vec<StarMatch>,
+    matches: Vec<MatchIndices>,
 }
 
 fn recover_matches(
     ref_stars: &[DVec2],
     target_stars: &[DVec2],
     transform: &Transform,
-    inlier_matches: &[StarMatch],
+    inlier_matches: &[MatchIndices],
     inlier_threshold: f64,
     transform_type: TransformType,
 ) -> RecoveredMatches {
@@ -433,7 +446,7 @@ fn recover_matches(
                 && !matched_target[nn.index]
                 && !newly_matched_targets[nn.index]
             {
-                current_matches.push(StarMatch {
+                current_matches.push(MatchIndices {
                     reference: ref_idx,
                     target: nn.index,
                 });
@@ -609,9 +622,9 @@ mod recovery_tests {
     use crate::stacking::registration::*;
     use crate::testing::synthetic::transforms::generate_random_positions;
 
-    fn identity_matches(count: usize) -> Vec<StarMatch> {
+    fn identity_matches(count: usize) -> Vec<MatchIndices> {
         (0..count)
-            .map(|index| StarMatch {
+            .map(|index| MatchIndices {
                 reference: index,
                 target: index,
             })
@@ -775,11 +788,11 @@ mod recovery_tests {
         // Good matches plus 2 deliberately wrong matches
         let mut seed_matches = identity_matches(8);
         // Wrong: ref[8] matched to target[15], ref[9] matched to target[20]
-        seed_matches.push(StarMatch {
+        seed_matches.push(MatchIndices {
             reference: 8,
             target: 15,
         });
-        seed_matches.push(StarMatch {
+        seed_matches.push(MatchIndices {
             reference: 9,
             target: 20,
         });

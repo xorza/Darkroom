@@ -288,8 +288,14 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     let star_match = StarMatch {
         reference: 4,
         target: 9,
+        residual: 0.125,
     };
-    let StarMatch { reference, target } = star_match;
+    let StarMatch {
+        reference,
+        target,
+        residual,
+    } = star_match;
     assert_eq!(reference, 4);
     assert_eq!(target, 9);
+    assert_eq!(residual, 0.125);
 }

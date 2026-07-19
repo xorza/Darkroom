@@ -120,7 +120,7 @@ fn test_image_registration_translation() {
         .expect("Registration should succeed");
 
     // Verify the recovered translation
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
     let recovered_dx = recovered.x;
     let recovered_dy = recovered.y;
 
@@ -144,9 +144,9 @@ fn test_image_registration_translation() {
     );
 
     assert!(
-        result.rms_error < 0.5,
+        result.rms_error() < 0.5,
         "RMS error too large: {}",
-        result.rms_error
+        result.rms_error()
     );
 }
 
@@ -187,7 +187,7 @@ fn test_image_registration_rotation() {
         .expect("Registration should succeed");
 
     // Verify rotation recovery
-    let recovered_angle = result.transform.rotation_angle();
+    let recovered_angle = result.transform().rotation_angle();
     let rotation_error = (recovered_angle - angle_rad).abs();
 
     assert!(
@@ -199,9 +199,9 @@ fn test_image_registration_rotation() {
     );
 
     assert!(
-        result.rms_error < 0.5,
+        result.rms_error() < 0.5,
         "RMS error too large: {}",
-        result.rms_error
+        result.rms_error()
     );
 }
 
@@ -243,7 +243,7 @@ fn test_image_registration_similarity() {
         .expect("Registration should succeed");
 
     // Verify scale and rotation recovery
-    let recovered_scale = result.transform.scale_factor();
+    let recovered_scale = result.transform().scale_factor();
     let scale_error = (recovered_scale - scale).abs();
 
     assert!(
@@ -254,7 +254,7 @@ fn test_image_registration_similarity() {
         scale_error
     );
 
-    let recovered_angle = result.transform.rotation_angle();
+    let recovered_angle = result.transform().rotation_angle();
     let rotation_error = (recovered_angle - angle_rad).abs();
 
     assert!(
@@ -265,9 +265,9 @@ fn test_image_registration_similarity() {
     );
 
     assert!(
-        result.rms_error < 2.0,
+        result.rms_error() < 2.0,
         "RMS error too large: {}",
-        result.rms_error
+        result.rms_error()
     );
 }
 
@@ -324,7 +324,7 @@ fn test_image_registration_with_noise() {
     let result = register(&ref_result.stars, &target_result.stars, &reg_config)
         .expect("Registration should succeed");
 
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
     let recovered_dx = recovered.x;
     let recovered_dy = recovered.y;
 
@@ -389,15 +389,15 @@ fn test_image_registration_dense_field() {
 
     // Should have many matched stars in a dense field
     assert!(
-        result.num_inliers >= 20,
+        result.num_inliers() >= 20,
         "Expected many inliers in dense field, got {}",
-        result.num_inliers
+        result.num_inliers()
     );
 
     assert!(
-        result.rms_error < 2.0,
+        result.rms_error() < 2.0,
         "RMS error too large: {}",
-        result.rms_error
+        result.rms_error()
     );
 }
 
@@ -434,7 +434,7 @@ fn test_image_registration_large_image() {
     let result = register(&ref_result.stars, &target_result.stars, &reg_config)
         .expect("Registration should succeed");
 
-    let recovered = result.transform.translation_components();
+    let recovered = result.transform().translation_components();
     let recovered_dx = recovered.x;
     let recovered_dy = recovered.y;
 

@@ -75,9 +75,9 @@ fn main() {
     )
     .expect("Registration failed");
 
-    println!("  Matched {} stars", result.num_inliers);
-    println!("  RMS error: {:.3} pixels", result.rms_error);
-    println!("  Transform: {}", result.transform);
+    println!("  Matched {} stars", result.num_inliers());
+    println!("  RMS error: {:.3} pixels", result.rms_error());
+    println!("  Transform: {}", result.transform());
 
     // Warp target to align with reference
     println!("\nWarping target image...");

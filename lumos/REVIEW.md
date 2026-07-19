@@ -6,8 +6,8 @@ Updated 2026-07-19 against the current Lumos source.
 
 The review now tracks implementation status instead of preserving the original snapshot:
 
-- 23 findings completed;
-- 3 concrete findings open;
+- 24 findings completed;
+- 2 concrete findings open;
 - 2 proposals deferred until there is a product decision or measured failure.
 
 The remaining concrete work is API policy and state-coherence decisions.
@@ -155,10 +155,10 @@ detectors through parallel frame processing without thread-local state. On the 1
 
 ## Batch 3 — API decisions with concrete inconsistencies
 
-- [ ] **Collapse `RegistrationResult`'s parallel mutable state.**
-  Matches, residuals, RMS, maximum error, and inlier count remain independently public, and `new`
-  accepts mismatched match/residual lengths. Store coherent match-with-residual records, derive
-  diagnostics internally, and expose only state callers can mutate independently.
+- [x] **Collapse `RegistrationResult`'s parallel mutable state.**
+  `StarMatch` now carries its final residual, while `RegistrationResult` keeps transform, SIP,
+  matches, and elapsed time private. Construction is internal, public views are immutable, and RMS,
+  maximum error, inlier count, and quality are derived from the single match collection.
 
 - [ ] **Define the unit contract for `NoiseModel`.**
   The type documents electrons per ADU, while detection operates on normalized pixels and directly

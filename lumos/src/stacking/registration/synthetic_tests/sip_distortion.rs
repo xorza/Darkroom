@@ -62,25 +62,25 @@ fn register_with_sip_recovers_barrel_distortion() {
     .expect("SIP registration should succeed");
 
     assert!(
-        with_sip.sip_fit.is_some(),
+        with_sip.sip_fit().is_some(),
         "a SIP polynomial should have been fitted"
     );
     // A linear transform cannot absorb the radial barrel → a visible residual remains.
     assert!(
-        no_sip.rms_error > 0.3,
+        no_sip.rms_error() > 0.3,
         "linear-only should leave a barrel residual, got RMS {:.3}",
-        no_sip.rms_error
+        no_sip.rms_error()
     );
     // The order-3 SIP captures the cubic distortion → residuals collapse.
     assert!(
-        with_sip.rms_error < no_sip.rms_error * 0.5,
+        with_sip.rms_error() < no_sip.rms_error() * 0.5,
         "SIP should at least halve the residual: {:.3} vs {:.3}",
-        with_sip.rms_error,
-        no_sip.rms_error
+        with_sip.rms_error(),
+        no_sip.rms_error()
     );
     assert!(
-        with_sip.rms_error < 0.2,
+        with_sip.rms_error() < 0.2,
         "SIP-corrected RMS {:.3} should be small",
-        with_sip.rms_error
+        with_sip.rms_error()
     );
 }
