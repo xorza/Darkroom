@@ -167,8 +167,9 @@ pub(crate) struct RuntimeSlot {
     pub(crate) state: AnyState,
     pub(crate) event_state: SharedAnyState,
     /// The node's current content digest — its cache-validity key (`None` when not
-    /// reproducible), computed and stamped by the executor as it reaches the node during
-    /// the run ([`digest::node_digest`]). A resident value hits iff its
+    /// reproducible), stamped producer-first by the resolver and refreshed at execution
+    /// reach only for a late bound-resource identity ([`digest::node_digest`]). A resident
+    /// value hits iff its
     /// `produced_under` equals this — so a flipped-back input can't serve a stale value.
     pub(crate) current_digest: Option<Digest>,
     pub(crate) value: ValueState,
@@ -264,9 +265,9 @@ impl RuntimeSlot {
 }
 
 /// The per-node cross-run cache plus its disk backing. `slots` is keyed like
-/// `program.e_nodes`; the executor computes each node's digest,
-/// mutates its outputs/state, and reads reuse state ([`Self::is_resident_hit`]) in its run
-/// loop. `disk_store` persists outputs and serves them back — set via
+/// `program.e_nodes`; the resolver stamps each node's digest and decides cache reuse,
+/// while the executor mutates outputs/state and consumes that decision. `disk_store`
+/// persists outputs and serves them back — set via
 /// [`ExecutionEngine::set_disk_store`](crate::execution::ExecutionEngine::set_disk_store) and
 /// kept across graph updates (only `slots` is reconciled/cleared).
 #[derive(Default, Debug)]
@@ -435,29 +436,31 @@ impl RuntimeCache {
         snapshot.coverage.ports[port] = false;
     }
 
-    /// Stamp `node_id`'s content digest into its slot and return whether an unchanged output
-    /// can be reused this run — resident in RAM ([`is_resident_hit`](Self::is_resident_hit)) or
-    /// a blob on disk flagged now ([`mark_on_disk_if_present`](Self::mark_on_disk_if_present)).
-    /// The single place the digest is folded and the reuse verdict formed — called once per
-    /// node per run, by the pre-run [`Resolver`](crate::execution::resolve::Resolver) sweep;
-    /// the run loop reads the resolver's verdict rather than re-deriving (a digest folds live
-    /// filesystem state and could drift mid-run). A `None` digest (an impure cone) never
-    /// reuses.
+    /// Stamp `node_id`'s structural content digest into its slot. The producer-first resolver
+    /// pass calls this before exact output demand is known; cache coverage is probed later by
+    /// [`check_reuse`](Self::check_reuse).
+    pub(crate) fn stamp_digest(&mut self, program: &ExecutionProgram, node_id: NodeId) {
+        let digest = node_digest(program, node_id, self);
+        self.slots.get_mut(&node_id).unwrap().current_digest = digest;
+    }
+
+    /// Whether an unchanged output can satisfy this run's exact demand — resident in RAM
+    /// ([`is_resident_hit`](Self::is_resident_hit)) or a blob on disk flagged now
+    /// ([`mark_on_disk_if_present`](Self::mark_on_disk_if_present)). A `None` digest
+    /// (an impure cone, or a bound resource not yet readable) never reuses.
     ///
     /// RAM reuse trusts residency ([`is_resident_hit`](Self::is_resident_hit)): a resident
     /// digest-valid value is served, because a content digest attests the value produced
     /// under it — however the value came to be resident (mode retention or a preview pin).
     /// Disk reuse stays gated on `persists_to_disk`
     /// (`Disk`/`Both`, enforced in [`DiskStore::blob_target`]).
-    pub(crate) fn stamp_and_check_reuse(
+    pub(crate) fn check_reuse(
         &mut self,
         program: &ExecutionProgram,
         node_id: NodeId,
         demand: &[OutputDemand],
     ) -> bool {
-        let digest = node_digest(program, node_id, self);
-        self.slots.get_mut(&node_id).unwrap().current_digest = digest;
-        digest.is_some()
+        self.slots[&node_id].current_digest.is_some()
             && (self.is_resident_hit(node_id, demand)
                 || self.mark_on_disk_if_present(program, node_id, demand))
     }

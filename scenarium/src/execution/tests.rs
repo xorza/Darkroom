@@ -265,10 +265,9 @@ mod cache_persistence {
     /// Two disk-cached nodes chained (`sum` → `mult`) under an executing sink
     /// (`print`). On reopen only the frontier `mult` — the cached value `print`
     /// actually reads — is deserialized into RAM; the deeper `sum`, whose sole
-    /// consumer `mult` is itself reused-from-disk (so never reads it), stays
-    /// `ValueState::OnDisk` with no resident bytes. That is the RAM win.
+    /// consumer `mult` is itself reused-from-disk, is never probed or loaded.
     #[tokio::test]
-    async fn chained_disk_cache_loads_only_the_frontier() {
+    async fn chained_disk_cache_probes_only_the_frontier() {
         let dir = TempDir::new("chain-frontier");
 
         let get_a_calls = Arc::new(AtomicUsize::new(0));
@@ -319,17 +318,16 @@ mod cache_persistence {
         engine.update(&graph, &make_lib()).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
 
-        // The persist'd sum + mult reuse from disk. `get_a` feeds only the reused `sum` and
-        // `mult` (neither reads it), so the pre-run cut prunes it — the `Memory` source is
-        // not recomputed on reopen.
+        // Only frontier `mult` is probed and reused. `sum` and `get_a` are behind that
+        // hit, so neither is probed or recomputed.
         assert_eq!(
             get_a_calls.load(Ordering::SeqCst),
             1,
             "the cut prunes the Memory source feeding only disk-cache hits"
         );
         assert!(
-            stats.cached_nodes.contains(&sum_id) && stats.cached_nodes.contains(&mult_id),
-            "both disk-cached nodes are reused from disk"
+            !stats.cached_nodes.contains(&sum_id) && stats.cached_nodes.contains(&mult_id),
+            "only the live frontier cache is probed and reported"
         );
 
         // The frontier `mult` (read by the executing `print`) is in RAM...
@@ -338,22 +336,23 @@ mod cache_persistence {
             .output_values()
             .is_some();
         assert!(mult_resident, "frontier cache is loaded into RAM");
-        // ...but the deeper `sum` is left on disk: flagged available, never read.
+        // ...but the deeper `sum` is not even flagged: the blob stays in the store,
+        // outside the runtime slot, until a later run actually needs it.
         let sum_resident = engine
             .runtime_slot(engine.by_name("sum").unwrap())
             .output_values()
             .is_some();
-        let sum_on_disk = matches!(
+        let sum_empty = matches!(
             engine.runtime_slot(engine.by_name("sum").unwrap()).value,
-            ValueState::OnDisk { .. }
+            ValueState::Empty
         );
         assert!(
             !sum_resident,
             "a disk cache behind another is not loaded into RAM"
         );
         assert!(
-            sum_on_disk,
-            "the deeper cache is still flagged available on disk"
+            sum_empty,
+            "the deeper cache is not probed before exact demand reaches it"
         );
 
         let empty_dir = TempDir::new("chain-empty");
@@ -361,13 +360,6 @@ mod cache_persistence {
             Arc::new(Library::default()),
             Some(empty_dir.0.clone()),
         ));
-        assert!(
-            matches!(
-                engine.runtime_slot(engine.by_name("sum").unwrap()).value,
-                ValueState::Empty
-            ),
-            "switching stores clears availability claimed by the old store"
-        );
         assert!(
             engine
                 .runtime_slot(engine.by_name("mult").unwrap())

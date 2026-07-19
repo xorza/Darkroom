@@ -7,9 +7,11 @@
 //! Each node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
 //!
 //! **Pre-run resolution.** [`run`](Executor::run) takes the
-//! [`Resolver`](crate::execution::resolve::Resolver)'s [`Disposition`] map — each node's
-//! merged reuse-verdict + cut state, authoritative for the whole run (a `Reuse` is never
-//! re-derived here, since a digest folds live filesystem state and could drift mid-run). A
+//! [`Resolver`](crate::execution::resolve::Resolver)'s
+//! [`ResolvedRun`](crate::execution::resolve::ResolvedRun) — disposition, output demand,
+//! and reader counts derived together and authoritative for the whole run. A
+//! [`Disposition::Reuse`] is never
+//! re-derived here, since a digest folds live filesystem state and could drift mid-run. A
 //! cut node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
 //! recomputed on reopen) gets [`NodeOutcome::Cut`]. The one verdict the loop *improves* is
 //! a `Run` whose stamped digest is `None` — a digest folding a Bind-delivered resource
@@ -33,7 +35,7 @@ use crate::{DynamicValue, RamUsage};
 use crate::execution::cache::RuntimeCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, OutputIdx};
-use crate::execution::resolve::Disposition;
+use crate::execution::resolve::{Disposition, ResolvedRun};
 use crate::execution::{NodeMap, NodeSet, OutputColumn, RunError, reset_node_map};
 
 /// What became of a node this run — the single per-node result map, so the run-time
@@ -88,8 +90,8 @@ struct RemainingOutputReads {
 }
 
 impl RemainingOutputReads {
-    fn seed(&mut self, plan: &ExecutionPlan) {
-        self.counts.clone_from(&plan.outputs.readers);
+    fn seed(&mut self, resolved: &ResolvedRun) {
+        self.counts.clone_from(&resolved.outputs.readers);
     }
 
     fn is_last(&self, output_idx: OutputIdx) -> bool {
@@ -100,7 +102,7 @@ impl RemainingOutputReads {
         let remaining = &mut self.counts[output_idx];
         assert!(
             *remaining > 0,
-            "read an output more often than the plan counted"
+            "read an output more often than the resolved run counted"
         );
         *remaining -= 1;
         *remaining == 0
@@ -184,19 +186,36 @@ impl ExecutionFrame<'_> {
                             input: input_idx,
                         });
                     };
-                    if self.remaining_reads.consume(output_idx) && !self.retain.contains(&target) {
-                        if self.remaining_reads.node_drained(self.program, target) {
-                            self.cache.reclaim_slot(self.program, target);
-                        } else {
-                            self.cache.clear_output_port(target, port_idx);
-                        }
-                    }
+                    self.finish_read(target, port_idx, output_idx);
                     value
                 }
             };
             self.inputs.push(InvokeInput { value });
         }
         Ok(())
+    }
+
+    fn cancel_input_reads(&mut self, node_id: NodeId) {
+        for input in self.program.node_inputs(&self.program.e_nodes[&node_id]) {
+            if let ExecutionBinding::Bind(address) = &input.binding {
+                let output_idx = self.program.output_idx(address.target, address.port_idx);
+                self.finish_read(address.target, address.port_idx, output_idx);
+            }
+        }
+    }
+
+    fn finish_read(&mut self, target: NodeId, port_idx: usize, output_idx: OutputIdx) {
+        if !self.remaining_reads.consume(output_idx)
+            || self.retain.contains(&target)
+            || self.cache.slots[&target].output_values().is_none()
+        {
+            return;
+        }
+        if self.remaining_reads.node_drained(self.program, target) {
+            self.cache.reclaim_slot(self.program, target);
+        } else {
+            self.cache.clear_output_port(target, port_idx);
+        }
     }
 }
 
@@ -205,8 +224,8 @@ pub(crate) struct Executor {
     pub(crate) ctx_manager: ContextManager,
     /// Per-*invoke* scratch: the node's resolved inputs, refilled for each node that runs.
     inputs: Vec<InvokeInput>,
-    /// The run's mutable copy of the plan's structural binding counts. Only real bound
-    /// input reads decrement it; production demand and host pins remain immutable plan data.
+    /// The run's mutable copy of the resolver's live binding counts. Only real bound
+    /// input reads decrement it; production demand and host pins remain immutable.
     remaining_reads: RemainingOutputReads,
     /// The run's retention policy, per node: `true` when the outputs must stay resident —
     /// the node's mode caches in RAM (`Ram`/`Both`) or it's a node-seeded preview root
@@ -238,13 +257,13 @@ impl Executor {
     /// [`NodeOutcome::Cut`] if the resolver pruned its cone, serve it from RAM/disk on
     /// [`Disposition::Reuse`], else invoke its lambda and persist the result to disk right
     /// away (so a long run's earlier caches survive a later failure or cancel). The
-    /// `program`, `plan`, and `disposition` map are read-only. Returns per-run stats.
+    /// `program`, `plan`, and `resolved` run are read-only. Returns per-run stats.
     #[allow(clippy::too_many_arguments)] // an orchestration entry point; each arg is a distinct collaborator
     pub(crate) async fn run(
         &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
-        disposition: &NodeMap<Disposition>,
+        resolved: &ResolvedRun,
         cache: &mut RuntimeCache,
         flatten: &FlattenMap,
         events: Option<&UnboundedSender<RunEvent>>,
@@ -267,7 +286,7 @@ impl Executor {
         }
         self.retain.extend(plan.pinned.iter().copied());
 
-        self.remaining_reads.seed(plan);
+        self.remaining_reads.seed(resolved);
 
         {
             let mut frame = ExecutionFrame {
@@ -280,11 +299,8 @@ impl Executor {
                 inputs: &mut self.inputs,
             };
 
-            // The schedule is `process_order` (all reachable, producer-first). A
-            // `MissingInputs` node can't run, so it's skipped here rather than pruned by a
-            // separate pass; a runnable node whose *only* consumer is one of those may then
-            // run needlessly (its output is unread — harmless, and missing inputs are an
-            // error state anyway).
+            // The schedule is `process_order` (all structurally reachable,
+            // producer-first); the resolved run cuts cache-hidden and blocked cones.
             for &node_id in &plan.process_order {
                 // Coarse cancel: stop scheduling further nodes. A node already
                 // mid-invoke isn't interrupted (it finishes), but nothing after
@@ -294,16 +310,16 @@ impl Executor {
                     break;
                 }
                 let e_node = &program.e_nodes[&node_id];
-                if disposition[&node_id] == Disposition::Cut {
+                if !plan.verdicts[&node_id].wants_execute() {
+                    continue;
+                }
+                if resolved.disposition[&node_id] == Disposition::Cut {
                     // Pruned by the pre-run cut: every consumer that would read this node reused
                     // a cache, so its output is never read. Report it cached iff it still holds a
                     // usable value (a deeper disk cache), else it's simply not computed this run.
                     *self.outcomes.get_mut(&node_id).unwrap() = NodeOutcome::Cut {
                         cached: frame.cache.has_available_value(node_id),
                     };
-                    continue;
-                }
-                if !plan.verdicts[&node_id].wants_execute() {
                     continue;
                 }
                 // A func registered without an implementation can't execute — a host/library
@@ -332,12 +348,17 @@ impl Executor {
                 // errored-dependency check: a digest-valid cached value stays valid even when an
                 // upstream re-ran for another consumer and failed, so it must not be cleared as
                 // skipped.
-                let reused = match disposition[&node_id] {
+                let reused = match resolved.disposition[&node_id] {
                     Disposition::Reuse => true,
                     Disposition::Run if frame.cache.slots[&node_id].current_digest.is_none() => {
                         frame.hydrate_resource_producers(node_id).await;
-                        let demand = plan.outputs.demand.slice(e_node.outputs);
-                        frame.cache.stamp_and_check_reuse(program, node_id, demand)
+                        frame.cache.stamp_digest(program, node_id);
+                        let demand = resolved.outputs.demand.slice(e_node.outputs);
+                        let reused = frame.cache.check_reuse(program, node_id, demand);
+                        if reused {
+                            frame.cancel_input_reads(node_id);
+                        }
+                        reused
                     }
                     _ => false,
                 };
@@ -385,7 +406,7 @@ impl Executor {
                         }))
                         .expect(EVENTS_OUTLIVE_RUN);
                 }
-                let demand = plan.outputs.demand.slice(e_node.outputs);
+                let demand = resolved.outputs.demand.slice(e_node.outputs);
                 let result = {
                     let slot = frame
                         .cache

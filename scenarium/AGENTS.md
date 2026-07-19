@@ -64,10 +64,10 @@ Choosing a representative instance is an explicit host-side policy.
 
 `Compiler::compile` runs synchronously on the host and returns a
 `CompiledGraph`; compile errors never enter the worker. Planning is structural:
-it selects roots, orders dependencies before consumers, detects missing inputs,
-and computes immutable `OutputDemand` plus binding-reader counts for every
-output. Execution resolves content digests and reuse, prunes cones that feed
-only reusable results, then invokes surviving nodes in plan order.
+it selects roots, orders dependencies before consumers, and detects missing
+inputs. Resolution stamps content digests, then derives cache-aware liveness,
+exact `OutputDemand`, and binding-reader counts together. Execution invokes the
+surviving nodes in plan order.
 
 A cache slot is valid only when its digest matches and its
 `OutputSnapshot` coverage contains every currently demanded output. Invocation

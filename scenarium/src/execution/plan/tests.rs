@@ -1,7 +1,7 @@
 use super::*;
 use crate::DataType;
 use crate::execution::identity::NodeAddress;
-use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, OutputIdx};
+use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 use common::Span;
@@ -85,14 +85,6 @@ fn plan(fix: &Fix) -> ExecutionPlan {
     plan
 }
 
-fn demand(plan: &ExecutionPlan, output_idx: usize) -> OutputDemand {
-    plan.outputs.demand[OutputIdx::from(output_idx)]
-}
-
-fn readers(plan: &ExecutionPlan, output_idx: usize) -> u32 {
-    plan.outputs.readers[OutputIdx::from(output_idx)]
-}
-
 #[test]
 fn chain_orders_deps_before_consumers_and_schedules_all() {
     // A → B → C (C sink). Every reachable node is scheduled — the planner is
@@ -143,38 +135,7 @@ fn optional_unbound_input_does_not_block() {
 }
 
 #[test]
-fn fan_out_counts_each_executing_consumer() {
-    // A feeds both B and C (both sink) ⇒ A's output is needed twice.
-    let mut f = Fix::default();
-    let a = f.node(false, &[], 1);
-    f.node(true, &[(false, bind(a, 0))], 1);
-    f.node(true, &[(false, bind(a, 0))], 1);
-
-    let p = plan(&f);
-    assert_eq!(demand(&p, 0), OutputDemand::Produce);
-    assert_eq!(readers(&p, 0), 2, "A.0 read by two consumers");
-}
-
-#[test]
-fn pinned_port_demands_output_without_creating_a_reader() {
-    // A has two outputs, neither structurally consumed by anything. Only port 1
-    // is flagged pinned (e.g. a GUI inspector reading it live) — the planner's
-    // demand must include exactly that one without inventing a binding reader.
-    let mut f = Fix::default();
-    f.node(true, &[], 2);
-    f.compiled.program.output_pinned[1] = true;
-
-    let p = plan(&f);
-    assert_eq!(demand(&p, 0), OutputDemand::Skip);
-    assert_eq!(demand(&p, 1), OutputDemand::Produce);
-    assert_eq!(readers(&p, 0), 0);
-    assert_eq!(readers(&p, 1), 0, "host pins are not binding readers");
-}
-
-#[test]
-fn overlapping_pin_sources_leave_reader_count_at_zero() {
-    // A's only output is BOTH a pinned root (node-seeded) and individually
-    // pinned, with no real consumer — the two sources must not stack into 2.
+fn node_seed_is_both_a_root_and_pinned() {
     let mut f = Fix::default();
     let a = f.node(false, &[], 1);
     f.compiled.program.output_pinned[0] = true;
@@ -188,8 +149,7 @@ fn overlapping_pin_sources_leave_reader_count_at_zero() {
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
 
     assert_eq!(p.pinned, vec![a]);
-    assert_eq!(demand(&p, 0), OutputDemand::Produce);
-    assert_eq!(readers(&p, 0), 0);
+    assert_eq!(p.roots, vec![a]);
 }
 
 #[test]
@@ -214,7 +174,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // A → B → C (C sink). Seeding node B (by authoring id — top-level ids resolve
     // straight against the program) schedules only [A, B] — C is upstream of nothing
     // seeded — and records B as both a root and a pinned node. B's output has no
-    // scheduled consumer, so pinning demands it without adding a reader.
+    // scheduled consumer.
     let mut f = Fix::default();
     let a = f.node(false, &[], 1);
     let b = f.node(false, &[(false, bind(a, 0))], 1);
@@ -234,10 +194,6 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert!(p.verdicts[&a].wants_execute());
     assert!(p.verdicts[&b].wants_execute());
     assert!(!p.verdicts[&c].wants_execute(), "C never verdicted");
-    assert_eq!(demand(&p, 0), OutputDemand::Produce);
-    assert_eq!(readers(&p, 0), 1, "A.0 read by B");
-    assert_eq!(demand(&p, 1), OutputDemand::Produce);
-    assert_eq!(readers(&p, 1), 0, "B.0 is host-demanded but unconsumed");
 
     // Node seeds combine with sinks: the same seed plus `sinks` schedules
     // everything, and B stays pinned.
@@ -249,8 +205,6 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
     assert_eq!(p.process_order, vec![a, b, c]);
     assert_eq!(p.pinned, vec![b]);
-    assert_eq!(demand(&p, 1), OutputDemand::Produce);
-    assert_eq!(readers(&p, 1), 1, "only C is a binding reader of B.0");
 
     // A seed id absent from the program is inconsistent caller state — a hard failure,
     // not a silent skip.

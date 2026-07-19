@@ -5,9 +5,9 @@ use tokio::sync::mpsc;
 use super::*;
 use crate::async_lambda;
 use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot, RuntimeCache, ValueState};
-use crate::execution::plan::{NodeVerdict, PlannedOutputs};
+use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
-use crate::execution::resolve::Resolver;
+use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
 use crate::graph::CacheMode;
 use crate::graph::NodeId;
 use crate::node::definition::{FuncBehavior, FuncId};
@@ -92,11 +92,17 @@ fn self_mapped_flatten(program: &ExecutionProgram) -> FlattenMap {
     flatten
 }
 
-/// A `straight_plan` with an explicit per-output consumer count (indexed by output-pool
+#[derive(Debug)]
+struct TestRun {
+    plan: ExecutionPlan,
+    resolved: ResolvedRun,
+}
+
+/// A `straight_run` with an explicit per-output consumer count (indexed by output-pool
 /// index, so its length is `n_outputs`), instead of the all-`1` default. Lets a test claim
 /// more consumers than actually read (to prove the release waits for the full count) or none
 /// (a sink, released the instant it runs).
-fn plan_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> ExecutionPlan {
+fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
     assert_eq!(readers.len(), program.n_outputs());
     let demand: Vec<OutputDemand> = readers
         .iter()
@@ -108,23 +114,24 @@ fn plan_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> Execution
             }
         })
         .collect();
-    ExecutionPlan {
-        outputs: PlannedOutputs {
-            demand: OutputColumn::from(demand),
-            readers: OutputColumn::from(readers),
+    TestRun {
+        plan: structural_plan(program),
+        resolved: ResolvedRun {
+            disposition: program
+                .node_ids()
+                .map(|node_id| (node_id, Disposition::Run))
+                .collect(),
+            outputs: ResolvedOutputs {
+                demand: OutputColumn::from(demand),
+                readers: OutputColumn::from(readers),
+            },
         },
-        ..straight_plan(program)
     }
 }
 
-fn demand_output(
-    program: &ExecutionProgram,
-    plan: &mut ExecutionPlan,
-    node_id: NodeId,
-    port_idx: usize,
-) {
+fn demand_output(program: &ExecutionProgram, run: &mut TestRun, node_id: NodeId, port_idx: usize) {
     let output_idx = program.output_idx(node_id, port_idx);
-    plan.outputs.demand[output_idx] = OutputDemand::Produce;
+    run.resolved.outputs.demand[output_idx] = OutputDemand::Produce;
 }
 
 fn bind(node_id: NodeId, port: usize) -> ExecutionBinding {
@@ -134,10 +141,14 @@ fn bind(node_id: NodeId, port: usize) -> ExecutionBinding {
     })
 }
 
-/// A plan that runs every node in index order, each output marked needed. These tests
+/// A resolved run that runs every node in index order, each output marked needed. These tests
 /// drive the run loop directly with an all-`needed` mask (the reuse/cut logic is
 /// unit-tested in `resolve.rs`), so `roots` is irrelevant here.
-fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
+fn straight_run(program: &ExecutionProgram) -> TestRun {
+    run_with_readers(program, vec![1; program.n_outputs()])
+}
+
+fn structural_plan(program: &ExecutionProgram) -> ExecutionPlan {
     let verdicts = program
         .node_ids()
         .map(|node_id| (node_id, NodeVerdict::Execute))
@@ -145,20 +156,27 @@ fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
     ExecutionPlan {
         process_order: program.node_ids().collect(),
         verdicts,
-        outputs: PlannedOutputs {
-            demand: vec![OutputDemand::Produce; program.n_outputs()].into(),
-            readers: vec![1; program.n_outputs()].into(),
-        },
         roots: program.node_ids().collect(),
         pinned: Vec::new(),
     }
 }
 
-async fn run(program: &ExecutionProgram, plan: &ExecutionPlan) -> (RuntimeCache, ExecutionStats) {
+async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, ExecutionStats) {
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
-    let stats = run_with(program, plan, &mut cache).await;
+    let mut executor = Executor::default();
+    let stats = executor
+        .run(
+            program,
+            &run.plan,
+            &run.resolved,
+            &mut cache,
+            &FlattenMap::default(),
+            None,
+            CancelToken::never(),
+        )
+        .await;
     (cache, stats)
 }
 
@@ -170,7 +188,7 @@ async fn run_with(
     cache: &mut RuntimeCache,
 ) -> ExecutionStats {
     let mut executor = Executor::default();
-    // Resolve dispositions like the engine does. `straight_plan` roots every node, so
+    // Resolve dispositions like the engine does. `straight_run` roots every node, so
     // the cut prunes nothing here — the cut itself is unit-tested in `resolve.rs`.
     let mut resolver = Resolver::default();
     resolver.resolve(program, plan, cache);
@@ -178,7 +196,7 @@ async fn run_with(
         .run(
             program,
             plan,
-            &resolver.disposition,
+            &resolver.run,
             cache,
             &FlattenMap::default(),
             None,
@@ -194,20 +212,18 @@ async fn run_with(
 /// what it leaves resident afterward).
 async fn run_with_pinned(
     program: &ExecutionProgram,
-    plan: &ExecutionPlan,
+    run: &TestRun,
 ) -> (RuntimeCache, ExecutionStats, Vec<PinnedOutputs>) {
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
     let mut executor = Executor::default();
-    let mut resolver = Resolver::default();
-    resolver.resolve(program, plan, &mut cache);
     let flatten = self_mapped_flatten(program);
     let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
     let stats = executor
         .run(
             program,
-            plan,
-            &resolver.disposition,
+            &run.plan,
+            &run.resolved,
             &mut cache,
             &flatten,
             Some(&tx),
@@ -239,7 +255,7 @@ async fn runs_in_order_resolving_binds_and_storing_outputs() {
     let a = p.node(&[], 1, producer);
     let b = p.node(&[bind(a, 0)], 1, consumer);
 
-    let plan = straight_plan(&p.program);
+    let plan = straight_run(&p.program);
     let (cache, stats) = run(&p.program, &plan).await;
 
     assert_eq!(
@@ -269,7 +285,7 @@ async fn upstream_error_skips_dependents_and_clears_output() {
     let a = p.node(&[], 1, failing);
     let b = p.node(&[bind(a, 0)], 1, downstream);
 
-    let plan = straight_plan(&p.program);
+    let plan = straight_run(&p.program);
     let (cache, stats) = run(&p.program, &plan).await;
 
     assert!(
@@ -302,7 +318,7 @@ async fn unbound_output_errors_only_when_demanded() {
     let a = p.node(&[], 2, producer);
     let b = p.node(&[bind(a, 0), bind(a, 1)], 1, consumer);
 
-    let plan = plan_with_readers(&p.program, vec![1, 1, 0]);
+    let plan = run_with_readers(&p.program, vec![1, 1, 0]);
     let (cache, stats) = run(&p.program, &plan).await;
     let error_of = |node_id: NodeId| {
         stats
@@ -329,7 +345,7 @@ async fn unbound_output_errors_only_when_demanded() {
         1,
         async_lambda!(|_ctx, _state, _ev, _inputs, _demand, _outputs| { Ok(()) }),
     );
-    let plan = plan_with_readers(&p.program, vec![0]);
+    let plan = run_with_readers(&p.program, vec![0]);
     let (cache, stats) = run(&p.program, &plan).await;
 
     assert!(stats.node_errors.is_empty());
@@ -361,7 +377,7 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
     p.set_cache(b, CacheMode::Ram);
 
     // A's one output has one consumer (B); B's output has a phantom consumer, so B never drains.
-    let plan = plan_with_readers(&p.program, vec![1, 1]);
+    let plan = run_with_readers(&p.program, vec![1, 1]);
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert!(
@@ -396,7 +412,7 @@ async fn pinned_delivery_does_not_create_a_reader() {
     p.set_cache(b, CacheMode::Ram);
     p.set_output_pinned(a, 0, true);
 
-    let plan = plan_with_readers(&p.program, vec![1, 1]);
+    let plan = run_with_readers(&p.program, vec![1, 1]);
     let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert!(
@@ -410,7 +426,7 @@ async fn pinned_delivery_does_not_create_a_reader() {
 
 /// A pinned (node-seeded preview) root's output survives even in `CacheMode::None`,
 /// unlike an unpinned `Skip` root on the same program. Demand controls production;
-/// `plan.pinned` independently controls retention.
+/// `run.plan.pinned` independently controls retention.
 #[tokio::test]
 async fn pinned_root_sees_demand_and_survives_drain() {
     use std::sync::Mutex;
@@ -430,7 +446,7 @@ async fn pinned_root_sees_demand_and_survives_drain() {
 
     // Unpinned root, no consumers: the lambda reads `Skip` and the slot is
     // reclaimed the instant it's stored.
-    let plan = plan_with_readers(&p.program, vec![0]);
+    let plan = run_with_readers(&p.program, vec![0]);
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Skip));
     assert!(
@@ -439,9 +455,9 @@ async fn pinned_root_sees_demand_and_survives_drain() {
         cache.slots[&a].value
     );
 
-    let mut plan = plan_with_readers(&p.program, vec![0]);
+    let mut plan = run_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut plan, a, 0);
-    plan.pinned.push(a);
+    plan.plan.pinned.push(a);
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
     assert_eq!(
@@ -463,7 +479,7 @@ async fn pinned_output_pushes_right_after_it_runs() {
     let a = p.node(&[], 1, producer);
     p.set_output_pinned(a, 0, true);
 
-    let plan = straight_plan(&p.program);
+    let plan = straight_run(&p.program);
     let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1, "one push for the one finished node");
@@ -486,7 +502,7 @@ async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
     p.set_cache(a, CacheMode::None); // not Ram — retention must not be why it survives
     p.set_output_pinned(a, 0, true);
 
-    let mut plan = plan_with_readers(&p.program, vec![0]);
+    let mut plan = run_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut plan, a, 0);
     let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
@@ -499,7 +515,7 @@ async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
 }
 
 /// A pinned-root node (a node-seeded on-demand preview target) pushes *every*
-/// output, not just an individually-pinned one — `plan.pinned` alone is
+/// output, not just an individually-pinned one — `run.plan.pinned` alone is
 /// enough to qualify the whole node.
 #[tokio::test]
 async fn pinned_root_pushes_every_output() {
@@ -511,10 +527,8 @@ async fn pinned_root_pushes_every_output() {
     });
     let a = p.node(&[], 2, producer);
 
-    let plan = ExecutionPlan {
-        pinned: vec![a],
-        ..straight_plan(&p.program)
-    };
+    let mut plan = straight_run(&p.program);
+    plan.plan.pinned.push(a);
     let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1);
@@ -537,7 +551,7 @@ async fn non_pinned_node_pushes_nothing() {
     });
     p.node(&[], 1, producer);
 
-    let plan = straight_plan(&p.program);
+    let plan = straight_run(&p.program);
     let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert!(
@@ -558,7 +572,7 @@ async fn failed_pinned_node_pushes_nothing() {
     let a = p.node(&[], 1, failing);
     p.set_output_pinned(a, 0, true);
 
-    let plan = straight_plan(&p.program);
+    let plan = straight_run(&p.program);
     let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert!(
@@ -586,7 +600,7 @@ async fn keeps_ram_cache_output_after_all_consumers_read() {
     p.set_cache(b, CacheMode::Ram);
 
     // A has one consumer (B, which reads it) and B has none (usage 0).
-    let plan = plan_with_readers(&p.program, vec![1, 0]);
+    let plan = run_with_readers(&p.program, vec![1, 0]);
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert_eq!(
@@ -596,12 +610,10 @@ async fn keeps_ram_cache_output_after_all_consumers_read() {
     );
 }
 
-/// The release waits for *every* counted consumer, not the first read. A(None) is claimed to
-/// have two consumers but only B actually reads it: the count never reaches zero, so the
-/// value is held (end-of-run eviction, not modeled by `Executor::run`, would reclaim it). This
-/// is the safety margin — a consumer that never runs can't cause a premature free.
+/// A reused consumer contributes no reader. The shared non-RAM producer is reclaimed as
+/// soon as the one running consumer reads it, without waiting for end-of-run eviction.
 #[tokio::test]
-async fn holds_output_until_every_counted_consumer_reads() {
+async fn reused_consumer_does_not_delay_last_read_reclamation() {
     let mut p = Prog::default();
     let producer = async_lambda!(|_ctx, _s, _ev, _inputs, _demand, outputs| {
         outputs[0] = DynamicValue::Static(StaticValue::Int(7));
@@ -612,17 +624,35 @@ async fn holds_output_until_every_counted_consumer_reads() {
         Ok(())
     });
     let a = p.node(&[], 1, producer);
-    let _b = p.node(&[bind(a, 0)], 1, consumer);
+    let live = p.node(&[bind(a, 0)], 1, consumer.clone());
+    let cached = p.node(&[bind(a, 0)], 1, consumer);
+    p.program.e_nodes.get_mut(&a).unwrap().behavior = FuncBehavior::Pure;
+    p.program.e_nodes.get_mut(&cached).unwrap().behavior = FuncBehavior::Pure;
     p.set_cache(a, CacheMode::None);
+    p.set_cache(live, CacheMode::None);
 
-    // Claim A has TWO consumers though only B reads it: its count settles at 1, never 0.
-    let plan = plan_with_readers(&p.program, vec![2, 0]);
-    let (cache, _stats) = run(&p.program, &plan).await;
+    let plan = structural_plan(&p.program);
+    let mut cache = RuntimeCache::default();
+    cache.reconcile(&p.program);
+    let first = run_with(&p.program, &plan, &mut cache).await;
+    assert_eq!(first.executed_nodes.len(), 3);
 
-    assert_eq!(
-        cache.slots[&a].output_values().map(|v| v[0].as_i64()),
-        Some(Some(7)),
-        "A (None) is still resident: one of its two counted reads never happened"
+    let second = run_with(&p.program, &plan, &mut cache).await;
+    assert!(
+        second.cached_nodes.contains(&cached),
+        "the pure RAM consumer reuses its first-run result"
+    );
+    assert!(
+        second.executed_nodes.iter().any(|node| node.node_id == a)
+            && second
+                .executed_nodes
+                .iter()
+                .any(|node| node.node_id == live),
+        "the producer and impure consumer still run"
+    );
+    assert!(
+        matches!(cache.slots[&a].value, ValueState::Empty),
+        "the producer is reclaimed immediately after its only live reader"
     );
 }
 
@@ -643,7 +673,7 @@ async fn frees_zero_consumer_output_right_after_it_runs() {
     p.set_cache(b, CacheMode::Ram);
 
     // Neither output is consumed.
-    let plan = plan_with_readers(&p.program, vec![0, 0]);
+    let plan = run_with_readers(&p.program, vec![0, 0]);
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert!(
@@ -672,7 +702,7 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     });
     let b = p.node(&[bind(a, 0)], 1, consumer);
 
-    let plan = straight_plan(&p.program);
+    let plan = straight_run(&p.program);
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
     // A stale prior value on the lambda-less node must not be served as this run's result.
@@ -683,7 +713,7 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
         ),
         produced_under: None,
     };
-    let stats = run_with(&p.program, &plan, &mut cache).await;
+    let stats = run_with(&p.program, &plan.plan, &mut cache).await;
 
     assert!(
         stats.executed_nodes.is_empty(),
@@ -754,12 +784,12 @@ async fn reuse_survives_failed_upstream_rerun() {
     // lets the store-time drain reclaim it — the executor harness has no end-of-run
     // eviction phase, and a `None` value left resident would serve as a reuse hit in
     // run 2 (residency is what the reuse check trusts), masking the skip under test.
-    let plan = plan_with_readers(&p.program, vec![2, 1, 0]);
+    let plan = run_with_readers(&p.program, vec![2, 1, 0]);
     let mut cache = RuntimeCache::default();
     cache.reconcile(&p.program);
 
     // Run 1: A=5, B=C=6, everything computes.
-    let stats1 = run_with(&p.program, &plan, &mut cache).await;
+    let stats1 = run_with(&p.program, &plan.plan, &mut cache).await;
     assert_eq!(stats1.executed_nodes.len(), 3);
     assert_eq!(
         cache.slots[&b].output_values().unwrap()[0].as_i64(),
@@ -769,7 +799,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     // Run 2: A re-runs (nothing cached it) and fails. B's digest is unchanged, so it
     // is served as cached — not skipped — and its resident 6 survives. C recomputes,
     // sees the errored upstream, and is skipped.
-    let stats2 = run_with(&p.program, &plan, &mut cache).await;
+    let stats2 = run_with(&p.program, &plan.plan, &mut cache).await;
     let (a_id, b_id, c_id) = (a, b, c);
     assert!(
         stats2.cached_nodes.contains(&b_id),

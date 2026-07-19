@@ -2,29 +2,27 @@
 //! it. The planner runs one backward post-order DFS from the run's roots (sinks,
 //! event subscribers, event-trigger owners — plus every sink when a fired event
 //! reaches a [`RunSinks`](crate::node::special::SpecialNode::RunSinks) sink),
-//! producing `process_order` (deps before consumers), output demand + reader counts, and each
-//! node's [`NodeVerdict`] (runnable vs blocked on inputs) — purely structural, no
-//! cache/digest state. The
-//! [`Executor`](crate::execution::executor::Executor) consumes the plan; the plan is
-//! reused via a buffer on the engine and the `Planner` owns reusable DFS scratch, so a
-//! repeated plan on an unchanged graph allocates nothing.
+//! producing `process_order` (deps before consumers) and each node's [`NodeVerdict`]
+//! (runnable vs blocked on inputs) — purely structural, no cache/digest state. The
+//! resolver and executor consume the plan; it is reused via a buffer on the engine and
+//! the `Planner` owns reusable DFS scratch, so a repeated plan on an unchanged graph
+//! allocates nothing.
 
 use crate::execution::compile::CompiledGraph;
-use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram, OutputIdx};
+use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram};
 use crate::execution::query::resolve_node_id;
-use crate::execution::{Error, NodeMap, OutputColumn, Result, RunSeeds, reset_node_map, validate};
+use crate::execution::{Error, NodeMap, Result, RunSeeds, reset_node_map, validate};
 use crate::graph::NodeId;
-use crate::node::lambda::OutputDemand;
 use crate::node::special::SpecialNode;
 
 /// The planner's structural verdict for one node this run.
 /// The planner decides only *runnable vs blocked on inputs*; *cached vs recompute* is an
-/// execution-time call (the executor computes the node's digest and reuses from RAM/disk
-/// or runs). The default (`MissingInputs`) is the conservative "not yet established as
-/// runnable" value for nodes outside `process_order`, whose verdict is never read.
+/// resolver call after planning. The default (`MissingInputs`) is the conservative "not
+/// yet established as runnable" value for nodes outside `process_order`, whose verdict
+/// is never read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum NodeVerdict {
-    /// Runnable this round (the executor then reuses its cached output or recomputes it).
+    /// Runnable this round; the resolver then selects reuse or execution.
     Execute,
     /// A required input is unsatisfied (unbound, or fed by a non-runnable producer);
     /// can't run, and the "missing" verdict propagates to its consumers.
@@ -56,59 +54,18 @@ pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeMap<NodeVerdi
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct PlannedOutputs {
-    /// Whether each output must be produced for an in-graph reader or a host pin.
-    pub(crate) demand: OutputColumn<OutputDemand>,
-    /// Structural downstream binding count. Pins do not create readers.
-    pub(crate) readers: OutputColumn<u32>,
-}
-
-impl PlannedOutputs {
-    fn reset(&mut self, output_count: usize) {
-        self.demand.reset(output_count, OutputDemand::Skip);
-        self.readers.reset(output_count, 0);
-    }
-
-    fn seed_external_demand(&mut self, program: &ExecutionProgram, pinned: &[NodeId]) {
-        assert_eq!(
-            program.output_pinned.len(),
-            program.n_outputs(),
-            "output_pinned must have exactly one entry per pooled output port"
-        );
-        for output_idx in program.pinned_output_indices() {
-            self.demand[output_idx] = OutputDemand::Produce;
-        }
-        for node_id in pinned {
-            self.demand
-                .slice_mut(program.e_nodes[node_id].outputs)
-                .fill(OutputDemand::Produce);
-        }
-    }
-
-    fn add_reader(&mut self, output_idx: OutputIdx) {
-        self.readers[output_idx] = self.readers[output_idx]
-            .checked_add(1)
-            .expect("output reader count overflowed u32");
-        self.demand[output_idx] = OutputDemand::Produce;
-    }
-}
-
-#[derive(Debug, Default)]
 pub(crate) struct ExecutionPlan {
     /// The schedule: post-order DFS over the dependency graph (deps before consumers),
-    /// seeded from the sinks — every reachable node, producer-first. The executor
-    /// walks this and skips `MissingInputs` nodes (and reuses cached ones) inline.
+    /// seeded from the sinks — every reachable node, producer-first. The resolver
+    /// refines it into the surviving run before execution.
     pub(crate) process_order: Vec<NodeId>,
     /// Per-node verdict (execute / missing-inputs), keyed by node id.
     pub(crate) verdicts: NodeMap<NodeVerdict>,
-    /// Per-output production demand and structural binding-reader counts. The plan owns
-    /// both immutable templates; the executor copies only `readers` into live state.
-    pub(crate) outputs: PlannedOutputs,
     /// The nodes the backward walk started from — sinks, event subscribers,
     /// event-trigger owners, and node seeds (a node seeding via several categories may
-    /// repeat; harmless). The schedule's "must be available" set: the executor's pre-run
-    /// cut seeds its `needed` mask from these and prunes any cone reachable only through
-    /// cache-hit consumers (see [`Executor`](crate::execution::executor::Executor)).
+    /// repeat; harmless). The schedule's "must be available" set: the resolver seeds
+    /// liveness from these and prunes any cone reachable only through cache-hit consumers
+    /// (see [`Resolver`](crate::execution::resolve::Resolver)).
     pub(crate) roots: Vec<NodeId>,
     /// The node-seeded roots (on-demand preview targets) — a *pinned root*, a subset of
     /// `roots`. Distinct from a pinned *output port* (a graph-authored, persisted flag —
@@ -125,8 +82,6 @@ impl ExecutionPlan {
     pub(crate) fn clear(&mut self) {
         self.process_order.clear();
         self.verdicts.clear();
-        self.outputs.demand.values.clear();
-        self.outputs.readers.values.clear();
         self.roots.clear();
         self.pinned.clear();
     }
@@ -140,7 +95,6 @@ impl ExecutionPlan {
             program.node_ids(),
             NodeVerdict::default(),
         );
-        self.outputs.reset(program.n_outputs());
         self.roots.clear();
         self.pinned.clear();
     }
@@ -186,11 +140,8 @@ impl Planner {
         plan.reset(program);
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
-        // below *and* the executor's pre-run cut, so they live on the plan as an output.
-        // Must run before external demand is seeded because pinned roots are collected here.
+        // below and the resolver's cache-aware reverse sweep.
         collect_roots(compiled, seeds, plan)?;
-
-        plan.outputs.seed_external_demand(program, &plan.pinned);
 
         let result = self.walk_backward_collect_order(program, plan);
         if result.is_ok() {
@@ -200,8 +151,8 @@ impl Planner {
     }
 
     /// Backward post-order DFS from the roots: builds `process_order` (deps before
-    /// consumers), records output demand and readers, detects cycles, and — folded in here
-    /// rather than a separate forward pass — resolves each node's [`NodeVerdict`].
+    /// consumers), detects cycles, and — folded in here rather than a separate forward
+    /// pass — resolves each node's [`NodeVerdict`].
     /// The verdict is set in the `Done` arm, i.e. in post-order, so every Bind dep is
     /// already `Black` with its own verdict set when a consumer reads it (what the old
     /// separate `resolve_verdicts` pass asserted, now structural).
@@ -257,8 +208,6 @@ impl Planner {
             let span = program.e_nodes[&node_id].inputs;
             for e_input in &program.inputs[span.range()] {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                    let output_idx = program.output_idx(addr.target, addr.port_idx);
-                    plan.outputs.add_reader(output_idx);
                     self.stack.push(Visit::Discover(addr.target));
                 }
             }

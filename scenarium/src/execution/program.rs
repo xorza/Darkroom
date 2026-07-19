@@ -135,14 +135,14 @@ pub(crate) struct ExecutionProgram {
     pub(crate) output_types: Vec<DataType>,
     /// Whether each pooled output port is pinned — copied from
     /// [`Graph::pinned_outputs`](crate::graph::Graph) at flatten, same
-    /// indexing as `output_types`. The planner reads this to count a
+    /// indexing as `output_types`. The resolver reads this to mark a
     /// pinned port as used even with no in-graph binding.
     pub(crate) output_pinned: Vec<bool>,
 }
 
 impl ExecutionProgram {
     /// The program's total output count: the length of the `output_types` pool and the
-    /// plan's output columns (every node's output span summed). Derived from
+    /// resolved run's output columns (every node's output span summed). Derived from
     /// `output_types` rather than stored, so it can't disagree with the pool it sizes.
     pub(crate) fn n_outputs(&self) -> usize {
         self.output_types.len()
@@ -160,14 +160,6 @@ impl ExecutionProgram {
         );
         let port_idx = u32::try_from(port_idx).expect("output port index must fit in u32");
         OutputIdx(outputs.start + port_idx)
-    }
-
-    pub(crate) fn pinned_output_indices(&self) -> impl Iterator<Item = OutputIdx> + '_ {
-        self.output_pinned
-            .iter()
-            .enumerate()
-            .filter(|(_, pinned)| **pinned)
-            .map(|(idx, _)| OutputIdx::from(idx))
     }
 
     pub(crate) fn is_output_pinned(&self, output_idx: OutputIdx) -> bool {

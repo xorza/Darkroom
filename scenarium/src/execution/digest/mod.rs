@@ -5,7 +5,7 @@
 //! values, the outputs of its upstream producers, and the content of
 //! any external files it reads. [`node_digest`] folds exactly that into a 256-bit
 //! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
-//! (the executor computes digests producer-first, so no recursion or memoization is
+//! (the resolver computes digests producer-first, so no recursion or memoization is
 //! needed). Equal digests ⇒ identical computation, so the digest is at once the cache
 //! key *and* the invalidation signal: change anything upstream and every downstream
 //! digest changes — on this machine or any other. See `README.md` Part B.

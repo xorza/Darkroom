@@ -7,12 +7,11 @@
 //!    via [`ExecutionEngine::install`], which cannot fail.
 //! 2. **plan** — the [`Planner`](plan::Planner) turns the program into an
 //!    [`ExecutionPlan`](plan::ExecutionPlan) (the schedule). Purely structural —
-//!    reachability + topological order + output demand/readers, no cache/digest state.
-//! 3. **execute** — the [`Executor`](executor::Executor) first resolves which
-//!    pure-structural nodes reuse a cache and cuts every cone that feeds only
-//!    reuse hits (so a cached node's stale upstream isn't recomputed on reopen),
-//!    then walks the surviving schedule producer-first, computing each node's
-//!    content digest and deciding reuse (RAM / disk) or recompute inline.
+//!    reachability + topological order + missing-input verdicts, no cache/digest state.
+//! 3. **execute** — the [`Resolver`](resolve::Resolver) stamps content digests, then
+//!    derives cache-aware liveness, exact output demand, and reader counts in one
+//!    consumer-first sweep. The [`Executor`] walks the surviving schedule
+//!    producer-first.
 //!
 //! [`ExecutionEngine`] owns the run-side pieces (program, plan, planner, the
 //! cross-run cache, and executor) and exposes `install` (phase 1's artifact)
@@ -306,16 +305,13 @@ impl ExecutionEngine {
         cancel: CancelToken,
     ) -> Result<ExecutionStats> {
         // Phase 2: schedule into the reusable plan buffer. Purely structural —
-        // reachability + topological order + output demand/readers + the walk roots, no cache/digest
-        // state. The artifact's flatten map resolves node seeds (authoring ids) to flat roots.
+        // reachability + topological order + missing-input verdicts + walk roots, no
+        // cache/digest state. The flatten map resolves authoring node seeds to flat roots.
         self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
 
-        // Phase 2b: cache-aware refinement. Resolve every node's disposition — its reuse
-        // verdict merged with the backward cut, so a cone feeding only cache hits (a
-        // disk-cached node's stale upstream) isn't recomputed on reopen. Mutates the cache
-        // (stamps digests, flags disk hits). The map is authoritative for the run: the
-        // executor reads it rather than re-deriving (a digest folds live filesystem state
-        // and could drift mid-run).
+        // Phase 2b: cache-aware refinement. Stamp digests, then derive disposition,
+        // exact output demand, and live readers together. The resolved run is authoritative:
+        // a cache-hit or blocked consumer contributes no upstream demand.
         self.resolver
             .resolve(&self.compiled.program, &self.plan, &mut self.cache);
 
@@ -327,7 +323,7 @@ impl ExecutionEngine {
             .run(
                 &self.compiled.program,
                 &self.plan,
-                &self.resolver.disposition,
+                &self.resolver.run,
                 &mut self.cache,
                 &self.compiled.flatten_map,
                 events,
@@ -341,7 +337,7 @@ impl ExecutionEngine {
         // (RAM modes + pinned preview roots) rather than recomputing either.
         self.cache.evict_unused(
             &self.compiled.program,
-            &self.resolver.disposition,
+            &self.resolver.run.disposition,
             &self.executor.retain,
         );
 
@@ -442,8 +438,7 @@ impl ExecutionEngine {
         .await
     }
 
-    /// Run only the planning phase (no execution), leaving the schedule in
-    /// `self.plan` for inspection.
+    /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.
     pub(crate) fn prepare_execution(
         &mut self,
         sinks: bool,
@@ -456,7 +451,10 @@ impl ExecutionEngine {
             events: events.to_vec(),
             nodes: Vec::new(),
         };
-        self.planner.plan(&self.compiled, &seeds, &mut self.plan)
+        self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
+        self.resolver
+            .resolve(&self.compiled.program, &self.plan, &mut self.cache);
+        Ok(())
     }
 
     pub(crate) fn by_id(&self, node_id: &NodeId) -> Option<&ExecutionNode> {
@@ -484,11 +482,11 @@ impl ExecutionEngine {
     }
 
     pub(crate) fn node_output_demand(&self, e_node: &ExecutionNode) -> &[OutputDemand] {
-        self.plan.outputs.demand.slice(e_node.outputs)
+        self.resolver.run.outputs.demand.slice(e_node.outputs)
     }
 
     pub(crate) fn node_output_readers(&self, e_node: &ExecutionNode) -> &[u32] {
-        self.plan.outputs.readers.slice(e_node.outputs)
+        self.resolver.run.outputs.readers.slice(e_node.outputs)
     }
 
     /// Whether `node_id` recomputed (rather than reused a cache) in the last run.

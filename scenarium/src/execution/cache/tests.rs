@@ -127,6 +127,41 @@ fn hydrate_turns_a_miss_into_a_hit() {
 }
 
 #[test]
+fn replacing_disk_store_clears_only_disk_availability() {
+    let mut cache = RuntimeCache::default();
+    let on_disk = insert_slot(
+        &mut cache,
+        1,
+        RuntimeSlot {
+            value: ValueState::OnDisk {
+                coverage: CachedOutputCoverage { ports: vec![true] },
+            },
+            ..Default::default()
+        },
+    );
+    let resident = insert_slot(
+        &mut cache,
+        2,
+        RuntimeSlot {
+            value: ValueState::Resident {
+                snapshot: complete_snapshot(out()),
+                produced_under: None,
+            },
+            ..Default::default()
+        },
+    );
+
+    cache.set_disk_store(DiskStore::default());
+
+    assert!(matches!(cache.slots[&on_disk].value, ValueState::Empty));
+    assert_eq!(
+        cache.slots[&resident].output_values().unwrap()[0].as_i64(),
+        Some(1),
+        "resident values do not belong to either disk store"
+    );
+}
+
+#[test]
 fn resident_hit_requires_coverage_for_every_demanded_output() {
     let digest = Digest([5; 32]);
     let mut cache = RuntimeCache::default();
