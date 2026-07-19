@@ -283,68 +283,19 @@ fn test_eccentricity_calculation_accuracy() {
     }
 }
 
-/// Verify SNR calculation follows the CCD noise equation.
 #[test]
-fn test_snr_calculation_with_gain() {
-    let width = 64;
-    let height = 64;
-    let amplitude = 0.8f32;
-    let sigma = 2.5f32;
-    let sky_noise = 0.02f32;
-    let gain = 2.0f32; // e-/ADU
-    let read_noise = 5.0f32; // electrons
-    let noise_model = NoiseModel { gain, read_noise };
+fn snr_uses_normalized_noise_units() {
+    let model = NoiseModel::from_normalized(1_000.0, 10.0);
 
-    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), sigma, amplitude, 0.1);
-    let bg = make_uniform_background(width, height, 0.1, sky_noise);
+    // Model variance = 2/1000 + 4 × (0.02² + (10/1000)²) = 0.004.
+    let modeled = compute_snr(2.0, 0.02, 4, Some(&model));
+    let expected_modeled = 2.0 / 0.004_f32.sqrt();
+    assert!((modeled - expected_modeled).abs() < 1e-5);
 
-    // Without gain (simplified formula)
-    let metrics_no_gain = compute_star(
-        &pixels,
-        &bg,
-        Vec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // With gain (full CCD equation)
-    let metrics_with_gain = compute_star(
-        &pixels,
-        &bg,
-        Vec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        Some(&noise_model),
-    )
-    .unwrap();
-
-    // Both should be positive
-    assert!(
-        metrics_no_gain.snr > 0.0,
-        "SNR without gain should be positive"
-    );
-    assert!(
-        metrics_with_gain.snr > 0.0,
-        "SNR with gain should be positive"
-    );
-
-    // With shot noise and read noise added, SNR should be lower
-    // (unless the star is very bright)
-    // Just verify both are computed reasonably
-    assert!(
-        metrics_no_gain.snr > 1.0,
-        "SNR should be > 1 for this bright star"
-    );
-    // With shot noise and read noise, SNR may be lower but still positive
-    assert!(
-        metrics_with_gain.snr > 0.1,
-        "SNR with gain should be > 0.1, got {}",
-        metrics_with_gain.snr
-    );
+    // Background-only variance = 4 × 0.02² = 0.0016.
+    let background_only = compute_snr(2.0, 0.02, 4, None);
+    assert!((background_only - 50.0).abs() < 1e-5);
+    assert_ne!(modeled, background_only);
 }
 
 /// Verify sharpness distinguishes point sources from extended sources.

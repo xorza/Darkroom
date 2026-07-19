@@ -232,9 +232,10 @@ For optimal accuracy when noise characteristics are known, we support **inverse-
 
 ```rust
 // Weight = 1/variance where:
-// variance = signal/gain + sky_noise² + read_noise²/gain²
+// variance = signal/G + sky_noise² + (read_noise_electrons/G)²
+// G is electrons per normalized unit.
 
-// Pass `Some(FitNoise { sky_noise, gain, read_noise })` to weight the fit;
+// Pass `Some(FitNoise { sky_noise, noise_model })` to weight the fit;
 // `None` is a plain unweighted fit.
 pub fn fit_gaussian_2d(
     pixels, pos, stamp_radius, background,
@@ -298,18 +299,18 @@ roundness2 = sqrt(asym_x² + asym_y²)
 
 ### Signal-to-Noise Ratio (SNR)
 
-Full CCD noise equation when gain is known:
+Full CCD noise equation when a normalized-domain noise model is known:
 
 ```
-SNR = flux / sqrt(flux/gain + npix × (σ_sky² + σ_read²/gain²))
+SNR = flux / sqrt(flux/G + npix × (σ_sky² + (R/G)²))
 ```
 
 Where:
-- `flux`: Background-subtracted star flux (ADU)
-- `gain`: Camera gain (e⁻/ADU)
+- `flux`: Background-subtracted star flux (normalized units)
+- `G`: Electrons per normalized unit
 - `npix`: Number of pixels in aperture
-- `σ_sky`: Background noise (ADU)
-- `σ_read`: Read noise (electrons)
+- `σ_sky`: Background noise (normalized units)
+- `R`: Read noise (electrons)
 
 Simplified background-dominated formula:
 

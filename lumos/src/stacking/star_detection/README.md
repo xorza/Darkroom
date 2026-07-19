@@ -50,7 +50,8 @@ config.background.refinement = BackgroundRefinement::Iterative { iterations: 2 }
 config.detection.sigma_threshold = 3.5;
 config.fwhm.auto_estimate = true;
 config.measurement.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
-config.measurement.noise_model = Some(NoiseModel::new(1.5, 5.0));
+// 1.5 e-/ADU × 16,000 ADU per normalized unit = 24,000 e-/normalized unit.
+config.measurement.noise_model = Some(NoiseModel::from_normalized(24_000.0, 5.0));
 config.filter.min_snr = 15.0;
 
 let mut detector = StarDetector::from_config(config)?;

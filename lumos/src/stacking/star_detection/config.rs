@@ -72,31 +72,63 @@ impl CentroidMethod {
     }
 }
 
-/// Camera noise model for accurate SNR calculation.
+/// Sensor noise model for normalized linear pixels.
+///
+/// Lumos stores pixels in normalized units, so the conversion factor is electrons represented by
+/// a pixel value of `1.0`, not the camera's electrons-per-ADU gain. Convert a physical gain with
+/// `electrons_per_normalized_unit = electrons_per_adu * adu_per_normalized_unit`.
 #[derive(Debug, Clone, Copy)]
 pub struct NoiseModel {
-    /// Camera gain in electrons per ADU (e-/ADU).
-    /// Typical values: 0.5-4.0 e-/ADU for modern CMOS sensors.
-    pub gain: f32,
-    /// Read noise in electrons (e-).
-    /// Typical values: 1-10 e- for modern CMOS sensors.
-    pub read_noise: f32,
+    /// Electrons represented by one normalized pixel unit.
+    pub electrons_per_normalized_unit: f32,
+    /// Per-pixel read-noise standard deviation in electrons.
+    pub read_noise_electrons: f32,
 }
 
 impl NoiseModel {
-    /// Create a new noise model.
-    pub fn new(gain: f32, read_noise: f32) -> Self {
-        Self { gain, read_noise }
+    /// Create a noise model whose signal scale already matches normalized Lumos pixels.
+    pub fn from_normalized(electrons_per_normalized_unit: f32, read_noise_electrons: f32) -> Self {
+        Self {
+            electrons_per_normalized_unit,
+            read_noise_electrons,
+        }
+    }
+
+    /// Variance of an integrated normalized signal.
+    ///
+    /// `signal` is the summed background-subtracted signal, `background_noise` is the empirical
+    /// per-pixel background standard deviation, and `sample_count` is the number of summed pixels.
+    pub(crate) fn variance_normalized(
+        &self,
+        signal: f64,
+        background_noise: f64,
+        sample_count: usize,
+    ) -> f64 {
+        debug_assert!(signal.is_finite() && signal >= 0.0);
+        debug_assert!(background_noise.is_finite() && background_noise >= 0.0);
+
+        let electrons_per_unit = self.electrons_per_normalized_unit as f64;
+        let read_noise_normalized = self.read_noise_electrons as f64 / electrons_per_unit;
+        signal / electrons_per_unit
+            + sample_count as f64
+                * (background_noise * background_noise
+                    + read_noise_normalized * read_noise_normalized)
     }
 
     /// Validate the noise model.
     pub fn validate(&self) -> Result<(), StarDetectionConfigError> {
-        if !self.gain.is_finite() || self.gain <= 0.0 {
-            return Err(StarDetectionConfigError::InvalidGain { value: self.gain });
+        if !self.electrons_per_normalized_unit.is_finite()
+            || self.electrons_per_normalized_unit <= 0.0
+        {
+            return Err(
+                StarDetectionConfigError::InvalidElectronsPerNormalizedUnit {
+                    value: self.electrons_per_normalized_unit,
+                },
+            );
         }
-        if !self.read_noise.is_finite() || self.read_noise < 0.0 {
-            return Err(StarDetectionConfigError::InvalidReadNoise {
-                value: self.read_noise,
+        if !self.read_noise_electrons.is_finite() || self.read_noise_electrons < 0.0 {
+            return Err(StarDetectionConfigError::InvalidReadNoiseElectrons {
+                value: self.read_noise_electrons,
             });
         }
         Ok(())
@@ -644,33 +676,37 @@ mod tests {
     }
 
     #[test]
-    fn test_noise_model() {
-        let model = NoiseModel::new(1.5, 5.0);
-        assert!((model.gain - 1.5).abs() < 1e-6);
-        assert!((model.read_noise - 5.0).abs() < 1e-6);
+    fn noise_model_uses_normalized_signal_units() {
+        let model = NoiseModel::from_normalized(1_000.0, 10.0);
+        assert_eq!(model.electrons_per_normalized_unit, 1_000.0);
+        assert_eq!(model.read_noise_electrons, 10.0);
         assert_eq!(model.validate(), Ok(()));
+
+        // 2/1000 + 4 × (0.02² + (10/1000)²) = 0.004 normalized².
+        let variance = model.variance_normalized(2.0, 0.02, 4);
+        assert!((variance - 0.004).abs() < 1e-12);
     }
 
     #[test]
     fn test_noise_model_invalid_parameters_return_exact_errors() {
         let cases = [
             (
-                NoiseModel::new(0.0, 5.0),
-                StarDetectionConfigError::InvalidGain { value: 0.0 },
+                NoiseModel::from_normalized(0.0, 5.0),
+                StarDetectionConfigError::InvalidElectronsPerNormalizedUnit { value: 0.0 },
             ),
             (
-                NoiseModel::new(f32::INFINITY, 5.0),
-                StarDetectionConfigError::InvalidGain {
+                NoiseModel::from_normalized(f32::INFINITY, 5.0),
+                StarDetectionConfigError::InvalidElectronsPerNormalizedUnit {
                     value: f32::INFINITY,
                 },
             ),
             (
-                NoiseModel::new(1.0, -1.0),
-                StarDetectionConfigError::InvalidReadNoise { value: -1.0 },
+                NoiseModel::from_normalized(1.0, -1.0),
+                StarDetectionConfigError::InvalidReadNoiseElectrons { value: -1.0 },
             ),
             (
-                NoiseModel::new(1.0, f32::INFINITY),
-                StarDetectionConfigError::InvalidReadNoise {
+                NoiseModel::from_normalized(1.0, f32::INFINITY),
+                StarDetectionConfigError::InvalidReadNoiseElectrons {
                     value: f32::INFINITY,
                 },
             ),
@@ -718,7 +754,7 @@ mod tests {
             config.fwhm.expected = 5.0;
             config.filter.min_snr = 15.0;
             config.detection.edge_margin = 20;
-            config.measurement.noise_model = Some(NoiseModel::new(1.5, 5.0));
+            config.measurement.noise_model = Some(NoiseModel::from_normalized(24_000.0, 5.0));
         });
 
         assert!((config.fwhm.expected - 5.0).abs() < 1e-6);
@@ -876,15 +912,15 @@ mod tests {
             ),
             (
                 configured(|config| {
-                    config.measurement.noise_model = Some(NoiseModel::new(0.0, 1.0));
+                    config.measurement.noise_model = Some(NoiseModel::from_normalized(0.0, 1.0));
                 }),
-                StarDetectionConfigError::InvalidGain { value: 0.0 },
+                StarDetectionConfigError::InvalidElectronsPerNormalizedUnit { value: 0.0 },
             ),
             (
                 configured(|config| {
-                    config.measurement.noise_model = Some(NoiseModel::new(1.0, -1.0));
+                    config.measurement.noise_model = Some(NoiseModel::from_normalized(1.0, -1.0));
                 }),
-                StarDetectionConfigError::InvalidReadNoise { value: -1.0 },
+                StarDetectionConfigError::InvalidReadNoiseElectrons { value: -1.0 },
             ),
         ];
 

@@ -585,26 +585,20 @@ carries error `npix²·σ_sky²/n_sky` (n_sky = sky-annulus pixel count). Photom
 codes that use a small sky annulus add this term; lumos's global-mesh σ makes it
 negligible. The equation also assumes Poisson ≈ Gaussian, valid for `N ≳ 10` e⁻.
 
-lumos implements exactly this (`compute_snr`, `centroid/mod.rs:721-750`) with
-three branches keyed on what the `NoiseModel` supplies: (1) gain **and** read
-noise → `total_var = flux/g + npix·(σ_sky² + R²/g²)` (shot + sky + read); (2)
-gain only → `flux/g + npix·σ_sky²` (drops the read term, `:737`); (3) no noise
-model → background-limited `total_var = npix·σ_sky²`, i.e.
+lumos implements the normalized-domain equivalent in `compute_snr`. A
+`NoiseModel` supplies `G`, electrons represented by one normalized pixel unit,
+and read noise `R` in electrons:
+`total_var = flux/G + npix·(σ_sky² + (R/G)²)` (shot + sky + read). Without a
+noise model it uses the background-limited `total_var = npix·σ_sky²`, i.e.
 `SNR = flux / (σ_sky·sqrt(npix))`. Two implementation details worth stating:
-`npix` is the **full square stamp** `(2r+1)²` (`:639`), not an
+`npix` is the **full square stamp** `(2r+1)²`, not an
 above-threshold/aperture pixel count — flux is summed over the same full stamp,
 so signal and the `npix`-scaled noise terms are consistent but both span a
 larger region than a tight aperture would; and `σ_sky` (`avg_noise`) is the mean
-of the per-pixel noise map over the stamp's **outer ring** (`r² >
-(r−2)²`, `:598-603`), a local sky-noise estimate rather than a global scalar.
-The full CCD form requires the user to supply gain and read noise
-(`config.noise_model`).
-
-> **Pitfall — gain unknown / data normalized to [0,1].** lumos pixels are
-> normalized to [0,1] (planar f32), so "flux" and σ are in normalized units, not
-> electrons. The shot-noise term `flux/g` is only correct if `g` is expressed in
-> the same normalized units; otherwise only the background-limited branch is
-> meaningful. State the units assumption explicitly when configuring `NoiseModel`.
+of the per-pixel noise map over the stamp's **outer ring** (`r² > (r−2)²`), a
+local sky-noise estimate rather than a global scalar. Configure the model with
+`G = electrons_per_adu × adu_per_normalized_unit`; passing the physical
+electrons-per-ADU value directly is dimensionally wrong.
 
 ### 5.3 FWHM & eccentricity from second moments
 

@@ -345,9 +345,8 @@ fn test_weighted_fit_registration_rms() {
         return;
     };
 
-    // Normalized-domain gain ≈ phys_gain × white_level for a 14-bit sensor; read noise
-    // small. The exact value isn't critical here — it only has to make the weighting active.
-    let noise_model = NoiseModel::new(30000.0, 30.0);
+    // 30,000 e-/normalized unit is representative of physical gain × the 14-bit signal range.
+    let noise_model = NoiseModel::from_normalized(30_000.0, 30.0);
 
     let register_with = |noise: Option<NoiseModel>| -> (f64, usize) {
         let mut config = Config::precise_ground();

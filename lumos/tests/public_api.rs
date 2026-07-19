@@ -5,10 +5,10 @@ use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig,
     CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet, CombineMethod,
     DefectSummary, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError,
-    GesdConfig, ImageDimensions, InterpolationMethod, LinearFitClipConfig, Normalization,
-    PercentileClipConfig, RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
-    RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN, StackConfig,
-    StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
+    GesdConfig, ImageDimensions, InterpolationMethod, LinearFitClipConfig, NoiseModel,
+    Normalization, PercentileClipConfig, RansacConfig, RegistrationCatalog, RegistrationConfig,
+    RegistrationError, RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN,
+    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
     StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionConfigError,
     StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
     StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
@@ -117,6 +117,11 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         filter: StarDetectionFilterConfig::default(),
     };
     detection.validate().unwrap();
+
+    let noise = NoiseModel::from_normalized(1_000.0, 10.0);
+    assert_eq!(noise.electrons_per_normalized_unit, 1_000.0);
+    assert_eq!(noise.read_noise_electrons, 10.0);
+    noise.validate().unwrap();
 
     let frame = DrizzleFrame::new("light.fits", Transform::identity());
     let DrizzleFrame {

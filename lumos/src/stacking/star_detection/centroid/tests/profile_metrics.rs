@@ -338,23 +338,20 @@ fn windowed_covariance_resists_wing_noise() {
 
 #[test]
 fn inverse_variance_weights_downweight_bright_pixels() {
-    // CCD per-pixel variance = signal/gain + sky² + read²/gain² (same as compute_snr).
-    // Gain is in the normalized domain (≈ phys_gain × white_level), so signal/gain is
-    // comparable to sky² and the shot-noisy bright pixels get lower weight.
+    // CCD per-pixel variance = signal/G + sky² + (read_e/G)², G = e-/normalized unit.
     let bg = 0.1;
     let sky_noise = 0.02; // sky_var = 4e-4
-    let gain = 1000.0;
-    let read_noise = 10.0; // read_var = 100 / 1e6 = 1e-4
+    let noise_model = NoiseModel::from_normalized(1_000.0, 10.0);
     let data_z = [0.1, 0.6, 1.1]; // signals 0.0, 0.5, 1.0
 
-    let w = inverse_variance_weights(&data_z, bg, sky_noise, gain, read_noise);
+    let w = inverse_variance_weights(&data_z, bg, sky_noise, noise_model);
 
     // signal 0.0: 1/(0      + 4e-4 + 1e-4) = 2000
     // signal 0.5: 1/(5e-4   + 5e-4)        = 1000
     // signal 1.0: 1/(1e-3   + 5e-4)        ≈ 666.67
-    assert!((w[0] - 2000.0).abs() < 1.0, "w0 = {}", w[0]);
-    assert!((w[1] - 1000.0).abs() < 1.0, "w1 = {}", w[1]);
-    assert!((w[2] - 666.667).abs() < 1.0, "w2 = {}", w[2]);
+    assert!((w[0] - 2000.0).abs() < 1e-9, "w0 = {}", w[0]);
+    assert!((w[1] - 1000.0).abs() < 1e-9, "w1 = {}", w[1]);
+    assert!((w[2] - 666.666_666_666_666_6).abs() < 1e-9, "w2 = {}", w[2]);
     assert!(
         w[0] > w[1] && w[1] > w[2],
         "weight must fall as signal rises"

@@ -199,8 +199,9 @@ readnoise)` immediately after trim and *before* gain/bias/dark/flat
 (`.tmp/refs/ccdproc/ccdproc/core.py:318`), so every subsequent operation propagates a
 Poisson+read-noise error array alongside the data. `cosmicray_lacosmic` likewise *"always
 need[s] to work in electrons"* and takes `gain`/`readnoise` explicitly (core.py:1541+). lumos
-does not carry a per-pixel uncertainty frame; it instead uses a **NoiseModel{gain,
-read_noise}** in star detection and **noise weighting** at the stack — equivalent in spirit
+does not carry a per-pixel uncertainty frame; it instead uses a normalized-domain
+**NoiseModel{electrons_per_normalized_unit, read_noise_electrons}** in star detection and
+**noise weighting** at the stack — equivalent in spirit
 (variance ∝ `1/σ²`) but it cannot propagate the flat's pixel-by-pixel error the way an
 explicit uncertainty array does. *Opportunity (see §7): an optional uncertainty plane.*
 
@@ -903,7 +904,7 @@ median for mono. (lumos already does all three.)
 2. **No single-frame cosmic-ray rejection.** Relies entirely on stack-time sigma clipping —
    fine for many dithered frames, weak for short sequences and vulnerable to warp-smearing.
    *Opportunity:* an L.A.Cosmic pass on calibrated frames before registration (needs
-   gain/read-noise, which lumos already models in `NoiseModel`).
+   normalized signal-to-electron conversion and read noise, which lumos models in `NoiseModel`).
 3. **No bad-column handling.** Per-pixel neighbor median degrades on full columns. *Opportunity:*
    detect persistent columns from the master dark and repair from cross-column same-color
    neighbors, or document reliance on dither + clip.
@@ -924,7 +925,7 @@ median for mono. (lumos already does all three.)
 8. **No per-pixel uncertainty plane.** ccdproc carries a Poisson+read-noise error array
    through every step (`create_deviation`, core.py:318) so the flat's pixel-by-pixel error
    propagates into the final variance (Newberry §1.4). lumos approximates this with a scalar
-   `NoiseModel{gain, read_noise}` + noise-weighted stacking, which captures *frame-level* but
+   normalized-domain `NoiseModel` + noise-weighted stacking, which captures *frame-level* but
    not *pixel-level* flat/dark noise. *Opportunity:* an optional uncertainty `Buffer2<f32>` per
    channel, propagated through subtract/divide, would make noise-weighted stacking and SNR
    estimates rigorous. Lower priority but the principled endpoint.

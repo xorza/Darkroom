@@ -118,8 +118,8 @@ let config = MoffatFitConfig::default();
 // Unweighted fit
 let result = fit_moffat_2d(&pixels, pos, stamp_radius, background, None, &config)?;
 
-// Inverse-variance-weighted fit: local sky σ + the NoiseModel's gain/read-noise
-let noise = Some(FitNoise { sky_noise, gain, read_noise });
+// Inverse-variance-weighted fit: local normalized sky σ + a normalized-domain NoiseModel.
+let noise = Some(FitNoise { sky_noise, noise_model });
 let result = fit_moffat_2d(&pixels, pos, stamp_radius, background, noise, &config)?;
 
 println!("Center: ({:.3}, {:.3})", result.pos.x, result.pos.y);

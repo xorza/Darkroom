@@ -77,9 +77,9 @@ pub enum StarDetectionConfigError {
     #[error("duplicate_min_separation must be finite and non-negative, got {value}")]
     InvalidDuplicateMinSeparation { value: f32 },
 
-    #[error("noise-model gain must be finite and positive, got {value}")]
-    InvalidGain { value: f32 },
+    #[error("noise-model electrons_per_normalized_unit must be finite and positive, got {value}")]
+    InvalidElectronsPerNormalizedUnit { value: f32 },
 
-    #[error("noise-model read_noise must be finite and non-negative, got {value}")]
-    InvalidReadNoise { value: f32 },
+    #[error("noise-model read_noise_electrons must be finite and non-negative, got {value}")]
+    InvalidReadNoiseElectrons { value: f32 },
 }

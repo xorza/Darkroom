@@ -196,7 +196,8 @@ pub(crate) fn estimate_sigma_from_moments(
 
 /// Per-pixel inverse-variance weights for the LM fit, using the CCD noise model
 /// (same per-pixel decomposition as `compute_snr`):
-/// `w_i = 1 / (max(z_i − bg, 0)/gain + sky_noise² + read_noise²/gain²)`.
+/// `w_i = 1 / (signal/G + sky_noise² + (read_noise_electrons/G)²)`, where `G` is
+/// electrons per normalized unit.
 ///
 /// Down-weights the shot-noisy bright core so the fit is the ML estimator instead of
 /// over-weighting high-signal pixels (which biases the sub-pixel centroid/FWHM/flux).
@@ -204,27 +205,25 @@ pub(crate) fn inverse_variance_weights(
     data_z: &[f64],
     background: f64,
     sky_noise: f64,
-    gain: f64,
-    read_noise: f64,
+    noise_model: NoiseModel,
 ) -> ArrayVec<f64, MAX_STAMP_PIXELS> {
-    let sky_var = sky_noise * sky_noise;
-    let read_var = read_noise * read_noise / (gain * gain);
     data_z
         .iter()
         .map(|&z| {
             let signal = (z - background).max(0.0);
-            1.0 / (signal / gain + sky_var + read_var).max(1e-12)
+            1.0 / noise_model
+                .variance_normalized(signal, sky_noise, 1)
+                .max(1e-12)
         })
         .collect()
 }
 
 /// Noise inputs for an inverse-variance-weighted fit: the local sky σ plus the
-/// `NoiseModel`'s gain/read-noise. `None` (absent) means an unweighted fit.
+/// normalized-domain sensor model. `None` (absent) means an unweighted fit.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FitNoise {
     pub sky_noise: f32,
-    pub gain: f32,
-    pub read_noise: f32,
+    pub noise_model: NoiseModel,
 }
 
 /// Per-pixel fit weights for a stamp, or `None` for an unweighted fit;
@@ -235,13 +234,7 @@ pub(crate) fn fit_weights(
     noise: Option<FitNoise>,
 ) -> Option<ArrayVec<f64, MAX_STAMP_PIXELS>> {
     noise.map(|n| {
-        inverse_variance_weights(
-            data_z,
-            background as f64,
-            n.sky_noise as f64,
-            n.gain as f64,
-            n.read_noise as f64,
-        )
+        inverse_variance_weights(data_z, background as f64, n.sky_noise as f64, n.noise_model)
     })
 }
 
@@ -418,10 +411,9 @@ pub(crate) fn measure_star(
     let mut fit_eccentricity: Option<f32> = None;
 
     // Inverse-variance fit weights when a noise model is configured (PR1).
-    let fit_noise = config.noise_model.as_ref().map(|nm| FitNoise {
+    let fit_noise = config.noise_model.map(|noise_model| FitNoise {
         sky_noise: local_noise,
-        gain: nm.gain,
-        read_noise: nm.read_noise,
+        noise_model,
     });
 
     match config.centroid_method {
@@ -699,7 +691,8 @@ fn windowed_covariance(
 /// Uses f64 accumulators for numerical stability.
 ///
 /// If `noise_model` is provided, uses the full CCD noise equation:
-/// `SNR = flux / sqrt(flux/gain + npix × (σ_sky² + σ_read²/gain²))`
+/// `SNR = flux / sqrt(flux/G + npix × (σ_sky² + (read_noise_electrons/G)²))`,
+/// where `G` is electrons per normalized unit.
 ///
 /// Otherwise, uses the simplified background-dominated formula:
 /// `SNR = flux / (σ_sky × sqrt(npix))`
@@ -842,7 +835,7 @@ fn compute_star(
         None => background.noise.row(icy as usize)[icx as usize],
     };
 
-    let npix = (2 * stamp_radius + 1).pow(2) as f32;
+    let npix = (2 * stamp_radius + 1).pow(2);
     let flux_f32 = flux as f32;
 
     let snr = compute_snr(flux_f32, avg_noise, npix, noise_model);
@@ -922,21 +915,17 @@ fn safe_ratio(numerator: f64, denominator: f64) -> f64 {
 /// Compute SNR using the configured sensor noise model when available.
 ///
 /// Uses the full CCD noise equation when the model is provided:
-/// `SNR = flux / sqrt(flux/gain + npix × (σ_sky² + σ_read²/gain²))`
+/// `SNR = flux / sqrt(flux/G + npix × (σ_sky² + (read_noise_electrons/G)²))`,
+/// where `G` is electrons per normalized unit.
 ///
 /// Otherwise, uses simplified background-dominated formula:
 /// `SNR = flux / (σ_sky × sqrt(npix))`
-fn compute_snr(flux: f32, sky_noise: f32, npix: f32, noise_model: Option<&NoiseModel>) -> f32 {
+fn compute_snr(flux: f32, sky_noise: f32, npix: usize, noise_model: Option<&NoiseModel>) -> f32 {
     let sky_var = sky_noise * sky_noise;
 
     let total_var = match noise_model {
-        Some(noise) if noise.gain > f32::EPSILON => {
-            // Full CCD noise model: shot + sky + read noise
-            flux / noise.gain
-                + npix
-                    * (sky_var + (noise.read_noise * noise.read_noise) / (noise.gain * noise.gain))
-        }
-        _ => npix * sky_var,
+        Some(noise) => noise.variance_normalized(flux as f64, sky_noise as f64, npix) as f32,
+        None => npix as f32 * sky_var,
     };
 
     if total_var > f32::EPSILON {

@@ -6,11 +6,11 @@ Updated 2026-07-19 against the current Lumos source.
 
 The review now tracks implementation status instead of preserving the original snapshot:
 
-- 24 findings completed;
-- 2 concrete findings open;
+- 25 findings completed;
+- 1 concrete finding open;
 - 2 proposals deferred until there is a product decision or measured failure.
 
-The remaining concrete work is API policy and state-coherence decisions.
+The remaining concrete work is one RAW color-policy decision.
 
 Scope: production code under `lumos/src`, `lumos/Cargo.toml`, production callers, and the published
 surface. Paths and symbol names are used instead of brittle line numbers.
@@ -160,11 +160,11 @@ detectors through parallel frame processing without thread-local state. On the 1
   matches, and elapsed time private. Construction is internal, public views are immutable, and RMS,
   maximum error, inlier count, and quality are derived from the single match collection.
 
-- [ ] **Define the unit contract for `NoiseModel`.**
-  The type documents electrons per ADU, while detection operates on normalized pixels and directly
-  evaluates `signal / gain` and `read_noise² / gain²`. Carry the ADU/full-scale conversion through
-  metadata or rename the field to normalized-signal units, then lock the decision with
-  hand-computed SNR and inverse-variance tests.
+- [x] **Define the unit contract for `NoiseModel`.**
+  The model now takes electrons per normalized unit plus read noise in electrons through the
+  explicit `from_normalized` constructor. SNR and inverse-variance fitting share its normalized
+  variance equation, with hand-computed formula tests and an example showing the
+  electrons-per-ADU conversion.
 
 - [ ] **Choose one white-balance policy for calibrated and direct RAW output.**
   Direct RAW loading applies camera white balance before demosaic. Calibration loading omits it,
