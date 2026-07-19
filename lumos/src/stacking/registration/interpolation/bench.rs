@@ -4,10 +4,10 @@ use std::hint::black_box;
 
 use ::quickbench::quick_bench;
 
-use crate::math::dmat3::DMat3;
 use crate::stacking::registration::config::InterpolationMethod;
 use crate::stacking::registration::interpolation::*;
-use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
+use crate::stacking::registration::transform::{Transform, WarpTransform};
+use glam::DVec2;
 use imaginarium::Buffer2;
 
 /// Create a test image of specified size filled with gradient pattern.
@@ -26,13 +26,7 @@ fn create_test_image(width: usize, height: usize) -> Buffer2<f32> {
 fn create_test_transform() -> Transform {
     // Small rotation (0.5 degrees) + small translation
     let angle = 0.5_f64.to_radians();
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
-
-    Transform::from_matrix(
-        DMat3::from_array([cos_a, sin_a, 5.0, -sin_a, cos_a, 3.0, 0.0, 0.0, 1.0]),
-        TransformType::Similarity,
-    )
+    Transform::similarity(DVec2::new(5.0, 3.0), -angle, 1.0)
 }
 
 #[quick_bench(warmup_iters = 2, iters = 10)]

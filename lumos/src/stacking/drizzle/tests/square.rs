@@ -96,21 +96,9 @@ fn test_square_kernel_rotation() {
 
     // 45° rotation around center (10, 10)
     let angle = FRAC_PI_4;
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
     let cx = 10.0;
     let cy = 10.0;
-    // Rotation matrix (row-major): translate to origin, rotate, translate back
-    // x' = cos*(x-cx) - sin*(y-cy) + cx
-    // y' = sin*(x-cx) + cos*(y-cy) + cy
-    use crate::math::dmat3::DMat3;
-    use crate::stacking::registration::transform::TransformType;
-    let matrix = DMat3::from_rows(
-        [cos_a, -sin_a, cx * (1.0 - cos_a) + cy * sin_a],
-        [sin_a, cos_a, -cx * sin_a + cy * (1.0 - cos_a)],
-        [0.0, 0.0, 1.0],
-    );
-    let transform = Transform::from_matrix(matrix, TransformType::Euclidean);
+    let transform = Transform::rotation_around(DVec2::new(cx, cy), angle);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -426,18 +414,9 @@ fn test_square_differs_from_turbo_under_rotation() {
 
     // 15° rotation around center — enough to produce measurable overlap differences
     let angle = 15.0_f64.to_radians();
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
     let cx = 5.0;
     let cy = 5.0;
-    use crate::math::dmat3::DMat3;
-    use crate::stacking::registration::transform::TransformType;
-    let matrix = DMat3::from_rows(
-        [cos_a, -sin_a, cx * (1.0 - cos_a) + cy * sin_a],
-        [sin_a, cos_a, -cx * sin_a + cy * (1.0 - cos_a)],
-        [0.0, 0.0, 1.0],
-    );
-    let transform = Transform::from_matrix(matrix, TransformType::Euclidean);
+    let transform = Transform::rotation_around(DVec2::new(cx, cy), angle);
 
     let config_turbo = DrizzleConfig {
         scale: 1.0,
@@ -523,18 +502,9 @@ fn test_square_kernel_flux_conservation() {
 
     // 15° rotation around center
     let angle = 15.0_f64.to_radians();
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
     let cx = 10.0;
     let cy = 10.0;
-    use crate::math::dmat3::DMat3;
-    use crate::stacking::registration::transform::TransformType;
-    let matrix = DMat3::from_rows(
-        [cos_a, -sin_a, cx * (1.0 - cos_a) + cy * sin_a],
-        [sin_a, cos_a, -cx * sin_a + cy * (1.0 - cos_a)],
-        [0.0, 0.0, 1.0],
-    );
-    let transform = Transform::from_matrix(matrix, TransformType::Euclidean);
+    let transform = Transform::rotation_around(DVec2::new(cx, cy), angle);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -651,12 +621,8 @@ fn test_local_jacobian_identity_scale2() {
 fn test_local_jacobian_rotation_preserves_area() {
     // Pure rotation around origin: area is preserved, Jacobian = scale².
     // Rotation by 30° around (0, 0), scale=1.
-    use crate::math::dmat3::DMat3;
-    use crate::stacking::registration::transform::TransformType;
     let angle = 30.0_f64.to_radians();
-    let (sin_a, cos_a) = angle.sin_cos();
-    let matrix = DMat3::from_rows([cos_a, -sin_a, 0.0], [sin_a, cos_a, 0.0], [0.0, 0.0, 1.0]);
-    let transform = Transform::from_matrix(matrix, TransformType::Euclidean);
+    let transform = Transform::euclidean(DVec2::ZERO, angle);
     let center = transform.apply(DVec2::new(50.0, 50.0));
     let jaco = local_jacobian(&transform, center, 50, 50, 1.0);
     // Rotation preserves area: Jacobian = 1.0
@@ -669,10 +635,7 @@ fn test_local_jacobian_rotation_preserves_area() {
 #[test]
 fn test_local_jacobian_anisotropic_scale() {
     // Scale by 2x in x, 3x in y: area magnification = 6.
-    use crate::math::dmat3::DMat3;
-    use crate::stacking::registration::transform::TransformType;
-    let matrix = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 1.0]);
-    let transform = Transform::from_matrix(matrix, TransformType::Affine);
+    let transform = Transform::scale(DVec2::new(2.0, 3.0));
     let center = transform.apply(DVec2::new(5.0, 5.0));
     // Jacobian = |det([2,0;0,3])| * scale² = 6 * 1 = 6.0
     let jaco = local_jacobian(&transform, center, 5, 5, 1.0);
@@ -686,14 +649,7 @@ fn test_local_jacobian_anisotropic_scale() {
 fn test_local_jacobian_perspective_varies_spatially() {
     // Perspective transform: Jacobian should differ at different image locations.
     // Homography with small perspective terms.
-    use crate::math::dmat3::DMat3;
-    use crate::stacking::registration::transform::TransformType;
-    let matrix = DMat3::from_rows(
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [1e-4, 0.0, 1.0], // perspective: w = 1e-4 * x + 1
-    );
-    let transform = Transform::from_matrix(matrix, TransformType::Homography);
+    let transform = Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1e-4, 0.0]);
 
     // At x=0: w ≈ 1, minimal distortion
     let c0 = transform.apply(DVec2::new(0.0, 0.0));

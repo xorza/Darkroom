@@ -309,23 +309,23 @@ pub(crate) fn estimate_homography(
     };
 
     // Denormalize: H = T_target^-1 * H_norm * T_ref
-    let h_norm = Transform::from_matrix(h, TransformType::Homography);
+    let h_norm = Transform::from_homography_matrix(h);
     let tar_t_inv = tar_norm.transform.inverse(); // Normalization transforms are always invertible
 
     let h_denorm = tar_t_inv.compose(&h_norm).compose(&ref_norm.transform);
 
     // Normalize so h[8] = 1
-    let scale = h_denorm.matrix[8];
+    let scale = h_denorm.matrix()[8];
     if scale.abs() < 1e-10 {
         return None;
     }
 
-    let mut data = h_denorm.matrix.to_array();
+    let mut data = *h_denorm.matrix();
     for d in &mut data {
         *d /= scale;
     }
 
-    let result = Transform::from_matrix(data.into(), TransformType::Homography);
+    let result = Transform::from_homography_matrix(data.into());
 
     if result.is_valid() {
         Some(result)
@@ -380,21 +380,7 @@ pub(crate) fn point_normalization(points: &[DVec2]) -> PointNormalization {
     let scale = SQRT_2 / avg_dist;
 
     // Transformation matrix: translate then scale
-    let transform = Transform::from_matrix(
-        [
-            scale,
-            0.0,
-            -c.x * scale,
-            0.0,
-            scale,
-            -c.y * scale,
-            0.0,
-            0.0,
-            1.0,
-        ]
-        .into(),
-        TransformType::Affine,
-    );
+    let transform = Transform::affine([scale, 0.0, -c.x * scale, 0.0, scale, -c.y * scale]);
 
     PointNormalization {
         transform,

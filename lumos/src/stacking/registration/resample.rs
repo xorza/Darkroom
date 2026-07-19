@@ -64,7 +64,7 @@ pub fn warp(image: &AstroImage, warp_transform: &WarpTransform, config: &WarpPar
     }
 
     let coverage =
-        interpolation::warp_coverage(image.dimensions().size, warp_transform, config.method);
+        interpolation::warp_coverage(image.dimensions().size(), warp_transform, config.method);
 
     // Border-flux renormalization: a partially-covered pixel warped with a zero
     // border is `Σ_in(value·w)`; dividing by `coverage = Σ_in(w)` recovers the

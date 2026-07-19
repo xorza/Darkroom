@@ -91,7 +91,7 @@ pub(crate) struct FrameStats {
 
 pub(crate) fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
     let dimensions = image.dimensions();
-    if dimensions.channels == 1 {
+    if dimensions.channels() == 1 {
         let data = image.channel(0);
         let mut scratch = data.to_vec();
         let median = median_f32_mut(&mut scratch);
@@ -101,7 +101,7 @@ pub(crate) fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
         return FrameStats { channels };
     }
 
-    let channels = (0..dimensions.channels)
+    let channels = (0..dimensions.channels())
         .into_par_iter()
         .map(|channel| {
             let data = image.channel(channel);
@@ -223,7 +223,7 @@ pub(crate) struct StoredImage {
 
 impl StoredImage {
     pub(crate) fn load(&self) -> AstroImage {
-        let sample_count = self.dimensions.size.x * self.dimensions.size.y;
+        let sample_count = self.dimensions.pixel_count();
         let planes = self
             .channels
             .iter()
@@ -302,7 +302,7 @@ fn spill_channels(
     let dimensions = image.dimensions();
     let mut planes = ArrayVec::new();
     let mut paths = ArrayVec::new();
-    for channel in 0..dimensions.channels {
+    for channel in 0..dimensions.channels() {
         let path = directory.join(channel_filename(name, channel));
         write_plane(&path, image.channel(channel))?;
         planes.push(StoredPlane::Mapped(map_plane(path.clone())?));
@@ -337,7 +337,7 @@ pub(crate) fn reusable_plane(path: &Path, dimensions: ImageDimensions) -> bool {
     let Ok(metadata) = std::fs::metadata(path) else {
         return false;
     };
-    let expected = (dimensions.size.x * dimensions.size.y * size_of::<f32>()) as u64;
+    let expected = (dimensions.pixel_count() * size_of::<f32>()) as u64;
     metadata.len() == expected
 }
 

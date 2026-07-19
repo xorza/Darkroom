@@ -492,9 +492,10 @@ fn test_sub_assign() {
 #[test]
 fn test_image_dimensions_validation() {
     let dims = ImageDimensions::new((100, 200), 3);
-    assert_eq!(dims.size.x, 100);
-    assert_eq!(dims.size.y, 200);
-    assert_eq!(dims.channels, 3);
+    assert_eq!(dims.size(), (100, 200).into());
+    assert_eq!(dims.width(), 100);
+    assert_eq!(dims.height(), 200);
+    assert_eq!(dims.channels(), 3);
     assert_eq!(dims.pixel_count(), 20000);
     assert_eq!(dims.sample_count(), 60000);
     assert!(!dims.is_grayscale());
@@ -517,6 +518,18 @@ fn test_image_dimensions_zero_height() {
 #[should_panic(expected = "Only 1 (grayscale) or 3 (RGB) channels supported")]
 fn test_image_dimensions_invalid_channels() {
     ImageDimensions::new((100, 100), 2);
+}
+
+#[test]
+#[should_panic(expected = "Image pixel count must fit in usize")]
+fn test_image_dimensions_reject_pixel_count_overflow() {
+    ImageDimensions::new((usize::MAX, 2), 1);
+}
+
+#[test]
+#[should_panic(expected = "Image sample count must fit in usize")]
+fn test_image_dimensions_reject_sample_count_overflow() {
+    ImageDimensions::new((usize::MAX, 1), 3);
 }
 
 #[test]

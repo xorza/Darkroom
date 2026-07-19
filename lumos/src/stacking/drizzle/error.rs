@@ -71,13 +71,6 @@ pub enum DrizzleError {
         pixel_index: usize,
         value: f32,
     },
-
-    #[error("invalid drizzle input dimensions {width}x{height} with {channels} channels")]
-    InvalidInputDimensions {
-        width: usize,
-        height: usize,
-        channels: usize,
-    },
 }
 
 #[cfg(test)]

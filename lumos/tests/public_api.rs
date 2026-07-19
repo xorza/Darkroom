@@ -125,9 +125,23 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         weight,
         pixel_weight_map,
     } = frame;
+
     assert_eq!(source, "light.fits");
     assert_eq!(weight, 1.0);
     assert!(pixel_weight_map.is_none());
+}
+
+#[test]
+fn invariant_types_expose_validated_state_from_the_crate_root() {
+    let dimensions = ImageDimensions::new((12, 8), 3);
+    assert_eq!(dimensions.size(), (12, 8).into());
+    assert_eq!(dimensions.channels(), 3);
+    assert_eq!(dimensions.pixel_count(), 96);
+    assert_eq!(dimensions.sample_count(), 288);
+
+    let transform = Transform::similarity(glam::DVec2::new(3.0, -2.0), 0.25, 1.1);
+    assert_eq!(transform.transform_type(), TransformType::Similarity);
+    assert_eq!(transform.matrix()[8], 1.0);
 }
 
 #[test]

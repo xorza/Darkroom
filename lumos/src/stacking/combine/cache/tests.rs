@@ -91,7 +91,7 @@ fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> CfaCac
         .into_iter()
         .map(|pixels| {
             let image = CfaImage {
-                data: Buffer2::new(dims.size.x, dims.size.y, pixels),
+                data: Buffer2::new(dims.width(), dims.height(), pixels),
                 metadata: AstroImageMetadata {
                     cfa_type: Some(CfaType::Mono),
                     ..Default::default()

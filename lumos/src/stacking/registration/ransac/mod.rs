@@ -224,7 +224,7 @@ impl RansacEstimator {
         scorer: &MagsacScorer,
         buffers: &mut LocalOptBuffers,
     ) -> (Transform, f64) {
-        let transform_type = initial_transform.transform_type;
+        let transform_type = initial_transform.transform_type();
         let min_samples = transform_type.min_points();
         let mut current_transform = *initial_transform;
 

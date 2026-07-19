@@ -84,7 +84,7 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
     } = base_field();
     let dims = base.dimensions;
     // A flat frame has no stars → registration fails → it is dropped, not fatal.
-    let blank = AstroImage::from_pixels(dims, vec![0.1; dims.size.x * dims.size.y]);
+    let blank = AstroImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![base.clone(), shifted(&base, &reg, 5.0, 3.0), blank];
 
     let config = AlignStackConfig {
@@ -140,7 +140,7 @@ fn all_non_reference_frames_dropped_errors() {
     // only the reference remains — guard the changed `frames.len() <= 1` condition.
     let BaseField { image: base, .. } = base_field();
     let dims = base.dimensions;
-    let blank = || AstroImage::from_pixels(dims, vec![0.1; dims.size.x * dims.size.y]);
+    let blank = || AstroImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     // Reference has stars; both others are blank → both fail to register → nothing aligns.
     let frames = vec![base, blank(), blank()];
 
@@ -164,7 +164,7 @@ fn auto_reference_picks_the_richest_frame() {
     // Frame 1 (full field) has far more stars than frame 0 (a near-blank), so Auto must
     // anchor on frame 1.
     let dims = base.dimensions;
-    let sparse = AstroImage::from_pixels(dims, vec![0.1; dims.size.x * dims.size.y]);
+    let sparse = AstroImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![sparse, base.clone(), shifted(&base, &reg, 4.0, -3.0)];
 
     let result =

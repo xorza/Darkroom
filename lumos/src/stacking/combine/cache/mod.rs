@@ -123,8 +123,8 @@ impl CacheCore {
     {
         let dims = self.dimensions;
         let frame_count = frames.len();
-        let width = dims.size.x;
-        let height = dims.size.y;
+        let width = dims.width();
+        let height = dims.height();
 
         // Whole-plane chunks in RAM; for disk-backed stacks size chunks to the memory budget
         // (queried only here, where it's used — an in-memory stack skips the sysinfo read).
@@ -135,7 +135,7 @@ impl CacheCore {
             optimal_chunk_rows(width, 1, frame_count, available_memory)
         };
 
-        let mut output = PixelData::new_default(width, height, dims.channels);
+        let mut output = PixelData::new_default(width, height, dims.channels());
         let channel_count = output.channels();
 
         let num_chunks = height.div_ceil(chunk_rows);
@@ -210,7 +210,7 @@ impl CacheCore {
     where
         Channels: Fn(&'a F) -> &'a [StoredPlane],
     {
-        let width = self.dimensions.size.x;
+        let width = self.dimensions.width();
         channels(&frames[frame_idx])[channel].chunk(start_row * width, end_row * width)
     }
 }
@@ -339,12 +339,13 @@ impl LightCache {
                 });
             }
             if let Some(coverage) = &frame.coverage
-                && (coverage.width(), coverage.height()) != (dimensions.size.x, dimensions.size.y)
+                && (coverage.width(), coverage.height())
+                    != (dimensions.width(), dimensions.height())
             {
                 return Err(Error::CoverageDimensionMismatch {
                     index,
-                    expected_width: dimensions.size.x,
-                    expected_height: dimensions.size.y,
+                    expected_width: dimensions.width(),
+                    expected_height: dimensions.height(),
                     actual_width: coverage.width(),
                     actual_height: coverage.height(),
                 });
@@ -392,8 +393,8 @@ impl LightCache {
         if let Some(w) = weights {
             assert_eq!(w.len(), frame_count, "weight count must match frame count");
         }
-        let width = self.core.dimensions.size.x;
-        let height = self.core.dimensions.size.y;
+        let width = self.core.dimensions.width();
+        let height = self.core.dimensions.height();
         let frame_weight = |f: usize| weights.map_or(1.0, |w| w[f]);
 
         // No frame carries a coverage map → every pixel is fully covered and the planes are

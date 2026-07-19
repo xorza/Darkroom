@@ -65,23 +65,14 @@ impl DrizzleAccumulator {
     ///
     /// # Errors
     ///
-    /// Returns an error when `config` is invalid or the input dimensions are empty or have a
-    /// channel count other than one or three.
+    /// Returns an error when `config` is invalid.
     pub fn new(input_dims: ImageDimensions, config: DrizzleConfig) -> Result<Self, DrizzleError> {
         config.validate()?;
-        if input_dims.size.x == 0 || input_dims.size.y == 0 || !matches!(input_dims.channels, 1 | 3)
-        {
-            return Err(DrizzleError::InvalidInputDimensions {
-                width: input_dims.size.x,
-                height: input_dims.size.y,
-                channels: input_dims.channels,
-            });
-        }
-        let output_width = (input_dims.size.x as f32 * config.scale).ceil() as usize;
-        let output_height = (input_dims.size.y as f32 * config.scale).ceil() as usize;
+        let output_width = (input_dims.width() as f32 * config.scale).ceil() as usize;
+        let output_height = (input_dims.height() as f32 * config.scale).ceil() as usize;
 
         let mut data = ArrayVec::new();
-        for _ in 0..input_dims.channels {
+        for _ in 0..input_dims.channels() {
             data.push(Buffer2::new_default(output_width, output_height));
         }
 
@@ -135,12 +126,12 @@ impl DrizzleAccumulator {
         }
         if let Some(pixel_weights) = &frame.pixel_weight_map {
             if (pixel_weights.width(), pixel_weights.height())
-                != (self.input_dims.size.x, self.input_dims.size.y)
+                != (self.input_dims.width(), self.input_dims.height())
             {
                 return Err(DrizzleError::PixelWeightDimensionMismatch {
                     index,
-                    expected_width: self.input_dims.size.x,
-                    expected_height: self.input_dims.size.y,
+                    expected_width: self.input_dims.width(),
+                    expected_height: self.input_dims.height(),
                     actual_width: pixel_weights.width(),
                     actual_height: pixel_weights.height(),
                 });

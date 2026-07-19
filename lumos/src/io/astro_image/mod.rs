@@ -68,11 +68,10 @@ impl BitPix {
 }
 
 /// Image dimensions: pixel size and number of channels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImageDimensions {
-    /// Pixel dimensions as a `(width, height)` vector.
-    pub size: Vec2us,
-    pub channels: usize,
+    size: Vec2us,
+    channels: usize,
 }
 
 impl ImageDimensions {
@@ -85,19 +84,48 @@ impl ImageDimensions {
             "Only 1 (grayscale) or 3 (RGB) channels supported, got {}",
             channels
         );
+        let pixel_count = size
+            .x
+            .checked_mul(size.y)
+            .expect("Image pixel count must fit in usize");
+        pixel_count
+            .checked_mul(channels)
+            .expect("Image sample count must fit in usize");
         Self { size, channels }
+    }
+
+    /// Pixel dimensions as a `(width, height)` vector.
+    pub fn size(&self) -> Vec2us {
+        self.size
+    }
+
+    pub fn width(&self) -> usize {
+        self.size.x
+    }
+
+    pub fn height(&self) -> usize {
+        self.size.y
+    }
+
+    pub fn channels(&self) -> usize {
+        self.channels
     }
 
     /// Total number of f32 samples: `width * height * channels`.
     /// For a 100x100 RGB image, returns 30000.
     pub fn sample_count(&self) -> usize {
-        self.size.x * self.size.y * self.channels
+        self.pixel_count()
+            .checked_mul(self.channels)
+            .expect("ImageDimensions validates sample count during construction")
     }
 
     /// Number of pixels: `width * height`.
     /// For a 100x100 RGB image, returns 10000.
     pub fn pixel_count(&self) -> usize {
-        self.size.x * self.size.y
+        self.size
+            .x
+            .checked_mul(self.size.y)
+            .expect("ImageDimensions validates pixel count during construction")
     }
 
     pub fn is_grayscale(&self) -> bool {

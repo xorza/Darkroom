@@ -33,7 +33,7 @@ pub(crate) unsafe fn warp_row_bilinear_avx2(
         let y = output_y as f64;
 
         // Extract transform coefficients
-        let t = transform.matrix.as_array();
+        let t = transform.matrix();
         let a = t[0] as f32;
         let b = t[1] as f32;
         let c = t[2] as f32;
@@ -174,7 +174,7 @@ pub(crate) unsafe fn warp_row_bilinear_sse(
         let y = output_y as f64;
 
         // Extract transform coefficients
-        let t = transform.matrix.as_array();
+        let t = transform.matrix();
         let a = t[0] as f32;
         let b = t[1] as f32;
         let c = t[2] as f32;

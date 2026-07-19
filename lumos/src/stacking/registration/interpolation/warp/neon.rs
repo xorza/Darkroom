@@ -34,7 +34,7 @@ pub(crate) unsafe fn warp_row_bilinear_neon(
         let output_width = output_row.len();
         let y = output_y as f32;
 
-        let t = transform.matrix.as_array();
+        let t = transform.matrix();
         let (a, b, c) = (t[0] as f32, t[1] as f32, t[2] as f32);
         let (d, e, f) = (t[3] as f32, t[4] as f32, t[5] as f32);
         let (g, h) = (t[6] as f32, t[7] as f32);

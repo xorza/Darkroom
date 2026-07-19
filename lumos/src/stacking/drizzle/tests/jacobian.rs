@@ -16,10 +16,7 @@ use crate::stacking::drizzle::tests::*;
 
 /// Build a scale-2x transform: maps (x,y) → (2x, 2y).
 fn make_scale2x_transform() -> Transform {
-    use crate::math::dmat3::DMat3;
-    use crate::stacking::registration::transform::TransformType;
-    let matrix = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 1.0]);
-    Transform::from_matrix(matrix, TransformType::Affine)
+    Transform::scale(DVec2::splat(2.0))
 }
 
 #[test]
@@ -142,9 +139,6 @@ fn test_turbo_matches_square_affine_with_jacobian() {
     // For affine transforms (constant Jacobian), Turbo with Jacobian and Square
     // should produce identical output on a gradient image (non-trivial content).
     // Using a translation of (0.3, 0.7) — axis-aligned, so Turbo drop = true quad.
-    use crate::math::dmat3::DMat3;
-    use crate::stacking::registration::transform::TransformType;
-
     let w = 16;
     let h = 16;
     // Gradient: val = x + y*0.5
@@ -156,8 +150,7 @@ fn test_turbo_matches_square_affine_with_jacobian() {
         })
         .collect();
 
-    let matrix = DMat3::from_rows([1.0, 0.0, 0.3], [0.0, 1.0, 0.7], [0.0, 0.0, 1.0]);
-    let transform = Transform::from_matrix(matrix, TransformType::Affine);
+    let transform = Transform::translation(DVec2::new(0.3, 0.7));
 
     let config_turbo = DrizzleConfig {
         scale: 1.0,
@@ -300,9 +293,6 @@ fn test_all_kernels_jacobian_matches_square_affine() {
     // For a pure translation (affine, constant Jacobian=1), all kernels with
     // pixfrac=1, scale=1 should produce similar output to Square on a gradient
     // image. This tests that Jacobian correction doesn't break normal operation.
-    use crate::math::dmat3::DMat3;
-    use crate::stacking::registration::transform::TransformType;
-
     let w = 20;
     let h = 20;
     let pixels: Vec<f32> = (0..w * h)
@@ -314,8 +304,7 @@ fn test_all_kernels_jacobian_matches_square_affine() {
         .collect();
 
     // Small sub-pixel shift
-    let matrix = DMat3::from_rows([1.0, 0.0, 0.25], [0.0, 1.0, 0.15], [0.0, 0.0, 1.0]);
-    let transform = Transform::from_matrix(matrix, TransformType::Affine);
+    let transform = Transform::translation(DVec2::new(0.25, 0.15));
 
     // Square kernel as reference
     let config_sq = DrizzleConfig {

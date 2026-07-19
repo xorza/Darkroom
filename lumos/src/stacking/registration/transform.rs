@@ -60,7 +60,7 @@ impl TransformType {
 
 /// 3x3 homogeneous transformation matrix.
 ///
-/// Stored as a row-major [`DMat3`]:
+/// Coefficients are exposed in row-major order:
 /// ```text
 /// | a  b  tx |   | m[0] m[1] m[2] |
 /// | c  d  ty | = | m[3] m[4] m[5] |
@@ -68,10 +68,8 @@ impl TransformType {
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct Transform {
-    /// Row-major 3x3 matrix.
-    pub matrix: DMat3,
-    /// The type of transformation this matrix represents.
-    pub transform_type: TransformType,
+    matrix: DMat3,
+    transform_type: TransformType,
 }
 
 impl Default for Transform {
@@ -204,16 +202,42 @@ impl Transform {
         }
     }
 
-    /// Create transform from a [`DMat3`] matrix.
-    pub fn from_matrix(matrix: DMat3, transform_type: TransformType) -> Self {
-        assert!(
-            transform_type != TransformType::Auto,
-            "Auto must be resolved to a concrete type before creating a Transform"
+    fn from_matrix(mut matrix: DMat3, transform_type: TransformType) -> Self {
+        assert_ne!(
+            transform_type,
+            TransformType::Auto,
+            "Auto must be resolved before constructing a transform"
         );
+        if transform_type != TransformType::Homography {
+            assert!(
+                matrix[6].abs() <= 1e-12
+                    && matrix[7].abs() <= 1e-12
+                    && (matrix[8] - 1.0).abs() <= 1e-12,
+                "affine-or-simpler transforms require homogeneous bottom row [0, 0, 1]"
+            );
+            matrix[6] = 0.0;
+            matrix[7] = 0.0;
+            matrix[8] = 1.0;
+        }
         Self {
             matrix,
             transform_type,
         }
+    }
+
+    /// Preserve the arbitrary homogeneous scale produced by the DLT solver.
+    pub(crate) fn from_homography_matrix(matrix: DMat3) -> Self {
+        Self::from_matrix(matrix, TransformType::Homography)
+    }
+
+    /// Row-major homogeneous matrix coefficients.
+    pub fn matrix(&self) -> &[f64; 9] {
+        self.matrix.as_array()
+    }
+
+    /// The concrete model represented by this transform.
+    pub fn transform_type(&self) -> TransformType {
+        self.transform_type
     }
 
     /// Apply transform to map a point from REFERENCE coordinates to TARGET coordinates.
@@ -266,10 +290,7 @@ impl Transform {
             .matrix
             .inverse()
             .expect("Cannot invert singular transform matrix");
-        Self {
-            matrix: inv,
-            transform_type: self.transform_type,
-        }
+        Self::from_matrix(inv, self.transform_type)
     }
 
     /// Compose two transforms: self * other (apply other first, then self).
@@ -277,10 +298,7 @@ impl Transform {
         // Result type is the more complex of the two
         let transform_type = self.transform_type.max(other.transform_type);
 
-        Self {
-            matrix: self.matrix.mul_mat(&other.matrix),
-            transform_type,
-        }
+        Self::from_matrix(self.matrix.mul_mat(&other.matrix), transform_type)
     }
 
     /// Extract translation components as DVec2.
@@ -304,12 +322,16 @@ impl Transform {
     ///
     /// Requires every matrix element finite (an isolated NaN/inf in a translation
     /// or perspective term would otherwise slip past a finite-determinant check)
-    /// and the linear part non-singular.
+    /// and the represented transform non-singular.
     pub fn is_valid(&self) -> bool {
         if !(0..9).all(|i| self.matrix[i].is_finite()) {
             return false;
         }
-        let det = self.matrix[0] * self.matrix[4] - self.matrix[1] * self.matrix[3];
+        let det = if self.transform_type == TransformType::Homography {
+            self.matrix.determinant()
+        } else {
+            self.matrix[0] * self.matrix[4] - self.matrix[1] * self.matrix[3]
+        };
         det.is_finite() && det.abs() > 1e-10
     }
 }
@@ -361,7 +383,7 @@ impl WarpTransform {
     /// Whether this transform is purely linear (affine or simpler, no SIP).
     /// When true, incremental stepping and SIMD can be used.
     pub fn is_linear(&self) -> bool {
-        self.sip.is_none() && !matches!(self.transform.transform_type, TransformType::Homography)
+        self.sip.is_none() && self.transform.transform_type() != TransformType::Homography
     }
 }
 
@@ -484,6 +506,11 @@ mod tests {
             TransformType::Affine,
         );
         assert!(!degenerate.is_valid());
+
+        // The upper-left 2×2 block is nonsingular, but the complete projective
+        // matrix has duplicate rows and therefore no inverse.
+        let singular_homography = Transform::homography([1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert!(!singular_homography.is_valid());
     }
 
     #[test]
@@ -638,7 +665,7 @@ mod tests {
         // Identity: output == input
         assert!(approx_eq(p.x, 42.0));
         assert!(approx_eq(p.y, -17.0));
-        assert_eq!(t.transform_type, TransformType::Translation);
+        assert_eq!(t.transform_type(), TransformType::Translation);
     }
 
     #[test]
@@ -650,7 +677,7 @@ mod tests {
         let p = t.apply(DVec2::new(3.0, 4.0));
         assert!(approx_eq(p.x, 6.0));
         assert!(approx_eq(p.y, 2.0));
-        assert_eq!(t.transform_type, TransformType::Affine);
+        assert_eq!(t.transform_type(), TransformType::Affine);
     }
 
     #[test]
@@ -750,7 +777,7 @@ mod tests {
         let t2 = Transform::affine([1.0, 0.5, 0.0, 0.0, 1.0, 0.0]);
 
         let composed = t1.compose(&t2);
-        assert_eq!(composed.transform_type, TransformType::Affine);
+        assert_eq!(composed.transform_type(), TransformType::Affine);
 
         // Verify the composed transform: apply T2 first (shear), then T1 (translate)
         // T2: (2,2) -> (2 + 0.5*2, 2) = (3, 2)
@@ -834,10 +861,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Cannot invert singular transform matrix")]
     fn test_inverse_singular_panics() {
-        let degenerate = Transform::from_matrix(
-            DMat3::from_array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
-            TransformType::Affine,
-        );
+        let degenerate = Transform::affine([0.0; 6]);
         let _ = degenerate.inverse();
     }
 
@@ -849,6 +873,39 @@ mod tests {
         let p = t.apply(DVec2::new(1.0, 1.0));
         assert!(approx_eq(p.x, 7.0));
         assert!(approx_eq(p.y, 2.0));
-        assert_eq!(t.transform_type, TransformType::Affine);
+        assert_eq!(t.transform_type(), TransformType::Affine);
+        assert_eq!(t.matrix(), m.as_array());
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "affine-or-simpler transforms require homogeneous bottom row [0, 0, 1]"
+    )]
+    fn test_from_matrix_rejects_projective_affine() {
+        let projective = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.01, 0.0, 1.0]);
+        Transform::from_matrix(projective, TransformType::Affine);
+    }
+
+    #[test]
+    fn test_from_matrix_canonicalizes_affine_roundoff() {
+        let rounded = DMat3::from_array([
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            f64::EPSILON,
+            -f64::EPSILON,
+            1.0 + f64::EPSILON,
+        ]);
+        let transform = Transform::from_matrix(rounded, TransformType::Affine);
+        assert_eq!(&transform.matrix()[6..], &[0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Auto must be resolved before constructing a transform")]
+    fn test_from_matrix_rejects_auto() {
+        Transform::from_matrix(DMat3::identity(), TransformType::Auto);
     }
 }

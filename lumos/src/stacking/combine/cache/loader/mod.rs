@@ -309,7 +309,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     tracing::info!(
         "Cached {} frames ({} channels each) to disk at {:?}",
         frames.len(),
-        dimensions.channels,
+        dimensions.channels(),
         cache_dir
     );
 
@@ -385,7 +385,7 @@ fn load_and_cache_frame<I: StackableImage>(
     dimensions: ImageDimensions,
     frame_index: usize,
 ) -> Result<LoadedStoredFrame, Error> {
-    let channels = dimensions.channels;
+    let channels = dimensions.channels();
 
     // Check if all channel files exist, have correct size, and source hasn't changed
     let meta_valid = validate_source_meta(cache_dir, base_filename, source_path);

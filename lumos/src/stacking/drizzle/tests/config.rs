@@ -115,30 +115,13 @@ fn test_drizzle_config_invalid_parameters_return_exact_errors() {
 }
 
 #[test]
-fn test_drizzle_accumulator_rejects_invalid_dimensions() {
-    let dimensions = ImageDimensions {
-        size: (0, 2).into(),
-        channels: 2,
-    };
-    let error = DrizzleAccumulator::new(dimensions, DrizzleConfig::default()).unwrap_err();
-    assert!(matches!(
-        error,
-        DrizzleError::InvalidInputDimensions {
-            width: 0,
-            height: 2,
-            channels: 2,
-        }
-    ));
-}
-
-#[test]
 fn test_drizzle_accumulator_dimensions() {
     let config = DrizzleConfig::x2();
     let acc = accumulator(ImageDimensions::new((100, 80), 3), config);
     let dims = acc.dimensions();
-    assert_eq!(dims.size.x, 200);
-    assert_eq!(dims.size.y, 160);
-    assert_eq!(dims.channels, 3);
+    assert_eq!(dims.width(), 200);
+    assert_eq!(dims.height(), 160);
+    assert_eq!(dims.channels(), 3);
 }
 
 #[test]

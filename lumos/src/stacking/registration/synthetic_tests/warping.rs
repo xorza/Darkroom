@@ -230,7 +230,7 @@ fn test_warp_affine_roundtrip() {
         0.99 * cos_a,
         -4.0,
     ]);
-    assert_eq!(forward.transform_type, TransformType::Affine);
+    assert_eq!(forward.transform_type(), TransformType::Affine);
 
     assert_roundtrip(
         44444,
@@ -249,7 +249,7 @@ fn test_warp_affine_roundtrip() {
 fn test_warp_homography_roundtrip() {
     // Mild perspective distortion
     let forward = Transform::homography([1.0, 0.0, 5.0, 0.0, 1.0, -3.0, 0.00005, 0.00003]);
-    assert_eq!(forward.transform_type, TransformType::Homography);
+    assert_eq!(forward.transform_type(), TransformType::Homography);
 
     assert_roundtrip(
         55555,

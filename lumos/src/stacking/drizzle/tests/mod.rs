@@ -51,7 +51,7 @@ fn constant_mono_image(width: usize, height: usize, value: f32) -> AstroImage {
 }
 
 fn assert_product_finite(product: &StackProduct) {
-    for channel in 0..product.image.dimensions.channels {
+    for channel in 0..product.image.dimensions.channels() {
         assert!(
             product
                 .image

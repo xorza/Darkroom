@@ -933,7 +933,7 @@ fn test_affine_with_outliers() {
     let result = register(&ref_stars, &target_with_spurious, &config)
         .expect("Affine registration should succeed with 15% spurious stars");
 
-    assert_eq!(result.transform.transform_type, TransformType::Affine);
+    assert_eq!(result.transform.transform_type(), TransformType::Affine);
 
     // Validate transform accuracy on original (non-spurious) stars
     let mut max_error = 0.0f64;
@@ -974,7 +974,7 @@ fn test_affine_with_noise_and_missing() {
     let result = register(&ref_stars, &target_modified, &config)
         .expect("Affine registration should succeed with noise and missing stars");
 
-    assert_eq!(result.transform.transform_type, TransformType::Affine);
+    assert_eq!(result.transform.transform_type(), TransformType::Affine);
     assert!(
         result.rms_error < 3.0,
         "Affine RMS error with noise: {}",
@@ -1011,7 +1011,7 @@ fn test_homography_with_outliers() {
     let result = register(&ref_stars, &target_with_spurious, &config)
         .expect("Homography registration should succeed with outliers");
 
-    assert_eq!(result.transform.transform_type, TransformType::Homography);
+    assert_eq!(result.transform.transform_type(), TransformType::Homography);
 
     // Validate transform accuracy
     let mut max_error = 0.0f64;
@@ -1067,7 +1067,7 @@ fn test_homography_with_noise_and_partial_overlap() {
     let result = register(&ref_in_overlap, &target_noisy, &config)
         .expect("Homography should succeed with noise and partial overlap");
 
-    assert_eq!(result.transform.transform_type, TransformType::Homography);
+    assert_eq!(result.transform.transform_type(), TransformType::Homography);
     assert!(
         result.rms_error < 3.0,
         "Homography RMS error with noise and overlap: {}",

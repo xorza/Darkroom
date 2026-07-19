@@ -206,9 +206,9 @@ fn master_stack_memory_probe() -> io::Result<()> {
     println!("=== result ===");
     println!(
         "master        {}×{} × {} ch, mean {:.4}",
-        dims.size.x,
-        dims.size.y,
-        dims.channels,
+        dims.width(),
+        dims.height(),
+        dims.channels(),
         result.image.mean()
     );
     println!(

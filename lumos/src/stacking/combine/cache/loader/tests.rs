@@ -49,7 +49,7 @@ fn test_load_and_cache_frame_fresh() {
     assert_eq!(cached_frame.frame.channels.len(), 1);
 
     // Verify cached data matches original
-    let cached_data = cached_frame.frame.channels[0].chunk(0, dims.size.x * dims.size.y);
+    let cached_data = cached_frame.frame.channels[0].chunk(0, dims.pixel_count());
     assert_eq!(cached_data, &pixels[..]);
 
     // Cleanup
@@ -81,7 +81,7 @@ fn test_load_and_cache_frame_reuse() {
             .unwrap();
 
     // Both should have same data
-    let n = dims.size.x * dims.size.y;
+    let n = dims.pixel_count();
     let first_data = first_frame.frame.channels[0].chunk(0, n);
     let second_data = second_frame.frame.channels[0].chunk(0, n);
     assert_eq!(first_data, second_data);

@@ -105,7 +105,7 @@ pub(crate) fn warp_row_with(
     invalid_value: f32,
     mut sample: impl FnMut(Vec2) -> f32,
 ) {
-    let m = wt.transform.matrix.as_array();
+    let m = wt.transform.matrix();
     let can_step = wt.is_linear();
     let src0 = wt.apply(DVec2::new(0.0, output_y as f64));
     let mut src_x = src0.x;
@@ -316,7 +316,7 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
         0.0
     };
 
-    let m = wt.transform.matrix.as_array();
+    let m = wt.transform.matrix();
     let can_step = wt.is_linear();
 
     let src0 = wt.apply(DVec2::new(0.0, output_y as f64));

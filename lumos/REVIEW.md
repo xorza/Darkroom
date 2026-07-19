@@ -126,17 +126,16 @@ detectors through parallel frame processing without thread-local state. On the 1
 
 ## Batch 1 — Enforce public invariants
 
-- [ ] **Make transform model and matrix representation a single invariant.**
-  `Transform.matrix` and `transform_type` remain independently public, and `from_matrix` accepts
-  arbitrary pairs while exposing the internal `DMat3`. `WarpTransform::is_linear` trusts the tag,
-  and homography validity still uses only the upper-left 2 × 2 determinant. Make raw construction
-  internal, expose model-specific constructors, validate affine bottom rows, and use the full
-  determinant for homographies.
+- [x] **Make transform model and matrix representation a single invariant.**
+  The matrix and concrete model are now private, public construction is model-specific, and raw
+  matrix construction is internal and rejects projective bottom rows for affine-or-simpler models.
+  Public callers receive immutable row-major coefficients without access to `DMat3`, and
+  homography validity uses the full 3 × 3 determinant.
 
-- [ ] **Remove invalid states from `ImageDimensions`.**
-  The public type derives `Default` and exposes mutable size/channel fields, so zero dimensions,
-  unsupported channel counts, and unchecked sample-count overflow remain constructible. Replace
-  this with an invariant-preserving representation and checked dimension arithmetic.
+- [x] **Remove invalid states from `ImageDimensions`.**
+  Size and channel count are private, `Default` is gone, and construction validates non-zero
+  dimensions, supported channel counts, and checked pixel/sample products. Immutable accessors
+  expose the validated dimensions.
 
 ## Batch 2 — Remaining repeated work and allocations
 

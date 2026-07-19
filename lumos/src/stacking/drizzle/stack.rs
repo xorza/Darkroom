@@ -65,9 +65,9 @@ pub fn drizzle_stack<P: AsRef<Path>>(
     let input_dims = first.source.dimensions;
 
     tracing::info!(
-        input_width = input_dims.size.x,
-        input_height = input_dims.size.y,
-        channels = input_dims.channels,
+        input_width = input_dims.width(),
+        input_height = input_dims.height(),
+        channels = input_dims.channels(),
         output_scale = config.scale,
         pixfrac = config.pixfrac,
         kernel = ?config.kernel,
@@ -110,9 +110,9 @@ pub fn drizzle_images(
     let input_dims = frames[0].source.dimensions;
 
     tracing::info!(
-        input_width = input_dims.size.x,
-        input_height = input_dims.size.y,
-        channels = input_dims.channels,
+        input_width = input_dims.width(),
+        input_height = input_dims.height(),
+        channels = input_dims.channels(),
         output_scale = config.scale,
         pixfrac = config.pixfrac,
         kernel = ?config.kernel,

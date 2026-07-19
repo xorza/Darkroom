@@ -66,9 +66,9 @@ fn bench_load_raw_libraw_demosaic() {
                 "  Run {}: {:.1}ms  ({}x{}x{})",
                 i + 1,
                 elapsed.as_secs_f64() * 1000.0,
-                image.dimensions().size.x,
-                image.dimensions().size.y,
-                image.dimensions().channels,
+                image.dimensions().width(),
+                image.dimensions().height(),
+                image.dimensions().channels(),
             );
         }
 
@@ -108,9 +108,9 @@ fn bench_markesteijn_quality_vs_libraw() {
     println!(
         "Our Markesteijn:   {:.1}ms  ({}x{}x{})",
         our_time.as_secs_f64() * 1000.0,
-        ours.dimensions().size.x,
-        ours.dimensions().size.y,
-        ours.dimensions().channels,
+        ours.dimensions().width(),
+        ours.dimensions().height(),
+        ours.dimensions().channels(),
     );
 
     // Load with libraw's Markesteijn 1-pass (user_qual=1)
@@ -120,18 +120,18 @@ fn bench_markesteijn_quality_vs_libraw() {
     println!(
         "libraw Markesteijn 1-pass: {:.1}ms  ({}x{}x{})",
         ref_time.as_secs_f64() * 1000.0,
-        reference.dimensions().size.x,
-        reference.dimensions().size.y,
-        reference.dimensions().channels,
+        reference.dimensions().width(),
+        reference.dimensions().height(),
+        reference.dimensions().channels(),
     );
 
-    assert_eq!(ours.dimensions().size.x, reference.dimensions().size.x);
-    assert_eq!(ours.dimensions().size.y, reference.dimensions().size.y);
-    assert_eq!(ours.dimensions().channels, 3);
-    assert_eq!(reference.dimensions().channels, 3);
+    assert_eq!(ours.dimensions().width(), reference.dimensions().width());
+    assert_eq!(ours.dimensions().height(), reference.dimensions().height());
+    assert_eq!(ours.dimensions().channels(), 3);
+    assert_eq!(reference.dimensions().channels(), 3);
 
-    let width = ours.dimensions().size.x;
-    let height = ours.dimensions().size.y;
+    let width = ours.dimensions().width();
+    let height = ours.dimensions().height();
     let border = 6;
 
     // Per-channel comparison using linear regression to remove WB/scale differences
@@ -221,9 +221,9 @@ fn bench_bayer_rcd_demosaic() {
             "  Run {}: {:.1}ms  ({}x{}x{})",
             i + 1,
             elapsed.as_secs_f64() * 1000.0,
-            img.dimensions().size.x,
-            img.dimensions().size.y,
-            img.dimensions().channels,
+            img.dimensions().width(),
+            img.dimensions().height(),
+            img.dimensions().channels(),
         );
         image = Some(img);
     }
@@ -253,9 +253,9 @@ fn bench_bayer_rcd_demosaic() {
                 "  Run {}: {:.1}ms  ({}x{}x{})",
                 i + 1,
                 elapsed.as_secs_f64() * 1000.0,
-                img.dimensions().size.x,
-                img.dimensions().size.y,
-                img.dimensions().channels,
+                img.dimensions().width(),
+                img.dimensions().height(),
+                img.dimensions().channels(),
             );
         }
         let avg = times.iter().map(|t| t.as_secs_f64()).sum::<f64>() / 3.0 * 1000.0;
@@ -301,13 +301,13 @@ fn bench_bayer_rcd_quality_vs_libraw() {
     println!(
         "Our RCD:       {:.1}ms  ({}x{}x{})",
         our_time.as_secs_f64() * 1000.0,
-        ours.dimensions().size.x,
-        ours.dimensions().size.y,
-        ours.dimensions().channels,
+        ours.dimensions().width(),
+        ours.dimensions().height(),
+        ours.dimensions().channels(),
     );
 
-    let width = ours.dimensions().size.x;
-    let height = ours.dimensions().size.y;
+    let width = ours.dimensions().width();
+    let height = ours.dimensions().height();
     let border = 6;
     let channel_names = ["Red", "Green", "Blue"];
 
@@ -321,8 +321,8 @@ fn bench_bayer_rcd_quality_vs_libraw() {
             ref_time.as_secs_f64() * 1000.0
         );
 
-        if ours.dimensions().size.x != reference.dimensions().size.x
-            || ours.dimensions().size.y != reference.dimensions().size.y
+        if ours.dimensions().width() != reference.dimensions().width()
+            || ours.dimensions().height() != reference.dimensions().height()
         {
             println!("  Dimension mismatch, skipping comparison\n");
             continue;
