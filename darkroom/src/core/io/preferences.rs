@@ -41,9 +41,9 @@ pub(crate) struct Preferences {
     /// (platform picks). A TOML `[window]` table — a table field, so it
     /// sits with the other tables after every scalar key.
     pub window: Option<WindowState>,
-    /// Image-viewer toolbar choices (backdrop + sampling), shared by all
-    /// viewer tabs: a toolbar click in any viewer edits this in place and
-    /// persists. A TOML `[viewer]` table.
+    /// Image-viewer toolbar choices (backdrop + magnification sampling),
+    /// shared by all viewer tabs: a toolbar click in any viewer edits this
+    /// in place and persists. A TOML `[viewer]` table.
     pub viewer: ViewerPreferences,
     /// ONNX model paths for lens's ML nodes (`ml_denoise` / `remove_stars`).
     /// A TOML `[ml_models]` table — must stay the **last** field, as TOML
@@ -72,16 +72,16 @@ pub(crate) enum ViewerBackground {
 #[serde(default)]
 pub(crate) struct ViewerPreferences {
     pub background: ViewerBackground,
-    /// Texel sampling for the shown image. Defaults to `Nearest` — hard
-    /// texels for pixel peeping; `Linear` smooths.
-    pub filter: ImageFilter,
+    /// Magnification sampling for the shown image. Defaults to `Nearest`
+    /// for pixel peeping; zoomed-out minification always stays linear.
+    pub mag_filter: ImageFilter,
 }
 
 impl Default for ViewerPreferences {
     fn default() -> Self {
         Self {
             background: ViewerBackground::default(),
-            filter: ImageFilter::Nearest,
+            mag_filter: ImageFilter::Nearest,
         }
     }
 }
@@ -211,13 +211,16 @@ mod tests {
             // Non-defaults (defaults are Theme + Nearest).
             viewer: ViewerPreferences {
                 background: ViewerBackground::Checker,
-                filter: ImageFilter::Linear,
+                mag_filter: ImageFilter::Linear,
             },
             ml_models: MlModelPreferences {
                 denoise: PathBuf::from("/models/d.onnx"),
                 star_removal: PathBuf::from("/models/s.onnx"),
             },
         };
+        let bytes = serialize(&cfg, SerdeFormat::Toml).expect("preferences TOML serializes");
+        let text = std::str::from_utf8(&bytes).expect("preferences TOML is UTF-8");
+        assert!(text.contains("mag_filter = \"linear\""));
         let back = roundtrip(&cfg);
         assert_eq!(back.theme, ThemeChoice::Light);
         assert_eq!(back.document_path, Some(PathBuf::from("/tmp/graph.json")));
@@ -235,7 +238,7 @@ mod tests {
             back.viewer,
             ViewerPreferences {
                 background: ViewerBackground::Checker,
-                filter: ImageFilter::Linear,
+                mag_filter: ImageFilter::Linear,
             }
         );
         assert_eq!(back.ml_models.denoise, PathBuf::from("/models/d.onnx"));
@@ -260,7 +263,7 @@ mod tests {
         // Viewer toolbar defaults: theme backdrop, nearest sampling.
         assert_eq!(back.viewer, ViewerPreferences::default());
         assert_eq!(back.viewer.background, ViewerBackground::Theme);
-        assert_eq!(back.viewer.filter, ImageFilter::Nearest);
+        assert_eq!(back.viewer.mag_filter, ImageFilter::Nearest);
         // ML model paths default to lens's canonical bare filenames.
         assert_eq!(
             back.ml_models.denoise,

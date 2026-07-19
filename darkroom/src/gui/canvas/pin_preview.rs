@@ -15,9 +15,9 @@
 //! over-decorated.
 
 use aperture::{
-    Align, Background, Color, Configure, Corners, CursorIcon, FontWeight, ImageFilter, ImageFit,
-    Justify, Panel, Response, Sense, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui,
-    VAlign, WidgetId,
+    Align, Background, Color, Configure, Corners, CursorIcon, FontWeight, ImageFit, Justify, Panel,
+    Response, Sense, Shape, Sizing, Spacing, Stroke, Text, TextStyle, TextWrap, Ui, VAlign,
+    WidgetId,
 };
 use glam::Vec2;
 use imaginarium::ColorFormat;
@@ -182,11 +182,7 @@ pub(crate) fn draw_widget<'ui>(
                         // corners are already interior — no rounding trick
                         // needed here, unlike a lone image with nothing
                         // below it.
-                        ui.add_shape(
-                            Shape::image(image.preview.clone())
-                                .fit(ImageFit::Contain)
-                                .filter(ImageFilter::Linear),
-                        );
+                        ui.add_shape(Shape::image(image.preview.clone()).fit(ImageFit::Contain));
                     } else if let Some(text) = text {
                         Panel::vstack()
                             .id_salt("text")

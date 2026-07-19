@@ -63,7 +63,7 @@ pub(crate) struct ImageViewer {
     /// Pan-drag bookkeeping: the viewport pan at drag start.
     pan_anchor: PanAnchor,
     /// Lazily registered checkerboard tile for the `Checker` backdrop.
-    /// The backdrop *choice* (and the sampling filter) live in
+    /// The backdrop choice and magnification filter live in
     /// [`ViewerPreferences`] — one persisted setting shared by every
     /// viewer tab, threaded into [`Self::show`] each frame.
     checker: Option<ImageHandle>,
@@ -183,7 +183,8 @@ impl ImageViewer {
                             Shape::image(shown.handle.clone())
                                 .at(draw_rect(img, v))
                                 .fit(ImageFit::Fill)
-                                .filter(prefs.filter),
+                                .min_filter(ImageFilter::Linear)
+                                .mag_filter(prefs.mag_filter),
                         );
                     }
                     // Pane not measured yet (first frame): let aperture fit it.
@@ -191,7 +192,8 @@ impl ImageViewer {
                         ui.add_shape(
                             Shape::image(shown.handle.clone())
                                 .fit(ImageFit::Contain)
-                                .filter(prefs.filter),
+                                .min_filter(ImageFilter::Linear)
+                                .mag_filter(prefs.mag_filter),
                         );
                     }
                     (None, _) => {
@@ -231,7 +233,8 @@ impl ImageViewer {
                     // The 2×2 tile is one checker period = 2 squares across.
                     scale: pane / (2.0 * CHECKER_SQUARE_PX),
                 })
-                .filter(ImageFilter::Nearest),
+                .min_filter(ImageFilter::Nearest)
+                .mag_filter(ImageFilter::Nearest),
         );
     }
 
@@ -327,7 +330,7 @@ impl ImageViewer {
                     // Rule between the backdrop radio stack and the
                     // sampling toggle — two concepts, one pill.
                     pill_rule(ui, theme);
-                    changed |= filter_toggle(ui, theme, port, &mut prefs.filter);
+                    changed |= filter_toggle(ui, theme, port, &mut prefs.mag_filter);
                 });
             });
         changed
@@ -453,14 +456,14 @@ fn readout_pill<'a>(ui: &mut Ui, theme: &Theme, panel: Panel, text: impl Into<Te
         });
 }
 
-/// The nearest/bilinear sampling toggle: accent-filled while nearest is
-/// active. Flips `filter` on click; returns whether it changed.
+/// The nearest/bilinear magnification toggle: accent-filled while nearest
+/// is active. Flips `filter` on click; returns whether it changed.
 fn filter_toggle(ui: &mut Ui, theme: &Theme, port: PortRef, filter: &mut ImageFilter) -> bool {
     let nearest = *filter == ImageFilter::Nearest;
     let tip = if nearest {
-        "Sampling: nearest — click for bilinear"
+        "Zoom-in sampling: nearest — click for bilinear"
     } else {
-        "Sampling: bilinear — click for nearest"
+        "Zoom-in sampling: bilinear — click for nearest"
     };
     if Chip::new(control_wid(port, "filter"), tip)
         .toggled(nearest)
