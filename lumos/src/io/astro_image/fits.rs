@@ -82,9 +82,15 @@ pub(crate) fn load_fits(path: &Path) -> Result<AstroImage, ImageError> {
 
     let header = &reader.hdus()[index].header;
     let metadata = read_metadata(header, shape, bitpix).map_err(|source| fits_err(path, source))?;
-    // DATAMAX is the frame-independent normalization divisor when present; RAW
-    // files arrive already normalized. See `normalize_fits_pixels`.
-    let pixels = normalize_fits_pixels(pixels, bitpix, metadata.data_max);
+    let pixels = prepare_fits_pixels(pixels, bitpix, metadata.data_max).map_err(|summary| {
+        fits_unsupported(
+            path,
+            format!(
+                "image contains {} null/non-finite pixels; first at linear index {}",
+                summary.count, summary.first_index
+            ),
+        )
+    })?;
 
     // FITS stores 3D images in planar order (all R, then all G, then all B).
     // Use from_planar_channels for RGB, from_pixels for grayscale.
@@ -151,51 +157,57 @@ fn map_bitpix(sample_type: SampleType) -> BitPix {
     }
 }
 
-/// Normalize FITS pixel data to a `[0,1]`-ish range, in place.
-///
-/// First pass always sanitizes non-finite values to 0.0: `physical_f32` maps the
-/// integer `BLANK` sentinel (and float NaN/Inf nulls) to NaN, and those must not
-/// survive into the pipeline for *either* type — an integer FITS carrying a BLANK
-/// keyword does produce NaN here, so the integer path can't assume clean input.
-///
-/// The divisor must be **frame-independent**: every frame in a stack has to normalize
-/// against the same scale or dark-subtraction and combination silently misalign. So we
-/// pick it in this order:
-///
-/// 1. **`DATAMAX`** (the writer's declared full-scale) when present and positive — the
-///    correct, frame-independent answer for *either* type. This is what reunites, e.g.,
-///    a 14-bit sensor written as `uint16` (`DATAMAX=16383`) whether stored as int or float.
-/// 2. **Integer without DATAMAX**: BZERO/BSCALE was already applied, so divide by the
-///    BITPIX type's max — fixed, frame-independent.
-/// 3. **Float without DATAMAX**: the FITS standard defines no convention and the bit depth
-///    is gone, so there is no frame-independent answer. As a single-file best-effort we
-///    take the actual max and normalize only if it exceeds 2.0 (headroom for HDR/overexposed
-///    [0,1] data while still catching integer-like ranges). **Frame-dependent** — multi-frame
-///    float stacking needs `DATAMAX` set (or pre-normalized input) to stay consistent.
-fn normalize_fits_pixels(mut pixels: Vec<f32>, bitpix: BitPix, data_max: Option<f64>) -> Vec<f32> {
-    let max = pixels
-        .par_iter_mut()
-        .map(|p| {
-            if p.is_finite() {
-                *p
-            } else {
-                *p = 0.0;
-                f32::NEG_INFINITY
-            }
-        })
-        .reduce(|| f32::NEG_INFINITY, f32::max);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NullSummary {
+    count: usize,
+    first_index: usize,
+}
 
-    let inv = match data_max {
-        // DATAMAX is in the same (BSCALE/BZERO-applied) physical units as the pixels.
-        Some(dm) if dm > 0.0 => 1.0 / dm as f32,
-        _ => match bitpix.normalization_max() {
-            Some(type_max) => 1.0 / type_max,
-            None if max > 2.0 => 1.0 / max,
-            None => return pixels,
+/// Validate FITS pixels and normalize integer sample types.
+///
+/// Floating-point FITS values are already physical values and remain unchanged. `DATAMAX` is
+/// descriptive image metadata, not a guaranteed sensor full-scale, so using it as a divisor can
+/// give sibling frames different scales.
+///
+/// Integer samples use a positive finite `DATAMAX` when supplied, otherwise their fixed BITPIX
+/// range. BZERO/BSCALE has already been applied before this step.
+///
+/// `physical_f32` represents integer `BLANK` and floating nulls as non-finite values. Until
+/// `AstroImage` carries a validity plane, accepting those values would either poison arithmetic or
+/// invent valid zero-valued samples, so the entire image is rejected with a summary.
+fn prepare_fits_pixels(
+    mut pixels: Vec<f32>,
+    bitpix: BitPix,
+    data_max: Option<f64>,
+) -> Result<Vec<f32>, NullSummary> {
+    let nulls = pixels
+        .par_iter()
+        .enumerate()
+        .filter_map(|(index, pixel)| {
+            (!pixel.is_finite()).then_some(NullSummary {
+                count: 1,
+                first_index: index,
+            })
+        })
+        .reduce_with(|left, right| NullSummary {
+            count: left.count + right.count,
+            first_index: left.first_index.min(right.first_index),
+        });
+    if let Some(summary) = nulls {
+        return Err(summary);
+    }
+
+    let inv = match bitpix {
+        BitPix::Float32 | BitPix::Float64 => None,
+        _ => match data_max {
+            Some(dm) if dm.is_finite() && dm > 0.0 => Some(1.0 / dm as f32),
+            _ => bitpix.normalization_max().map(|type_max| 1.0 / type_max),
         },
     };
-    pixels.par_iter_mut().for_each(|p| *p *= inv);
-    pixels
+    if let Some(inv) = inv {
+        pixels.par_iter_mut().for_each(|pixel| *pixel *= inv);
+    }
+    Ok(pixels)
 }
 
 /// Read CFA pattern from BAYERPAT header, adjusting for ROWORDER if present.
@@ -328,196 +340,72 @@ mod tests {
     use crate::io::astro_image::fits::*;
 
     #[test]
-    fn test_normalize_float_already_01() {
-        // Pixels already in [0, 1] — should be unchanged
-        let pixels = vec![0.0, 0.25, 0.5, 0.75, 1.0];
-        let result = normalize_fits_pixels(pixels.clone(), BitPix::Float32, None);
-        assert_eq!(result, pixels);
-    }
+    fn float_without_datamax_preserves_physical_values() {
+        let pixels = vec![-5.0, 0.0, 0.5, 2.0, 255.0, 65_535.0];
 
-    #[test]
-    fn test_normalize_float_hdr_headroom() {
-        // max = 1.5 (HDR overexposure) — below threshold 2.0, unchanged
-        let pixels = vec![0.0, 0.5, 1.0, 1.5];
-        let result = normalize_fits_pixels(pixels.clone(), BitPix::Float32, None);
-        assert_eq!(result, pixels);
-    }
-
-    #[test]
-    fn test_normalize_float_at_threshold() {
-        // max = 2.0 — at threshold, should NOT normalize (threshold is > 2.0, not >=)
-        let pixels = vec![0.0, 1.0, 2.0];
-        let result = normalize_fits_pixels(pixels.clone(), BitPix::Float32, None);
-        assert_eq!(result, pixels);
-    }
-
-    #[test]
-    fn test_normalize_float_0_65535_range() {
-        // DeepSkyStacker output: [0, 65535] — should normalize by dividing by max
-        // inv_max = 1.0 / 65535.0
-        let pixels = vec![0.0, 32767.5, 65535.0];
-        let result = normalize_fits_pixels(pixels, BitPix::Float32, None);
-        // 0.0 / 65535.0 = 0.0
-        assert!((result[0] - 0.0).abs() < 1e-7);
-        // 32767.5 / 65535.0 = 0.5
-        assert!((result[1] - 0.5).abs() < 1e-4);
-        // 65535.0 / 65535.0 = 1.0
-        assert!((result[2] - 1.0).abs() < 1e-7);
-    }
-
-    #[test]
-    fn test_normalize_float_0_255_range() {
-        // 8-bit style float: [0, 255] — should normalize
-        // inv_max = 1.0 / 255.0
-        let pixels = vec![0.0, 127.5, 255.0];
-        let result = normalize_fits_pixels(pixels, BitPix::Float32, None);
-        // 0.0 / 255.0 = 0.0
-        assert!((result[0] - 0.0).abs() < 1e-7);
-        // 127.5 / 255.0 = 0.5
-        assert!((result[1] - 0.5).abs() < 1e-4);
-        // 255.0 / 255.0 = 1.0
-        assert!((result[2] - 1.0).abs() < 1e-7);
-    }
-
-    #[test]
-    fn test_normalize_float_negative_values_preserved() {
-        // Dark-subtracted data can have negative values.
-        // max = 100.0 > 2.0 → normalize by max. Negatives scale proportionally.
-        let pixels = vec![-5.0, 0.0, 50.0, 100.0];
-        let result = normalize_fits_pixels(pixels, BitPix::Float32, None);
-        // inv_max = 1.0 / 100.0 = 0.01
-        // -5.0 * 0.01 = -0.05
-        assert!((result[0] - (-0.05)).abs() < 1e-7);
-        // 0.0 * 0.01 = 0.0
-        assert!((result[1] - 0.0).abs() < 1e-7);
-        // 50.0 * 0.01 = 0.5
-        assert!((result[2] - 0.5).abs() < 1e-7);
-        // 100.0 * 0.01 = 1.0
-        assert!((result[3] - 1.0).abs() < 1e-7);
-    }
-
-    #[test]
-    fn test_normalize_float64_same_behavior() {
-        // Float64 (BITPIX -64) should behave identically to Float32
-        let pixels = vec![0.0, 32767.5, 65535.0];
-        let result = normalize_fits_pixels(pixels, BitPix::Float64, None);
-        assert!((result[0] - 0.0).abs() < 1e-7);
-        assert!((result[1] - 0.5).abs() < 1e-4);
-        assert!((result[2] - 1.0).abs() < 1e-7);
-    }
-
-    #[test]
-    fn test_normalize_uint16_unchanged() {
-        // Integer types still use fixed normalization_max, not heuristic
-        // UInt16: max = 65535.0
-        let pixels = vec![0.0, 32767.5, 65535.0];
-        let result = normalize_fits_pixels(pixels, BitPix::UInt16, None);
-        // 0.0 / 65535.0 = 0.0
-        assert!((result[0] - 0.0).abs() < 1e-7);
-        // 32767.5 / 65535.0 ≈ 0.49999
-        assert!((result[1] - 32767.5 / 65535.0).abs() < 1e-7);
-        // 65535.0 / 65535.0 = 1.0
-        assert!((result[2] - 1.0).abs() < 1e-7);
-    }
-
-    #[test]
-    fn test_normalize_datamax_overrides_for_int_and_float() {
-        // A 14-bit sensor written as uint16 (DATAMAX=16383). With DATAMAX honored, both the
-        // integer and float encodings divide by 16383 → identical, full-range result. This is the
-        // case where int (÷65535) and float (÷actual-max) would otherwise diverge.
-        let pixels = vec![0.0, 8191.5, 16383.0];
-        let dm = Some(16383.0);
-
-        let as_int = normalize_fits_pixels(pixels.clone(), BitPix::UInt16, dm);
-        let as_float = normalize_fits_pixels(pixels.clone(), BitPix::Float32, dm);
-
-        for r in [&as_int, &as_float] {
-            assert!((r[0] - 0.0).abs() < 1e-6);
-            assert!((r[1] - 0.5).abs() < 1e-4);
-            assert!((r[2] - 1.0).abs() < 1e-6);
+        for bitpix in [BitPix::Float32, BitPix::Float64] {
+            assert_eq!(
+                prepare_fits_pixels(pixels.clone(), bitpix, None).unwrap(),
+                pixels,
+                "{bitpix:?}"
+            );
         }
-        assert_eq!(as_int, as_float, "DATAMAX reunites the int and float paths");
     }
 
     #[test]
-    fn test_normalize_datamax_nonpositive_falls_back() {
-        // A zero/negative DATAMAX is ignored — fall back to the per-type rule (UInt16 → ÷65535).
-        let pixels = vec![0.0, 65535.0];
-        let result = normalize_fits_pixels(pixels, BitPix::UInt16, Some(0.0));
-        assert!((result[0] - 0.0).abs() < 1e-7);
-        assert!((result[1] - 1.0).abs() < 1e-7); // ÷65535, not a panic on ÷0
+    fn integer_without_datamax_uses_bitpix_range() {
+        let result =
+            prepare_fits_pixels(vec![0.0, 32_767.5, 65_535.0], BitPix::UInt16, None).unwrap();
+
+        assert_eq!(result, vec![0.0, 0.5, 1.0]);
     }
 
     #[test]
-    fn test_normalize_float_all_zero() {
-        // All zeros: max = 0.0, which is <= 2.0, so unchanged
-        let pixels = vec![0.0, 0.0, 0.0];
-        let result = normalize_fits_pixels(pixels.clone(), BitPix::Float32, None);
-        assert_eq!(result, pixels);
+    fn valid_datamax_sets_integer_scale() {
+        assert_eq!(
+            prepare_fits_pixels(vec![0.0, 50.0, 100.0], BitPix::UInt16, Some(100.0)).unwrap(),
+            vec![0.0, 0.5, 1.0]
+        );
     }
 
     #[test]
-    fn test_normalize_float_single_pixel() {
-        // Single pixel at 50000 → normalizes to 1.0
-        let pixels = vec![50000.0];
-        let result = normalize_fits_pixels(pixels, BitPix::Float32, None);
-        assert!((result[0] - 1.0).abs() < 1e-7);
+    fn float_datamax_remains_metadata_only() {
+        let pixels = vec![-5.0, 0.0, 50.0, 100.0];
+
+        for bitpix in [BitPix::Float32, BitPix::Float64] {
+            assert_eq!(
+                prepare_fits_pixels(pixels.clone(), bitpix, Some(100.0)).unwrap(),
+                pixels,
+                "{bitpix:?}"
+            );
+        }
     }
 
     #[test]
-    fn test_normalize_float_nan_replaced_with_zero() {
-        // FITS uses NaN as null indicator for float images.
-        // NaN pixels should become 0.0. Valid pixels unchanged (max=0.8 < 2.0).
-        let pixels = vec![0.0, f32::NAN, 0.5, f32::NAN, 0.8];
-        let result = normalize_fits_pixels(pixels, BitPix::Float32, None);
-        assert_eq!(result, vec![0.0, 0.0, 0.5, 0.0, 0.8]);
+    fn invalid_datamax_uses_sample_type_fallback() {
+        for datamax in [0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                prepare_fits_pixels(vec![0.0, 32_767.5, 65_535.0], BitPix::UInt16, Some(datamax),)
+                    .unwrap(),
+                vec![0.0, 0.5, 1.0]
+            );
+        }
     }
 
     #[test]
-    fn test_normalize_float_inf_replaced_with_zero() {
-        // +Inf and -Inf should become 0.0. Valid pixels unchanged (max=1.0 < 2.0).
-        let pixels = vec![0.5, f32::INFINITY, 1.0, f32::NEG_INFINITY];
-        let result = normalize_fits_pixels(pixels, BitPix::Float32, None);
-        assert_eq!(result, vec![0.5, 0.0, 1.0, 0.0]);
-    }
+    fn non_finite_pixels_return_exact_summary_for_every_sample_type() {
+        let pixels = vec![0.0, f32::NAN, 5.0, f32::INFINITY, f32::NEG_INFINITY];
 
-    #[test]
-    fn test_normalize_float_nan_with_normalization() {
-        // NaN replaced before normalization. max of valid pixels = 100.0 > 2.0.
-        // inv_max = 1/100 = 0.01
-        // [NaN→0.0, 50.0, 100.0] → [0.0*0.01, 50.0*0.01, 100.0*0.01] = [0.0, 0.5, 1.0]
-        let pixels = vec![f32::NAN, 50.0, 100.0];
-        let result = normalize_fits_pixels(pixels, BitPix::Float32, None);
-        assert!((result[0] - 0.0).abs() < 1e-7);
-        assert!((result[1] - 0.5).abs() < 1e-7);
-        assert!((result[2] - 1.0).abs() < 1e-7);
-    }
-
-    #[test]
-    fn test_normalize_float_all_nan() {
-        // All NaN → all become 0.0. max of remaining = 0.0 < 2.0, no normalization.
-        let pixels = vec![f32::NAN, f32::NAN, f32::NAN];
-        let result = normalize_fits_pixels(pixels, BitPix::Float32, None);
-        assert_eq!(result, vec![0.0, 0.0, 0.0]);
-    }
-
-    #[test]
-    fn test_normalize_float64_nan_replaced() {
-        // Float64 follows same path as Float32
-        let pixels = vec![0.0, f32::NAN, 0.5];
-        let result = normalize_fits_pixels(pixels, BitPix::Float64, None);
-        assert_eq!(result, vec![0.0, 0.0, 0.5]);
-    }
-
-    #[test]
-    fn test_normalize_uint16_nan_sanitized() {
-        // fits-well's physical_f32 maps the integer BLANK sentinel to NaN, so the
-        // integer path must sanitize too: NaN → 0.0 before the fixed-max divide.
-        let pixels = vec![0.0, f32::NAN, 65535.0];
-        let result = normalize_fits_pixels(pixels, BitPix::UInt16, None);
-        assert!((result[0] - 0.0).abs() < 1e-7);
-        assert_eq!(result[1], 0.0); // BLANK → 0.0, not propagated as NaN
-        assert!((result[2] - 1.0).abs() < 1e-7);
+        for bitpix in [BitPix::UInt16, BitPix::Float32, BitPix::Float64] {
+            assert_eq!(
+                prepare_fits_pixels(pixels.clone(), bitpix, None).unwrap_err(),
+                NullSummary {
+                    count: 3,
+                    first_index: 1,
+                },
+                "{bitpix:?}"
+            );
+        }
     }
 
     #[test]

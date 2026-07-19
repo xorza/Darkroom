@@ -6,7 +6,7 @@ mod tests;
 
 use common::CancelToken;
 
-use crate::io::raw::demosaic::Cancelled;
+use crate::io::raw::demosaic::{Cancelled, DemosaicRange};
 
 /// Bayer CFA (Color Filter Array) pattern.
 /// Represents the 2x2 pattern of color filters on the sensor.
@@ -74,7 +74,7 @@ impl CfaPattern {
 /// Raw Bayer image data with metadata needed for demosaicing.
 #[derive(Debug)]
 pub(crate) struct BayerImage<'a> {
-    /// Raw Bayer pixel data (normalized to 0.0-1.0)
+    /// Decoded or calibrated linear samples; calibration may put values outside `[0, 1]`.
     pub(crate) data: &'a [f32],
     /// Width of the raw data buffer
     pub(crate) raw_width: usize,
@@ -90,6 +90,8 @@ pub(crate) struct BayerImage<'a> {
     pub(crate) left_margin: usize,
     /// CFA pattern
     pub(crate) cfa: CfaPattern,
+    /// Whether synthesized channels are bounded for direct display or kept in the calibrated range.
+    pub(crate) output_range: DemosaicRange,
 }
 
 impl<'a> BayerImage<'a> {
@@ -111,6 +113,7 @@ impl<'a> BayerImage<'a> {
         top_margin: usize,
         left_margin: usize,
         cfa: CfaPattern,
+        output_range: DemosaicRange,
     ) -> Self {
         assert!(
             width > 0 && height > 0,
@@ -161,6 +164,7 @@ impl<'a> BayerImage<'a> {
             top_margin,
             left_margin,
             cfa,
+            output_range,
         }
     }
 }

@@ -10,8 +10,8 @@
 use common::CancelToken;
 use rayon::prelude::*;
 
-use crate::io::raw::demosaic::Cancelled;
-
+use crate::concurrency::UnsafeSendPtr;
+use crate::io::raw::demosaic::{Cancelled, DemosaicRange};
 use crate::io::raw::{
     alloc_uninit_vec,
     demosaic::bayer::{BayerImage, CfaPattern},
@@ -57,23 +57,10 @@ fn avg4_diag(buf: &[f32], idx: usize, w1: usize) -> f32 {
     0.25 * (buf[idx - w1 - 1] + buf[idx - w1 + 1] + buf[idx + w1 - 1] + buf[idx + w1 + 1])
 }
 
-// SAFETY: Caller must ensure no data races (each thread writes to unique indices).
-#[derive(Clone, Copy)]
-struct SendPtr(*mut f32);
-unsafe impl Send for SendPtr {}
-unsafe impl Sync for SendPtr {}
-
-impl SendPtr {
-    fn get(self) -> *mut f32 {
-        self.0
-    }
-}
-
 /// RCD demosaic implementation.
 ///
-/// Input: BayerImage with normalized [0,1] CFA data and margin info.
-/// Output: Interleaved RGB f32 pixels `[R0, G0, B0, R1, G1, B1, ...]`
-/// for the active area (width × height).
+/// Input: Bayer data and margin info. Calibrated samples may be outside `[0, 1]`.
+/// Output: planar RGB f32 channels for the active area (width × height).
 pub(crate) fn rcd_demosaic(
     bayer: &BayerImage,
     cancel: &CancelToken,
@@ -108,9 +95,9 @@ pub(crate) fn rcd_demosaic(
 
     // Single parallel dispatch for all 3 channels (avoids 3 rayon syncs).
     {
-        let ptr_r = SendPtr(rgb_r.as_mut_ptr());
-        let ptr_g = SendPtr(rgb_g.as_mut_ptr());
-        let ptr_b = SendPtr(rgb_b.as_mut_ptr());
+        let ptr_r = UnsafeSendPtr::new(rgb_r.as_mut_ptr());
+        let ptr_g = UnsafeSendPtr::new(rgb_g.as_mut_ptr());
+        let ptr_b = UnsafeSendPtr::new(rgb_b.as_mut_ptr());
         (0..rh).into_par_iter().for_each(|ry| {
             let ptrs = [ptr_r.get(), ptr_g.get(), ptr_b.get()];
             for rx in 0..rw {
@@ -267,7 +254,7 @@ pub(crate) fn rcd_demosaic(
                     vh_central
                 };
 
-                green_row[rx] = intp(vh_disc, v_est, h_est).clamp(0.0, 1.0);
+                green_row[rx] = bayer.output_range.apply(intp(vh_disc, v_est, h_est));
 
                 rx += 2;
             }
@@ -359,13 +346,29 @@ pub(crate) fn rcd_demosaic(
     if cancel.is_cancelled() {
         return Err(Cancelled);
     }
-    step4_2_rb_at_opposing(&mut rgb_r, &mut rgb_b, &rgb_g, &pq_dir, &pattern, s);
+    step4_2_rb_at_opposing(
+        &mut rgb_r,
+        &mut rgb_b,
+        &rgb_g,
+        &pq_dir,
+        &pattern,
+        bayer.output_range,
+        s,
+    );
 
     // Step 4.3: Red/Blue at Green CFA positions.
     // Reads rgb_r, rgb_b, rgb_g, vh_dir. Writes rgb_r and rgb_b at green positions.
     // Each row's green positions only read from neighboring rows' R/B values
     // (set in CFA copy or Step 4.2), so rows are independent.
-    step4_3_rb_at_green(&mut rgb_r, &mut rgb_b, &rgb_g, &vh_dir, &pattern, s);
+    step4_3_rb_at_green(
+        &mut rgb_r,
+        &mut rgb_b,
+        &rgb_g,
+        &vh_dir,
+        &pattern,
+        bayer.output_range,
+        s,
+    );
 
     drop(vh_dir);
     drop(pq_dir);
@@ -409,9 +412,10 @@ fn step4_2_rb_at_opposing(
     rgb_g: &[f32],
     pq_dir: &[f32],
     pattern: &CfaPattern,
+    output_range: DemosaicRange,
     s: Strides,
 ) {
-    let Strides { rw, rh, .. } = s;
+    let rh = s.rh;
 
     // On R-rows we write rgb_b (reading rgb_b for diagonal neighbors which are CFA originals).
     // On B-rows we write rgb_r (reading rgb_r for diagonal neighbors which are CFA originals).
@@ -420,9 +424,8 @@ fn step4_2_rb_at_opposing(
 
     // Single dispatch: R-rows write B, B-rows write R. Rows are independent
     // (each writes only to its own indices in the destination buffer).
-    let dst_r = SendPtr(rgb_r.as_mut_ptr());
-    let dst_b = SendPtr(rgb_b.as_mut_ptr());
-    let buf_len = rw * rh;
+    let dst_r = UnsafeSendPtr::new(rgb_r.as_mut_ptr());
+    let dst_b = UnsafeSendPtr::new(rgb_b.as_mut_ptr());
     (BORDER..rh.saturating_sub(BORDER))
         .into_par_iter()
         .for_each(|ry| {
@@ -433,26 +436,30 @@ fn step4_2_rb_at_opposing(
                 2 => dst_r.get(), // B-row → write R
                 _ => return,      // G-row → skip
             };
-            // SAFETY: Each row writes only to its own indices (ry*rw+col_start, ry*rw+col_start+2, ...).
-            // No two parallel iterations share the same ry, so writes don't overlap.
-            // Reads from other rows access CFA-original values that are never written in this loop.
-            let dst = unsafe { std::slice::from_raw_parts_mut(ptr, buf_len) };
-            process_step4_2_row(dst, rgb_g, pq_dir, ry, col_start, s);
+            // SAFETY: Rows write disjoint indices. Diagonal reads land only on native CFA samples,
+            // which this phase never writes.
+            unsafe {
+                process_step4_2_row(ptr, rgb_g, pq_dir, ry, col_start, output_range, s);
+            }
         });
 }
 
 /// Process one row of Step 4.2.
-/// `dst` is the full channel buffer being written (the missing color channel).
 /// Values at diagonal neighbors were set during CFA copy and are not modified by this step.
-fn process_step4_2_row(
-    dst: &mut [f32],
+unsafe fn process_step4_2_row(
+    dst: *mut f32,
     rgb_g: &[f32],
     pq_dir: &[f32],
     ry: usize,
     col_start: usize,
+    output_range: DemosaicRange,
     s: Strides,
 ) {
     let Strides { rw, w1, w2, w3, .. } = s;
+    let read = |index: usize| {
+        // SAFETY: The caller guarantees that `dst` covers the complete `rw * rh` channel.
+        unsafe { dst.add(index).read() }
+    };
     let mut rx = col_start;
     while rx < rw.saturating_sub(BORDER) {
         let idx = ry * rw + rx;
@@ -466,31 +473,33 @@ fn process_step4_2_row(
         };
 
         let nw_grad = EPS
-            + (dst[idx - w1 - 1] - dst[idx + w1 + 1]).abs()
-            + (dst[idx - w1 - 1] - dst[idx - w3 - 3]).abs()
+            + (read(idx - w1 - 1) - read(idx + w1 + 1)).abs()
+            + (read(idx - w1 - 1) - read(idx - w3 - 3)).abs()
             + (rgb_g[idx] - rgb_g[idx - w2 - 2]).abs();
         let ne_grad = EPS
-            + (dst[idx - w1 + 1] - dst[idx + w1 - 1]).abs()
-            + (dst[idx - w1 + 1] - dst[idx - w3 + 3]).abs()
+            + (read(idx - w1 + 1) - read(idx + w1 - 1)).abs()
+            + (read(idx - w1 + 1) - read(idx - w3 + 3)).abs()
             + (rgb_g[idx] - rgb_g[idx - w2 + 2]).abs();
         let sw_grad = EPS
-            + (dst[idx - w1 + 1] - dst[idx + w1 - 1]).abs()
-            + (dst[idx + w1 - 1] - dst[idx + w3 - 3]).abs()
+            + (read(idx - w1 + 1) - read(idx + w1 - 1)).abs()
+            + (read(idx + w1 - 1) - read(idx + w3 - 3)).abs()
             + (rgb_g[idx] - rgb_g[idx + w2 - 2]).abs();
         let se_grad = EPS
-            + (dst[idx - w1 - 1] - dst[idx + w1 + 1]).abs()
-            + (dst[idx + w1 + 1] - dst[idx + w3 + 3]).abs()
+            + (read(idx - w1 - 1) - read(idx + w1 + 1)).abs()
+            + (read(idx + w1 + 1) - read(idx + w3 + 3)).abs()
             + (rgb_g[idx] - rgb_g[idx + w2 + 2]).abs();
 
-        let nw_est = dst[idx - w1 - 1] - rgb_g[idx - w1 - 1];
-        let ne_est = dst[idx - w1 + 1] - rgb_g[idx - w1 + 1];
-        let sw_est = dst[idx + w1 - 1] - rgb_g[idx + w1 - 1];
-        let se_est = dst[idx + w1 + 1] - rgb_g[idx + w1 + 1];
+        let nw_est = read(idx - w1 - 1) - rgb_g[idx - w1 - 1];
+        let ne_est = read(idx - w1 + 1) - rgb_g[idx - w1 + 1];
+        let sw_est = read(idx + w1 - 1) - rgb_g[idx + w1 - 1];
+        let se_est = read(idx + w1 + 1) - rgb_g[idx + w1 + 1];
 
         let p_est = (nw_grad * se_est + se_grad * nw_est) / (nw_grad + se_grad);
         let q_est = (ne_grad * sw_est + sw_grad * ne_est) / (ne_grad + sw_grad);
 
-        dst[idx] = (rgb_g[idx] + intp(pq_disc, p_est, q_est)).clamp(0.0, 1.0);
+        let value = output_range.apply(rgb_g[idx] + intp(pq_disc, p_est, q_est));
+        // SAFETY: This row owns `idx`; no other phase worker reads or writes missing-color sites.
+        unsafe { dst.add(idx).write(value) };
 
         rx += 2;
     }
@@ -503,6 +512,7 @@ fn step4_3_rb_at_green(
     rgb_g: &[f32],
     vh_dir: &[f32],
     pattern: &CfaPattern,
+    output_range: DemosaicRange,
     s: Strides,
 ) {
     let Strides { rw, rh, w1, w2, w3 } = s;
@@ -511,19 +521,23 @@ fn step4_3_rb_at_green(
     // were written in Step 4.2. Since we only write at green positions and
     // read from R/B positions, there are no write-read conflicts between rows.
     //
-    // We need full-buffer access for neighbor rows (±w1, ±w3), so use SendPtr.
-    let ptr_r = SendPtr(rgb_r.as_mut_ptr());
-    let ptr_b = SendPtr(rgb_b.as_mut_ptr());
-    let buf_len = rw * rh;
+    // Neighbor reads span rows, so raw pointers avoid creating overlapping mutable slices.
+    let ptr_r = UnsafeSendPtr::new(rgb_r.as_mut_ptr());
+    let ptr_b = UnsafeSendPtr::new(rgb_b.as_mut_ptr());
 
     (BORDER..rh.saturating_sub(BORDER))
         .into_par_iter()
         .for_each(|ry| {
-            // SAFETY: Each row writes only to its own green positions (ry*rw+col_start, +2, ...).
-            // No two parallel iterations share the same ry. Reads from other rows access
-            // values set in CFA copy or Step 4.2, which are not modified here.
-            let r_buf = unsafe { std::slice::from_raw_parts_mut(ptr_r.get(), buf_len) };
-            let b_buf = unsafe { std::slice::from_raw_parts_mut(ptr_b.get(), buf_len) };
+            let r_ptr = ptr_r.get();
+            let b_ptr = ptr_b.get();
+            let read_r = |index: usize| {
+                // SAFETY: Cardinal reads land only on native or Step 4.2 R/B sites.
+                unsafe { r_ptr.add(index).read() }
+            };
+            let read_b = |index: usize| {
+                // SAFETY: Cardinal reads land only on native or Step 4.2 R/B sites.
+                unsafe { b_ptr.add(index).read() }
+            };
 
             let col_start = BORDER + (pattern.color_at(ry, 1) & 1);
             let mut rx = col_start;
@@ -546,42 +560,46 @@ fn step4_3_rb_at_green(
 
                 // Interpolate R
                 {
-                    let sn_abs = (r_buf[idx - w1] - r_buf[idx + w1]).abs();
-                    let ew_abs = (r_buf[idx - 1] - r_buf[idx + 1]).abs();
-                    let n_grad = n1 + sn_abs + (r_buf[idx - w1] - r_buf[idx - w3]).abs();
-                    let s_grad = s1 + sn_abs + (r_buf[idx + w1] - r_buf[idx + w3]).abs();
-                    let w_grad = w1_val + ew_abs + (r_buf[idx - 1] - r_buf[idx - 3]).abs();
-                    let e_grad = e1_val + ew_abs + (r_buf[idx + 1] - r_buf[idx + 3]).abs();
+                    let sn_abs = (read_r(idx - w1) - read_r(idx + w1)).abs();
+                    let ew_abs = (read_r(idx - 1) - read_r(idx + 1)).abs();
+                    let n_grad = n1 + sn_abs + (read_r(idx - w1) - read_r(idx - w3)).abs();
+                    let s_grad = s1 + sn_abs + (read_r(idx + w1) - read_r(idx + w3)).abs();
+                    let w_grad = w1_val + ew_abs + (read_r(idx - 1) - read_r(idx - 3)).abs();
+                    let e_grad = e1_val + ew_abs + (read_r(idx + 1) - read_r(idx + 3)).abs();
 
-                    let n_est = r_buf[idx - w1] - rgb_g[idx - w1];
-                    let s_est = r_buf[idx + w1] - rgb_g[idx + w1];
-                    let w_est = r_buf[idx - 1] - rgb_g[idx - 1];
-                    let e_est = r_buf[idx + 1] - rgb_g[idx + 1];
+                    let n_est = read_r(idx - w1) - rgb_g[idx - w1];
+                    let s_est = read_r(idx + w1) - rgb_g[idx + w1];
+                    let w_est = read_r(idx - 1) - rgb_g[idx - 1];
+                    let e_est = read_r(idx + 1) - rgb_g[idx + 1];
 
                     let v_est = (n_grad * s_est + s_grad * n_est) / (n_grad + s_grad);
                     let h_est = (e_grad * w_est + w_grad * e_est) / (e_grad + w_grad);
 
-                    r_buf[idx] = (g_center + intp(vh_disc, v_est, h_est)).clamp(0.0, 1.0);
+                    let value = output_range.apply(g_center + intp(vh_disc, v_est, h_est));
+                    // SAFETY: Each worker owns the green sites in its row.
+                    unsafe { r_ptr.add(idx).write(value) };
                 }
 
                 // Interpolate B
                 {
-                    let sn_abs = (b_buf[idx - w1] - b_buf[idx + w1]).abs();
-                    let ew_abs = (b_buf[idx - 1] - b_buf[idx + 1]).abs();
-                    let n_grad = n1 + sn_abs + (b_buf[idx - w1] - b_buf[idx - w3]).abs();
-                    let s_grad = s1 + sn_abs + (b_buf[idx + w1] - b_buf[idx + w3]).abs();
-                    let w_grad = w1_val + ew_abs + (b_buf[idx - 1] - b_buf[idx - 3]).abs();
-                    let e_grad = e1_val + ew_abs + (b_buf[idx + 1] - b_buf[idx + 3]).abs();
+                    let sn_abs = (read_b(idx - w1) - read_b(idx + w1)).abs();
+                    let ew_abs = (read_b(idx - 1) - read_b(idx + 1)).abs();
+                    let n_grad = n1 + sn_abs + (read_b(idx - w1) - read_b(idx - w3)).abs();
+                    let s_grad = s1 + sn_abs + (read_b(idx + w1) - read_b(idx + w3)).abs();
+                    let w_grad = w1_val + ew_abs + (read_b(idx - 1) - read_b(idx - 3)).abs();
+                    let e_grad = e1_val + ew_abs + (read_b(idx + 1) - read_b(idx + 3)).abs();
 
-                    let n_est = b_buf[idx - w1] - rgb_g[idx - w1];
-                    let s_est = b_buf[idx + w1] - rgb_g[idx + w1];
-                    let w_est = b_buf[idx - 1] - rgb_g[idx - 1];
-                    let e_est = b_buf[idx + 1] - rgb_g[idx + 1];
+                    let n_est = read_b(idx - w1) - rgb_g[idx - w1];
+                    let s_est = read_b(idx + w1) - rgb_g[idx + w1];
+                    let w_est = read_b(idx - 1) - rgb_g[idx - 1];
+                    let e_est = read_b(idx + 1) - rgb_g[idx + 1];
 
                     let v_est = (n_grad * s_est + s_grad * n_est) / (n_grad + s_grad);
                     let h_est = (e_grad * w_est + w_grad * e_est) / (e_grad + w_grad);
 
-                    b_buf[idx] = (g_center + intp(vh_disc, v_est, h_est)).clamp(0.0, 1.0);
+                    let value = output_range.apply(g_center + intp(vh_disc, v_est, h_est));
+                    // SAFETY: Each worker owns the green sites in its row.
+                    unsafe { b_ptr.add(idx).write(value) };
                 }
 
                 rx += 2;

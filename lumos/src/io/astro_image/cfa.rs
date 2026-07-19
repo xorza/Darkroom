@@ -10,8 +10,8 @@ use rayon::prelude::*;
 
 use crate::io::astro_image::error::ImageError;
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
-use crate::io::raw::demosaic::Cancelled;
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::demosaic::{Cancelled, DemosaicRange};
 use crate::io::raw::{load_raw_cfa, raw_dimensions};
 use crate::stacking::frame_store::StackableImage;
 use common::CancelToken;
@@ -53,7 +53,7 @@ impl CfaType {
 /// Represents sensor data before demosaicing.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CfaImage {
-    /// Single-channel pixel data, normalized to 0.0-1.0.
+    /// Single-channel linear samples; calibration may put values outside `[0, 1]`.
     /// Layout: row-major, width * height pixels.
     pub data: Buffer2<f32>,
     pub metadata: AstroImageMetadata,
@@ -153,6 +153,7 @@ impl CfaImage {
                     0,
                     0,
                     *cfa_pattern,
+                    DemosaicRange::Preserve,
                 );
                 let planes = demosaic_bayer(&bayer, cancel)?;
                 let dims = ImageDimensions::new((width, height), 3);

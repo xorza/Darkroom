@@ -76,7 +76,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 - Entry points: `from_file` (`mod.rs`, dispatches FITS → `fits::load_fits`, `io::raw::RAW_EXTENSIONS` → `io::raw::load_raw`, standard formats → imaginarium) and owns the public `ASTRO_IMAGE_EXTENSIONS` policy; `from_pixels` (interleaved → planar); `from_planar_channels` (planar input). `mean()` uses parallel Kahan summation.
 - The `Rgb` value struct (`mod.rs:216`, `.intensity()` / `.scale()`). Display transforms live in `image_ops` over the interleaved `imaginarium::Image`: per-pixel operations use `par_map_pixels`, intensity operations use `intensity_plane` / `apply_intensity_remap`, and spatial operations stream through `process_channels`. Full planar conversion is private to the optional ML backend's model boundary.
 - `cfa` (`CfaType` = `Mono | Bayer(CfaPattern) | XTrans([[u8;6];6])`; `CfaImage` un-demosaiced sensor data with in-place `subtract`/`divide_by_normalized` and `demosaic()` → `AstroImage`). Flat division uses **per-color-channel means** so non-white flats don't shift color.
-- `fits` (`fits-well` I/O, `physical()` BSCALE/BZERO scaling, NaN/Inf sanitization, ROWORDER/XBAYROFF flips), `sensor` (`detect_sensor_type(filters, colors)` from libraw metadata), `error` (`ImageError`).
+- `fits` (`fits-well` I/O, `physical_f32()` BSCALE/BZERO scaling, null rejection, physical float preservation, ROWORDER/XBAYROFF flips), `sensor` (`detect_sensor_type(filters, colors)` from libraw metadata), `error` (`ImageError`).
 
 ## stacking/calibration_masters — master frames & defects
 

@@ -1,8 +1,10 @@
 //! Tests for Bayer CFA types and RCD demosaicing.
 
+use crate::io::raw::demosaic::DemosaicRange;
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use crate::io::raw::demosaic::interleave_planes;
 use common::CancelToken;
+use rayon::ThreadPoolBuilder;
 
 #[test]
 fn test_cfa_rggb_pattern() {
@@ -107,41 +109,101 @@ fn test_flip_both_axes() {
 #[should_panic(expected = "Output dimensions must be non-zero")]
 fn test_bayer_image_zero_width() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(&data, 2, 2, 0, 2, 0, 0, CfaPattern::Rggb);
+    BayerImage::with_margins(
+        &data,
+        2,
+        2,
+        0,
+        2,
+        0,
+        0,
+        CfaPattern::Rggb,
+        DemosaicRange::Unit,
+    );
 }
 
 #[test]
 #[should_panic(expected = "Output dimensions must be non-zero")]
 fn test_bayer_image_zero_height() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(&data, 2, 2, 2, 0, 0, 0, CfaPattern::Rggb);
+    BayerImage::with_margins(
+        &data,
+        2,
+        2,
+        2,
+        0,
+        0,
+        0,
+        CfaPattern::Rggb,
+        DemosaicRange::Unit,
+    );
 }
 
 #[test]
 #[should_panic(expected = "Data length")]
 fn test_bayer_image_wrong_data_length() {
     let data = vec![0.0f32; 3];
-    BayerImage::with_margins(&data, 2, 2, 2, 2, 0, 0, CfaPattern::Rggb);
+    BayerImage::with_margins(
+        &data,
+        2,
+        2,
+        2,
+        2,
+        0,
+        0,
+        CfaPattern::Rggb,
+        DemosaicRange::Unit,
+    );
 }
 
 #[test]
 #[should_panic(expected = "Top margin")]
 fn test_bayer_image_margin_exceeds_height() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(&data, 2, 2, 2, 2, 1, 0, CfaPattern::Rggb);
+    BayerImage::with_margins(
+        &data,
+        2,
+        2,
+        2,
+        2,
+        1,
+        0,
+        CfaPattern::Rggb,
+        DemosaicRange::Unit,
+    );
 }
 
 #[test]
 #[should_panic(expected = "Left margin")]
 fn test_bayer_image_margin_exceeds_width() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(&data, 2, 2, 2, 2, 0, 1, CfaPattern::Rggb);
+    BayerImage::with_margins(
+        &data,
+        2,
+        2,
+        2,
+        2,
+        0,
+        1,
+        CfaPattern::Rggb,
+        DemosaicRange::Unit,
+    );
 }
 
 #[test]
 fn test_bayer_image_valid() {
     let data = vec![0.0f32; 16];
-    let bayer = BayerImage::with_margins(&data, 4, 4, 2, 2, 1, 1, CfaPattern::Rggb);
+    let bayer = BayerImage::with_margins(
+        &data,
+        4,
+        4,
+        2,
+        2,
+        1,
+        1,
+        CfaPattern::Rggb,
+        DemosaicRange::Unit,
+    );
     assert_eq!(bayer.raw_width, 4);
     assert_eq!(bayer.raw_height, 4);
     assert_eq!(bayer.width, 2);
@@ -152,7 +214,17 @@ fn test_bayer_image_valid() {
 
 /// Helper: create a BayerImage from a flat CFA array with no margins.
 fn make_bayer(data: &[f32], width: usize, height: usize, cfa: CfaPattern) -> BayerImage<'_> {
-    BayerImage::with_margins(data, width, height, width, height, 0, 0, cfa)
+    BayerImage::with_margins(
+        data,
+        width,
+        height,
+        width,
+        height,
+        0,
+        0,
+        cfa,
+        DemosaicRange::Unit,
+    )
 }
 
 #[test]
@@ -186,6 +258,30 @@ fn cancelled_token_bails_the_demosaic() {
 }
 
 #[test]
+fn parallel_rcd_matches_single_thread_bit_for_bit() {
+    let (w, h) = if cfg!(miri) {
+        (20usize, 20usize)
+    } else {
+        (96usize, 80usize)
+    };
+    let data: Vec<f32> = (0..w * h)
+        .map(|index| ((index * 37 + index / w * 11) % 1_024) as f32 / 1_023.0)
+        .collect();
+    let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
+
+    let run = |threads| {
+        ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap()
+            .install(|| demosaic_bayer(&bayer, &CancelToken::never()).unwrap())
+    };
+
+    let parallel_threads = if cfg!(miri) { 2 } else { 4 };
+    assert_eq!(run(1), run(parallel_threads));
+}
+
+#[test]
 fn test_rcd_uniform_input() {
     // A uniform CFA (all pixels = 0.5) should produce approximately uniform RGB.
     // The ratio correction formula with uniform LPF reduces to:
@@ -198,7 +294,17 @@ fn test_rcd_uniform_input() {
     let data = vec![val; raw_w * raw_h];
     let act_w = 20;
     let act_h = 20;
-    let bayer = BayerImage::with_margins(&data, raw_w, raw_h, act_w, act_h, 6, 6, CfaPattern::Rggb);
+    let bayer = BayerImage::with_margins(
+        &data,
+        raw_w,
+        raw_h,
+        act_w,
+        act_h,
+        6,
+        6,
+        CfaPattern::Rggb,
+        DemosaicRange::Unit,
+    );
     let rgb = interleave_planes(demosaic_bayer(&bayer, &CancelToken::never()).unwrap());
 
     // Check all output pixels. With 6 pixels of margin on each side of the raw
@@ -350,8 +456,17 @@ fn test_rcd_with_margins() {
     let lm = 4;
 
     let data = vec![0.4f32; raw_w * raw_h];
-    let bayer =
-        BayerImage::with_margins(&data, raw_w, raw_h, act_w, act_h, tm, lm, CfaPattern::Rggb);
+    let bayer = BayerImage::with_margins(
+        &data,
+        raw_w,
+        raw_h,
+        act_w,
+        act_h,
+        tm,
+        lm,
+        CfaPattern::Rggb,
+        DemosaicRange::Unit,
+    );
     let rgb = interleave_planes(demosaic_bayer(&bayer, &CancelToken::never()).unwrap());
 
     // Output should be active area size

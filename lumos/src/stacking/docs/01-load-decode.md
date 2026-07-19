@@ -983,11 +983,12 @@ A concrete, opinionated Stage-1 recipe for an OSC astro pipeline.
 
 ## 6. How lumos currently does it — and gaps/opportunities
 
-**FITS** (`src/astro_image/fits.rs`): solid. Goes through rust-fitsio/cfitsio so
-`BZERO`/`BSCALE` and endianness are handled; preserves signed-vs-unsigned BITPIX for
-correct normalization (`image_type_to_bitpix`); handles 2-D/3-D axis order and planar
-RGB correctly; composes `ROWORDER` + `XBAYROFF` + `YBAYROFF` + `BAYERPAT` for OSC FITS;
-parses RA/Dec in all three common encodings; sanitizes float NaN/Inf to 0.
+**FITS** (`src/io/astro_image/fits.rs`): solid. `fits-well` applies `BZERO`/`BSCALE`,
+endianness, and integer `BLANK`; the loader selects the first image-bearing HDU, including
+tile-compressed images. It handles 2-D/3-D axis order and planar RGB correctly; composes
+`ROWORDER` + `XBAYROFF` + `YBAYROFF` + `BAYERPAT` for OSC FITS; parses RA/Dec in all three
+common encodings; preserves physical float values and rejects null/non-finite samples with
+a summary until the image model has a validity plane.
 
 **RAW** (`src/raw/mod.rs`): strong. `consolidate_black_levels` is a faithful port of
 libraw `adjust_bl()` including the 2×2/X-Trans spatial folding, common-minimum
@@ -1008,34 +1009,18 @@ calibrate-then-debayer ordering, with flat division using per-CFA-color means.
    high. `CfaImage::subtract` keeps negatives, but the raw frames are already clamped
    before they are stacked into a master. Consider an unclamped calibration load path
    (subtract pedestal, allow negative f32).
-2. **Integer-FITS `BLANK` is not handled.** `normalize_fits_pixels` only sanitizes
-   NaN/Inf, and only for float BITPIX (`fits.rs:146-163`). Integer FITS carrying a
-   `BLANK` value will pass through as ordinary finite data. Read `BLANK` and mask it
-   (against the pre-scale value) for integer images.
-3. **Float-FITS divide-by-max is per-file and lossy.** The 2.0 threshold + divide-by-max
-   heuristic (`fits.rs:146-163`) can't distinguish `[0,1.5]` HDR from small physical
-   values and gives sibling frames different scales. It works because the stacking
-   stage re-normalizes, but a known-range override (or carrying the source range in
-   metadata) would be safer for photometry.
-4. **No multi-extension or compressed FITS (pass 2).** `load_fits` reads only the
-   primary HDU (`fits.rs:21`) and errors on a table. It cannot open an MEF whose image
-   is in an `IMAGE` extension, nor any `fpack`/tile-compressed FITS (image in a
-   `BINTABLE` with `ZIMAGE=T`, §1.8). Both are common in survey/archive data and some
-   capture-tool exports. cfitsio can decompress these transparently; the fix is to
-   iterate HDUs and select the image (honoring `ZIMAGE`), letting cfitsio handle
-   Rice/GZIP/HCOMPRESS and the `ZSCALE`/`ZZERO`/`ZQUANTIZ` float dequantization.
-5. **No native CFA-drizzle wiring.** lumos has both a drizzle stage and an
+2. **No native CFA-drizzle wiring.** lumos has both a drizzle stage and an
    un-demosaiced `CfaImage`, but they aren't connected into a CFA/Bayer-drizzle path.
    Given RawPedia/Siril guidance that CFA drizzle is the artifact-free OSC ideal, a
    `drizzle_stack` variant that consumes mosaics (scale = pixfrac = 1.0, dithered) is
    a high-value addition.
-6. **No superpixel / split-CFA mode.** A trivial, exactly-linear half-res debayer
+3. **No superpixel / split-CFA mode.** A trivial, exactly-linear half-res debayer
    would be a useful fast/trustworthy alternative and a photometric ground truth for
    testing the RCD path.
-7. **No DNG linearization-table handling (pass 2).** lumos assumes post-unpack
+4. **No DNG linearization-table handling (pass 2).** lumos assumes post-unpack
    linearity; a sensor shipping a DNG `LinearizationTable` would be mis-handled (§2.4).
    Mainstream astro CMOS is natively linear so this is low-priority, but worth noting.
-8. **Defect correction is dark-derived (good) but lives in the calibration module**,
+5. **Defect correction is dark-derived (good) but lives in the calibration module**,
    not the load module — fine architecturally, but the load docs should make the
    "defects corrected on the mosaic before demosaic" ordering explicit so callers
    don't accidentally demosaic the uncalibrated `load_raw` output for OSC data.

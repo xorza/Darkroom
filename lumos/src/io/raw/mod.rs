@@ -25,6 +25,7 @@ use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::io::astro_image::sensor::{SensorType, detect_sensor_type};
 use crate::io::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 use common::{CancelToken, Vec2us};
+use demosaic::DemosaicRange;
 use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use demosaic::xtrans::process_xtrans;
 use imaginarium::Buffer2;
@@ -459,6 +460,7 @@ impl UnpackedRaw {
             self.top_margin,
             self.left_margin,
             cfa_pattern,
+            DemosaicRange::Unit,
         );
 
         let demosaic_start = Instant::now();

@@ -353,6 +353,7 @@ fn bench_bayer_rcd_quality_vs_libraw() {
 #[test]
 #[ignore]
 fn bench_rcd_demosaic_core() {
+    use demosaic::DemosaicRange;
     use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 
     println!("Benchmarking RCD demosaic core (synthetic data)\n");
@@ -366,7 +367,17 @@ fn bench_rcd_demosaic_core() {
             }
         }
 
-        let bayer = BayerImage::with_margins(&data, w, h, w, h, 0, 0, CfaPattern::Rggb);
+        let bayer = BayerImage::with_margins(
+            &data,
+            w,
+            h,
+            w,
+            h,
+            0,
+            0,
+            CfaPattern::Rggb,
+            DemosaicRange::Unit,
+        );
 
         // Warmup
         let _ = demosaic_bayer(&bayer, &CancelToken::never()).unwrap();

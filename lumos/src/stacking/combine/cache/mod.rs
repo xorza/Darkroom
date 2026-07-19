@@ -276,7 +276,7 @@ impl CfaCache {
                                 // The combine reducers (median/MAD, precise sums) assume finite
                                 // inputs — NaN/Inf would silently corrupt the output (NaN-unsafe
                                 // ordering, multiply-through). No production path emits them today
-                                // (FITS load sanitizes, flat division is floored, warp border-fills 0),
+                                // (FITS load rejects them, flat division is floored, warp border-fills 0),
                                 // so this guards against a future upstream regression.
                                 debug_assert!(
                                     values.iter().all(|v| v.is_finite()),

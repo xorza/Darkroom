@@ -6,15 +6,14 @@ Updated 2026-07-19 against the current Lumos source.
 
 The review now tracks implementation status instead of preserving the original snapshot:
 
-- 8 findings completed;
-- 17 concrete findings open;
+- 12 findings completed;
+- 13 concrete findings open;
 - 1 allocation finding partially resolved;
 - 2 proposals deferred until there is a product decision or measured failure.
 
-The remaining highest-priority problem is overlapping mutable references in parallel RCD
-demosaicing. FITS normalization/null handling and calibrated demosaic clamping are the next
-scientific-correctness risks. Lower-priority work is mostly invariant enforcement and repeated
-whole-frame work.
+The remaining highest-priority work is algorithmic correctness in deblending, FWHM propagation,
+background fitting, and final RANSAC refits. Lower-priority work is mostly invariant enforcement
+and repeated whole-frame work.
 
 Scope: production code under `lumos/src`, `lumos/Cargo.toml`, production callers, and the published
 surface. Paths and symbol names are used instead of brittle line numbers.
@@ -61,37 +60,33 @@ surface. Paths and symbol names are used instead of brittle line numbers.
   validation without allocating image-sized scratch or intensity planes. Identity tests assert
   bit-exact output.
 
+- [x] **Remove overlapping mutable references from parallel RCD interpolation.**
+  `io::raw::demosaic::bayer::rcd` now keeps cross-row channel access behind
+  `concurrency::UnsafeSendPtr` without constructing full-allocation mutable slices in Rayon jobs.
+  The access phases read only completed R/B sites and write disjoint destination sites; a
+  single-thread/four-thread cross-check asserts bit-identical output, and the reduced case passes
+  Miri under tree borrows.
+
+- [x] **Preserve physical floating-point FITS values.**
+  `io::astro_image::fits` no longer derives a scale from a frame maximum and ignores `DATAMAX` for
+  float sample types because it is descriptive metadata, not a guaranteed sensor full-scale.
+  Synthetic FITS round-trips cover negative and above-unity values.
+
+- [x] **Preserve signed and above-unity calibrated samples through demosaicing.**
+  Bayer and X-Trans demosaicing now use an explicit output-range policy: direct Bayer decode keeps
+  its `[0, 1]` clamp, direct X-Trans keeps its nonnegative floor, and calibrated `CfaImage`
+  demosaicing preserves its linear range. End-to-end tests cover negative and above-unity mosaics
+  through both algorithms.
+
+- [x] **Reject FITS nulls instead of inventing zero-valued samples.**
+  Integer `BLANK` and floating non-finite samples are rejected with their total count and first
+  linear index until the image model carries a validity plane.
+
 Completed follow-up work not present in the original review: `DetectorPool` threads reusable
 detectors through parallel frame processing without thread-local state. On the 16 × 1 MP,
 8-thread benchmark, reuse reduced the median from 50.06 ms to 41.91 ms.
 
-## Batch 1 — Safety and scientific signal
-
-- [ ] **Remove overlapping mutable references from parallel RCD interpolation.**
-  `io::raw::demosaic::bayer::rcd` still constructs full-allocation mutable slices in multiple Rayon
-  row jobs. Disjoint writes do not make overlapping `&mut [f32]` values legal. Give each job a true
-  row-local mutable slice and use raw-pointer reads only for cross-row neighbours, or keep all
-  access behind `concurrency::UnsafeSendPtr`. Cross-check the parallel output against a sequential
-  reference and exercise the reduced kernel under Miri.
-
-- [ ] **Remove frame-dependent normalization of floating-point FITS data.**
-  `io::astro_image::fits::normalize_fits_pixels` still divides a floating-point frame by its own
-  maximum when `DATAMAX` is absent and the maximum exceeds 2. A cosmic ray or exposure difference
-  can therefore rescale every otherwise-identical pixel before calibration and stacking. Preserve
-  physical floating-point values by default or require an explicit frame-independent policy.
-
-- [ ] **Preserve signed and above-unity calibrated samples through demosaicing.**
-  Calibration retains the below-black noise tail, but the f32 Bayer path clamps synthesized
-  channels to `[0, 1]` and X-Trans clamps them nonnegative. Make clamping a decode policy: retain it
-  for display-oriented direct RAW loading and disable it for calibrated `CfaImage` demosaicing.
-  Cross-check both demosaicers with mosaics containing negative and greater-than-one samples.
-
-- [ ] **Stop converting FITS nulls into valid zero-valued samples.**
-  FITS `BLANK` values and non-finite nulls become NaN in `physical_f32`, then normalization rewrites
-  them to zero. Until `AstroImage` carries a validity plane, fail loading with a useful null
-  summary. A later validity-plane design can feed the existing coverage/weight pipeline.
-
-## Batch 2 — Algorithmic correctness
+## Batch 1 — Algorithmic correctness
 
 - [ ] **Remove the invalid multi-threshold deblend early exit.**
   `stacking::star_detection::deblend::multi_threshold` stops after four levels without a split,
@@ -116,7 +111,7 @@ detectors through parallel frame processing without thread-local state. On the 1
   Retain the saved model unless the refit is finite, valid, physically plausible, sufficiently
   supported, and non-worse under the same scorer.
 
-## Batch 3 — Enforce public invariants
+## Batch 2 — Enforce public invariants
 
 - [ ] **Make transform model and matrix representation a single invariant.**
   `Transform.matrix` and `transform_type` remain independently public, and `from_matrix` accepts
@@ -146,7 +141,7 @@ detectors through parallel frame processing without thread-local state. On the 1
   semantics before entering those kernels. Test every kernel at the boundary and assert finite
   image, coverage, weight, and variance planes.
 
-## Batch 4 — Remaining repeated work and allocations
+## Batch 3 — Remaining repeated work and allocations
 
 - [ ] **Partially resolved — bound masked background-mesh sampling.**
   `MeshWorkspace` now retains tile, median-filter, spline, and per-job scratch, and the unmasked
@@ -161,7 +156,7 @@ detectors through parallel frame processing without thread-local state. On the 1
   construction and defect detection so each light performs only division. Validate bit-identical
   calibration and benchmark a representative 30-light set.
 
-## Batch 5 — API decisions with concrete inconsistencies
+## Batch 4 — API decisions with concrete inconsistencies
 
 - [ ] **Collapse `RegistrationResult`'s parallel mutable state.**
   Matches, residuals, RMS, maximum error, and inlier count remain independently public, and `new`

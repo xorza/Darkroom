@@ -4,10 +4,28 @@
 //! - Bayer CFA patterns (RGGB, BGGR, GRBG, GBRG)
 //! - X-Trans 6x6 patterns (Fujifilm sensors)
 //!
-//! Re-exports the main types and functions from the submodules.
+//! The Bayer and X-Trans kernels share an explicit output-range policy.
 
 pub(crate) mod bayer;
 pub(crate) mod xtrans;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DemosaicRange {
+    Unit,
+    NonNegative,
+    Preserve,
+}
+
+impl DemosaicRange {
+    #[inline(always)]
+    pub(crate) fn apply(self, value: f32) -> f32 {
+        match self {
+            Self::Unit => value.clamp(0.0, 1.0),
+            Self::NonNegative => value.max(0.0),
+            Self::Preserve => value,
+        }
+    }
+}
 
 /// Returned by a demosaic kernel when it observes the cancel token set
 /// between stages. A marker only — the partial buffers are dropped; the caller
@@ -30,4 +48,27 @@ pub(crate) fn interleave_planes(planes: [Vec<f32>; 3]) -> Vec<f32> {
         out[i * 3 + 2] = bv;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::io::raw::demosaic::DemosaicRange;
+
+    #[test]
+    fn output_range_policies_are_distinct() {
+        let values = [-0.25, 0.5, 1.25];
+
+        assert_eq!(
+            values.map(|value| DemosaicRange::Unit.apply(value)),
+            [0.0, 0.5, 1.0]
+        );
+        assert_eq!(
+            values.map(|value| DemosaicRange::NonNegative.apply(value)),
+            [0.0, 0.5, 1.25]
+        );
+        assert_eq!(
+            values.map(|value| DemosaicRange::Preserve.apply(value)),
+            values
+        );
+    }
 }

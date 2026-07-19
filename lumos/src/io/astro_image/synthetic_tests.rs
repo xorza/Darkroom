@@ -2,14 +2,15 @@
 //!
 //! `fits-well` ships a `FitsWriter`, so a synthetic FITS can be written and read back through the
 //! real `load_fits` path — exercising BitPix selection, the unsigned-via-BZERO convention, the
-//! `[0,1]` normalization, and NaN/Inf sanitization. The demosaic path is exercised by building a
-//! Bayer mosaic from a known colour and demosaicing it back.
+//! integer normalization, physical float preservation, and null rejection. The demosaic path is
+//! exercised by building mosaics from known colours and demosaicing them back.
 
 use std::fs::File;
 
 use crate::io::astro_image::error::ImageError;
 use crate::io::astro_image::fits::load_fits;
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::demosaic::xtrans::test_support::test_pattern_array;
 use crate::testing::make_cfa;
 use crate::{AstroImage, CfaType};
 use common::CancelToken;
@@ -18,12 +19,12 @@ use fits_well::image::Image;
 use fits_well::{FitsError, FitsWriter};
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `load_fits`.
-fn write_and_load(name: &str, image: &Image) -> AstroImage {
+fn write_and_load(name: &str, image: &Image) -> Result<AstroImage, ImageError> {
     let path = common::test_utils::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_image(image).unwrap();
     writer.into_inner().sync_all().unwrap();
-    load_fits(&path).unwrap()
+    load_fits(&path)
 }
 
 fn write_header_and_load(name: &str, header: &Header) -> Result<AstroImage, ImageError> {
@@ -70,9 +71,9 @@ fn fits_metadata_errors_survive_the_lumos_loader() {
 #[test]
 fn fits_float32_round_trips_pixels_and_order() {
     let (w, h) = (32usize, 24usize);
-    // Horizontal gradient in [0,1] — asymmetric, so a transposed read-back would be caught.
+    // The asymmetric physical scale catches both transposition and accidental frame-max scaling.
     let pixels: Vec<f32> = (0..h)
-        .flat_map(|_| (0..w).map(|x| x as f32 / (w - 1) as f32))
+        .flat_map(|y| (0..w).map(move |x| -12.0 + y as f32 * 3.0 + x as f32 * 0.25))
         .collect();
     let image = Image::new(
         vec![w, h], // fits-well is NAXIS1-first: [width, height]
@@ -80,13 +81,11 @@ fn fits_float32_round_trips_pixels_and_order() {
     )
     .unwrap();
 
-    let loaded = write_and_load("float32", &image);
+    let loaded = write_and_load("float32", &image).unwrap();
     assert_eq!(loaded.width(), w);
     assert_eq!(loaded.height(), h);
     assert_eq!(loaded.channels(), 1);
-    for (a, b) in loaded.channel(0).pixels().iter().zip(&pixels) {
-        assert!((a - b).abs() < 1e-6, "pixel mismatch {a} vs {b}");
-    }
+    assert_eq!(loaded.channel(0).pixels(), pixels);
 }
 
 #[test]
@@ -96,7 +95,7 @@ fn fits_unsigned16_round_trips_via_bzero_and_normalizes() {
     let raw = [0u16, 16384, 32768, 49152, 65535];
     let image = Image::from_u16(vec![w, h], &raw).unwrap();
 
-    let loaded = write_and_load("uint16", &image);
+    let loaded = write_and_load("uint16", &image).unwrap();
     let expected: Vec<f32> = raw.iter().map(|&v| v as f32 / 65535.0).collect();
     for (a, b) in loaded.channel(0).pixels().iter().zip(&expected) {
         assert!((a - b).abs() < 1e-4, "normalized pixel {a} vs {b}");
@@ -104,7 +103,7 @@ fn fits_unsigned16_round_trips_via_bzero_and_normalizes() {
 }
 
 #[test]
-fn fits_sanitizes_nan_and_inf() {
+fn fits_rejects_nan_and_inf_with_summary() {
     let (w, h) = (4usize, 4usize);
     let mut pixels = vec![0.3f32; w * h];
     pixels[0] = f32::NAN;
@@ -112,18 +111,11 @@ fn fits_sanitizes_nan_and_inf() {
     pixels[10] = f32::NEG_INFINITY;
     let image = Image::new(vec![w, h], pixels).unwrap();
 
-    let loaded = write_and_load("nan_inf", &image);
-    let px = loaded.channel(0).pixels();
-    // Nothing non-finite survives, and each injected site is replaced by exactly 0 …
-    assert!(
-        px.iter().all(|v| v.is_finite()),
-        "load must sanitize NaN/Inf"
-    );
-    assert_eq!(px[0], 0.0, "NaN → 0");
-    assert_eq!(px[5], 0.0, "+Inf → 0");
-    assert_eq!(px[10], 0.0, "-Inf → 0");
-    // … while a valid neighbour passes through untouched (max valid 0.3 < 2.0 → no rescale).
-    assert_eq!(px[1], 0.3, "valid pixel must be preserved");
+    assert!(matches!(
+        write_and_load("nan_inf", &image),
+        Err(ImageError::FitsUnsupported { reason, .. })
+            if reason == "image contains 3 null/non-finite pixels; first at linear index 0"
+    ));
 }
 
 #[test]
@@ -173,5 +165,40 @@ fn demosaic_uniform_bayer_recovers_colour() {
             median_dev < 0.01,
             "the typical interior pixel should match {true_c}, median deviation {median_dev}"
         );
+    }
+}
+
+#[test]
+fn calibrated_demosaic_preserves_out_of_range_samples() {
+    let (w, h) = (48usize, 48usize);
+
+    for cfa in [
+        CfaType::Bayer(CfaPattern::Rggb),
+        CfaType::XTrans(test_pattern_array()),
+    ] {
+        for expected in [-0.25f32, 1.25] {
+            let image = make_cfa(w, h, vec![expected; w * h], cfa.clone())
+                .demosaic(&CancelToken::never())
+                .unwrap();
+
+            for channel in 0..3 {
+                let pixels = image.channel(channel).pixels();
+                assert!(pixels.iter().all(|sample| sample.is_finite()));
+                for y in 8..h - 8 {
+                    for x in 8..w - 8 {
+                        let actual = pixels[y * w + x];
+                        let preserved = if expected < 0.0 {
+                            actual < 0.0
+                        } else {
+                            actual > 1.0
+                        };
+                        assert!(
+                            preserved,
+                            "{cfa:?} channel {channel} at ({x},{y}) clipped {expected} to {actual}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

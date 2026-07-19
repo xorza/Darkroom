@@ -650,7 +650,7 @@ fn interpolate_missing_color_fast(
             (Some((v, _)), None) | (None, Some((v, _))) => v,
             (None, None) => green_center,
         };
-        return val.max(0.0);
+        return xtrans.output_value(val);
     }
 
     // Slow path: full bounds checking for border pixels.
@@ -734,7 +734,7 @@ fn interpolate_missing_color_fast(
         (None, None) => green_center,
     };
 
-    val.max(0.0)
+    xtrans.output_value(val)
 }
 
 /// Build homogeneity maps from per-direction derivatives.
@@ -938,9 +938,9 @@ pub(crate) fn blend_final(
 
                 if count > 0 {
                     let inv = 1.0 / count as f32;
-                    r_row[x] = (avg_r * inv).max(0.0);
-                    g_row[x] = (avg_g * inv).max(0.0);
-                    b_row[x] = (avg_b * inv).max(0.0);
+                    r_row[x] = xtrans.output_value(avg_r * inv);
+                    g_row[x] = xtrans.output_value(avg_g * inv);
+                    b_row[x] = xtrans.output_value(avg_b * inv);
                 } else {
                     r_row[x] = 0.0;
                     g_row[x] = 0.0;

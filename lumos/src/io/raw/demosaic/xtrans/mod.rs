@@ -18,7 +18,7 @@ use std::time::Instant;
 use common::CancelToken;
 use markesteijn::demosaic_xtrans_markesteijn;
 
-use crate::io::raw::demosaic::Cancelled;
+use crate::io::raw::demosaic::{Cancelled, DemosaicRange};
 
 /// Process X-Trans sensor data and demosaic to RGB.
 ///
@@ -72,9 +72,8 @@ pub(crate) fn process_xtrans(
     rgb_pixels
 }
 
-/// Process pre-normalized f32 X-Trans data and demosaic to RGB.
+/// Process calibrated f32 X-Trans data and demosaic to RGB.
 ///
-/// Takes f32 data already in [0,1] range (e.g., from CfaImage after calibration).
 /// Avoids the lossy f32->u16->f32 roundtrip of converting to u16 for `process_xtrans`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn process_xtrans_f32(
@@ -149,7 +148,7 @@ impl XTransPattern {
     }
 }
 
-/// Pixel data source: either raw u16 sensor values or pre-normalized f32.
+/// Pixel data source: either raw u16 sensor values or calibrated f32.
 ///
 /// The u16 path is used by the raw loader (saves ~47 MB by deferring normalization).
 /// The f32 path is used by CfaImage after calibration (avoids lossy f32->u16 roundtrip).
@@ -162,10 +161,10 @@ pub(crate) enum PixelSource<'a> {
 /// Raw X-Trans image data with metadata needed for demosaicing.
 ///
 /// Supports both raw u16 sensor data (with on-the-fly normalization) and
-/// pre-normalized f32 data (identity passthrough).
+/// calibrated f32 data (identity passthrough).
 #[derive(Debug)]
 pub(crate) struct XTransImage<'a> {
-    /// Pixel data (u16 raw sensor values or pre-normalized f32)
+    /// Pixel data (u16 raw sensor values or calibrated f32)
     pub(crate) data: PixelSource<'a>,
     /// Width of the raw data buffer
     pub(crate) raw_width: usize,
@@ -187,6 +186,7 @@ pub(crate) struct XTransImage<'a> {
     inv_range: f32,
     /// Per-channel white balance multipliers [R=0, G=1, B=2] for u16 path.
     wb_mul: [f32; 3],
+    output_range: DemosaicRange,
 }
 
 impl<'a> XTransImage<'a> {
@@ -272,10 +272,11 @@ impl<'a> XTransImage<'a> {
             channel_black,
             inv_range,
             wb_mul,
+            output_range: DemosaicRange::NonNegative,
         }
     }
 
-    /// Create from pre-normalized f32 data (already in [0,1] range).
+    /// Create from calibrated f32 data, including negative and above-unity samples.
     ///
     /// Used by CfaImage after calibration to avoid lossy f32->u16->f32 roundtrip.
     #[allow(clippy::too_many_arguments)]
@@ -310,13 +311,14 @@ impl<'a> XTransImage<'a> {
             channel_black: [0.0; 3],
             inv_range: 1.0,
             wb_mul: [1.0; 3],
+            output_range: DemosaicRange::Preserve,
         }
     }
 
     /// Read a pixel and return its normalized, white-balanced value.
     ///
     /// For u16 data: per-channel black subtraction, normalization, and WB multiplication.
-    /// For f32 data: returns value directly (already normalized and WB'd).
+    /// For f32 data: returns the calibrated value directly.
     #[inline(always)]
     pub(crate) fn read_normalized(&self, raw_y: usize, raw_x: usize) -> f32 {
         let idx = raw_y * self.raw_width + raw_x;
@@ -329,6 +331,11 @@ impl<'a> XTransImage<'a> {
             }
             PixelSource::F32(data) => data[idx],
         }
+    }
+
+    #[inline(always)]
+    pub(crate) fn output_value(&self, value: f32) -> f32 {
+        self.output_range.apply(value)
     }
 }
 
