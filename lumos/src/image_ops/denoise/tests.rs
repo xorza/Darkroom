@@ -232,6 +232,7 @@ fn validate_rejects_nonpositive_k() {
     let mut img = gray(4, 4, vec![0.0; 16]);
     let err = Denoise {
         k: 0.0,
+        strength: 0.0,
         ..Default::default()
     }
     .apply(&mut img)
@@ -250,7 +251,12 @@ fn rejects_non_f32_master() {
         vec![0u8; 4 * 4 * 3],
     )
     .unwrap();
-    let err = Denoise::default().apply(&mut img).unwrap_err();
+    let err = Denoise {
+        strength: 0.0,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap_err();
     assert!(
         matches!(err, OpError::UnsupportedFormat(ColorFormat::RGB_U8)),
         "expected UnsupportedFormat(RGB_U8), got {err:?}"

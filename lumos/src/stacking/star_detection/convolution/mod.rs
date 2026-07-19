@@ -17,12 +17,18 @@ mod tests;
 
 use rayon::prelude::*;
 
+use crate::math::fwhm_to_sigma;
 use imaginarium::Buffer2;
 
 /// Maximum deviation of axis_ratio from 1.0 to use the faster separable
 /// (circular) kernel path instead of full 2D elliptical convolution.
 const CIRCULAR_KERNEL_THRESHOLD: f32 = 0.01;
-use crate::math::fwhm_to_sigma;
+
+#[derive(Debug)]
+struct GaussianKernel2d {
+    weights: Vec<f32>,
+    size: usize,
+}
 
 /// Scratch buffers for [`matched_filter`]. All three must have the same
 /// dimensions as the input image.
@@ -96,16 +102,10 @@ pub(crate) fn matched_filter(
     // For separable kernel: sum_2d(K^2) = sum_1d(K^2)^2
     // axis_ratio close to 1.0 → circular kernel; use faster separable path
     let noise_norm = if (axis_ratio - 1.0).abs() < CIRCULAR_KERNEL_THRESHOLD {
-        let kernel_1d = gaussian_kernel_1d(sigma);
-        let sum_k_sq: f32 = kernel_1d.iter().map(|&k| k * k).sum();
-        (sum_k_sq * sum_k_sq).sqrt()
+        gaussian_convolve(subtraction_scratch, sigma, output, temp)
     } else {
-        let (kernel_2d, _) = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
-        let sum_k_sq: f32 = kernel_2d.iter().map(|&k| k * k).sum();
-        sum_k_sq.sqrt()
+        elliptical_gaussian_convolve(subtraction_scratch, sigma, axis_ratio, angle, output, temp)
     };
-
-    elliptical_gaussian_convolve(subtraction_scratch, sigma, axis_ratio, angle, output, temp);
 
     // Normalize output so noise matches original noise map.
     // After convolution: conv_noise = orig_noise * sqrt(sum(K^2))
@@ -122,34 +122,45 @@ pub(crate) fn matched_filter(
 ///
 /// Uses separable convolution: first convolve rows, then columns.
 /// This is O(n×k) instead of O(n×k²) for a 2D convolution.
+/// Returns `sqrt(sum(K²))` for the equivalent normalized 2D kernel.
 pub(crate) fn gaussian_convolve(
     pixels: &Buffer2<f32>,
     sigma: f32,
     output: &mut Buffer2<f32>,
     temp: &mut Buffer2<f32>,
-) {
+) -> f32 {
     assert!(sigma > 0.0, "Sigma must be positive");
     assert_eq!(pixels.width(), output.width());
     assert_eq!(pixels.height(), output.height());
     assert_eq!(pixels.width(), temp.width());
     assert_eq!(pixels.height(), temp.height());
 
+    let kernel = gaussian_kernel_1d(sigma);
+    gaussian_convolve_with_kernel(pixels, &kernel, output, temp);
+    kernel.iter().map(|&weight| weight * weight).sum()
+}
+
+fn gaussian_convolve_with_kernel(
+    pixels: &Buffer2<f32>,
+    kernel: &[f32],
+    output: &mut Buffer2<f32>,
+    temp: &mut Buffer2<f32>,
+) {
     let width = pixels.width();
     let height = pixels.height();
-    let kernel = gaussian_kernel_1d(sigma);
     let radius = kernel.len() / 2;
 
     // If kernel is larger than image dimension, fall back to direct 2D convolution
     if radius >= width.min(height) / 2 {
-        gaussian_convolve_2d_direct(pixels, sigma, output);
+        gaussian_convolve_2d_direct(pixels, kernel, output);
         return;
     }
 
     // Step 1: Convolve rows (horizontal pass)
-    convolve_rows_parallel(pixels, temp, &kernel);
+    convolve_rows_parallel(pixels, temp, kernel);
 
     // Step 2: Convolve columns (vertical pass)
-    convolve_cols(temp, output, &kernel);
+    convolve_cols(temp, output, kernel);
 }
 
 /// Apply elliptical Gaussian convolution to an image.
@@ -157,6 +168,7 @@ pub(crate) fn gaussian_convolve(
 /// Unlike separable convolution for circular Gaussians, elliptical Gaussians
 /// require full 2D convolution which is O(n×k²). This is used when the PSF
 /// is known to be non-circular.
+/// Returns `sqrt(sum(K²))` for the normalized 2D kernel.
 pub(crate) fn elliptical_gaussian_convolve(
     pixels: &Buffer2<f32>,
     sigma: f32,
@@ -164,7 +176,7 @@ pub(crate) fn elliptical_gaussian_convolve(
     angle: f32,
     output: &mut Buffer2<f32>,
     temp: &mut Buffer2<f32>,
-) {
+) -> f32 {
     let width = pixels.width();
     let height = pixels.height();
     assert_eq!(width, output.width());
@@ -172,12 +184,23 @@ pub(crate) fn elliptical_gaussian_convolve(
 
     // For axis_ratio very close to 1.0, use faster separable convolution
     if (axis_ratio - 1.0).abs() < CIRCULAR_KERNEL_THRESHOLD {
-        gaussian_convolve(pixels, sigma, output, temp);
-        return;
+        return gaussian_convolve(pixels, sigma, output, temp);
     }
 
-    let (kernel, ksize) = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
-    let radius = ksize / 2;
+    let kernel = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
+    convolve_2d(pixels, &kernel, output);
+    kernel
+        .weights
+        .iter()
+        .map(|&weight| weight * weight)
+        .sum::<f32>()
+        .sqrt()
+}
+
+fn convolve_2d(pixels: &Buffer2<f32>, kernel: &GaussianKernel2d, output: &mut Buffer2<f32>) {
+    let width = pixels.width();
+    let height = pixels.height();
+    let radius = kernel.size / 2;
 
     // Parallel SIMD 2D convolution - process rows in parallel
     output
@@ -191,8 +214,8 @@ pub(crate) fn elliptical_gaussian_convolve(
                 width,
                 height,
                 y,
-                &kernel,
-                ksize,
+                &kernel.weights,
+                kernel.size,
                 radius,
             );
         });
@@ -258,10 +281,13 @@ pub(crate) fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, ker
 }
 
 /// Direct 2D Gaussian convolution for small images or large kernels.
-fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32, output: &mut Buffer2<f32>) {
+fn gaussian_convolve_2d_direct(
+    pixels: &Buffer2<f32>,
+    kernel_1d: &[f32],
+    output: &mut Buffer2<f32>,
+) {
     let width = pixels.width();
     let height = pixels.height();
-    let kernel_1d = gaussian_kernel_1d(sigma);
     let radius = kernel_1d.len() / 2;
 
     // Build 2D kernel
@@ -299,7 +325,7 @@ fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32, output: &mut B
 }
 
 /// Compute 2D elliptical Gaussian kernel (normalized to sum to 1.0).
-fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> (Vec<f32>, usize) {
+fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> GaussianKernel2d {
     assert!(sigma > 0.0, "Sigma must be positive");
     assert!(
         axis_ratio > 0.0 && axis_ratio <= 1.0,
@@ -342,5 +368,8 @@ fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> (Ve
         *v /= sum;
     }
 
-    (kernel, size)
+    GaussianKernel2d {
+        weights: kernel,
+        size,
+    }
 }

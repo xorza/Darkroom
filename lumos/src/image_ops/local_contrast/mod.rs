@@ -72,6 +72,9 @@ impl LocalContrast {
     pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
         self.validate()?;
         require_f32_master(image)?;
+        if self.strength == 0.0 {
+            return Ok(());
+        }
         remap_intensity(image, |intensity| clahe_map(intensity, self));
         Ok(())
     }

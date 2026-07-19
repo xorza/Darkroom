@@ -126,6 +126,7 @@ fn rejects_clip_limit_below_one() {
     let mut img = gray(8, 8, vec![0.5; 64]);
     let err = LocalContrast {
         clip_limit: 0.5,
+        strength: 0.0,
         ..Default::default()
     }
     .apply(&mut img)

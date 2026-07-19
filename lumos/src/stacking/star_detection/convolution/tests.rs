@@ -499,45 +499,45 @@ fn test_matched_filter_noise_normalization() {
     let mut scratch = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
 
-    let fwhm = 4.0;
-    matched_filter(
-        &pixels,
-        &background,
-        fwhm,
-        1.0,
-        0.0,
-        &mut MatchedFilterBuffers {
-            output: &mut result,
-            subtraction_scratch: &mut scratch,
-            temp: &mut temp,
-        },
-    );
+    for axis_ratio in [1.0, 0.7] {
+        matched_filter(
+            &pixels,
+            &background,
+            4.0,
+            axis_ratio,
+            0.5,
+            &mut MatchedFilterBuffers {
+                output: &mut result,
+                subtraction_scratch: &mut scratch,
+                temp: &mut temp,
+            },
+        );
 
-    // Compute standard deviation of output (excluding border region affected by mirror)
-    let margin = 10;
-    let mut sum = 0.0f64;
-    let mut sum_sq = 0.0f64;
-    let mut count = 0usize;
-    for y in margin..height - margin {
-        for x in margin..width - margin {
-            let v = result.row(y)[x] as f64;
-            sum += v;
-            sum_sq += v * v;
-            count += 1;
+        // Exclude the border region affected by mirror sampling.
+        let margin = 10;
+        let mut sum = 0.0f64;
+        let mut sum_sq = 0.0f64;
+        let mut count = 0usize;
+        for y in margin..height - margin {
+            for x in margin..width - margin {
+                let v = result.row(y)[x] as f64;
+                sum += v;
+                sum_sq += v * v;
+                count += 1;
+            }
         }
-    }
-    let mean = sum / count as f64;
-    let variance = sum_sq / count as f64 - mean * mean;
-    let output_sigma = variance.sqrt();
+        let mean = sum / count as f64;
+        let variance = sum_sq / count as f64 - mean * mean;
+        let output_sigma = variance.sqrt();
 
-    // After normalization, output noise should be close to input noise.
-    // Allow 30% tolerance for finite-sample and boundary effects.
-    let ratio = output_sigma / noise_sigma as f64;
-    assert!(
-        (0.7..1.3).contains(&ratio),
-        "Output noise should match input noise after normalization. \
-         ratio={ratio:.3}, output_sigma={output_sigma:.2}, input_sigma={noise_sigma}"
-    );
+        // Allow 30% tolerance for finite-sample and boundary effects.
+        let ratio = output_sigma / noise_sigma as f64;
+        assert!(
+            (0.7..1.3).contains(&ratio),
+            "axis_ratio={axis_ratio}: output noise should match input noise after normalization; \
+             ratio={ratio:.3}, output_sigma={output_sigma:.2}, input_sigma={noise_sigma}"
+        );
+    }
 }
 
 #[test]
@@ -558,7 +558,8 @@ fn test_separable_vs_direct_equivalence() {
     let mut result_direct = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     gaussian_convolve(&pixels, sigma, &mut result_sep, &mut temp);
-    gaussian_convolve_2d_direct(&pixels, sigma, &mut result_direct);
+    let kernel = gaussian_kernel_1d(sigma);
+    gaussian_convolve_2d_direct(&pixels, &kernel, &mut result_direct);
 
     for (i, (&a, &b)) in result_sep.iter().zip(result_direct.iter()).enumerate() {
         assert!(
@@ -591,8 +592,8 @@ fn test_elliptical_kernel_normalization() {
     for sigma in [1.0, 2.0, 3.0] {
         for axis_ratio in [0.3, 0.5, 0.7, 1.0] {
             for angle in [0.0, 0.5, 1.0, 1.57] {
-                let (kernel, _ksize) = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
-                let sum: f32 = kernel.iter().sum();
+                let kernel = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
+                let sum: f32 = kernel.weights.iter().sum();
                 assert!(
                     (sum - 1.0).abs() < 1e-5,
                     "Elliptical kernel should sum to 1.0, got {} for sigma={}, axis_ratio={}, angle={}",
@@ -608,16 +609,16 @@ fn test_elliptical_kernel_normalization() {
 
 #[test]
 fn test_elliptical_kernel_symmetry_at_zero_angle() {
-    let (kernel, ksize) = elliptical_gaussian_kernel_2d(2.0, 0.5, 0.0);
+    let kernel = elliptical_gaussian_kernel_2d(2.0, 0.5, 0.0);
 
     // At angle=0, kernel should be symmetric about both axes
-    let center = ksize / 2;
+    let center = kernel.size / 2;
     for dy in 0..=center {
         for dx in 0..=center {
-            let v1 = kernel[(center + dy) * ksize + (center + dx)];
-            let v2 = kernel[(center - dy) * ksize + (center + dx)];
-            let v3 = kernel[(center + dy) * ksize + (center - dx)];
-            let v4 = kernel[(center - dy) * ksize + (center - dx)];
+            let v1 = kernel.weights[(center + dy) * kernel.size + (center + dx)];
+            let v2 = kernel.weights[(center - dy) * kernel.size + (center + dx)];
+            let v3 = kernel.weights[(center + dy) * kernel.size + (center - dx)];
+            let v4 = kernel.weights[(center - dy) * kernel.size + (center - dx)];
 
             assert!(
                 (v1 - v2).abs() < 1e-6 && (v1 - v3).abs() < 1e-6 && (v1 - v4).abs() < 1e-6,
@@ -630,14 +631,14 @@ fn test_elliptical_kernel_symmetry_at_zero_angle() {
 #[test]
 fn test_elliptical_kernel_elongation() {
     // With axis_ratio < 1, kernel should be elongated along major axis
-    let (kernel, ksize) = elliptical_gaussian_kernel_2d(2.0, 0.3, 0.0);
-    let center = ksize / 2;
+    let kernel = elliptical_gaussian_kernel_2d(2.0, 0.3, 0.0);
+    let center = kernel.size / 2;
 
     // At angle=0, major axis is horizontal (x), minor axis is vertical (y)
     // Check that horizontal extent > vertical extent at same distance from center
     let dist = 2;
-    let horizontal_val = kernel[center * ksize + (center + dist)];
-    let vertical_val = kernel[(center + dist) * ksize + center];
+    let horizontal_val = kernel.weights[center * kernel.size + (center + dist)];
+    let vertical_val = kernel.weights[(center + dist) * kernel.size + center];
 
     assert!(
         horizontal_val > vertical_val,

@@ -122,6 +122,9 @@ impl Denoise {
     pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
         self.validate()?;
         require_f32_master(image)?;
+        if self.strength == 0.0 {
+            return Ok(());
+        }
         let (width, height) = (image.desc.width, image.desc.height);
         let scales = self.scales.min(max_scales(width, height));
         let mut scratch = DenoiseScratch::new(width, height);

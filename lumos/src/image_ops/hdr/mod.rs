@@ -62,6 +62,9 @@ impl Hdr {
     pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
         self.validate()?;
         require_f32_master(image)?;
+        if self.amount == 0.0 {
+            return Ok(());
+        }
         remap_intensity(image, |intensity| hdr_map(intensity, self));
         Ok(())
     }

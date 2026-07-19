@@ -28,9 +28,11 @@ fn hdr_amount_zero_is_identity() {
     }
     .apply(&mut img)
     .unwrap();
-    for (a, b) in channel(&img, 0).to_vec().iter().zip(&px) {
-        assert!((a - b).abs() < 1e-4, "amount 0 is the identity: {a} vs {b}");
-    }
+    assert_eq!(
+        channel(&img, 0).to_vec(),
+        px,
+        "amount 0 leaves the image untouched"
+    );
 }
 
 #[test]
@@ -162,7 +164,7 @@ fn hdr_output_stays_in_range() {
 }
 
 #[test]
-fn rejects_out_of_range_amount() {
+fn rejects_invalid_config_before_zero_amount_shortcut() {
     let mut img = gray(8, 8, vec![0.5; 64]);
     let err = Hdr {
         scales: 6,
@@ -173,5 +175,16 @@ fn rejects_out_of_range_amount() {
     assert!(
         matches!(&err, OpError::InvalidConfig(m) if m.contains("amount must be in")),
         "expected an InvalidConfig amount error, got {err:?}"
+    );
+
+    let err = Hdr {
+        scales: 0,
+        amount: 0.0,
+    }
+    .apply(&mut img)
+    .unwrap_err();
+    assert!(
+        matches!(&err, OpError::InvalidConfig(m) if m.contains("scales must be")),
+        "expected an InvalidConfig scales error, got {err:?}"
     );
 }
