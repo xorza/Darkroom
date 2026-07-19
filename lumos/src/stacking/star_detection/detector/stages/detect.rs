@@ -3,11 +3,9 @@
 //! Combines matched filtering (optional), thresholding, connected component
 //! labeling, and deblending into a single stage that returns detected regions.
 
-use std::collections::HashMap;
-
+use parking_lot::Mutex;
 use rayon::prelude::*;
 
-use crate::math::rect::URect;
 use common::Vec2us;
 use imaginarium::Buffer2;
 
@@ -274,55 +272,79 @@ fn extract_candidates(
 /// Collect component metadata (bounding boxes and areas) from label map.
 fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
     let num_labels = label_map.num_labels();
+    let height = label_map.height();
+    let max_jobs = (rayon::current_num_threads()).min(height).max(1);
+    let num_jobs = dense_component_jobs(num_labels, label_map.labels().len(), max_jobs);
+    collect_component_data_dense(label_map, num_jobs)
+}
+
+fn dense_component_jobs(num_labels: usize, pixel_count: usize, max_jobs: usize) -> usize {
+    let bytes_per_job = num_labels.saturating_mul(std::mem::size_of::<ComponentData>());
+    if bytes_per_job == 0 {
+        return max_jobs;
+    }
+    let scratch_budget = pixel_count.saturating_mul(std::mem::size_of::<u32>());
+    (scratch_budget / bytes_per_job).clamp(1, max_jobs)
+}
+
+fn collect_component_data_dense(label_map: &LabelMap, num_jobs: usize) -> Vec<ComponentData> {
+    let num_labels = label_map.num_labels();
     let labels = label_map.labels();
     let width = label_map.width();
     let height = label_map.height();
+    if num_jobs == 1 {
+        let mut result = vec![ComponentData::default(); num_labels];
+        accumulate_component_rows(labels, width, 0, height, &mut result, |_| {});
+        return result;
+    }
 
-    // Calculate optimal number of jobs for parallel processing
-    let num_jobs = (rayon::current_num_threads()).min(height).max(1);
     let rows_per_job = height.div_ceil(num_jobs);
+    let result = Mutex::new(vec![ComponentData::default(); num_labels]);
 
-    let partial = (0..num_jobs)
-        .into_par_iter()
-        .map(|job_idx| {
-            let start_row = job_idx * rows_per_job;
-            let end_row = (start_row + rows_per_job).min(height);
-            let mut local = HashMap::new();
+    (0..num_jobs).into_par_iter().for_each(|job_idx| {
+        let start_row = job_idx * rows_per_job;
+        let end_row = (start_row + rows_per_job).min(height);
+        let mut local = vec![ComponentData::default(); num_labels];
+        let mut touched = Vec::with_capacity(num_labels.min(1024));
 
-            for y in start_row..end_row {
-                let row_start = y * width;
-                for x in 0..width {
-                    let label = labels[row_start + x];
-                    if label == 0 {
-                        continue;
-                    }
-                    let data = local.entry(label).or_insert_with(|| ComponentData {
-                        bbox: URect::empty(),
-                        label,
-                        area: 0,
-                    });
-                    data.bbox.include(Vec2us::new(x, y));
-                    data.area += 1;
-                }
-            }
-            local
-        })
-        .reduce(HashMap::new, |mut left, mut right| {
-            if left.len() < right.len() {
-                std::mem::swap(&mut left, &mut right);
-            }
-            for (label, partial_comp) in right {
-                let data = left.entry(label).or_default();
-                merge_component_data(data, partial_comp);
-            }
-            left
+        accumulate_component_rows(labels, width, start_row, end_row, &mut local, |index| {
+            touched.push(index)
         });
 
-    let mut result = vec![ComponentData::default(); num_labels];
-    for (label, partial_comp) in partial {
-        merge_component_data(&mut result[(label - 1) as usize], partial_comp);
+        let mut result = result.lock();
+        for index in touched {
+            merge_component_data(&mut result[index], local[index]);
+        }
+    });
+
+    result.into_inner()
+}
+
+fn accumulate_component_rows(
+    labels: &[u32],
+    width: usize,
+    start_row: usize,
+    end_row: usize,
+    data: &mut [ComponentData],
+    mut first_seen: impl FnMut(usize),
+) {
+    for y in start_row..end_row {
+        let row_start = y * width;
+        for x in 0..width {
+            let label = labels[row_start + x];
+            if label == 0 {
+                continue;
+            }
+            let index = (label - 1) as usize;
+            let component = &mut data[index];
+            if component.area == 0 {
+                component.label = label;
+                first_seen(index);
+            }
+            component.bbox.include(Vec2us::new(x, y));
+            component.area += 1;
+        }
     }
-    result
 }
 
 fn merge_component_data(target: &mut ComponentData, source: ComponentData) {
@@ -333,6 +355,7 @@ fn merge_component_data(target: &mut ComponentData, source: ComponentData) {
 
 #[cfg(test)]
 mod tests {
+    use crate::math::rect::URect;
     use crate::stacking::star_detection::detector::stages::detect::*;
     use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
 
@@ -412,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn component_collection_merges_sparse_cross_job_metadata_exactly() {
+    fn component_collection_merges_cross_job_metadata_exactly() {
         let width = 5;
         let height = 6;
         let mut labels = Buffer2::new_filled(width, height, 0u32);
@@ -429,6 +452,8 @@ mod tests {
         let label_map = label_map_from_raw(labels, 3);
 
         let components = collect_component_data(&label_map);
+        let parallel = collect_component_data_dense(&label_map, 3);
+        let sequential = collect_component_data_dense(&label_map, 1);
 
         assert_eq!(components.len(), 3);
         assert_eq!(components[0].label, 1);
@@ -448,6 +473,25 @@ mod tests {
         assert_eq!(
             components[2].bbox,
             URect::new(Vec2us::new(2, 5), Vec2us::new(3, 6))
+        );
+        for alternative in [parallel, sequential] {
+            assert_eq!(alternative.len(), components.len());
+            for (actual, expected) in alternative.iter().zip(&components) {
+                assert_eq!(actual.label, expected.label);
+                assert_eq!(actual.area, expected.area);
+                assert_eq!(actual.bbox, expected.bbox);
+            }
+        }
+
+        assert_eq!(
+            dense_component_jobs(100_000, 2048 * 2048, 8),
+            3,
+            "three 4.8 MB dense jobs fit in one 16 MiB label plane"
+        );
+        assert_eq!(
+            dense_component_jobs(2048 * 2048, 2048 * 2048, 8),
+            1,
+            "an oversized dense scratch falls back to the scratch-free sequential scan"
         );
     }
 
@@ -474,5 +518,16 @@ mod tests {
                  region must be filtered out"
             );
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::stacking::star_detection::deblend::ComponentData;
+    use crate::stacking::star_detection::detector::stages::detect::collect_component_data;
+    use crate::stacking::star_detection::labeling::LabelMap;
+
+    pub(crate) fn collect_components(label_map: &LabelMap) -> Vec<ComponentData> {
+        collect_component_data(label_map)
     }
 }

@@ -6,9 +6,12 @@
 
 pub(crate) mod align;
 pub(crate) mod config;
+pub(crate) mod detector_pool;
 pub(crate) mod result;
 pub(crate) mod streaming;
 
+#[cfg(test)]
+mod bench;
 #[cfg(test)]
 mod mem_budget_probe;
 #[cfg(test)]

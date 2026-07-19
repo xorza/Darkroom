@@ -17,14 +17,13 @@ use crate::stacking::frame_store::{
     MemoryPlan, SpillDirectory, StoredImage, StoredLightFrame, plan_memory, store_image,
     store_light_frame,
 };
+use crate::stacking::pipeline::align::{DetectedFrame, align_and_stack, select_reference};
+use crate::stacking::pipeline::config::AlignStackConfig;
+use crate::stacking::pipeline::detector_pool::DetectorPool;
+use crate::stacking::pipeline::result::{AlignStackResult, Error};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::warp;
-use crate::stacking::star_detection::detector::StarDetector;
-
-use crate::stacking::pipeline::align::{DetectedFrame, align_and_stack, select_reference};
-use crate::stacking::pipeline::config::AlignStackConfig;
-use crate::stacking::pipeline::result::{AlignStackResult, Error};
 
 /// Max light frames decoded+demosaiced concurrently. The RAW decode is the one
 /// uninterruptible step, so this caps the work a cancel must drain and peak
@@ -161,15 +160,15 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
     );
     let done = AtomicUsize::new(0);
     let indexed: Vec<(usize, &P)> = light_paths.iter().enumerate().collect();
-    let mut detected: Vec<DetectedFrame<StoredImage>> =
-        try_par_map_limited(&indexed, decode_concurrency, |&(idx, ref path)| {
+    let mut detected: Vec<DetectedFrame<StoredImage>> = {
+        let mut detectors =
+            DetectorPool::from_config(&config.detection, decode_concurrency.min(total))?;
+        detectors.try_map(&indexed, |detector, &(idx, ref path)| {
             if cancel.is_cancelled() {
                 return Err(Error::Stack(StackError::Cancelled));
             }
             let image = decode_calibrate_demosaic(path.as_ref(), masters, config, &cancel)?;
-            let stars = StarDetector::from_config(config.detection.clone())?
-                .detect(&image)
-                .stars;
+            let stars = detector.detect(&image).stars;
             let stored = store_image(cache_dir, &format!("calib_{idx}"), &image)
                 .map_err(StackError::from)?;
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
@@ -183,7 +182,8 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
                 image: stored,
                 stars,
             })
-        })?;
+        })
+    }?;
     if cancel.is_cancelled() {
         return Err(Error::Stack(StackError::Cancelled));
     }

@@ -11,11 +11,10 @@ use crate::stacking::combine::stack::{StackFrame, stack_images};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::warp;
-use crate::stacking::star_detection::detector::StarDetector;
-use crate::stacking::star_detection::error::StarDetectionConfigError;
 use crate::stacking::star_detection::star::Star;
 
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
+use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::pipeline::result::{AlignStackResult, Error};
 
 /// Detect → register → warp → stack a set of light frames into one aligned, combined image.
@@ -36,22 +35,19 @@ pub fn align_and_stack(
     }
     config.detection.validate()?;
 
-    // Detect stars on every frame. Each rayon task owns its detector — `detect` is `&mut`.
     let total = lights.len();
     tracing::info!(frames = total, "Detecting stars");
     let detected = AtomicUsize::new(0);
-    let detected_frames: Result<Vec<DetectedFrame<AstroImage>>, StarDetectionConfigError> = lights
-        .into_par_iter()
-        .map(|image| {
+    let detected_stars = {
+        let mut detectors =
+            DetectorPool::from_config(&config.detection, total.min(rayon::current_num_threads()))?;
+        detectors.try_map(&lights, |detector, image| {
             // Cancelled: skip this frame's detection (cheap empty result); the
             // post-loop check below turns the run into `Cancelled`.
             if cancel.is_cancelled() {
-                return Ok(DetectedFrame {
-                    image,
-                    stars: Vec::new(),
-                });
+                return Ok(Vec::new());
             }
-            let result = StarDetector::from_config(config.detection.clone())?.detect(&image);
+            let result = detector.detect(image);
             let d = &result.diagnostics;
             let n = detected.fetch_add(1, Ordering::Relaxed) + 1;
             // The detection funnel — candidates → deblended → centroided → kept — shows how
@@ -65,13 +61,14 @@ pub fn align_and_stack(
                 stars = result.stars.len(),
                 "detected stars"
             );
-            Ok(DetectedFrame {
-                image,
-                stars: result.stars,
-            })
+            Ok::<_, Error>(result.stars)
         })
+    }?;
+    let mut detected_frames: Vec<DetectedFrame<AstroImage>> = lights
+        .into_iter()
+        .zip(detected_stars)
+        .map(|(image, stars)| DetectedFrame { image, stars })
         .collect();
-    let mut detected_frames = detected_frames?;
     let total_stars: usize = detected_frames.iter().map(|frame| frame.stars.len()).sum();
     tracing::info!(total_stars, "Star detection complete");
     if cancel.is_cancelled() {
