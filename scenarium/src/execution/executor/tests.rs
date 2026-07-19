@@ -6,7 +6,7 @@ use super::*;
 use crate::async_lambda;
 use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot, RuntimeCache, ValueState};
 use crate::execution::plan::{NodeVerdict, PlannedOutputs};
-use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
+use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::execution::resolve::Resolver;
 use crate::graph::CacheMode;
 use crate::graph::NodeId;
@@ -24,7 +24,7 @@ struct Prog {
 }
 
 impl Prog {
-    fn node(&mut self, inputs: &[ExecutionBinding], outputs: u32, lambda: FuncLambda) -> usize {
+    fn node(&mut self, inputs: &[ExecutionBinding], outputs: u32, lambda: FuncLambda) -> NodeId {
         let inputs_start = self.program.inputs.len() as u32;
         for binding in inputs {
             self.program.inputs.push(ExecutionInput {
@@ -41,29 +41,34 @@ impl Prog {
             .output_pinned
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = self.program.e_nodes.len();
-        self.program.e_nodes.add(ExecutionNode {
-            id: NodeId::from_u128(idx as u128 + 1),
-            func_id: FuncId::from_u128(idx as u128 + 1),
-            inputs: Span::new(inputs_start, inputs.len() as u32),
-            outputs: Span::new(outputs_start, outputs),
-            lambda,
-            // `CacheMode` now defaults to `None`; these tests assume outputs are
-            // retained (`Ram`) unless a case flips it via `set_cache`.
-            cache: CacheMode::Ram,
-            ..Default::default()
-        });
-        idx
+        let node_id = NodeId::from_u128(idx as u128 + 1);
+        self.program.node_order.push(node_id);
+        self.program.e_nodes.insert(
+            node_id,
+            ExecutionNode {
+                id: node_id,
+                func_id: FuncId::from_u128(idx as u128 + 1),
+                inputs: Span::new(inputs_start, inputs.len() as u32),
+                outputs: Span::new(outputs_start, outputs),
+                lambda,
+                // `CacheMode` now defaults to `None`; these tests assume outputs are
+                // retained (`Ram`) unless a case flips it via `set_cache`.
+                cache: CacheMode::Ram,
+                ..Default::default()
+            },
+        );
+        node_id
     }
 
     /// Override a node's [`CacheMode`] (nodes default to `Ram`). Drives the mid-run
     /// output-release tests, which turn on the non-RAM modes.
-    fn set_cache(&mut self, idx: usize, cache: CacheMode) {
-        self.program.e_nodes[idx].cache = cache;
+    fn set_cache(&mut self, node_id: NodeId, cache: CacheMode) {
+        self.program.e_nodes.get_mut(&node_id).unwrap().cache = cache;
     }
 
     /// Flip node `idx`'s output `port`'s pinned flag (both default `false`).
-    fn set_output_pinned(&mut self, idx: usize, port: usize, pinned: bool) {
-        let start = self.program.e_nodes[idx].outputs.start as usize;
+    fn set_output_pinned(&mut self, node_id: NodeId, port: usize, pinned: bool) {
+        let start = self.program.e_nodes[&node_id].outputs.start as usize;
         self.program.output_pinned[start + port] = pinned;
     }
 }
@@ -81,7 +86,7 @@ fn self_mapped_flatten(program: &ExecutionProgram) -> FlattenMap {
     // `RunProgress` Started/Finished sends, not just the pinned-output push)
     // indexes out of bounds.
     flatten.reset();
-    for e_node in program.e_nodes.iter() {
+    for e_node in program.e_nodes.values() {
         flatten.set_leaf(e_node.id, 0, e_node.id);
     }
     flatten
@@ -115,16 +120,16 @@ fn plan_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> Execution
 fn demand_output(
     program: &ExecutionProgram,
     plan: &mut ExecutionPlan,
-    node_idx: usize,
+    node_id: NodeId,
     port_idx: usize,
 ) {
-    let output_idx = program.output_idx(node_idx.into(), port_idx);
+    let output_idx = program.output_idx(node_id, port_idx);
     plan.outputs.demand[output_idx] = OutputDemand::Produce;
 }
 
-fn bind(idx: usize, port: usize) -> ExecutionBinding {
+fn bind(node_id: NodeId, port: usize) -> ExecutionBinding {
     ExecutionBinding::Bind(ExecutionPortAddress {
-        target_idx: idx.into(),
+        target: node_id,
         port_idx: port,
     })
 }
@@ -133,15 +138,18 @@ fn bind(idx: usize, port: usize) -> ExecutionBinding {
 /// drive the run loop directly with an all-`needed` mask (the reuse/cut logic is
 /// unit-tested in `resolve.rs`), so `roots` is irrelevant here.
 fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
-    let n = program.e_nodes.len();
+    let verdicts = program
+        .node_ids()
+        .map(|node_id| (node_id, NodeVerdict::Execute))
+        .collect();
     ExecutionPlan {
-        process_order: (0..n).map(NodeIdx::from).collect(),
-        verdicts: vec![NodeVerdict::Execute; n].into(),
+        process_order: program.node_ids().collect(),
+        verdicts,
         outputs: PlannedOutputs {
             demand: vec![OutputDemand::Produce; program.n_outputs()].into(),
             readers: vec![1; program.n_outputs()].into(),
         },
-        roots: (0..n).map(NodeIdx::from).collect(),
+        roots: program.node_ids().collect(),
         pinned: Vec::new(),
     }
 }
@@ -149,7 +157,7 @@ fn straight_plan(program: &ExecutionProgram) -> ExecutionPlan {
 async fn run(program: &ExecutionProgram, plan: &ExecutionPlan) -> (RuntimeCache, ExecutionStats) {
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&program.e_nodes);
+    cache.reconcile(program);
     let stats = run_with(program, plan, &mut cache).await;
     (cache, stats)
 }
@@ -189,7 +197,7 @@ async fn run_with_pinned(
     plan: &ExecutionPlan,
 ) -> (RuntimeCache, ExecutionStats, Vec<PinnedOutputs>) {
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&program.e_nodes);
+    cache.reconcile(program);
     let mut executor = Executor::default();
     let mut resolver = Resolver::default();
     resolver.resolve(program, plan, &mut cache);
@@ -235,12 +243,12 @@ async fn runs_in_order_resolving_binds_and_storing_outputs() {
     let (cache, stats) = run(&p.program, &plan).await;
 
     assert_eq!(
-        cache.slots[a].output_values().unwrap()[0].as_i64(),
+        cache.slots[&a].output_values().unwrap()[0].as_i64(),
         Some(7),
         "producer wrote 7"
     );
     assert_eq!(
-        cache.slots[b].output_values().unwrap()[0].as_i64(),
+        cache.slots[&b].output_values().unwrap()[0].as_i64(),
         Some(8),
         "consumer read 7 and wrote 7+1"
     );
@@ -265,18 +273,18 @@ async fn upstream_error_skips_dependents_and_clears_output() {
     let (cache, stats) = run(&p.program, &plan).await;
 
     assert!(
-        cache.slots[a].output_values().is_none(),
+        cache.slots[&a].output_values().is_none(),
         "an errored node's output is dropped (so it re-runs)"
     );
     assert!(
-        cache.slots[b].output_values().is_none(),
+        cache.slots[&b].output_values().is_none(),
         "the dependent is skipped, producing nothing"
     );
-    let error_of = |idx: usize| {
+    let error_of = |node_id: NodeId| {
         stats
             .node_errors
             .iter()
-            .find(|e| e.node_id == NodeId::from_u128(idx as u128 + 1))
+            .find(|e| e.node_id == node_id)
             .map(|e| e.error.to_string())
     };
     assert!(error_of(a).unwrap().contains("boom"));
@@ -296,16 +304,16 @@ async fn unbound_output_errors_only_when_demanded() {
 
     let plan = plan_with_readers(&p.program, vec![1, 1, 0]);
     let (cache, stats) = run(&p.program, &plan).await;
-    let error_of = |idx: usize| {
+    let error_of = |node_id: NodeId| {
         stats
             .node_errors
             .iter()
-            .find(|error| error.node_id == p.program.e_nodes[idx].id)
+            .find(|error| error.node_id == node_id)
             .map(|error| &error.error)
     };
 
-    assert!(cache.slots[a].output_values().is_none());
-    assert!(cache.slots[b].output_values().is_none());
+    assert!(cache.slots[&a].output_values().is_none());
+    assert!(cache.slots[&b].output_values().is_none());
     assert!(matches!(
         error_of(a),
         Some(RunError::OutputsNotProduced { outputs, .. }) if outputs == &[0, 1]
@@ -326,7 +334,7 @@ async fn unbound_output_errors_only_when_demanded() {
 
     assert!(stats.node_errors.is_empty());
     assert!(matches!(
-        cache.slots[skipped].output_values().unwrap().as_slice(),
+        cache.slots[&skipped].output_values().unwrap().as_slice(),
         [DynamicValue::Unbound]
     ));
 }
@@ -357,12 +365,12 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert!(
-        matches!(cache.slots[a].value, ValueState::Empty),
+        matches!(cache.slots[&a].value, ValueState::Empty),
         "A (None) is freed the moment its last consumer B reads it: {:?}",
-        cache.slots[a].value
+        cache.slots[&a].value
     );
     assert_eq!(
-        cache.slots[b].output_values().unwrap()[0].as_i64(),
+        cache.slots[&b].output_values().unwrap()[0].as_i64(),
         Some(8),
         "B (Ram) keeps its own output (7+1)"
     );
@@ -392,9 +400,9 @@ async fn pinned_delivery_does_not_create_a_reader() {
     let (cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert!(
-        matches!(cache.slots[a].value, ValueState::Empty),
+        matches!(cache.slots[&a].value, ValueState::Empty),
         "A is released after its only binding reader despite host delivery: {:?}",
-        cache.slots[a].value
+        cache.slots[&a].value
     );
     assert_eq!(pushes.len(), 1);
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
@@ -426,18 +434,18 @@ async fn pinned_root_sees_demand_and_survives_drain() {
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Skip));
     assert!(
-        matches!(cache.slots[a].value, ValueState::Empty),
+        matches!(cache.slots[&a].value, ValueState::Empty),
         "unpinned Skip root is drained at store time: {:?}",
-        cache.slots[a].value
+        cache.slots[&a].value
     );
 
     let mut plan = plan_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut plan, a, 0);
-    plan.pinned.push(a.into());
+    plan.pinned.push(a);
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
     assert_eq!(
-        cache.slots[a].output_values().unwrap()[0].as_i64(),
+        cache.slots[&a].output_values().unwrap()[0].as_i64(),
         Some(7),
         "pinned root's value survives the run"
     );
@@ -459,7 +467,7 @@ async fn pinned_output_pushes_right_after_it_runs() {
     let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1, "one push for the one finished node");
-    assert_eq!(pushes[0].node.node_id, NodeId::from_u128(a as u128 + 1));
+    assert_eq!(pushes[0].node.node_id, a);
     assert_eq!(pushes[0].values.len(), 1);
     assert_eq!(pushes[0].values[0].port_idx, 0);
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(7));
@@ -484,9 +492,9 @@ async fn pinned_output_with_no_consumers_is_reclaimed_right_after_the_push() {
 
     assert_eq!(pushes.len(), 1, "the value was still pushed");
     assert!(
-        matches!(cache.slots[a].value, ValueState::Empty),
+        matches!(cache.slots[&a].value, ValueState::Empty),
         "reclaimed right after the push, not left resident to end-of-run eviction: {:?}",
-        cache.slots[a].value
+        cache.slots[&a].value
     );
 }
 
@@ -504,13 +512,13 @@ async fn pinned_root_pushes_every_output() {
     let a = p.node(&[], 2, producer);
 
     let plan = ExecutionPlan {
-        pinned: vec![a.into()],
+        pinned: vec![a],
         ..straight_plan(&p.program)
     };
     let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1);
-    assert_eq!(pushes[0].node.node_id, NodeId::from_u128(a as u128 + 1));
+    assert_eq!(pushes[0].node.node_id, a);
     assert_eq!(pushes[0].values.len(), 2);
     assert_eq!(pushes[0].values[0].port_idx, 0);
     assert_eq!(pushes[0].values[0].value.as_i64(), Some(1));
@@ -582,7 +590,7 @@ async fn keeps_ram_cache_output_after_all_consumers_read() {
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert_eq!(
-        cache.slots[a].output_values().unwrap()[0].as_i64(),
+        cache.slots[&a].output_values().unwrap()[0].as_i64(),
         Some(7),
         "A (Ram) is kept hot for the next run even though B has fully drained it"
     );
@@ -612,7 +620,7 @@ async fn holds_output_until_every_counted_consumer_reads() {
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert_eq!(
-        cache.slots[a].output_values().map(|v| v[0].as_i64()),
+        cache.slots[&a].output_values().map(|v| v[0].as_i64()),
         Some(Some(7)),
         "A (None) is still resident: one of its two counted reads never happened"
     );
@@ -639,12 +647,12 @@ async fn frees_zero_consumer_output_right_after_it_runs() {
     let (cache, _stats) = run(&p.program, &plan).await;
 
     assert!(
-        matches!(cache.slots[a].value, ValueState::Empty),
+        matches!(cache.slots[&a].value, ValueState::Empty),
         "A (None, no consumers) is freed right after it runs: {:?}",
-        cache.slots[a].value
+        cache.slots[&a].value
     );
     assert_eq!(
-        cache.slots[b].output_values().unwrap()[0].as_i64(),
+        cache.slots[&b].output_values().unwrap()[0].as_i64(),
         Some(7),
         "B (Ram, no consumers) is kept hot"
     );
@@ -666,9 +674,9 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
 
     let plan = straight_plan(&p.program);
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program.e_nodes);
+    cache.reconcile(&p.program);
     // A stale prior value on the lambda-less node must not be served as this run's result.
-    cache.slots[a].value = ValueState::Resident {
+    cache.slots.get_mut(&a).unwrap().value = ValueState::Resident {
         snapshot: OutputSnapshot::new(
             vec![DynamicValue::Static(StaticValue::Int(9))],
             CachedOutputCoverage { ports: vec![true] },
@@ -682,14 +690,14 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
         "neither node ran: A has no lambda, B skips on the errored upstream"
     );
     assert!(
-        cache.slots[a].output_values().is_none(),
+        cache.slots[&a].output_values().is_none(),
         "A's stale value is dropped, not served"
     );
-    let error_of = |idx: usize| {
+    let error_of = |node_id: NodeId| {
         stats
             .node_errors
             .iter()
-            .find(|e| e.node_id == p.program.e_nodes[idx].id)
+            .find(|e| e.node_id == node_id)
             .map(|e| &e.error)
     };
     assert!(
@@ -734,8 +742,8 @@ async fn reuse_survives_failed_upstream_rerun() {
     let b = p.node(&[bind(a, 0)], 1, consumer());
     let c = p.node(&[bind(a, 0)], 1, consumer());
     // Content-cacheable (the fixture default is `Impure` = no digest, never a hit).
-    for idx in [a, b, c] {
-        p.program.e_nodes[idx].behavior = FuncBehavior::Pure;
+    for node_id in [a, b, c] {
+        p.program.e_nodes.get_mut(&node_id).unwrap().behavior = FuncBehavior::Pure;
     }
     // A and C recompute every run; only B (the fixture default `Ram`) retains RAM.
     p.set_cache(a, CacheMode::None);
@@ -748,28 +756,27 @@ async fn reuse_survives_failed_upstream_rerun() {
     // run 2 (residency is what the reuse check trusts), masking the skip under test.
     let plan = plan_with_readers(&p.program, vec![2, 1, 0]);
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&p.program.e_nodes);
+    cache.reconcile(&p.program);
 
     // Run 1: A=5, B=C=6, everything computes.
     let stats1 = run_with(&p.program, &plan, &mut cache).await;
     assert_eq!(stats1.executed_nodes.len(), 3);
-    assert_eq!(cache.slots[b].output_values().unwrap()[0].as_i64(), Some(6));
+    assert_eq!(
+        cache.slots[&b].output_values().unwrap()[0].as_i64(),
+        Some(6)
+    );
 
     // Run 2: A re-runs (nothing cached it) and fails. B's digest is unchanged, so it
     // is served as cached — not skipped — and its resident 6 survives. C recomputes,
     // sees the errored upstream, and is skipped.
     let stats2 = run_with(&p.program, &plan, &mut cache).await;
-    let (a_id, b_id, c_id) = (
-        p.program.e_nodes[a].id,
-        p.program.e_nodes[b].id,
-        p.program.e_nodes[c].id,
-    );
+    let (a_id, b_id, c_id) = (a, b, c);
     assert!(
         stats2.cached_nodes.contains(&b_id),
         "B is a reuse hit despite A's failure"
     );
     assert_eq!(
-        cache.slots[b].output_values().unwrap()[0].as_i64(),
+        cache.slots[&b].output_values().unwrap()[0].as_i64(),
         Some(6),
         "B's valid cached value survives the sibling failure"
     );

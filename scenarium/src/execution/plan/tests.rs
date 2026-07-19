@@ -8,15 +8,15 @@ use common::Span;
 use std::sync::Arc;
 
 /// Hand-built compile artifact for planner tests (an empty flatten map — every
-/// node is "top-level", so seed ids resolve directly). Node `idx` gets id
-/// `from_u128(idx+1)`. Inputs are `(required, binding)`.
+/// node is "top-level", so seed ids resolve directly). Inputs are
+/// `(required, binding)`.
 #[derive(Default)]
 struct Fix {
     compiled: CompiledGraph,
 }
 
 impl Fix {
-    fn node(&mut self, sink: bool, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> NodeIdx {
+    fn node(&mut self, sink: bool, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> NodeId {
         let program = &mut self.compiled.program;
         if program.e_nodes.is_empty() {
             Arc::get_mut(&mut self.compiled.flatten_map)
@@ -44,24 +44,28 @@ impl Fix {
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = program.e_nodes.len();
         let id = NodeId::from_u128(idx as u128 + 1);
-        program.e_nodes.add(ExecutionNode {
+        program.node_order.push(id);
+        program.e_nodes.insert(
             id,
-            sink,
-            func_id: FuncId::from_u128(idx as u128 + 1),
-            inputs: Span::new(inputs_start, inputs.len() as u32),
-            outputs: Span::new(outputs_start, outputs),
-            ..Default::default()
-        });
+            ExecutionNode {
+                id,
+                sink,
+                func_id: FuncId::from_u128(idx as u128 + 1),
+                inputs: Span::new(inputs_start, inputs.len() as u32),
+                outputs: Span::new(outputs_start, outputs),
+                ..Default::default()
+            },
+        );
         Arc::get_mut(&mut self.compiled.flatten_map)
             .unwrap()
             .set_leaf(id, 0, id);
-        idx.into()
+        id
     }
 }
 
-fn bind(idx: NodeIdx, port: usize) -> ExecutionBinding {
+fn bind(node_id: NodeId, port: usize) -> ExecutionBinding {
     ExecutionBinding::Bind(ExecutionPortAddress {
-        target_idx: idx,
+        target: node_id,
         port_idx: port,
     })
 }
@@ -101,8 +105,8 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
     let p = plan(&f);
     assert_eq!(p.process_order, vec![a, b, c], "post-order: deps first");
     for idx in [a, b, c] {
-        assert!(p.verdicts[idx].wants_execute());
-        assert!(!p.verdicts[idx].missing_required_inputs());
+        assert!(p.verdicts[&idx].wants_execute());
+        assert!(!p.verdicts[&idx].missing_required_inputs());
     }
 }
 
@@ -116,11 +120,11 @@ fn missing_required_input_blocks_node_and_dependents() {
     let p = plan(&f);
     for idx in [a, b] {
         assert!(
-            p.verdicts[idx].missing_required_inputs(),
+            p.verdicts[&idx].missing_required_inputs(),
             "node {idx:?} missing"
         );
         assert!(
-            !p.verdicts[idx].wants_execute(),
+            !p.verdicts[&idx].wants_execute(),
             "node {idx:?} not runnable"
         );
     }
@@ -133,8 +137,8 @@ fn optional_unbound_input_does_not_block() {
     let a = f.node(true, &[(false, ExecutionBinding::None)], 1);
 
     let p = plan(&f);
-    assert!(!p.verdicts[a].missing_required_inputs());
-    assert!(p.verdicts[a].wants_execute());
+    assert!(!p.verdicts[&a].missing_required_inputs());
+    assert!(p.verdicts[&a].wants_execute());
     assert_eq!(p.process_order, vec![a]);
 }
 
@@ -178,7 +182,7 @@ fn overlapping_pin_sources_leave_reader_count_at_zero() {
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
     let seeds = RunSeeds {
-        nodes: vec![NodeAddress::root(f.compiled.program.e_nodes[a].id)],
+        nodes: vec![NodeAddress::root(a)],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -192,8 +196,8 @@ fn overlapping_pin_sources_leave_reader_count_at_zero() {
 fn dependency_cycle_is_rejected() {
     // A binds B, B binds A (A sink) — the planner must error, not loop.
     let mut f = Fix::default();
-    f.node(true, &[(false, bind(NodeIdx(1), 0))], 1); // A (idx 0) binds B
-    f.node(false, &[(false, bind(NodeIdx(0), 0))], 1); // B (idx 1) binds A
+    f.node(true, &[(false, bind(NodeId::from_u128(2), 0))], 1);
+    f.node(false, &[(false, bind(NodeId::from_u128(1), 0))], 1);
 
     let mut planner = Planner::default();
     let mut plan = ExecutionPlan::default();
@@ -219,7 +223,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let mut planner = Planner::default();
     let mut p = ExecutionPlan::default();
     let seeds = RunSeeds {
-        nodes: vec![NodeAddress::root(f.compiled.program.e_nodes[b].id)],
+        nodes: vec![NodeAddress::root(b)],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
@@ -227,9 +231,9 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     assert_eq!(p.process_order, vec![a, b], "only B's cone, deps first");
     assert_eq!(p.roots, vec![b]);
     assert_eq!(p.pinned, vec![b]);
-    assert!(p.verdicts[a].wants_execute());
-    assert!(p.verdicts[b].wants_execute());
-    assert!(!p.verdicts[c].wants_execute(), "C never verdicted");
+    assert!(p.verdicts[&a].wants_execute());
+    assert!(p.verdicts[&b].wants_execute());
+    assert!(!p.verdicts[&c].wants_execute(), "C never verdicted");
     assert_eq!(demand(&p, 0), OutputDemand::Produce);
     assert_eq!(readers(&p, 0), 1, "A.0 read by B");
     assert_eq!(demand(&p, 1), OutputDemand::Produce);
@@ -239,7 +243,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     // everything, and B stays pinned.
     let seeds = RunSeeds {
         sinks: true,
-        nodes: vec![NodeAddress::root(f.compiled.program.e_nodes[b].id)],
+        nodes: vec![NodeAddress::root(b)],
         ..Default::default()
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");

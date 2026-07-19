@@ -90,6 +90,7 @@ impl Compiler {
         let mut flatten_map = FlattenMap::default();
         self.flattener.build(
             &mut program.e_nodes,
+            &mut program.node_order,
             Pools {
                 inputs: &mut program.inputs,
                 events: &mut program.events,

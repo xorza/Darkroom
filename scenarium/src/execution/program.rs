@@ -5,10 +5,10 @@
 //! per-run scheduling state lives in the
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan).
 
-use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
-use common::{KeyIndexKey, KeyIndexVec, Span};
+use common::Span;
+use hashbrown::HashMap;
 
 use crate::graph::{CacheMode, NodeId};
 use crate::library::Library;
@@ -18,43 +18,8 @@ use crate::node::lambda::FuncLambda;
 use crate::node::special::SpecialNode;
 use crate::{DataType, ResourceStamper, StaticValue};
 
-/// A position into the flat node table — `e_nodes`, the cache's `slots`, and the
-/// per-node plan/cache columns are all indexed by it. Resolved at flatten and stable
-/// for the program's lifetime. A newtype so it can't be crossed with an input-pool
-/// index, an output-pool index, or a port number: those are different spaces, and
-/// mixing them was previously a silent `usize` bug caught only by debug `validate`.
-/// `KeyIndexVec<NodeId, _>` indexes by it directly; plain `Vec` columns go through
-/// [`NodeIdx::idx`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct NodeIdx(pub(crate) u32);
-
-impl NodeIdx {
-    pub(crate) fn idx(self) -> usize {
-        self.0 as usize
-    }
-}
-
-impl From<usize> for NodeIdx {
-    fn from(i: usize) -> Self {
-        NodeIdx(i as u32)
-    }
-}
-
-impl<V: KeyIndexKey<NodeId>> Index<NodeIdx> for KeyIndexVec<NodeId, V> {
-    type Output = V;
-    fn index(&self, i: NodeIdx) -> &V {
-        &self[i.idx()]
-    }
-}
-
-impl<V: KeyIndexKey<NodeId>> IndexMut<NodeIdx> for KeyIndexVec<NodeId, V> {
-    fn index_mut(&mut self, i: NodeIdx) -> &mut V {
-        &mut self[i.idx()]
-    }
-}
-
 /// A position in the program's flat output pool. It cannot be confused with a node
-/// position or a node-local port number.
+/// id or a node-local port number.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct OutputIdx(pub(crate) u32);
 
@@ -70,13 +35,10 @@ impl From<usize> for OutputIdx {
     }
 }
 
-/// A flat output address: producer node `target_idx` (a [`NodeIdx`], resolved at
-/// flatten and stable for the program's lifetime), output `port_idx`. The producer's
-/// `NodeId` is *not* stored — it's `e_nodes[target_idx].id`; the index is the
-/// canonical key here, so there's no id/index pair to keep in sync.
+/// A flat output address: producer node id and output port.
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ExecutionPortAddress {
-    pub target_idx: NodeIdx,
+    pub target: NodeId,
     pub port_idx: usize,
 }
 
@@ -111,15 +73,12 @@ pub(crate) struct ExecutionInput {
 
 #[derive(Default, Debug)]
 pub(crate) struct ExecutionEvent {
-    /// Flat positions of the nodes subscribed to this event, resolved at flatten —
-    /// like a binding's `target_idx`, so the planner seeds its walk roots without a
-    /// per-plan id→index lookup. (Data and event edges now address the same way.)
-    pub subscribers: Vec<NodeIdx>,
+    pub subscribers: Vec<NodeId>,
     pub lambda: EventLambda,
 }
 
 /// Topology + code for one flat node. Immutable across runs; all mutable
-/// per-run/cross-run state lives in the executor's slot of the same index.
+/// per-run/cross-run state is keyed by the node id in the executor.
 #[derive(Default, Debug)]
 pub(crate) struct ExecutionNode {
     pub id: NodeId,
@@ -161,15 +120,12 @@ pub(crate) struct ExecutionNode {
     pub name: String,
 }
 
-impl KeyIndexKey<NodeId> for ExecutionNode {
-    fn key(&self) -> &NodeId {
-        &self.id
-    }
-}
-
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionProgram {
-    pub(crate) e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
+    pub(crate) e_nodes: HashMap<NodeId, ExecutionNode>,
+    /// Deterministic flatten order for scheduling independent nodes. Node identity
+    /// and all lookups still use `NodeId`.
+    pub(crate) node_order: Vec<NodeId>,
     pub(crate) inputs: Vec<ExecutionInput>,
     pub(crate) events: Vec<ExecutionEvent>,
     /// The output pool: each node's resolved declared output types (wildcards
@@ -196,14 +152,12 @@ impl ExecutionProgram {
         self.output_types.len()
     }
 
-    /// Every node position, typed — `for idx in program.node_indices()` instead of
-    /// `for idx in 0..program.e_nodes.len()` so the loop variable is a [`NodeIdx`].
-    pub(crate) fn node_indices(&self) -> impl Iterator<Item = NodeIdx> {
-        (0..self.e_nodes.len()).map(NodeIdx::from)
+    pub(crate) fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.node_order.iter().copied()
     }
 
-    pub(crate) fn output_idx(&self, node_idx: NodeIdx, port_idx: usize) -> OutputIdx {
-        let outputs = self.e_nodes[node_idx].outputs;
+    pub(crate) fn output_idx(&self, node_id: NodeId, port_idx: usize) -> OutputIdx {
+        let outputs = self.e_nodes[&node_id].outputs;
         assert!(
             port_idx < outputs.len as usize,
             "output port is out of range"
@@ -239,18 +193,16 @@ impl ExecutionProgram {
     /// flatten, where every compiled node's func is guaranteed present (`check_for_execution`
     /// resolved them). An unresolved wildcard port stores `DataType::Any`. Builds
     /// into a fresh buffer first so the per-node reads don't alias the write-back.
-    /// Each node's types are written through its *span*: spans are assigned in
-    /// flatten emit order, which diverges from index order whenever a consumer's
-    /// `set_input` claimed its producer's index early — a sequential push would
-    /// hand nodes each other's types.
+    /// Each node's types are written through its span because the output pool is
+    /// independent from the node map's storage order.
     pub(crate) fn resolve_output_types(&mut self, library: &Library) {
-        let total: usize = self.e_nodes.iter().map(|n| n.outputs.len as usize).sum();
+        let total: usize = self.e_nodes.values().map(|n| n.outputs.len as usize).sum();
         let mut types = vec![DataType::Any; total];
-        for idx in self.node_indices() {
-            let span = self.e_nodes[idx].outputs;
+        for node_id in self.node_ids() {
+            let span = self.e_nodes[&node_id].outputs;
             for port in 0..span.len as usize {
                 types[span.start as usize + port] =
-                    effective_output_type(self, library, idx, port, 0).unwrap_or(DataType::Any);
+                    effective_output_type(self, library, node_id, port, 0).unwrap_or(DataType::Any);
             }
         }
         self.output_types = types;
@@ -263,7 +215,7 @@ impl ExecutionProgram {
 /// Legitimate reroute chains are a handful deep.
 const MAX_WILDCARD_DEPTH: usize = 64;
 
-/// The concrete declared output type of node `idx`'s `port`, resolving a wildcard
+/// The concrete declared output type of `node_id`'s `port`, resolving a wildcard
 /// reroute by following its mirrored input through the program's bindings. `None`
 /// *only* for an output with no concrete type — a wildcard whose mirror isn't a
 /// `Bind` (a const/unbound mirror is never a custom value), an out-of-range port, or
@@ -273,44 +225,40 @@ const MAX_WILDCARD_DEPTH: usize = 64;
 fn effective_output_type(
     program: &ExecutionProgram,
     library: &Library,
-    idx: NodeIdx,
+    node_id: NodeId,
     port: usize,
     depth: usize,
 ) -> Option<DataType> {
     if depth > MAX_WILDCARD_DEPTH {
         return None;
     }
-    let func = node_func(program, library, idx).expect(
+    let func = node_func(program, library, node_id).expect(
         "a compiled node's func is registered in the library (validated at check_for_execution)",
     );
     match &func.outputs.get(port)?.ty {
         OutputType::Fixed(data_type) => Some(data_type.clone()),
         OutputType::Wildcard { mirrors } => {
-            let span = program.e_nodes[idx].inputs;
+            let span = program.e_nodes[&node_id].inputs;
             match &program.inputs[span.range()].get(*mirrors)?.binding {
-                ExecutionBinding::Bind(addr) => effective_output_type(
-                    program,
-                    library,
-                    addr.target_idx,
-                    addr.port_idx,
-                    depth + 1,
-                ),
+                ExecutionBinding::Bind(addr) => {
+                    effective_output_type(program, library, addr.target, addr.port_idx, depth + 1)
+                }
                 _ => None,
             }
         }
     }
 }
 
-/// The func backing node `idx`: a special node's hardcoded spec, else the library
+/// The func backing `node_id`: a special node's hardcoded spec, else the library
 /// entry for its `func_id`. `None` only if the library doesn't carry the func — which,
 /// for the program's own (`check_for_execution`-validated) library, never happens.
 fn node_func<'a>(
     program: &'a ExecutionProgram,
     library: &'a Library,
-    idx: NodeIdx,
+    node_id: NodeId,
 ) -> Option<&'a Func> {
-    match program.e_nodes[idx].special {
+    match program.e_nodes[&node_id].special {
         Some(special) => Some(special.func()),
-        None => library.by_id(&program.e_nodes[idx].func_id),
+        None => library.by_id(&program.e_nodes[&node_id].func_id),
     }
 }

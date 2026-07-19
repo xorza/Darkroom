@@ -22,6 +22,7 @@ use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
 use common::{CancelToken, Span};
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
@@ -63,17 +64,11 @@ use executor::Executor;
 use plan::{ExecutionPlan, Planner};
 #[cfg(test)]
 use program::ExecutionNode;
-use program::{NodeIdx, OutputIdx};
+use program::OutputIdx;
 use resolve::Resolver;
 
 trait ColumnIndex {
     fn idx(self) -> usize;
-}
-
-impl ColumnIndex for NodeIdx {
-    fn idx(self) -> usize {
-        self.idx()
-    }
 }
 
 impl ColumnIndex for OutputIdx {
@@ -128,8 +123,16 @@ impl<I: ColumnIndex, T> IndexMut<I> for Column<I, T> {
     }
 }
 
-/// A column aligned to the program's flat node table.
-pub(crate) type NodeColumn<T> = Column<NodeIdx, T>;
+pub(crate) type NodeMap<T> = HashMap<NodeId, T>;
+
+fn reset_node_map<T: Clone>(
+    map: &mut NodeMap<T>,
+    node_ids: impl Iterator<Item = NodeId>,
+    value: T,
+) {
+    map.clear();
+    map.extend(node_ids.map(|node_id| (node_id, value.clone())));
+}
 
 /// A column aligned to the program's flat output pool. Node-local views are sliced by
 /// their compiled output span, while individual entries require an [`OutputIdx`].
@@ -283,7 +286,7 @@ impl ExecutionEngine {
 
         // Realign the runtime cache to the new node set (preserve by id,
         // default new, trim gone).
-        self.cache.reconcile(&self.compiled.program.e_nodes);
+        self.cache.reconcile(&self.compiled.program);
 
         self.compiled.validate_installed(&self.cache);
     }
@@ -309,7 +312,7 @@ impl ExecutionEngine {
         // Phase 2b: cache-aware refinement. Resolve every node's disposition — its reuse
         // verdict merged with the backward cut, so a cone feeding only cache hits (a
         // disk-cached node's stale upstream) isn't recomputed on reopen. Mutates the cache
-        // (stamps digests, flags disk hits). The column is authoritative for the run: the
+        // (stamps digests, flags disk hits). The map is authoritative for the run: the
         // executor reads it rather than re-deriving (a digest folds live filesystem state
         // and could drift mid-run).
         self.resolver
@@ -333,7 +336,7 @@ impl ExecutionEngine {
 
         // Phase 3b: reclaim RAM from values this run left off the active frontier and that the
         // disk store (written per-node above) can serve again on demand. Reuses the resolver's
-        // disposition column (the active-frontier set) and the executor's retention policy
+        // disposition map (the active-frontier set) and the executor's retention policy
         // (RAM modes + pinned preview roots) rather than recomputing either.
         self.cache.evict_unused(
             &self.compiled.program,
@@ -361,12 +364,19 @@ impl ExecutionEngine {
     /// digest is the same bytes, so [`DiskStore::store`] skips it. Also a no-op for a
     /// node with no resident value.
     pub(crate) async fn store_resident_caches(&mut self) {
-        for idx in self.compiled.program.node_indices() {
-            if !self.compiled.program.e_nodes[idx].cache.persists_to_disk() {
+        for node_id in self.compiled.program.node_ids() {
+            if !self.compiled.program.e_nodes[&node_id]
+                .cache
+                .persists_to_disk()
+            {
                 continue;
             }
             self.cache
-                .store_node(&self.compiled.program, idx, &mut self.executor.ctx_manager)
+                .store_node(
+                    &self.compiled.program,
+                    node_id,
+                    &mut self.executor.ctx_manager,
+                )
                 .await;
         }
     }
@@ -449,14 +459,14 @@ impl ExecutionEngine {
     }
 
     pub(crate) fn by_id(&self, node_id: &NodeId) -> Option<&ExecutionNode> {
-        self.compiled.program.e_nodes.by_key(node_id)
+        self.compiled.program.e_nodes.get(node_id)
     }
 
     pub(crate) fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
         self.compiled
             .program
             .e_nodes
-            .iter()
+            .values()
             .find(|node| node.name == node_name)
     }
 
@@ -469,13 +479,7 @@ impl ExecutionEngine {
     }
 
     pub(crate) fn node_verdict(&self, e_node: &ExecutionNode) -> plan::NodeVerdict {
-        let idx = self
-            .compiled
-            .program
-            .e_nodes
-            .index_of_key(&e_node.id)
-            .unwrap();
-        self.plan.verdicts[idx.into()]
+        self.plan.verdicts[&e_node.id]
     }
 
     pub(crate) fn node_output_demand(&self, e_node: &ExecutionNode) -> &[OutputDemand] {
@@ -486,25 +490,20 @@ impl ExecutionEngine {
         self.plan.outputs.readers.slice(e_node.outputs)
     }
 
-    /// Whether node `idx` recomputed (rather than reused a cache) in the last run.
-    pub(crate) fn node_ran(&self, idx: program::NodeIdx) -> bool {
-        self.executor.ran(idx)
+    /// Whether `node_id` recomputed (rather than reused a cache) in the last run.
+    pub(crate) fn node_ran(&self, node_id: NodeId) -> bool {
+        self.executor.ran(node_id)
     }
 
     pub(crate) fn runtime_slot(&self, e_node: &ExecutionNode) -> &cache::RuntimeSlot {
-        self.cache.slots.by_key(&e_node.id).unwrap()
+        &self.cache.slots[&e_node.id]
     }
 
     /// Seed a node's cached output (simulating a prior run): set the value and
     /// stamp `produced_under` from the current digest, so the planner sees a hit.
     pub(crate) fn set_output_values(&mut self, node_name: &str, values: Vec<DynamicValue>) {
-        let idx = self
-            .compiled
-            .program
-            .e_nodes
-            .index_of_key(&self.by_name(node_name).unwrap().id);
-        let idx = idx.unwrap();
-        let slot = &mut self.cache.slots[idx];
+        let node_id = self.by_name(node_name).unwrap().id;
+        let slot = self.cache.slots.get_mut(&node_id).unwrap();
         let coverage = cache::CachedOutputCoverage::from_values(&values);
         slot.value = cache::ValueState::Resident {
             snapshot: cache::OutputSnapshot::new(values, coverage),

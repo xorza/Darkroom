@@ -1,6 +1,6 @@
 //! Graph flattening, fused into execution-node building. Walks the
 //! authoring `Graph`, expands every composite instance into its interior func
-//! nodes, and writes them straight into the execution graph's `CompactInsert`
+//! nodes, and writes them straight into the execution program
 //! — no intermediate `Graph` is materialized. Boundary nodes
 //! (`GraphInput`/`GraphOutput`) and composites dissolve; their edges are
 //! short-circuited so the result is a flat, func-only execution graph on which
@@ -12,8 +12,8 @@
 //!
 //! See `README.md` Part A §5.
 
-use common::{CompactInsert, KeyIndexVec, Span};
-use hashbrown::HashSet;
+use common::Span;
+use hashbrown::{HashMap, HashSet};
 
 use crate::execution::identity::FlattenMap;
 use crate::execution::program::{
@@ -68,13 +68,14 @@ pub(crate) struct Pools<'a> {
 }
 
 impl Flattener {
-    /// Flatten `root` into `e_nodes` (via compact insert, preserving caches),
-    /// rebuilding the SoA pools fresh from the library. Output spans are assigned
+    /// Flatten `root` into `e_nodes`, rebuilding the SoA pools fresh from the
+    /// library. Output spans are assigned
     /// from a running counter local to the build; the program's total output count
     /// is then `output_types.len()`, resolved separately.
     pub(crate) fn build(
         &mut self,
-        e_nodes: &mut KeyIndexVec<NodeId, ExecutionNode>,
+        e_nodes: &mut HashMap<NodeId, ExecutionNode>,
+        node_order: &mut Vec<NodeId>,
         pools: Pools<'_>,
         root: &Graph,
         library: &Library,
@@ -83,6 +84,8 @@ impl Flattener {
         self.path.clear();
         self.seen_shared.clear();
         self.subs.clear();
+        e_nodes.clear();
+        node_order.clear();
         // Reset to a lone root scope; emit pushes child scopes as it
         // descends composites (scope 0 is the root the stack starts on).
         flatten.reset();
@@ -102,8 +105,9 @@ impl Flattener {
                 flatten,
                 seen_shared: &mut self.seen_shared,
                 subs: &mut self.subs,
-                compact: e_nodes.compact_insert_start(),
-                cur_idx: 0,
+                e_nodes,
+                node_order,
+                cur_id: NodeId::default(),
                 new_inputs: &mut new_inputs,
                 n_outputs: 0,
                 events: pools.events,
@@ -121,25 +125,22 @@ impl Flattener {
                 run.n_outputs as usize,
                 "output_pinned must have exactly one entry per pooled output port"
             );
-            // `compact` finalizes on drop, trimming nodes that disappeared.
         }
         // Swap the freshly built pools in; recycle the old ones as scratch.
         std::mem::swap(pools.inputs, &mut new_inputs);
         self.inputs_scratch = new_inputs;
 
         // Apply resolved event edges now that every flat emitter/subscriber exists and
-        // is addressable by key. Both ends resolve to flat positions here (the
-        // subscriber to a `NodeIdx`, like a binding target). Subscribers were cleared
-        // while rebuilding events.
+        // is addressable by key. Subscribers were cleared while rebuilding events.
         for s in &self.subs {
-            let Some(subscriber) = e_nodes.index_of_key(&s.subscriber) else {
+            if !e_nodes.contains_key(&s.subscriber) {
                 continue;
-            };
-            if let Some(e_node) = e_nodes.by_key_mut(&s.emitter) {
+            }
+            if let Some(e_node) = e_nodes.get_mut(&s.emitter) {
                 let span = e_node.events.range();
                 pools.events[span][s.event_idx]
                     .subscribers
-                    .push(subscriber.into());
+                    .push(s.subscriber);
             }
         }
     }
@@ -220,12 +221,10 @@ struct Run<'a> {
     flatten: &'a mut FlattenMap,
     seen_shared: &'a mut HashSet<GraphId>,
     subs: &'a mut Vec<Subscription>,
-    compact: CompactInsert<'a, NodeId, ExecutionNode>,
-    /// Index of the leaf currently being filled. Stable across the target
-    /// inserts in `set_input`: `compact_insert` only swaps slots at indices
-    /// `>= write_idx`, never the already-compacted consumer.
-    cur_idx: usize,
-    /// The inputs pool being built this update; `cur_idx`'s span is its tail.
+    e_nodes: &'a mut HashMap<NodeId, ExecutionNode>,
+    node_order: &'a mut Vec<NodeId>,
+    cur_id: NodeId,
+    /// The inputs pool being built this update; `cur_id`'s span is its tail.
     new_inputs: &'a mut Vec<ExecutionInput>,
     /// Running total of outputs emitted so far; also the next output span start.
     n_outputs: u32,
@@ -304,10 +303,19 @@ impl<'a> Run<'a> {
 
             let flat_id = flatten_id(self.path.as_slice(), node.id);
             let input_count = func.inputs.len();
-            let (idx, _) = self.compact.insert_with(&flat_id, || ExecutionNode {
-                id: flat_id,
-                ..Default::default()
-            });
+            self.node_order.push(flat_id);
+            assert!(
+                self.e_nodes
+                    .insert(
+                        flat_id,
+                        ExecutionNode {
+                            id: flat_id,
+                            ..Default::default()
+                        },
+                    )
+                    .is_none(),
+                "flattened node ids must be unique"
+            );
 
             let outputs_start = self.n_outputs;
             self.n_outputs += func.outputs.len() as u32;
@@ -336,7 +344,7 @@ impl<'a> Run<'a> {
                 });
             }
 
-            let e_node = &mut self.compact[idx];
+            let e_node = self.e_nodes.get_mut(&flat_id).unwrap();
             e_node.func_id = func.id;
             e_node.func_version = func.version;
             // Refreshed every build (an Arc clone), so a reused flat node can't keep
@@ -362,7 +370,7 @@ impl<'a> Run<'a> {
             let scope = *self.scope_stack.last().unwrap();
             self.flatten.set_leaf(flat_id, scope, node.id);
 
-            self.cur_idx = idx;
+            self.cur_id = flat_id;
 
             for binding_entry in graph.node_bindings(node.id, input_count) {
                 let source = match binding_entry.binding {
@@ -480,13 +488,12 @@ impl<'a> Run<'a> {
         }
     }
 
-    /// Pool index of input `input_idx` of the node currently being filled,
-    /// living in the new pool at `cur_idx`'s span.
+    /// Pool index of input `input_idx` of the node currently being filled.
     fn cur_input_idx(&self, input_idx: usize) -> usize {
-        self.compact[self.cur_idx].inputs.start as usize + input_idx
+        self.e_nodes[&self.cur_id].inputs.start as usize + input_idx
     }
 
-    /// Write the resolved source into input `cur_idx`/`input_idx`. A changed
+    /// Write the resolved source into input `cur_id`/`input_idx`. A changed
     /// binding changes the node's content digest, which drives cache
     /// invalidation — no per-input dirty tracking is needed.
     fn set_input(&mut self, input_idx: usize, source: Source) {
@@ -494,16 +501,10 @@ impl<'a> Run<'a> {
         let binding = match source {
             Source::None => ExecutionBinding::None,
             Source::Const(v) => ExecutionBinding::Const(v),
-            Source::Producer(port) => {
-                let (target_idx, _) = self.compact.insert_with(&port.node_id, || ExecutionNode {
-                    id: port.node_id,
-                    ..Default::default()
-                });
-                ExecutionBinding::Bind(ExecutionPortAddress {
-                    target_idx: target_idx.into(),
-                    port_idx: port.port_idx,
-                })
-            }
+            Source::Producer(port) => ExecutionBinding::Bind(ExecutionPortAddress {
+                target: port.node_id,
+                port_idx: port.port_idx,
+            }),
         };
         self.new_inputs[pool_idx].binding = binding;
     }

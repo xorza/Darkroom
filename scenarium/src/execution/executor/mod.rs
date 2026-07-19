@@ -4,10 +4,10 @@
 //! [`ExecutionProgram`](crate::execution::program::ExecutionProgram), a prepared
 //! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan), and that `RuntimeCache`,
 //! [`Executor::run`] invokes each scheduled node's lambda and gathers stats.
-//! Each node's per-run result is one [`NodeOutcome`] in the per-run outcome column.
+//! Each node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
 //!
 //! **Pre-run resolution.** [`run`](Executor::run) takes the
-//! [`Resolver`](crate::execution::resolve::Resolver)'s [`Disposition`] column — each node's
+//! [`Resolver`](crate::execution::resolve::Resolver)'s [`Disposition`] map — each node's
 //! merged reuse-verdict + cut state, authoritative for the whole run (a `Reuse` is never
 //! re-derived here, since a digest folds live filesystem state and could drift mid-run). A
 //! cut node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
@@ -25,21 +25,21 @@ use common::CancelToken;
 use crate::execution::identity::FlattenMap;
 use crate::execution::report::{PinnedOutput, PinnedOutputs, RunEvent, RunPhase, RunProgress};
 use crate::execution::stats::{ExecutedNodeStats, ExecutionStats, NodeError};
-use crate::graph::InputPort;
+use crate::graph::{InputPort, NodeId};
 use crate::node::lambda::{InvokeError, InvokeInput};
 use crate::runtime::context::ContextManager;
 use crate::{DynamicValue, RamUsage};
 
 use crate::execution::cache::RuntimeCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
-use crate::execution::program::{ExecutionBinding, ExecutionProgram, NodeIdx, OutputIdx};
+use crate::execution::program::{ExecutionBinding, ExecutionProgram, OutputIdx};
 use crate::execution::resolve::Disposition;
-use crate::execution::{NodeColumn, OutputColumn, RunError};
+use crate::execution::{NodeMap, OutputColumn, RunError, reset_node_map};
 
-/// What became of a node this run — the single per-node result column, so the run-time
+/// What became of a node this run — the single per-node result map, so the run-time
 /// facts can't contradict (a node can't be `Reused` yet carry a run time, or `Ran` yet
 /// also flagged errored). Carries its own `RunError`/elapsed, so nothing lives in a side
-/// column.
+/// map.
 #[derive(Debug, Clone, Default)]
 enum NodeOutcome {
     /// Not reached this run: skipped for missing inputs, below a cancel, or unscheduled.
@@ -106,9 +106,9 @@ impl RemainingOutputReads {
         *remaining == 0
     }
 
-    fn node_drained(&self, program: &ExecutionProgram, node_idx: NodeIdx) -> bool {
+    fn node_drained(&self, program: &ExecutionProgram, node_id: NodeId) -> bool {
         self.counts
-            .slice(program.e_nodes[node_idx].outputs)
+            .slice(program.e_nodes[&node_id].outputs)
             .iter()
             .all(|remaining| *remaining == 0)
     }
@@ -121,31 +121,31 @@ struct ExecutionFrame<'a> {
     cache: &'a mut RuntimeCache,
     flatten: &'a FlattenMap,
     remaining_reads: &'a mut RemainingOutputReads,
-    retain: &'a NodeColumn<bool>,
+    retain: &'a NodeMap<bool>,
     inputs: &'a mut Vec<InvokeInput>,
 }
 
 impl ExecutionFrame<'_> {
-    async fn hydrate_resource_producers(&mut self, node_idx: NodeIdx) {
-        for input in self.program.node_inputs(&self.program.e_nodes[node_idx]) {
+    async fn hydrate_resource_producers(&mut self, node_id: NodeId) {
+        for input in self.program.node_inputs(&self.program.e_nodes[&node_id]) {
             if input.stamper.is_some()
                 && let ExecutionBinding::Bind(addr) = &input.binding
             {
-                self.cache.hydrate_slot(self.program, addr.target_idx).await;
+                self.cache.hydrate_slot(self.program, addr.target).await;
             }
         }
     }
 
-    fn collect_pinned_values(&mut self, node_idx: NodeIdx) -> Option<PinnedOutputs> {
-        let e_node = &self.program.e_nodes[node_idx];
-        let pinned_root = self.plan.pinned.contains(&node_idx);
+    fn collect_pinned_values(&mut self, node_id: NodeId) -> Option<PinnedOutputs> {
+        let e_node = &self.program.e_nodes[&node_id];
+        let pinned_root = self.plan.pinned.contains(&node_id);
         let mut values = Vec::new();
         for port_idx in 0..e_node.outputs.len as usize {
-            let output_idx = self.program.output_idx(node_idx, port_idx);
+            let output_idx = self.program.output_idx(node_id, port_idx);
             if pinned_root || self.program.is_output_pinned(output_idx) {
                 let value = self
                     .cache
-                    .read_output_port(self.program, node_idx, port_idx, false)
+                    .read_output_port(self.program, node_id, port_idx, false)
                     .expect("a node's output is resident immediately after it succeeds");
                 values.push(PinnedOutput { port_idx, value });
             }
@@ -155,35 +155,35 @@ impl ExecutionFrame<'_> {
         }
         let node = self
             .flatten
-            .address(e_node.id)
+            .address(node_id)
             .expect("a node that just ran must have an authoring address")
             .clone();
         Some(PinnedOutputs { node, values })
     }
 
-    async fn collect_inputs(&mut self, node_idx: NodeIdx) -> Result<(), RunError> {
+    async fn collect_inputs(&mut self, node_id: NodeId) -> Result<(), RunError> {
         self.inputs.clear();
-        let node_inputs = self.program.node_inputs(&self.program.e_nodes[node_idx]);
+        let node_inputs = self.program.node_inputs(&self.program.e_nodes[&node_id]);
         for (input_idx, e_input) in node_inputs.iter().enumerate() {
             let value = match &e_input.binding {
                 ExecutionBinding::None => DynamicValue::Unbound,
                 ExecutionBinding::Const(value) => value.into(),
                 ExecutionBinding::Bind(addr) => {
-                    let target = addr.target_idx;
+                    let target = addr.target;
                     let port_idx = addr.port_idx;
                     self.cache.hydrate_slot(self.program, target).await;
                     let output_idx = self.program.output_idx(target, port_idx);
-                    let take = self.remaining_reads.is_last(output_idx) && !self.retain[target];
+                    let take = self.remaining_reads.is_last(output_idx) && !self.retain[&target];
                     let Some(value) =
                         self.cache
                             .read_output_port(self.program, target, port_idx, take)
                     else {
                         return Err(RunError::InputLoadFailed {
-                            func_id: self.program.e_nodes[node_idx].func_id,
+                            func_id: self.program.e_nodes[&node_id].func_id,
                             input: input_idx,
                         });
                     };
-                    if self.remaining_reads.consume(output_idx) && !self.retain[target] {
+                    if self.remaining_reads.consume(output_idx) && !self.retain[&target] {
                         if self.remaining_reads.node_drained(self.program, target) {
                             self.cache.reclaim_slot(self.program, target);
                         } else {
@@ -213,36 +213,37 @@ pub(crate) struct Executor {
     /// move-on-last-use take, the spent-output release, the post-invoke drain reclaim
     /// (all in this module), and the engine's end-of-run
     /// [`evict_unused`](RuntimeCache::evict_unused). Reused across runs, rebuilt each run.
-    pub(crate) retain: NodeColumn<bool>,
-    /// Per-run outcome per node (see [`NodeOutcome`]), indexed by `e_node_idx`. Reused
-    /// across runs, reset to node count each run. The one per-node result column.
-    outcomes: NodeColumn<NodeOutcome>,
+    pub(crate) retain: NodeMap<bool>,
+    /// Per-run outcome per node (see [`NodeOutcome`]), keyed by node id. Reused
+    /// across runs and rebuilt each run.
+    outcomes: NodeMap<NodeOutcome>,
 }
 
 impl Executor {
-    /// Whether node `idx` actually recomputed its lambda in the last run — i.e. wasn't
-    /// reused from RAM/disk. Before any run (empty column) every node reads as "ran", so
+    /// Whether `node_id` actually recomputed its lambda in the last run — i.e. wasn't
+    /// reused from RAM/disk. Before any run (empty map) every node reads as "ran", so
     /// plan-only introspection still sees the full schedule. Test introspection only.
     #[cfg(test)]
-    pub(crate) fn ran(&self, idx: NodeIdx) -> bool {
-        idx.idx() >= self.outcomes.values.len()
-            || matches!(
-                self.outcomes[idx],
+    pub(crate) fn ran(&self, node_id: NodeId) -> bool {
+        self.outcomes.get(&node_id).is_none_or(|outcome| {
+            matches!(
+                outcome,
                 NodeOutcome::Ran { .. } | NodeOutcome::Failed { .. }
             )
+        })
     }
 
     /// Walk `plan.process_order` (producer-first). For each node: skip it as
     /// [`NodeOutcome::Cut`] if the resolver pruned its cone, serve it from RAM/disk on
     /// [`Disposition::Reuse`], else invoke its lambda and persist the result to disk right
     /// away (so a long run's earlier caches survive a later failure or cancel). The
-    /// `program`, `plan`, and `disposition` column are read-only. Returns per-run stats.
+    /// `program`, `plan`, and `disposition` map are read-only. Returns per-run stats.
     #[allow(clippy::too_many_arguments)] // an orchestration entry point; each arg is a distinct collaborator
     pub(crate) async fn run(
         &mut self,
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
-        disposition: &NodeColumn<Disposition>,
+        disposition: &NodeMap<Disposition>,
         cache: &mut RuntimeCache,
         flatten: &FlattenMap,
         events: Option<&UnboundedSender<RunEvent>>,
@@ -254,16 +255,16 @@ impl Executor {
         // one source.
         self.ctx_manager.cancel = cancel;
         self.ctx_manager.logs.clear();
-        self.outcomes
-            .reset(program.e_nodes.len(), NodeOutcome::Pending);
+        reset_node_map(&mut self.outcomes, program.node_ids(), NodeOutcome::Pending);
 
         // Build the run's retention policy (see the field doc): RAM-caching mode or pinned.
-        self.retain.reset(program.e_nodes.len(), false);
-        for idx in program.node_indices() {
-            self.retain[idx] = program.e_nodes[idx].cache.caches_in_ram();
+        reset_node_map(&mut self.retain, program.node_ids(), false);
+        for node_id in program.node_ids() {
+            *self.retain.get_mut(&node_id).unwrap() =
+                program.e_nodes[&node_id].cache.caches_in_ram();
         }
-        for &idx in &plan.pinned {
-            self.retain[idx] = true;
+        for node_id in &plan.pinned {
+            *self.retain.get_mut(node_id).unwrap() = true;
         }
 
         self.remaining_reads.seed(plan);
@@ -284,7 +285,7 @@ impl Executor {
             // separate pass; a runnable node whose *only* consumer is one of those may then
             // run needlessly (its output is unread — harmless, and missing inputs are an
             // error state anyway).
-            for &e_node_idx in &plan.process_order {
+            for &node_id in &plan.process_order {
                 // Coarse cancel: stop scheduling further nodes. A node already
                 // mid-invoke isn't interrupted (it finishes), but nothing after
                 // it starts. The unreached tail stays `Pending`, which the stats
@@ -292,17 +293,17 @@ impl Executor {
                 if self.ctx_manager.cancel.is_cancelled() {
                     break;
                 }
-                let e_node = &program.e_nodes[e_node_idx];
-                if disposition[e_node_idx] == Disposition::Cut {
+                let e_node = &program.e_nodes[&node_id];
+                if disposition[&node_id] == Disposition::Cut {
                     // Pruned by the pre-run cut: every consumer that would read this node reused
                     // a cache, so its output is never read. Report it cached iff it still holds a
                     // usable value (a deeper disk cache), else it's simply not computed this run.
-                    self.outcomes[e_node_idx] = NodeOutcome::Cut {
-                        cached: frame.cache.has_available_value(e_node_idx),
+                    *self.outcomes.get_mut(&node_id).unwrap() = NodeOutcome::Cut {
+                        cached: frame.cache.has_available_value(node_id),
                     };
                     continue;
                 }
-                if !plan.verdicts[e_node_idx].wants_execute() {
+                if !plan.verdicts[&node_id].wants_execute() {
                     continue;
                 }
                 // A func registered without an implementation can't execute — a host/library
@@ -312,7 +313,7 @@ impl Executor {
                     mark_skipped(
                         frame.cache,
                         &mut self.outcomes,
-                        e_node_idx,
+                        node_id,
                         RunError::MissingLambda {
                             func_id: e_node.func_id,
                         },
@@ -331,29 +332,27 @@ impl Executor {
                 // errored-dependency check: a digest-valid cached value stays valid even when an
                 // upstream re-ran for another consumer and failed, so it must not be cleared as
                 // skipped.
-                let reused = match disposition[e_node_idx] {
+                let reused = match disposition[&node_id] {
                     Disposition::Reuse => true,
-                    Disposition::Run if frame.cache.slots[e_node_idx].current_digest.is_none() => {
-                        frame.hydrate_resource_producers(e_node_idx).await;
+                    Disposition::Run if frame.cache.slots[&node_id].current_digest.is_none() => {
+                        frame.hydrate_resource_producers(node_id).await;
                         let demand = plan.outputs.demand.slice(e_node.outputs);
-                        frame
-                            .cache
-                            .stamp_and_check_reuse(program, e_node_idx, demand)
+                        frame.cache.stamp_and_check_reuse(program, node_id, demand)
                     }
                     _ => false,
                 };
                 if reused {
-                    self.outcomes[e_node_idx] = NodeOutcome::Reused;
+                    *self.outcomes.get_mut(&node_id).unwrap() = NodeOutcome::Reused;
                     continue;
                 }
 
                 let func_id = e_node.func_id;
 
-                if has_errored_dependency(program, &self.outcomes, e_node_idx) {
+                if has_errored_dependency(program, &self.outcomes, node_id) {
                     mark_skipped(
                         frame.cache,
                         &mut self.outcomes,
-                        e_node_idx,
+                        node_id,
                         RunError::SkippedUpstream { func_id },
                     );
                     continue;
@@ -364,18 +363,18 @@ impl Executor {
                 // satisfies. A bound producer whose blob failed to load drops this node for
                 // the run under its own reason (`InputLoadFailed`) — unlike an errored
                 // dependency, there is no upstream error to point at.
-                if let Err(error) = frame.collect_inputs(e_node_idx).await {
-                    mark_skipped(frame.cache, &mut self.outcomes, e_node_idx, error);
+                if let Err(error) = frame.collect_inputs(node_id).await {
+                    mark_skipped(frame.cache, &mut self.outcomes, node_id, error);
                     continue;
                 }
 
                 let output_count = e_node.outputs.len as usize;
-                let event_state = frame.cache.slots[e_node_idx].event_state.clone();
-                assert!(matches!(self.outcomes[e_node_idx], NodeOutcome::Pending));
+                let event_state = frame.cache.slots[&node_id].event_state.clone();
+                assert!(matches!(self.outcomes[&node_id], NodeOutcome::Pending));
 
                 // Attribute any logs this node emits to it (read by
                 // `ContextManager::log`).
-                let flat_id = e_node.id;
+                let flat_id = node_id;
                 self.ctx_manager.current_node = Some(flat_id);
                 let invoke_start = Instant::now();
                 if let Some(events) = events {
@@ -388,7 +387,12 @@ impl Executor {
                 }
                 let demand = plan.outputs.demand.slice(e_node.outputs);
                 let result = {
-                    let slot = frame.cache.slots[e_node_idx].invoke_slot(output_count);
+                    let slot = frame
+                        .cache
+                        .slots
+                        .get_mut(&node_id)
+                        .unwrap()
+                        .invoke_slot(output_count);
                     e_node
                         .lambda
                         .invoke(
@@ -423,8 +427,7 @@ impl Executor {
                         Err(RunError::Cancelled { func_id })
                     }
                     Ok(()) => {
-                        let outputs =
-                            frame.cache.slots[e_node_idx].unbound_demanded_outputs(demand);
+                        let outputs = frame.cache.slots[&node_id].unbound_demanded_outputs(demand);
                         if outputs.is_empty() {
                             Ok(())
                         } else {
@@ -434,18 +437,19 @@ impl Executor {
                     other => other,
                 };
                 let cancelled = matches!(&result, Err(RunError::Cancelled { .. }));
-                let slot = &mut frame.cache.slots[e_node_idx];
+                let slot = frame.cache.slots.get_mut(&node_id).unwrap();
                 let succeeded = match result {
                     // The fresh output now corresponds to this node's current digest; record
                     // it so the next run's reuse check is a RAM hit.
                     Ok(()) => {
                         slot.stamp_produced();
-                        self.outcomes[e_node_idx] = NodeOutcome::Ran { secs: run_time };
+                        *self.outcomes.get_mut(&node_id).unwrap() =
+                            NodeOutcome::Ran { secs: run_time };
                         true
                     }
                     Err(error) => {
                         slot.clear_output();
-                        self.outcomes[e_node_idx] = NodeOutcome::Failed {
+                        *self.outcomes.get_mut(&node_id).unwrap() = NodeOutcome::Failed {
                             secs: run_time,
                             error,
                         };
@@ -468,7 +472,7 @@ impl Executor {
                 // the values. Host delivery does not participate in binding-reader accounting.
                 if succeeded
                     && let Some(events) = events
-                    && let Some(payload) = frame.collect_pinned_values(e_node_idx)
+                    && let Some(payload) = frame.collect_pinned_values(node_id)
                 {
                     events
                         .send(RunEvent::PinnedOutputs(payload))
@@ -481,16 +485,16 @@ impl Executor {
                 if succeeded {
                     frame
                         .cache
-                        .store_node(program, e_node_idx, &mut self.ctx_manager)
+                        .store_node(program, node_id, &mut self.ctx_manager)
                         .await;
                     // A node no consumer reads (a sink, or every output already `Skip`) is
                     // spent the instant it's stored — reclaim its non-retained slot now rather
                     // than holding it to end-of-run eviction. A node that still owes reads is
                     // reclaimed later, in `collect_inputs`, when its last consumer lands.
-                    if !frame.retain[e_node_idx]
-                        && frame.remaining_reads.node_drained(program, e_node_idx)
+                    if !frame.retain[&node_id]
+                        && frame.remaining_reads.node_drained(program, node_id)
                     {
-                        frame.cache.reclaim_slot(program, e_node_idx);
+                        frame.cache.reclaim_slot(program, node_id);
                     }
                 }
             }
@@ -504,35 +508,35 @@ impl Executor {
     }
 }
 
-/// Drop node `idx` from this run: clear any stale cached output so it isn't served as
+/// Drop `node_id` from this run: clear any stale cached output so it isn't served as
 /// this run's result, and record the outcome under the caller's reason —
 /// [`RunError::SkippedUpstream`] for an errored dependency, [`RunError::InputLoadFailed`]
 /// for a cached input that failed to load, [`RunError::MissingLambda`] for a func with
 /// no implementation.
 fn mark_skipped(
     cache: &mut RuntimeCache,
-    outcomes: &mut NodeColumn<NodeOutcome>,
-    idx: NodeIdx,
+    outcomes: &mut NodeMap<NodeOutcome>,
+    node_id: NodeId,
     error: RunError,
 ) {
-    cache.slots[idx].clear_output();
-    outcomes[idx] = NodeOutcome::Skipped { error };
+    cache.slots.get_mut(&node_id).unwrap().clear_output();
+    *outcomes.get_mut(&node_id).unwrap() = NodeOutcome::Skipped { error };
 }
 
 fn has_errored_dependency(
     program: &ExecutionProgram,
-    outcomes: &NodeColumn<NodeOutcome>,
-    e_node_idx: NodeIdx,
+    outcomes: &NodeMap<NodeOutcome>,
+    node_id: NodeId,
 ) -> bool {
-    program.node_inputs(&program.e_nodes[e_node_idx]).iter().any(|input| {
-        matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[addr.target_idx].error().is_some())
+    program.node_inputs(&program.e_nodes[&node_id]).iter().any(|input| {
+        matches!(&input.binding, ExecutionBinding::Bind(addr) if outcomes[&addr.target].error().is_some())
     })
 }
 
 fn collect_execution_stats(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
-    outcomes: &NodeColumn<NodeOutcome>,
+    outcomes: &NodeMap<NodeOutcome>,
     start: Instant,
 ) -> ExecutionStats {
     let mut executed_nodes = Vec::new();
@@ -543,15 +547,17 @@ fn collect_execution_stats(
     // The schedule (and its per-node outcomes) is `process_order`. Each node's outcome is
     // the sole source of truth; a node the run never reached (a cancelled run's tail, or
     // skipped for missing inputs) is `Pending` and contributes to no list here.
-    for &idx in &plan.process_order {
-        let e = &program.e_nodes[idx];
-        match &outcomes[idx] {
+    for &node_id in &plan.process_order {
+        let e = &program.e_nodes[&node_id];
+        match &outcomes[&node_id] {
             // A reuse hit, or a node the cut pruned that still holds a value, are both
             // "available, not recomputed" — reported cached. A pruned memory-only node
             // (`Cut { cached: false }`) has no value this run and falls through, uncounted.
-            NodeOutcome::Reused | NodeOutcome::Cut { cached: true } => cached_nodes.push(e.id),
+            NodeOutcome::Reused | NodeOutcome::Cut { cached: true } => {
+                cached_nodes.push(node_id);
+            }
             NodeOutcome::Ran { secs } => executed_nodes.push(ExecutedNodeStats {
-                node_id: e.id,
+                node_id,
                 elapsed_secs: *secs,
             }),
             // A cancelled invoke didn't complete — omit it from the executed set so the
@@ -559,24 +565,24 @@ fn collect_execution_stats(
             // genuine failure did run; it appears in both lists.
             NodeOutcome::Failed { secs, error } if !matches!(error, RunError::Cancelled { .. }) => {
                 executed_nodes.push(ExecutedNodeStats {
-                    node_id: e.id,
+                    node_id,
                     elapsed_secs: *secs,
                 });
             }
             _ => {}
         }
-        if plan.verdicts[idx].missing_required_inputs() {
+        if plan.verdicts[&node_id].missing_required_inputs() {
             // Recompute which ports are unsatisfied (shares `input_missing` with the
             // planner) — only for the rare missing node, so it isn't worth a stored column.
             for (i, input) in program.node_inputs(e).iter().enumerate() {
                 if input_missing(input, &plan.verdicts) {
-                    missing_inputs.push(InputPort::new(e.id, i));
+                    missing_inputs.push(InputPort::new(node_id, i));
                 }
             }
         }
-        if let Some(err) = outcomes[idx].error() {
+        if let Some(err) = outcomes[&node_id].error() {
             node_errors.push(NodeError {
-                node_id: e.id,
+                node_id,
                 error: err.clone(),
             });
         }

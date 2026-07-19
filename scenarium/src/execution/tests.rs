@@ -22,10 +22,15 @@ fn execution_node_names_in_order(execution_graph: &ExecutionEngine) -> Vec<Strin
         .plan
         .process_order
         .iter()
-        .filter(|&&idx| {
-            execution_graph.plan.verdicts[idx].wants_execute() && execution_graph.node_ran(idx)
+        .filter(|&&node_id| {
+            execution_graph.plan.verdicts[&node_id].wants_execute()
+                && execution_graph.node_ran(node_id)
         })
-        .map(|&idx| execution_graph.compiled.program.e_nodes[idx].name.clone())
+        .map(|node_id| {
+            execution_graph.compiled.program.e_nodes[node_id]
+                .name
+                .clone()
+        })
         .collect()
 }
 
@@ -698,11 +703,11 @@ mod cache_persistence {
         // `mult` isn't RAM-caching (`Disk` mode) and nothing pins it, so it was
         // reclaimed to its on-disk blob once `Print` finished reading it this
         // run — hydrate it back to inspect the served bytes.
-        use crate::execution::query::resolve_node_idx;
-        let idx = resolve_node_idx(&engine.compiled, &NodeAddress::root(mult_id)).unwrap();
+        use crate::execution::query::resolve_node_id;
+        let node_id = resolve_node_id(&engine.compiled, &NodeAddress::root(mult_id)).unwrap();
         engine
             .cache
-            .hydrate_slot(&engine.compiled.program, idx)
+            .hydrate_slot(&engine.compiled.program, node_id)
             .await;
         let vals = engine.get_argument_values(&mult_id).unwrap();
         assert!(
@@ -1886,15 +1891,15 @@ mod graph_structure {
             execution_graph
                 .compiled
                 .program
-                .node_indices()
-                .all(|i| !execution_graph.plan.verdicts[i].missing_required_inputs())
+                .node_ids()
+                .all(|node_id| !execution_graph.plan.verdicts[&node_id].missing_required_inputs())
         );
         assert!(
             execution_graph
                 .compiled
                 .program
-                .node_indices()
-                .all(|i| execution_graph.plan.verdicts[i].wants_execute())
+                .node_ids()
+                .all(|node_id| execution_graph.plan.verdicts[&node_id].wants_execute())
         );
 
         let get_a = execution_graph.by_name("get_a").unwrap();
@@ -4013,14 +4018,8 @@ mod events {
         // The RunSinks sink is itself a sink, so it runs (its no-op lambda)
         // alongside the promoted sinks — never seeded as a plain subscriber cone.
         assert!(ran.contains(&"trigger".to_string()), "ran = {ran:?}");
-        let trigger_idx = eg
-            .compiled
-            .program
-            .e_nodes
-            .index_of_key(&trigger_id)
-            .unwrap();
         assert!(
-            eg.plan.process_order.iter().any(|i| i.idx() == trigger_idx),
+            eg.plan.process_order.contains(&trigger_id),
             "the RunSinks sink runs as a sink"
         );
 
@@ -4283,7 +4282,7 @@ mod topology {
     use common::FloatExt;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn removing_node_compacts_and_remaps() -> anyhow::Result<()> {
+    async fn removing_node_rebuilds_id_keyed_edges() -> anyhow::Result<()> {
         let printed = Arc::new(Mutex::new(0i64));
         let printed_l = printed.clone();
         let library = test_func_lib(TestFuncHooks {
@@ -4298,7 +4297,7 @@ mod topology {
         assert_eq!(eg.compiled.program.e_nodes.len(), 5);
 
         // Remove get_b — a middle node feeding sum[1] and mult[1] (both optional).
-        // Forces compaction and target_idx remapping for the survivors.
+        // The surviving direct-ID bindings remain valid.
         let get_b_id = graph
             .find_by_name("get_b", NodeSearch::TopLevel)
             .unwrap()
@@ -4387,10 +4386,9 @@ mod topology {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn cached_output_survives_compaction_reorder() -> anyhow::Result<()> {
+    async fn cached_output_survives_node_removal() -> anyhow::Result<()> {
         // Both sources are Pure, so their outputs are cached across runs.
-        // Removing whichever chain compiled first guarantees that the other
-        // source shifts slots despite the authoring graph's unordered storage.
+        // Removing one chain must preserve the survivor's ID-keyed slot.
         let calls_a = Arc::new(Mutex::new(0));
         let calls_a_l = calls_a.clone();
         let calls_b = Arc::new(Mutex::new(0));
@@ -4427,40 +4425,22 @@ mod topology {
         assert_eq!(*calls_a.lock().await, 1);
         assert_eq!(*calls_b.lock().await, 1);
 
-        let get_a_idx = eg.compiled.program.e_nodes.index_of_key(&get_a_id).unwrap();
-        let get_b_idx = eg.compiled.program.e_nodes.index_of_key(&get_b_id).unwrap();
-        let (survivor_id, removed_source_id, removed_print_id, expected_value, survivor_calls) =
-            if get_a_idx > get_b_idx {
-                (get_a_id, get_b_id, print_b_id, 2.0, &calls_a)
-            } else {
-                (get_b_id, get_a_id, print_a_id, 5.0, &calls_b)
-            };
-        let idx_before = eg
-            .compiled
-            .program
-            .e_nodes
-            .index_of_key(&survivor_id)
-            .unwrap();
+        let survivor_id = get_a_id;
+        let expected_value = 2.0;
+        let survivor_calls = &calls_a;
 
-        graph.detach_node(removed_source_id);
-        graph.detach_node(removed_print_id);
+        graph.detach_node(get_b_id);
+        graph.detach_node(print_b_id);
         graph.debug_check();
 
         eg.update(&graph, &library).unwrap();
-        let idx_after = eg
-            .compiled
-            .program
-            .e_nodes
-            .index_of_key(&survivor_id)
-            .unwrap();
-        assert_ne!(idx_before, idx_after, "survivor should have been reordered");
 
         let stats = eg.execute_sinks().await?;
 
         assert_eq!(
             *survivor_calls.lock().await,
             1,
-            "survivor recomputed after reorder"
+            "survivor recomputed after unrelated node removal"
         );
         assert!(stats.cached_nodes.contains(&survivor_id));
         let vals = eg.get_argument_values(&survivor_id).unwrap();
@@ -4474,7 +4454,7 @@ mod topology {
     #[tokio::test(flavor = "multi_thread")]
     async fn repeated_structural_churn_stays_correct() -> anyhow::Result<()> {
         // Grow→shrink the graph repeatedly on ONE ExecutionEngine, re-executing
-        // each step. Stresses the SoA pool rebuild + compaction across many
+        // each step. Stresses the SoA pool and ID-keyed node-map rebuild across many
         // updates (pools grow 2→4 then shrink 4→2 each round).
         let printed = Arc::new(Mutex::new(Vec::<i64>::new()));
         let p = printed.clone();
@@ -4687,7 +4667,7 @@ mod graph {
 
     fn bind_target(eg: &ExecutionEngine, e: &ExecutionNode, input_idx: usize) -> NodeId {
         match &eg.node_inputs(e)[input_idx].binding {
-            ExecutionBinding::Bind(addr) => eg.compiled.program.e_nodes[addr.target_idx].id,
+            ExecutionBinding::Bind(addr) => addr.target,
             other => panic!("expected Bind, got {other:?}"),
         }
     }
@@ -4759,7 +4739,7 @@ mod graph {
             .compiled
             .program
             .e_nodes
-            .iter()
+            .values()
             .filter(|e| e.name == "sum")
             .map(|e| e.id)
             .collect();
@@ -4820,11 +4800,7 @@ mod graph {
     }
 
     fn subscriber_ids(eg: &ExecutionEngine, e: &ExecutionNode, event_idx: usize) -> Vec<NodeId> {
-        eg.node_events(e)[event_idx]
-            .subscribers
-            .iter()
-            .map(|&i| eg.compiled.program.e_nodes[i].id)
-            .collect()
+        eg.node_events(e)[event_idx].subscribers.clone()
     }
 
     /// A parent subscriber of a composite's exposed event is rewired onto the
@@ -4944,7 +4920,7 @@ mod graph {
                 .compiled
                 .program
                 .e_nodes
-                .iter()
+                .values()
                 .filter(|e| e.name == "sum")
                 .map(|e| e.id)
                 .collect();

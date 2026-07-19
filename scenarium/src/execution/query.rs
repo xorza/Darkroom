@@ -6,16 +6,16 @@ use crate::execution::ExecutionEngine;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::event::{EventRef, EventTrigger};
 use crate::execution::identity::NodeAddress;
-use crate::execution::program::NodeIdx;
 use crate::execution::stats::ExecutionStats;
+use crate::graph::NodeId;
 
-pub(crate) fn resolve_node_idx(compiled: &CompiledGraph, address: &NodeAddress) -> Option<NodeIdx> {
+pub(crate) fn resolve_node_id(compiled: &CompiledGraph, address: &NodeAddress) -> Option<NodeId> {
     let flat_id = compiled.flatten_map.flat_node(address)?;
     compiled
         .program
         .e_nodes
-        .index_of_key(&flat_id)
-        .map(Into::into)
+        .contains_key(&flat_id)
+        .then_some(flat_id)
 }
 
 impl ExecutionEngine {
@@ -30,25 +30,14 @@ impl ExecutionEngine {
             .copied()
             .chain(stats.executed_nodes.iter().map(|n| n.node_id))
             .flat_map(|node_id| {
-                // One key lookup: `e_nodes` and `cache.slots` are index-aligned.
-                let idx = self
-                    .compiled
-                    .program
-                    .e_nodes
-                    .index_of_key(&node_id)
-                    .unwrap();
-                let e_node = &self.compiled.program.e_nodes[idx];
-                let event_state = self.cache.slots[idx].event_state.clone();
-                let id = e_node.id;
+                let e_node = &self.compiled.program.e_nodes[&node_id];
+                let event_state = self.cache.slots[&node_id].event_state.clone();
                 self.compiled.program.events[e_node.events.range()]
                     .iter()
                     .enumerate()
                     .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
                     .map(move |(event_idx, event)| EventTrigger {
-                        event: EventRef {
-                            node_id: id,
-                            event_idx,
-                        },
+                        event: EventRef { node_id, event_idx },
                         lambda: event.lambda.clone(),
                         state: event_state.clone(),
                     })
@@ -75,26 +64,26 @@ pub(crate) mod test_support {
         /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
         pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
             let address = self.compiled.flatten_map.representative(node_id)?;
-            let idx = resolve_node_idx(&self.compiled, address)?;
-            Some(self.argument_values_at(idx))
+            let node_id = resolve_node_id(&self.compiled, address)?;
+            Some(self.argument_values_at(node_id))
         }
 
-        fn argument_values_at(&self, idx: NodeIdx) -> ArgumentValues {
-            let e_node = &self.compiled.program.e_nodes[idx];
+        fn argument_values_at(&self, node_id: NodeId) -> ArgumentValues {
+            let e_node = &self.compiled.program.e_nodes[&node_id];
 
             let inputs = self.compiled.program.inputs[e_node.inputs.range()]
                 .iter()
                 .map(|input| match &input.binding {
                     ExecutionBinding::None => None,
                     ExecutionBinding::Const(v) => Some(DynamicValue::from(v)),
-                    ExecutionBinding::Bind(addr) => self.cache.slots[addr.target_idx]
+                    ExecutionBinding::Bind(addr) => self.cache.slots[&addr.target]
                         .output_values()
                         .and_then(|o| o.get(addr.port_idx))
                         .cloned(),
                 })
                 .collect();
 
-            let outputs = self.cache.slots[idx]
+            let outputs = self.cache.slots[&node_id]
                 .output_values()
                 .map(|o| o.to_vec())
                 .unwrap_or_default();

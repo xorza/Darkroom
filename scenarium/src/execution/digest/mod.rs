@@ -37,8 +37,9 @@ use blake3::Hasher;
 
 use crate::execution::cache::RuntimeCache;
 use crate::execution::program::{
-    ExecutionBinding, ExecutionPortAddress, ExecutionProgram, InputStamper, NodeIdx,
+    ExecutionBinding, ExecutionPortAddress, ExecutionProgram, InputStamper,
 };
+use crate::graph::NodeId;
 use crate::node::definition::FuncBehavior;
 use crate::{DataType, StaticValue};
 
@@ -255,10 +256,10 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
 ///   `None`, and the run loop re-stamps such a node at reach time, once its producers settled.
 pub(crate) fn node_digest(
     program: &ExecutionProgram,
-    idx: NodeIdx,
+    node_id: NodeId,
     cache: &RuntimeCache,
 ) -> Option<Digest> {
-    let e_node = &program.e_nodes[idx];
+    let e_node = &program.e_nodes[&node_id];
 
     // Only a `Pure` node is content-cacheable; an `Impure` node varies per run, so it has no
     // digest and always recomputes.
@@ -292,7 +293,7 @@ pub(crate) fn node_digest(
             ExecutionBinding::Bind(addr) => {
                 // The producer was visited first (topological order), so its `current_digest`
                 // is set; a `None` taints this node.
-                let node = cache.slots[addr.target_idx].current_digest?;
+                let node = cache.slots[&addr.target].current_digest?;
                 hasher
                     .write_bytes(&[2])
                     .write_digest(&port_digest_of(node, addr.port_idx));
@@ -327,7 +328,7 @@ fn hash_bound_resource(
     addr: &ExecutionPortAddress,
     stamper: &InputStamper,
 ) -> Option<()> {
-    let value = cache.slots[addr.target_idx]
+    let value = cache.slots[&addr.target]
         .output_values()?
         .get(addr.port_idx)?;
     match stamper {

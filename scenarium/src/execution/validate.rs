@@ -27,8 +27,10 @@ impl CompiledGraph {
 
         let program = &self.program;
         let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(program.e_nodes.len());
-        for e_node in program.e_nodes.iter() {
-            assert!(seen_node_ids.insert(e_node.id));
+        for node_id in program.node_ids() {
+            assert!(seen_node_ids.insert(node_id));
+            let e_node = &program.e_nodes[&node_id];
+            assert_eq!(e_node.id, node_id);
 
             // A special node's interface is its hardcoded spec, not a library func.
             let func = match e_node.special {
@@ -41,16 +43,16 @@ impl CompiledGraph {
 
             for e_input in program.node_inputs(e_node) {
                 if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
-                    assert!(e_addr.target_idx.idx() < program.e_nodes.len());
-                    let target = &program.e_nodes[e_addr.target_idx];
+                    let target = &program.e_nodes[&e_addr.target];
                     assert!(e_addr.port_idx < target.outputs.len as usize);
                 }
             }
         }
+        assert_eq!(seen_node_ids.len(), program.e_nodes.len());
     }
 
-    /// The engine's runtime `cache` stayed index-aligned to this artifact's
-    /// nodes after `reconcile` — the install-side half of the checks;
+    /// The engine's runtime `cache` has exactly this artifact's node ids after
+    /// `reconcile` — the install-side half of the checks;
     /// artifact-vs-library consistency runs at compile ([`Self::validate`]).
     pub(crate) fn validate_installed(&self, cache: &RuntimeCache) {
         if !is_debug() {
@@ -59,9 +61,9 @@ impl CompiledGraph {
 
         assert_eq!(cache.slots.len(), self.program.e_nodes.len());
 
-        for (idx, e_node) in self.program.e_nodes.iter().enumerate() {
-            let slot = &cache.slots[idx];
-            assert_eq!(slot.id, e_node.id);
+        for node_id in self.program.node_ids() {
+            let e_node = &self.program.e_nodes[&node_id];
+            let slot = &cache.slots[&node_id];
             if let Some(output_values) = slot.output_values() {
                 assert_eq!(output_values.len(), e_node.outputs.len as usize);
             }
@@ -81,16 +83,16 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
     // `process_order` is a post-order DFS: unique, and every Bind dep appears
     // before its consumer.
     let mut seen_in_order = HashSet::with_capacity(program.e_nodes.len());
-    for &idx in &plan.process_order {
-        assert!(idx.idx() < program.e_nodes.len());
-        for input in program.node_inputs(&program.e_nodes[idx]) {
+    for &node_id in &plan.process_order {
+        assert!(program.e_nodes.contains_key(&node_id));
+        for input in program.node_inputs(&program.e_nodes[&node_id]) {
             // Every Bind dep must be earlier in the order (bounds are re-checked, with
             // the port index, in the all-nodes loop below).
             if let ExecutionBinding::Bind(addr) = &input.binding {
-                assert!(seen_in_order.contains(&addr.target_idx));
+                assert!(seen_in_order.contains(&addr.target));
             }
         }
-        assert!(seen_in_order.insert(idx));
+        assert!(seen_in_order.insert(node_id));
     }
 
     // Eviction keeps a retained node only while it's on the frontier, which for a pinned
@@ -102,11 +104,10 @@ pub(crate) fn schedule(program: &ExecutionProgram, plan: &ExecutionPlan) {
 
     // Per-node verdict consistency is unrepresentable by construction (`NodeVerdict` is a
     // plain enum of mutually exclusive states), so only binding bounds remain to check.
-    for e_node in program.e_nodes.iter() {
+    for e_node in program.e_nodes.values() {
         for e_input in program.node_inputs(e_node) {
             if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                assert!(addr.target_idx.idx() < program.e_nodes.len());
-                assert!(addr.port_idx < program.e_nodes[addr.target_idx].outputs.len as usize);
+                assert!(addr.port_idx < program.e_nodes[&addr.target].outputs.len as usize);
             }
         }
     }

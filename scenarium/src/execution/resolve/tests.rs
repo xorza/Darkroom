@@ -1,7 +1,7 @@
 use super::*;
 use crate::DataType;
 use crate::execution::plan::{NodeVerdict, PlannedOutputs};
-use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, NodeIdx};
+use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 use crate::node::lambda::OutputDemand;
@@ -16,14 +16,14 @@ struct Fix {
 }
 
 impl Fix {
-    fn node(&mut self, producers: &[NodeIdx]) -> NodeIdx {
+    fn node(&mut self, producers: &[NodeId]) -> NodeId {
         let inputs_start = self.program.inputs.len() as u32;
         for &p in producers {
             self.program.inputs.push(ExecutionInput {
                 required: false,
                 stamper: None,
                 binding: ExecutionBinding::Bind(ExecutionPortAddress {
-                    target_idx: p,
+                    target: p,
                     port_idx: 0,
                 }),
             });
@@ -31,25 +31,35 @@ impl Fix {
         let idx = self.program.e_nodes.len();
         let outputs_start = self.program.output_types.len() as u32;
         self.program.output_types.push(DataType::Any);
-        self.program.e_nodes.add(ExecutionNode {
-            id: NodeId::from_u128(idx as u128 + 1),
-            func_id: FuncId::from_u128(idx as u128 + 1),
-            inputs: Span::new(inputs_start, producers.len() as u32),
-            outputs: Span::new(outputs_start, 1),
-            ..Default::default()
-        });
-        idx.into()
+        let node_id = NodeId::from_u128(idx as u128 + 1);
+        self.program.node_order.push(node_id);
+        self.program.e_nodes.insert(
+            node_id,
+            ExecutionNode {
+                id: node_id,
+                func_id: FuncId::from_u128(idx as u128 + 1),
+                inputs: Span::new(inputs_start, producers.len() as u32),
+                outputs: Span::new(outputs_start, 1),
+                ..Default::default()
+            },
+        );
+        node_id
     }
 }
 
 /// Run the backward cut over `fix` with the given roots and per-node resolution,
 /// returning each node's merged [`Disposition`].
-fn dispositions_of(fix: &Fix, roots: &[NodeIdx], reused: &[bool]) -> Vec<Disposition> {
+fn dispositions_of(fix: &Fix, roots: &[NodeId], reused: &[bool]) -> Vec<Disposition> {
+    let verdicts = fix
+        .program
+        .node_ids()
+        .map(|node_id| (node_id, NodeVerdict::Execute))
+        .collect();
     let plan = ExecutionPlan {
         // Producer-first order for these fixtures is just index order (a producer is always
         // added before its consumer), matching the planner's post-order.
-        process_order: (0..fix.program.e_nodes.len()).map(NodeIdx::from).collect(),
-        verdicts: vec![NodeVerdict::Execute; fix.program.e_nodes.len()].into(),
+        process_order: fix.program.node_ids().collect(),
+        verdicts,
         outputs: PlannedOutputs {
             demand: vec![OutputDemand::Skip; fix.program.n_outputs()].into(),
             readers: vec![0; fix.program.n_outputs()].into(),
@@ -57,11 +67,12 @@ fn dispositions_of(fix: &Fix, roots: &[NodeIdx], reused: &[bool]) -> Vec<Disposi
         roots: roots.to_vec(),
         pinned: Vec::new(),
     };
-    let reused: NodeColumn<bool> = reused.to_vec().into();
-    let mut disposition = NodeColumn::default();
+    let reused: NodeMap<bool> = fix.program.node_ids().zip(reused.iter().copied()).collect();
+    let mut disposition = NodeMap::default();
     compute_disposition(&fix.program, &plan, &reused, &mut disposition);
-    (0..fix.program.e_nodes.len())
-        .map(|i| disposition[NodeIdx::from(i)])
+    fix.program
+        .node_ids()
+        .map(|node_id| disposition[&node_id])
         .collect()
 }
 

@@ -19,10 +19,10 @@
 //! loop re-stamps it at reach time, once its producers have settled, possibly improving
 //! `Run` to a reuse.
 
-use crate::execution::NodeColumn;
 use crate::execution::cache::RuntimeCache;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
+use crate::execution::{NodeMap, reset_node_map};
 
 /// What the run loop does with one node — the resolver's single exposed column, merging the
 /// reuse verdict with the backward cut so the three states are mutually exclusive by
@@ -61,10 +61,10 @@ impl Disposition {
 pub(crate) struct Resolver {
     /// Pass-1 cache-hit scratch, read when the sweep promotes a node onto the frontier.
     /// Internal — everything downstream reads `disposition`.
-    reused: NodeColumn<bool>,
+    reused: NodeMap<bool>,
     /// The run's authoritative per-node verdicts (see [`Disposition`]), read by the
     /// executor's run loop and the end-of-run eviction.
-    pub(crate) disposition: NodeColumn<Disposition>,
+    pub(crate) disposition: NodeMap<Disposition>,
 }
 
 impl Resolver {
@@ -91,20 +91,20 @@ fn resolve_structural(
     program: &ExecutionProgram,
     cache: &mut RuntimeCache,
     plan: &ExecutionPlan,
-    reused: &mut NodeColumn<bool>,
+    reused: &mut NodeMap<bool>,
 ) {
-    reused.reset(program.e_nodes.len(), false);
-    for &idx in &plan.process_order {
+    reset_node_map(reused, program.node_ids(), false);
+    for &node_id in &plan.process_order {
         // A node blocked on a missing required input can't run and isn't a reuse hit; leave it
         // `Run` so the backward cut keeps its cone alive.
-        if !plan.verdicts[idx].wants_execute() {
+        if !plan.verdicts[&node_id].wants_execute() {
             continue;
         }
         // Fold the digest (reading producers' just-stamped digests) and decide reuse — the
         // one verdict for the run; the run loop reads the merged `disposition` rather than
         // re-deriving.
-        let demand = plan.outputs.demand.slice(program.e_nodes[idx].outputs);
-        reused[idx] = cache.stamp_and_check_reuse(program, idx, demand);
+        let demand = plan.outputs.demand.slice(program.e_nodes[&node_id].outputs);
+        *reused.get_mut(&node_id).unwrap() = cache.stamp_and_check_reuse(program, node_id, demand);
     }
 }
 
@@ -118,8 +118,8 @@ fn resolve_structural(
 fn compute_disposition(
     program: &ExecutionProgram,
     plan: &ExecutionPlan,
-    reused: &NodeColumn<bool>,
-    disposition: &mut NodeColumn<Disposition>,
+    reused: &NodeMap<bool>,
+    disposition: &mut NodeMap<Disposition>,
 ) {
     fn promote(reused: bool) -> Disposition {
         if reused {
@@ -128,19 +128,19 @@ fn compute_disposition(
             Disposition::Run
         }
     }
-    disposition.reset(program.e_nodes.len(), Disposition::Cut);
+    reset_node_map(disposition, program.node_ids(), Disposition::Cut);
     for &root in &plan.roots {
-        disposition[root] = promote(reused[root]);
+        *disposition.get_mut(&root).unwrap() = promote(reused[&root]);
     }
-    for &idx in plan.process_order.iter().rev() {
+    for &node_id in plan.process_order.iter().rev() {
         // Only a running node reads its producers: `Reuse` serves a cache and `Cut` is
         // never read, so neither passes need upstream.
-        if disposition[idx] != Disposition::Run {
+        if disposition[&node_id] != Disposition::Run {
             continue;
         }
-        for input in &program.inputs[program.e_nodes[idx].inputs.range()] {
+        for input in &program.inputs[program.e_nodes[&node_id].inputs.range()] {
             if let ExecutionBinding::Bind(addr) = &input.binding {
-                disposition[addr.target_idx] = promote(reused[addr.target_idx]);
+                *disposition.get_mut(&addr.target).unwrap() = promote(reused[&addr.target]);
             }
         }
     }

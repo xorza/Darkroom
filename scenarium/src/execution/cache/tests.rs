@@ -13,6 +13,12 @@ fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
     OutputSnapshot::new(values, coverage)
 }
 
+fn insert_slot(cache: &mut RuntimeCache, id: u128, slot: RuntimeSlot) -> NodeId {
+    let node_id = NodeId::from_u128(id);
+    assert!(cache.slots.insert(node_id, slot).is_none());
+    node_id
+}
+
 /// `is_resident_hit` is the resident-cache definition: a slot hits iff it has a
 /// current digest, holds values, and those values were produced under that
 /// exact digest. The four cases below are the full truth table.
@@ -23,56 +29,68 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     let mut cache = RuntimeCache::default();
 
     // 0: impure cone (no current digest) — never hits, even holding values.
-    cache.slots.add(RuntimeSlot {
-        id: NodeId::from_u128(1),
-        value: ValueState::Resident {
-            snapshot: complete_snapshot(out()),
-            produced_under: Some(d),
+    let impure = insert_slot(
+        &mut cache,
+        1,
+        RuntimeSlot {
+            value: ValueState::Resident {
+                snapshot: complete_snapshot(out()),
+                produced_under: Some(d),
+            },
+            current_digest: None,
+            ..Default::default()
         },
-        current_digest: None,
-        ..Default::default()
-    });
+    );
     // 1: has a current digest but no cached values.
-    cache.slots.add(RuntimeSlot {
-        id: NodeId::from_u128(2),
-        current_digest: Some(d),
-        ..Default::default()
-    });
+    let empty = insert_slot(
+        &mut cache,
+        2,
+        RuntimeSlot {
+            current_digest: Some(d),
+            ..Default::default()
+        },
+    );
     // 2: values present, but produced under a *different* digest (stale).
-    cache.slots.add(RuntimeSlot {
-        id: NodeId::from_u128(3),
-        current_digest: Some(d),
-        value: ValueState::Resident {
-            snapshot: complete_snapshot(out()),
-            produced_under: Some(other),
+    let stale = insert_slot(
+        &mut cache,
+        3,
+        RuntimeSlot {
+            current_digest: Some(d),
+            value: ValueState::Resident {
+                snapshot: complete_snapshot(out()),
+                produced_under: Some(other),
+            },
+            ..Default::default()
         },
-        ..Default::default()
-    });
+    );
     // 3: values produced under the current digest — the only hit.
-    cache.slots.add(RuntimeSlot {
-        id: NodeId::from_u128(4),
-        current_digest: Some(d),
-        value: ValueState::Resident {
-            snapshot: complete_snapshot(out()),
-            produced_under: Some(d),
+    let current = insert_slot(
+        &mut cache,
+        4,
+        RuntimeSlot {
+            current_digest: Some(d),
+            value: ValueState::Resident {
+                snapshot: complete_snapshot(out()),
+                produced_under: Some(d),
+            },
+            ..Default::default()
         },
-        ..Default::default()
-    });
+    );
 
     assert!(
-        !cache.is_resident_hit(NodeIdx(0), DEMANDED),
+        !cache.is_resident_hit(impure, DEMANDED),
         "impure cone never hits"
     );
     assert!(
-        !cache.is_resident_hit(NodeIdx(1), DEMANDED),
+        !cache.is_resident_hit(empty, DEMANDED),
         "no cached values is a miss"
     );
     assert!(
-        !cache.is_resident_hit(NodeIdx(2), DEMANDED),
+        !cache.is_resident_hit(stale, DEMANDED),
         "values under a stale digest is a miss"
     );
     assert!(
-        cache.is_resident_hit(NodeIdx(3), DEMANDED),
+        cache.is_resident_hit(current, DEMANDED),
         "values under the current digest is a hit"
     );
 }
@@ -81,26 +99,29 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
 fn hydrate_turns_a_miss_into_a_hit() {
     let d = Digest([3u8; 32]);
     let mut cache = RuntimeCache::default();
-    cache.slots.add(RuntimeSlot {
-        id: NodeId::from_u128(1),
-        current_digest: Some(d),
-        ..Default::default()
-    });
+    let node_id = insert_slot(
+        &mut cache,
+        1,
+        RuntimeSlot {
+            current_digest: Some(d),
+            ..Default::default()
+        },
+    );
     assert!(
-        !cache.is_resident_hit(NodeIdx(0), DEMANDED),
+        !cache.is_resident_hit(node_id, DEMANDED),
         "empty slot misses"
     );
 
-    test_support::hydrate(&mut cache, NodeIdx(0), complete_snapshot(out()), d);
+    test_support::hydrate(&mut cache, node_id, complete_snapshot(out()), d);
     assert!(
-        cache.is_resident_hit(NodeIdx(0), DEMANDED),
+        cache.is_resident_hit(node_id, DEMANDED),
         "a slot hydrated under its current digest hits"
     );
 
     // Hydrating under a digest that is no longer current does not hit.
-    cache.slots[0].current_digest = Some(Digest([9u8; 32]));
+    cache.slots.get_mut(&node_id).unwrap().current_digest = Some(Digest([9u8; 32]));
     assert!(
-        !cache.is_resident_hit(NodeIdx(0), DEMANDED),
+        !cache.is_resident_hit(node_id, DEMANDED),
         "current digest moved on ⇒ miss"
     );
 }
@@ -110,24 +131,23 @@ fn resident_hit_requires_coverage_for_every_demanded_output() {
     let digest = Digest([5; 32]);
     let mut cache = RuntimeCache::default();
     let mut slot = RuntimeSlot {
-        id: NodeId::from_u128(1),
         current_digest: Some(digest),
         ..Default::default()
     };
     slot.invoke_slot(2).outputs[0] = StaticValue::Int(10).into();
     slot.stamp_produced();
-    cache.slots.add(slot);
+    let node_id = insert_slot(&mut cache, 1, slot);
 
-    let ValueState::Resident { snapshot, .. } = &cache.slots[0].value else {
+    let ValueState::Resident { snapshot, .. } = &cache.slots[&node_id].value else {
         panic!("the invocation result was stamped resident");
     };
     assert_eq!(snapshot.coverage.ports, [true, false]);
 
-    assert!(cache.is_resident_hit(NodeIdx(0), &[OutputDemand::Produce, OutputDemand::Skip]));
-    assert!(!cache.is_resident_hit(NodeIdx(0), &[OutputDemand::Produce, OutputDemand::Produce]));
+    assert!(cache.is_resident_hit(node_id, &[OutputDemand::Produce, OutputDemand::Skip]));
+    assert!(!cache.is_resident_hit(node_id, &[OutputDemand::Produce, OutputDemand::Produce]));
 
-    cache.clear_output_port(NodeIdx(0), 0);
-    let ValueState::Resident { snapshot, .. } = &cache.slots[0].value else {
+    cache.clear_output_port(node_id, 0);
+    let ValueState::Resident { snapshot, .. } = &cache.slots[&node_id].value else {
         panic!("clearing one output keeps the snapshot resident");
     };
     assert_eq!(snapshot.coverage.ports, [false, false]);
@@ -231,38 +251,47 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
 
     let mut cache = RuntimeCache::default();
     // Slot A: the shared value + a distinct 5/0 value + a scalar (weightless).
-    cache.slots.add(RuntimeSlot {
-        id: NodeId::from_u128(1),
-        current_digest: Some(d),
-        value: ValueState::Resident {
-            snapshot: complete_snapshot(vec![
-                DynamicValue::Custom(shared.clone()),
-                DynamicValue::Custom(Arc::new(Payload { cpu: 5, gpu: 0 })),
-                DynamicValue::Static(StaticValue::Int(9)),
-            ]),
-            produced_under: Some(d),
+    insert_slot(
+        &mut cache,
+        1,
+        RuntimeSlot {
+            current_digest: Some(d),
+            value: ValueState::Resident {
+                snapshot: complete_snapshot(vec![
+                    DynamicValue::Custom(shared.clone()),
+                    DynamicValue::Custom(Arc::new(Payload { cpu: 5, gpu: 0 })),
+                    DynamicValue::Static(StaticValue::Int(9)),
+                ]),
+                produced_under: Some(d),
+            },
+            ..Default::default()
         },
-        ..Default::default()
-    });
+    );
     // Slot B: the *same* shared Arc again — must not be counted twice.
-    cache.slots.add(RuntimeSlot {
-        id: NodeId::from_u128(2),
-        current_digest: Some(d),
-        value: ValueState::Resident {
-            snapshot: complete_snapshot(vec![DynamicValue::Custom(shared.clone())]),
-            produced_under: Some(d),
+    insert_slot(
+        &mut cache,
+        2,
+        RuntimeSlot {
+            current_digest: Some(d),
+            value: ValueState::Resident {
+                snapshot: complete_snapshot(vec![DynamicValue::Custom(shared.clone())]),
+                produced_under: Some(d),
+            },
+            ..Default::default()
         },
-        ..Default::default()
-    });
+    );
     // Slot C: OnDisk — resident nowhere, contributes zero.
-    cache.slots.add(RuntimeSlot {
-        id: NodeId::from_u128(3),
-        current_digest: Some(d),
-        value: ValueState::OnDisk {
-            coverage: CachedOutputCoverage { ports: vec![true] },
+    insert_slot(
+        &mut cache,
+        3,
+        RuntimeSlot {
+            current_digest: Some(d),
+            value: ValueState::OnDisk {
+                coverage: CachedOutputCoverage { ports: vec![true] },
+            },
+            ..Default::default()
         },
-        ..Default::default()
-    });
+    );
 
     // shared (100/10) counted once + the 5/0 value; scalar and OnDisk add nothing.
     let usage = cache.resident_ram_usage();
@@ -273,17 +302,13 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
     // shared (100/10) + the 5/0 value = 105/10; slot B holds shared again = 100/10;
     // the OnDisk slot C is omitted.
     let by_node = cache.resident_ram_by_node();
-    assert_eq!(
-        by_node,
-        vec![
-            NodeRamUsage {
-                node_id: NodeId::from_u128(1),
-                usage: RamUsage { cpu: 105, gpu: 10 },
-            },
-            NodeRamUsage {
-                node_id: NodeId::from_u128(2),
-                usage: RamUsage { cpu: 100, gpu: 10 },
-            },
-        ]
-    );
+    assert_eq!(by_node.len(), 2);
+    assert!(by_node.contains(&NodeRamUsage {
+        node_id: NodeId::from_u128(1),
+        usage: RamUsage { cpu: 105, gpu: 10 },
+    }));
+    assert!(by_node.contains(&NodeRamUsage {
+        node_id: NodeId::from_u128(2),
+        usage: RamUsage { cpu: 100, gpu: 10 },
+    }));
 }

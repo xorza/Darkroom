@@ -128,8 +128,10 @@ Data bindings cross boundaries as follows:
 
 Event resolution similarly maps `GraphEvent` inward to a concrete emitter and
 expands composite subscribers through `GraphInput`. The resulting execution program
-contains only flat func-to-func data and event edges. Disk and RAM caching therefore
-need no composite-specific behavior.
+contains only flat func-to-func data and event edges. Nodes, binding targets, and
+event subscribers are all addressed directly by flat `NodeId`; `node_order` preserves
+deterministic scheduling order independently from the node map. Disk and RAM caching
+therefore need no composite-specific behavior.
 
 ---
 
@@ -241,7 +243,7 @@ never yields a half-real output set.
 
 ## B.5 The RAM tier (`cache.rs`)
 
-Each node has a `RuntimeSlot` (index-aligned to `e_nodes`):
+Each flat `NodeId` has a `RuntimeSlot` in the ID-keyed runtime cache:
 
 ```
 current_digest: Option<Digest>   // this run's content digest, stamped by the executor

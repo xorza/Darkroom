@@ -125,7 +125,7 @@ impl Prog {
     /// Mark input `input_idx` of node `idx` resource-typed with `stamper` (inputs default
     /// to none) — gates the Bind-side referent-identity fold.
     fn stamp_input(&mut self, idx: usize, input_idx: usize, stamper: InputStamper) {
-        let pool = self.program.e_nodes[idx].inputs.start as usize + input_idx;
+        let pool = self.program.e_nodes[&node_id(idx)].inputs.start as usize + input_idx;
         self.program.inputs[pool].stamper = Some(stamper);
     }
 
@@ -148,24 +148,33 @@ impl Prog {
         let idx = self.program.e_nodes.len();
         let outputs_start = self.program.output_types.len() as u32;
         self.program.output_types.extend_from_slice(types);
-        self.program.e_nodes.add(ExecutionNode {
-            id: NodeId::from_u128(idx as u128 + 1),
-            behavior,
-            func_id: FuncId::from_u128(func),
-            func_version: version,
-            inputs: Span::new(inputs_start, bindings.len() as u32),
-            outputs: Span::new(outputs_start, types.len() as u32),
-            ..Default::default()
-        });
+        let node_id = node_id(idx);
+        self.program.node_order.push(node_id);
+        self.program.e_nodes.insert(
+            node_id,
+            ExecutionNode {
+                id: node_id,
+                behavior,
+                func_id: FuncId::from_u128(func),
+                func_version: version,
+                inputs: Span::new(inputs_start, bindings.len() as u32),
+                outputs: Span::new(outputs_start, types.len() as u32),
+                ..Default::default()
+            },
+        );
         idx
     }
 }
 
 fn bind(idx: usize, port: usize) -> ExecutionBinding {
     ExecutionBinding::Bind(ExecutionPortAddress {
-        target_idx: idx.into(),
+        target: node_id(idx),
         port_idx: port,
     })
+}
+
+fn node_id(idx: usize) -> NodeId {
+    NodeId::from_u128(idx as u128 + 1)
 }
 
 fn konst(value: StaticValue) -> ExecutionBinding {
@@ -176,28 +185,28 @@ fn konst(value: StaticValue) -> ExecutionBinding {
 /// in `e_node` order (the test `Prog`s are built that way), each node reading its
 /// producers' just-stamped `current_digest` — stopping after `through`. Re-stats any
 /// `FsPath` const each call. Returns the cache, holding every computed digest.
-fn digested_cache(program: &ExecutionProgram, through: NodeIdx) -> RuntimeCache {
+fn digested_cache(program: &ExecutionProgram, through: usize) -> RuntimeCache {
     let mut cache = RuntimeCache::default();
-    cache.reconcile(&program.e_nodes);
-    for idx in program.node_indices().take(through.idx() + 1) {
-        let d = node_digest(program, idx, &cache);
-        cache.slots[idx].current_digest = d;
+    cache.reconcile(program);
+    for node_id in program.node_ids().take(through + 1) {
+        let digest = node_digest(program, node_id, &cache);
+        cache.slots.get_mut(&node_id).unwrap().current_digest = digest;
     }
     cache
 }
 
 /// One node's content digest, computing only the producer-first prefix it needs.
-fn digest_at(program: &ExecutionProgram, idx: NodeIdx) -> Option<Digest> {
-    digested_cache(program, idx).slots[idx].current_digest
+fn digest_at(program: &ExecutionProgram, idx: usize) -> Option<Digest> {
+    digested_cache(program, idx).slots[&node_id(idx)].current_digest
 }
 
 /// Every node's content digest, indexed by position.
 fn digests(prog: &Prog) -> Vec<Option<Digest>> {
-    let last = NodeIdx::from(prog.program.e_nodes.len().saturating_sub(1));
+    let last = prog.program.e_nodes.len().saturating_sub(1);
     let cache = digested_cache(&prog.program, last);
     prog.program
-        .node_indices()
-        .map(|i| cache.slots[i].current_digest)
+        .node_ids()
+        .map(|node_id| cache.slots[&node_id].current_digest)
         .collect()
 }
 
@@ -296,9 +305,9 @@ fn fs_path_folds_file_identity_and_path() {
 
     let p = prog_for(&path);
     std::fs::write(&file, b"x").unwrap(); // len 1
-    let d_len1 = digest_at(&p.program, NodeIdx(0));
+    let d_len1 = digest_at(&p.program, 0);
     std::fs::write(&file, b"xyz").unwrap(); // len 3 — file identity changed
-    let d_len3 = digest_at(&p.program, NodeIdx(0));
+    let d_len3 = digest_at(&p.program, 0);
     assert_ne!(
         d_len1, d_len3,
         "a file content change must re-key the digest"
@@ -306,14 +315,11 @@ fn fs_path_folds_file_identity_and_path() {
 
     // A present file and a missing one are distinct identities.
     std::fs::remove_file(&file).unwrap();
-    let d_missing = digest_at(&p.program, NodeIdx(0));
+    let d_missing = digest_at(&p.program, 0);
     assert_ne!(d_len3, d_missing, "file presence must matter");
 
     // The path string itself is folded, independent of file identity (both missing).
-    let d_other = digest_at(
-        &prog_for("definitely-missing-elsewhere").program,
-        NodeIdx(0),
-    );
+    let d_other = digest_at(&prog_for("definitely-missing-elsewhere").program, 0);
     assert_ne!(d_missing, d_other, "different path ⇒ different digest");
 }
 
@@ -343,20 +349,20 @@ fn bound_fs_path_folds_delivered_file_identity() {
     // slot empty — an unreadable value), then fold both consumers.
     let digests_with = |value: Option<DynamicValue>| {
         let mut cache = RuntimeCache::default();
-        cache.reconcile(&p.program.e_nodes);
-        let producer = node_digest(&p.program, NodeIdx(0), &cache).unwrap();
-        cache.slots[NodeIdx(0)].current_digest = Some(producer);
+        cache.reconcile(&p.program);
+        let producer = node_digest(&p.program, node_id(0), &cache).unwrap();
+        cache.slots.get_mut(&node_id(0)).unwrap().current_digest = Some(producer);
         if let Some(value) = value {
             hydrate(
                 &mut cache,
-                NodeIdx(0),
+                node_id(0),
                 OutputSnapshot::new(vec![value], CachedOutputCoverage { ports: vec![true] }),
                 producer,
             );
         }
         (
-            node_digest(&p.program, NodeIdx(1), &cache),
-            node_digest(&p.program, NodeIdx(2), &cache),
+            node_digest(&p.program, node_id(1), &cache),
+            node_digest(&p.program, node_id(2), &cache),
         )
     };
     let fs_path = || Some(DynamicValue::Static(StaticValue::FsPath(path.clone())));
@@ -440,12 +446,12 @@ fn custom_stamper_folds_referent_version() {
 
     let digests = || {
         let mut cache = RuntimeCache::default();
-        cache.reconcile(&p.program.e_nodes);
-        let producer = node_digest(&p.program, NodeIdx(0), &cache).unwrap();
-        cache.slots[NodeIdx(0)].current_digest = Some(producer);
+        cache.reconcile(&p.program);
+        let producer = node_digest(&p.program, node_id(0), &cache).unwrap();
+        cache.slots.get_mut(&node_id(0)).unwrap().current_digest = Some(producer);
         hydrate(
             &mut cache,
-            NodeIdx(0),
+            node_id(0),
             OutputSnapshot::new(
                 vec![StaticValue::Int(42).into()],
                 CachedOutputCoverage { ports: vec![true] },
@@ -453,8 +459,8 @@ fn custom_stamper_folds_referent_version() {
             producer,
         );
         (
-            node_digest(&p.program, NodeIdx(1), &cache),
-            node_digest(&p.program, NodeIdx(2), &cache),
+            node_digest(&p.program, node_id(1), &cache),
+            node_digest(&p.program, node_id(2), &cache),
         )
     };
 
@@ -483,7 +489,7 @@ fn output_ports_are_disambiguated() {
     p.add(20, 0, 1, &[bind(0, 0)]); // B binds A.0
     p.add(20, 0, 1, &[bind(0, 1)]); // C binds A.1 (same func as B)
 
-    let a = digest_at(&p.program, NodeIdx(0)).unwrap();
+    let a = digest_at(&p.program, 0).unwrap();
     assert_ne!(
         port_digest_of(a, 0),
         port_digest_of(a, 1),
@@ -548,7 +554,7 @@ fn cycle_yields_none() {
     let mut p = Prog::default();
     p.add(10, 0, 1, &[bind(1, 0)]); // A binds B (idx 1)
     p.add(20, 0, 1, &[bind(0, 0)]); // B binds A (idx 0)
-    assert_eq!(digest_at(&p.program, NodeIdx(0)), None);
+    assert_eq!(digest_at(&p.program, 0), None);
 }
 
 #[test]

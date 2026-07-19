@@ -10,15 +10,14 @@
 //! repeated plan on an unchanged graph allocates nothing.
 
 use crate::execution::compile::CompiledGraph;
-use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionProgram, NodeIdx, OutputIdx,
-};
-use crate::execution::query::resolve_node_idx;
-use crate::execution::{Error, NodeColumn, OutputColumn, Result, RunSeeds, validate};
+use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram, OutputIdx};
+use crate::execution::query::resolve_node_id;
+use crate::execution::{Error, NodeMap, OutputColumn, Result, RunSeeds, reset_node_map, validate};
+use crate::graph::NodeId;
 use crate::node::lambda::OutputDemand;
 use crate::node::special::SpecialNode;
 
-/// The planner's structural verdict for one node this run, indexed by `e_node_idx`.
+/// The planner's structural verdict for one node this run.
 /// The planner decides only *runnable vs blocked on inputs*; *cached vs recompute* is an
 /// execution-time call (the executor computes the node's digest and reuses from RAM/disk
 /// or runs). The default (`MissingInputs`) is the conservative "not yet established as
@@ -48,11 +47,11 @@ impl NodeVerdict {
 /// `verdicts` must already hold the producer's verdict, which the planner's
 /// post-order forward pass guarantees. Shared by that pass and the executor's
 /// stats so the two can't drift.
-pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeColumn<NodeVerdict>) -> bool {
+pub(crate) fn input_missing(input: &ExecutionInput, verdicts: &NodeMap<NodeVerdict>) -> bool {
     match &input.binding {
         ExecutionBinding::None => input.required,
         ExecutionBinding::Const(_) => false,
-        ExecutionBinding::Bind(addr) => verdicts[addr.target_idx].missing_required_inputs(),
+        ExecutionBinding::Bind(addr) => verdicts[&addr.target].missing_required_inputs(),
     }
 }
 
@@ -70,7 +69,7 @@ impl PlannedOutputs {
         self.readers.reset(output_count, 0);
     }
 
-    fn seed_external_demand(&mut self, program: &ExecutionProgram, pinned: &[NodeIdx]) {
+    fn seed_external_demand(&mut self, program: &ExecutionProgram, pinned: &[NodeId]) {
         assert_eq!(
             program.output_pinned.len(),
             program.n_outputs(),
@@ -79,9 +78,9 @@ impl PlannedOutputs {
         for output_idx in program.pinned_output_indices() {
             self.demand[output_idx] = OutputDemand::Produce;
         }
-        for &idx in pinned {
+        for node_id in pinned {
             self.demand
-                .slice_mut(program.e_nodes[idx].outputs)
+                .slice_mut(program.e_nodes[node_id].outputs)
                 .fill(OutputDemand::Produce);
         }
     }
@@ -99,9 +98,9 @@ pub(crate) struct ExecutionPlan {
     /// The schedule: post-order DFS over the dependency graph (deps before consumers),
     /// seeded from the sinks — every reachable node, producer-first. The executor
     /// walks this and skips `MissingInputs` nodes (and reuses cached ones) inline.
-    pub(crate) process_order: Vec<NodeIdx>,
-    /// Per-node verdict (execute / missing-inputs), indexed by node position.
-    pub(crate) verdicts: NodeColumn<NodeVerdict>,
+    pub(crate) process_order: Vec<NodeId>,
+    /// Per-node verdict (execute / missing-inputs), keyed by node id.
+    pub(crate) verdicts: NodeMap<NodeVerdict>,
     /// Per-output production demand and structural binding-reader counts. The plan owns
     /// both immutable templates; the executor copies only `readers` into live state.
     pub(crate) outputs: PlannedOutputs,
@@ -110,7 +109,7 @@ pub(crate) struct ExecutionPlan {
     /// repeat; harmless). The schedule's "must be available" set: the executor's pre-run
     /// cut seeds its `needed` mask from these and prunes any cone reachable only through
     /// cache-hit consumers (see [`Executor`](crate::execution::executor::Executor)).
-    pub(crate) roots: Vec<NodeIdx>,
+    pub(crate) roots: Vec<NodeId>,
     /// The node-seeded roots (on-demand preview targets) — a *pinned root*, a subset of
     /// `roots`. Distinct from a pinned *output port* (a graph-authored, persisted flag —
     /// see [`Graph::pinned_outputs`](crate::graph::Graph)): this is a per-run seed with
@@ -119,13 +118,13 @@ pub(crate) struct ExecutionPlan {
     /// outputs resident through every release/eviction site whatever its cache mode.
     /// Retention is all it takes for a repeated run to be a RAM hit: the reuse check
     /// serves any resident digest-valid value.
-    pub(crate) pinned: Vec<NodeIdx>,
+    pub(crate) pinned: Vec<NodeId>,
 }
 
 impl ExecutionPlan {
     pub(crate) fn clear(&mut self) {
         self.process_order.clear();
-        self.verdicts.values.clear();
+        self.verdicts.clear();
         self.outputs.demand.values.clear();
         self.outputs.readers.values.clear();
         self.roots.clear();
@@ -134,10 +133,14 @@ impl ExecutionPlan {
 
     /// Clear the order and reset every per-node verdict to default at the given pool
     /// sizes. Called at the start of each planning pass.
-    pub(crate) fn reset(&mut self, n_nodes: usize, n_outputs: usize) {
+    pub(crate) fn reset(&mut self, program: &ExecutionProgram) {
         self.process_order.clear();
-        self.verdicts.reset(n_nodes, NodeVerdict::default());
-        self.outputs.reset(n_outputs);
+        reset_node_map(
+            &mut self.verdicts,
+            program.node_ids(),
+            NodeVerdict::default(),
+        );
+        self.outputs.reset(program.n_outputs());
         self.roots.clear();
         self.pinned.clear();
     }
@@ -154,8 +157,8 @@ enum Color {
 
 #[derive(Debug)]
 enum Visit {
-    Discover(NodeIdx),
-    Done(NodeIdx),
+    Discover(NodeId),
+    Done(NodeId),
 }
 
 /// Reusable per-run scheduling scratch, kept across runs so a repeated plan on
@@ -163,7 +166,7 @@ enum Visit {
 #[derive(Debug, Default)]
 pub(crate) struct Planner {
     /// DFS coloring for the backward pass.
-    color: NodeColumn<Color>,
+    color: NodeMap<Color>,
     /// DFS work stack.
     stack: Vec<Visit>,
 }
@@ -180,7 +183,7 @@ impl Planner {
         plan: &mut ExecutionPlan,
     ) -> Result<()> {
         let program = &compiled.program;
-        plan.reset(program.e_nodes.len(), program.n_outputs());
+        plan.reset(program);
 
         // Collect the walk roots straight into `plan.roots` — they seed the backward walk
         // below *and* the executor's pre-run cut, so they live on the plan as an output.
@@ -210,28 +213,28 @@ impl Planner {
         // `plan.reset` (called at the top of `plan`) already cleared `process_order` and
         // `roots`; this pass only needs to reset its own scratch.
         self.stack.clear();
-        self.color.reset(program.e_nodes.len(), Color::White);
+        reset_node_map(&mut self.color, program.node_ids(), Color::White);
 
-        for e_node_idx in plan.roots.iter().copied() {
-            self.stack.push(Visit::Discover(e_node_idx));
+        for node_id in plan.roots.iter().copied() {
+            self.stack.push(Visit::Discover(node_id));
         }
 
         while let Some(visit) = self.stack.pop() {
-            let idx = match visit {
-                Visit::Discover(idx) => idx,
-                Visit::Done(idx) => {
-                    assert_eq!(self.color[idx], Color::Gray);
-                    self.color[idx] = Color::Black;
-                    plan.process_order.push(idx);
+            let node_id = match visit {
+                Visit::Discover(node_id) => node_id,
+                Visit::Done(node_id) => {
+                    assert_eq!(self.color[&node_id], Color::Gray);
+                    *self.color.get_mut(&node_id).unwrap() = Color::Black;
+                    plan.process_order.push(node_id);
                     // Runnable unless a required input is unbound or fed by a
                     // non-runnable producer. Post-order ⇒ deps already verdicted, so
                     // `input_missing` reads settled values. Whether the node's output is
                     // reused from cache is decided at execution, not here.
-                    let inputs = program.e_nodes[idx].inputs;
+                    let inputs = program.e_nodes[&node_id].inputs;
                     let missing = program.inputs[inputs.range()]
                         .iter()
                         .any(|e_input| input_missing(e_input, &plan.verdicts));
-                    plan.verdicts[idx] = if missing {
+                    *plan.verdicts.get_mut(&node_id).unwrap() = if missing {
                         NodeVerdict::MissingInputs
                     } else {
                         NodeVerdict::Execute
@@ -240,25 +243,23 @@ impl Planner {
                 }
             };
 
-            match self.color[idx] {
+            match self.color[&node_id] {
                 Color::Gray => {
-                    return Err(Error::CycleDetected {
-                        node_id: program.e_nodes[idx].id,
-                    });
+                    return Err(Error::CycleDetected { node_id });
                 }
                 Color::Black => continue,
                 Color::White => {}
             }
 
-            self.color[idx] = Color::Gray;
-            self.stack.push(Visit::Done(idx));
+            *self.color.get_mut(&node_id).unwrap() = Color::Gray;
+            self.stack.push(Visit::Done(node_id));
 
-            let span = program.e_nodes[idx].inputs;
+            let span = program.e_nodes[&node_id].inputs;
             for e_input in &program.inputs[span.range()] {
                 if let ExecutionBinding::Bind(addr) = &e_input.binding {
-                    let output_idx = program.output_idx(addr.target_idx, addr.port_idx);
+                    let output_idx = program.output_idx(addr.target, addr.port_idx);
                     plan.outputs.add_reader(output_idx);
-                    self.stack.push(Visit::Discover(addr.target_idx));
+                    self.stack.push(Visit::Discover(addr.target));
                 }
             }
         }
@@ -290,21 +291,22 @@ fn collect_roots(
     // program they target, so an id that doesn't resolve (deleted, disabled, or stale) is
     // inconsistent caller state — fail the run rather than silently skip the seed.
     for address in &seeds.nodes {
-        let idx = resolve_node_idx(compiled, address).ok_or_else(|| Error::NodeSeedNotFound {
-            address: address.clone(),
-        })?;
-        plan.roots.push(idx);
-        plan.pinned.push(idx);
+        let node_id =
+            resolve_node_id(compiled, address).ok_or_else(|| Error::NodeSeedNotFound {
+                address: address.clone(),
+            })?;
+        plan.roots.push(node_id);
+        plan.pinned.push(node_id);
     }
 
     // Event subscribers. A `RunSinks` sink among them fires no cone of its own — it
     // promotes this run to run all sinks (below), so it's skipped as a root here.
     let mut run_sinks = seeds.sinks;
     for event in &seeds.events {
-        let e_node = program.e_nodes.by_key(&event.node_id).unwrap();
+        let e_node = &program.e_nodes[&event.node_id];
         let subs = &program.events[e_node.events.range()][event.event_idx].subscribers;
         for &sub in subs {
-            if program.e_nodes[sub].special == Some(SpecialNode::RunSinks) {
+            if program.e_nodes[&sub].special == Some(SpecialNode::RunSinks) {
                 run_sinks = true;
             } else {
                 plan.roots.push(sub);
@@ -318,14 +320,15 @@ fn collect_roots(
     // One sweep for both whole-graph seed kinds: sink nodes (requested directly, or
     // promoted by a fired event reaching a `RunSinks` sink) and — for the event
     // loop — nodes owning a subscribed event.
-    for (idx, e_node) in program.e_nodes.iter().enumerate() {
+    for node_id in program.node_ids() {
+        let e_node = &program.e_nodes[&node_id];
         if (run_sinks && e_node.sink)
             || (seeds.event_triggers
                 && program.events[e_node.events.range()]
                     .iter()
                     .any(|ev| !ev.subscribers.is_empty()))
         {
-            plan.roots.push(idx.into());
+            plan.roots.push(node_id);
         }
     }
     Ok(())
