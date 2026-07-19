@@ -839,8 +839,8 @@ fn image_to_cpu(value: DynamicValue) -> anyhow::Result<RawImage> {
 /// Build (or load from cache) the four calibration masters for `dirs`
 /// (darks / flats / bias / flat_darks, in order). With `cache` on, a master is
 /// loaded from `master_<role>.lcm` next to its frames when present, and a
-/// freshly-stacked one is written there for next time. Delete the `.lcm` to
-/// force a rebuild (a changed frame set is not auto-detected).
+/// freshly-stacked one is written there for next time. An unreadable or stale
+/// cache is rebuilt from its source folder.
 /// Run a cancellable blocking lumos op off the worker. Centralizes the
 /// `spawn_blocking` + join handling and the "a cancelled op is a cancel, not a
 /// failure" rule the heavy astro nodes share: a lumos op reports cancellation as
@@ -875,7 +875,7 @@ fn build_masters_cached(
                 file: &str|
      -> anyhow::Result<Option<CfaImage>> {
         // Bail between roles (a cancel during the cached-master loads stops the
-        // next load); a real load/stack error propagates as itself.
+        // next load); a real source scan/stack error propagates as itself.
         if cancel.is_cancelled() {
             anyhow::bail!("cancelled");
         }
@@ -884,7 +884,14 @@ fn build_masters_cached(
         };
         let cache_path = dir.join(file);
         if cache && cache_path.exists() {
-            return Ok(Some(CfaImage::load(&cache_path)?));
+            match CfaImage::load(&cache_path) {
+                Ok(master) => return Ok(Some(master)),
+                Err(error) => tracing::warn!(
+                    path = %cache_path.display(),
+                    %error,
+                    "failed to load calibration master cache; rebuilding from source frames"
+                ),
+            }
         }
         let frames = raw_frame_files(&dir)?;
         let master =

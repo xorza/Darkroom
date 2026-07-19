@@ -95,6 +95,34 @@ fn raw_frame_scan_is_decoder_specific_sorted_and_contextual() {
 }
 
 #[test]
+fn build_masters_rebuilds_when_cache_load_fails() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("test_output/lens/stale_master_cache");
+    if dir.exists() {
+        fs::remove_dir_all(&dir).unwrap();
+    }
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("master_dark.lcm"), b"obsolete cache format").unwrap();
+
+    let masters = build_masters_cached(
+        [Some(dir.clone()), None, None, None],
+        DEFAULT_SIGMA_THRESHOLD,
+        true,
+        CancelToken::never(),
+    )
+    .expect("a stale cache falls back to scanning and stacking its source folder");
+
+    assert_eq!(
+        masters.components().collect::<Vec<_>>(),
+        [],
+        "the empty source folder rebuilds to an absent dark master"
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn load_astro_image_node_is_registered() {
     let lib = astro_library();
     let f = func(&lib, "Load Astro Image");
