@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn avx2_matches_scalar_reference() {
-        if !common::cpu_features::has_avx2() {
+        if !common::cpu_features::has_avx2_fma() {
             return;
         }
         let beta = 0.05f32;
