@@ -32,7 +32,7 @@ pub struct DrizzleConfig {
     /// Common values: 1.5, 2.0, 3.0
     pub scale: f32,
     /// Pixel fraction - ratio of drop size to input pixel before mapping.
-    /// Range: 0.0 to 1.0
+    /// Range: greater than 0.0 and at most 1.0
     /// - 1.0 = shift-and-add (full pixel footprint)
     /// - 0.8 = recommended for 4-point dithered data
     /// - 0.5 = aggressive shrinking, needs good dithering
@@ -104,7 +104,7 @@ impl DrizzleConfig {
         if !self.scale.is_finite() || self.scale <= 0.0 {
             return Err(DrizzleConfigError::InvalidScale { value: self.scale });
         }
-        if !self.pixfrac.is_finite() || !(0.0..=1.0).contains(&self.pixfrac) {
+        if !self.pixfrac.is_finite() || !(self.pixfrac > 0.0 && self.pixfrac <= 1.0) {
             return Err(DrizzleConfigError::InvalidPixfrac {
                 value: self.pixfrac,
             });

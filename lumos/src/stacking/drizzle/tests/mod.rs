@@ -12,6 +12,7 @@ use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
 use crate::stacking::drizzle::geometry::{boxer, lanczos_kernel, local_jacobian, sgarea};
 use crate::stacking::drizzle::stack::{drizzle_images, drizzle_stack};
+use crate::stacking::product::StackProduct;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::transform::Transform;
 
@@ -47,6 +48,39 @@ fn mono_image(width: usize, height: usize, pixels: Vec<f32>) -> AstroImage {
 
 fn constant_mono_image(width: usize, height: usize, value: f32) -> AstroImage {
     mono_image(width, height, vec![value; width * height])
+}
+
+fn assert_product_finite(product: &StackProduct) {
+    for channel in 0..product.image.dimensions.channels {
+        assert!(
+            product
+                .image
+                .channel(channel)
+                .iter()
+                .all(|value| value.is_finite())
+        );
+    }
+    assert!(
+        product
+            .coverage
+            .pixels()
+            .iter()
+            .all(|value| value.is_finite())
+    );
+    assert!(
+        product
+            .weight
+            .pixels()
+            .iter()
+            .all(|value| value.is_finite())
+    );
+    assert!(
+        product
+            .variance
+            .pixels()
+            .iter()
+            .all(|value| value.is_finite())
+    );
 }
 
 fn drizzle_frames(

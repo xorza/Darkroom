@@ -18,7 +18,7 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 
 /// CFA pattern for raw sensor data.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CfaType {
     /// No CFA pattern (monochrome sensor)
     Mono,
@@ -205,7 +205,7 @@ impl CfaImage {
     /// For Bayer/X-Trans: uses per-color-channel means to avoid color shift
     /// when flat light source is not perfectly white (LED panels, twilight flats).
     /// Each R/G/B channel is normalized independently.
-    pub fn divide_by_normalized(&mut self, flat: &CfaImage, bias: Option<&CfaImage>) {
+    pub(crate) fn divide_by_normalized(&mut self, flat: &CfaImage, bias: Option<&CfaImage>) {
         assert!(
             self.data.width() == flat.data.width() && self.data.height() == flat.data.height(),
             "Flat dimensions mismatch: {}x{} vs {}x{}",

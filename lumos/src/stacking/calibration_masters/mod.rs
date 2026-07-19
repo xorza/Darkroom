@@ -16,7 +16,7 @@ use std::path::Path;
 
 use common::CancelToken;
 
-use crate::io::astro_image::cfa::CfaImage;
+use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::io::raw::raw_dimensions;
 use crate::stacking::combine::cache::CfaCache;
 use crate::stacking::combine::config::StackConfig;
@@ -74,6 +74,26 @@ impl std::fmt::Display for CalibrationComponent {
             Self::Defects => f.write_str("defects"),
         }
     }
+}
+
+/// Invalid CFA metadata supplied to raw-frame calibration.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum CalibrationError {
+    /// The light frame does not identify its sensor pattern.
+    #[error("light frame is missing CFA pattern metadata")]
+    MissingLightCfaPattern,
+    /// A calibration master does not identify its sensor pattern.
+    #[error("{component} master is missing CFA pattern metadata")]
+    MissingMasterCfaPattern { component: CalibrationComponent },
+    /// A calibration master was captured with a different sensor pattern.
+    #[error(
+        "{component} master CFA pattern {master:?} does not match light frame pattern {light:?}"
+    )]
+    CfaPatternMismatch {
+        component: CalibrationComponent,
+        light: CfaType,
+        master: CfaType,
+    },
 }
 
 /// Read-only defect statistics derived from a calibration bundle.
@@ -357,12 +377,19 @@ impl CalibrationMasters {
     /// 1. Dark subtraction (or bias if no dark)
     /// 2. Flat division with normalization
     /// 3. CFA-aware defect pixel correction
-    pub fn calibrate(&self, image: &mut CfaImage) {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CalibrationError`] when the light or any stored master is missing CFA metadata,
+    /// or when a master's Mono, Bayer, or X-Trans pattern differs from the light. Validation
+    /// completes before the light is mutated.
+    pub fn calibrate(&self, image: &mut CfaImage) -> Result<(), CalibrationError> {
         // Double application would silently subtract the dark / divide the flat twice.
         assert!(
             !image.metadata.calibrated,
             "calibrate() called on an already-calibrated frame"
         );
+        self.validate_cfa_patterns(image)?;
         image.metadata.calibrated = true;
 
         // 1. Dark subtraction
@@ -382,5 +409,43 @@ impl CalibrationMasters {
         if let Some(ref defect_map) = self.defect_map {
             defect_map.correct(image);
         }
+
+        Ok(())
+    }
+
+    fn validate_cfa_patterns(&self, image: &CfaImage) -> Result<(), CalibrationError> {
+        let light = image
+            .metadata
+            .cfa_type
+            .as_ref()
+            .ok_or(CalibrationError::MissingLightCfaPattern)?;
+
+        for (component, master) in [
+            (CalibrationComponent::Dark, self.images.dark.as_ref()),
+            (CalibrationComponent::Flat, self.images.flat.as_ref()),
+            (CalibrationComponent::Bias, self.images.bias.as_ref()),
+            (
+                CalibrationComponent::FlatDark,
+                self.images.flat_dark.as_ref(),
+            ),
+        ] {
+            let Some(master) = master else {
+                continue;
+            };
+            let master_pattern = master
+                .metadata
+                .cfa_type
+                .as_ref()
+                .ok_or(CalibrationError::MissingMasterCfaPattern { component })?;
+            if master_pattern != light {
+                return Err(CalibrationError::CfaPatternMismatch {
+                    component,
+                    light: light.clone(),
+                    master: master_pattern.clone(),
+                });
+            }
+        }
+
+        Ok(())
     }
 }

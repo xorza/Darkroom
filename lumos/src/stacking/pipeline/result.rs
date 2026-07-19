@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use crate::io::astro_image::error::ImageError;
+use crate::stacking::calibration_masters::CalibrationError;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::product::StackProduct;
 use crate::stacking::star_detection::error::StarDetectionConfigError;
@@ -66,6 +67,8 @@ pub enum Error {
     },
     #[error("all {count} non-reference frames failed to register")]
     AllFramesDropped { count: usize },
+    #[error(transparent)]
+    Calibration(#[from] CalibrationError),
     #[error(transparent)]
     DetectionConfig(#[from] StarDetectionConfigError),
     #[error(transparent)]

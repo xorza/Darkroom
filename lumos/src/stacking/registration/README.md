@@ -21,8 +21,8 @@ let warped = warp(
 ```
 
 `register` returns `Result<RegistrationResult, RegistrationError>`. Configuration validation,
-insufficient catalogs, pattern matching failure, RANSAC failure, SIP failure, and the final RMS gate
-are typed errors.
+non-finite catalog coordinates/FWHM, insufficient catalogs, pattern matching failure, RANSAC
+failure, SIP failure, and the final RMS gate are typed errors.
 
 `warp` returns `WarpResult { image, coverage }`. Coverage is the fraction of interpolation support
 that came from in-bounds source pixels. The stacking pipeline stores and applies it as a per-pixel
@@ -30,7 +30,8 @@ weight, excluding extrapolated borders from rejection and combination.
 
 ## Registration flow
 
-1. Validate `RegistrationConfig` and derive the RANSAC noise scale from the catalogs' median FWHM.
+1. Validate `RegistrationConfig`, catalog coordinates, and FWHM values, then derive the RANSAC
+   noise scale from the catalogs' median FWHM.
 2. Take the brightest `matching.max_stars` entries from each catalog.
 3. Form local k-nearest-neighbor triangles, query the reference triangle invariants with a 2D
    k-d tree, vote for point pairs, and resolve a deterministic one-to-one match set.

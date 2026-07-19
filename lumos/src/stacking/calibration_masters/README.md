@@ -10,6 +10,10 @@ Replacing a source master without rebuilding its defect map is not representable
 `from_images` accepts optional prebuilt CFA images through the same named dark, flat, bias, and
 flat-dark fields.
 
+`calibrate` validates that the light and every stored master carry the same Mono, Bayer, or X-Trans
+pattern before changing the light. Missing or mismatched metadata returns `CalibrationError`;
+failed validation leaves both pixels and the calibrated flag unchanged.
+
 ## Construction and cancellation
 
 - `stack_cfa_master(paths, config, cancel)` stacks one calibration role and polls `CancelToken`
@@ -114,10 +118,11 @@ The implementation dispatches by sensor layout:
   then reassemble the mosaic.
 - X-Trans: same-color mosaic stencils selected through the 6×6 pattern.
 
-Unlabelled CFA frames skip the optional pipeline step because their same-color neighborhood is
-unknown. Tight Bayer stars can become nearly single-pixel sources in a phase plane, so per-frame
-rejection is best reserved for short sequences where stack-time rejection cannot reliably outvote
-transients; dithered multi-frame sets should normally rely on sigma/winsor rejection.
+Calibration rejects unlabelled CFA frames because neither flat normalization nor same-color
+correction can be applied safely without the sensor pattern. Tight Bayer stars can become nearly
+single-pixel sources in a phase plane, so per-frame rejection is best reserved for short sequences
+where stack-time rejection cannot reliably outvote transients; dithered multi-frame sets should
+normally rely on sigma/winsor rejection.
 
 ## References
 

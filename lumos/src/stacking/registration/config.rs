@@ -342,7 +342,7 @@ impl Config {
     /// - `ratio_tolerance` not in (0, 1)
     /// - `min_votes` < 1
     /// - invalid RANSAC configuration
-    /// - `max_rms_error` <= 0
+    /// - `max_rms_error` non-finite or <= 0
     /// - invalid SIP configuration (when enabled)
     /// - invalid warp configuration
     pub fn validate(&self) -> Result<(), RegistrationError> {
@@ -352,9 +352,9 @@ impl Config {
         self.ransac.validate()?;
 
         // Quality
-        if self.max_rms_error <= 0.0 {
+        if !self.max_rms_error.is_finite() || self.max_rms_error <= 0.0 {
             return invalid(format!(
-                "max_rms_error must be positive, got {}",
+                "max_rms_error must be positive and finite, got {}",
                 self.max_rms_error
             ));
         }
@@ -371,6 +371,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use crate::stacking::registration::config::*;
+    use glam::DVec2;
 
     #[test]
     fn test_config_default_values() {
@@ -675,12 +676,32 @@ mod tests {
             (
                 Config {
                     ransac: RansacConfig {
+                        max_rotation: Some(f64::NAN),
+                        ..Default::default()
+                    },
+                    ..Config::default()
+                },
+                "max_rotation must be positive and finite",
+            ),
+            (
+                Config {
+                    ransac: RansacConfig {
                         scale_range: Some((1.5, 0.5)),
                         ..Default::default()
                     },
                     ..Config::default()
                 },
                 "scale_range must have 0 < min < max",
+            ),
+            (
+                Config {
+                    ransac: RansacConfig {
+                        scale_range: Some((0.8, f64::INFINITY)),
+                        ..Default::default()
+                    },
+                    ..Config::default()
+                },
+                "scale_range bounds must be finite",
             ),
             (
                 Config {
@@ -691,6 +712,13 @@ mod tests {
             ),
             (
                 Config {
+                    max_rms_error: f64::INFINITY,
+                    ..Config::default()
+                },
+                "max_rms_error must be positive and finite",
+            ),
+            (
+                Config {
                     sip: Some(SipConfig {
                         order: 6,
                         ..Default::default()
@@ -698,6 +726,16 @@ mod tests {
                     ..Config::default()
                 },
                 "SIP order must be 2-5",
+            ),
+            (
+                Config {
+                    sip: Some(SipConfig {
+                        reference_point: Some(DVec2::new(0.0, f64::NEG_INFINITY)),
+                        ..Default::default()
+                    }),
+                    ..Config::default()
+                },
+                "SIP reference_point must be finite",
             ),
             (
                 // Homography needs 4 points, so min_matches = 3 is too few.

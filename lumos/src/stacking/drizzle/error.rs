@@ -13,7 +13,7 @@ pub enum DrizzleConfigError {
     #[error("scale must be finite and positive, got {value}")]
     InvalidScale { value: f32 },
 
-    #[error("pixfrac must be finite and between 0 and 1, got {value}")]
+    #[error("pixfrac must be finite, greater than 0, and at most 1, got {value}")]
     InvalidPixfrac { value: f32 },
 
     #[error("fill_value must be finite, got {value}")]

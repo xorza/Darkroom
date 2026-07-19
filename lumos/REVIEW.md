@@ -6,8 +6,8 @@ Updated 2026-07-19 against the current Lumos source.
 
 The review now tracks implementation status instead of preserving the original snapshot:
 
-- 16 findings completed;
-- 9 concrete findings open;
+- 19 findings completed;
+- 6 concrete findings open;
 - 1 allocation finding partially resolved;
 - 2 proposals deferred until there is a product decision or measured failure.
 
@@ -104,6 +104,22 @@ surface. Paths and symbol names are used instead of brittle line numbers.
   edge-inlier regression covers the concrete case where a translation refit shifts by 0.6 pixels
   and degrades the robust score.
 
+- [x] **Enforce CFA-pattern coherence during calibration.**
+  `CalibrationMasters::calibrate` validates the light and every stored master before changing
+  pixels or the calibrated flag. Missing metadata and mismatched Mono, Bayer, Bayer-phase, and
+  X-Trans patterns return typed `CalibrationError` variants; the lower-level flat-division helper
+  is no longer public.
+
+- [x] **Validate registration inputs and limits as finite at the public boundary.**
+  `register` rejects non-finite positions and FWHM values with catalog-and-index-aware error
+  variants before triangle construction. Configuration validation now rejects non-finite RMS and
+  rotation limits, scale-range bounds, and SIP reference points.
+
+- [x] **Reject zero `pixfrac` before drizzle arithmetic.**
+  `DrizzleConfig::validate` now requires `0 < pixfrac <= 1`, so every kernel rejects zero before
+  output allocation or drop arithmetic. Tests cover all five kernels and assert finite image,
+  coverage, weight, and variance planes at the valid upper boundary.
+
 Completed follow-up work not present in the original review: `DetectorPool` threads reusable
 detectors through parallel frame processing without thread-local state. On the 16 × 1 MP,
 8-thread benchmark, reuse reduced the median from 50.06 ms to 41.91 ms.
@@ -121,22 +137,6 @@ detectors through parallel frame processing without thread-local state. On the 1
   The public type derives `Default` and exposes mutable size/channel fields, so zero dimensions,
   unsupported channel counts, and unchecked sample-count overflow remain constructible. Replace
   this with an invariant-preserving representation and checked dimension arithmetic.
-
-- [ ] **Enforce CFA-pattern coherence during calibration.**
-  `CfaImage` exposes its plane and metadata, and flat division can select the flat pattern without
-  verifying that it matches the light. Reject missing or mismatched Mono, Bayer, and X-Trans
-  patterns before mutation.
-
-- [ ] **Validate registration inputs and limits as finite at the public boundary.**
-  `register` does not validate star positions or FWHM before triangle construction. NaN
-  `max_rms_error`, `max_rotation`, and SIP reference points can also bypass their current
-  comparisons. Return typed validation errors before sorting or fitting.
-
-- [ ] **Reject or define zero `pixfrac` before drizzle arithmetic.**
-  `DrizzleConfig::validate` accepts zero although Turbo divides by `drop_size²` and Gaussian derives
-  inverse variance from zero sigma. Require `0 < pixfrac <= 1`, or map zero explicitly to Point
-  semantics before entering those kernels. Test every kernel at the boundary and assert finite
-  image, coverage, weight, and variance planes.
 
 ## Batch 2 — Remaining repeated work and allocations
 

@@ -109,7 +109,7 @@ fn decode_calibrate_demosaic(
         path: path.to_path_buf(),
         source,
     })?;
-    masters.calibrate(&mut cfa);
+    masters.calibrate(&mut cfa)?;
     if let Some(cr) = &config.cosmic_ray {
         // Dispatched per CFA type inside `reject_cosmic_rays` (mono / Bayer-deinterleave /
         // X-Trans same-color). Only an unlabeled frame is skipped — its pattern is unknown, so any

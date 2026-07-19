@@ -55,7 +55,9 @@ mod synthetic_tests;
 
 use config::Config;
 use distortion::sip::SipPolynomial;
-use result::{RansacFailureReason, RegistrationError, RegistrationResult, StarMatch};
+use result::{
+    RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult, StarMatch,
+};
 use transform::{Transform, TransformType};
 
 use std::time::Instant;
@@ -107,6 +109,8 @@ pub fn register(
     config: &Config,
 ) -> Result<RegistrationResult, RegistrationError> {
     config.validate()?;
+    validate_catalog(ref_stars, RegistrationCatalog::Reference)?;
+    validate_catalog(target_stars, RegistrationCatalog::Target)?;
     let start = Instant::now();
 
     // Validate input — the gate is keyed to the transform model unless min_stars overrides it.
@@ -184,6 +188,26 @@ pub fn register(
     }
 
     Ok(result)
+}
+
+fn validate_catalog(stars: &[Star], catalog: RegistrationCatalog) -> Result<(), RegistrationError> {
+    for (index, star) in stars.iter().enumerate() {
+        if !star.pos.x.is_finite() || !star.pos.y.is_finite() {
+            return Err(RegistrationError::InvalidStarPosition {
+                catalog,
+                index,
+                position: star.pos,
+            });
+        }
+        if !star.fwhm.is_finite() {
+            return Err(RegistrationError::InvalidStarFwhm {
+                catalog,
+                index,
+                value: star.fwhm,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Compute the median FWHM from two sets of stars.
@@ -459,7 +483,7 @@ fn recover_matches(
 }
 
 #[cfg(test)]
-mod fwhm_tests {
+mod input_tests {
     use crate::stacking::registration::*;
 
     fn make_star(fwhm: f32) -> Star {
@@ -522,6 +546,61 @@ mod fwhm_tests {
         // max_sigma = 2.5 * 0.5 = 1.25
         assert!((median - 2.5).abs() < 0.01);
         assert!((max_sigma - 1.25).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_register_rejects_non_finite_positions_in_both_catalogs() {
+        for catalog in [RegistrationCatalog::Reference, RegistrationCatalog::Target] {
+            let mut ref_stars = vec![make_star(2.0); 8];
+            let mut target_stars = ref_stars.clone();
+            let stars = match catalog {
+                RegistrationCatalog::Reference => &mut ref_stars,
+                RegistrationCatalog::Target => &mut target_stars,
+            };
+            stars[3].pos = DVec2::new(f64::NAN, 4.0);
+
+            let error = register(&ref_stars, &target_stars, &Config::default()).unwrap_err();
+            match error {
+                RegistrationError::InvalidStarPosition {
+                    catalog: actual,
+                    index,
+                    position,
+                } => {
+                    assert_eq!(actual, catalog);
+                    assert_eq!(index, 3);
+                    assert!(position.x.is_nan());
+                    assert_eq!(position.y, 4.0);
+                }
+                other => panic!("expected invalid star position, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_register_rejects_non_finite_fwhm_in_both_catalogs() {
+        for catalog in [RegistrationCatalog::Reference, RegistrationCatalog::Target] {
+            let mut ref_stars = vec![make_star(2.0); 8];
+            let mut target_stars = ref_stars.clone();
+            let stars = match catalog {
+                RegistrationCatalog::Reference => &mut ref_stars,
+                RegistrationCatalog::Target => &mut target_stars,
+            };
+            stars[5].fwhm = f32::INFINITY;
+
+            let error = register(&ref_stars, &target_stars, &Config::default()).unwrap_err();
+            match error {
+                RegistrationError::InvalidStarFwhm {
+                    catalog: actual,
+                    index,
+                    value,
+                } => {
+                    assert_eq!(actual, catalog);
+                    assert_eq!(index, 5);
+                    assert_eq!(value, f32::INFINITY);
+                }
+                other => panic!("expected invalid star FWHM, got {other:?}"),
+            }
+        }
     }
 }
 

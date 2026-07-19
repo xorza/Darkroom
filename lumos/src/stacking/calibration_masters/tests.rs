@@ -1,7 +1,8 @@
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
-use crate::stacking::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
+use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::weighted_budget;
+use crate::stacking::calibration_masters::{CalibrationError, DEFAULT_SIGMA_THRESHOLD};
 use crate::stacking::combine::error::Error;
 use crate::testing::constant_cfa;
 use crate::{
@@ -50,9 +51,113 @@ fn test_calibrate_twice_panics() {
         CalibrationMasters::from_images(CalibrationSet::default(), 5.0, CancelToken::never())
             .unwrap();
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
     assert!(light.metadata.calibrated);
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
+}
+
+fn masters_with_component(
+    component: CalibrationComponent,
+    cfa_type: Option<CfaType>,
+) -> CalibrationMasters {
+    let mut master = constant_cfa(2, 2, 1.0, CfaType::Mono);
+    master.metadata.cfa_type = cfa_type;
+    let mut images = CalibrationSet::default();
+    match component {
+        CalibrationComponent::Dark => images.dark = Some(master),
+        CalibrationComponent::Flat => images.flat = Some(master),
+        CalibrationComponent::Bias => images.bias = Some(master),
+        CalibrationComponent::FlatDark => images.flat_dark = Some(master),
+        CalibrationComponent::Defects => panic!("defect maps do not carry CFA metadata"),
+    }
+    CalibrationMasters {
+        images,
+        defect_map: None,
+    }
+}
+
+#[test]
+fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
+    #[derive(Debug)]
+    struct Case {
+        component: CalibrationComponent,
+        light: Option<CfaType>,
+        master: Option<CfaType>,
+        expected: CalibrationError,
+    }
+
+    let xtrans_a = CfaType::XTrans([[0; 6]; 6]);
+    let mut xtrans_b_pattern = [[0; 6]; 6];
+    xtrans_b_pattern[0][0] = 1;
+    let xtrans_b = CfaType::XTrans(xtrans_b_pattern);
+    let cases = [
+        Case {
+            component: CalibrationComponent::Flat,
+            light: None,
+            master: Some(CfaType::Mono),
+            expected: CalibrationError::MissingLightCfaPattern,
+        },
+        Case {
+            component: CalibrationComponent::Flat,
+            light: Some(CfaType::Mono),
+            master: None,
+            expected: CalibrationError::MissingMasterCfaPattern {
+                component: CalibrationComponent::Flat,
+            },
+        },
+        Case {
+            component: CalibrationComponent::Dark,
+            light: Some(CfaType::Mono),
+            master: Some(CfaType::Bayer(CfaPattern::Rggb)),
+            expected: CalibrationError::CfaPatternMismatch {
+                component: CalibrationComponent::Dark,
+                light: CfaType::Mono,
+                master: CfaType::Bayer(CfaPattern::Rggb),
+            },
+        },
+        Case {
+            component: CalibrationComponent::Flat,
+            light: Some(CfaType::Bayer(CfaPattern::Rggb)),
+            master: Some(CfaType::Bayer(CfaPattern::Bggr)),
+            expected: CalibrationError::CfaPatternMismatch {
+                component: CalibrationComponent::Flat,
+                light: CfaType::Bayer(CfaPattern::Rggb),
+                master: CfaType::Bayer(CfaPattern::Bggr),
+            },
+        },
+        Case {
+            component: CalibrationComponent::Bias,
+            light: Some(CfaType::Bayer(CfaPattern::Rggb)),
+            master: Some(xtrans_a.clone()),
+            expected: CalibrationError::CfaPatternMismatch {
+                component: CalibrationComponent::Bias,
+                light: CfaType::Bayer(CfaPattern::Rggb),
+                master: xtrans_a.clone(),
+            },
+        },
+        Case {
+            component: CalibrationComponent::FlatDark,
+            light: Some(xtrans_a.clone()),
+            master: Some(xtrans_b.clone()),
+            expected: CalibrationError::CfaPatternMismatch {
+                component: CalibrationComponent::FlatDark,
+                light: xtrans_a,
+                master: xtrans_b,
+            },
+        },
+    ];
+
+    for case in cases {
+        let masters = masters_with_component(case.component, case.master);
+        let mut light = constant_cfa(2, 2, 0.5, CfaType::Mono);
+        light.metadata.cfa_type = case.light.clone();
+        let original_data = light.data.to_vec();
+
+        assert_eq!(masters.calibrate(&mut light), Err(case.expected));
+        assert_eq!(light.data.pixels(), original_data);
+        assert_eq!(light.metadata.cfa_type, case.light);
+        assert!(!light.metadata.calibrated);
+    }
 }
 
 #[test]
@@ -179,7 +284,7 @@ fn test_calibrate_dark_subtraction() {
     .unwrap();
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
 
     // 0.5 - 0.1 = 0.4
     for &v in &light.data {
@@ -202,7 +307,7 @@ fn test_calibrate_bias_only() {
     .unwrap();
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
 
     // 0.5 - 0.05 = 0.45
     for &v in &light.data {
@@ -227,7 +332,7 @@ fn test_calibrate_dark_takes_priority_over_bias() {
     .unwrap();
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
 
     // Dark subtracted: 0.5 - 0.1 = 0.4 (not 0.5 - 0.05)
     for &v in &light.data {
@@ -260,7 +365,7 @@ fn test_calibrate_flat_correction() {
     .unwrap();
 
     let mut light = constant_cfa(2, 2, 0.3, CfaType::Mono);
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
 
     // 0.3 / (0.4/0.6) = 0.3 / 0.6667 = 0.45
     assert!((light.data[0] - 0.45).abs() < 1e-4, "got {}", light.data[0]);
@@ -322,7 +427,7 @@ fn test_calibrate_full_pipeline() {
             ..Default::default()
         },
     };
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
 
     // After dark subtraction: signal * vignetting
     // After flat division with bias: signal (vignetting cancelled)
@@ -487,7 +592,7 @@ fn test_calibrate_hot_pixel_correction() {
             ..Default::default()
         },
     };
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
 
     // After dark subtraction: normal pixels become ~0.49, hot pixel stays high
     // After hot pixel correction: replaced with median of same-color Bayer neighbors
@@ -551,7 +656,7 @@ fn test_calibrate_flat_dark() {
             ..Default::default()
         },
     };
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
 
     // After dark subtraction: signal * vignetting = [0.24, 0.60]
     // flat - flat_dark = K * vignetting = [0.64, 0.80]
@@ -600,7 +705,7 @@ fn test_flat_dark_takes_priority_over_bias() {
     .unwrap();
 
     let mut light = constant_cfa(2, 2, 0.5, CfaType::Mono);
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
 
     // Bias subtracted from light: 0.5 - 0.05 = 0.45
     // flat - flat_dark = [0.7, 0.5, 0.5, 0.7], mean = 0.6

@@ -73,6 +73,32 @@ fn test_drizzle_config_invalid_parameters_return_exact_errors() {
         assert_eq!(config.validate(), Err(expected));
     }
 
+    for kernel in [
+        DrizzleKernel::Square,
+        DrizzleKernel::Turbo,
+        DrizzleKernel::Point,
+        DrizzleKernel::Gaussian,
+        DrizzleKernel::Lanczos,
+    ] {
+        let config = DrizzleConfig {
+            scale: 1.0,
+            pixfrac: 0.0,
+            kernel,
+            ..Default::default()
+        };
+        assert_eq!(
+            config.validate(),
+            Err(DrizzleConfigError::InvalidPixfrac { value: 0.0 }),
+            "{kernel:?} must reject zero pixfrac before kernel arithmetic"
+        );
+        assert!(matches!(
+            DrizzleAccumulator::new(ImageDimensions::new((2, 2), 1), config),
+            Err(DrizzleError::Config(DrizzleConfigError::InvalidPixfrac {
+                value: 0.0
+            }))
+        ));
+    }
+
     let error = DrizzleAccumulator::new(
         ImageDimensions::new((2, 2), 1),
         DrizzleConfig::default().with_pixfrac(1.5),
@@ -80,7 +106,7 @@ fn test_drizzle_config_invalid_parameters_return_exact_errors() {
     .unwrap_err();
     assert_eq!(
         error.to_string(),
-        "pixfrac must be finite and between 0 and 1, got 1.5"
+        "pixfrac must be finite, greater than 0, and at most 1, got 1.5"
     );
     assert!(matches!(
         error,

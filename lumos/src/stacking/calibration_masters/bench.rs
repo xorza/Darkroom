@@ -67,7 +67,7 @@ fn bench_calibrate_apply_bayer(b: ::quickbench::Bencher) {
     let light = make_cfa(W, H, cfa_pixels(0.3, 0.05, 0.95, 0x44), bayer());
     b.bench(|| {
         let mut frame = light.clone();
-        masters.calibrate(&mut frame);
+        masters.calibrate(&mut frame).unwrap();
         black_box(frame)
     });
 }

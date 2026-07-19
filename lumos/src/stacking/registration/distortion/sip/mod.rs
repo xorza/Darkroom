@@ -90,6 +90,14 @@ impl SipConfig {
                 self.clip_sigma
             )));
         }
+        if let Some(reference_point) = self.reference_point
+            && (!reference_point.x.is_finite() || !reference_point.y.is_finite())
+        {
+            return Err(RegistrationError::InvalidConfig(format!(
+                "SIP reference_point must be finite, got ({}, {})",
+                reference_point.x, reference_point.y
+            )));
+        }
         Ok(())
     }
 }

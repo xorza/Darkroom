@@ -126,18 +126,23 @@ impl RansacConfig {
             ));
         }
         if let Some(max_rotation) = self.max_rotation
-            && max_rotation <= 0.0
+            && (!max_rotation.is_finite() || max_rotation <= 0.0)
         {
             return invalid(format!(
-                "ransac max_rotation must be positive, got {max_rotation}"
+                "ransac max_rotation must be positive and finite, got {max_rotation}"
             ));
         }
-        if let Some((min_scale, max_scale)) = self.scale_range
-            && !(min_scale > 0.0 && max_scale > min_scale)
-        {
-            return invalid(format!(
-                "ransac scale_range must have 0 < min < max, got ({min_scale}, {max_scale})"
-            ));
+        if let Some((min_scale, max_scale)) = self.scale_range {
+            if !min_scale.is_finite() || !max_scale.is_finite() {
+                return invalid(format!(
+                    "ransac scale_range bounds must be finite, got ({min_scale}, {max_scale})"
+                ));
+            }
+            if !(min_scale > 0.0 && max_scale > min_scale) {
+                return invalid(format!(
+                    "ransac scale_range must have 0 < min < max, got ({min_scale}, {max_scale})"
+                ));
+            }
         }
         Ok(())
     }

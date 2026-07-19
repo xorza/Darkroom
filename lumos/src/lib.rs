@@ -43,8 +43,8 @@ pub use stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, NoiseEstima
 pub use stacking::calibration_masters::defect_map::DefectMap;
 
 pub use stacking::calibration_masters::{
-    CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
-    DefectSummary, stack_cfa_master,
+    CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet,
+    DEFAULT_SIGMA_THRESHOLD, DefectSummary, stack_cfa_master,
 };
 
 pub use stacking::star_detection::config::{
@@ -69,7 +69,7 @@ pub use stacking::registration::ransac::RansacConfig;
 pub use stacking::registration::register;
 pub use stacking::registration::resample::{WarpResult, warp};
 pub use stacking::registration::result::{
-    RansacFailureReason, RegistrationError, RegistrationResult, StarMatch,
+    RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult, StarMatch,
 };
 pub use stacking::registration::transform::{Transform, TransformType, WarpTransform};
 pub use stacking::registration::triangle::TriangleConfig;

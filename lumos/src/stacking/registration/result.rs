@@ -1,5 +1,7 @@
 //! Registration result and error types.
 
+use glam::DVec2;
+
 use crate::stacking::registration::distortion::sip::SipFitResult;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 
@@ -9,6 +11,24 @@ const QUALITY_MIN_INLIERS: usize = 4;
 const QUALITY_ERROR_SCALE: f64 = 2.0;
 /// Inlier saturation point: `quality_count = min(inliers / SAT, 1.0)`. Full credit at 20+ inliers.
 const QUALITY_INLIER_SATURATION: f64 = 20.0;
+
+/// Input catalog supplied to image registration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistrationCatalog {
+    /// Stars detected in the reference image.
+    Reference,
+    /// Stars detected in the image being aligned.
+    Target,
+}
+
+impl std::fmt::Display for RegistrationCatalog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegistrationCatalog::Reference => f.write_str("reference"),
+            RegistrationCatalog::Target => f.write_str("target"),
+        }
+    }
+}
 
 /// Reason for RANSAC failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +59,18 @@ impl std::fmt::Display for RansacFailureReason {
 pub enum RegistrationError {
     /// Not enough stars detected.
     InsufficientStars { found: usize, required: usize },
+    /// A star has a non-finite position.
+    InvalidStarPosition {
+        catalog: RegistrationCatalog,
+        index: usize,
+        position: DVec2,
+    },
+    /// A star has a non-finite FWHM.
+    InvalidStarFwhm {
+        catalog: RegistrationCatalog,
+        index: usize,
+        value: f32,
+    },
     /// No matching star patterns found.
     NoMatchingPatterns,
     /// RANSAC failed to find valid transformation.
@@ -73,6 +105,24 @@ impl std::fmt::Display for RegistrationError {
                     "Insufficient stars detected: found {}, need {}",
                     found, required
                 )
+            }
+            RegistrationError::InvalidStarPosition {
+                catalog,
+                index,
+                position,
+            } => {
+                write!(
+                    f,
+                    "{catalog} star {index} position must be finite, got ({}, {})",
+                    position.x, position.y
+                )
+            }
+            RegistrationError::InvalidStarFwhm {
+                catalog,
+                index,
+                value,
+            } => {
+                write!(f, "{catalog} star {index} FWHM must be finite, got {value}")
             }
             RegistrationError::NoMatchingPatterns => {
                 write!(f, "No matching star patterns found between images")

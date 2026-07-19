@@ -82,7 +82,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 - `CalibrationSet<T>` names dark/flat/bias/flat-dark once for raw path slices, prebuilt master inputs, and the private images stored by `CalibrationMasters`; the bundle separately owns its derived `DefectMap`, so `from_images`/`from_files` keep sources and defects synchronized. `components()` and `defect_summary()` expose read-only derived state; `Default` is the valid empty bundle.
 - `from_files` (`mod.rs:161`) stacks raw CFA frames through the full stacking pipeline (sigma-clipped mean at ≥8 frames, else median); `from_images` (`mod.rs:124`) builds from pre-stacked frames and derives a `DefectMap` (hot from the dark, cold/dead from the flat).
-- `calibrate(&mut CfaImage)` (`mod.rs:186`): **order = dark-subtract (or bias) → flat-divide (flat-dark priority over bias) → defect-correct**, in place.
+- `calibrate(&mut CfaImage) -> Result<(), CalibrationError>` (`mod.rs`): validates matching light/master CFA metadata before mutation, then **order = dark-subtract (or bias) → flat-divide (flat-dark priority over bias) → defect-correct**, in place.
 - `DefectMap` (`defect_map.rs`): hot/cold flat-index lists, built fluently from `DefectMap::default().detect_hot(&dark, σ).detect_cold(&flat)` — **hot** from the dark via per-color MAD threshold (adaptive sampling above 200K px), **cold/dead** from the flat via a same-color local-neighbour ratio (`< DEAD_PIXEL_FRACTION × local median`, robust to vignetting where a global cut can't be); `correct()` replaces defects with same-color CFA-neighbor medians. `DEFAULT_SIGMA_THRESHOLD = 5.0`.
 - `cosmic_ray.rs`: `reject_cosmic_rays(&mut CfaImage, &CosmicRayConfig) -> usize` (count removed) — single-frame **L.A.Cosmic** (van Dokkum 2001) Laplacian CR/streak rejection on the calibrated, linear `CfaImage` *before* demosaic/registration (warping/demosaic would smear a hit); flagged pixels in-painted with unflagged-neighbour medians, detect→replace looped. CFA dispatch: Mono = subsampled L.A.Cosmic, Bayer = per-2×2-phase dense same-color planes, X-Trans = same-color stencils via `color_at`. `CosmicRayConfig` / `NoiseEstimation` are `pub use`d in `lib.rs`.
 
@@ -114,7 +114,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 ## stacking/registration — alignment & warp
 
 `register(ref_stars, target_stars, config)` (`stacking/registration/mod.rs`) → `Result<RegistrationResult, RegistrationError>`:
-1. derive `max_sigma = (median_fwhm·0.5).max(0.5)` from input FWHM,
+1. validate finite catalog positions/FWHM and configuration limits, then derive `max_sigma = (median_fwhm·0.5).max(0.5)` from input FWHM,
 2. select brightest ≤`max_stars`,
 3. **triangle matching** (`triangle/`: k-NN invariant triangles via `spatial::KdTree`, ratio-space voting in `voting.rs`, greedy conflict resolution) → `Vec<PointMatch>`,
 4. **RANSAC/MAGSAC++** (`ransac/`); `Auto` (`auto_ladder`) walks Euclidean → Similarity → Affine → Homography and takes the first model within 0.5 px RMS (simplest fit, no overfitting), falling through to Homography,
@@ -144,7 +144,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 `drizzle_stack(Vec<DrizzleFrame<Path>>, config, progress)` (`stacking/drizzle/stack.rs`) → `StackProduct`: output `AstroImage` + normalized `coverage` `[0,1]`, absolute `weight` map (`Σwᵢ`, the WHT), and `variance` map (`Σwᵢ²/(Σwᵢ)²` = output variance per unit input variance — the true per-pixel noise the correlation-suppressed image RMS understates). `drizzle_images` accepts the same coherent records with in-memory `AstroImage` sources.
 
-- `config.rs` owns `DrizzleConfig` (`scale`, `pixfrac`, `kernel`, `fill_value`, `min_coverage`) and `DrizzleKernel`: `Square` (exact polygon clipping via Green's theorem `boxer`/`sgarea`), `Turbo` (axis-aligned, default), `Point`, `Gaussian`, and `Lanczos` (valid only at pixfrac=scale=1). `validate()` reports `DrizzleConfigError`; builders remain freely composable and drizzle entry points validate before loading or allocating.
+- `config.rs` owns `DrizzleConfig` (`scale`, `pixfrac`, `kernel`, `fill_value`, `min_coverage`) and `DrizzleKernel`: `Square` (exact polygon clipping via Green's theorem `boxer`/`sgarea`), `Turbo` (axis-aligned, default), `Point`, `Gaussian`, and `Lanczos` (valid only at pixfrac=scale=1). `validate()` requires `0 < pixfrac <= 1` and reports `DrizzleConfigError`; builders remain freely composable and drizzle entry points validate before loading or allocating.
 - `accumulator.rs` owns `DrizzleFrame<T>`, which keeps one source, transform, frame weight, and optional per-pixel weight map coherent, plus `DrizzleAccumulator`. Fallible construction validates configuration and input dimensions. The accumulator stores per-channel flux `Buffer2` (`Σ fluxᵢ·wᵢ`) plus shared `weight` (`Σwᵢ`) and `weight_sq` (`Σwᵢ²`) planes; `add_frame` validates before mapping each input pixel and `finalize` emits the normalized image and quality planes. Pure CPU + rayon-parallel finalize.
 - `geometry.rs` owns the pure Jacobian, rectangle overlap, Lanczos, and polygon clipping helpers. `stack.rs` owns disk loading and the path/in-memory entry points; `mod.rs` only declares the ownership modules and tests.
 

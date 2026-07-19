@@ -328,6 +328,7 @@ fn test_all_kernels_jacobian_matches_square_affine() {
     let mut acc_sq = accumulator(ImageDimensions::new((w, h), 1), config_sq);
     acc_sq.add_image(image_sq, &transform, 1.0, None);
     let result_sq = acc_sq.finalize();
+    assert_product_finite(&result_sq);
     let out_sq = result_sq.image.channel(0);
 
     for kernel in [
@@ -346,6 +347,7 @@ fn test_all_kernels_jacobian_matches_square_affine() {
         let mut acc = accumulator(ImageDimensions::new((w, h), 1), config);
         acc.add_image(image, &transform, 1.0, None);
         let result = acc.finalize();
+        assert_product_finite(&result);
         let out = result.image.channel(0);
         let ow = result.image.width();
 

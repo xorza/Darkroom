@@ -82,7 +82,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
     .unwrap();
 
     let mut light = make_cfa(w, h, light_px, CfaType::Mono);
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
 
     // Recovered = sky·mean(flat), spatially flat (vignette divided out).
     let rec = light.data.pixels();
@@ -137,7 +137,7 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
     .unwrap();
 
     let mut light = make_cfa(w, h, light_px, CfaType::Mono);
-    masters.calibrate(&mut light);
+    masters.calibrate(&mut light).unwrap();
 
     // Uniform flat (mean 1) → recovered ≈ true signal. The residual is the single-frame shot+read
     // noise floor (~0.0015–0.003 at 50 ke⁻ well); assert it sits in that band — a tighter upper

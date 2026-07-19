@@ -3,16 +3,16 @@ use std::io::{Error, ErrorKind};
 use imaginarium::Buffer2;
 use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig,
-    CalibrationComponent, CalibrationMasters, CalibrationSet, CombineMethod, DefectSummary,
-    DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError, GesdConfig,
-    ImageDimensions, InterpolationMethod, LinearFitClipConfig, Normalization, PercentileClipConfig,
-    RansacConfig, RegistrationConfig, RegistrationMatchingConfig, Rejection, SigmaClipConfig,
-    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
-    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
-    StarDetectionConfigError, StarDetectionDiagnostics, StarDetectionFilterConfig,
-    StarDetectionFwhmConfig, StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics,
-    StarDetector, StarMatch, Transform, TransformType, TriangleConfig, WarpParams, Weighting,
-    WinsorizedClipConfig,
+    CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet, CombineMethod,
+    DefectSummary, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError,
+    GesdConfig, ImageDimensions, InterpolationMethod, LinearFitClipConfig, Normalization,
+    PercentileClipConfig, RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
+    RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN, StackConfig,
+    StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
+    StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionConfigError,
+    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
+    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
+    Transform, TransformType, TriangleConfig, WarpParams, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -188,6 +188,23 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
             value: 0.0
         })
     ));
+
+    let calibration_error = CalibrationError::MissingLightCfaPattern;
+    let pipeline_error: AlignStackError = calibration_error.into();
+    assert!(matches!(
+        pipeline_error,
+        AlignStackError::Calibration(CalibrationError::MissingLightCfaPattern)
+    ));
+
+    let registration_error = RegistrationError::InvalidStarFwhm {
+        catalog: RegistrationCatalog::Target,
+        index: 7,
+        value: f32::INFINITY,
+    };
+    assert_eq!(
+        registration_error.to_string(),
+        "target star 7 FWHM must be finite, got inf"
+    );
 }
 
 #[test]
