@@ -72,6 +72,19 @@ fn bench_calibrate_apply_bayer(b: ::quickbench::Bencher) {
     });
 }
 
+#[quick_bench(warmup_iters = 0, iters = 3)]
+fn bench_calibrate_30_lights_bayer(b: ::quickbench::Bencher) {
+    let masters = make_masters();
+    let light = make_cfa(W, H, cfa_pixels(0.3, 0.05, 0.95, 0x44), bayer());
+    b.bench(|| {
+        for _ in 0..30 {
+            let mut frame = light.clone();
+            masters.calibrate(&mut frame).unwrap();
+            black_box(frame);
+        }
+    });
+}
+
 #[quick_bench(warmup_iters = 1, iters = 10)]
 fn bench_defect_map_build_bayer(b: ::quickbench::Bencher) {
     let dark = make_cfa(W, H, cfa_pixels(0.02, 0.004, 0.9, 0x11), bayer());

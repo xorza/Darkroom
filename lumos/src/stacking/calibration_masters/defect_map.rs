@@ -63,7 +63,7 @@ pub struct DefectMap {
     /// local-neighbourhood median in the flat), ascending.
     pub cold_indices: Vec<usize>,
     /// Sensor dimensions the indices apply to — `None` until the first `detect_*` call records them.
-    dimensions: Option<Vec2us>,
+    pub(crate) dimensions: Option<Vec2us>,
 }
 
 impl DefectMap {

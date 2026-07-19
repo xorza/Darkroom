@@ -92,21 +92,24 @@ fn builds_full_master_set() {
     .expect("master build failed");
 
     // Every supplied role yields a master; the un-supplied flat-dark stays `None`.
-    let dark = masters.images.dark.as_ref().expect("master dark");
-    let flat = masters.images.flat.as_ref().expect("master flat");
-    let bias = masters.images.bias.as_ref().expect("master bias");
-    assert!(masters.images.flat_dark.is_none());
+    let dark = masters.dark.as_ref().expect("master dark");
+    let flat = masters.flat.as_ref().expect("prepared master flat");
+    let bias = masters.bias.as_ref().expect("master bias");
+    assert!(masters.flat_dark.is_none());
 
     // All masters share the single sensor geometry (one CFA plane each).
     let (w, h) = (dark.data.width(), dark.data.height());
     assert!(w > 0 && h > 0, "degenerate master dimensions {w}x{h}");
-    for (name, m) in [("flat", flat), ("bias", bias)] {
-        assert_eq!(
-            (m.data.width(), m.data.height()),
-            (w, h),
-            "{name} master dimensions differ from dark"
-        );
-    }
+    assert_eq!(
+        (flat.data.width(), flat.data.height()),
+        (w, h),
+        "flat master dimensions differ from dark"
+    );
+    assert_eq!(
+        (bias.data.width(), bias.data.height()),
+        (w, h),
+        "bias master dimensions differ from dark"
+    );
 
     // A defect map is derived whenever a dark or flat is present (hot from the dark,
     // cold from the flat), so the full set must produce one.
@@ -139,20 +142,20 @@ fn builds_full_master_set() {
         );
         mean
     };
-    let dark_mean = mean_of(dark, "dark");
-    let flat_mean = mean_of(flat, "flat");
-    let bias_mean = mean_of(bias, "bias");
+    mean_of(dark, "dark");
+    mean_of(bias, "bias");
 
-    // The flat is the one *illuminated* master, so it must be meaningfully brighter than the
-    // unilluminated dark/bias (whose black-subtracted means sit near 0). This cross-checks that
-    // each frame set was routed to the right master rather than swapped.
+    let flat_pixels = flat.data.pixels();
+    assert!(flat_pixels.iter().all(|value| value.is_finite()));
+    assert!(flat_pixels.iter().all(|&value| value >= 0.1));
+    let (flat_min, flat_max) = flat_pixels
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(min, max), &value| {
+            (min.min(value), max.max(value))
+        });
     assert!(
-        flat_mean > 0.05,
-        "flat master mean {flat_mean} too dark to be an illuminated flat"
-    );
-    assert!(
-        flat_mean > dark_mean && flat_mean > bias_mean,
-        "flat ({flat_mean}) should outshine dark ({dark_mean}) and bias ({bias_mean})"
+        flat_max > flat_min,
+        "prepared flat is degenerate (constant buffer)"
     );
 }
 

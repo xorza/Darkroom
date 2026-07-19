@@ -4,7 +4,9 @@ Creates, loads, saves, and applies master calibration frames (bias, dark, flat) 
 
 `CalibrationMasters` keeps its images and derived defect map private. Build a bundle through
 `from_images` or `from_files`; inspect its read-only `components()` and `defect_summary()` views.
-Replacing a source master without rebuilding its defect map is not representable.
+Replacing a source master without rebuilding its defect map and prepared flat is not representable.
+`save` writes the coherent bundle, including the already normalized flat divisor; `load` restores it
+without repeating defect detection, flat subtraction, or per-color normalization.
 
 `CalibrationSet<T>` is the shared four-role shape: `from_files` accepts path slices and
 `from_images` accepts optional prebuilt CFA images through the same named dark, flat, bias, and
@@ -19,11 +21,14 @@ failed validation leaves both pixels and the calibrated flag unchanged.
 - `stack_cfa_master(paths, config, cancel)` stacks one calibration role and polls `CancelToken`
   during loading and combination.
 - `CalibrationMasters::from_images(images, sigma, cancel)` builds the coherent bundle and polls
-  cancellation during hot/cold defect-map scans. Cancellation returns `Error::Cancelled`; partial
-  masters or defect maps never escape.
+  cancellation during hot/cold defect-map scans. Cold defects are detected from the raw flat, then
+  the flat is consumed into a bias/flat-dark-subtracted, per-color normalized divisor. Cancellation
+  returns `Error::Cancelled`; partial masters, prepared flats, or defect maps never escape.
 - `CalibrationMasters::from_files(frames, sigma)` schedules independent role stacks concurrently
   when the whole set fits the memory budget, or sequentially with the full budget per role when it
   does not. This convenience constructor currently runs those role stacks to completion.
+- `CalibrationMasters::save(path)` / `load(path)` persist the prepared bundle in a versioned binary
+  cache. A loaded cache is immediately ready to calibrate lights.
 
 ## Calibration Formula
 
@@ -101,7 +106,7 @@ draw only on good neighbors.
 ## Pipeline Order
 
 1. Subtract master dark (removes bias + thermal)
-2. Divide by normalized master flat (corrects vignetting)
+2. Divide by the prepared normalized master flat (corrects vignetting)
 3. Correct hot + cold/dead pixels (same-color neighbor median)
 
 ## Optional single-frame cosmic-ray rejection

@@ -106,9 +106,8 @@ The same logic applies *inside* the flat: the flat frame itself contains bias + 
 dark current, which are additive and must be removed from `F` **before** `F` is used as a
 divisor — hence `F − FD` (or `F − B`). If you divide lights by a flat that still has its
 own pedestal in it, you inject the flat's bias signal into your data
-(opticalmechanics; astropy guide). This is exactly why lumos passes a `flat_sub`
-(`flat_dark` with priority over `bias`) into `divide_by_normalized`
-(`$HOME/Projects/Scenarium/lumos/src/calibration_masters/mod.rs:181`).
+(opticalmechanics; astropy guide). Lumos therefore subtracts `flat_dark` (or `bias` as
+fallback) while preparing the normalized flat once in `CalibrationMasters::from_images`.
 
 ### 1.3 Linearity and the pedestal problem
 
@@ -488,10 +487,9 @@ standard:
   (`$HOME/Projects/Scenarium/lumos/.tmp/refs/siril/src/core/siril.c:453–514`,
   re-verified pass 2), gated by the `equalize_cfa` option (`preprocess.c:329`).
 - **DeepSkyStacker** computes per-channel (R/G/B) dark factors and flat handling.
-- **lumos** does this natively: `divide_by_normalized_cfa` accumulates independent R/G/B
-  sums and divides each color by its own mean
-  (`$HOME/Projects/Scenarium/lumos/src/astro_image/cfa.rs:253–289`), with the
-  rationale documented at lines 166–168.
+- **lumos** does this natively: `calibration_masters::prepared_flat` accumulates
+  independent R/G/B sums once, normalizes each color by its own mean, and stores the
+  resulting divisor for every light.
 
 Note the subtle policy difference: lumos/PixInsight normalize each channel to its **own**
 mean (color balance deferred to a later white-balance/PCC step), whereas Siril's
@@ -997,10 +995,11 @@ DSS C++ source**, superseding the pass-1 search snippet).
     hot-pixel removal lines 473–486.
 - **lumos** (grounding):
   - `src/calibration_masters/mod.rs` (`calibrate` order, flat-dark priority, presets/fallback).
+  - `src/calibration_masters/prepared_flat.rs` (one-time Mono/per-CFA normalization and divisor
+    application).
   - `src/calibration_masters/defect_map.rs` (MAD per-color thresholds, sigma floor, CFA-color
     neighbor median, X-Trans handling).
-  - `src/astro_image/cfa.rs:146` `subtract` (preserves negatives, rationale at line 144);
-    `:169` `divide_by_normalized` (per-CFA-channel means).
+  - `src/astro_image/cfa.rs` `subtract` (preserves negatives).
   - `src/stacking/config.rs:163` frame-type combine presets.
 
 ### Online (cross-verified, ≥2 sources per major claim)

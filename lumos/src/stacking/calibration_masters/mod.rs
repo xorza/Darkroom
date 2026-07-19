@@ -2,6 +2,7 @@
 
 pub(crate) mod cosmic_ray;
 pub(crate) mod defect_map;
+mod prepared_flat;
 
 #[cfg(test)]
 mod bench;
@@ -12,9 +13,12 @@ mod synthetic_tests;
 #[cfg(test)]
 mod tests;
 
+use std::fs::File;
+use std::io::{Error as IoError, ErrorKind, Read, Write};
 use std::path::Path;
 
-use common::CancelToken;
+use common::serde as common_serde;
+use common::{CancelToken, Vec2us};
 
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::io::raw::raw_dimensions;
@@ -35,8 +39,8 @@ pub const DEFAULT_SIGMA_THRESHOLD: f32 = 5.0;
 
 /// Four calibration roles carrying values of one common type.
 ///
-/// Named fields prevent swapping roles when `T` is the same for all four. Raw
-/// inputs use path slices; prebuilt and stored masters use optional CFA images.
+/// Named fields prevent swapping roles when `T` is the same for all four. Raw inputs use path
+/// slices, while prebuilt inputs use optional CFA images.
 #[derive(Debug, Default)]
 pub struct CalibrationSet<T> {
     /// Thermal-noise calibration data.
@@ -107,14 +111,85 @@ pub struct DefectSummary {
     pub percentage: f32,
 }
 
-/// Master calibration frames and their derived defect map.
+/// Master calibration frames, prepared flat divisor, and derived defect map.
 ///
-/// Construction keeps the source masters and defect map synchronized. Calibration operates on raw
-/// CFA data before demosaicing so defect correction can use same-color neighbors.
+/// Construction detects cold pixels from the raw flat before consuming it into a normalized,
+/// clamped divisor. Calibration operates on raw CFA data before demosaicing so defect correction
+/// can use same-color neighbors.
 #[derive(Debug, Default)]
 pub struct CalibrationMasters {
-    images: CalibrationSet<Option<CfaImage>>,
+    dark: Option<CfaImage>,
+    flat: Option<CfaImage>,
+    bias: Option<CfaImage>,
+    flat_dark: Option<CfaImage>,
     defect_map: Option<DefectMap>,
+}
+
+const CACHE_MAGIC: [u8; 8] = *b"LUMOSCM\0";
+const CACHE_VERSION: u32 = 1;
+
+#[derive(Debug, serde::Serialize)]
+struct CalibrationMastersCacheRef<'a> {
+    dark: Option<&'a CfaImage>,
+    flat: Option<&'a CfaImage>,
+    bias: Option<&'a CfaImage>,
+    flat_dark: Option<&'a CfaImage>,
+    defect_map: Option<DefectMapCacheRef<'a>>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DefectMapCacheRef<'a> {
+    hot_indices: &'a [usize],
+    cold_indices: &'a [usize],
+    dimensions: Option<Vec2us>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CalibrationMastersCache {
+    dark: Option<CfaImage>,
+    flat: Option<CfaImage>,
+    bias: Option<CfaImage>,
+    flat_dark: Option<CfaImage>,
+    defect_map: Option<DefectMapCache>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DefectMapCache {
+    hot_indices: Vec<usize>,
+    cold_indices: Vec<usize>,
+    dimensions: Option<Vec2us>,
+}
+
+impl<'a> From<&'a CalibrationMasters> for CalibrationMastersCacheRef<'a> {
+    fn from(masters: &'a CalibrationMasters) -> Self {
+        Self {
+            dark: masters.dark.as_ref(),
+            flat: masters.flat.as_ref(),
+            bias: masters.bias.as_ref(),
+            flat_dark: masters.flat_dark.as_ref(),
+            defect_map: masters.defect_map.as_ref().map(|map| DefectMapCacheRef {
+                hot_indices: &map.hot_indices,
+                cold_indices: &map.cold_indices,
+                dimensions: map.dimensions,
+            }),
+        }
+    }
+}
+
+impl From<CalibrationMastersCache> for CalibrationMasters {
+    fn from(cache: CalibrationMastersCache) -> Self {
+        Self {
+            dark: cache.dark,
+            flat: cache.flat,
+            bias: cache.bias,
+            flat_dark: cache.flat_dark,
+            defect_map: cache.defect_map.map(|map| DefectMap {
+                hot_indices: map.hot_indices,
+                cold_indices: map.cold_indices,
+                dimensions: map.dimensions,
+            }),
+        }
+    }
 }
 
 /// Frame-weighted share of the memory budget for one role when [`CalibrationMasters::from_files`]
@@ -188,20 +263,10 @@ impl CalibrationMasters {
     /// Components present in this bundle, in calibration order.
     pub fn components(&self) -> impl Iterator<Item = CalibrationComponent> {
         [
-            self.images
-                .dark
-                .as_ref()
-                .map(|_| CalibrationComponent::Dark),
-            self.images
-                .flat
-                .as_ref()
-                .map(|_| CalibrationComponent::Flat),
-            self.images
-                .bias
-                .as_ref()
-                .map(|_| CalibrationComponent::Bias),
-            self.images
-                .flat_dark
+            self.dark.as_ref().map(|_| CalibrationComponent::Dark),
+            self.flat.as_ref().map(|_| CalibrationComponent::Flat),
+            self.bias.as_ref().map(|_| CalibrationComponent::Bias),
+            self.flat_dark
                 .as_ref()
                 .map(|_| CalibrationComponent::FlatDark),
             self.defect_map
@@ -224,18 +289,62 @@ impl CalibrationMasters {
     /// Resident RAM held by this bundle: the present master frames' pixel bytes
     /// plus the defect map's index lists.
     pub fn ram_bytes(&self) -> usize {
-        let frames = [
-            &self.images.dark,
-            &self.images.flat,
-            &self.images.bias,
-            &self.images.flat_dark,
-        ];
-        let frame_bytes: usize = frames
-            .iter()
-            .filter_map(|m| m.as_ref())
+        let frame_bytes = [&self.dark, &self.flat, &self.bias, &self.flat_dark]
+            .into_iter()
+            .filter_map(|master| master.as_ref())
             .map(CfaImage::ram_bytes)
-            .sum();
+            .sum::<usize>();
         frame_bytes + self.defect_map.as_ref().map_or(0, DefectMap::ram_bytes)
+    }
+
+    /// Save this coherent master bundle to a versioned binary cache.
+    ///
+    /// The flat is already bias/flat-dark subtracted, per-color normalized, and clamped in this
+    /// representation. Loading the cache does not repeat flat preparation or defect detection.
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        let mut file = File::create(path)?;
+        file.write_all(&CACHE_MAGIC)?;
+        file.write_all(&CACHE_VERSION.to_le_bytes())?;
+        common_serde::serialize_into(
+            CalibrationMastersCacheRef::from(self),
+            common::SerdeFormat::Bitcode,
+            &mut file,
+            &mut Vec::new(),
+        )
+        .map_err(IoError::other)
+    }
+
+    /// Load a bundle written by [`Self::save`] without rebuilding its prepared flat or defect map.
+    pub fn load(path: &Path) -> std::io::Result<Self> {
+        let mut file = File::open(path)?;
+        let mut magic = [0u8; CACHE_MAGIC.len()];
+        file.read_exact(&mut magic)?;
+        if magic != CACHE_MAGIC {
+            return Err(IoError::new(
+                ErrorKind::InvalidData,
+                "not a Lumos calibration-master cache",
+            ));
+        }
+
+        let mut version = [0u8; size_of::<u32>()];
+        file.read_exact(&mut version)?;
+        let version = u32::from_le_bytes(version);
+        if version != CACHE_VERSION {
+            return Err(IoError::new(
+                ErrorKind::InvalidData,
+                format!(
+                    "unsupported calibration-master cache version {version}; expected {CACHE_VERSION}"
+                ),
+            ));
+        }
+
+        let cache: CalibrationMastersCache = common_serde::deserialize_from(
+            &mut file,
+            common::SerdeFormat::Bitcode,
+            &mut Vec::new(),
+        )
+        .map_err(IoError::other)?;
+        Ok(cache.into())
     }
 
     /// Create CalibrationMasters from pre-built CFA images.
@@ -274,7 +383,25 @@ impl CalibrationMasters {
             None
         };
 
-        Ok(Self { images, defect_map })
+        let CalibrationSet {
+            dark,
+            flat,
+            bias,
+            flat_dark,
+        } = images;
+        let flat_subtractor = flat_dark.as_ref().or(bias.as_ref());
+        let flat = flat.map(|flat| prepared_flat::prepare(flat, flat_subtractor));
+        if cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+
+        Ok(Self {
+            dark,
+            flat,
+            bias,
+            flat_dark,
+            defect_map,
+        })
     }
 
     /// Create CalibrationMasters by stacking raw CFA files.
@@ -393,16 +520,15 @@ impl CalibrationMasters {
         image.metadata.calibrated = true;
 
         // 1. Dark subtraction
-        if let Some(ref dark) = self.images.dark {
+        if let Some(ref dark) = self.dark {
             image.subtract(dark);
-        } else if let Some(ref bias) = self.images.bias {
+        } else if let Some(ref bias) = self.bias {
             image.subtract(bias);
         }
 
-        // 2. Flat division (flat dark takes priority over bias for flat normalization)
-        if let Some(ref flat) = self.images.flat {
-            let flat_sub = self.images.flat_dark.as_ref().or(self.images.bias.as_ref());
-            image.divide_by_normalized(flat, flat_sub);
+        // 2. Flat division
+        if let Some(ref flat) = self.flat {
+            prepared_flat::apply(flat, image);
         }
 
         // 3. CFA-aware defective pixel correction
@@ -420,20 +546,28 @@ impl CalibrationMasters {
             .as_ref()
             .ok_or(CalibrationError::MissingLightCfaPattern)?;
 
-        for (component, master) in [
-            (CalibrationComponent::Dark, self.images.dark.as_ref()),
-            (CalibrationComponent::Flat, self.images.flat.as_ref()),
-            (CalibrationComponent::Bias, self.images.bias.as_ref()),
+        for (component, metadata) in [
+            (
+                CalibrationComponent::Dark,
+                self.dark.as_ref().map(|master| &master.metadata),
+            ),
+            (
+                CalibrationComponent::Flat,
+                self.flat.as_ref().map(|master| &master.metadata),
+            ),
+            (
+                CalibrationComponent::Bias,
+                self.bias.as_ref().map(|master| &master.metadata),
+            ),
             (
                 CalibrationComponent::FlatDark,
-                self.images.flat_dark.as_ref(),
+                self.flat_dark.as_ref().map(|master| &master.metadata),
             ),
         ] {
-            let Some(master) = master else {
+            let Some(metadata) = metadata else {
                 continue;
             };
-            let master_pattern = master
-                .metadata
+            let master_pattern = metadata
                 .cfa_type
                 .as_ref()
                 .ok_or(CalibrationError::MissingMasterCfaPattern { component })?;

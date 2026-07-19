@@ -2,7 +2,9 @@ use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::weighted_budget;
-use crate::stacking::calibration_masters::{CalibrationError, DEFAULT_SIGMA_THRESHOLD};
+use crate::stacking::calibration_masters::{
+    CACHE_MAGIC, CACHE_VERSION, CalibrationError, DEFAULT_SIGMA_THRESHOLD,
+};
 use crate::stacking::combine::error::Error;
 use crate::testing::constant_cfa;
 use crate::{
@@ -70,10 +72,7 @@ fn masters_with_component(
         CalibrationComponent::FlatDark => images.flat_dark = Some(master),
         CalibrationComponent::Defects => panic!("defect maps do not carry CFA metadata"),
     }
-    CalibrationMasters {
-        images,
-        defect_map: None,
-    }
+    CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never()).unwrap()
 }
 
 #[test]
@@ -727,6 +726,104 @@ fn test_flat_dark_takes_priority_over_bias() {
 }
 
 #[test]
+fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
+    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let flat = CfaImage {
+        data: Buffer2::new(
+            4,
+            4,
+            vec![
+                0.5, 0.7, 0.9, 0.7, 0.7, 0.4, 0.7, 0.4, 0.9, 0.7, 0.5, 0.7, 0.7, 0.4, 0.7, 0.4,
+            ],
+        ),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(cfa_type.clone()),
+            ..Default::default()
+        },
+    };
+    let masters = CalibrationMasters::from_images(
+        CalibrationSet {
+            dark: Some(constant_cfa(4, 4, 0.05, cfa_type.clone())),
+            flat: Some(flat),
+            bias: Some(constant_cfa(4, 4, 0.1, cfa_type.clone())),
+            flat_dark: None,
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
+    )
+    .unwrap();
+    let prepared_bits = masters
+        .flat
+        .as_ref()
+        .unwrap()
+        .data
+        .iter()
+        .map(|value| value.to_bits())
+        .collect::<Vec<_>>();
+
+    let mut expected = constant_cfa(4, 4, 0.75, cfa_type.clone());
+    masters.calibrate(&mut expected).unwrap();
+
+    let cache_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp");
+    std::fs::create_dir_all(&cache_dir).unwrap();
+    let path = cache_dir.join(format!(
+        "calibration_masters_roundtrip_{}.lcm",
+        std::process::id()
+    ));
+    masters.save(&path).unwrap();
+    let mut cache_bytes = std::fs::read(&path).unwrap();
+    let loaded = CalibrationMasters::load(&path).unwrap();
+
+    cache_bytes[0] ^= 0xff;
+    std::fs::write(&path, &cache_bytes).unwrap();
+    assert_eq!(
+        CalibrationMasters::load(&path).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    cache_bytes[0] ^= 0xff;
+    cache_bytes[CACHE_MAGIC.len()..CACHE_MAGIC.len() + size_of::<u32>()]
+        .copy_from_slice(&(CACHE_VERSION + 1).to_le_bytes());
+    std::fs::write(&path, cache_bytes).unwrap();
+    assert_eq!(
+        CalibrationMasters::load(&path).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    std::fs::remove_file(path).unwrap();
+
+    assert_eq!(
+        loaded
+            .flat
+            .as_ref()
+            .unwrap()
+            .data
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>(),
+        prepared_bits
+    );
+    assert_eq!(
+        loaded.components().collect::<Vec<_>>(),
+        masters.components().collect::<Vec<_>>()
+    );
+    assert_eq!(loaded.defect_summary(), masters.defect_summary());
+
+    let mut actual = constant_cfa(4, 4, 0.75, cfa_type);
+    loaded.calibrate(&mut actual).unwrap();
+    assert_eq!(
+        actual
+            .data
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>(),
+        expected
+            .data
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn ram_bytes_sums_present_frames_and_defects() {
     // A 10×8 mono CFA frame holds 80 f32 pixels = 320 bytes.
     let dark = constant_cfa(10, 8, 0.1, CfaType::Mono);
@@ -742,12 +839,10 @@ fn ram_bytes_sums_present_frames_and_defects() {
 
     // The bundle sums present roles + the defect map; absent roles add nothing.
     let masters = CalibrationMasters {
-        images: CalibrationSet {
-            dark: Some(dark),
-            flat: Some(constant_cfa(4, 4, 1.0, CfaType::Mono)),
-            bias: None,
-            flat_dark: None,
-        },
+        dark: Some(dark),
+        flat: Some(constant_cfa(4, 4, 1.0, CfaType::Mono)),
+        bias: None,
+        flat_dark: None,
         defect_map: Some(defects),
     };
     // 320 (dark: 80·4) + 64 (flat: 16·4) + 24 (defects: 3·8) = 408 bytes.

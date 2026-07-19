@@ -6,13 +6,11 @@ Updated 2026-07-19 against the current Lumos source.
 
 The review now tracks implementation status instead of preserving the original snapshot:
 
-- 19 findings completed;
-- 6 concrete findings open;
-- 1 allocation finding partially resolved;
+- 23 findings completed;
+- 3 concrete findings open;
 - 2 proposals deferred until there is a product decision or measured failure.
 
-The remaining highest-priority work is public invariant enforcement. Lower-priority work is mostly
-repeated whole-frame work and API policy decisions.
+The remaining concrete work is API policy and state-coherence decisions.
 
 Scope: production code under `lumos/src`, `lumos/Cargo.toml`, production callers, and the published
 surface. Paths and symbol names are used instead of brittle line numbers.
@@ -147,11 +145,13 @@ detectors through parallel frame processing without thread-local state. On the 1
   with a 172,032-byte RSS delta, while exact-output and per-job capacity tests lock the bound. The
   existing 6K sparse-mask benchmark improved from a 168.59 ms median to 8.30 ms.
 
-- [ ] **Prepare a normalized master flat once per calibration set.**
-  Mono and per-colour means are recomputed over the complete flat for every light even though
-  `CalibrationMasters` reuses the same flat/bias pair. Build an internal prepared flat after master
-  construction and defect detection so each light performs only division. Validate bit-identical
-  calibration and benchmark a representative 30-light set.
+- [x] **Prepare a normalized master flat once per calibration set.**
+  Cold defects are detected from the raw flat, then `CalibrationMasters` consumes it into a
+  flat-dark/bias-subtracted, per-colour normalized, clamped divisor. The versioned bundle cache
+  persists that prepared representation, so cache hits repeat neither preparation nor defect
+  detection. Hand-computed Mono/Bayer/X-Trans tests and a cache round-trip assert bit-exact
+  calibration. The 3 MP Bayer apply benchmark improved from a 3.20 ms median to 2.33 ms
+  (27.3% faster); the representative 30-light benchmark completes in 72.33 ms.
 
 ## Batch 3 — API decisions with concrete inconsistencies
 

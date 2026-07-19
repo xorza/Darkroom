@@ -919,8 +919,8 @@ A concrete, opinionated Stage-1 recipe for an OSC astro pipeline.
    or apply camera multipliers **min-normalized to 1.0** (libraw `!highlight`
    behavior). Either way it is a per-channel multiply — keep it linear. Never apply
    `output_color`, gamma, or auto-bright.
-5. **Calibrate on the mosaic**: dark/bias subtract, flat divide with **per-CFA-color
-   means** (lumos `divide_by_normalized_cfa`), then defect-correct against a
+5. **Calibrate on the mosaic**: dark/bias subtract, divide by the prepared flat whose
+   divisor uses **per-CFA-color means**, then defect-correct against a
    dark-derived map using same-color neighbors.
 6. Demosaic **last**, with **RCD** (Bayer) or **Markesteijn 1-pass** (X-Trans), and
    **no chroma denoise / no false-color suppression**. Offer **superpixel** and
@@ -962,7 +962,7 @@ A concrete, opinionated Stage-1 recipe for an OSC astro pipeline.
 - **Single-scalar black on a per-channel sensor.** Leaves an additive color cast flats
   can't remove. Use the full `adjust_bl()` per-channel model.
 - **Single global flat mean on a non-white flat (LED/twilight).** Shifts color. Use
-  per-CFA-color means (lumos's `divide_by_normalized_cfa` does this correctly).
+  per-CFA-color means (lumos prepares and caches these in `calibration_masters::prepared_flat`).
 - **Chroma denoising / false-color suppression on astro data.** Nonlinear,
   flux-moving, treats stars as noise. Skip entirely; rely on temporal stacking.
 - **sRGB / ICC color management on linear astro data.** Linear sky data is not an sRGB
