@@ -573,7 +573,7 @@ impl Document {
 
     pub(crate) fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {
         self.debug_check();
-        common::serialize(self, format)
+        Ok(common::serialize(self, format)?)
     }
 
     pub(crate) fn deserialize(format: SerdeFormat, input: &[u8]) -> Result<Self> {

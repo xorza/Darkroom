@@ -15,7 +15,6 @@ test-support = []
 [dependencies]
 common-derive = { path = "common-derive" }
 aligned-vec = { workspace = true }
-anyhow = { workspace = true }
 glam = { workspace = true }
 rayon = { workspace = true }
 tokio = { workspace = true }

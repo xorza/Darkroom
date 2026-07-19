@@ -1,8 +1,8 @@
 //! `Graph` structural validation, including library-independent checks,
 //! recursive validation against a `Library`, and debug-only invariant asserts.
 
-use anyhow::{self, Context, ensure};
-use common::{Result, is_debug};
+use anyhow::{self, Context, Result, ensure};
+use common::is_debug;
 use hashbrown::HashSet;
 
 use crate::graph::interface::{GraphId, GraphLink};

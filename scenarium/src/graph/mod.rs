@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
 use ::serde::{Deserialize, Serialize};
+use anyhow::Result;
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
 
@@ -12,7 +13,7 @@ use crate::node::definition::{Func, FuncId};
 use crate::node::definition::{FuncInput, FuncOutput};
 use crate::node::special::SpecialNode;
 use common::id_type;
-use common::{Result, SerdeFormat, deserialize, serialize};
+use common::{SerdeFormat, deserialize, serialize};
 
 id_type!(NodeId);
 
@@ -409,7 +410,7 @@ impl Graph {
     }
 
     pub fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>> {
-        serialize(self, format)
+        Ok(serialize(self, format)?)
     }
     pub fn deserialize(serialized: &[u8], format: SerdeFormat) -> Result<Graph> {
         let graph: Self = deserialize(serialized, format)?;

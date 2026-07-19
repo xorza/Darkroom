@@ -22,10 +22,10 @@ macro_rules! cfg_aarch64 {
 
 /// Defines a `#[repr(transparent)]` strongly-typed UUID newtype.
 ///
-/// The expansion references `uuid`, `anyhow`, and `serde` (with the `derive`
-/// feature) in the invoking crate, so **the invoking crate must carry all three
-/// as dependencies**. They are not `$crate`-qualified: `common` itself does not
-/// depend on `uuid`. (Today the sole caller, `scenarium`, already has them.)
+/// The expansion references `uuid` and `serde` (with the `derive` feature) in
+/// the invoking crate, so **the invoking crate must carry both as
+/// dependencies**. They are not `$crate`-qualified: `common` itself does not
+/// depend on `uuid`.
 ///
 /// `FromStr` is the fallible parse; the `From<&str>`/`From<String>` impls are
 /// convenience conversions that **panic on an invalid UUID** — use them only on
@@ -97,7 +97,7 @@ macro_rules! id_type {
         }
 
         impl std::str::FromStr for $name {
-            type Err = anyhow::Error;
+            type Err = uuid::Error;
 
             fn from_str(id: &str) -> std::result::Result<$name, Self::Err> {
                 let uuid = uuid::Uuid::parse_str(id)?;

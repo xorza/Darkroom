@@ -705,6 +705,16 @@ fn node_func_id_shims_kind() {
 }
 
 #[test]
+fn typed_id_from_str_preserves_uuid_error() {
+    let input = "not-a-uuid";
+    let error: uuid::Error = input.parse::<FuncId>().unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        uuid::Uuid::parse_str(input).unwrap_err().to_string()
+    );
+}
+
+#[test]
 fn binding_accessors() {
     let out = OutputPort::new(NodeId::unique(), 2);
     let bind = Binding::Bind(out);

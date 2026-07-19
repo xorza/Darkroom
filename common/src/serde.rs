@@ -6,25 +6,68 @@ use serde::de::DeserializeOwned;
 use crate::file_format::SerdeFormat;
 use crate::normalize_string::NormalizeString;
 
-pub type Result<T> = anyhow::Result<T>;
-
 const LZ4_HEADER_LEN: usize = size_of::<u32>();
 const LZ4_MAX_UNCOMPRESSED_SIZE: usize = 1 << 30;
 
-fn checked_lz4_uncompressed_size(uncompressed_size: usize) -> Result<u32> {
-    let header_size = u32::try_from(uncompressed_size).map_err(|_| {
-        anyhow::anyhow!("lz4 uncompressed size {uncompressed_size} exceeds 32-bit header capacity")
-    })?;
+#[derive(Debug, thiserror::Error)]
+pub enum SerializeError {
+    #[error("JSON serialization failed: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("Bitcode serialization failed: {0}")]
+    Bitcode(#[from] bitcode::Error),
+    #[error("TOML serialization failed: {0}")]
+    Toml(#[from] toml::ser::Error),
+    #[error("LZ4 compression failed: {0}")]
+    Lz4(#[from] lz4_flex::block::CompressError),
+    #[error("writing serialized bytes failed: {0}")]
+    Write(#[from] std::io::Error),
+    #[error(transparent)]
+    Lz4Size(#[from] Lz4SizeError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DeserializeError {
+    #[error("JSON deserialization failed: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("Bitcode deserialization failed: {0}")]
+    Bitcode(#[from] bitcode::Error),
+    #[error("TOML deserialization failed: {0}")]
+    Toml(#[from] toml::de::Error),
+    #[error("LZ4 decompression failed: {0}")]
+    Lz4(#[from] lz4_flex::block::DecompressError),
+    #[error("reading serialized bytes failed: {0}")]
+    Read(#[from] std::io::Error),
+    #[error(transparent)]
+    Lz4Size(#[from] Lz4SizeError),
+    #[error("lz4 payload too short: {len} bytes")]
+    Lz4PayloadTooShort { len: usize },
+    #[error("lz4 decompressed size mismatch: got {actual}, expected {expected}")]
+    Lz4DecompressedSizeMismatch { actual: usize, expected: usize },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum Lz4SizeError {
+    #[error("lz4 uncompressed size {size} exceeds 32-bit header capacity")]
+    HeaderCapacity { size: usize },
+    #[error("lz4 uncompressed size {size} exceeds limit {limit}")]
+    Limit { size: usize, limit: usize },
+}
+
+fn checked_lz4_uncompressed_size(uncompressed_size: usize) -> Result<u32, Lz4SizeError> {
+    let header_size =
+        u32::try_from(uncompressed_size).map_err(|_| Lz4SizeError::HeaderCapacity {
+            size: uncompressed_size,
+        })?;
     if uncompressed_size > LZ4_MAX_UNCOMPRESSED_SIZE {
-        anyhow::bail!(
-            "lz4 uncompressed size {uncompressed_size} exceeds limit \
-             {LZ4_MAX_UNCOMPRESSED_SIZE}"
-        );
+        return Err(Lz4SizeError::Limit {
+            size: uncompressed_size,
+            limit: LZ4_MAX_UNCOMPRESSED_SIZE,
+        });
     }
     Ok(header_size)
 }
 
-pub fn serialize<T: Serialize>(value: &T, format: SerdeFormat) -> Result<Vec<u8>> {
+pub fn serialize<T: Serialize>(value: &T, format: SerdeFormat) -> Result<Vec<u8>, SerializeError> {
     let mut buffer = Vec::new();
     let mut temp_buffer = Vec::new();
     serialize_into(value, format, &mut buffer, &mut temp_buffer)?;
@@ -40,7 +83,7 @@ pub fn serialize_into<T: Serialize, W: Write>(
     format: SerdeFormat,
     writer: &mut W,
     temp_buffer: &mut Vec<u8>,
-) -> Result<()> {
+) -> Result<(), SerializeError> {
     temp_buffer.clear();
 
     match format {
@@ -72,7 +115,10 @@ pub fn serialize_into<T: Serialize, W: Write>(
     Ok(())
 }
 
-pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: SerdeFormat) -> Result<T> {
+pub fn deserialize<T: DeserializeOwned>(
+    serialized: &[u8],
+    format: SerdeFormat,
+) -> Result<T, DeserializeError> {
     let mut temp_buffer = Vec::new();
     deserialize_from(&mut Cursor::new(serialized), format, &mut temp_buffer)
 }
@@ -83,7 +129,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
     reader: &mut R,
     format: SerdeFormat,
     temp_buffer: &mut Vec<u8>,
-) -> Result<T> {
+) -> Result<T, DeserializeError> {
     temp_buffer.clear();
 
     match format {
@@ -102,17 +148,14 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
             // Trust-boundary parser: the header length is attacker-controlled, so
             // every step is bounds-/range-checked and returns `Err` rather than panicking.
             if temp_buffer.len() < LZ4_HEADER_LEN {
-                anyhow::bail!("lz4 payload too short: {} bytes", temp_buffer.len());
+                return Err(DeserializeError::Lz4PayloadTooShort {
+                    len: temp_buffer.len(),
+                });
             }
 
             let uncompressed_size =
                 u32::from_le_bytes(temp_buffer[0..LZ4_HEADER_LEN].try_into().unwrap()) as usize;
-            if uncompressed_size > LZ4_MAX_UNCOMPRESSED_SIZE {
-                anyhow::bail!(
-                    "lz4 uncompressed size {uncompressed_size} exceeds limit \
-                     {LZ4_MAX_UNCOMPRESSED_SIZE}"
-                );
-            }
+            checked_lz4_uncompressed_size(uncompressed_size)?;
 
             let compressed_len = temp_buffer.len() - LZ4_HEADER_LEN;
             temp_buffer.resize(LZ4_HEADER_LEN + compressed_len + uncompressed_size, 0);
@@ -123,9 +166,10 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
 
             let decompressed_len = lz4_flex::decompress_into(compressed, decompressed_part)?;
             if decompressed_len != uncompressed_size {
-                anyhow::bail!(
-                    "lz4 decompressed size mismatch: got {decompressed_len}, expected {uncompressed_size}"
-                );
+                return Err(DeserializeError::Lz4DecompressedSizeMismatch {
+                    actual: decompressed_len,
+                    expected: uncompressed_size,
+                });
             }
 
             Ok(serde_json::from_slice(decompressed_part)?)
@@ -136,6 +180,47 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug)]
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn backend_failures_keep_their_typed_variant() {
+        assert!(matches!(
+            deserialize::<i64>(b"{", SerdeFormat::Json).unwrap_err(),
+            DeserializeError::Json(_)
+        ));
+        assert!(matches!(
+            deserialize::<i64>(b"x =", SerdeFormat::Toml).unwrap_err(),
+            DeserializeError::Toml(_)
+        ));
+        assert!(matches!(
+            deserialize::<i64>(&[], SerdeFormat::Bitcode).unwrap_err(),
+            DeserializeError::Bitcode(_)
+        ));
+
+        let err = serialize_into(
+            1i64,
+            SerdeFormat::Bitcode,
+            &mut FailingWriter,
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            SerializeError::Write(error) if error.kind() == std::io::ErrorKind::BrokenPipe
+        ));
+    }
 
     #[test]
     fn lz4_round_trips_json_payload() {
@@ -158,56 +243,78 @@ mod tests {
         let over_limit = LZ4_MAX_UNCOMPRESSED_SIZE + 1;
         let err = checked_lz4_uncompressed_size(over_limit).unwrap_err();
         assert_eq!(
-            err.to_string(),
-            format!(
-                "lz4 uncompressed size {over_limit} exceeds limit \
-                 {LZ4_MAX_UNCOMPRESSED_SIZE}"
-            )
+            err,
+            Lz4SizeError::Limit {
+                size: over_limit,
+                limit: LZ4_MAX_UNCOMPRESSED_SIZE,
+            }
         );
 
         if let Ok(over_header) = usize::try_from(u64::from(u32::MAX) + 1) {
             let err = checked_lz4_uncompressed_size(over_header).unwrap_err();
-            assert_eq!(
-                err.to_string(),
-                format!("lz4 uncompressed size {over_header} exceeds 32-bit header capacity")
-            );
+            assert_eq!(err, Lz4SizeError::HeaderCapacity { size: over_header });
         }
     }
 
     #[test]
     fn lz4_payload_shorter_than_header_errors() {
-        // < 4 bytes: the length prefix isn't even present.
         for input in [&[][..], &[0][..], &[0, 1][..], &[0, 1, 2][..]] {
-            let err = deserialize::<i64>(input, SerdeFormat::Lz4);
+            let err = deserialize::<i64>(input, SerdeFormat::Lz4).unwrap_err();
             assert!(
-                err.is_err(),
-                "{}-byte payload must Err, not panic",
-                input.len()
+                matches!(
+                    err,
+                    DeserializeError::Lz4PayloadTooShort { len } if len == input.len()
+                ),
+                "unexpected error for {}-byte payload: {err}",
+                input.len(),
             );
         }
     }
 
     #[test]
     fn lz4_oversized_length_prefix_is_rejected() {
-        // Header claims ~2 GiB uncompressed — above the 1 GiB ceiling — so the
-        // decoder must reject it instead of attempting the allocation.
-        let mut input = 0x7FFF_FFFFu32.to_le_bytes().to_vec();
+        let oversized = 0x7FFF_FFFFu32 as usize;
+        let mut input = (oversized as u32).to_le_bytes().to_vec();
         input.extend_from_slice(&[1, 2, 3]);
-        let err = deserialize::<i64>(&input, SerdeFormat::Lz4);
-        assert!(err.is_err());
-        // Exactly at the ceiling boundary is also rejected (> limit is the check,
-        // and (1<<30)+1 exceeds it); a 4-byte-only buffer has no compressed body.
-        let just_over = ((1u32 << 30) + 1).to_le_bytes().to_vec();
-        assert!(deserialize::<i64>(&just_over, SerdeFormat::Lz4).is_err());
+        let err = deserialize::<i64>(&input, SerdeFormat::Lz4).unwrap_err();
+        assert!(matches!(
+            err,
+            DeserializeError::Lz4Size(Lz4SizeError::Limit {
+                size,
+                limit: LZ4_MAX_UNCOMPRESSED_SIZE,
+            }) if size == oversized
+        ));
+
+        let just_over = LZ4_MAX_UNCOMPRESSED_SIZE + 1;
+        let input = (just_over as u32).to_le_bytes();
+        let err = deserialize::<i64>(&input, SerdeFormat::Lz4).unwrap_err();
+        assert!(matches!(
+            err,
+            DeserializeError::Lz4Size(Lz4SizeError::Limit {
+                size,
+                limit: LZ4_MAX_UNCOMPRESSED_SIZE,
+            }) if size == just_over
+        ));
     }
 
     #[test]
-    fn lz4_corrupt_body_errors_without_panicking() {
-        // Plausible header (size 8) followed by garbage that isn't a valid LZ4
-        // block: decompress fails or the size mismatches — either way, an Err.
+    fn lz4_corrupt_and_mismatched_bodies_return_typed_errors() {
         let mut input = 8u32.to_le_bytes().to_vec();
         input.extend_from_slice(&[0xFF; 16]);
-        let err = deserialize::<i64>(&input, SerdeFormat::Lz4);
-        assert!(err.is_err());
+        let err = deserialize::<i64>(&input, SerdeFormat::Lz4).unwrap_err();
+        assert!(matches!(err, DeserializeError::Lz4(_)));
+
+        let json = b"1";
+        let expected = json.len() + 1;
+        let mut input = (expected as u32).to_le_bytes().to_vec();
+        input.extend_from_slice(&lz4_flex::block::compress(json));
+        let err = deserialize::<i64>(&input, SerdeFormat::Lz4).unwrap_err();
+        assert!(matches!(
+            err,
+            DeserializeError::Lz4DecompressedSizeMismatch {
+                actual,
+                expected: error_expected,
+            } if actual == json.len() && error_expected == expected
+        ));
     }
 }

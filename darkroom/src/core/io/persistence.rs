@@ -29,7 +29,7 @@ pub(crate) fn save_document(doc: &Document, path: &Path) -> Result<()> {
 
 /// Serialize a reusable graph and its nested graphs.
 pub(crate) fn export_graph(graph: &Graph, path: &Path) -> Result<()> {
-    save_typed(path, |format| serialize(graph, format))
+    save_typed(path, |format| Ok(serialize(graph, format)?))
 }
 
 /// Read and validate a reusable graph from `path`.

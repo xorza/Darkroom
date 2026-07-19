@@ -18,7 +18,7 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 | `ready_state.rs` | `ReadyState`: barrier-like counter that notifies waiters once `total` signals arrive. |
 | `cancel_token.rs` | `CancelToken`: shared poll-only cooperative cancel token (enum over `Never` / `Live(Arc<AtomicBool>)`, encapsulated in a tuple struct). `new()` = live, `never()`/`default()` = the zero-cost "no cancellation" case — so an op takes a plain `CancelToken`, never `Option<CancelToken>`. `cancel()`/`is_cancelled()`/`reset()`; live clones share one flag. For cooperative bail-out in hot loops (`spawn_blocking`/rayon); `reset()` makes a live token reusable across operations. No async wait — use `tokio_util`'s token for that. |
 | `macros.rs` | `id_type!` (strongly-typed UUID wrappers) + `cfg_x86_64!` / `cfg_aarch64!` arch-gate macros. |
-| `serde.rs` | Generic `serialize`/`deserialize` dispatching over `SerdeFormat`. |
+| `serde.rs` | Generic `serialize`/`deserialize` dispatching over `SerdeFormat`, with typed `SerializeError` / `DeserializeError` failures. |
 | `file_format.rs` | `SerdeFormat` enum + extension-based format detection. |
 | `file_utils.rs` | Generic fallible, sorted directory scanning by file extension. |
 | `cpu_features.rs` | `X86Features`: cached runtime SSE/AVX2/FMA detection (x86_64; stubbed elsewhere). |
@@ -43,8 +43,8 @@ helpers. Pure leaf crate — depended on by everything, depends on nothing in-tr
 
 ## Serialization
 
-`serialize()` returns `Vec<u8>`; `deserialize()` accepts bytes; `serialize_into`/`deserialize_from` stream over `Write`/`Read`. JSON and TOML are UTF-8. `Bitcode` is binary. `Lz4` is compact JSON LZ4-compressed with a 4-byte length prefix.
+`serialize()` returns `Result<Vec<u8>, SerializeError>`; `deserialize()` accepts bytes and returns `Result<T, DeserializeError>`; `serialize_into`/`deserialize_from` stream over `Write`/`Read`. JSON and TOML are UTF-8. `Bitcode` is binary. `Lz4` is compact JSON LZ4-compressed with a 4-byte length prefix.
 
 ## Dependencies
 
-tokio, rayon, serde, serde_json, toml, bitcode, lz4_flex, glam, aligned-vec, arc-swap, anyhow, thiserror.
+tokio, rayon, serde, serde_json, toml, bitcode, lz4_flex, glam, aligned-vec, arc-swap, thiserror.
