@@ -1009,7 +1009,7 @@ impl Rejection {
 
 /// Weighted mean of rejection-reordered `values`: gathers each survivor's weight
 /// via `indices[i] → weights[indices[i]]` into `scratch` so values and weights
-/// align, then delegates to the compensated (and SIMD) [`weighted_mean_f32`],
+/// align, then delegates to the precision-preserving [`weighted_mean_f32`],
 /// matching the unrejected branch. Returns `0.0` when the total weight is ~0.
 ///
 /// `scratch` is a reused buffer (its prior contents are overwritten) so the
@@ -2421,9 +2421,9 @@ mod tests {
     }
 
     #[test]
-    fn weighted_mean_indexed_uses_compensated_sum() {
+    fn weighted_mean_indexed_preserves_small_increments() {
         // 0.5 sits below half the ULP of 2e7, so a naive f32 accumulation would
-        // drop every increment; the compensated weighted_mean_f32 recovers them.
+        // drop every increment; the wider/compensated weighted mean recovers them.
         // Weights are all 1.0, so the result is a plain mean.
         let mut values = vec![0.5_f32; 17];
         values[0] = 2.0e7;
@@ -2438,7 +2438,7 @@ mod tests {
         let expected = (2.0e7_f64 + 8.0) / 17.0;
         assert!(
             (mean as f64 - expected).abs() < 0.1,
-            "compensated mean {mean} must be within 0.1 of {expected} (naive loses ~0.47)"
+            "precise mean {mean} must be within 0.1 of {expected} (naive loses ~0.47)"
         );
     }
 }

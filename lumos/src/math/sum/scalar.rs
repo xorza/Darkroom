@@ -13,38 +13,25 @@ pub(crate) fn neumaier_add(sum: &mut f32, c: &mut f32, v: f32) {
     *sum = t;
 }
 
-/// Sum f32 values using Neumaier compensated summation.
-///
-/// Achieves O(n·ε²) error — essentially independent of array length,
-/// vs O(n·ε) for naive summation.
+/// Sum f32 values using a wider accumulator.
 #[inline]
 pub(crate) fn sum_f32(values: &[f32]) -> f32 {
-    let mut sum = 0.0f32;
-    let mut c = 0.0f32;
-    for &v in values {
-        neumaier_add(&mut sum, &mut c, v);
-    }
-    sum + c
+    values.iter().map(|&value| f64::from(value)).sum::<f64>() as f32
 }
 
-/// Weighted mean using Neumaier compensated summation (scalar).
+/// Weighted mean using wider products and accumulators.
 #[inline]
 pub(crate) fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
-    let mut sum = 0.0f32;
-    let mut c_sum = 0.0f32;
-    let mut wsum = 0.0f32;
-    let mut c_wsum = 0.0f32;
+    let mut sum = 0.0f64;
+    let mut weight_sum = 0.0f64;
 
-    for (&v, &w) in values.iter().zip(weights.iter()) {
-        neumaier_add(&mut sum, &mut c_sum, v * w);
-        neumaier_add(&mut wsum, &mut c_wsum, w);
+    for (&value, &weight) in values.iter().zip(weights) {
+        sum += f64::from(value) * f64::from(weight);
+        weight_sum += f64::from(weight);
     }
 
-    let total = sum + c_sum;
-    let total_w = wsum + c_wsum;
-
-    if total_w > f32::EPSILON {
-        total / total_w
+    if weight_sum > f64::from(f32::EPSILON) {
+        (sum / weight_sum) as f32
     } else {
         0.0
     }

@@ -1,39 +1,8 @@
-//! SSE SIMD implementations of sum operations (x86_64).
+//! SSE SIMD weighted mean (x86_64).
 
 use std::arch::x86_64::*;
 
 use crate::math::sum::scalar::neumaier_add;
-
-/// Sum f32 values using SSE4.1 SIMD with Kahan compensated summation.
-///
-/// # Safety
-/// Caller must ensure SSE4.1 is available.
-#[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn sum_f32(values: &[f32]) -> f32 {
-    unsafe {
-        let mut sum_vec = _mm_setzero_ps();
-        let mut c_vec = _mm_setzero_ps(); // compensation
-
-        let chunks = values.chunks_exact(4);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let v = _mm_loadu_ps(chunk.as_ptr());
-            let y = _mm_sub_ps(v, c_vec); // compensated value
-            let t = _mm_add_ps(sum_vec, y);
-            c_vec = _mm_sub_ps(_mm_sub_ps(t, sum_vec), y); // (t - sum) - y
-            sum_vec = t;
-        }
-
-        let (mut s, mut c) = reduce_kahan_128(sum_vec, c_vec);
-
-        for &v in remainder {
-            neumaier_add(&mut s, &mut c, v);
-        }
-
-        s + c
-    }
-}
 
 /// Kahan horizontal reduction of 4 sum lanes + 4 compensation lanes.
 #[inline]

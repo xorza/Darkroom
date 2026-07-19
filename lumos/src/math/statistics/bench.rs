@@ -42,7 +42,7 @@ fn bench_median_f32(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 3, iters = 100)]
+#[quick_bench(warmup_iters = 50, iters = 1_000)]
 fn bench_sigma_clipped_median_mad(b: ::quickbench::Bencher) {
     let data = make_test_data_with_outliers();
     let mut deviations = Vec::with_capacity(BENCH_SIZE);
@@ -59,7 +59,7 @@ fn bench_sigma_clipped_median_mad(b: ::quickbench::Bencher) {
 }
 
 /// Benchmark sigma clipping on realistic 64x64 tile (4096 pixels, 5 iterations)
-#[quick_bench(warmup_iters = 3, iters = 100)]
+#[quick_bench(warmup_iters = 50, iters = 1_000)]
 fn bench_sigma_clipped_tile_4096(b: ::quickbench::Bencher) {
     let data = make_tile_data_with_outliers();
     let mut deviations = Vec::with_capacity(TILE_SIZE);

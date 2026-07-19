@@ -36,7 +36,7 @@ Iteratively rejects outliers beyond `kappa × sigma` from the median:
 ```
 for each iteration:
     1. Compute median (quickselect)
-    2. Compute absolute deviations
+    2. Fill the scratch buffer with absolute deviations
     3. Compute MAD (median of deviations)
     4. Convert MAD to sigma (× 1.4826)
     5. Reject values outside [median ± kappa×sigma]
@@ -60,12 +60,15 @@ For normally distributed data: `σ ≈ 1.4826 × MAD`
 
 The constant is `1 / Φ⁻¹(3/4)` where Φ⁻¹ is the inverse normal CDF.
 
-## Benchmark Results (1,024 elements)
+## Benchmark Results
 
-| Function | Time |
-|----------|------|
-| median_f32_mut | 3.1 µs |
-| sigma_clipped_median_mad (3 iterations) | 5.9 µs |
+Pinned to one core on an high-end Intel CPU:
+
+| Function | Input | Median time |
+|----------|------:|------------:|
+| `median_f32_mut` | 1,024 values | 1.21 µs |
+| `sigma_clipped_median_mad` | 1,024 values, 3 iterations | 2.08 µs |
+| `sigma_clipped_median_mad` | 4,096-pixel tile, 5 iterations | 7.57 µs |
 
 ## Files
 

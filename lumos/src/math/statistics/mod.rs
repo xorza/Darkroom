@@ -133,8 +133,8 @@ pub(crate) struct ClippedStats {
     pub median: f32,
     /// MAD-based sigma of the survivors.
     pub sigma: f32,
-    /// Mean of the survivors (compensated sum). With the median it exposes the residual skew of
-    /// the clipped distribution — what SExtractor's Pearson mode estimator corrects for.
+    /// Mean of the survivors. With the median it exposes the residual skew of the clipped
+    /// distribution — what SExtractor's Pearson mode estimator corrects for.
     pub mean: f32,
 }
 
@@ -173,7 +173,6 @@ fn sigma_clip_iteration(
     // Compute approximate median (fast — partial_cmp, single partition)
     let median = median_f32_fast(active);
 
-    // Compute deviations using SIMD - copy values first, then transform
     deviations[..*len].copy_from_slice(active);
     abs_deviation_inplace(&mut deviations[..*len], median);
 

@@ -273,7 +273,7 @@ impl CfaCache {
                                         values[frame_idx] = chunk[pixel_idx];
                                     }
                                 }
-                                // The combine reducers (median/MAD, compensated sums) assume finite
+                                // The combine reducers (median/MAD, precise sums) assume finite
                                 // inputs — NaN/Inf would silently corrupt the output (NaN-unsafe
                                 // ordering, multiply-through). No production path emits them today
                                 // (FITS load sanitizes, flat division is floored, warp border-fills 0),

@@ -65,53 +65,18 @@ fn test_simd_vs_scalar_sum() {
 }
 
 #[test]
-fn test_sum_f32_simd_boundaries() {
-    // Test exact SIMD chunk boundaries: 4 (SSE), 8 (AVX2), 16, 32
-    for size in [4, 8, 16, 32] {
-        let values: Vec<f32> = (1..=size).map(|x| x as f32).collect();
-        let expected: f32 = values.iter().sum();
-        let result = sum_f32(&values);
-        assert!(
-            (result - expected).abs() < 1e-4,
-            "size={}, expected={}, got={}",
-            size,
-            expected,
-            result
-        );
-    }
-}
-
-#[test]
-fn test_sum_f32_simd_boundary_minus_one() {
-    // Test one less than chunk boundaries (remainder handling)
-    for size in [3, 7, 15, 31] {
-        let values: Vec<f32> = (1..=size).map(|x| x as f32).collect();
-        let expected: f32 = values.iter().sum();
-        let result = sum_f32(&values);
-        assert!(
-            (result - expected).abs() < 1e-4,
-            "size={}, expected={}, got={}",
-            size,
-            expected,
-            result
-        );
-    }
-}
-
-#[test]
-fn test_sum_f32_simd_boundary_plus_one() {
-    // Test one more than chunk boundaries
-    for size in [5, 9, 17, 33] {
-        let values: Vec<f32> = (1..=size).map(|x| x as f32).collect();
-        let expected: f32 = values.iter().sum();
-        let result = sum_f32(&values);
-        assert!(
-            (result - expected).abs() < 1e-4,
-            "size={}, expected={}, got={}",
-            size,
-            expected,
-            result
-        );
+fn test_sum_f32_dispatch_boundary() {
+    for size in [255, 256, 257] {
+        let values: Vec<f32> = (0..size)
+            .map(|index| match index % 4 {
+                0 => 1e6,
+                1 => 0.25,
+                2 => -1e6,
+                _ => 0.5,
+            })
+            .collect();
+        let expected = values.iter().map(|&value| f64::from(value)).sum::<f64>() as f32;
+        assert_eq!(sum_f32(&values), expected, "size={size}");
     }
 }
 
@@ -203,16 +168,12 @@ fn test_sum_f32_precision_catastrophic_cancellation() {
 
 #[test]
 fn test_sum_f32_precision_scalar_vs_f64() {
-    // Compare scalar Neumaier result against f64 reference for typical astronomy data.
+    // Compare scalar wide accumulation against an f64 reference for typical astronomy data.
     let values: Vec<f32> = (0..4096).map(|i| 100.0 + (i as f32) * 0.01).collect();
     let f64_sum: f64 = values.iter().map(|&v| v as f64).sum();
 
     let result = scalar::sum_f32(&values);
-    let error = (result as f64 - f64_sum).abs();
-    assert!(
-        error < 0.1,
-        "scalar Neumaier error {error:.6} too large (f64 ref: {f64_sum:.6}, got: {result:.6})"
-    );
+    assert_eq!(result, f64_sum as f32);
 }
 
 #[test]
@@ -263,7 +224,7 @@ fn test_sum_f32_compensation_actually_helps() {
     let scalar_result = scalar::sum_f32(&values);
     assert!(
         (scalar_result - expected as f32).abs() < 1.0,
-        "scalar compensation should recover small values: expected ~{expected}, got {scalar_result}"
+        "scalar wide accumulation should recover small values: expected ~{expected}, got {scalar_result}"
     );
 }
 
@@ -301,6 +262,7 @@ fn test_sum_f32_simd_vs_scalar_large_f64_ref() {
 
     let scalar_err = (scalar_result as f64 - f64_ref).abs();
     let simd_err = (simd_result as f64 - f64_ref).abs();
+    assert_eq!(scalar_result, f64_ref as f32);
 
     assert!(
         scalar_err < 1.0,
@@ -398,9 +360,8 @@ fn test_weighted_mean_simd_vs_scalar_large() {
 }
 
 #[test]
-fn test_weighted_mean_simd_boundary_sizes() {
-    // Test sizes that exercise remainder handling for SSE (4) and AVX2 (8)
-    for size in [3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33] {
+fn test_weighted_mean_dispatch_boundary() {
+    for size in [127, 128, 129] {
         let values: Vec<f32> = (0..size).map(|i| 10.0 + i as f32).collect();
         let weights: Vec<f32> = (0..size).map(|i| 1.0 + i as f32 * 0.1).collect();
 
