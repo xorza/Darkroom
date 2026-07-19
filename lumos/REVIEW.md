@@ -6,13 +6,13 @@ Updated 2026-07-19 against the current Lumos source.
 
 The review now tracks implementation status instead of preserving the original snapshot:
 
-- 15 findings completed;
-- 10 concrete findings open;
+- 16 findings completed;
+- 9 concrete findings open;
 - 1 allocation finding partially resolved;
 - 2 proposals deferred until there is a product decision or measured failure.
 
-The remaining highest-priority work is correctness in final RANSAC refits. Lower-priority work is
-mostly invariant enforcement and repeated whole-frame work.
+The remaining highest-priority work is public invariant enforcement. Lower-priority work is mostly
+repeated whole-frame work and API policy decisions.
 
 Scope: production code under `lumos/src`, `lumos/Cargo.toml`, production callers, and the published
 surface. Paths and symbol names are used instead of brittle line numbers.
@@ -97,19 +97,18 @@ surface. Paths and symbol names are used instead of brittle line numbers.
   and LU. Rank-deficient sample geometry returns `OpError::RankDeficient` without rewriting the
   failed channel instead of silently substituting a zero surface.
 
+- [x] **Accept the final RANSAC refit only when it preserves the robust solution.**
+  The all-inlier least-squares candidate is now returned only when it remains finite, valid,
+  physically plausible, sufficiently supported, and non-worse under the same MAGSAC scorer.
+  Otherwise RANSAC retains the saved robust model and its complete inlier set. A deterministic
+  edge-inlier regression covers the concrete case where a translation refit shifts by 0.6 pixels
+  and degrades the robust score.
+
 Completed follow-up work not present in the original review: `DetectorPool` threads reusable
 detectors through parallel frame processing without thread-local state. On the 16 × 1 MP,
 8-thread benchmark, reuse reduced the median from 50.06 ms to 41.91 ms.
 
-## Batch 1 — Algorithmic correctness
-
-- [ ] **Accept the final RANSAC refit only when it preserves the robust solution.**
-  Hypotheses and local optimization are checked for plausibility and score improvement, but the
-  final all-inlier least-squares refit is returned unconditionally and its rescore is discarded.
-  Retain the saved model unless the refit is finite, valid, physically plausible, sufficiently
-  supported, and non-worse under the same scorer.
-
-## Batch 2 — Enforce public invariants
+## Batch 1 — Enforce public invariants
 
 - [ ] **Make transform model and matrix representation a single invariant.**
   `Transform.matrix` and `transform_type` remain independently public, and `from_matrix` accepts
@@ -139,7 +138,7 @@ detectors through parallel frame processing without thread-local state. On the 1
   semantics before entering those kernels. Test every kernel at the boundary and assert finite
   image, coverage, weight, and variance planes.
 
-## Batch 3 — Remaining repeated work and allocations
+## Batch 2 — Remaining repeated work and allocations
 
 - [ ] **Partially resolved — bound masked background-mesh sampling.**
   `MeshWorkspace` now retains tile, median-filter, spline, and per-job scratch, and the unmasked
@@ -154,7 +153,7 @@ detectors through parallel frame processing without thread-local state. On the 1
   construction and defect detection so each light performs only division. Validate bit-identical
   calibration and benchmark a representative 30-light set.
 
-## Batch 4 — API decisions with concrete inconsistencies
+## Batch 3 — API decisions with concrete inconsistencies
 
 - [ ] **Collapse `RegistrationResult`'s parallel mutable state.**
   Matches, residuals, RMS, maximum error, and inlier count remain independently public, and `new`

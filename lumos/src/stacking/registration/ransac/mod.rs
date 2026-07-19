@@ -415,21 +415,33 @@ impl RansacEstimator {
                 &lo_buffers.point_buf_ref,
                 &lo_buffers.point_buf_target,
                 transform_type,
-            )
-            .unwrap_or(transform);
-
-            score_hypothesis(
-                ref_points,
-                target_points,
-                &refined,
-                &scorer,
-                &mut inlier_buf,
-                f64::NEG_INFINITY,
             );
 
+            if let Some(refined) = refined
+                && refined.is_valid()
+                && self.is_plausible(&refined)
+            {
+                let refined_score = score_hypothesis(
+                    ref_points,
+                    target_points,
+                    &refined,
+                    &scorer,
+                    &mut inlier_buf,
+                    best_score,
+                );
+
+                if refined_score >= best_score && inlier_buf.len() >= min_samples {
+                    return Some(RansacResult {
+                        transform: refined,
+                        inliers: inlier_buf,
+                        iterations,
+                    });
+                }
+            }
+
             return Some(RansacResult {
-                transform: refined,
-                inliers: inlier_buf,
+                transform,
+                inliers: best_inliers,
                 iterations,
             });
         }

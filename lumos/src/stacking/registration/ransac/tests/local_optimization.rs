@@ -83,3 +83,64 @@ fn test_lo_ransac_vs_standard_with_noisy_data() {
         result_without_lo.inliers.len()
     );
 }
+
+#[test]
+fn test_final_refit_does_not_degrade_robust_score() {
+    let ref_points: Vec<DVec2> = (0..10)
+        .map(|index| DVec2::new(index as f64 * 10.0, 0.0))
+        .collect();
+    let mut target_points = ref_points.clone();
+    for point in &mut target_points[8..] {
+        point.x += 3.0;
+    }
+
+    let robust = Transform::translation(DVec2::ZERO);
+    // The all-inlier translation refit is the mean displacement:
+    // (8 × 0 + 2 × 3) / 10 = 0.6 pixels.
+    let all_inlier_refit = Transform::translation(DVec2::new(0.6, 0.0));
+    let scorer = MagsacScorer::new(1.0);
+    let mut inliers = Vec::new();
+    let robust_score = score_hypothesis(
+        &ref_points,
+        &target_points,
+        &robust,
+        &scorer,
+        &mut inliers,
+        f64::NEG_INFINITY,
+    );
+    assert_eq!(inliers, (0..10).collect::<Vec<_>>());
+    let refit_score = score_hypothesis(
+        &ref_points,
+        &target_points,
+        &all_inlier_refit,
+        &scorer,
+        &mut inliers,
+        f64::NEG_INFINITY,
+    );
+    assert!(
+        robust_score > refit_score,
+        "robust score {robust_score} must beat refit score {refit_score}"
+    );
+
+    let estimator = make_estimator(RansacConfig {
+        max_iterations: 1,
+        local_optimization: false,
+        ..Default::default()
+    });
+    let result = estimator
+        .ransac_loop(
+            &ref_points,
+            &target_points,
+            ref_points.len(),
+            TransformType::Translation.min_points(),
+            TransformType::Translation,
+            |_, _, sample| {
+                sample.clear();
+                sample.push(0);
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result.inliers, (0..10).collect::<Vec<_>>());
+    assert_eq!(result.transform.translation_components(), DVec2::ZERO);
+}
