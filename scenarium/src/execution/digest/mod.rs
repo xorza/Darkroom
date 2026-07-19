@@ -5,10 +5,12 @@
 //! values, the outputs of its upstream producers, and the content of
 //! any external files it reads. [`node_digest`] folds exactly that into a 256-bit
 //! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
-//! (the resolver computes digests producer-first, so no recursion or memoization is
-//! needed). Equal digests ⇒ identical computation, so the digest is at once the cache
-//! key *and* the invalidation signal: change anything upstream and every downstream
-//! digest changes — on this machine or any other. See `README.md` Part B.
+//! (the resolver computes digests producer-first, so no recursive digest traversal is
+//! needed). External identities come from one memoized per-run
+//! [`RunResourceStamps`](crate::execution::resource::RunResourceStamps), keeping this fold
+//! I/O-free. Equal digests ⇒ identical computation, so the digest is at once the cache key
+//! and the invalidation signal: change anything upstream and every downstream digest
+//! changes — on this machine or any other. See `README.md` Part B.
 //!
 //! **Trust boundary (what is *not* folded).** The digest is only as honest as these
 //! assumptions; violating one is a *false hit* (a stale value served):
@@ -17,9 +19,10 @@
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
 //!   cached).
-//! - **`FsPath` identity is `(len, mtime)`** — a file's own, or a directory's
-//!   entries' ([`hash_fs_path_identity`]), so a folder-reading node can be `Pure` and
-//!   still re-key when its contents change. A same-size edit within mtime granularity
+//! - **`FsPath` identity is `(len, mtime)`** — a file's own, or a directory's entries',
+//!   prepared by [`RunResourceStamps`](crate::execution::resource::RunResourceStamps), so a
+//!   folder-reading node can be `Pure` and still re-key when its contents change. A
+//!   same-size edit within mtime granularity
 //!   can slip through; a full content hash is the opt-in resolver. The same tier holds
 //!   for any registered [`ResourceStamper`](crate::ResourceStamper): a stamp is
 //!   cheap referent *metadata*, and stamps are machine-local (mtimes, local versions),
@@ -38,6 +41,7 @@ use crate::execution::cache::RuntimeCache;
 use crate::execution::program::{
     ExecutionBinding, ExecutionPortAddress, ExecutionProgram, InputStamper,
 };
+use crate::execution::resource::RunResourceStamps;
 use crate::graph::NodeId;
 use crate::node::definition::FuncBehavior;
 use crate::{DataType, StaticValue};
@@ -116,7 +120,7 @@ impl DigestHasher {
 
     /// Fold a length-prefixed byte string (a `u64` length then the bytes), so
     /// concatenations of variable-length data can't collide.
-    fn write_len_prefixed(&mut self, bytes: &[u8]) -> &mut Self {
+    pub(crate) fn write_len_prefixed(&mut self, bytes: &[u8]) -> &mut Self {
         self.write_pod(bytes.len() as u64).write_bytes(bytes)
     }
 
@@ -139,32 +143,6 @@ impl DigestHasher {
 impl Default for DigestHasher {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Identity of an external file an `FsPath` input points at, folded into the
-/// digest so the same path holding different bytes invalidates the cache. Uses
-/// `(len, mtime)` — cheap; a same-size in-place edit within mtime granularity can
-/// slip (a full content hash would be the opt-in resolver).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct FileId {
-    pub(crate) len: u64,
-    pub(crate) mtime_ns: u128,
-}
-
-/// `(len, mtime)` from an already-resolved [`std::fs::Metadata`] — shared by a file
-/// input and each entry of a directory input, so a directory walk doesn't
-/// re-`metadata` what `read_dir` already stat'd.
-fn file_id_from_meta(meta: &std::fs::Metadata) -> FileId {
-    let mtime_ns = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    FileId {
-        len: meta.len(),
-        mtime_ns,
     }
 }
 
@@ -208,15 +186,17 @@ fn hash_static(hasher: &mut DigestHasher, value: &StaticValue) {
     }
 }
 
-/// Fold the external identity an `FsPath` const points at — a file's `(len, mtime)` or
-/// a directory's entry fingerprint ([`hash_fs_path_identity`]) — so a folder-reading
-/// node re-keys on its contents. A no-op for any non-`FsPath` value. Kept separate from
-/// [`hash_static`] (which folds only the const string, no I/O). This is what lets
-/// `build_masters` re-key when its calibration folders change.
-fn hash_fs_content(hasher: &mut DigestHasher, value: &StaticValue) {
+/// Fold the prepared external identity an `FsPath` const points at. A no-op for any
+/// non-`FsPath` value.
+fn hash_fs_content(
+    hasher: &mut DigestHasher,
+    value: &StaticValue,
+    resource_stamps: &RunResourceStamps,
+) -> Option<()> {
     if let StaticValue::FsPath(path) = value {
-        hash_fs_path_identity(hasher, path);
+        resource_stamps.hash_fs_path(hasher, path)?;
     }
+    Some(())
 }
 
 /// Fold a declared port type into `hasher`: a discriminant tag, plus the nominal
@@ -248,8 +228,8 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
 ///
 /// - An **`Impure`** node has no digest (`None`) — it varies per run, so it never caches and
 ///   always recomputes; a `Bind` producer with a `None` digest taints this node to `None`.
-/// - Otherwise fold every input structurally: a `Const`'s value + `FsPath` file/dir content
-///   ([`hash_fs_content`]), or a `Bind` producer's stamped `current_digest` — plus, for a
+/// - Otherwise fold every input structurally: a `Const`'s value + prepared `FsPath`
+///   file/dir content, or a `Bind` producer's stamped `current_digest` — plus, for a
 ///   resource-typed input, the live identity of the referent behind the *delivered* value
 ///   ([`hash_bound_resource`]). That last fold needs the producer's value: unreadable ⇒
 ///   `None`, and the run loop re-stamps such a node at reach time, once its producers settled.
@@ -257,6 +237,7 @@ pub(crate) fn node_digest(
     program: &ExecutionProgram,
     node_id: NodeId,
     cache: &RuntimeCache,
+    resource_stamps: &RunResourceStamps,
 ) -> Option<Digest> {
     let e_node = &program.e_nodes[&node_id];
 
@@ -286,7 +267,7 @@ pub(crate) fn node_digest(
             ExecutionBinding::Const(value) => {
                 hasher.write_bytes(&[1]);
                 hash_static(&mut hasher, value);
-                hash_fs_content(&mut hasher, value);
+                hash_fs_content(&mut hasher, value, resource_stamps)?;
             }
             ExecutionBinding::Bind(addr) => {
                 // The producer was visited first (topological order), so its `current_digest`
@@ -301,7 +282,7 @@ pub(crate) fn node_digest(
                 // the producer's value; unreadable (pre-run) ⇒ `None`, re-stamped at reach
                 // time by the run loop.
                 if let Some(stamper) = &input.stamper {
-                    hash_bound_resource(&mut hasher, cache, addr, stamper)?;
+                    hash_bound_resource(&mut hasher, cache, resource_stamps, addr, stamper)?;
                 }
             }
         }
@@ -311,8 +292,8 @@ pub(crate) fn node_digest(
 
 /// Fold the referent identity behind a **Bind-delivered** resource input: read the
 /// delivered value off the producer's resident slot and fold what the input's
-/// [`InputStamper`] derives from it — the built-in `FsPath` file/dir identity
-/// ([`hash_fs_path_identity`]), or a registered [`ResourceStamper`]'s stamp bytes
+/// [`InputStamper`] derives from it — the built-in prepared `FsPath` file/dir identity,
+/// or a registered [`ResourceStamper`](crate::ResourceStamper)'s prepared stamp bytes
 /// (length-prefixed, so its internal encoding can't collide across calls) — so a wired
 /// reference re-keys its consumer exactly like a const path does. The producer's value
 /// must exist first: an unreadable value (producer not resident) is `None`, tainting the
@@ -323,99 +304,29 @@ pub(crate) fn node_digest(
 fn hash_bound_resource(
     hasher: &mut DigestHasher,
     cache: &RuntimeCache,
+    resource_stamps: &RunResourceStamps,
     addr: &ExecutionPortAddress,
     stamper: &InputStamper,
 ) -> Option<()> {
     let value = cache.slots[&addr.target]
-        .output_values()?
+        .current_output_values()?
         .get(addr.port_idx)?;
     match stamper {
         InputStamper::FsPath => match value.as_fs_path() {
             Some(path) => {
                 hasher.write_bytes(&[3]);
-                hash_fs_path_identity(hasher, path);
+                resource_stamps.hash_fs_path(hasher, path)?;
             }
             None => {
                 hasher.write_bytes(&[4]);
             }
         },
         InputStamper::Custom(stamper) => {
-            hasher
-                .write_bytes(&[5])
-                .write_len_prefixed(stamper.stamp(value).as_bytes());
+            hasher.write_bytes(&[5]);
+            resource_stamps.hash_custom(hasher, addr, stamper, value)?;
         }
     }
     Some(())
-}
-
-/// Fold an `FsPath` input's external identity into `hasher`: for a regular file its
-/// `(len, mtime)`; for a **directory**, a fingerprint of its immediate entries (each
-/// entry's name + `(len, mtime)`, sorted for determinism) — so adding, removing, or
-/// editing a contained file re-keys the node's digest. This is what lets a node that
-/// reads a folder (calibration frames, a light-frame set) be `Pure` and cache
-/// correctly: the folder's contents *are* part of the cache key. A path that can't be
-/// stat'd folds a distinct "missing" marker. Same `(len, mtime)` trust boundary as the
-/// file case, and non-recursive — enough for the flat frame folders these inputs point
-/// at; a nested layout only tracks its subdirectories' own mtimes.
-fn hash_fs_path_identity(hasher: &mut DigestHasher, path: &str) {
-    match std::fs::metadata(path) {
-        Ok(meta) if meta.is_dir() => {
-            hasher.write_bytes(&[1]);
-            hash_dir_entries(hasher, path);
-        }
-        Ok(meta) => {
-            let id = file_id_from_meta(&meta);
-            hasher
-                .write_bytes(&[0])
-                .write_pod(id.len)
-                .write_pod(id.mtime_ns);
-        }
-        // Missing/unreadable is a *keyed state*, not an error: the digest's only
-        // job is to key world state, and "absent" is a legitimate one (a `NewFile`
-        // save target before its first run, a loader that tolerates absence).
-        // Judging it stays with the node's lambda — the marker guarantees a cache
-        // miss, the node runs, and a lambda that needs the file fails right there
-        // with per-node attribution. Distinct from both the file and dir arms; the
-        // path string is folded by the caller, so distinct missing paths stay
-        // distinct.
-        Err(_) => {
-            hasher.write_bytes(&[2]);
-        }
-    }
-}
-
-/// Fold a directory's immediate entries into `hasher` in a deterministic order:
-/// entry count, then each entry's name and `(len, mtime)`, sorted by name
-/// (`read_dir` order isn't stable across platforms). An unreadable directory folds
-/// a sentinel count no real directory can reach, keying it apart from a
-/// readable-but-empty one.
-fn hash_dir_entries(hasher: &mut DigestHasher, dir: &str) {
-    // `u64::MAX` as the count: a cached "empty dir" result must not keep being
-    // served once the directory turns unreadable (and vice versa) — both fold
-    // `[1]` + count, so the count is what keys them apart.
-    let Ok(read) = std::fs::read_dir(dir) else {
-        hasher.write_pod(u64::MAX);
-        return;
-    };
-    let mut entries: Vec<(String, FileId)> = read
-        .flatten()
-        .map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let id = entry
-                .metadata()
-                .map(|m| file_id_from_meta(&m))
-                .unwrap_or_default();
-            (name, id)
-        })
-        .collect();
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
-    hasher.write_pod(entries.len() as u64);
-    for (name, id) in &entries {
-        hasher
-            .write_str(name)
-            .write_pod(id.len)
-            .write_pod(id.mtime_ns);
-    }
 }
 
 #[cfg(test)]

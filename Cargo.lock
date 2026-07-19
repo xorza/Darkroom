@@ -2554,7 +2554,6 @@ dependencies = [
  "rand_chacha 0.10.0",
  "rayon",
  "serde",
- "serde_json",
  "smallvec",
  "sysinfo",
  "thiserror 2.0.19",

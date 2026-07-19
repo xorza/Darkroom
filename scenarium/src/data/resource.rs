@@ -1,7 +1,9 @@
-use crate::DynamicValue;
+use crate::{CancelToken, DynamicValue};
 
 pub trait ResourceStamper: Send + Sync + std::fmt::Debug {
-    fn stamp(&self, value: &DynamicValue) -> ResourceStamp;
+    /// Implementations doing non-trivial work should poll `cancel` and return promptly.
+    /// A stamp returned after cancellation is discarded.
+    fn stamp(&self, value: &DynamicValue, cancel: &CancelToken) -> ResourceStamp;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

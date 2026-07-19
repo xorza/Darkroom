@@ -54,6 +54,7 @@ Choosing a representative instance is an explicit host-side policy.
 | `execution/codec.rs` | Cache framing plus downstream custom-value codec API |
 | `execution/disk_store/` | On-disk cache persistence |
 | `execution/report.rs` | Live progress and pinned-output transport |
+| `execution/resource/` | Off-thread, memoized per-run external-resource stamps |
 | `execution/stats.rs` | Completed-run results |
 | `worker/protocol.rs` | Host/worker messages and reports |
 | `worker/batch.rs` | Ordered batch reduction |
@@ -69,6 +70,11 @@ inputs. Resolution stamps content digests, then derives cache-aware liveness,
 exact `OutputDemand`, and binding-reader counts together. Execution invokes the
 surviving nodes in plan order.
 
+Before resolution, `RunResourceStamps` collects filesystem identities and custom
+resource stamps on Tokio's blocking pool. It memoizes each resource for one run
+and is reused by late bound-resource restamps after producers settle, keeping
+`node_digest` itself synchronous and I/O-free.
+
 A cache slot is valid only when its digest matches and its
 `OutputSnapshot` coverage contains every currently demanded output. Invocation
 clears the output buffer first, so an output the lambda skips cannot retain a
@@ -77,7 +83,8 @@ an older frame when the new result covers more outputs.
 
 Only `FuncBehavior::Pure` cones receive reusable content digests. Resource
 inputs fold the current referent identity through `ResourceStamper`; filesystem
-paths have built-in stamping. Custom runtime values are not serializable.
+paths have built-in stamping. Stampers receive the run's cooperative
+`CancelToken`. Custom runtime values are not serializable.
 Downstream types attach a `CustomValueCodec` explicitly when they want disk
 cache support.
 

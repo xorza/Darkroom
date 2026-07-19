@@ -8,6 +8,7 @@ use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot, RuntimeCache
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
+use crate::execution::resource::RunResourceStamps;
 use crate::graph::CacheMode;
 use crate::graph::NodeId;
 use crate::node::definition::{FuncBehavior, FuncId};
@@ -166,12 +167,14 @@ async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, Execut
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
     let mut executor = Executor::default();
+    let mut resource_stamps = RunResourceStamps::default();
     let stats = executor
         .run(
             program,
             &run.plan,
             &run.resolved,
             &mut cache,
+            &mut resource_stamps,
             &FlattenMap::default(),
             None,
             CancelToken::never(),
@@ -191,13 +194,15 @@ async fn run_with(
     // Resolve dispositions like the engine does. `straight_run` roots every node, so
     // the cut prunes nothing here — the cut itself is unit-tested in `resolve.rs`.
     let mut resolver = Resolver::default();
-    resolver.resolve(program, plan, cache);
+    let mut resource_stamps = RunResourceStamps::default();
+    resolver.resolve(program, plan, cache, &resource_stamps);
     executor
         .run(
             program,
             plan,
             &resolver.run,
             cache,
+            &mut resource_stamps,
             &FlattenMap::default(),
             None,
             CancelToken::never(),
@@ -217,6 +222,7 @@ async fn run_with_pinned(
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
     let mut executor = Executor::default();
+    let mut resource_stamps = RunResourceStamps::default();
     let flatten = self_mapped_flatten(program);
     let (tx, mut rx) = mpsc::unbounded_channel::<RunEvent>();
     let stats = executor
@@ -225,6 +231,7 @@ async fn run_with_pinned(
             &run.plan,
             &run.resolved,
             &mut cache,
+            &mut resource_stamps,
             &flatten,
             Some(&tx),
             CancelToken::never(),

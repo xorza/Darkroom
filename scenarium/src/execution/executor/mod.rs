@@ -10,13 +10,12 @@
 //! [`Resolver`](crate::execution::resolve::Resolver)'s
 //! [`ResolvedRun`](crate::execution::resolve::ResolvedRun) — disposition, output demand,
 //! and reader counts derived together and authoritative for the whole run. A
-//! [`Disposition::Reuse`] is never
-//! re-derived here, since a digest folds live filesystem state and could drift mid-run. A
-//! cut node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
-//! recomputed on reopen) gets [`NodeOutcome::Cut`]. The one verdict the loop *improves* is
-//! a `Run` whose stamped digest is `None` — a digest folding a Bind-delivered resource
-//! value that exists only once its producers settle: the loop re-stamps it at reach time
-//! and serves the cache on a hit. The run loop otherwise walks the schedule unchanged.
+//! [`Disposition::Reuse`] is never re-derived after its producers may have been cut. A cut
+//! node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
+//! recomputed on reopen) gets [`NodeOutcome::Cut`]. The one verdict the loop *improves* is a
+//! `Run` whose stamped digest is `None` because a Bind-delivered resource value exists only
+//! once its producers settle: the loop prepares that identity off-thread, re-stamps at
+//! reach time, and serves the cache on a hit.
 
 use std::time::Instant;
 
@@ -36,6 +35,7 @@ use crate::execution::cache::RuntimeCache;
 use crate::execution::plan::{ExecutionPlan, input_missing};
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, OutputIdx};
 use crate::execution::resolve::{Disposition, ResolvedRun};
+use crate::execution::resource::RunResourceStamps;
 use crate::execution::{NodeMap, NodeSet, OutputColumn, RunError, reset_node_map};
 
 /// What became of a node this run — the single per-node result map, so the run-time
@@ -121,6 +121,7 @@ struct ExecutionFrame<'a> {
     program: &'a ExecutionProgram,
     plan: &'a ExecutionPlan,
     cache: &'a mut RuntimeCache,
+    resource_stamps: &'a mut RunResourceStamps,
     flatten: &'a FlattenMap,
     remaining_reads: &'a mut RemainingOutputReads,
     retain: &'a NodeSet,
@@ -265,6 +266,7 @@ impl Executor {
         plan: &ExecutionPlan,
         resolved: &ResolvedRun,
         cache: &mut RuntimeCache,
+        resource_stamps: &mut RunResourceStamps,
         flatten: &FlattenMap,
         events: Option<&UnboundedSender<RunEvent>>,
         cancel: CancelToken,
@@ -293,6 +295,7 @@ impl Executor {
                 program,
                 plan,
                 cache,
+                resource_stamps,
                 flatten,
                 remaining_reads: &mut self.remaining_reads,
                 retain: &self.retain,
@@ -352,7 +355,18 @@ impl Executor {
                     Disposition::Reuse => true,
                     Disposition::Run if frame.cache.slots[&node_id].current_digest.is_none() => {
                         frame.hydrate_resource_producers(node_id).await;
-                        frame.cache.stamp_digest(program, node_id);
+                        frame
+                            .resource_stamps
+                            .prepare_node(
+                                program,
+                                frame.cache,
+                                node_id,
+                                self.ctx_manager.cancel.clone(),
+                            )
+                            .await;
+                        frame
+                            .cache
+                            .stamp_digest(program, frame.resource_stamps, node_id);
                         let demand = resolved.outputs.demand.slice(e_node.outputs);
                         let reused = frame.cache.check_reuse(program, node_id, demand);
                         if reused {

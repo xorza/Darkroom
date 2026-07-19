@@ -1779,7 +1779,7 @@ mod resource_binds {
     #[derive(Debug)]
     struct StoreStamper(Arc<Store>);
     impl ResourceStamper for StoreStamper {
-        fn stamp(&self, _value: &DynamicValue) -> ResourceStamp {
+        fn stamp(&self, _value: &DynamicValue, _cancel: &CancelToken) -> ResourceStamp {
             ResourceStamp::from_bytes(&self.0.version.load(Ordering::SeqCst).to_le_bytes())
         }
     }

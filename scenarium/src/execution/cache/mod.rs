@@ -18,6 +18,7 @@ use crate::execution::digest::{Digest, node_digest};
 use crate::execution::disk_store::DiskStore;
 use crate::execution::program::ExecutionProgram;
 use crate::execution::resolve::Disposition;
+use crate::execution::resource::RunResourceStamps;
 use crate::execution::stats::NodeRamUsage;
 use crate::execution::{NodeMap, NodeSet};
 use crate::graph::NodeId;
@@ -197,6 +198,19 @@ impl RuntimeSlot {
     pub(crate) fn output_values(&self) -> Option<&Vec<DynamicValue>> {
         match &self.value {
             ValueState::Resident { snapshot, .. } => Some(&snapshot.values),
+            _ => None,
+        }
+    }
+
+    /// Reject stale resident references so they cannot enter a new resource-backed digest.
+    pub(crate) fn current_output_values(&self) -> Option<&[DynamicValue]> {
+        match &self.value {
+            ValueState::Resident {
+                snapshot,
+                produced_under,
+            } if self.current_digest.is_some() && *produced_under == self.current_digest => {
+                Some(&snapshot.values)
+            }
             _ => None,
         }
     }
@@ -439,8 +453,13 @@ impl RuntimeCache {
     /// Stamp `node_id`'s structural content digest into its slot. The producer-first resolver
     /// pass calls this before exact output demand is known; cache coverage is probed later by
     /// [`check_reuse`](Self::check_reuse).
-    pub(crate) fn stamp_digest(&mut self, program: &ExecutionProgram, node_id: NodeId) {
-        let digest = node_digest(program, node_id, self);
+    pub(crate) fn stamp_digest(
+        &mut self,
+        program: &ExecutionProgram,
+        resource_stamps: &RunResourceStamps,
+        node_id: NodeId,
+    ) {
+        let digest = node_digest(program, node_id, self, resource_stamps);
         self.slots.get_mut(&node_id).unwrap().current_digest = digest;
     }
 

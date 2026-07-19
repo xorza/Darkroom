@@ -8,10 +8,10 @@
 //! 2. **plan** — the [`Planner`](plan::Planner) turns the program into an
 //!    [`ExecutionPlan`](plan::ExecutionPlan) (the schedule). Purely structural —
 //!    reachability + topological order + missing-input verdicts, no cache/digest state.
-//! 3. **execute** — the [`Resolver`](resolve::Resolver) stamps content digests, then
-//!    derives cache-aware liveness, exact output demand, and reader counts in one
-//!    consumer-first sweep. The [`Executor`] walks the surviving schedule
-//!    producer-first.
+//! 3. **execute** — [`RunResourceStamps`] prepares external identities on the blocking
+//!    pool; the [`Resolver`](resolve::Resolver) stamps content digests, then derives
+//!    cache-aware liveness, exact output demand, and reader counts in one consumer-first
+//!    sweep. The [`Executor`] walks the surviving schedule producer-first.
 //!
 //! [`ExecutionEngine`] owns the run-side pieces (program, plan, planner, the
 //! cross-run cache, and executor) and exposes `install` (phase 1's artifact)
@@ -51,6 +51,7 @@ pub(crate) mod program;
 mod query;
 pub(crate) mod report;
 pub(crate) mod resolve;
+pub(crate) mod resource;
 pub(crate) mod stats;
 #[cfg(test)]
 mod tests;
@@ -65,6 +66,7 @@ use plan::{ExecutionPlan, Planner};
 use program::ExecutionNode;
 use program::OutputIdx;
 use resolve::Resolver;
+use resource::RunResourceStamps;
 
 trait ColumnIndex {
     fn idx(self) -> usize;
@@ -249,6 +251,9 @@ pub(crate) struct ExecutionEngine {
     /// Cache-aware refinement of the plan: resolves reuse + cuts cones feeding only cache
     /// hits, between plan and execute. Owns reusable per-run scratch (see `resolve.rs`).
     resolver: Resolver,
+    /// Per-run external-resource identities, collected off-thread and shared by initial
+    /// resolution and late bound-resource restamps.
+    resource_stamps: RunResourceStamps,
     /// Reusable plan buffer, recycled across runs to avoid reallocation.
     plan: ExecutionPlan,
 }
@@ -262,6 +267,7 @@ impl ExecutionEngine {
         self.compiled = CompiledGraph::default();
         self.plan.clear();
         self.cache.clear();
+        self.resource_stamps = RunResourceStamps::default();
     }
 
     /// Swap the [`DiskStore`] — the library snapshot (its type table supplies
@@ -309,11 +315,26 @@ impl ExecutionEngine {
         // cache/digest state. The flatten map resolves authoring node seeds to flat roots.
         self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
 
+        // Phase 2a: prepare external identities away from the async worker. The stamps are
+        // reused for repeated resources and any late bound-resource restamp this run.
+        self.resource_stamps
+            .prepare_run(
+                &self.compiled.program,
+                &self.plan,
+                &self.cache,
+                cancel.clone(),
+            )
+            .await;
+
         // Phase 2b: cache-aware refinement. Stamp digests, then derive disposition,
         // exact output demand, and live readers together. The resolved run is authoritative:
         // a cache-hit or blocked consumer contributes no upstream demand.
-        self.resolver
-            .resolve(&self.compiled.program, &self.plan, &mut self.cache);
+        self.resolver.resolve(
+            &self.compiled.program,
+            &self.plan,
+            &mut self.cache,
+            &self.resource_stamps,
+        );
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), not batched here — so a long run's earlier
@@ -325,6 +346,7 @@ impl ExecutionEngine {
                 &self.plan,
                 &self.resolver.run,
                 &mut self.cache,
+                &mut self.resource_stamps,
                 &self.compiled.flatten_map,
                 events,
                 cancel,
@@ -452,8 +474,13 @@ impl ExecutionEngine {
             nodes: Vec::new(),
         };
         self.planner.plan(&self.compiled, &seeds, &mut self.plan)?;
-        self.resolver
-            .resolve(&self.compiled.program, &self.plan, &mut self.cache);
+        self.resource_stamps = RunResourceStamps::default();
+        self.resolver.resolve(
+            &self.compiled.program,
+            &self.plan,
+            &mut self.cache,
+            &self.resource_stamps,
+        );
         Ok(())
     }
 

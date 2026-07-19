@@ -180,10 +180,12 @@ surfaced on the flat node as `ExecutionNode.cache`. Disk is a **request**, honor
 
 A node's output is a pure function of its `func_id`, resolved input values, upstream
 outputs, and the content of any external files it reads. `node_digest` (`digest.rs`)
-folds exactly that into a 256-bit BLAKE3 `Digest`. The **executor** computes it for each
-node as it reaches the node (producer-first order), reading each `Bind` producer's
-*already-stamped* `current_digest` — so no recursion, no memoization, and it's the
-single place any digest is computed.
+folds exactly that into a 256-bit BLAKE3 `Digest`. Before the fold,
+`RunResourceStamps` (`resource.rs`) resolves filesystem identities and custom resource
+stamps on Tokio's blocking pool, memoizing each identity for the run. The resolver then
+computes node digests producer-first from prepared resource identities and each `Bind`
+producer's *already-stamped* `current_digest`, with no recursive digest traversal or I/O
+inside `node_digest`.
 
 - **Equal digest ⇒ identical computation** only while the implementation behind each
   `FuncId` remains stable for the cache's lifetime.
@@ -192,7 +194,7 @@ single place any digest is computed.
   for RAM and disk alike (a `None` producer folds to a `None` consumer).
 - **File inputs.** An `FsPath` const folds the path string *and* the file's identity
   (`FileId`, default `(len, mtime)`; opt-in content hash), or — for a **directory** — a
-  fingerprint of its entries (§`hash_dir_entries`), so the same path holding different
+  sorted fingerprint of its entries, so the same path holding different
   bytes, or a folder gaining/losing/editing a file, invalidates. This is what re-keys
   `build_masters` when its calibration folders change.
 - **Wired resource inputs.** A **resource reference** arriving over a `Bind` edge — an
@@ -202,9 +204,14 @@ single place any digest is computed.
   consumer's *declared* input type (the contract "this node dereferences the reference"),
   resolved onto the input at flatten (`InputStamper`). The value must exist first: pre-run
   the fold taints the digest `None` ("uncacheable, must run", keeping the cone alive), and
-  the run loop **re-stamps** such a node at reach time — its producers settled by then —
-  serving the cache on a hit. So a loader fed by any path- or handle-producing node re-keys
-  when the referent changes and still caches when it doesn't.
+  the run loop prepares the newly available identity through the same blocking-pool
+  stamp set and **re-stamps** such a node at reach time — its producers settled by then —
+  serving the cache on a hit. So a loader fed by any path- or handle-producing node
+  re-keys when the referent changes and still caches when it doesn't.
+- **One coherent resource identity per run.** Repeated references to the same path, or
+  repeated consumers of the same custom resource, reuse one prepared identity. The next
+  run clears and refreshes the stamps. `ResourceStamper` receives the run's cooperative
+  cancel token so long-running custom identity work can stop promptly.
 - **Output ports** of a multi-output node are disambiguated (`port_digest_of`); a
   `DOMAIN` separator versions the hashing scheme itself.
 - **Output signature.** Each node's resolved output types (arity + each type, wildcards
@@ -212,10 +219,11 @@ single place any digest is computed.
   re-keys it. This is what makes "a blob exists for this digest but is the wrong type"
   impossible by construction: a type change is a key change, so the stale blob is never
   looked up.
-A node's digest is computed at **execution** (once per run, in the pre-run resolve sweep —
-the run loop reads the resolver's verdicts rather than re-deriving, since a digest folds
-live filesystem state and could drift mid-run), not `update`: only then are its producers'
-`current_digest`s stamped. The planner is purely structural and never touches digests.
+A node's digest is computed at **execution** (once per run, in the pre-run resolve sweep),
+not `update`. The run loop reads the resolver's verdicts rather than re-deriving them;
+only a node whose bound resource becomes readable after its producers settle is improved
+at reach time, using the same run stamps. The planner is purely structural and never
+touches digests.
 
 ## B.3 Storage (`disk_store.rs`)
 
@@ -244,7 +252,7 @@ never yields a half-real output set.
 Each flat `NodeId` has a `RuntimeSlot` in the ID-keyed runtime cache:
 
 ```
-current_digest: Option<Digest>   // this run's content digest, stamped by the executor
+current_digest: Option<Digest>   // this run's content digest, stamped by the resolver
 value:          ValueState        // Empty | Resident { snapshot, produced_under }
                                   //       | OnDisk { coverage }
 ```
@@ -260,15 +268,16 @@ without entering RAM (B.6).
 
 ## B.6 Execution-time lifecycle (`cache.rs` policy over `disk_store.rs` I/O)
 
-All of it happens *during the run*, not at plan time — the planner is structural and does no
-cache work. The executor first does a **pre-run cut** (`resolve.rs`): fold every node's digest
-producer-first (from upstream digests — no lambda, no value load), decide reuse, then prune
-any cone that feeds *only* reuse hits (a backward walk from the plan's roots). So a disk-cached
-node's now-unneeded upstream — a memory-only source, say — isn't recomputed on reopen. Nearly
-every digest is structural, so nearly the whole graph resolves here; a digest folding a Bind-delivered resource value it can't read yet (§B.2 wired
-resource inputs) stamps `None` — resolved `Run`, cone kept alive — and the run loop re-stamps
-it at reach time, serving the cache on a hit. Then, per surviving node, once its digest is
-computed:
+All of it happens *during the run*, not at plan time — the planner is structural and does
+no cache work. First the engine prepares one per-run resource stamp set on the blocking
+pool. The resolver then performs the **pre-run cut** (`resolve.rs`): fold every node's
+digest producer-first (from upstream digests and prepared resource identities), decide
+reuse, then prune any cone that feeds *only* reuse hits (a backward walk from the plan's
+roots). So a disk-cached node's now-unneeded upstream — a memory-only source, say — isn't
+recomputed on reopen. A digest folding a Bind-delivered resource value it can't read yet
+(§B.2 wired resource inputs) stamps `None` — resolved `Run`, cone kept alive — and the run
+loop prepares that identity off-thread and re-stamps it at reach time, serving the cache
+on a hit. Then, per surviving node, once its digest is computed:
 
 1. **resident hit?** — reuse only when the digest matches and the resident
    coverage contains every demanded output.

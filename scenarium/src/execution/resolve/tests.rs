@@ -78,7 +78,8 @@ impl Fix {
         };
         let mut cache = RuntimeCache::default();
         cache.reconcile(&self.program);
-        stamp_digests(&self.program, &mut cache, &plan);
+        let resource_stamps = RunResourceStamps::default();
+        stamp_digests(&self.program, &mut cache, &resource_stamps, &plan);
         for cached in cached {
             let digest = cache.slots[&cached.node_id].current_digest.unwrap();
             let coverage = CachedOutputCoverage::from_values(&cached.values);
@@ -88,7 +89,7 @@ impl Fix {
             };
         }
         let mut resolver = Resolver::default();
-        resolver.resolve(&self.program, &plan, &mut cache);
+        resolver.resolve(&self.program, &plan, &mut cache, &resource_stamps);
         resolver.run
     }
 }

@@ -3,76 +3,11 @@ use crate::StaticValue;
 use crate::execution::cache::test_support::hydrate;
 use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot};
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
+use crate::execution::resource::RunResourceStamps;
+use crate::execution::resource::test_support::prepare_node;
 use crate::graph::NodeId;
 use crate::node::definition::FuncId;
 use common::Span;
-
-/// A folder-input node stays `Pure` and cacheable, but its digest tracks the
-/// folder's *contents*: `hash_fs_path_identity` re-keys when a contained file is
-/// added, edited, or removed, and folds identically for an unchanged directory —
-/// closing the gap a bare directory mtime (add/remove only) leaves.
-#[test]
-fn dir_fingerprint_tracks_entry_changes() {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "scenarium-digest-dirfp-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed),
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.to_string_lossy().into_owned();
-
-    let fingerprint = |p: &str| {
-        let mut hasher = DigestHasher::new();
-        hash_fs_path_identity(&mut hasher, p);
-        hasher.finish()
-    };
-
-    // An empty directory and an unreadable one must key apart — otherwise a
-    // value cached against "empty" keeps being served after the directory
-    // turns unreadable (the sentinel-count fix in `hash_dir_entries`).
-    #[cfg(unix)]
-    {
-        use std::fs::Permissions;
-        use std::os::unix::fs::PermissionsExt;
-        let empty = fingerprint(&path);
-        let perms = |mode: u32| Permissions::from_mode(mode);
-        std::fs::set_permissions(&dir, perms(0o000)).unwrap();
-        let unreadable = fingerprint(&path);
-        std::fs::set_permissions(&dir, perms(0o755)).unwrap();
-        assert_ne!(
-            unreadable, empty,
-            "an unreadable directory keys apart from an empty one"
-        );
-        assert_eq!(fingerprint(&path), empty, "readable again folds as before");
-    }
-
-    std::fs::write(dir.join("a.fits"), b"one").unwrap();
-    let base = fingerprint(&path);
-    assert_eq!(
-        fingerprint(&path),
-        base,
-        "an unchanged directory folds identically"
-    );
-
-    std::fs::write(dir.join("b.fits"), b"two").unwrap();
-    let after_add = fingerprint(&path);
-    assert_ne!(
-        after_add, base,
-        "adding a file re-keys the directory fingerprint"
-    );
-
-    // In-place edit changing length — the gap a bare directory mtime would miss.
-    std::fs::write(dir.join("a.fits"), b"one-plus-more").unwrap();
-    let after_edit = fingerprint(&path);
-    assert_ne!(after_edit, after_add, "editing a contained file re-keys it");
-
-    std::fs::remove_file(dir.join("b.fits")).unwrap();
-    assert_ne!(fingerprint(&path), after_edit, "removing a file re-keys it");
-
-    std::fs::remove_dir_all(&dir).ok();
-}
 
 /// Minimal hand-built `ExecutionProgram` for digest tests. Node ids are
 /// `from_u128(idx + 1)`; `bind`'s target id must match that scheme. Output types
@@ -171,15 +106,23 @@ fn konst(value: StaticValue) -> ExecutionBinding {
     ExecutionBinding::Const(value)
 }
 
+#[derive(Debug)]
+struct DigestPair {
+    typed: Option<Digest>,
+    plain: Option<Digest>,
+}
+
 /// Fold node digests into a fresh cache the way the executor does — producer-first
 /// in `e_node` order (the test `Prog`s are built that way), each node reading its
-/// producers' just-stamped `current_digest` — stopping after `through`. Re-stats any
-/// `FsPath` const each call. Returns the cache, holding every computed digest.
+/// producers' just-stamped `current_digest` — stopping after `through`. Prepares a fresh
+/// resource stamps each call. Returns the cache, holding every computed digest.
 fn digested_cache(program: &ExecutionProgram, through: usize) -> RuntimeCache {
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
+    let mut resource_stamps = RunResourceStamps::default();
     for node_id in program.node_ids().take(through + 1) {
-        let digest = node_digest(program, node_id, &cache);
+        prepare_node(&mut resource_stamps, program, &cache, node_id);
+        let digest = node_digest(program, node_id, &cache, &resource_stamps);
         cache.slots.get_mut(&node_id).unwrap().current_digest = digest;
     }
     cache
@@ -287,6 +230,14 @@ fn fs_path_folds_file_identity_and_path() {
 
     // The path string itself is folded, independent of file identity (both missing).
     let d_other = digest_at(&prog_for("definitely-missing-elsewhere").program, 0);
+    assert_eq!(
+        d_other,
+        Some(Digest([
+            146, 239, 40, 142, 65, 20, 168, 176, 50, 39, 8, 92, 111, 114, 244, 116, 75, 9, 185,
+            107, 251, 223, 168, 66, 148, 196, 31, 123, 202, 44, 186, 180,
+        ])),
+        "moving identity collection must not change cache keys"
+    );
     assert_ne!(d_missing, d_other, "different path ⇒ different digest");
 }
 
@@ -317,7 +268,8 @@ fn bound_fs_path_folds_delivered_file_identity() {
     let digests_with = |value: Option<DynamicValue>| {
         let mut cache = RuntimeCache::default();
         cache.reconcile(&p.program);
-        let producer = node_digest(&p.program, node_id(0), &cache).unwrap();
+        let mut resource_stamps = RunResourceStamps::default();
+        let producer = node_digest(&p.program, node_id(0), &cache, &resource_stamps).unwrap();
         cache.slots.get_mut(&node_id(0)).unwrap().current_digest = Some(producer);
         if let Some(value) = value {
             hydrate(
@@ -327,24 +279,32 @@ fn bound_fs_path_folds_delivered_file_identity() {
                 producer,
             );
         }
-        (
-            node_digest(&p.program, node_id(1), &cache),
-            node_digest(&p.program, node_id(2), &cache),
-        )
+        prepare_node(&mut resource_stamps, &p.program, &cache, node_id(1));
+        prepare_node(&mut resource_stamps, &p.program, &cache, node_id(2));
+        DigestPair {
+            typed: node_digest(&p.program, node_id(1), &cache, &resource_stamps),
+            plain: node_digest(&p.program, node_id(2), &cache, &resource_stamps),
+        }
     };
     let fs_path = || Some(DynamicValue::Static(StaticValue::FsPath(path.clone())));
 
     std::fs::write(&file, b"x").unwrap(); // len 1
-    let (typed_len1, plain_len1) = digests_with(fs_path());
+    let DigestPair {
+        typed: typed_len1,
+        plain: plain_len1,
+    } = digests_with(fs_path());
     assert!(typed_len1.is_some() && plain_len1.is_some());
     assert_eq!(
-        digests_with(fs_path()).0,
+        digests_with(fs_path()).typed,
         typed_len1,
         "an unchanged file folds identically"
     );
 
     std::fs::write(&file, b"xyz").unwrap(); // len 3 — the file identity changed
-    let (typed_len3, plain_len3) = digests_with(fs_path());
+    let DigestPair {
+        typed: typed_len3,
+        plain: plain_len3,
+    } = digests_with(fs_path());
     assert_ne!(
         typed_len1, typed_len3,
         "a wired path's file change re-keys the FsPath-declared consumer"
@@ -355,11 +315,11 @@ fn bound_fs_path_folds_delivered_file_identity() {
     );
 
     std::fs::remove_file(&file).unwrap();
-    let (typed_missing, _) = digests_with(fs_path());
+    let typed_missing = digests_with(fs_path()).typed;
     assert_ne!(typed_len3, typed_missing, "file presence must matter");
 
     // A delivered non-path value folds a distinct marker — still cacheable.
-    let (typed_int, _) = digests_with(Some(DynamicValue::Static(StaticValue::Int(7))));
+    let typed_int = digests_with(Some(DynamicValue::Static(StaticValue::Int(7)))).typed;
     assert!(typed_int.is_some(), "a mis-typed wire stays cacheable");
     assert_ne!(
         typed_int, typed_missing,
@@ -367,7 +327,10 @@ fn bound_fs_path_folds_delivered_file_identity() {
     );
 
     // An unreadable delivered value (producer not resident) taints only the declared consumer.
-    let (typed_unread, plain_unread) = digests_with(None);
+    let DigestPair {
+        typed: typed_unread,
+        plain: plain_unread,
+    } = digests_with(None);
     assert_eq!(
         typed_unread, None,
         "unreadable reference value ⇒ None digest"
@@ -376,11 +339,33 @@ fn bound_fs_path_folds_delivered_file_identity() {
         plain_unread.is_some(),
         "the undeclared consumer never reads the value, so it still folds"
     );
+
+    let mut cache = RuntimeCache::default();
+    cache.reconcile(&p.program);
+    let mut resource_stamps = RunResourceStamps::default();
+    let producer = node_digest(&p.program, node_id(0), &cache, &resource_stamps).unwrap();
+    cache.slots.get_mut(&node_id(0)).unwrap().current_digest = Some(producer);
+    hydrate(
+        &mut cache,
+        node_id(0),
+        OutputSnapshot::new(
+            vec![DynamicValue::Static(StaticValue::FsPath(path))],
+            CachedOutputCoverage { ports: vec![true] },
+        ),
+        producer,
+    );
+    cache.slots.get_mut(&node_id(0)).unwrap().current_digest = Some(Digest([9; 32]));
+    prepare_node(&mut resource_stamps, &p.program, &cache, node_id(1));
+    assert_eq!(
+        node_digest(&p.program, node_id(1), &cache, &resource_stamps),
+        None,
+        "a resource value produced under an old producer digest is unreadable"
+    );
 }
 
 /// A registered [`ResourceStamper`] keys a consumer on the *referent's* state, not the
 /// reference value: bumping the external version re-keys the stamped consumer while the
-/// producer and an unstamped sibling stay put — the stamp is read live at every fold.
+/// producer and an unstamped sibling stay put — each test fold prepares fresh run stamps.
 #[test]
 fn custom_stamper_folds_referent_version() {
     use std::sync::Arc;
@@ -391,7 +376,7 @@ fn custom_stamper_folds_referent_version() {
     #[derive(Debug)]
     struct VersionStamper(Arc<AtomicU64>);
     impl ResourceStamper for VersionStamper {
-        fn stamp(&self, _value: &DynamicValue) -> ResourceStamp {
+        fn stamp(&self, _value: &DynamicValue, _cancel: &crate::CancelToken) -> ResourceStamp {
             ResourceStamp::from_bytes(&self.0.load(Ordering::SeqCst).to_le_bytes())
         }
     }
@@ -414,7 +399,8 @@ fn custom_stamper_folds_referent_version() {
     let digests = || {
         let mut cache = RuntimeCache::default();
         cache.reconcile(&p.program);
-        let producer = node_digest(&p.program, node_id(0), &cache).unwrap();
+        let mut resource_stamps = RunResourceStamps::default();
+        let producer = node_digest(&p.program, node_id(0), &cache, &resource_stamps).unwrap();
         cache.slots.get_mut(&node_id(0)).unwrap().current_digest = Some(producer);
         hydrate(
             &mut cache,
@@ -425,22 +411,30 @@ fn custom_stamper_folds_referent_version() {
             ),
             producer,
         );
-        (
-            node_digest(&p.program, node_id(1), &cache),
-            node_digest(&p.program, node_id(2), &cache),
-        )
+        prepare_node(&mut resource_stamps, &p.program, &cache, node_id(1));
+        prepare_node(&mut resource_stamps, &p.program, &cache, node_id(2));
+        DigestPair {
+            typed: node_digest(&p.program, node_id(1), &cache, &resource_stamps),
+            plain: node_digest(&p.program, node_id(2), &cache, &resource_stamps),
+        }
     };
 
-    let (stamped_v1, plain_v1) = digests();
+    let DigestPair {
+        typed: stamped_v1,
+        plain: plain_v1,
+    } = digests();
     assert!(stamped_v1.is_some());
     assert_eq!(
-        digests().0,
+        digests().typed,
         stamped_v1,
         "an unchanged referent folds identically"
     );
 
     version.store(2, Ordering::SeqCst);
-    let (stamped_v2, plain_v2) = digests();
+    let DigestPair {
+        typed: stamped_v2,
+        plain: plain_v2,
+    } = digests();
     assert_ne!(
         stamped_v1, stamped_v2,
         "a referent version bump re-keys the stamped consumer"

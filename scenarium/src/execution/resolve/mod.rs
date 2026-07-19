@@ -11,16 +11,17 @@
 //! node against the demand accumulated from running consumers, and stops at cache hits and
 //! missing-input nodes.
 //!
-//! Every node's digest is structural (a fold of its inputs), so the sweep stamps the
-//! *whole* graph ahead of the run. The one stamp it can leave imprecise is a digest folding a Bind-delivered
-//! *resource* value it can't read yet (`hash_bound_resource`, `digest.rs`): that folds to
-//! `None` here — "uncacheable, must run", which keeps the node's cone alive — and the run
-//! loop re-stamps it at reach time, once its producers have settled, possibly improving
-//! `Run` to a reuse.
+//! Every node's digest is structural (a fold of its inputs and the run's prepared resource
+//! snapshot), so the sweep stamps the *whole* graph ahead of the run. The one stamp it can
+//! leave imprecise is a digest folding a Bind-delivered *resource* value it can't read yet:
+//! that folds to `None` here — "uncacheable, must run", which keeps the node's cone alive —
+//! and the run loop prepares the identity and re-stamps at reach time once its producers
+//! have settled, possibly improving `Run` to a reuse.
 
 use crate::execution::cache::RuntimeCache;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram, OutputIdx};
+use crate::execution::resource::RunResourceStamps;
 use crate::execution::{NodeMap, OutputColumn, reset_node_map};
 use crate::graph::NodeId;
 use crate::node::lambda::OutputDemand;
@@ -28,12 +29,10 @@ use crate::node::lambda::OutputDemand;
 /// What the run loop does with one node — the resolver's single exposed column, merging the
 /// reuse verdict with the backward cut so the three states are mutually exclusive by
 /// construction (a pruned reuse hit can't also read as `Reuse`). Authoritative for the whole
-/// run: a `Reuse` is never re-derived by the executor, since a node digest folds live
-/// external state (`FsPath` len/mtime, resource stamps) and a second derivation mid-run
-/// could flip a verdict after the cut already pruned its producers. The safe direction is
-/// allowed once: the run loop re-stamps a `Run` node whose digest folded to `None` here (a
-/// Bind-delivered resource value not yet readable) — its cone was kept alive, so improving
-/// it to a reuse at reach time contradicts nothing.
+/// run: a `Reuse` is never re-derived after the cut may have pruned its producers. The safe
+/// direction is allowed once: the run loop prepares and re-stamps a `Run` node whose bound
+/// resource value was not yet readable — its cone was kept alive, so improving it to reuse
+/// at reach time contradicts nothing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Disposition {
     /// Pruned by the cut: no running node reads this node this run. The default — a node
@@ -129,8 +128,9 @@ impl Resolver {
         program: &ExecutionProgram,
         plan: &ExecutionPlan,
         cache: &mut RuntimeCache,
+        resource_stamps: &RunResourceStamps,
     ) {
-        stamp_digests(program, cache, plan);
+        stamp_digests(program, cache, resource_stamps, plan);
         resolve_run(program, plan, cache, &mut self.run);
     }
 }
@@ -139,12 +139,17 @@ impl Resolver {
 /// Reuse is deliberately not probed here because exact demand exists only in the reverse
 /// sweep. A Bind-delivered resource value that is not resident yet stamps `None`; the run
 /// loop can improve that node to reuse after its producers settle.
-fn stamp_digests(program: &ExecutionProgram, cache: &mut RuntimeCache, plan: &ExecutionPlan) {
+fn stamp_digests(
+    program: &ExecutionProgram,
+    cache: &mut RuntimeCache,
+    resource_stamps: &RunResourceStamps,
+    plan: &ExecutionPlan,
+) {
     for &node_id in &plan.process_order {
         if !plan.verdicts[&node_id].wants_execute() {
             continue;
         }
-        cache.stamp_digest(program, node_id);
+        cache.stamp_digest(program, resource_stamps, node_id);
     }
 }
 
