@@ -131,7 +131,7 @@ mod tests {
 
         let dir = fixture_dir("unreadable");
         let original = fs::metadata(&dir).unwrap().permissions();
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o0)).unwrap();
         let result = files_with_extensions(&dir, &["raf"]);
         fs::set_permissions(&dir, original).unwrap();
 

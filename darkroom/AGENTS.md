@@ -58,8 +58,8 @@ Root holds the entry point; implementation is grouped by responsibility:
   `prefs` / `edit` / `shell`; `mod.rs` is the dispatcher).
 - **`core/worker.rs`** — `WorkerBridge`: tokio worker + result channel.
 - **`core/document/`** — `mod.rs` (the `Document` model + `GraphRef` / `GraphView` /
-  `EditScope`), `validate.rs` (document/view structural validation),
-  `canvas_item_placement.rs` (node/pin position and paint-stack records).
+  `EditScope`), `serde.rs` (custom ordered paint-stack wire format), and
+  `validate.rs` (document/view structural validation).
 - **`core/edit/`** — the mutation machinery: `intent/` (intents + undo steps),
   `action_stack/` (packed undo history), `reconcile/` (derived graph-
   interface reconciliation).

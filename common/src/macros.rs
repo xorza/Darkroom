@@ -23,10 +23,9 @@ macro_rules! cfg_aarch64 {
 /// Defines a `#[repr(transparent)]` strongly-typed UUID newtype.
 ///
 /// The expansion references `uuid`, `anyhow`, and `serde` (with the `derive`
-/// feature) by bare path, so **the invoking crate must carry all three as
-/// dependencies**. They are not `$crate`-qualified: `common` itself does not
-/// depend on `uuid`, and serde's derive needs the crate in the caller's own
-/// extern prelude. (Today the sole caller, `scenarium`, already has them.)
+/// feature) in the invoking crate, so **the invoking crate must carry all three
+/// as dependencies**. They are not `$crate`-qualified: `common` itself does not
+/// depend on `uuid`. (Today the sole caller, `scenarium`, already has them.)
 ///
 /// `FromStr` is the fallible parse; the `From<&str>`/`From<String>` impls are
 /// convenience conversions that **panic on an invalid UUID** — use them only on
@@ -43,8 +42,8 @@ macro_rules! id_type {
             PartialOrd,
             Debug,
             Hash,
-            serde::Serialize,
-            serde::Deserialize,
+            ::serde::Serialize,
+            ::serde::Deserialize,
         )]
         #[repr(transparent)]
         pub struct $name(uuid::Uuid);

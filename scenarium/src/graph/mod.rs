@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
+use ::serde::{Deserialize, Serialize};
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
-use serde::{Deserialize, Serialize};
 
 use crate::StaticValue;
 use crate::graph::interface::{GraphEvent, GraphId, GraphLink};
@@ -20,6 +20,7 @@ pub(crate) mod clone;
 pub(crate) mod interface;
 mod query;
 pub(crate) mod reconcile;
+mod serde;
 #[cfg(test)]
 mod tests;
 mod validate;
@@ -78,30 +79,6 @@ pub struct Subscription {
     pub emitter: NodeId,
     pub event_idx: usize,
     pub subscriber: NodeId,
-}
-
-/// Serialize `bindings` as a `(port, binding)` sequence: struct keys can't be
-/// map keys in string-keyed formats (JSON/TOML). Order is deterministic
-/// because the source is a `BTreeMap`.
-mod binding_map_serde {
-    use crate::graph::{Binding, InputPort};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use std::collections::BTreeMap;
-
-    pub(crate) fn serialize<S: Serializer>(
-        map: &BTreeMap<InputPort, Binding>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        map.iter().collect::<Vec<_>>().serialize(serializer)
-    }
-
-    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<BTreeMap<InputPort, Binding>, D::Error> {
-        Ok(Vec::<(InputPort, Binding)>::deserialize(deserializer)?
-            .into_iter()
-            .collect())
-    }
 }
 
 /// Where a node's computed output is cached — the two orthogonal storage bits
@@ -271,7 +248,7 @@ pub struct Graph {
     /// serialization deterministic and lets a node's ports range contiguously.
     /// Serialized as a sequence of `(port, binding)` pairs — struct keys aren't
     /// valid map keys in string-keyed formats (JSON/TOML).
-    #[serde(default, with = "binding_map_serde")]
+    #[serde(default, with = "crate::graph::serde")]
     pub(crate) bindings: BTreeMap<InputPort, Binding>,
 
     /// Event wiring: every (emitter event → subscriber) edge, flat. A

@@ -2952,14 +2952,14 @@ mod composite_behavior {
         eg.update(graph, library).unwrap();
         eg.prepare_execution(true, false, &[]).unwrap();
         assert!(
-            execution_node_names_in_order(&eg, &graph, &library).contains(&name.to_string()),
+            execution_node_names_in_order(&eg, graph, library).contains(&name.to_string()),
             "{name} should run on the first prepare"
         );
         let node_id = execution_node_id(&eg, graph, library, name).unwrap();
         eg.set_output_values(node_id, vec![DynamicValue::Static(StaticValue::Int(11))]);
         eg.update(graph, library).unwrap();
         eg.prepare_execution(true, false, &[]).unwrap();
-        execution_node_names_in_order(&eg, &graph, &library).contains(&name.to_string())
+        execution_node_names_in_order(&eg, graph, library).contains(&name.to_string())
     }
 
     #[test]
