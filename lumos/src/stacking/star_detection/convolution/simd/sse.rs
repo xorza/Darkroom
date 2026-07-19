@@ -392,7 +392,7 @@ pub(crate) unsafe fn convolve_2d_row_sse41(
 mod tests {
     use crate::stacking::star_detection::convolution::simd;
 
-    use super::*;
+    use crate::stacking::star_detection::convolution::simd::sse::*;
     use common::cpu_features;
 
     #[test]

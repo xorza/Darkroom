@@ -7,8 +7,8 @@
 //! hallucinate (false-positive rate within the scenario's bound) and detection must not collapse
 //! to nothing. A regression in either fails the test.
 
-use super::run_test;
 use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::synthetic_tests::pipeline_tests::run_test;
 use crate::stacking::star_detection::synthetic_tests::{Placement, Scenario};
 use crate::stacking::star_detection::test_common::output::metrics::{
     PassCriteria, check_pass, crowded_criteria, faint_star_criteria,

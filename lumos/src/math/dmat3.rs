@@ -249,7 +249,7 @@ impl DMat3 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::math::dmat3::*;
 
     const EPS: f64 = 1e-10;
 

@@ -1,6 +1,7 @@
 //! Shared `ort` (ONNX Runtime) backend for the display-domain ML filters. Loads a caller-supplied
 //! `512×512×3` NHWC model and runs it over an image in overlapping, feather-blended 512×512 tiles.
-//! Used by [`star_removal`](super::star_removal) and [`denoise`](super::denoise).
+//! Used by [`star_removal`](crate::image_ops::ml::star_removal) and
+//! [`denoise`](crate::image_ops::ml::denoise).
 //!
 //! The tile loop is **sequential** and lets ONNX Runtime use its default (all-core) intra-op
 //! threading. These nets are memory-bandwidth-bound (~125 MB of weights streamed per tile), so
@@ -240,7 +241,7 @@ fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], w: usize, h: usi
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::image_ops::ml::backend::*;
     use imaginarium::{ColorFormat, ImageDesc};
 
     #[test]

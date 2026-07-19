@@ -598,8 +598,8 @@ impl DefectMap {
 
 #[cfg(test)]
 mod bench {
-    use super::*;
     use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::stacking::calibration_masters::defect_map::*;
     use ::quickbench::quick_bench;
 
     #[quick_bench(warmup_iters = 3, iters = 20)]
@@ -619,7 +619,7 @@ mod bench {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::calibration_masters::defect_map::*;
     use crate::{io::raw::demosaic::bayer::CfaPattern, testing::make_cfa};
 
     fn is_hot(defect_map: &DefectMap, pixel_idx: usize) -> bool {

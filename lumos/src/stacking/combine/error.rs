@@ -91,7 +91,7 @@ pub enum Error {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::combine::error::*;
 
     #[test]
     fn test_no_frames_error_message() {

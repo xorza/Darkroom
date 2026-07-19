@@ -1,8 +1,8 @@
 //! Standard pipeline tests - full star detection on typical forward-model scenarios.
 
-use super::run_test;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::synthetic_tests::Scenario;
+use crate::stacking::star_detection::synthetic_tests::pipeline_tests::run_test;
 use crate::stacking::star_detection::test_common::output::metrics::{
     PassCriteria, check_pass, standard_criteria,
 };

@@ -127,7 +127,7 @@ pub(crate) unsafe fn asinh_color_preserve_neon(block: &mut [f32], inv_beta: f32,
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::image_ops::stretching::simd_neon::*;
 
     #[test]
     fn neon_matches_scalar_reference() {

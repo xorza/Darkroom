@@ -138,7 +138,7 @@ pub(crate) unsafe fn asinh_color_preserve_avx2(block: &mut [f32], inv_beta: f32,
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::image_ops::stretching::simd_avx2::*;
 
     #[test]
     fn avx2_matches_scalar_reference() {

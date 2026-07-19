@@ -228,7 +228,7 @@ impl RegistrationResult {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::registration::result::*;
     use glam::DVec2;
 
     fn identity_matches(count: usize) -> Vec<StarMatch> {

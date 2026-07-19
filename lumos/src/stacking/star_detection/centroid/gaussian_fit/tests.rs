@@ -1,7 +1,7 @@
 //! Tests for 2D Gaussian fitting.
 
-use super::*;
 use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
+use crate::stacking::star_detection::centroid::gaussian_fit::*;
 use crate::stacking::star_detection::centroid::test_utils::{
     add_noise, approx_eq, compute_hessian_gradient,
 };

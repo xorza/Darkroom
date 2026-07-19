@@ -1,6 +1,6 @@
 use crate::testing::{first_raw_file, init_tracing};
 
-use super::*;
+use crate::io::raw::*;
 
 #[test]
 fn test_load_raw_invalid_path() {

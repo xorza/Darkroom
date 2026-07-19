@@ -148,7 +148,7 @@ pub fn add_nebula_background(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::testing::synthetic::backgrounds::*;
 
     #[test]
     fn test_uniform_background() {

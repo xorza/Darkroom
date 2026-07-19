@@ -90,7 +90,7 @@ pub(crate) fn cfa_pattern_from_filters(filters: u32) -> Option<CfaPattern> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::io::astro_image::sensor::*;
 
     #[test]
     fn test_cfa_pattern_from_filters_rggb() {

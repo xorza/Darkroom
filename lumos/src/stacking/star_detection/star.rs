@@ -60,7 +60,7 @@ impl Star {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::star::*;
 
     fn make_test_star() -> Star {
         Star {

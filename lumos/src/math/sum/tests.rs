@@ -1,6 +1,6 @@
 //! Tests for sum operations.
 
-use super::*;
+use crate::math::sum::*;
 
 #[test]
 fn test_sum_f32() {

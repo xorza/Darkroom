@@ -360,7 +360,7 @@ fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::detector::stages::detect::*;
     use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
 
     /// Render Gaussian `stars` (cx, cy, amplitude, sigma) into a single connected

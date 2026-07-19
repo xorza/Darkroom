@@ -6,12 +6,12 @@
 
 use std::f32::consts::PI;
 
-use super::background_estimate;
 use crate::math::fwhm_to_sigma;
 use crate::math::rect::URect;
 use crate::stacking::star_detection::centroid::measure_star;
 use crate::stacking::star_detection::config::{CentroidMethod, MeasurementConfig};
 use crate::stacking::star_detection::deblend::region::Region;
+use crate::stacking::star_detection::synthetic_tests::stage_tests::background_estimate;
 use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::render_gaussian_star;
 use common::Vec2us;

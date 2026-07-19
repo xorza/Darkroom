@@ -24,7 +24,7 @@ pub(crate) fn uniform(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::testing::synthetic::background_map::*;
 
     #[test]
     fn test_uniform() {

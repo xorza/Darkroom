@@ -325,7 +325,7 @@ fn read_i32(header: &Header, key: &'static str) -> fits_well::Result<Option<i32>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::io::astro_image::fits::*;
 
     #[test]
     fn test_normalize_float_already_01() {

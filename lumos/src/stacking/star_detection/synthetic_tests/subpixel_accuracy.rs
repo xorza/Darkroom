@@ -5,9 +5,11 @@
 //! [`Observation`] translation, and verify the detector's centroids recover that shift to well
 //! under 0.1 px — grading per-frame completeness through [`metrics`] against captured truth.
 
-use super::{detected_positions, synthetic_config, truth_positions};
 use crate::stacking::registration::transform::Transform;
 use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::synthetic_tests::{
+    detected_positions, synthetic_config, truth_positions,
+};
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::metrics::{match_catalogs, score_detection};
 use crate::testing::synthetic::observe::{Observation, render};

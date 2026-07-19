@@ -1,4 +1,4 @@
-use super::*;
+use crate::background_mesh::*;
 
 /// Number of sigma-clipping iterations for tests.
 const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;

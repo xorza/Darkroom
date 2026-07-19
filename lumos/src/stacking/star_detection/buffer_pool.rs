@@ -149,7 +149,7 @@ impl BufferPool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::buffer_pool::*;
 
     #[test]
     fn test_pool_creation() {

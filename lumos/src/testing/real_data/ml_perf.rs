@@ -7,10 +7,10 @@
 
 use std::time::Instant;
 
-use super::ml_support::{onnx_weights, stretched_master};
 use crate::image_ops::ml::backend::TiledOnnxConfig;
 use crate::image_ops::ml::star_removal::remove_stars;
 use crate::testing::init_tracing;
+use crate::testing::real_data::ml_support::{onnx_weights, stretched_master};
 
 /// Count of 512-wide tiles covering `dim` at `stride` — mirrors the backend's `tile_starts`.
 fn tiles_1d(dim: usize, stride: usize) -> usize {

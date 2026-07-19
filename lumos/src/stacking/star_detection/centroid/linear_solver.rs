@@ -71,7 +71,7 @@ pub(crate) fn solve<const N: usize>(a: &[[f64; N]; N], b: &[f64; N]) -> Option<[
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::centroid::linear_solver::*;
 
     #[test]
     fn test_solve_5x5_identity() {

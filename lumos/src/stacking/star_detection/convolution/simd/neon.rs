@@ -193,7 +193,7 @@ pub(crate) unsafe fn convolve_2d_row_neon(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::convolution::simd::neon::*;
 
     #[test]
     fn test_neon_matches_scalar() {

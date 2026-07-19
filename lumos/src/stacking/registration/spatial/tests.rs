@@ -1,6 +1,6 @@
 //! Tests for the spatial module (k-d tree).
 
-use super::*;
+use crate::stacking::registration::spatial::*;
 use glam::DVec2;
 
 /// Helper: collect radius search indices into a sorted Vec.

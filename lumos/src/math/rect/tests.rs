@@ -1,7 +1,7 @@
 use common::Vec2us;
 use glam::Vec2;
 
-use super::{Rect, URect};
+use crate::math::rect::{Rect, URect};
 
 #[test]
 fn rect_construction_and_overlap_are_half_open_and_const() {

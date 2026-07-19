@@ -106,7 +106,7 @@ pub(crate) fn solve_natural_spline_d2(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::background_mesh::spline::*;
 
     #[test]
     fn test_solve_d2_two_points_gives_zero() {

@@ -84,7 +84,7 @@ impl MagsacScorer {
 mod tests {
     use std::f64::consts::E;
 
-    use super::*;
+    use crate::stacking::registration::ransac::magsac::*;
 
     const TOL: f64 = 1e-10;
 

@@ -236,7 +236,7 @@ pub(crate) fn median9_scalar(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::median_filter::simd::*;
 
     #[test]
     fn test_median_filter_row_scalar() {

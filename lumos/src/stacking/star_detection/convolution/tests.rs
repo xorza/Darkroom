@@ -2,7 +2,7 @@
 
 use std::f32::consts::{FRAC_PI_2, PI};
 
-use super::*;
+use crate::stacking::star_detection::convolution::*;
 use crate::{
     math::FWHM_TO_SIGMA, stacking::star_detection::convolution::elliptical_gaussian_kernel_2d,
 };

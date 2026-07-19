@@ -11,8 +11,8 @@
 //! The live peak-RSS measurement is the `#[ignore]`d `master_stack_memory_probe` test in
 //! `mem_budget_probe`; here we assert the deterministic invariants instead.
 //!
-//! [`load_to_disk`]: super::cache
-//! [`load_in_memory`]: super::cache
+//! [`load_to_disk`]: crate::stacking::combine::cache
+//! [`load_in_memory`]: crate::stacking::combine::cache
 
 use common::CancelToken;
 use fits_well::FitsWriter;

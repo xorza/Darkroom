@@ -75,7 +75,7 @@ pub fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::testing::synthetic::patterns::*;
 
     #[test]
     fn test_uniform() {

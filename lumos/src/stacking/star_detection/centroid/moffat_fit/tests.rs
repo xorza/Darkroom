@@ -2,8 +2,8 @@
 
 use std::f64::consts::PI;
 
-use super::*;
 use crate::stacking::star_detection::centroid::lm_optimizer::LMConfig;
+use crate::stacking::star_detection::centroid::moffat_fit::*;
 use crate::stacking::star_detection::centroid::test_utils::{
     add_noise, approx_eq, compute_hessian_gradient,
 };

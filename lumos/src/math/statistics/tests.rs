@@ -1,6 +1,6 @@
 //! Tests for statistical functions.
 
-use super::*;
+use crate::math::statistics::*;
 
 #[test]
 fn test_median_odd() {

@@ -1,7 +1,7 @@
-use super::ml_support::{onnx_weights, stretched_master};
 use crate::image_ops::intensity_plane;
 use crate::image_ops::ml::backend::TiledOnnxConfig;
 use crate::image_ops::ml::star_removal::{remove_stars, remove_stars_starless_only};
+use crate::testing::real_data::ml_support::{onnx_weights, stretched_master};
 use crate::testing::{init_tracing, save_png};
 
 fn max_of(p: &[f32]) -> f32 {

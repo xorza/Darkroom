@@ -622,10 +622,10 @@ fn xtrans_replace(data: &mut Buffer2<f32>, cfa: &CfaType, mask: &[bool]) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::io::astro_image::AstroImageMetadata;
     use crate::io::astro_image::cfa::CfaType;
     use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::stacking::calibration_masters::cosmic_ray::*;
     use crate::testing::TestRng;
 
     /// Add a round Gaussian source (peak above the existing background) at `(cx, cy)`.

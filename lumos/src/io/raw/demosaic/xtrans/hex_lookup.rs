@@ -144,7 +144,7 @@ impl HexLookup {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::io::raw::demosaic::xtrans::hex_lookup::*;
 
     fn test_pattern() -> XTransPattern {
         XTransPattern::new([

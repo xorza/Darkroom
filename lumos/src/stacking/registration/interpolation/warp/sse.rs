@@ -474,7 +474,7 @@ mod tests {
     use common::cpu_features;
     use imaginarium::Buffer2;
 
-    use super::*;
+    use crate::stacking::registration::interpolation::warp::sse::*;
 
     /// Helper: compare SIMD output against scalar reference for a given transform.
     #[cfg(target_arch = "x86_64")]

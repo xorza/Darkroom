@@ -1,6 +1,6 @@
 //! Tests for 3x3 median filter.
 
-use super::*;
+use crate::stacking::star_detection::median_filter::*;
 use imaginarium::Buffer2;
 
 #[test]

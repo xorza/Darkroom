@@ -1,6 +1,6 @@
 use std::f32::consts::PI;
 
-use super::*;
+use crate::stacking::registration::interpolation::*;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use common::Vec2us;
 use glam::{DVec2, IVec2, Vec2};

@@ -1,4 +1,4 @@
-use super::{atrous_smooth, max_scales, reflect};
+use crate::image_ops::wavelet::{atrous_smooth, max_scales, reflect};
 use imaginarium::Buffer2;
 
 fn pattern(width: usize, height: usize) -> Buffer2<f32> {

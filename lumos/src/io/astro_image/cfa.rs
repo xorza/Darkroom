@@ -381,7 +381,7 @@ fn flat_per_color_inv_means(
 
 #[cfg(test)]
 mod bench {
-    use super::*;
+    use crate::io::astro_image::cfa::*;
     use crate::testing::make_cfa;
     use ::quickbench::quick_bench;
 
@@ -406,7 +406,7 @@ mod bench {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::io::astro_image::cfa::*;
     use crate::testing::make_cfa;
 
     #[test]

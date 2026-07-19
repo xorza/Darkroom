@@ -226,8 +226,8 @@ pub(crate) unsafe fn lanczos_kernel_neon<
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::stacking::registration::interpolation::get_lanczos_lut;
+    use crate::stacking::registration::interpolation::warp::neon::*;
 
     /// NEON Lanczos kernel must match a plain scalar weighted sum (mirror of the x86
     /// `lanczos_kernel_fma_matches_scalar` checks). Interior 20×20 window, no border.

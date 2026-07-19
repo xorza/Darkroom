@@ -20,7 +20,7 @@ use crate::stacking::frame_store::{
 };
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 
-use super::{CacheCore, CfaCache, LightCache};
+use crate::stacking::combine::cache::{CacheCore, CfaCache, LightCache};
 
 #[derive(Debug)]
 struct LoadedTier {

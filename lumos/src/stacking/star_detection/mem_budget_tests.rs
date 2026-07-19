@@ -11,8 +11,8 @@
 //! with no live measurement. The at-scale peak-RSS counterpart is the `#[ignore]`d
 //! `detect_memory_probe` in `mem_budget_probe`.
 //!
-//! [`StarDetector`]: super::detector::StarDetector
-//! [`BufferPool`]: super::buffer_pool::BufferPool
+//! [`StarDetector`]: crate::stacking::star_detection::detector::StarDetector
+//! [`BufferPool`]: crate::stacking::star_detection::buffer_pool::BufferPool
 
 use crate::stacking::star_detection::buffer_pool::PoolCounts;
 use crate::stacking::star_detection::config::Config;

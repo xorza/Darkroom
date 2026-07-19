@@ -31,7 +31,7 @@ pub(crate) fn sigma_to_fwhm(sigma: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::math::*;
 
     #[test]
     fn test_fwhm_sigma_conversion_roundtrip() {

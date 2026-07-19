@@ -235,7 +235,7 @@ impl StarDetector {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::detector::*;
 
     #[test]
     fn constructor_rejects_invalid_configuration() {

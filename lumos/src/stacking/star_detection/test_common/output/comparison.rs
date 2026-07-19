@@ -149,7 +149,7 @@ pub(crate) fn match_stars(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::test_common::output::comparison::*;
 
     #[test]
     fn test_match_stars_perfect() {

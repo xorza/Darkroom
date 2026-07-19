@@ -460,7 +460,7 @@ fn recover_matches(
 
 #[cfg(test)]
 mod fwhm_tests {
-    use super::*;
+    use crate::stacking::registration::*;
 
     fn make_star(fwhm: f32) -> Star {
         Star {
@@ -527,7 +527,7 @@ mod fwhm_tests {
 
 #[cfg(test)]
 mod recovery_tests {
-    use super::*;
+    use crate::stacking::registration::*;
     use crate::testing::synthetic::transforms::generate_random_positions;
 
     fn identity_matches(count: usize) -> Vec<StarMatch> {

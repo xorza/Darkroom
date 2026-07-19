@@ -184,9 +184,9 @@ pub fn observe_dithered(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::testing::synthetic::camera::{BiasField, FlatField, SensorDefects};
     use crate::testing::synthetic::metrics::pixel_stats;
+    use crate::testing::synthetic::observe::*;
     use crate::testing::synthetic::scene::{BackgroundField, Scene};
 
     fn argmax_xy(pixels: &[f32], width: usize) -> (usize, usize) {

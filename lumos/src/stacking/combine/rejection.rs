@@ -1033,7 +1033,7 @@ fn weighted_mean_indexed(
 mod tests {
     use crate::math::sum::mean_f32;
 
-    use super::*;
+    use crate::stacking::combine::rejection::*;
 
     #[test]
     fn test_sigma_clip_config_default() {

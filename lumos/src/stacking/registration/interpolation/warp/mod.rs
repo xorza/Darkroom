@@ -470,9 +470,9 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::stacking::registration::config::InterpolationMethod;
     use crate::stacking::registration::interpolation::WarpParams;
+    use crate::stacking::registration::interpolation::warp::*;
     use crate::stacking::registration::transform::Transform;
     use crate::testing::synthetic::patterns;
 

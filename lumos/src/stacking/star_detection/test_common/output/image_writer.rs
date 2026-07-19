@@ -182,7 +182,7 @@ pub(crate) fn save_mask(mask: &[bool], width: usize, height: usize, path: &Path)
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::test_common::output::image_writer::*;
 
     #[test]
     fn test_gray_image_conversion() {

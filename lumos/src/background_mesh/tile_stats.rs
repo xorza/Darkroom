@@ -1,7 +1,7 @@
 //! Per-tile SExtractor sky estimation: pixel collection (masked/sampled), sigma-clipped robust
 //! statistics, and the crowding-aware Pearson-mode sky estimator for a single tile box.
 
-use super::TileStats;
+use crate::background_mesh::TileStats;
 use crate::math::statistics::ClippedStats;
 use crate::math::statistics::sigma_clipped_median_mad;
 use common::BitBuffer2;
@@ -203,7 +203,7 @@ fn subsample_in_place(values: &mut Vec<f32>, target_size: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::background_mesh::tile_stats::*;
 
     fn create_uniform_image(width: usize, height: usize, value: f32) -> Buffer2<f32> {
         Buffer2::new(width, height, vec![value; width * height])

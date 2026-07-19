@@ -265,7 +265,7 @@ unsafe fn normalize_chunk_neon<const CLAMP: bool>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::io::raw::normalize::*;
 
     /// Pure-scalar reference for cross-checking the SIMD kernels.
     fn scalar_ref<const CLAMP: bool>(data: &[u16], black: f32, inv_range: f32) -> Vec<f32> {

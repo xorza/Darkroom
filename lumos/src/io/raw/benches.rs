@@ -5,7 +5,7 @@ use quickbench::quick_bench;
 
 use crate::testing::init_tracing;
 
-use super::*;
+use crate::io::raw::*;
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
 fn raw_load(b: quickbench::Bencher) {

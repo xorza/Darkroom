@@ -6,8 +6,10 @@
 //! a source-free noise field yields essentially no false positives, completeness falls under
 //! crowding, and the `min_snr` knob gates the faint end.
 
-use super::{Placement, Scenario, detected_positions, synthetic_config, truth_positions};
 use crate::stacking::star_detection::detector::StarDetector;
+use crate::stacking::star_detection::synthetic_tests::{
+    Placement, Scenario, detected_positions, synthetic_config, truth_positions,
+};
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::metrics::{astrometric_rms, score_detection};
 use crate::testing::synthetic::observe::{Observation, render};

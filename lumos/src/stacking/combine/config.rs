@@ -364,7 +364,7 @@ impl StackConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::combine::config::*;
     use crate::stacking::combine::rejection::{
         GesdConfig, LinearFitClipConfig, PercentileClipConfig, SigmaClipConfig,
         WinsorizedClipConfig,

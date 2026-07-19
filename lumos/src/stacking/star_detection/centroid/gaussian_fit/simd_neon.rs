@@ -339,7 +339,7 @@ pub(crate) unsafe fn batch_compute_chi2_neon(
 mod tests {
     use std::f64::consts::PI;
 
-    use super::*;
+    use crate::stacking::star_detection::centroid::gaussian_fit::simd_neon::*;
 
     /// Test that simd_exp_fast produces results close to std exp().
     #[test]

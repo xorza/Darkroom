@@ -98,7 +98,7 @@ pub enum BayerPattern {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::testing::synthetic::artifacts::*;
 
     #[test]
     fn test_cosmic_rays_count() {

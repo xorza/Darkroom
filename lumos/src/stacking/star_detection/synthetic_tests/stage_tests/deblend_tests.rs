@@ -5,10 +5,12 @@
 //! bound (`>= N`) would pass a deblender that under-splits or fragments a single star. A knob
 //! sweep pins that the contrast threshold actually controls the split.
 
-use super::{background_estimate, matched_truths};
 use crate::math::fwhm_to_sigma;
 use crate::stacking::star_detection::config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
+use crate::stacking::star_detection::synthetic_tests::stage_tests::{
+    background_estimate, matched_truths,
+};
 use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::render_gaussian_star;
 use imaginarium::Buffer2;

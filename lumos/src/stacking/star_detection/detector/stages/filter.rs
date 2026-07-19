@@ -198,7 +198,7 @@ fn compact_by_mask(stars: &mut Vec<Star>, kept: &[bool]) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::detector::stages::filter::*;
     use glam::DVec2;
 
     fn make_test_star(fwhm: f32, flux: f32) -> Star {

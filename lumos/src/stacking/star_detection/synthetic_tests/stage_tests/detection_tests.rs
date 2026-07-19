@@ -14,7 +14,7 @@ use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
-use super::{TILE_SIZE, matched_truths};
+use crate::stacking::star_detection::synthetic_tests::stage_tests::{TILE_SIZE, matched_truths};
 
 /// Create a detection overlay image showing candidates.
 fn create_detection_overlay(

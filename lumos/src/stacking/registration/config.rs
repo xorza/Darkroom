@@ -370,7 +370,7 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::registration::config::*;
 
     #[test]
     fn test_config_default_values() {

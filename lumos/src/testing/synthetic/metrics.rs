@@ -167,7 +167,7 @@ pub fn rms_diff(a: &[f32], b: &[f32]) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::testing::synthetic::metrics::*;
 
     #[test]
     fn match_catalogs_greedy_nearest_within_radius() {

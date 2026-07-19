@@ -100,7 +100,7 @@ unsafe fn median9_neon(
 #[cfg(test)]
 mod tests {
     #[allow(unused_imports)]
-    use super::*;
+    use crate::stacking::star_detection::median_filter::simd::neon::*;
 
     #[test]
     #[cfg(target_arch = "aarch64")]

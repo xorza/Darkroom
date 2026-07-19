@@ -401,7 +401,7 @@ unsafe fn interpolate_segment_cubic_neon(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::background::simd::*;
 
     #[test]
     #[should_panic(expected = "assertion")]

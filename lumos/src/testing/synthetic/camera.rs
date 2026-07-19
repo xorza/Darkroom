@@ -201,7 +201,7 @@ impl Camera {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::testing::synthetic::camera::*;
 
     fn render_one(psf: PsfModel, size: usize, flux: f32, seeing: f32) -> Vec<f32> {
         let mut pixels = vec![0.0f32; size * size];

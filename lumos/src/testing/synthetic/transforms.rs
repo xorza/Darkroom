@@ -215,7 +215,7 @@ pub fn translate_stars_with_overlap(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::testing::synthetic::transforms::*;
 
     #[test]
     fn test_generate_random_positions() {

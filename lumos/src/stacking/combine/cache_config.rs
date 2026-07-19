@@ -64,7 +64,7 @@ fn get_available_memory() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::combine::cache_config::*;
 
     #[test]
     fn default_config_uses_unique_process_cache_directories() {

@@ -3,7 +3,7 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use super::*;
+use crate::math::statistics::*;
 
 const BENCH_SIZE: usize = 1024;
 const TILE_SIZE: usize = 4096; // 64x64 tile - realistic background estimation size

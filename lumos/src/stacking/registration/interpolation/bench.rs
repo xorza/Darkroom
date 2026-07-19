@@ -4,9 +4,9 @@ use std::hint::black_box;
 
 use ::quickbench::quick_bench;
 
-use super::*;
 use crate::math::dmat3::DMat3;
 use crate::stacking::registration::config::InterpolationMethod;
+use crate::stacking::registration::interpolation::*;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 use imaginarium::Buffer2;
 

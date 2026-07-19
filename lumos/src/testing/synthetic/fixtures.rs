@@ -47,7 +47,7 @@ pub fn cluster_field(width: usize, height: usize, num_stars: usize, seed: u64) -
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::testing::synthetic::fixtures::*;
     use crate::testing::synthetic::metrics::pixel_stats;
     use imaginarium::Buffer2;
 

@@ -207,8 +207,8 @@ impl Scene {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::testing::synthetic::metrics::pixel_stats;
+    use crate::testing::synthetic::scene::*;
 
     #[test]
     fn uniform_background_renders_constant() {

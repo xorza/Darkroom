@@ -464,10 +464,10 @@ pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) ->
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::io::astro_image::PixelData;
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::rejection::Rejection;
+    use crate::stacking::combine::stack::*;
     use crate::stacking::frame_store::store_light_frame;
     use crate::{
         io::astro_image::{AstroImage, ImageDimensions},

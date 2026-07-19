@@ -635,7 +635,7 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::config::*;
 
     fn configured(update: impl FnOnce(&mut Config)) -> Config {
         let mut config = Config::default();

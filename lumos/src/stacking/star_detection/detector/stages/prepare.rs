@@ -105,7 +105,7 @@ fn combine_channels(image: &AstroImage, weights: [f32; 3], output: &mut Buffer2<
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::detector::stages::prepare::*;
     use crate::{AstroImage, ImageDimensions};
 
     /// Build a 16-pixel channel whose median is `center` and MAD is exactly `mad`

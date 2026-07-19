@@ -218,7 +218,7 @@ fn estimate_fwhm_from_stars(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::star_detection::detector::stages::fwhm::*;
     use glam::DVec2;
 
     fn make_star(fwhm: f32, eccentricity: f32, sharpness: f32, peak: f32) -> Star {

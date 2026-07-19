@@ -87,7 +87,7 @@ pub fn add_dark_current(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::testing::synthetic::noise::*;
 
     fn mean_var(samples: &[f32]) -> (f64, f64) {
         let n = samples.len() as f64;

@@ -82,7 +82,7 @@ pub enum DrizzleError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::stacking::drizzle::error::*;
 
     #[test]
     fn test_no_frames_message() {

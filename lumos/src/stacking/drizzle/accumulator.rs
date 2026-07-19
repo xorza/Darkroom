@@ -659,7 +659,7 @@ impl DrizzleAccumulator {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::*;
+    use crate::stacking::drizzle::accumulator::*;
 
     pub(crate) fn add_image(
         accumulator: &mut DrizzleAccumulator,
