@@ -4,7 +4,6 @@ use imaginarium::{ColorFormat, Image, ImageDesc};
 
 use crate::io::astro_image::*;
 use crate::io::raw;
-use crate::testing::{calibration_dir, init_tracing};
 
 #[test]
 fn loadable_extensions_match_decoder_policies() {
@@ -234,9 +233,12 @@ fn test_image_rgba_to_astro_drops_alpha() {
     assert!((astro.channel(2)[1] - 0.0).abs() < 1e-6);
 }
 
+#[cfg(feature = "real-data")]
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn test_load_single_raw_from_env() {
+    use crate::testing::{calibration_dir, init_tracing};
+
     init_tracing();
 
     let cal_dir = calibration_dir();

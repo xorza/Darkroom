@@ -2,11 +2,9 @@ use common::CancelToken;
 use glam::DVec2;
 
 use crate::io::astro_image::{AstroImage, ImageDimensions};
-use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::pipeline::align::align_and_stack;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::result::Error;
-use crate::stacking::pipeline::streaming::calibrate_align_stack;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
@@ -210,12 +208,12 @@ fn public_input_errors() {
     ));
 }
 
+#[cfg(feature = "real-data")]
 #[test]
-#[cfg_attr(
-    not(feature = "real-data"),
-    ignore = "requires the bundled real-data dataset"
-)]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
+    use crate::stacking::calibration_masters::CalibrationMasters;
+    use crate::stacking::pipeline::streaming::calibrate_align_stack;
     use crate::testing::calibration_image_paths;
     use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
 
@@ -258,12 +256,12 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
     );
 }
 
+#[cfg(feature = "real-data")]
 #[test]
-#[cfg_attr(
-    not(feature = "real-data"),
-    ignore = "requires the bundled real-data dataset"
-)]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn streaming_disk_tier_matches_ram_on_real_lights() {
+    use crate::stacking::calibration_masters::CalibrationMasters;
+    use crate::stacking::pipeline::streaming::calibrate_align_stack;
     use crate::testing::calibration_image_paths;
     use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
 

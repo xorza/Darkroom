@@ -16,7 +16,7 @@ use crate::{
 };
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data pipeline benchmark; run explicitly with --ignored"]
 fn bench_full_pipeline() {
     init_tracing();
 

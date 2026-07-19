@@ -54,7 +54,7 @@ fn calibration_paths() -> Option<CalibrationPaths> {
 }
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn raw_dimensions_matches_full_decode() {
     // `from_files` sizes its in-memory-vs-disk decision from `raw_dimensions` (a header peek, no
     // decode). That peek must report exactly the dims a full decode produces, or the memory budget
@@ -73,7 +73,7 @@ fn raw_dimensions_matches_full_decode() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn builds_full_master_set() {
     init_tracing();
     let Some(paths) = calibration_paths() else {

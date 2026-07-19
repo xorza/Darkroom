@@ -5,9 +5,7 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use common::file_utils;
-use common::test_utils::test_output_path;
 use imaginarium::Buffer2;
-use imaginarium::{ColorFormat, Image};
 
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::io::astro_image::{ASTRO_IMAGE_EXTENSIONS, AstroImage, AstroImageMetadata};
@@ -17,6 +15,7 @@ use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::BackgroundConfig;
 
 pub mod mem_probe;
+#[cfg(feature = "real-data")]
 pub mod real_data;
 pub mod synthetic;
 
@@ -177,7 +176,11 @@ pub fn init_tracing() {
 /// Save an image as an 8-bit RGB file under `test_output/<name>`, creating the directory.
 /// 8-bit/JPEG output needs `RGB_U8`, so the (often `[0,1]`-float) image is converted first. Used by
 /// real-data tests to write viewable results for inspection.
-pub(crate) fn save_png(image: &Image, name: &str) {
+#[cfg(feature = "real-data")]
+pub(crate) fn save_png(image: &imaginarium::Image, name: &str) {
+    use common::test_utils::test_output_path;
+    use imaginarium::ColorFormat;
+
     let path = test_output_path(name);
     std::fs::create_dir_all(path.parent().unwrap()).expect("create test_output dir");
     image
