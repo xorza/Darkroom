@@ -200,50 +200,11 @@ pub(crate) fn demosaic_xtrans_markesteijn(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::io::raw::demosaic::interleave_planes;
-    use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
-
-    fn test_pattern() -> XTransPattern {
-        XTransPattern::new([
-            [1, 0, 1, 1, 2, 1],
-            [2, 1, 2, 0, 1, 0],
-            [1, 2, 1, 1, 0, 1],
-            [1, 2, 1, 1, 0, 1],
-            [0, 1, 0, 2, 1, 2],
-            [1, 0, 1, 1, 2, 1],
-        ])
-    }
-
-    const TEST_INV_RANGE: f32 = 1.0 / 65535.0;
-
-    fn to_u16(val: f32) -> u16 {
-        (val * 65535.0).round() as u16
-    }
-
-    fn make_xtrans(
-        data: &[u16],
-        raw_w: usize,
-        raw_h: usize,
-        w: usize,
-        h: usize,
-        top: usize,
-        left: usize,
-    ) -> XTransImage<'_> {
-        XTransImage::with_margins(
-            data,
-            raw_w,
-            raw_h,
-            w,
-            h,
-            top,
-            left,
-            test_pattern(),
-            [0.0; 3],
-            TEST_INV_RANGE,
-            [1.0; 3],
-        )
-    }
+    use crate::io::raw::demosaic::xtrans::markesteijn::*;
+    use crate::io::raw::demosaic::xtrans::test_support::{
+        TEST_INV_RANGE, make_xtrans, test_pattern, to_u16,
+    };
 
     #[test]
     fn test_markesteijn_output_size() {

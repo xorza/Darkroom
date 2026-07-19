@@ -3,7 +3,7 @@
 use crate::math::rect::URect;
 use crate::stacking::star_detection::deblend::assign_to_nearest_peak;
 use crate::stacking::star_detection::deblend::local_maxima::*;
-use crate::stacking::star_detection::labeling::LabelMap;
+use crate::stacking::star_detection::deblend::test_support::{TestComponent, make_test_component};
 use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
 use common::Vec2us;
 
@@ -12,55 +12,13 @@ use crate::stacking::star_detection::deblend::local_maxima::is_local_maximum;
 const DEFAULT_MIN_SEPARATION: usize = 3;
 const DEFAULT_MIN_PROMINENCE: f32 = 0.3;
 
-/// Create a test image with Gaussian stars and return pixels, labels, and component data.
-fn make_test_component(
-    width: usize,
-    height: usize,
-    stars: &[(usize, usize, f32, f32)], // (cx, cy, amplitude, sigma)
-) -> (Buffer2<f32>, LabelMap, ComponentData) {
-    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
-    let mut labels = Buffer2::new_filled(width, height, 0u32);
-
-    let mut bbox = URect::empty();
-    let mut area = 0;
-
-    for (cx, cy, amplitude, sigma) in stars {
-        let radius = (sigma * 4.0).ceil() as i32;
-
-        for dy in -radius..=radius {
-            for dx in -radius..=radius {
-                let x = (*cx as i32 + dx) as usize;
-                let y = (*cy as i32 + dy) as usize;
-
-                if x < width && y < height {
-                    let r2 = (dx * dx + dy * dy) as f32;
-                    let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
-                    if value > 0.001 {
-                        pixels[(x, y)] += value;
-                        if labels[(x, y)] == 0 {
-                            labels[(x, y)] = 1;
-                            bbox.include(Vec2us::new(x, y));
-                            area += 1;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let label_map = label_map_from_raw(labels, 1);
-    let component = ComponentData {
-        bbox,
-        label: 1,
-        area,
-    };
-
-    (pixels, label_map, component)
-}
-
 #[test]
 fn test_find_single_peak() {
-    let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
 
     let peaks = find_local_maxima(
         &data,
@@ -79,8 +37,11 @@ fn test_find_single_peak() {
 
 #[test]
 fn test_find_two_peaks() {
-    let (pixels, labels, data) =
-        make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
     let peaks = find_local_maxima(&data, &pixels, &labels, 3, 0.3);
 
@@ -89,8 +50,11 @@ fn test_find_two_peaks() {
 
 #[test]
 fn test_deblend_creates_separate_candidates() {
-    let (pixels, labels, data) =
-        make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
     let candidates = deblend_local_maxima(&data, &pixels, &labels, 3, 0.3);
 
@@ -101,7 +65,11 @@ fn test_deblend_creates_separate_candidates() {
 
 #[test]
 fn test_iter_pixels_count() {
-    let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
 
     let iter_count = data.iter_pixels(&pixels, &labels).count();
     assert_eq!(
@@ -115,8 +83,11 @@ fn test_euclidean_separation() {
     // Two peaks at distance sqrt(18) ≈ 4.24 apart (diagonal)
     // With min_separation=5, they should be merged (5^2=25 > 18)
     // With min_separation=4, they should be separate (4^2=16 < 18)
-    let (pixels, labels, data) =
-        make_test_component(100, 100, &[(50, 50, 1.0, 1.5), (53, 53, 0.9, 1.5)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(50, 50, 1.0, 1.5), (53, 53, 0.9, 1.5)]);
 
     let peaks_merge = find_local_maxima(&data, &pixels, &labels, 5, 0.3);
     assert_eq!(peaks_merge.len(), 1, "Close peaks should merge");
@@ -128,8 +99,11 @@ fn test_euclidean_separation() {
 #[test]
 fn test_prominence_filter() {
     // Bright primary peak and dim secondary that should be filtered
-    let (pixels, labels, data) =
-        make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.2, 2.5)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.2, 2.5)]);
 
     // With high prominence threshold, only bright peak survives
     let peaks = find_local_maxima(&data, &pixels, &labels, 3, 0.5);
@@ -142,7 +116,11 @@ fn test_prominence_filter() {
 
 #[test]
 fn test_deblend_empty_peaks() {
-    let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
     let empty_peaks: &[Pixel] = &[];
 
     let candidates = assign_to_nearest_peak(&data, &pixels, &labels, empty_peaks);
@@ -154,7 +132,11 @@ fn test_deblend_empty_peaks() {
 
 #[test]
 fn test_deblend_single_peak_returns_full_component() {
-    let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
 
     let candidates = deblend_local_maxima(
         &data,
@@ -172,7 +154,11 @@ fn test_deblend_single_peak_returns_full_component() {
 
 #[test]
 fn test_peaks_sorted_by_brightness() {
-    let (pixels, labels, data) = make_test_component(
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(
         100,
         100,
         &[(30, 50, 0.5, 2.5), (50, 50, 1.0, 2.5), (70, 50, 0.7, 2.5)],
@@ -189,7 +175,11 @@ fn test_peaks_sorted_by_brightness() {
 
 #[test]
 fn test_find_peak_returns_global_max() {
-    let (pixels, labels, data) = make_test_component(
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(
         100,
         100,
         &[(30, 50, 0.5, 2.5), (50, 50, 1.0, 2.5), (70, 50, 0.7, 2.5)],
@@ -206,8 +196,11 @@ fn test_find_peak_returns_global_max() {
 #[test]
 fn test_deblend_area_conservation() {
     // Total area of deblended candidates should equal original component area
-    let (pixels, labels, data) =
-        make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
     let candidates = deblend_local_maxima(&data, &pixels, &labels, 3, 0.3);
 
@@ -221,8 +214,11 @@ fn test_deblend_area_conservation() {
 #[test]
 fn test_peak_replacement_when_brighter() {
     // Two very close peaks - brighter one should replace dimmer
-    let (pixels, labels, data) =
-        make_test_component(100, 100, &[(50, 50, 1.0, 1.5), (51, 50, 0.8, 1.5)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(50, 50, 1.0, 1.5), (51, 50, 0.8, 1.5)]);
 
     let peaks = find_local_maxima(&data, &pixels, &labels, 5, 0.3);
 
@@ -292,8 +288,11 @@ fn test_is_local_maximum_not_max() {
 #[test]
 fn test_voronoi_partitioning() {
     // Create component with two well-separated peaks
-    let (pixels, labels, data) =
-        make_test_component(100, 100, &[(25, 50, 1.0, 3.0), (75, 50, 1.0, 3.0)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(25, 50, 1.0, 3.0), (75, 50, 1.0, 3.0)]);
 
     let peaks = vec![
         Pixel {
@@ -327,7 +326,11 @@ fn test_many_peaks_limited_to_max() {
         .map(|i| (10 + i * 8, 50usize, 1.0 - i as f32 * 0.05, 1.5f32))
         .collect();
 
-    let (pixels, labels, data) = make_test_component(120, 100, &stars);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(120, 100, &stars);
 
     let peaks = find_local_maxima(&data, &pixels, &labels, 2, 0.1);
 
@@ -391,8 +394,11 @@ fn test_single_pixel_is_local_max() {
 #[test]
 fn test_equal_brightness_tie_breaking() {
     // Two stars with exactly equal brightness - both should be found
-    let (pixels, labels, data) =
-        make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 1.0, 2.5)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 1.0, 2.5)]);
 
     let peaks = find_local_maxima(&data, &pixels, &labels, 3, 0.3);
 
@@ -521,8 +527,11 @@ fn test_all_corners_local_max() {
 fn test_zero_min_separation() {
     // With min_separation=0, separation check always passes (dist² >= 0)
     // Create two peaks that are well-separated (distinct local maxima)
-    let (pixels, labels, data) =
-        make_test_component(100, 100, &[(30, 50, 1.0, 2.0), (70, 50, 0.9, 2.0)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.0), (70, 50, 0.9, 2.0)]);
 
     let peaks = find_local_maxima(&data, &pixels, &labels, 0, 0.1);
 
@@ -533,7 +542,11 @@ fn test_zero_min_separation() {
 #[test]
 fn test_bbox_contains_peak() {
     // Each deblended candidate's bbox should contain its peak
-    let (pixels, labels, data) = make_test_component(
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(
         100,
         100,
         &[(25, 25, 1.0, 2.5), (75, 25, 0.9, 2.5), (50, 75, 0.8, 2.5)],
@@ -554,7 +567,11 @@ fn test_bbox_contains_peak() {
 #[test]
 fn test_peak_value_matches_pixel() {
     // Candidate's peak_value should match the actual pixel value
-    let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 2.5)]);
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(50, 50, 1.0, 2.5)]);
 
     let candidates = deblend_local_maxima(
         &data,

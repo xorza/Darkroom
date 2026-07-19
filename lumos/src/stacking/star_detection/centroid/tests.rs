@@ -208,148 +208,120 @@ fn test_snr_and_flux_values() {
 }
 
 #[test]
-fn test_valid_stamp_position_center() {
-    // Center of a 64x64 image should be valid
-    assert!(is_valid_stamp_position(
-        Vec2::splat(32.0),
-        64,
-        64,
-        TEST_STAMP_RADIUS
-    ));
-}
+fn valid_stamp_position_covers_boundaries_and_rounding() {
+    #[derive(Debug)]
+    struct Case {
+        name: &'static str,
+        position: Vec2,
+        width: usize,
+        height: usize,
+        expected: bool,
+    }
 
-#[test]
-fn test_valid_stamp_position_minimum_valid() {
-    // Minimum valid position is at TEST_STAMP_RADIUS
-    let min_pos = TEST_STAMP_RADIUS as f32;
-    assert!(is_valid_stamp_position(
-        Vec2::splat(min_pos),
-        64,
-        64,
-        TEST_STAMP_RADIUS
-    ));
-}
-
-#[test]
-fn test_valid_stamp_position_maximum_valid() {
-    // Maximum valid position is at width - TEST_STAMP_RADIUS - 1
-    let width = 64usize;
-    let height = 64usize;
-    let max_pos_x = (width - TEST_STAMP_RADIUS - 1) as f32;
-    let max_pos_y = (height - TEST_STAMP_RADIUS - 1) as f32;
-    assert!(is_valid_stamp_position(
-        Vec2::new(max_pos_x, max_pos_y),
-        width,
-        height,
-        TEST_STAMP_RADIUS
-    ));
-}
-
-#[test]
-fn test_valid_stamp_position_too_close_to_left_edge() {
-    // Position too close to left edge
-    let pos = (TEST_STAMP_RADIUS - 1) as f32;
-    assert!(!is_valid_stamp_position(
-        Vec2::new(pos, 32.0),
-        64,
-        64,
-        TEST_STAMP_RADIUS
-    ));
-}
-
-#[test]
-fn test_valid_stamp_position_too_close_to_top_edge() {
-    // Position too close to top edge
-    let pos = (TEST_STAMP_RADIUS - 1) as f32;
-    assert!(!is_valid_stamp_position(
-        Vec2::new(32.0, pos),
-        64,
-        64,
-        TEST_STAMP_RADIUS
-    ));
-}
-
-#[test]
-fn test_valid_stamp_position_too_close_to_right_edge() {
-    // Position too close to right edge
-    let width = 64usize;
-    let pos = (width - TEST_STAMP_RADIUS) as f32;
-    assert!(!is_valid_stamp_position(
-        Vec2::new(pos, 32.0),
-        width,
-        64,
-        TEST_STAMP_RADIUS
-    ));
-}
-
-#[test]
-fn test_valid_stamp_position_too_close_to_bottom_edge() {
-    // Position too close to bottom edge
-    let height = 64usize;
-    let pos = (height - TEST_STAMP_RADIUS) as f32;
-    assert!(!is_valid_stamp_position(
-        Vec2::new(32.0, pos),
-        64,
-        height,
-        TEST_STAMP_RADIUS
-    ));
-}
-
-#[test]
-fn test_valid_stamp_position_negative_rounds_to_invalid() {
-    // Negative position should be invalid
-    assert!(!is_valid_stamp_position(
-        Vec2::new(-1.0, 32.0),
-        64,
-        64,
-        TEST_STAMP_RADIUS
-    ));
-    assert!(!is_valid_stamp_position(
-        Vec2::new(32.0, -1.0),
-        64,
-        64,
-        TEST_STAMP_RADIUS
-    ));
-}
-
-#[test]
-fn test_valid_stamp_position_fractional_rounding() {
-    // Test that fractional positions are rounded correctly
-    // 7.4 rounds to 7, which equals TEST_STAMP_RADIUS, so it should be valid
-    assert!(is_valid_stamp_position(
-        Vec2::new(7.4, 32.0),
-        64,
-        64,
-        TEST_STAMP_RADIUS
-    ));
-    // 6.4 rounds to 6, which is less than TEST_STAMP_RADIUS (7), so invalid
-    assert!(!is_valid_stamp_position(
-        Vec2::new(6.4, 32.0),
-        64,
-        64,
-        TEST_STAMP_RADIUS
-    ));
-}
-
-#[test]
-fn test_valid_stamp_position_small_image() {
-    // Image too small to have any valid stamp positions
-    // Minimum valid image size is 2 * TEST_STAMP_RADIUS + 1 = 15
+    let radius = TEST_STAMP_RADIUS;
     let min_size = 2 * TEST_STAMP_RADIUS + 1;
-    // Just barely large enough - center should be valid
-    assert!(is_valid_stamp_position(
-        Vec2::splat(TEST_STAMP_RADIUS as f32),
-        min_size,
-        min_size,
-        TEST_STAMP_RADIUS
-    ));
-    // One pixel smaller - no valid positions
-    assert!(!is_valid_stamp_position(
-        Vec2::splat(TEST_STAMP_RADIUS as f32),
-        min_size - 1,
-        min_size - 1,
-        TEST_STAMP_RADIUS
-    ));
+    let cases = [
+        Case {
+            name: "center",
+            position: Vec2::splat(32.0),
+            width: 64,
+            height: 64,
+            expected: true,
+        },
+        Case {
+            name: "minimum valid",
+            position: Vec2::splat(radius as f32),
+            width: 64,
+            height: 64,
+            expected: true,
+        },
+        Case {
+            name: "maximum valid",
+            position: Vec2::splat((64 - radius - 1) as f32),
+            width: 64,
+            height: 64,
+            expected: true,
+        },
+        Case {
+            name: "left edge",
+            position: Vec2::new((radius - 1) as f32, 32.0),
+            width: 64,
+            height: 64,
+            expected: false,
+        },
+        Case {
+            name: "top edge",
+            position: Vec2::new(32.0, (radius - 1) as f32),
+            width: 64,
+            height: 64,
+            expected: false,
+        },
+        Case {
+            name: "right edge",
+            position: Vec2::new((64 - radius) as f32, 32.0),
+            width: 64,
+            height: 64,
+            expected: false,
+        },
+        Case {
+            name: "bottom edge",
+            position: Vec2::new(32.0, (64 - radius) as f32),
+            width: 64,
+            height: 64,
+            expected: false,
+        },
+        Case {
+            name: "negative x",
+            position: Vec2::new(-1.0, 32.0),
+            width: 64,
+            height: 64,
+            expected: false,
+        },
+        Case {
+            name: "negative y",
+            position: Vec2::new(32.0, -1.0),
+            width: 64,
+            height: 64,
+            expected: false,
+        },
+        Case {
+            name: "fraction rounds in",
+            position: Vec2::new(7.4, 32.0),
+            width: 64,
+            height: 64,
+            expected: true,
+        },
+        Case {
+            name: "fraction rounds out",
+            position: Vec2::new(6.4, 32.0),
+            width: 64,
+            height: 64,
+            expected: false,
+        },
+        Case {
+            name: "minimum image size",
+            position: Vec2::splat(radius as f32),
+            width: min_size,
+            height: min_size,
+            expected: true,
+        },
+        Case {
+            name: "image too small",
+            position: Vec2::splat(radius as f32),
+            width: min_size - 1,
+            height: min_size - 1,
+            expected: false,
+        },
+    ];
+
+    for case in cases {
+        assert_eq!(
+            is_valid_stamp_position(case.position, case.width, case.height, radius),
+            case.expected,
+            "{}: {case:?}",
+            case.name
+        );
+    }
 }
 
 fn make_uniform_background(
@@ -2983,44 +2955,25 @@ fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
 }
 
 #[test]
-fn test_compute_stamp_radius_typical_fwhm() {
+fn compute_stamp_radius_scales_and_clamps() {
     use crate::stacking::star_detection::centroid::compute_stamp_radius;
-    // FWHM = 4.0 -> radius = ceil(4.0 * 1.75) = 7
-    assert_eq!(compute_stamp_radius(4.0), 7);
-}
+    let cases = [
+        (1.0, 4),
+        (2.0, 4),
+        (3.0, 6),
+        (4.0, 7),
+        (5.0, 9),
+        (6.0, 11),
+        (8.0, 14),
+        (10.0, 15),
+        (20.0, 15),
+    ];
 
-#[test]
-fn test_compute_stamp_radius_clamped_min() {
-    use crate::stacking::star_detection::centroid::MIN_STAMP_RADIUS;
-    use crate::stacking::star_detection::centroid::compute_stamp_radius;
-    // Very small FWHM should clamp to minimum
-    assert_eq!(compute_stamp_radius(1.0), MIN_STAMP_RADIUS);
-}
-
-#[test]
-fn test_compute_stamp_radius_clamped_max() {
-    use crate::stacking::star_detection::centroid::MAX_STAMP_RADIUS;
-    use crate::stacking::star_detection::centroid::compute_stamp_radius;
-    // Very large FWHM should clamp to maximum
-    assert_eq!(compute_stamp_radius(20.0), MAX_STAMP_RADIUS);
-}
-
-#[test]
-fn test_compute_stamp_radius_various_fwhm() {
-    use crate::stacking::star_detection::centroid::compute_stamp_radius;
-    use crate::stacking::star_detection::centroid::{
-        MAX_STAMP_RADIUS, MIN_STAMP_RADIUS, STAMP_RADIUS_FWHM_FACTOR,
-    };
-
-    // Test various FWHM values
-    for fwhm in [2.0f32, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0] {
-        let radius = compute_stamp_radius(fwhm);
-        let expected = (fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
-        let expected_clamped = expected.clamp(MIN_STAMP_RADIUS, MAX_STAMP_RADIUS);
+    for (fwhm, expected) in cases {
         assert_eq!(
-            radius, expected_clamped,
-            "FWHM={}: expected {}, got {}",
-            fwhm, expected_clamped, radius
+            compute_stamp_radius(fwhm),
+            expected,
+            "FWHM {fwhm} uses ceil(1.75 × FWHM), clamped to [4, 15]"
         );
     }
 }

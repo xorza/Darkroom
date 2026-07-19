@@ -178,7 +178,7 @@ fn scatter_channel(image: &mut Image, channel: usize, channels: usize, plane: &B
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::image_ops::*;
     use imaginarium::{ColorFormat, ImageDesc};
 
     fn rgb_f32(width: usize, height: usize, samples: Vec<f32>) -> Image {
@@ -272,13 +272,53 @@ mod tests {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use imaginarium::{Buffer2, Image};
+    use crate::image_ops::gather_channel;
+    use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
     pub(crate) fn channel_plane(image: &Image, channel: usize) -> Buffer2<f32> {
         let channels = image.desc.color_format.channel_count.channel_count() as usize;
         assert!(channel < channels);
         let mut plane = Buffer2::new_default(image.desc.width, image.desc.height);
-        super::gather_channel(image, channel, channels, &mut plane);
+        gather_channel(image, channel, channels, &mut plane);
         plane
+    }
+
+    pub(crate) fn channel_samples(image: &Image, channel: usize) -> Vec<f32> {
+        channel_plane(image, channel).pixels().to_vec()
+    }
+
+    pub(crate) fn gray_image(width: usize, height: usize, pixels: Vec<f32>) -> Image {
+        Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
+            width, height, pixels,
+        )]))
+    }
+
+    pub(crate) fn rgb_image(
+        width: usize,
+        height: usize,
+        red: Vec<f32>,
+        green: Vec<f32>,
+        blue: Vec<f32>,
+    ) -> Image {
+        Image::from(&DeinterleavedImageData::from_channels([
+            Buffer2::new(width, height, red),
+            Buffer2::new(width, height, green),
+            Buffer2::new(width, height, blue),
+        ]))
+    }
+
+    pub(crate) fn mean(samples: &[f32]) -> f32 {
+        assert!(!samples.is_empty());
+        samples.iter().sum::<f32>() / samples.len() as f32
+    }
+
+    pub(crate) fn standard_deviation(samples: &[f32]) -> f32 {
+        let mean = mean(samples);
+        (samples
+            .iter()
+            .map(|&sample| (sample - mean) * (sample - mean))
+            .sum::<f32>()
+            / samples.len() as f32)
+            .sqrt()
     }
 }

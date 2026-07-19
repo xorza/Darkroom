@@ -162,3 +162,93 @@ fn nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
 pub(crate) fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
     dist_sq(a, b) < min_sep_sq
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use common::Vec2us;
+    use imaginarium::Buffer2;
+    use smallvec::SmallVec;
+
+    use crate::math::rect::URect;
+    use crate::stacking::star_detection::deblend::multi_threshold::{
+        DeblendBuffers, deblend_multi_threshold,
+    };
+    use crate::stacking::star_detection::deblend::region::Region;
+    use crate::stacking::star_detection::deblend::{ComponentData, MAX_PEAKS};
+    use crate::stacking::star_detection::labeling::LabelMap;
+    use crate::stacking::star_detection::labeling::test_utils::label_map_from_raw;
+
+    #[derive(Debug)]
+    pub(crate) struct TestComponent {
+        pub(crate) pixels: Buffer2<f32>,
+        pub(crate) labels: LabelMap,
+        pub(crate) data: ComponentData,
+    }
+
+    pub(crate) fn make_test_component(
+        width: usize,
+        height: usize,
+        stars: &[(usize, usize, f32, f32)],
+    ) -> TestComponent {
+        let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+        let mut labels = Buffer2::new_filled(width, height, 0u32);
+        let mut bbox = URect::empty();
+        let mut area = 0;
+
+        for &(center_x, center_y, amplitude, sigma) in stars {
+            let radius = (sigma * 4.0).ceil() as i32;
+            for offset_y in -radius..=radius {
+                for offset_x in -radius..=radius {
+                    let x = (center_x as i32 + offset_x) as usize;
+                    let y = (center_y as i32 + offset_y) as usize;
+                    if x >= width || y >= height {
+                        continue;
+                    }
+
+                    let radius_squared = (offset_x * offset_x + offset_y * offset_y) as f32;
+                    let value = amplitude * (-radius_squared / (2.0 * sigma * sigma)).exp();
+                    if value <= 0.001 {
+                        continue;
+                    }
+
+                    pixels[(x, y)] += value;
+                    if labels[(x, y)] == 0 {
+                        labels[(x, y)] = 1;
+                        bbox.include(Vec2us::new(x, y));
+                        area += 1;
+                    }
+                }
+            }
+        }
+
+        TestComponent {
+            pixels,
+            labels: label_map_from_raw(labels, 1),
+            data: ComponentData {
+                bbox,
+                label: 1,
+                area,
+            },
+        }
+    }
+
+    pub(crate) fn deblend_multi_threshold_test(
+        data: &ComponentData,
+        pixels: &Buffer2<f32>,
+        labels: &LabelMap,
+        n_thresholds: usize,
+        min_separation: usize,
+        min_contrast: f32,
+    ) -> SmallVec<[Region; MAX_PEAKS]> {
+        let mut buffers = DeblendBuffers::new();
+        deblend_multi_threshold(
+            data,
+            pixels,
+            labels,
+            n_thresholds,
+            min_separation,
+            min_contrast,
+            &mut buffers,
+        )
+    }
+}

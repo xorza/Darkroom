@@ -1,21 +1,12 @@
-use super::*;
+use crate::stacking::frame_store::*;
+use crate::testing::ScratchDirectory;
 
 const GB: u64 = 1024 * 1024 * 1024;
 const FRAME_96MB: usize = 6240 * 4160 * size_of::<f32>();
 
-fn scratch_directory(name: &str) -> PathBuf {
-    let directory = std::env::current_dir()
-        .unwrap()
-        .join(".tmp")
-        .join(format!("{name}_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&directory);
-    std::fs::create_dir_all(&directory).unwrap();
-    directory
-}
-
 #[test]
 fn stored_image_roundtrip_overwrites_stale_pixels_and_cleans_spill_files() {
-    let directory = scratch_directory("frame_store_image");
+    let directory = ScratchDirectory::new("frame_store_image");
     let dimensions = ImageDimensions::new((2, 2), 1);
     let mut image = AstroImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4]);
     image.metadata.exposure_time = Some(30.0);
@@ -29,7 +20,6 @@ fn stored_image_roundtrip_overwrites_stale_pixels_and_cleans_spill_files() {
 
     drop(stored);
     assert!(!path.exists());
-    std::fs::remove_dir(directory).unwrap();
 }
 
 #[test]
@@ -45,7 +35,7 @@ fn light_frame_keeps_statistics_with_its_planes() {
 
 #[test]
 fn plane_persistence_validates_dimensions_and_roundtrips_pixels() {
-    let directory = scratch_directory("frame_store_plane");
+    let directory = ScratchDirectory::new("frame_store_plane");
     let path = directory.join("plane.bin");
     let dimensions = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|value| value as f32).collect();
@@ -58,8 +48,6 @@ fn plane_persistence_validates_dimensions_and_roundtrips_pixels() {
     assert_eq!(mapped.chunk(0, pixels.len()), pixels);
 
     drop(mapped);
-    std::fs::remove_file(path).unwrap();
-    std::fs::remove_dir(directory).unwrap();
 }
 
 #[test]

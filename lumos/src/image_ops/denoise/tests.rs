@@ -1,68 +1,16 @@
-use std::f32::consts::TAU;
-
-use super::{Denoise, Threshold};
+use crate::image_ops::denoise::{Denoise, Threshold};
 use crate::image_ops::op::OpError;
-use crate::image_ops::test_support::channel_plane as channel;
-use imaginarium::{Buffer2, ColorFormat, DeinterleavedImageData, Image, ImageDesc};
-
-/// Deterministic xorshift64 + Box-Muller Gaussian, so noise tests are reproducible without a dep.
-struct Rng(u64);
-
-impl Rng {
-    fn new(seed: u64) -> Self {
-        Rng(seed | 1)
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        let mut x = self.0;
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        self.0 = x;
-        x
-    }
-
-    /// Uniform in `(0, 1]`.
-    fn next_unit(&mut self) -> f32 {
-        ((self.next_u64() >> 40) as f32 + 1.0) / (1u64 << 24) as f32
-    }
-
-    /// Standard-normal sample.
-    fn next_gaussian(&mut self) -> f32 {
-        let u1 = self.next_unit();
-        let u2 = self.next_unit();
-        (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
-    }
-}
-
-fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
-    Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
-        width, height, px,
-    )]))
-}
-
-fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Image {
-    Image::from(&DeinterleavedImageData::from_channels([
-        Buffer2::new(width, height, r),
-        Buffer2::new(width, height, g),
-        Buffer2::new(width, height, b),
-    ]))
-}
-
-/// Channel `c` of an image as a buffer (for assertions).
-fn mean(data: &[f32]) -> f32 {
-    data.iter().sum::<f32>() / data.len() as f32
-}
-
-fn std_dev(data: &[f32]) -> f32 {
-    let m = mean(data);
-    (data.iter().map(|&v| (v - m) * (v - m)).sum::<f32>() / data.len() as f32).sqrt()
-}
+use crate::image_ops::test_support::{
+    channel_plane as channel, gray_image as gray, mean, rgb_image as rgb,
+    standard_deviation as std_dev,
+};
+use crate::testing::TestRng;
+use imaginarium::{ColorFormat, Image, ImageDesc};
 
 fn noisy(width: usize, height: usize, bg: f32, sigma: f32, seed: u64) -> Vec<f32> {
-    let mut rng = Rng::new(seed);
+    let mut rng = TestRng::new(seed);
     (0..width * height)
-        .map(|_| bg + rng.next_gaussian() * sigma)
+        .map(|_| bg + rng.next_gaussian_f32() * sigma)
         .collect()
 }
 

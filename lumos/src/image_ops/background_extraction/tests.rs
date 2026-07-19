@@ -1,7 +1,7 @@
-use super::*;
+use crate::image_ops::background_extraction::*;
 use crate::image_ops::op::OpError;
-use crate::image_ops::test_support::channel_plane as channel;
-use imaginarium::{Buffer2, DeinterleavedImageData, Image};
+use crate::image_ops::test_support::{channel_plane as channel, gray_image, rgb_image as rgb};
+use imaginarium::Image;
 
 fn fill(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     let mut v = vec![0.0f32; w * h];
@@ -14,14 +14,9 @@ fn fill(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
 }
 
 fn gray(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Image {
-    Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
-        w,
-        h,
-        fill(w, h, f),
-    )]))
+    gray_image(w, h, fill(w, h, f))
 }
 
-/// Channel `c` of an image as a buffer (for assertions).
 fn max_abs(p: &[f32]) -> f32 {
     p.iter().fold(0.0f32, |m, &v| m.max(v.abs()))
 }
@@ -178,11 +173,7 @@ fn removes_independent_per_channel_gradients() {
     let r = fill(w, h, |x, _| 0.40 + 0.0010 * x as f32);
     let g = fill(w, h, |_, y| 0.30 + 0.0008 * y as f32);
     let b = fill(w, h, |x, y| 0.50 - 0.0005 * x as f32 + 0.0006 * y as f32);
-    let mut img = Image::from(&DeinterleavedImageData::from_channels([
-        Buffer2::new(w, h, r),
-        Buffer2::new(w, h, g),
-        Buffer2::new(w, h, b),
-    ]));
+    let mut img = rgb(w, h, r, g, b);
     ExtractBackground {
         degree: 1,
         tile_size: 20,

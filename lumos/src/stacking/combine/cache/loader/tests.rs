@@ -2,18 +2,9 @@ use std::fs::OpenOptions;
 use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
 
-use super::*;
 use crate::io::astro_image::AstroImage;
-
-fn scratch_directory(name: &str) -> PathBuf {
-    let directory = std::env::current_dir()
-        .unwrap()
-        .join(".tmp")
-        .join(format!("{name}_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&directory);
-    std::fs::create_dir_all(&directory).unwrap();
-    directory
-}
+use crate::stacking::combine::cache::loader::*;
+use crate::testing::ScratchDirectory;
 
 #[test]
 fn from_paths_reports_empty_and_missing_sources() {
@@ -38,8 +29,7 @@ fn from_paths_reports_empty_and_missing_sources() {
 
 #[test]
 fn test_load_and_cache_frame_fresh() {
-    let temp_dir = scratch_directory("lumos_load_cache_fresh_test");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = ScratchDirectory::new("lumos_load_cache_fresh_test");
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
@@ -64,13 +54,11 @@ fn test_load_and_cache_frame_fresh() {
 
     // Cleanup
     drop(cached_frame);
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_load_and_cache_frame_reuse() {
-    let temp_dir = scratch_directory("lumos_load_cache_reuse_test");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = ScratchDirectory::new("lumos_load_cache_reuse_test");
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
@@ -101,13 +89,11 @@ fn test_load_and_cache_frame_reuse() {
 
     // Cleanup
     drop(first_frame);
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_load_and_cache_frame_dimension_mismatch() {
-    let temp_dir = scratch_directory("lumos_load_cache_mismatch_test");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = ScratchDirectory::new("lumos_load_cache_mismatch_test");
 
     // Create image with different dimensions than expected
     let actual_dims = ImageDimensions::new((4, 3), 1);
@@ -133,14 +119,11 @@ fn test_load_and_cache_frame_dimension_mismatch() {
     ));
 
     // Cleanup
-    let _ = std::fs::remove_file(&source_path);
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_source_meta_validates_mtime() {
-    let temp_dir = scratch_directory("test_source_meta_validates");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = ScratchDirectory::new("test_source_meta_validates");
 
     let source = temp_dir.join("source.fits");
     std::fs::write(&source, b"original data").unwrap();
@@ -171,13 +154,11 @@ fn test_source_meta_validates_mtime() {
     assert!(!validate_source_meta(&temp_dir, base, &source));
 
     // Cleanup
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_frame_stats_sidecar_roundtrip() {
-    let temp_dir = scratch_directory("lumos_stats_roundtrip_test");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = ScratchDirectory::new("lumos_stats_roundtrip_test");
 
     let base = "test_frame.bin";
 
@@ -247,14 +228,12 @@ fn test_frame_stats_sidecar_roundtrip() {
     ));
 
     // Cleanup
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_load_and_cache_frame_reuse_preserves_stats() {
     // Verify that stats computed on first load match stats read from sidecar on reuse.
-    let temp_dir = scratch_directory("lumos_cache_reuse_stats_test");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = ScratchDirectory::new("lumos_cache_reuse_stats_test");
 
     // Non-uniform data so median and MAD are non-trivial
     let dims = ImageDimensions::new((4, 3), 1);
@@ -291,15 +270,13 @@ fn test_load_and_cache_frame_reuse_preserves_stats() {
     assert_eq!(reused_stats.channels[0].mad, first_stats.channels[0].mad);
 
     // Cleanup
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_missing_stats_sidecar_forces_reload() {
     // If the .stats file is deleted but .meta and .bin remain,
     // load_and_cache_frame should NOT reuse cache (can_reuse = false).
-    let temp_dir = scratch_directory("lumos_missing_stats_test");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = ScratchDirectory::new("lumos_missing_stats_test");
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
@@ -338,5 +315,4 @@ fn test_missing_stats_sidecar_forces_reload() {
     assert!(sp.exists());
 
     // Cleanup
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }

@@ -1,26 +1,8 @@
-use super::*;
+use crate::image_ops::color_calibration::*;
 use crate::image_ops::op::OpError;
-use crate::image_ops::test_support::channel_plane;
-use imaginarium::{Buffer2, DeinterleavedImageData, Image};
-
-fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Image {
-    Image::from(&DeinterleavedImageData::from_channels([
-        Buffer2::new(width, height, r),
-        Buffer2::new(width, height, g),
-        Buffer2::new(width, height, b),
-    ]))
-}
-
-fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
-    Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
-        width, height, px,
-    )]))
-}
-
-/// Channel `c` of an image as a flat vector (for assertions).
-fn channel(image: &Image, c: usize) -> Vec<f32> {
-    channel_plane(image, c).pixels().to_vec()
-}
+use crate::image_ops::test_support::{
+    channel_samples as channel, gray_image as gray, rgb_image as rgb,
+};
 
 #[test]
 fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {

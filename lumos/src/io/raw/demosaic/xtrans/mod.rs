@@ -334,30 +334,8 @@ impl<'a> XTransImage<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    // Standard X-Trans pattern (one common variant)
-    fn test_pattern_array() -> [[u8; 6]; 6] {
-        [
-            [1, 0, 1, 1, 2, 1], // G R G G B G
-            [2, 1, 2, 0, 1, 0], // B G B R G R
-            [1, 2, 1, 1, 0, 1], // G B G G R G
-            [1, 2, 1, 1, 0, 1], // G B G G R G
-            [0, 1, 0, 2, 1, 2], // R G R B G B
-            [1, 0, 1, 1, 2, 1], // G R G G B G
-        ]
-    }
-
-    fn test_pattern() -> XTransPattern {
-        XTransPattern::new([
-            [1, 0, 1, 1, 2, 1], // G R G G B G
-            [2, 1, 2, 0, 1, 0], // B G B R G R
-            [1, 2, 1, 1, 0, 1], // G B G G R G
-            [1, 2, 1, 1, 0, 1], // G B G G R G
-            [0, 1, 0, 2, 1, 2], // R G R B G B
-            [1, 0, 1, 1, 2, 1], // G R G G B G
-        ])
-    }
+    use crate::io::raw::demosaic::xtrans::test_support::{test_pattern, test_pattern_array};
+    use crate::io::raw::demosaic::xtrans::*;
 
     #[test]
     fn test_xtrans_pattern_color_at() {
@@ -747,5 +725,57 @@ mod tests {
                 (a - b).abs()
             );
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
+
+    const TEST_PATTERN: [[u8; 6]; 6] = [
+        [1, 0, 1, 1, 2, 1],
+        [2, 1, 2, 0, 1, 0],
+        [1, 2, 1, 1, 0, 1],
+        [1, 2, 1, 1, 0, 1],
+        [0, 1, 0, 2, 1, 2],
+        [1, 0, 1, 1, 2, 1],
+    ];
+
+    pub(crate) const TEST_INV_RANGE: f32 = 1.0 / 65535.0;
+
+    pub(crate) fn test_pattern_array() -> [[u8; 6]; 6] {
+        TEST_PATTERN
+    }
+
+    pub(crate) fn test_pattern() -> XTransPattern {
+        XTransPattern::new(TEST_PATTERN)
+    }
+
+    pub(crate) fn to_u16(value: f32) -> u16 {
+        (value * 65535.0).round() as u16
+    }
+
+    pub(crate) fn make_xtrans(
+        data: &[u16],
+        raw_width: usize,
+        raw_height: usize,
+        width: usize,
+        height: usize,
+        top_margin: usize,
+        left_margin: usize,
+    ) -> XTransImage<'_> {
+        XTransImage::with_margins(
+            data,
+            raw_width,
+            raw_height,
+            width,
+            height,
+            top_margin,
+            left_margin,
+            test_pattern(),
+            [0.0; 3],
+            TEST_INV_RANGE,
+            [1.0; 3],
+        )
     }
 }

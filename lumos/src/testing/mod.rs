@@ -1,7 +1,8 @@
 //! Testing utilities for lumos.
 
 use std::f32::consts::PI;
-use std::path::PathBuf;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 
 use common::file_utils;
 use common::test_utils::test_output_path;
@@ -18,6 +19,41 @@ use crate::stacking::star_detection::config::BackgroundConfig;
 pub mod mem_probe;
 pub mod real_data;
 pub mod synthetic;
+
+#[derive(Debug)]
+pub(crate) struct ScratchDirectory(PathBuf);
+
+impl ScratchDirectory {
+    pub(crate) fn new(name: &str) -> Self {
+        let path = std::env::current_dir()
+            .unwrap()
+            .join(".tmp")
+            .join(format!("{name}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+}
+
+impl Deref for ScratchDirectory {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for ScratchDirectory {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for ScratchDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 /// Deterministic LCG random number generator for reproducible test data.
 ///
@@ -200,4 +236,21 @@ pub fn calibration_image_paths(subdir: &str) -> Option<Vec<PathBuf>> {
         file_utils::files_with_extensions(&dir, RAW_EXTENSIONS)
             .expect("scan RAW calibration directory"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::testing::ScratchDirectory;
+
+    #[test]
+    fn scratch_directory_cleans_up_on_drop() {
+        let path;
+        {
+            let directory = ScratchDirectory::new("scratch_directory_cleanup");
+            path = directory.to_path_buf();
+            std::fs::write(directory.join("probe"), b"test").unwrap();
+            assert!(path.join("probe").is_file());
+        }
+        assert!(!path.exists());
+    }
 }

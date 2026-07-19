@@ -1,31 +1,10 @@
-use super::{LocalContrast, build_tile_luts};
+use crate::image_ops::local_contrast::{LocalContrast, build_tile_luts};
 use crate::image_ops::op::OpError;
-use crate::image_ops::test_support::channel_plane as channel;
-use imaginarium::{Buffer2, DeinterleavedImageData, Image};
-
-fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
-    Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
-        width, height, px,
-    )]))
-}
-
-fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Image {
-    Image::from(&DeinterleavedImageData::from_channels([
-        Buffer2::new(width, height, r),
-        Buffer2::new(width, height, g),
-        Buffer2::new(width, height, b),
-    ]))
-}
-
-/// Channel `c` of an image as a buffer (for assertions).
-fn mean(d: &[f32]) -> f32 {
-    d.iter().sum::<f32>() / d.len() as f32
-}
-
-fn std_dev(d: &[f32]) -> f32 {
-    let m = mean(d);
-    (d.iter().map(|&v| (v - m) * (v - m)).sum::<f32>() / d.len() as f32).sqrt()
-}
+use crate::image_ops::test_support::{
+    channel_plane as channel, gray_image as gray, mean, rgb_image as rgb,
+    standard_deviation as std_dev,
+};
+use imaginarium::Buffer2;
 
 /// A low-contrast horizontal gradient (intensity in `[0.45, 0.55]`).
 fn low_contrast(width: usize, height: usize) -> Vec<f32> {

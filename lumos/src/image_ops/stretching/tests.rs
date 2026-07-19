@@ -1,24 +1,10 @@
-use super::*;
 use crate::image_ops::op::OpError;
-use crate::image_ops::test_support::channel_plane as channel;
+use crate::image_ops::stretching::*;
+use crate::image_ops::test_support::{
+    channel_plane as channel, gray_image as gray, rgb_image as rgb,
+};
 use crate::math::statistics::median_f32_mut;
-use imaginarium::{Buffer2, DeinterleavedImageData, Image};
 
-fn gray(width: usize, height: usize, px: Vec<f32>) -> Image {
-    Image::from(&DeinterleavedImageData::from_channels([Buffer2::new(
-        width, height, px,
-    )]))
-}
-
-fn rgb(width: usize, height: usize, r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Image {
-    Image::from(&DeinterleavedImageData::from_channels([
-        Buffer2::new(width, height, r),
-        Buffer2::new(width, height, g),
-        Buffer2::new(width, height, b),
-    ]))
-}
-
-/// Channel `c` of an image as a buffer (for assertions).
 fn median_of(v: &[f32]) -> f32 {
     let mut c = v.to_vec();
     median_f32_mut(&mut c)

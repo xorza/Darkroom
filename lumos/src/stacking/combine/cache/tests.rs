@@ -1,19 +1,8 @@
-use std::path::PathBuf;
-
-use super::*;
 use crate::io::astro_image::AstroImage;
 use crate::io::astro_image::cfa::{CfaImage, CfaType};
+use crate::stacking::combine::cache::*;
 use crate::stacking::frame_store::{frame_from_memory, store_frame};
-
-fn scratch_directory(name: &str) -> PathBuf {
-    let directory = std::env::current_dir()
-        .unwrap()
-        .join(".tmp")
-        .join(format!("{name}_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&directory);
-    std::fs::create_dir_all(&directory).unwrap();
-    directory
-}
+use crate::testing::ScratchDirectory;
 
 /// Create an in-memory [`LightCache`] from loaded images, with no coverage (test helper).
 pub(crate) fn make_test_cache(images: Vec<AstroImage>) -> LightCache {
@@ -260,8 +249,7 @@ fn test_frame_count() {
 
 #[test]
 fn test_cleanup_removes_files() {
-    let temp_dir = scratch_directory("lumos_cleanup_test");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = ScratchDirectory::new("lumos_cleanup_test");
 
     let dims = ImageDimensions::new((2, 2), 3);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
@@ -282,7 +270,7 @@ fn test_cleanup_removes_files() {
     let cache = CfaCache {
         frames: vec![cached_frame],
         core: CacheCore {
-            spill_directory: Some(SpillDirectory::create(temp_dir.clone(), false).unwrap()),
+            spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
             channel_stats: vec![],
@@ -327,8 +315,7 @@ fn test_read_channel_chunk_in_memory() {
 
 #[test]
 fn test_read_channel_chunk_disk_backed() {
-    let temp_dir = scratch_directory("lumos_read_chunk_disk_test");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = ScratchDirectory::new("lumos_read_chunk_disk_test");
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
@@ -341,7 +328,7 @@ fn test_read_channel_chunk_disk_backed() {
     let cache = CfaCache {
         frames: vec![cached_frame],
         core: CacheCore {
-            spill_directory: Some(SpillDirectory::create(temp_dir.clone(), false).unwrap()),
+            spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
             channel_stats: vec![],
@@ -372,8 +359,7 @@ fn test_read_channel_chunk_disk_backed() {
 
 #[test]
 fn test_frame_count_disk_backed() {
-    let temp_dir = scratch_directory("lumos_frame_count_disk_test");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_dir = ScratchDirectory::new("lumos_frame_count_disk_test");
 
     let dims = ImageDimensions::new((2, 2), 1);
 
@@ -390,7 +376,7 @@ fn test_frame_count_disk_backed() {
     let cache = CfaCache {
         frames,
         core: CacheCore {
-            spill_directory: Some(SpillDirectory::create(temp_dir.clone(), false).unwrap()),
+            spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
             channel_stats: vec![],
