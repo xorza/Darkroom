@@ -338,8 +338,9 @@ impl ExecutionEngine {
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.
-        stats.cache_ram = self.cache.resident_ram_usage();
-        stats.node_ram = self.cache.resident_ram_by_node();
+        let ram = self.cache.resident_ram_stats();
+        stats.cache_ram = ram.total;
+        stats.node_ram = ram.by_node;
 
         stats.triggered_events = seeds.events;
 

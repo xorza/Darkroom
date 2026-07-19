@@ -200,9 +200,10 @@ fn resident_hit_derives_coverage_from_values() {
 }
 
 #[test]
-fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
+fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     use std::any::Any;
     use std::fmt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::{CustomValue, TypeId};
 
@@ -210,6 +211,7 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
     struct Payload {
         cpu: usize,
         gpu: usize,
+        calls: Arc<AtomicUsize>,
     }
     impl fmt::Display for Payload {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -227,6 +229,7 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
             self
         }
         fn ram_bytes(&self) -> RamUsage {
+            self.calls.fetch_add(1, Ordering::Relaxed);
             RamUsage {
                 cpu: self.cpu,
                 gpu: self.gpu,
@@ -236,7 +239,13 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
 
     let d = Digest([1u8; 32]);
     // One Arc held by two different slots — its bytes exist once.
-    let shared: Arc<dyn CustomValue> = Arc::new(Payload { cpu: 100, gpu: 10 });
+    let shared_calls = Arc::new(AtomicUsize::new(0));
+    let distinct_calls = Arc::new(AtomicUsize::new(0));
+    let shared: Arc<dyn CustomValue> = Arc::new(Payload {
+        cpu: 100,
+        gpu: 10,
+        calls: shared_calls.clone(),
+    });
 
     let mut cache = RuntimeCache::default();
     // Slot A: the shared value + a distinct 5/0 value + a scalar (weightless).
@@ -248,7 +257,11 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
             value: ValueState::Resident {
                 snapshot: complete_snapshot(vec![
                     DynamicValue::Custom(shared.clone()),
-                    DynamicValue::Custom(Arc::new(Payload { cpu: 5, gpu: 0 })),
+                    DynamicValue::Custom(Arc::new(Payload {
+                        cpu: 5,
+                        gpu: 0,
+                        calls: distinct_calls.clone(),
+                    })),
                     DynamicValue::Static(StaticValue::Int(9)),
                 ]),
                 produced_under: Some(d),
@@ -283,21 +296,22 @@ fn resident_ram_usage_sums_custom_values_and_dedups_shared_arcs() {
     );
 
     // shared (100/10) counted once + the 5/0 value; scalar and OnDisk add nothing.
-    let usage = cache.resident_ram_usage();
-    assert_eq!(usage, RamUsage { cpu: 105, gpu: 10 });
-    assert_eq!(usage.total(), 115);
+    let stats = cache.resident_ram_stats();
+    assert_eq!(stats.total, RamUsage { cpu: 105, gpu: 10 });
+    assert_eq!(stats.total.total(), 115);
 
     // Per-node: no cross-slot dedup — each node reports what it holds. Slot A holds
     // shared (100/10) + the 5/0 value = 105/10; slot B holds shared again = 100/10;
     // the OnDisk slot C is omitted.
-    let by_node = cache.resident_ram_by_node();
-    assert_eq!(by_node.len(), 2);
-    assert!(by_node.contains(&NodeRamUsage {
+    assert_eq!(stats.by_node.len(), 2);
+    assert!(stats.by_node.contains(&NodeRamUsage {
         node_id: NodeId::from_u128(1),
         usage: RamUsage { cpu: 105, gpu: 10 },
     }));
-    assert!(by_node.contains(&NodeRamUsage {
+    assert!(stats.by_node.contains(&NodeRamUsage {
         node_id: NodeId::from_u128(2),
         usage: RamUsage { cpu: 100, gpu: 10 },
     }));
+    assert_eq!(shared_calls.load(Ordering::Relaxed), 2);
+    assert_eq!(distinct_calls.load(Ordering::Relaxed), 1);
 }

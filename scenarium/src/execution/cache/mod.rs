@@ -287,6 +287,12 @@ pub(crate) struct RuntimeCache {
     disk_store: DiskStore,
 }
 
+#[derive(Debug)]
+pub(crate) struct CacheRamStats {
+    pub(crate) total: RamUsage,
+    pub(crate) by_node: Vec<NodeRamUsage>,
+}
+
 impl RuntimeCache {
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
@@ -303,54 +309,37 @@ impl RuntimeCache {
         self.disk_store = disk_store;
     }
 
-    /// The RAM held by every *resident* value across all slots, split into system
-    /// RAM vs GPU VRAM. `OnDisk`/`Empty` slots hold nothing and count zero. A
-    /// `Custom` value shared (`Arc`) by more than one slot is counted once — its
-    /// bytes exist once — deduped by pointer identity.
-    pub(crate) fn resident_ram_usage(&self) -> RamUsage {
+    /// The total and per-node RAM held by resident values. The global total deduplicates
+    /// shared custom values by pointer identity, while each node reports the full size of
+    /// every value it holds. `OnDisk`/`Empty` slots and zero-byte nodes are omitted.
+    pub(crate) fn resident_ram_stats(&self) -> CacheRamStats {
         let mut seen: HashSet<*const ()> = HashSet::new();
         let mut total = RamUsage::default();
-        for slot in self.slots.values() {
-            let ValueState::Resident { snapshot, .. } = &slot.value else {
-                continue;
-            };
-            for value in &snapshot.values {
-                if let DynamicValue::Custom(arc) = value
-                    && !seen.insert(Arc::as_ptr(arc) as *const ())
-                {
-                    // A second slot holds the same Arc — its bytes are already counted.
-                    continue;
-                }
-                total += value.ram_usage();
-            }
-        }
-        total
-    }
-
-    /// Per-node resident RAM: each slot holding a non-zero resident value paired with
-    /// its footprint (system RAM vs GPU VRAM), keyed by the slot's `NodeId`. Unlike
-    /// [`resident_ram_usage`](Self::resident_ram_usage) this does **not** dedup shared
-    /// `Arc`s — each node reports the size of the value it holds, even when another
-    /// node references the same `Arc`. `OnDisk`/`Empty` slots and zero-byte values are
-    /// omitted, so only nodes actually holding memory appear.
-    pub(crate) fn resident_ram_by_node(&self) -> Vec<NodeRamUsage> {
-        let mut out = Vec::new();
+        let mut by_node = Vec::new();
         for (node_id, slot) in &self.slots {
             let ValueState::Resident { snapshot, .. } = &slot.value else {
                 continue;
             };
-            let mut usage = RamUsage::default();
+            let mut node_usage = RamUsage::default();
             for value in &snapshot.values {
-                usage += value.ram_usage();
+                let usage = value.ram_usage();
+                node_usage += usage;
+                let counts_toward_total = match value {
+                    DynamicValue::Custom(arc) => seen.insert(Arc::as_ptr(arc) as *const ()),
+                    _ => true,
+                };
+                if counts_toward_total {
+                    total += usage;
+                }
             }
-            if usage.total() > 0 {
-                out.push(NodeRamUsage {
+            if node_usage.total() > 0 {
+                by_node.push(NodeRamUsage {
                     node_id: *node_id,
-                    usage,
+                    usage: node_usage,
                 });
             }
         }
-        out
+        CacheRamStats { total, by_node }
     }
 
     /// Preserve surviving slots by id, default new nodes, and trim removed ones.
