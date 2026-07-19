@@ -82,6 +82,10 @@ pub(crate) mod test_support {
     pub(crate) fn job_count<T>(pool: &JobScratchPool<T>) -> usize {
         pool.values.lock().len()
     }
+
+    pub(crate) fn all_by<T>(pool: &JobScratchPool<T>, predicate: impl Fn(&T) -> bool) -> bool {
+        pool.values.lock().iter().all(predicate)
+    }
 }
 
 #[cfg(test)]

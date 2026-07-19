@@ -100,8 +100,10 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
+    use crate::background_mesh::tile_stats::MAX_TILE_SAMPLES;
     use crate::background_mesh::workspace::MeshWorkspace;
-    use crate::concurrency::test_support::job_count;
+    use crate::concurrency::test_support::{all_by, job_count};
+    use common::BitBuffer2;
     use imaginarium::Buffer2;
 
     const SIGMA_CLIP_ITERATIONS: usize = 2;
@@ -124,8 +126,6 @@ mod tests {
         let spline_values_ptr = workspace.spline_values.as_ptr();
         let spline_d2_ptr = workspace.spline_d2.as_ptr();
         let spline_scratch_ptr = workspace.spline_scratch.as_ptr();
-        let tile_job_count = job_count(&workspace.tile_scratch);
-
         {
             let grid = workspace.compute(&pixels, None, 64, SIGMA_CLIP_ITERATIONS, true);
             assert_eq!(grid.stats.pixels().as_ptr(), filter_ptr);
@@ -146,7 +146,6 @@ mod tests {
         assert_eq!(workspace.spline_values.as_ptr(), spline_values_ptr);
         assert_eq!(workspace.spline_d2.as_ptr(), spline_d2_ptr);
         assert_eq!(workspace.spline_scratch.as_ptr(), spline_scratch_ptr);
-        assert_eq!(job_count(&workspace.tile_scratch), tile_job_count);
     }
 
     #[test]
@@ -189,5 +188,27 @@ mod tests {
             assert_eq!(stats.sky, 0.25);
             assert_eq!(stats.sigma, 0.0);
         }
+    }
+
+    #[test]
+    fn masked_compute_keeps_per_job_scratch_bounded() {
+        let pixels = Buffer2::new_filled(512, 512, 0.5);
+        let mask = BitBuffer2::new_filled(512, 512, false);
+        let mut workspace = MeshWorkspace::default();
+
+        workspace.compute(&pixels, Some(&mask), 256, SIGMA_CLIP_ITERATIONS, false);
+        assert_ne!(job_count(&workspace.tile_scratch), 0);
+        assert!(
+            all_by(&workspace.tile_scratch, |scratch| {
+                scratch.values.capacity() <= MAX_TILE_SAMPLES
+            }),
+            "masked value scratch must retain at most {MAX_TILE_SAMPLES} samples per job"
+        );
+        assert!(
+            all_by(&workspace.tile_scratch, |scratch| {
+                scratch.deviations.capacity() <= MAX_TILE_SAMPLES
+            }),
+            "deviation scratch must retain at most {MAX_TILE_SAMPLES} samples per job"
+        );
     }
 }

@@ -139,12 +139,13 @@ detectors through parallel frame processing without thread-local state. On the 1
 
 ## Batch 2 — Remaining repeated work and allocations
 
-- [ ] **Partially resolved — bound masked background-mesh sampling.**
-  `MeshWorkspace` now retains tile, median-filter, spline, and per-job scratch, and the unmasked
-  stride keeps at most `MAX_TILE_SAMPLES`. The masked branch still collects every unmasked pixel
-  before subsampling to 1,024, so its vector can grow to and retain a full tile. Measure masked
-  refinement allocation/RSS first; replace it with deterministic direct sampling only if the
-  retained capacity is material.
+- [x] **Bound masked background-mesh sampling.**
+  At the supported 256 × 256 tile maximum, a sparse mask grew 32 retained value scratches from
+  77,824 bytes to 8,388,608 bytes and added 9,707,520 bytes of RSS. The masked path now counts
+  unmasked bits first and directly reads the same evenly spaced ordinals selected by the old
+  collect-then-subsample path. The same measurement retained 131,072 bytes after the masked pass
+  with a 172,032-byte RSS delta, while exact-output and per-job capacity tests lock the bound. The
+  existing 6K sparse-mask benchmark improved from a 168.59 ms median to 8.30 ms.
 
 - [ ] **Prepare a normalized master flat once per calibration set.**
   Mono and per-colour means are recomputed over the complete flat for every light even though

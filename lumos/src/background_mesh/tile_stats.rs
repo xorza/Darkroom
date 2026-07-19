@@ -132,8 +132,20 @@ fn collect_unmasked_pixels(
     width: usize,
     values: &mut Vec<f32>,
 ) {
+    let unmasked_count = count_unmasked_pixels(mask, x_start, x_end, y_start, y_end);
+    let sample_count = unmasked_count.min(MAX_TILE_SAMPLES);
+    if sample_count == 0 {
+        return;
+    }
+
     let mask_words = mask.words();
     let words_per_row = mask.words_per_row();
+    let ordinal_step = unmasked_count / sample_count;
+    let ordinal_remainder = unmasked_count % sample_count;
+    let mut next_ordinal = 0;
+    let mut remainder_accumulator = 0;
+    let mut ordinal = 0;
+    let mut selected_count = 0;
 
     for y in y_start..y_end {
         let row_start = y * width;
@@ -145,32 +157,81 @@ fn collect_unmasked_pixels(
             let bit_offset = x % 64;
             let mask_word = mask_words[word_row_start + word_idx];
             let bits_to_process = (64 - bit_offset).min(x_end - x);
-            let relevant_bits = if bits_to_process == 64 {
-                !0u64
-            } else {
-                ((1u64 << bits_to_process) - 1) << bit_offset
-            };
-            let mut bits = (!mask_word & relevant_bits) >> bit_offset;
+            let mut bits = unmasked_bits(mask_word, bit_offset, bits_to_process);
             while bits != 0 {
-                values.push(pixels[row_start + x + bits.trailing_zeros() as usize]);
+                if ordinal == next_ordinal {
+                    values.push(pixels[row_start + x + bits.trailing_zeros() as usize]);
+                    selected_count += 1;
+                    if selected_count == sample_count {
+                        return;
+                    }
+                    next_ordinal += ordinal_step;
+                    remainder_accumulator += ordinal_remainder;
+                    if remainder_accumulator >= sample_count {
+                        next_ordinal += 1;
+                        remainder_accumulator -= sample_count;
+                    }
+                }
+                ordinal += 1;
                 bits &= bits - 1;
             }
             x += bits_to_process;
         }
     }
-    subsample_in_place(values, MAX_TILE_SAMPLES);
+    unreachable!("unmasked pixel count changed between sampling passes");
 }
 
 #[inline]
-fn subsample_in_place(values: &mut Vec<f32>, target_size: usize) {
+fn count_unmasked_pixels(
+    mask: &BitBuffer2,
+    x_start: usize,
+    x_end: usize,
+    y_start: usize,
+    y_end: usize,
+) -> usize {
+    let mask_words = mask.words();
+    let words_per_row = mask.words_per_row();
+    let mut count = 0;
+
+    for y in y_start..y_end {
+        let word_row_start = y * words_per_row;
+        let mut x = x_start;
+        while x < x_end {
+            let word_idx = x / 64;
+            let bit_offset = x % 64;
+            let bits_to_process = (64 - bit_offset).min(x_end - x);
+            count += unmasked_bits(
+                mask_words[word_row_start + word_idx],
+                bit_offset,
+                bits_to_process,
+            )
+            .count_ones() as usize;
+            x += bits_to_process;
+        }
+    }
+
+    count
+}
+
+#[inline]
+fn unmasked_bits(mask_word: u64, bit_offset: usize, bits_to_process: usize) -> u64 {
+    let relevant_bits = if bits_to_process == 64 {
+        !0
+    } else {
+        ((1u64 << bits_to_process) - 1) << bit_offset
+    };
+    (!mask_word & relevant_bits) >> bit_offset
+}
+
+#[cfg(test)]
+fn reference_subsample(values: &mut Vec<f32>, target_size: usize) {
     let len = values.len();
-    if len <= target_size {
-        return;
+    if len > target_size {
+        for write_index in 0..target_size {
+            values[write_index] = values[write_index * len / target_size];
+        }
+        values.truncate(target_size);
     }
-    for write_index in 0..target_size {
-        values[write_index] = values[write_index * len / target_size];
-    }
-    values.truncate(target_size);
 }
 
 #[cfg(test)]
@@ -265,38 +326,97 @@ mod tests {
 
     #[test]
     fn masked_sampling_matches_evenly_spaced_unmasked_ordinals() {
-        let width = 40;
-        let height = 40;
-        let pixels = Buffer2::new(
-            width,
-            height,
-            (0..width * height).map(|i| i as f32).collect(),
-        );
-        let mut mask = BitBuffer2::new_filled(width, height, false);
-        for y in 0..height {
-            for x in 0..width {
-                if (x + 3 * y) % 7 == 0 {
-                    mask.set_xy(x, y, true);
-                }
-            }
+        #[derive(Debug)]
+        struct SamplingCase {
+            dimensions: (usize, usize),
+            x_range: std::ops::Range<usize>,
+            y_range: std::ops::Range<usize>,
+            mask_modulus: Option<usize>,
         }
 
-        let expected_all: Vec<f32> = (0..height)
-            .flat_map(|y| {
-                let mask = &mask;
-                let pixels = &pixels;
-                (0..width)
-                    .filter(move |&x| !mask.get_xy(x, y))
-                    .map(move |x| pixels[y * width + x])
-            })
-            .collect();
-        let expected: Vec<f32> = (0..MAX_TILE_SAMPLES)
-            .map(|i| expected_all[i * expected_all.len() / MAX_TILE_SAMPLES])
-            .collect();
+        let cases = [
+            SamplingCase {
+                dimensions: (17, 19),
+                x_range: 0..17,
+                y_range: 0..19,
+                mask_modulus: None,
+            },
+            SamplingCase {
+                dimensions: (32, 32),
+                x_range: 0..32,
+                y_range: 0..32,
+                mask_modulus: None,
+            },
+            SamplingCase {
+                dimensions: (40, 40),
+                x_range: 0..40,
+                y_range: 0..40,
+                mask_modulus: Some(7),
+            },
+            SamplingCase {
+                dimensions: (130, 75),
+                x_range: 3..129,
+                y_range: 2..74,
+                mask_modulus: Some(5),
+            },
+            SamplingCase {
+                dimensions: (256, 256),
+                x_range: 0..256,
+                y_range: 0..256,
+                mask_modulus: None,
+            },
+        ];
 
-        let mut values = Vec::new();
-        collect_unmasked_pixels(&pixels, &mask, 0, width, 0, height, width, &mut values);
+        for case in cases {
+            let (width, height) = case.dimensions;
+            let pixels = Buffer2::new(
+                width,
+                height,
+                (0..width * height).map(|i| i as f32).collect(),
+            );
+            let mut mask = BitBuffer2::new_filled(width, height, false);
+            if let Some(modulus) = case.mask_modulus {
+                for y in 0..height {
+                    for x in 0..width {
+                        if (x + 3 * y) % modulus == 0 {
+                            mask.set_xy(x, y, true);
+                        }
+                    }
+                }
+            }
 
-        assert_eq!(values, expected);
+            let mut expected: Vec<f32> = case
+                .y_range
+                .clone()
+                .flat_map(|y| {
+                    let mask = &mask;
+                    let pixels = &pixels;
+                    case.x_range
+                        .clone()
+                        .filter(move |&x| !mask.get_xy(x, y))
+                        .map(move |x| pixels[y * width + x])
+                })
+                .collect();
+            reference_subsample(&mut expected, MAX_TILE_SAMPLES);
+
+            let mut actual = Vec::new();
+            collect_unmasked_pixels(
+                &pixels,
+                &mask,
+                case.x_range.start,
+                case.x_range.end,
+                case.y_range.start,
+                case.y_range.end,
+                width,
+                &mut actual,
+            );
+
+            assert_eq!(actual, expected, "case: {case:?}");
+            assert!(
+                actual.capacity() <= MAX_TILE_SAMPLES,
+                "case retained {} samples: {case:?}",
+                actual.capacity()
+            );
+        }
     }
 }
