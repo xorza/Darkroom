@@ -450,7 +450,7 @@ pub(crate) fn warp_coverage(
         .par_chunks_mut(dims.x)
         .enumerate()
         .for_each(|(y, row)| {
-            warp::warp_row_with(y, wt, row, |pos| coverage_at(pos, dims, method));
+            warp::warp_row_with(y, wt, row, 0.0, |pos| coverage_at(pos, dims, method));
         });
     coverage
 }
@@ -486,11 +486,11 @@ pub(crate) fn warp_image(
                 let border = params.border_value;
                 match params.method {
                     InterpolationMethod::Bicubic => {
-                        warp::warp_row_with(y, warp_transform, row, |pos| {
+                        warp::warp_row_with(y, warp_transform, row, border, |pos| {
                             interpolate_bicubic(input, pos, border)
                         })
                     }
-                    _ => warp::warp_row_with(y, warp_transform, row, |pos| {
+                    _ => warp::warp_row_with(y, warp_transform, row, border, |pos| {
                         interpolate_nearest(input, pos, border)
                     }),
                 }

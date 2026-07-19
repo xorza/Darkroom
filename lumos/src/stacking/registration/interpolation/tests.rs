@@ -952,6 +952,72 @@ fn test_generic_stepping_disabled_for_homography() {
     }
 }
 
+#[test]
+fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
+    const WIDTH: usize = 16;
+    const HEIGHT: usize = 8;
+    const HORIZON_X: usize = 8;
+    const BORDER: f32 = -0.25;
+
+    let input = Buffer2::new_filled(WIDTH, HEIGHT, 0.75);
+    for horizon_scale in [1.0, 1.0 - 1e-12] {
+        let transform = Transform::homography([
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            -horizon_scale / HORIZON_X as f64,
+            0.0,
+        ]);
+        let wt = WarpTransform::new(transform);
+        let horizon = wt.apply(DVec2::new(HORIZON_X as f64, 0.0));
+        if horizon_scale == 1.0 {
+            assert!(!horizon.is_finite());
+        } else {
+            assert!(horizon.is_finite());
+            assert!(horizon.x > i32::MAX as f64);
+        }
+
+        for method in [
+            InterpolationMethod::Lanczos2 { deringing: -1.0 },
+            InterpolationMethod::Lanczos3 { deringing: -1.0 },
+            InterpolationMethod::Lanczos3 { deringing: 0.3 },
+            InterpolationMethod::Lanczos4 { deringing: -1.0 },
+        ] {
+            let params = WarpParams {
+                method,
+                border_value: BORDER,
+            };
+            let mut output = Buffer2::new_default(WIDTH, HEIGHT);
+            warp_image(&input, &mut output, &wt, &params);
+            let coverage = warp_coverage(Vec2us::new(WIDTH, HEIGHT), &wt, method);
+
+            for y in 0..HEIGHT {
+                assert_eq!(
+                    output[(HORIZON_X, y)],
+                    BORDER,
+                    "{method:?} horizon value at y={y}"
+                );
+                assert_eq!(
+                    coverage[(HORIZON_X, y)],
+                    0.0,
+                    "{method:?} horizon coverage at y={y}"
+                );
+            }
+            assert!(
+                output.pixels().iter().all(|value| value.is_finite()),
+                "{method:?} produced a non-finite value"
+            );
+            assert!(
+                coverage.pixels().iter().all(|value| value.is_finite()),
+                "{method:?} produced non-finite coverage"
+            );
+        }
+    }
+}
+
 /// In-bounds renormalization: on a flat field the in-bounds weighted average is the
 /// constant V no matter how many kernel taps fall off the image, so a renormalized edge
 /// sample reads exactly V. Before in-bounds weight tracking, bicubic read `V·Σ_in(w)` and

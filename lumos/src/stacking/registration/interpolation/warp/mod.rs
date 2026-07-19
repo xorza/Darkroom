@@ -67,17 +67,42 @@ impl SoftClampAccum {
     }
 }
 
+#[inline]
+fn finite_source_position(src_x: f64, src_y: f64) -> Option<Vec2> {
+    let pos = Vec2::new(src_x as f32, src_y as f32);
+    pos.is_finite().then_some(pos)
+}
+
+#[inline]
+fn lanczos_source_position<const A: usize>(
+    src_x: f64,
+    src_y: f64,
+    input_width: usize,
+    input_height: usize,
+) -> Option<Vec2> {
+    let pos = finite_source_position(src_x, src_y)?;
+    let support_min = -(A as f32);
+    let support_max_x = input_width as f32 + A as f32 - 1.0;
+    let support_max_y = input_height as f32 + A as f32 - 1.0;
+
+    // Reject no-overlap coordinates before floor and LUT index arithmetic.
+    (pos.x >= support_min && pos.y >= support_min && pos.x < support_max_x && pos.y < support_max_y)
+        .then_some(pos)
+}
+
 /// Inverse-map one output row to source coordinates and fill it via `sample`.
 ///
 /// Centralizes the linear incremental-stepping fast path — for non-perspective transforms the
 /// source coordinate advances by a constant `(m[0], m[3])` per output pixel, so the per-pixel matrix
 /// multiply is skipped. Shared by the scalar bilinear, generic per-pixel, and coverage row loops so
-/// the stepping logic lives in exactly one place (value and coverage cannot drift).
+/// the stepping logic lives in exactly one place (value and coverage cannot drift). Non-finite
+/// projected coordinates produce `invalid_value` without reaching a sampler.
 #[inline]
 pub(crate) fn warp_row_with(
     output_y: usize,
     wt: &WarpTransform,
     output_row: &mut [f32],
+    invalid_value: f32,
     mut sample: impl FnMut(Vec2) -> f32,
 ) {
     let m = wt.transform.matrix.as_array();
@@ -94,7 +119,10 @@ pub(crate) fn warp_row_with(
             src_x = src.x;
             src_y = src.y;
         }
-        *out = sample(Vec2::new(src_x as f32, src_y as f32));
+        *out = match finite_source_position(src_x, src_y) {
+            Some(pos) => sample(pos),
+            None => invalid_value,
+        };
         if can_step {
             src_x += dx_step;
             src_y += dy_step;
@@ -156,7 +184,7 @@ pub(crate) fn warp_row_bilinear_scalar(
     wt: &WarpTransform,
     border_value: f32,
 ) {
-    warp_row_with(output_y, wt, output_row, |pos| {
+    warp_row_with(output_y, wt, output_row, border_value, |pos| {
         bilinear_sample(input, pos, border_value)
     });
 }
@@ -304,8 +332,17 @@ fn warp_row_lanczos_inner<const A: usize, const SIZE: usize, const DERINGING: bo
             src_y = src.y;
         }
 
-        let sx = src_x as f32;
-        let sy = src_y as f32;
+        let Some(pos) = lanczos_source_position::<A>(src_x, src_y, input_width, input_height)
+        else {
+            *out_pixel = border_value;
+            if can_step {
+                src_x += dx_step;
+                src_y += dy_step;
+            }
+            continue;
+        };
+        let sx = pos.x;
+        let sy = pos.y;
 
         let x0 = fast_floor_i32(sx);
         let y0 = fast_floor_i32(sy);
