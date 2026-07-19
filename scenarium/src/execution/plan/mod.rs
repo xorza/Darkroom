@@ -11,7 +11,7 @@
 use crate::execution::compile::CompiledGraph;
 use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionProgram};
 use crate::execution::query::resolve_node_id;
-use crate::execution::{Error, NodeMap, Result, RunSeeds, reset_node_map, validate};
+use crate::execution::{Error, NodeMap, NodeSet, Result, RunSeeds, reset_node_map, validate};
 use crate::graph::NodeId;
 use crate::node::special::SpecialNode;
 
@@ -62,11 +62,10 @@ pub(crate) struct ExecutionPlan {
     /// Per-node verdict (execute / missing-inputs), keyed by node id.
     pub(crate) verdicts: NodeMap<NodeVerdict>,
     /// The nodes the backward walk started from — sinks, event subscribers,
-    /// event-trigger owners, and node seeds (a node seeding via several categories may
-    /// repeat; harmless). The schedule's "must be available" set: the resolver seeds
-    /// liveness from these and prunes any cone reachable only through cache-hit consumers
-    /// (see [`Resolver`](crate::execution::resolve::Resolver)).
-    pub(crate) roots: Vec<NodeId>,
+    /// event-trigger owners, and node seeds. The schedule's "must be available" set:
+    /// the resolver seeds liveness from these and prunes any cone reachable only through
+    /// cache-hit consumers (see [`Resolver`](crate::execution::resolve::Resolver)).
+    pub(crate) roots: NodeSet,
     /// The node-seeded roots (on-demand preview targets) — a *pinned root*, a subset of
     /// `roots`. Distinct from a pinned *output port* (a graph-authored, persisted flag —
     /// see [`Graph::pinned_outputs`](crate::graph::Graph)): this is a per-run seed with
@@ -75,7 +74,7 @@ pub(crate) struct ExecutionPlan {
     /// outputs resident through every release/eviction site whatever its cache mode.
     /// Retention is all it takes for a repeated run to be a RAM hit: the reuse check
     /// serves any resident digest-valid value.
-    pub(crate) pinned: Vec<NodeId>,
+    pub(crate) pinned: NodeSet,
 }
 
 impl ExecutionPlan {
@@ -92,7 +91,7 @@ impl ExecutionPlan {
         self.process_order.clear();
         reset_node_map(
             &mut self.verdicts,
-            program.node_ids(),
+            program.e_nodes.keys().copied(),
             NodeVerdict::default(),
         );
         self.roots.clear();
@@ -164,7 +163,11 @@ impl Planner {
         // `plan.reset` (called at the top of `plan`) already cleared `process_order` and
         // `roots`; this pass only needs to reset its own scratch.
         self.stack.clear();
-        reset_node_map(&mut self.color, program.node_ids(), Color::White);
+        reset_node_map(
+            &mut self.color,
+            program.e_nodes.keys().copied(),
+            Color::White,
+        );
 
         for node_id in plan.roots.iter().copied() {
             self.stack.push(Visit::Discover(node_id));
@@ -221,8 +224,7 @@ impl Planner {
 /// the executor's cut: the node seeds (authoring ids resolved to flat nodes here), every
 /// event subscriber, every sink node, and (for the event loop) every node owning a
 /// subscribed event. Not deduped: a node seeding via several categories appears more than
-/// once, which is harmless — the walk's `Color` check skips a revisited root and the cut's
-/// `needed[root] = true` seeding is idempotent, so neither cares about repeats.
+/// once.
 ///
 /// A [`RunSinks`](SpecialNode::RunSinks) node among a fired event's subscribers is not
 /// itself a root (it computes nothing); instead it promotes the run to include *every* sink
@@ -244,8 +246,8 @@ fn collect_roots(
             resolve_node_id(compiled, address).ok_or_else(|| Error::NodeSeedNotFound {
                 address: address.clone(),
             })?;
-        plan.roots.push(node_id);
-        plan.pinned.push(node_id);
+        plan.roots.insert(node_id);
+        plan.pinned.insert(node_id);
     }
 
     // Event subscribers. A `RunSinks` sink among them fires no cone of its own — it
@@ -258,7 +260,7 @@ fn collect_roots(
             if program.e_nodes[&sub].special == Some(SpecialNode::RunSinks) {
                 run_sinks = true;
             } else {
-                plan.roots.push(sub);
+                plan.roots.insert(sub);
             }
         }
     }
@@ -269,7 +271,7 @@ fn collect_roots(
     // One sweep for both whole-graph seed kinds: sink nodes (requested directly, or
     // promoted by a fired event reaching a `RunSinks` sink) and — for the event
     // loop — nodes owning a subscribed event.
-    for node_id in program.node_ids() {
+    for node_id in program.e_nodes.keys().copied() {
         let e_node = &program.e_nodes[&node_id];
         if (run_sinks && e_node.sink)
             || (seeds.event_triggers
@@ -277,7 +279,7 @@ fn collect_roots(
                     .iter()
                     .any(|ev| !ev.subscribers.is_empty()))
         {
-            plan.roots.push(node_id);
+            plan.roots.insert(node_id);
         }
     }
     Ok(())

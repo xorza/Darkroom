@@ -1,9 +1,7 @@
 //! The compiled, flattened graph: topology + code, immutable across runs.
 //! Built by the compiler through graph flattening and installed as runtime
-//! state; it is deliberately not a persistence format. All mutable execution
-//! state lives in the [`Executor`](crate::execution::executor::Executor); all
-//! per-run scheduling state lives in the
-//! [`ExecutionPlan`](crate::execution::plan::ExecutionPlan).
+//! state; it is deliberately not a persistence format. Mutable state is split
+//! between the per-run plan/resolver/executor and the cross-run runtime cache.
 
 use std::sync::Arc;
 
@@ -82,8 +80,6 @@ pub(crate) struct ExecutionEvent {
 /// per-run/cross-run state is keyed by the node id in the executor.
 #[derive(Default, Debug)]
 pub(crate) struct ExecutionNode {
-    pub id: NodeId,
-
     pub sink: bool,
     /// Copied from the node's func at flatten. Only `Pure` is content-cacheable;
     /// the digest of an `Impure` node (or any node downstream of one) is `None`.
@@ -112,16 +108,11 @@ pub(crate) struct ExecutionNode {
     pub func_id: FuncId,
 
     pub lambda: FuncLambda,
-
-    pub name: String,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionProgram {
     pub(crate) e_nodes: HashMap<NodeId, ExecutionNode>,
-    /// Deterministic flatten order for scheduling independent nodes. Node identity
-    /// and all lookups still use `NodeId`.
-    pub(crate) node_order: Vec<NodeId>,
     pub(crate) inputs: Vec<ExecutionInput>,
     pub(crate) events: Vec<ExecutionEvent>,
     /// The output pool: each node's resolved declared output types (wildcards
@@ -146,10 +137,6 @@ impl ExecutionProgram {
     /// `output_types` rather than stored, so it can't disagree with the pool it sizes.
     pub(crate) fn n_outputs(&self) -> usize {
         self.output_types.len()
-    }
-
-    pub(crate) fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.node_order.iter().copied()
     }
 
     pub(crate) fn output_idx(&self, node_id: NodeId, port_idx: usize) -> OutputIdx {
@@ -184,7 +171,7 @@ impl ExecutionProgram {
     pub(crate) fn resolve_output_types(&mut self, library: &Library) {
         let total: usize = self.e_nodes.values().map(|n| n.outputs.len as usize).sum();
         let mut owners = vec![None; total];
-        for node_id in self.node_ids() {
+        for node_id in self.e_nodes.keys().copied() {
             let span = self.e_nodes[&node_id].outputs;
             for output_idx in span.range() {
                 owners[output_idx] = Some(node_id);

@@ -12,12 +12,74 @@ use crate::{DataType, DynamicValue, StaticValue};
 use common::FloatExt;
 use tokio::sync::Mutex;
 
+fn execution_node_name<'a>(
+    execution_graph: &ExecutionEngine,
+    graph: &'a Graph,
+    library: &'a Library,
+    node_id: NodeId,
+) -> &'a str {
+    let address = execution_graph
+        .compiled
+        .flatten_map
+        .address(node_id)
+        .unwrap();
+    let mut current = graph;
+    for instance in &address.instances {
+        let link = current
+            .find(instance, NodeSearch::TopLevel)
+            .unwrap()
+            .kind
+            .as_graph()
+            .unwrap();
+        current = current.resolve_graph(link, library).unwrap();
+    }
+    &current
+        .find(&address.node_id, NodeSearch::TopLevel)
+        .unwrap()
+        .name
+}
+
+fn execution_node_id(
+    execution_graph: &ExecutionEngine,
+    graph: &Graph,
+    library: &Library,
+    name: &str,
+) -> Option<NodeId> {
+    execution_graph
+        .compiled
+        .program
+        .e_nodes
+        .keys()
+        .copied()
+        .find(|&node_id| execution_node_name(execution_graph, graph, library, node_id) == name)
+}
+
+fn execution_node_ids(
+    execution_graph: &ExecutionEngine,
+    graph: &Graph,
+    library: &Library,
+    name: &str,
+) -> Vec<NodeId> {
+    execution_graph
+        .compiled
+        .program
+        .e_nodes
+        .keys()
+        .copied()
+        .filter(|&node_id| execution_node_name(execution_graph, graph, library, node_id) == name)
+        .collect()
+}
+
 /// Names of the nodes that actually recomputed in the last run, in schedule order.
 /// `process_order` now schedules every reachable node (the planner is structural), so
 /// this keeps only the *runnable* ones (`wants_execute` — never a `MissingInputs` node)
 /// that actually ran (not a reused cache). Before any run `node_ran` is `true` for all,
 /// so it reads as "the runnable schedule" for plan-only (`prepare_execution`) tests.
-fn execution_node_names_in_order(execution_graph: &ExecutionEngine) -> Vec<String> {
+fn execution_node_names_in_order(
+    execution_graph: &ExecutionEngine,
+    graph: &Graph,
+    library: &Library,
+) -> Vec<String> {
     execution_graph
         .plan
         .process_order
@@ -26,11 +88,7 @@ fn execution_node_names_in_order(execution_graph: &ExecutionEngine) -> Vec<Strin
             execution_graph.plan.verdicts[&node_id].wants_execute()
                 && execution_graph.node_ran(node_id)
         })
-        .map(|node_id| {
-            execution_graph.compiled.program.e_nodes[node_id]
-                .name
-                .clone()
-        })
+        .map(|&node_id| execution_node_name(execution_graph, graph, library, node_id).to_owned())
         .collect()
 }
 
@@ -331,21 +389,12 @@ mod cache_persistence {
         );
 
         // The frontier `mult` (read by the executing `print`) is in RAM...
-        let mult_resident = engine
-            .runtime_slot(engine.by_name("mult").unwrap())
-            .output_values()
-            .is_some();
+        let mult_resident = engine.cache.slots[&mult_id].output_values().is_some();
         assert!(mult_resident, "frontier cache is loaded into RAM");
         // ...but the deeper `sum` is not even flagged: the blob stays in the store,
         // outside the runtime slot, until a later run actually needs it.
-        let sum_resident = engine
-            .runtime_slot(engine.by_name("sum").unwrap())
-            .output_values()
-            .is_some();
-        let sum_empty = matches!(
-            engine.runtime_slot(engine.by_name("sum").unwrap()).value,
-            ValueState::Empty
-        );
+        let sum_resident = engine.cache.slots[&sum_id].output_values().is_some();
+        let sum_empty = matches!(engine.cache.slots[&sum_id].value, ValueState::Empty);
         assert!(
             !sum_resident,
             "a disk cache behind another is not loaded into RAM"
@@ -361,10 +410,7 @@ mod cache_persistence {
             Some(empty_dir.0.clone()),
         ));
         assert!(
-            engine
-                .runtime_slot(engine.by_name("mult").unwrap())
-                .output_values()
-                .is_some(),
+            engine.cache.slots[&mult_id].output_values().is_some(),
             "switching stores preserves resident values"
         );
 
@@ -427,10 +473,7 @@ mod cache_persistence {
         // (all of it is this run's own output).
         engine.execute_sinks().await.unwrap();
         assert!(
-            engine
-                .runtime_slot(engine.by_name("sum").unwrap())
-                .output_values()
-                .is_some(),
+            engine.cache.slots[&sum_id].output_values().is_some(),
             "sum is resident after the run that computed it"
         );
 
@@ -443,22 +486,10 @@ mod cache_persistence {
             "only print runs the second time"
         );
 
-        let sum_resident = engine
-            .runtime_slot(engine.by_name("sum").unwrap())
-            .output_values()
-            .is_some();
-        let sum_disk = matches!(
-            engine.runtime_slot(engine.by_name("sum").unwrap()).value,
-            ValueState::OnDisk { .. }
-        );
-        let mult_resident = engine
-            .runtime_slot(engine.by_name("mult").unwrap())
-            .output_values()
-            .is_some();
-        let get_a_resident = engine
-            .runtime_slot(engine.by_name("get_a").unwrap())
-            .output_values()
-            .is_some();
+        let sum_resident = engine.cache.slots[&sum_id].output_values().is_some();
+        let sum_disk = matches!(engine.cache.slots[&sum_id].value, ValueState::OnDisk { .. });
+        let mult_resident = engine.cache.slots[&mult_id].output_values().is_some();
+        let get_a_resident = engine.cache.slots[&get_a_id].output_values().is_some();
         assert!(
             !sum_resident,
             "the unused prior-run value is evicted from RAM"
@@ -539,7 +570,7 @@ mod cache_persistence {
         }
 
         // Slot retention after run 2: RAM-resident iff the mode keeps RAM.
-        let slot = engine.runtime_slot(engine.by_name("mult").unwrap());
+        let slot = &engine.cache.slots[&mult_id];
         assert_eq!(
             slot.output_values().is_some(),
             mode.caches_in_ram(),
@@ -1905,7 +1936,7 @@ mod graph_structure {
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph)[2..],
+            execution_node_names_in_order(&execution_graph, &graph, &library)[2..],
             ["sum", "mult", "Print"]
         );
 
@@ -1915,22 +1946,26 @@ mod graph_structure {
             execution_graph
                 .compiled
                 .program
-                .node_ids()
+                .e_nodes
+                .keys()
+                .copied()
                 .all(|node_id| !execution_graph.plan.verdicts[&node_id].missing_required_inputs())
         );
         assert!(
             execution_graph
                 .compiled
                 .program
-                .node_ids()
+                .e_nodes
+                .keys()
+                .copied()
                 .all(|node_id| execution_graph.plan.verdicts[&node_id].wants_execute())
         );
 
-        let get_a = execution_graph.by_name("get_a").unwrap();
-        let get_b = execution_graph.by_name("get_b").unwrap();
-        let sum = execution_graph.by_name("sum").unwrap();
-        let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("Print").unwrap();
+        let get_a = execution_node_id(&execution_graph, &graph, &library, "get_a").unwrap();
+        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
+        let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
+        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
+        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
         // get_a→sum[0], get_b→sum[1]+mult[1], sum→mult[0], mult→print[0]
         assert_eq!(
@@ -1954,7 +1989,7 @@ mod graph_structure {
         assert_eq!(execution_graph.node_output_readers(sum), &[1]);
         assert_eq!(execution_graph.node_output_readers(mult), &[1]);
 
-        assert!(print.sink);
+        assert!(execution_graph.compiled.program.e_nodes[&print].sink);
 
         Ok(())
     }
@@ -1988,10 +2023,10 @@ mod graph_structure {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
-        let get_a = execution_graph.by_name("get_a").unwrap();
-        let get_b = execution_graph.by_name("get_b").unwrap();
-        let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("Print").unwrap();
+        let get_a = execution_node_id(&execution_graph, &graph, &library, "get_a").unwrap();
+        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
+        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
+        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
         assert_eq!(execution_graph.node_output_demand(get_a).len(), 1);
         assert_eq!(execution_graph.node_output_demand(get_b).len(), 1);
@@ -2058,26 +2093,18 @@ mod missing_inputs {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
-        let get_b = execution_graph.by_name("get_b").unwrap();
-        let sum = execution_graph.by_name("sum").unwrap();
-        let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("Print").unwrap();
+        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
+        let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
+        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
+        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
         // get_b has no missing inputs (no inputs at all)
-        assert!(
-            !execution_graph
-                .node_verdict(get_b)
-                .missing_required_inputs()
-        );
+        assert!(!execution_graph.plan.verdicts[&get_b].missing_required_inputs());
         // sum is missing input[0], propagates to downstream mult and print — so none of
         // them is runnable (get_b, a source with satisfied inputs, still is).
         for gated in [sum, mult, print] {
-            assert!(
-                execution_graph
-                    .node_verdict(gated)
-                    .missing_required_inputs()
-            );
-            assert!(!execution_graph.node_verdict(gated).wants_execute());
+            assert!(execution_graph.plan.verdicts[&gated].missing_required_inputs());
+            assert!(!execution_graph.plan.verdicts[&gated].wants_execute());
         }
 
         Ok(())
@@ -2101,19 +2128,15 @@ mod missing_inputs {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
-        let sum = execution_graph.by_name("sum").unwrap();
-        let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("Print").unwrap();
+        let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
+        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
+        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
         // The missing flag flows through the optional bind to mult and on to print, so
         // the gated chain isn't runnable (its sources still are).
         for gated in [sum, mult, print] {
-            assert!(
-                execution_graph
-                    .node_verdict(gated)
-                    .missing_required_inputs()
-            );
-            assert!(!execution_graph.node_verdict(gated).wants_execute());
+            assert!(execution_graph.plan.verdicts[&gated].missing_required_inputs());
+            assert!(!execution_graph.plan.verdicts[&gated].wants_execute());
         }
 
         Ok(())
@@ -2135,16 +2158,15 @@ mod missing_inputs {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
-        let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("Print").unwrap();
+        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
+        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
-        assert!(!execution_graph.node_verdict(mult).missing_required_inputs());
+        assert!(!execution_graph.plan.verdicts[&mult].missing_required_inputs());
+        assert!(!execution_graph.plan.verdicts[&print].missing_required_inputs());
         assert!(
-            !execution_graph
-                .node_verdict(print)
-                .missing_required_inputs()
+            execution_node_names_in_order(&execution_graph, &graph, &library)
+                .contains(&"mult".to_string())
         );
-        assert!(execution_node_names_in_order(&execution_graph).contains(&"mult".to_string()));
 
         Ok(())
     }
@@ -2180,9 +2202,12 @@ mod missing_inputs {
 
         // The run completes (no panic reading sum's absent output); the gated `mult`
         // never runs, so it never reads that value.
-        let mult = execution_graph.by_name("mult").unwrap();
-        assert!(execution_graph.node_verdict(mult).missing_required_inputs());
-        assert!(!execution_node_names_in_order(&execution_graph).contains(&"mult".to_string()));
+        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
+        assert!(execution_graph.plan.verdicts[&mult].missing_required_inputs());
+        assert!(
+            !execution_node_names_in_order(&execution_graph, &graph, &library)
+                .contains(&"mult".to_string())
+        );
 
         Ok(())
     }
@@ -2212,26 +2237,18 @@ mod disabled_nodes {
 
         // The disabled node emits no execution node at all.
         assert!(
-            execution_graph.by_name("sum").is_none(),
+            execution_node_id(&execution_graph, &graph, &library, "sum").is_none(),
             "disabled node must be absent from the program"
         );
 
         // get_b has no inputs, so it's unaffected; mult/print lost their
         // (transitive) producer and are flagged missing-required-input.
-        let get_b = execution_graph.by_name("get_b").unwrap();
-        let mult = execution_graph.by_name("mult").unwrap();
-        let print = execution_graph.by_name("Print").unwrap();
-        assert!(
-            !execution_graph
-                .node_verdict(get_b)
-                .missing_required_inputs()
-        );
-        assert!(execution_graph.node_verdict(mult).missing_required_inputs());
-        assert!(
-            execution_graph
-                .node_verdict(print)
-                .missing_required_inputs()
-        );
+        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
+        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
+        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
+        assert!(!execution_graph.plan.verdicts[&get_b].missing_required_inputs());
+        assert!(execution_graph.plan.verdicts[&mult].missing_required_inputs());
+        assert!(execution_graph.plan.verdicts[&print].missing_required_inputs());
 
         Ok(())
     }
@@ -2256,9 +2273,9 @@ mod disabled_nodes {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
-        assert!(execution_graph.by_name("sum").is_none());
+        assert!(execution_node_id(&execution_graph, &graph, &library, "sum").is_none());
         assert_eq!(
-            execution_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph, &graph, &library),
             ["get_b", "mult", "Print"]
         );
 
@@ -2284,12 +2301,12 @@ mod const_bindings {
         // Only mult and print execute — the const binds detach mult from its
         // upstream, so get_a/get_b/sum are pruned.
         assert_eq!(
-            execution_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph, &graph, &library),
             ["mult", "Print"]
         );
 
-        let mult_id = execution_graph.by_name("mult").unwrap().id;
-        let print_id = execution_graph.by_name("Print").unwrap().id;
+        let mult_id = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
+        let print_id = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
         let ran = |stats: &ExecutionStats, id| stats.executed_nodes.iter().any(|n| n.node_id == id);
 
         // Re-run with the same bindings: mult's digest is unchanged, so it's reused
@@ -2328,7 +2345,7 @@ mod const_bindings {
         execution_graph.execute_sinks().await?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph, &graph, &library),
             ["mult", "Print"]
         );
 
@@ -2337,7 +2354,10 @@ mod const_bindings {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
 
-        assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph, &graph, &library),
+            ["Print"]
+        );
 
         // Different const value: mult re-executes
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
@@ -2345,7 +2365,7 @@ mod const_bindings {
         execution_graph.execute_sinks().await?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph, &graph, &library),
             ["mult", "Print"]
         );
 
@@ -2353,7 +2373,10 @@ mod const_bindings {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
 
-        assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph, &graph, &library),
+            ["Print"]
+        );
 
         Ok(())
     }
@@ -2372,7 +2395,7 @@ mod const_bindings {
         execution_graph.execute_sinks().await?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph, &graph, &library),
             ["get_b", "sum", "mult", "Print"]
         );
 
@@ -2383,7 +2406,7 @@ mod const_bindings {
         execution_graph.execute_sinks().await?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph, &graph, &library),
             ["sum", "mult", "Print"]
         );
 
@@ -2407,7 +2430,7 @@ mod const_bindings {
         execution_graph.execute_sinks().await?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph, &graph, &library),
             ["get_b", "sum", "mult", "Print"]
         );
 
@@ -2418,7 +2441,7 @@ mod const_bindings {
         execution_graph.execute_sinks().await?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph, &graph, &library),
             ["sum", "mult", "Print"]
         );
 
@@ -2443,7 +2466,7 @@ mod const_bindings {
         execution_graph.execute_sinks().await?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph, &graph, &library),
             ["mult", "Print"]
         );
 
@@ -2451,7 +2474,10 @@ mod const_bindings {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
 
-        assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph, &graph, &library),
+            ["Print"]
+        );
 
         Ok(())
     }
@@ -2472,11 +2498,17 @@ mod behavior {
 
         // First run: get_b (pure source) executes.
         execution_graph.execute_sinks().await?;
-        assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
+        assert!(
+            execution_node_names_in_order(&execution_graph, &graph, &library)
+                .contains(&"get_b".to_string())
+        );
 
         // Re-run: get_b's digest is unchanged, so it reuses its RAM output — skipped.
         execution_graph.execute_sinks().await?;
-        assert!(!execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
+        assert!(
+            !execution_node_names_in_order(&execution_graph, &graph, &library)
+                .contains(&"get_b".to_string())
+        );
 
         Ok(())
     }
@@ -2491,13 +2523,16 @@ mod behavior {
         execution_graph.execute_sinks().await?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph)[2..],
+            execution_node_names_in_order(&execution_graph, &graph, &library)[2..],
             ["sum", "mult", "Print"]
         );
 
         // Second run: only print (impure sink) re-executes, others cached
         let exe_stats = execution_graph.execute_sinks().await?;
-        assert_eq!(execution_node_names_in_order(&execution_graph), ["Print"]);
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph, &graph, &library),
+            ["Print"]
+        );
         assert_eq!(exe_stats.cached_nodes.len(), 4);
 
         // Cached mult must still hold the correct product, not a stale value:
@@ -2575,7 +2610,10 @@ mod behavior {
 
         // The progressed order equals the executor's recorded run order, and
         // covers exactly the finally-executed nodes.
-        assert_eq!(started_order, execution_node_names_in_order(&eg));
+        assert_eq!(
+            started_order,
+            execution_node_names_in_order(&eg, &graph, &library)
+        );
         assert_eq!(started_order.len(), stats.executed_nodes.len());
 
         Ok(())
@@ -2801,12 +2839,13 @@ mod behavior {
         execution_graph.update(&graph, &library).unwrap();
 
         // Even with cached output, impure node still wants to execute
-        execution_graph.set_output_values("get_b", vec![DynamicValue::Static(StaticValue::Int(7))]);
+        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
+        execution_graph.set_output_values(get_b, vec![DynamicValue::Static(StaticValue::Int(7))]);
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph)[2..],
+            execution_node_names_in_order(&execution_graph, &graph, &library)[2..],
             ["sum", "mult", "Print"]
         );
 
@@ -2826,7 +2865,8 @@ mod behavior {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
 
-        let slot = execution_graph.runtime_slot(execution_graph.by_name("get_b").unwrap());
+        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
+        let slot = &execution_graph.cache.slots[&get_b];
         let outputs = slot
             .output_values()
             .expect("impure node's output stays resident after the run");
@@ -2892,13 +2932,14 @@ mod composite_behavior {
         eg.update(graph, library).unwrap();
         eg.prepare_execution(true, false, &[]).unwrap();
         assert!(
-            execution_node_names_in_order(&eg).contains(&name.to_string()),
+            execution_node_names_in_order(&eg, &graph, &library).contains(&name.to_string()),
             "{name} should run on the first prepare"
         );
-        eg.set_output_values(name, vec![DynamicValue::Static(StaticValue::Int(11))]);
+        let node_id = execution_node_id(&eg, graph, library, name).unwrap();
+        eg.set_output_values(node_id, vec![DynamicValue::Static(StaticValue::Int(11))]);
         eg.update(graph, library).unwrap();
         eg.prepare_execution(true, false, &[]).unwrap();
-        execution_node_names_in_order(&eg).contains(&name.to_string())
+        execution_node_names_in_order(&eg, &graph, &library).contains(&name.to_string())
     }
 
     #[test]
@@ -3145,8 +3186,8 @@ mod execution {
         assert_eq!(order1, order2);
 
         // sum should be marked as missing required inputs
-        let sum = execution_graph.by_name("sum").unwrap();
-        assert!(execution_graph.node_verdict(sum).missing_required_inputs());
+        let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
+        assert!(execution_graph.plan.verdicts[&sum].missing_required_inputs());
 
         Ok(())
     }
@@ -3159,11 +3200,11 @@ mod execution {
         eg.update(&graph, &library).unwrap();
 
         eg.execute_sinks().await?;
-        let run1 = execution_node_names_in_order(&eg);
+        let run1 = execution_node_names_in_order(&eg, &graph, &library);
         eg.execute_sinks().await?;
-        let run2 = execution_node_names_in_order(&eg);
+        let run2 = execution_node_names_in_order(&eg, &graph, &library);
         eg.execute_sinks().await?;
-        let run3 = execution_node_names_in_order(&eg);
+        let run3 = execution_node_names_in_order(&eg, &graph, &library);
 
         // First run executes everything; once the pure upstream is cached, runs 2
         // and 3 must schedule identically — guards the reused `Scratch` buffers
@@ -3201,7 +3242,7 @@ mod execution {
         execution_graph.execute_sinks().await?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph, &graph, &library),
             ["mult", "Print"]
         );
 
@@ -3216,7 +3257,7 @@ mod execution {
         execution_graph.execute_sinks().await?;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph, &graph, &library),
             ["mult", "Print"]
         );
 
@@ -3271,8 +3312,8 @@ mod execution {
         // Run 1: both ports written.
         let stats = eg.execute_sinks().await?;
         assert!(stats.node_errors.is_empty());
-        let outputs = eg
-            .runtime_slot(eg.by_name("partial_writer").unwrap())
+        let node_id = execution_node_id(&eg, &graph, &library, "partial_writer").unwrap();
+        let outputs = eg.cache.slots[&node_id]
             .output_values()
             .cloned()
             .expect("the node ran, so it holds outputs");
@@ -3286,8 +3327,7 @@ mod execution {
         // so port 1 cannot masquerade as a value produced by this run.
         let stats = eg.execute_sinks().await?;
         assert!(stats.node_errors.is_empty());
-        let outputs = eg
-            .runtime_slot(eg.by_name("partial_writer").unwrap())
+        let outputs = eg.cache.slots[&node_id]
             .output_values()
             .cloned()
             .expect("the node re-ran (it is impure)");
@@ -3338,7 +3378,7 @@ mod node_seeds {
         let stats = eg.execute_nodes([NodeAddress::root(sum_id)]).await.unwrap();
         assert_eq!(stats.executed_nodes.len(), 3);
 
-        let mut ran = execution_node_names_in_order(&eg);
+        let mut ran = execution_node_names_in_order(&eg, &graph, &library);
         ran.sort();
         assert_eq!(ran, ["get_a", "get_b", "sum"], "only sum's cone runs");
 
@@ -3656,12 +3696,12 @@ mod error_propagation {
         // Errors are reported through the run stats (the per-run channel), not the
         // cross-run cache; the cache only reflects which outputs survived.
         let error_for = |name: &str| {
-            let id = execution_graph.by_name(name).unwrap().id;
+            let id = execution_node_id(&execution_graph, &graph, &library, name).unwrap();
             stats.node_errors.iter().find(move |e| e.node_id == id)
         };
         let output_values = |name: &str| {
-            execution_graph
-                .runtime_slot(execution_graph.by_name(name).unwrap())
+            execution_graph.cache.slots
+                [&execution_node_id(&execution_graph, &graph, &library, name).unwrap()]
                 .output_values()
                 .cloned()
         };
@@ -3858,7 +3898,10 @@ mod events {
             .await?;
 
         // recv subscribes to emit's tick → recv is the root, emit runs as its dep
-        assert_eq!(execution_node_names_in_order(&eg), ["emit", "recv"]);
+        assert_eq!(
+            execution_node_names_in_order(&eg, &f.graph, &f.library),
+            ["emit", "recv"]
+        );
         assert_eq!(*f.emit_calls.lock().await, 1);
         assert_eq!(*f.recv_values.lock().await, vec![1]);
 
@@ -3888,7 +3931,10 @@ mod events {
         )
         .await?;
 
-        assert_eq!(execution_node_names_in_order(&eg), ["emit"]);
+        assert_eq!(
+            execution_node_names_in_order(&eg, &f.graph, &f.library),
+            ["emit"]
+        );
         assert_eq!(*f.emit_calls.lock().await, 1);
         assert!(f.recv_values.lock().await.is_empty());
 
@@ -4031,7 +4077,7 @@ mod events {
             .await?;
 
         // The sink cone ran; emit (neither a sink nor in that cone) did not.
-        let ran = execution_node_names_in_order(&eg);
+        let ran = execution_node_names_in_order(&eg, &graph, &library);
         assert!(ran.contains(&"source".to_string()), "ran = {ran:?}");
         assert!(ran.contains(&"sink".to_string()), "ran = {ran:?}");
         assert!(!ran.contains(&"emit".to_string()), "ran = {ran:?}");
@@ -4100,7 +4146,7 @@ mod events {
         }])
         .await?;
 
-        assert!(execution_node_names_in_order(&eg).is_empty());
+        assert!(execution_node_names_in_order(&eg, &graph, &library).is_empty());
         assert_eq!(*source_calls.lock().await, 0);
 
         Ok(())
@@ -4155,7 +4201,7 @@ mod output_demand {
         eg.update(&graph, &library).unwrap();
         eg.execute_sinks().await?;
 
-        let split = eg.by_name("split").unwrap();
+        let split = execution_node_id(&eg, &graph, &library, "split").unwrap();
         assert_eq!(eg.node_output_demand(split)[0], OutputDemand::Produce);
         assert_eq!(eg.node_output_demand(split)[1], OutputDemand::Skip);
         assert_eq!(eg.node_output_readers(split), &[1, 0]);
@@ -4213,7 +4259,7 @@ mod output_demand {
         eg.update(&graph, &library).unwrap();
         eg.execute_sinks().await?;
 
-        let split = eg.by_name("split").unwrap();
+        let split = execution_node_id(&eg, &graph, &library, "split").unwrap();
         assert_eq!(eg.node_output_demand(split)[0], OutputDemand::Produce);
         assert_eq!(
             eg.node_output_demand(split)[1],
@@ -4331,7 +4377,7 @@ mod topology {
 
         eg.update(&graph, &library).unwrap();
         assert_eq!(eg.compiled.program.e_nodes.len(), 4);
-        assert!(eg.by_name("get_b").is_none());
+        assert!(execution_node_id(&eg, &graph, &library, "get_b").is_none());
 
         eg.execute_sinks().await?;
 
@@ -4689,8 +4735,8 @@ mod graph {
         );
     }
 
-    fn bind_target(eg: &ExecutionEngine, e: &ExecutionNode, input_idx: usize) -> NodeId {
-        match &eg.node_inputs(e)[input_idx].binding {
+    fn bind_target(eg: &ExecutionEngine, node_id: NodeId, input_idx: usize) -> NodeId {
+        match &eg.node_inputs(node_id)[input_idx].binding {
             ExecutionBinding::Bind(addr) => addr.target,
             other => panic!("expected Bind, got {other:?}"),
         }
@@ -4723,10 +4769,17 @@ mod graph {
 
         // get_a, get_b, sum (interior), print — no composite/boundary nodes.
         assert_eq!(eg.compiled.program.e_nodes.len(), 4);
-        let sum = eg.by_name("sum").unwrap();
+        let sum = execution_node_id(&eg, &graph, &library, "sum").unwrap();
         assert_eq!(bind_target(&eg, sum, 0), a_id);
         assert_eq!(bind_target(&eg, sum, 1), b_id);
-        assert_eq!(bind_target(&eg, eg.by_name("Print").unwrap(), 0), sum.id);
+        assert_eq!(
+            bind_target(
+                &eg,
+                execution_node_id(&eg, &graph, &library, "Print").unwrap(),
+                0,
+            ),
+            sum
+        );
     }
 
     /// A func-only graph builds with the node ids unchanged (caches survive).
@@ -4739,7 +4792,10 @@ mod graph {
 
         assert_eq!(eg.compiled.program.e_nodes.len(), graph.len());
         for node in graph.iter() {
-            assert!(eg.by_id(&node.id).is_some(), "id preserved");
+            assert!(
+                eg.compiled.program.e_nodes.contains_key(&node.id),
+                "id preserved"
+            );
         }
     }
 
@@ -4759,14 +4815,7 @@ mod graph {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let sums: Vec<NodeId> = eg
-            .compiled
-            .program
-            .e_nodes
-            .values()
-            .filter(|e| e.name == "sum")
-            .map(|e| e.id)
-            .collect();
+        let sums = execution_node_ids(&eg, &graph, &library, "sum");
         assert_eq!(sums.len(), 2);
         assert_ne!(sums[0], sums[1]);
     }
@@ -4796,7 +4845,7 @@ mod graph {
 
         // Interior node: flattened id is remapped, but attribution points
         // back to the authoring interior id then the enclosing instance.
-        let sum_flat = eg.by_name("sum").unwrap().id;
+        let sum_flat = execution_node_id(&eg, &graph, &library, "sum").unwrap();
         assert_ne!(sum_flat, interior_sum_id, "flattened id is remapped");
         let attr: Vec<_> = eg.compiled.flatten_map.attribution(sum_flat).collect();
         assert_eq!(attr, vec![interior_sum_id, c_id]);
@@ -4823,8 +4872,8 @@ mod graph {
         library
     }
 
-    fn subscriber_ids(eg: &ExecutionEngine, e: &ExecutionNode, event_idx: usize) -> Vec<NodeId> {
-        eg.node_events(e)[event_idx].subscribers.clone()
+    fn subscriber_ids(eg: &ExecutionEngine, node_id: NodeId, event_idx: usize) -> Vec<NodeId> {
+        eg.node_events(node_id)[event_idx].subscribers.clone()
     }
 
     /// A parent subscriber of a composite's exposed event is rewired onto the
@@ -4857,7 +4906,7 @@ mod graph {
         eg.update(&graph, &library).unwrap();
 
         // The flattened interior `ticker` carries the rewired subscriber.
-        let ticker_node = eg.by_name("ticker").unwrap();
+        let ticker_node = execution_node_id(&eg, &graph, &library, "ticker").unwrap();
         assert_eq!(subscriber_ids(&eg, ticker_node, 0), vec![listener_id]);
     }
 
@@ -4887,9 +4936,8 @@ mod graph {
         eg.update(&graph, &library).unwrap();
 
         // The interior `print` flat id is the one wired onto `ticker`'s event.
-        let reactor_flat = eg.by_name("Print").unwrap().id;
-        let ticker_node = eg.by_id(&emitter_id).unwrap();
-        assert_eq!(subscriber_ids(&eg, ticker_node, 0), vec![reactor_flat]);
+        let reactor_flat = execution_node_id(&eg, &graph, &library, "Print").unwrap();
+        assert_eq!(subscriber_ids(&eg, emitter_id, 0), vec![reactor_flat]);
     }
 
     /// Editing a shared (linked) def re-inlines every instance on the next
@@ -4939,19 +4987,12 @@ mod graph {
         captured.lock().unwrap().clear();
 
         // Interior `sum` flat ids (sorted) — for the cache-stability check.
-        let sum_ids = |eg: &ExecutionEngine| -> Vec<NodeId> {
-            let mut ids: Vec<NodeId> = eg
-                .compiled
-                .program
-                .e_nodes
-                .values()
-                .filter(|e| e.name == "sum")
-                .map(|e| e.id)
-                .collect();
+        let sum_ids = |eg: &ExecutionEngine, graph: &Graph, library: &Library| {
+            let mut ids = execution_node_ids(eg, graph, library, "sum");
             ids.sort();
             ids
         };
-        let sum_ids_before = sum_ids(&eg);
+        let sum_ids_before = sum_ids(&eg, &graph, &library);
         assert_eq!(sum_ids_before.len(), 2);
 
         // Edit the linked def: route the exposed output straight from input A
@@ -4980,7 +5021,7 @@ mod graph {
 
         // Same interior `sum` leaves, same ids → caches were preserved, not
         // rebuilt under fresh keys.
-        assert_eq!(sum_ids_before, sum_ids(&eg));
+        assert_eq!(sum_ids_before, sum_ids(&eg, &graph, &library));
         Ok(())
     }
 
@@ -5345,15 +5386,21 @@ mod compile_regressions {
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library).unwrap();
 
-        let make_int = engine.by_name("make_int").unwrap();
-        let make_str = engine.by_name("make_str").unwrap();
+        let make_int = execution_node_id(&engine, &graph, &library, "make_int").unwrap();
+        let make_str = execution_node_id(&engine, &graph, &library, "make_str").unwrap();
         assert_eq!(
-            engine.compiled.program.node_output_types(make_int),
+            engine
+                .compiled
+                .program
+                .node_output_types(&engine.compiled.program.e_nodes[&make_int]),
             &[DataType::Int],
             "make_int reads its own type, not its neighbor's"
         );
         assert_eq!(
-            engine.compiled.program.node_output_types(make_str),
+            engine
+                .compiled
+                .program
+                .node_output_types(&engine.compiled.program.e_nodes[&make_str]),
             &[DataType::String],
             "make_str reads its own type, not its neighbor's"
         );
@@ -5450,11 +5497,9 @@ mod compile_regressions {
                 port_idx: 0,
             }),
         });
-        program.node_order.push(node_id);
         program.e_nodes.insert(
             node_id,
             ExecutionNode {
-                id: node_id,
                 func_id: passthrough.id,
                 inputs: Span::new(0, 1),
                 outputs: Span::new(0, 1),
@@ -5519,9 +5564,7 @@ mod compile_regressions {
         let lib_v2 = make_lib(2, true);
         engine.update(&graph, &lib_v2).unwrap();
         assert_eq!(
-            engine
-                .node_inputs(engine.by_name("generate").unwrap())
-                .len(),
+            engine.node_inputs(generate_id).len(),
             1,
             "the reused flat node picked up the grown input list"
         );
@@ -5580,7 +5623,7 @@ mod compile_regressions {
         eg.execute_sinks().await.unwrap();
 
         assert!(
-            eg.by_id(&sum_interior_id).is_none(),
+            !eg.compiled.program.e_nodes.contains_key(&sum_interior_id),
             "interior ids are remapped at flatten — the key lookup alone must miss"
         );
         let values = eg

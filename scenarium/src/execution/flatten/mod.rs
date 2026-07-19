@@ -33,11 +33,9 @@ use crate::{DataType, StaticValue};
 /// rejected recursive graphs.
 const MAX_DEPTH: usize = 256;
 
-/// Reusable flattening scratch, owned by the [`Compiler`](crate::execution::compile::Compiler)
-/// so its buffers are not re-allocated every compile. The only state is the descent path
-/// (`path`); the current graph at each level is re-derived from it on demand
-/// (`graph_at`), which is cheap at realistic nesting depth and keeps the
-/// struct free of borrowed references (so it can persist).
+/// Reusable flattening scratch owned by the
+/// [`Compiler`](crate::execution::compile::Compiler). The current graph at each level is
+/// re-derived from `path`, keeping the struct free of borrowed references.
 #[derive(Debug, Default)]
 pub(crate) struct Flattener {
     path: Vec<NodeId>,
@@ -50,9 +48,6 @@ pub(crate) struct Flattener {
     /// walk and applied after the node pass (when `e_nodes` is final and
     /// addressable by key). Reused across builds.
     subs: Vec<Subscription>,
-    /// Reusable scratch for the next `inputs` pool, built during emit and
-    /// swapped into the graph (the displaced old pool returns here for reuse).
-    inputs_scratch: Vec<ExecutionInput>,
 }
 
 /// The graph's SoA pools, rebuilt each `build`. Each node's output span is
@@ -75,7 +70,6 @@ impl Flattener {
     pub(crate) fn build(
         &mut self,
         e_nodes: &mut HashMap<NodeId, ExecutionNode>,
-        node_order: &mut Vec<NodeId>,
         pools: Pools<'_>,
         root: &Graph,
         library: &Library,
@@ -85,15 +79,13 @@ impl Flattener {
         self.seen_shared.clear();
         self.subs.clear();
         e_nodes.clear();
-        node_order.clear();
         // Reset to a lone root scope; emit pushes child scopes as it
         // descends composites (scope 0 is the root the stack starts on).
         flatten.reset();
         self.scope_stack.clear();
         self.scope_stack.push(0);
 
-        let mut new_inputs = std::mem::take(&mut self.inputs_scratch);
-        new_inputs.clear();
+        pools.inputs.clear();
         pools.events.clear();
         pools.output_pinned.clear();
         {
@@ -106,9 +98,8 @@ impl Flattener {
                 seen_shared: &mut self.seen_shared,
                 subs: &mut self.subs,
                 e_nodes,
-                node_order,
                 cur_id: NodeId::default(),
-                new_inputs: &mut new_inputs,
+                inputs: pools.inputs,
                 n_outputs: 0,
                 events: pools.events,
                 output_pinned: pools.output_pinned,
@@ -126,9 +117,6 @@ impl Flattener {
                 "output_pinned must have exactly one entry per pooled output port"
             );
         }
-        // Swap the freshly built pools in; recycle the old ones as scratch.
-        std::mem::swap(pools.inputs, &mut new_inputs);
-        self.inputs_scratch = new_inputs;
 
         // Apply resolved event edges now that every flat emitter/subscriber exists and
         // is addressable by key. Subscribers were cleared while rebuilding events.
@@ -222,10 +210,9 @@ struct Run<'a> {
     seen_shared: &'a mut HashSet<GraphId>,
     subs: &'a mut Vec<Subscription>,
     e_nodes: &'a mut HashMap<NodeId, ExecutionNode>,
-    node_order: &'a mut Vec<NodeId>,
     cur_id: NodeId,
     /// The inputs pool being built this update; `cur_id`'s span is its tail.
-    new_inputs: &'a mut Vec<ExecutionInput>,
+    inputs: &'a mut Vec<ExecutionInput>,
     /// Running total of outputs emitted so far; also the next output span start.
     n_outputs: u32,
     events: &'a mut Vec<ExecutionEvent>,
@@ -303,19 +290,6 @@ impl<'a> Run<'a> {
 
             let flat_id = flatten_id(self.path.as_slice(), node.id);
             let input_count = func.inputs.len();
-            self.node_order.push(flat_id);
-            assert!(
-                self.e_nodes
-                    .insert(
-                        flat_id,
-                        ExecutionNode {
-                            id: flat_id,
-                            ..Default::default()
-                        },
-                    )
-                    .is_none(),
-                "flattened node ids must be unique"
-            );
 
             let outputs_start = self.n_outputs;
             self.n_outputs += func.outputs.len() as u32;
@@ -335,34 +309,34 @@ impl<'a> Run<'a> {
             // last build): the library can evolve between updates — a changed
             // `required` flag or a grown input list must land here, and the bindings
             // loop below visits every port anyway.
-            let inputs_start = self.new_inputs.len() as u32;
+            let inputs_start = self.inputs.len() as u32;
             for func_input in &func.inputs {
-                self.new_inputs.push(ExecutionInput {
+                self.inputs.push(ExecutionInput {
                     required: func_input.required,
                     stamper: input_stamper(&func_input.data_type, library),
                     ..Default::default()
                 });
             }
 
-            let e_node = self.e_nodes.get_mut(&flat_id).unwrap();
-            e_node.func_id = func.id;
-            // Refreshed every build (an Arc clone), so a reused flat node can't keep
-            // executing a previous library's lambda after an in-session change.
-            e_node.lambda = func.lambda.clone();
-            e_node.inputs = Span::new(inputs_start, input_count as u32);
-            e_node.outputs = Span::new(outputs_start, func.outputs.len() as u32);
-            e_node.events = Span::new(events_start, func.events.len() as u32);
-            e_node.sink = func.sink;
-            e_node.behavior = func.behavior;
-            // Copy the cache mode; whether its disk bit is actually honored is decided
-            // by the content digest (a node with an impure cone has no digest and
-            // so can't be disk-cached) — see `digest.rs`.
-            e_node.cache = node.cache;
-            // Special-node identity, recognized by the engine (the planner's
-            // run-sinks promotion).
-            e_node.special = special;
-            e_node.name.clear();
-            e_node.name.push_str(&node.name);
+            assert!(
+                self.e_nodes
+                    .insert(
+                        flat_id,
+                        ExecutionNode {
+                            sink: func.sink,
+                            behavior: func.behavior,
+                            cache: node.cache,
+                            special,
+                            inputs: Span::new(inputs_start, input_count as u32),
+                            outputs: Span::new(outputs_start, func.outputs.len() as u32),
+                            events: Span::new(events_start, func.events.len() as u32),
+                            func_id: func.id,
+                            lambda: func.lambda.clone(),
+                        },
+                    )
+                    .is_none(),
+                "flattened node ids must be unique"
+            );
 
             // Record where this flat node came from (current scope + authoring
             // id) so stats map back to editor nodes.
@@ -505,7 +479,7 @@ impl<'a> Run<'a> {
                 port_idx: port.port_idx,
             }),
         };
-        self.new_inputs[pool_idx].binding = binding;
+        self.inputs[pool_idx].binding = binding;
     }
 
     /// Resolve an output reference in the current frame to a concrete flat

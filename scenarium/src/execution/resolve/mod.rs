@@ -106,7 +106,11 @@ pub(crate) struct ResolvedRun {
 
 impl ResolvedRun {
     fn reset(&mut self, program: &ExecutionProgram) {
-        reset_node_map(&mut self.disposition, program.node_ids(), Disposition::Cut);
+        reset_node_map(
+            &mut self.disposition,
+            program.e_nodes.keys().copied(),
+            Disposition::Cut,
+        );
         self.outputs.reset(program.n_outputs());
     }
 }

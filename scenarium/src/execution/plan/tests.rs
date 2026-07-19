@@ -44,11 +44,9 @@ impl Fix {
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = program.e_nodes.len();
         let id = NodeId::from_u128(idx as u128 + 1);
-        program.node_order.push(id);
         program.e_nodes.insert(
             id,
             ExecutionNode {
-                id,
                 sink,
                 func_id: FuncId::from_u128(idx as u128 + 1),
                 inputs: Span::new(inputs_start, inputs.len() as u32),
@@ -148,8 +146,16 @@ fn node_seed_is_both_a_root_and_pinned() {
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
 
-    assert_eq!(p.pinned, vec![a]);
-    assert_eq!(p.roots, vec![a]);
+    assert_eq!(p.pinned, NodeSet::from([a]));
+    assert_eq!(p.roots, NodeSet::from([a]));
+
+    let seeds = RunSeeds {
+        nodes: vec![NodeAddress::root(a), NodeAddress::root(a)],
+        ..Default::default()
+    };
+    planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
+    assert_eq!(p.pinned, NodeSet::from([a]));
+    assert_eq!(p.roots, NodeSet::from([a]));
 }
 
 #[test]
@@ -189,8 +195,8 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
 
     assert_eq!(p.process_order, vec![a, b], "only B's cone, deps first");
-    assert_eq!(p.roots, vec![b]);
-    assert_eq!(p.pinned, vec![b]);
+    assert_eq!(p.roots, NodeSet::from([b]));
+    assert_eq!(p.pinned, NodeSet::from([b]));
     assert!(p.verdicts[&a].wants_execute());
     assert!(p.verdicts[&b].wants_execute());
     assert!(!p.verdicts[&c].wants_execute(), "C never verdicted");
@@ -204,7 +210,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     };
     planner.plan(&f.compiled, &seeds, &mut p).expect("no cycle");
     assert_eq!(p.process_order, vec![a, b, c]);
-    assert_eq!(p.pinned, vec![b]);
+    assert_eq!(p.pinned, NodeSet::from([b]));
 
     // A seed id absent from the program is inconsistent caller state — a hard failure,
     // not a silent skip.

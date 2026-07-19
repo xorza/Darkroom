@@ -7,7 +7,6 @@ use std::time::Duration;
 use common::{CancelToken, Span};
 use tokio::sync::Notify;
 
-use crate::execution::NodeMap;
 use crate::execution::cache::test_support::hydrate;
 use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot, RuntimeCache};
 use crate::execution::digest::{Digest, DigestHasher};
@@ -17,6 +16,7 @@ use crate::execution::program::{
     InputStamper,
 };
 use crate::execution::resource::{FsPathId, RunResourceStamps};
+use crate::execution::{NodeMap, NodeSet};
 use crate::graph::NodeId;
 use crate::node::definition::{FuncBehavior, FuncId};
 use crate::{
@@ -114,11 +114,9 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
         ..Default::default()
     };
     for (node_id, input_start, output_start) in [(first, 0, 0), (second, 1, 1)] {
-        program.node_order.push(node_id);
         program.e_nodes.insert(
             node_id,
             ExecutionNode {
-                id: node_id,
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(10),
                 inputs: Span::new(input_start, 1),
@@ -136,8 +134,8 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
         plan: ExecutionPlan {
             process_order: vec![first, second],
             verdicts,
-            roots: vec![first, second],
-            pinned: Vec::new(),
+            roots: [first, second].into_iter().collect(),
+            pinned: NodeSet::new(),
         },
         first,
         second,
@@ -268,7 +266,6 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
                 ..Default::default()
             },
         ],
-        node_order: vec![producer, first_consumer, second_consumer],
         output_types: vec![DataType::Int, DataType::Int, DataType::Int],
         output_pinned: vec![false, false, false],
         ..Default::default()
@@ -276,7 +273,6 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
     program.e_nodes.insert(
         producer,
         ExecutionNode {
-            id: producer,
             behavior: FuncBehavior::Pure,
             func_id: FuncId::from_u128(1),
             outputs: Span::new(0, 1),
@@ -287,7 +283,6 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
         program.e_nodes.insert(
             node_id,
             ExecutionNode {
-                id: node_id,
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(2),
                 inputs: Span::new(input_start, 1),
@@ -297,14 +292,16 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
         );
     }
     let verdicts = program
-        .node_ids()
+        .e_nodes
+        .keys()
+        .copied()
         .map(|node_id| (node_id, NodeVerdict::Execute))
         .collect();
     let plan = ExecutionPlan {
-        process_order: program.node_ids().collect(),
+        process_order: vec![producer, first_consumer, second_consumer],
         verdicts,
-        roots: vec![first_consumer, second_consumer],
-        pinned: Vec::new(),
+        roots: [first_consumer, second_consumer].into_iter().collect(),
+        pinned: NodeSet::new(),
     };
     let mut cache = RuntimeCache::default();
     cache.reconcile(&program);

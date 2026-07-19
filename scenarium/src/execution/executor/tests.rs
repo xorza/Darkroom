@@ -43,11 +43,9 @@ impl Prog {
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = self.program.e_nodes.len();
         let node_id = NodeId::from_u128(idx as u128 + 1);
-        self.program.node_order.push(node_id);
         self.program.e_nodes.insert(
             node_id,
             ExecutionNode {
-                id: node_id,
                 func_id: FuncId::from_u128(idx as u128 + 1),
                 inputs: Span::new(inputs_start, inputs.len() as u32),
                 outputs: Span::new(outputs_start, outputs),
@@ -87,8 +85,8 @@ fn self_mapped_flatten(program: &ExecutionProgram) -> FlattenMap {
     // `RunProgress` Started/Finished sends, not just the pinned-output push)
     // indexes out of bounds.
     flatten.reset();
-    for e_node in program.e_nodes.values() {
-        flatten.set_leaf(e_node.id, 0, e_node.id);
+    for node_id in program.e_nodes.keys().copied() {
+        flatten.set_leaf(node_id, 0, node_id);
     }
     flatten
 }
@@ -119,7 +117,9 @@ fn run_with_readers(program: &ExecutionProgram, readers: Vec<u32>) -> TestRun {
         plan: structural_plan(program),
         resolved: ResolvedRun {
             disposition: program
-                .node_ids()
+                .e_nodes
+                .keys()
+                .copied()
                 .map(|node_id| (node_id, Disposition::Run))
                 .collect(),
             outputs: ResolvedOutputs {
@@ -150,15 +150,19 @@ fn straight_run(program: &ExecutionProgram) -> TestRun {
 }
 
 fn structural_plan(program: &ExecutionProgram) -> ExecutionPlan {
-    let verdicts = program
-        .node_ids()
+    let process_order: Vec<_> = (0..program.e_nodes.len())
+        .map(|idx| NodeId::from_u128(idx as u128 + 1))
+        .collect();
+    let verdicts = process_order
+        .iter()
+        .copied()
         .map(|node_id| (node_id, NodeVerdict::Execute))
         .collect();
     ExecutionPlan {
-        process_order: program.node_ids().collect(),
+        process_order: process_order.clone(),
         verdicts,
-        roots: program.node_ids().collect(),
-        pinned: Vec::new(),
+        roots: process_order.into_iter().collect(),
+        pinned: NodeSet::new(),
     }
 }
 
@@ -464,7 +468,7 @@ async fn pinned_root_sees_demand_and_survives_drain() {
 
     let mut plan = run_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut plan, a, 0);
-    plan.plan.pinned.push(a);
+    plan.plan.pinned.insert(a);
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
     assert_eq!(
@@ -535,7 +539,7 @@ async fn pinned_root_pushes_every_output() {
     let a = p.node(&[], 2, producer);
 
     let mut plan = straight_run(&p.program);
-    plan.plan.pinned.push(a);
+    plan.plan.pinned.insert(a);
     let (_cache, _stats, pushes) = run_with_pinned(&p.program, &plan).await;
 
     assert_eq!(pushes.len(), 1);

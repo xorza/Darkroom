@@ -54,10 +54,9 @@ impl CompiledGraph {
     }
 }
 
-/// The compile entry point, owning the reusable [`Flattener`] scratch so the
-/// flatten buffers aren't reallocated on every compile. Hosts keep one per
-/// compile site (e.g. darkroom's `Engine`); the produced [`CompiledGraph`] is
-/// always fresh — it's moved to the worker.
+/// The compile entry point, owning reusable [`Flattener`] traversal scratch.
+/// Hosts keep one per compile site (e.g. darkroom's `Engine`); the produced
+/// [`CompiledGraph`] is always fresh — it's moved to the worker.
 #[derive(Debug, Default)]
 pub struct Compiler {
     flattener: Flattener,
@@ -90,7 +89,6 @@ impl Compiler {
         let mut flatten_map = FlattenMap::default();
         self.flattener.build(
             &mut program.e_nodes,
-            &mut program.node_order,
             Pools {
                 inputs: &mut program.inputs,
                 events: &mut program.events,

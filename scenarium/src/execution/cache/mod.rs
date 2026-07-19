@@ -360,7 +360,7 @@ impl RuntimeCache {
     pub(crate) fn reconcile(&mut self, program: &ExecutionProgram) {
         self.slots
             .retain(|node_id, _| program.e_nodes.contains_key(node_id));
-        for node_id in program.node_ids() {
+        for node_id in program.e_nodes.keys().copied() {
             self.slots.entry(node_id).or_default();
         }
     }
@@ -667,7 +667,7 @@ impl RuntimeCache {
         disposition: &NodeMap<Disposition>,
         retain: &NodeSet,
     ) {
-        for node_id in program.node_ids() {
+        for node_id in program.e_nodes.keys().copied() {
             if self.slots[&node_id].output_values().is_none() {
                 continue;
             }

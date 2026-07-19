@@ -277,11 +277,15 @@ impl Executor {
         // one source.
         self.ctx_manager.cancel = cancel;
         self.ctx_manager.logs.clear();
-        reset_node_map(&mut self.outcomes, program.node_ids(), NodeOutcome::Pending);
+        reset_node_map(
+            &mut self.outcomes,
+            program.e_nodes.keys().copied(),
+            NodeOutcome::Pending,
+        );
 
         // Build the run's retention policy (see the field doc): RAM-caching mode or pinned.
         self.retain.clear();
-        for node_id in program.node_ids() {
+        for node_id in program.e_nodes.keys().copied() {
             if program.e_nodes[&node_id].cache.caches_in_ram() {
                 self.retain.insert(node_id);
             }

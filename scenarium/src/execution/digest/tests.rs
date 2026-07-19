@@ -75,11 +75,9 @@ impl Prog {
         let outputs_start = self.program.output_types.len() as u32;
         self.program.output_types.extend_from_slice(types);
         let node_id = node_id(idx);
-        self.program.node_order.push(node_id);
         self.program.e_nodes.insert(
             node_id,
             ExecutionNode {
-                id: node_id,
                 behavior,
                 func_id: FuncId::from_u128(func),
                 inputs: Span::new(inputs_start, bindings.len() as u32),
@@ -113,14 +111,15 @@ struct DigestPair {
 }
 
 /// Fold node digests into a fresh cache the way the executor does — producer-first
-/// in `e_node` order (the test `Prog`s are built that way), each node reading its
+/// in fixture index order, each node reading its
 /// producers' just-stamped `current_digest` — stopping after `through`. Prepares a fresh
 /// resource stamps each call. Returns the cache, holding every computed digest.
 fn digested_cache(program: &ExecutionProgram, through: usize) -> RuntimeCache {
     let mut cache = RuntimeCache::default();
     cache.reconcile(program);
     let mut resource_stamps = RunResourceStamps::default();
-    for node_id in program.node_ids().take(through + 1) {
+    for idx in 0..=through {
+        let node_id = node_id(idx);
         prepare_node(&mut resource_stamps, program, &cache, node_id);
         let digest = node_digest(program, node_id, &cache, &resource_stamps);
         cache.slots.get_mut(&node_id).unwrap().current_digest = digest;
@@ -137,9 +136,8 @@ fn digest_at(program: &ExecutionProgram, idx: usize) -> Option<Digest> {
 fn digests(prog: &Prog) -> Vec<Option<Digest>> {
     let last = prog.program.e_nodes.len().saturating_sub(1);
     let cache = digested_cache(&prog.program, last);
-    prog.program
-        .node_ids()
-        .map(|node_id| cache.slots[&node_id].current_digest)
+    (0..prog.program.e_nodes.len())
+        .map(|idx| cache.slots[&node_id(idx)].current_digest)
         .collect()
 }
 

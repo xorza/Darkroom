@@ -11,7 +11,6 @@ use crate::execution::cache::RuntimeCache;
 use crate::execution::compile::CompiledGraph;
 use crate::execution::plan::ExecutionPlan;
 use crate::execution::program::{ExecutionBinding, ExecutionProgram};
-use crate::graph::NodeId;
 use crate::library::Library;
 
 impl CompiledGraph {
@@ -26,12 +25,7 @@ impl CompiledGraph {
         }
 
         let program = &self.program;
-        let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(program.e_nodes.len());
-        for node_id in program.node_ids() {
-            assert!(seen_node_ids.insert(node_id));
-            let e_node = &program.e_nodes[&node_id];
-            assert_eq!(e_node.id, node_id);
-
+        for e_node in program.e_nodes.values() {
             // A special node's interface is its hardcoded spec, not a library func.
             let func = match e_node.special {
                 Some(s) => s.func(),
@@ -48,7 +42,6 @@ impl CompiledGraph {
                 }
             }
         }
-        assert_eq!(seen_node_ids.len(), program.e_nodes.len());
     }
 
     /// The engine's runtime `cache` has exactly this artifact's node ids after
@@ -61,9 +54,9 @@ impl CompiledGraph {
 
         assert_eq!(cache.slots.len(), self.program.e_nodes.len());
 
-        for node_id in self.program.node_ids() {
-            let e_node = &self.program.e_nodes[&node_id];
-            let slot = &cache.slots[&node_id];
+        for node_id in self.program.e_nodes.keys() {
+            let e_node = &self.program.e_nodes[node_id];
+            let slot = &cache.slots[node_id];
             if let Some(output_values) = slot.output_values() {
                 assert_eq!(output_values.len(), e_node.outputs.len as usize);
             }

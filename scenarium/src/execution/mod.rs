@@ -17,7 +17,6 @@
 //! cross-run cache, and executor) and exposes `install` (phase 1's artifact)
 //! and `execute` (phases 2–3, run back-to-back).
 
-use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
 use common::{CancelToken, Span};
@@ -68,59 +67,37 @@ use program::OutputIdx;
 use resolve::Resolver;
 use resource::RunResourceStamps;
 
-trait ColumnIndex {
-    fn idx(self) -> usize;
-}
-
-impl ColumnIndex for OutputIdx {
-    fn idx(self) -> usize {
-        self.idx()
-    }
-}
-
-/// A `Vec<T>` addressable only by one typed program index.
-#[derive(Debug, Clone)]
-pub(crate) struct Column<I, T> {
+/// A column aligned to the program's flat output pool. Node-local views are sliced by
+/// their compiled output span, while individual entries require an [`OutputIdx`].
+#[derive(Debug, Clone, Default)]
+pub(crate) struct OutputColumn<T> {
     pub(crate) values: Vec<T>,
-    index: PhantomData<fn(I)>,
 }
 
-impl<I, T> Default for Column<I, T> {
-    fn default() -> Self {
-        Self {
-            values: Vec::new(),
-            index: PhantomData,
-        }
-    }
-}
-
-impl<I, T: Clone> Column<I, T> {
+impl<T: Clone> OutputColumn<T> {
     pub(crate) fn reset(&mut self, len: usize, value: T) {
         self.values.clear();
         self.values.resize(len, value);
     }
 }
 
-impl<I, T> From<Vec<T>> for Column<I, T> {
+impl<T> From<Vec<T>> for OutputColumn<T> {
     fn from(values: Vec<T>) -> Self {
-        Self {
-            values,
-            index: PhantomData,
-        }
+        Self { values }
     }
 }
 
-impl<I: ColumnIndex, T> Index<I> for Column<I, T> {
+impl<T> Index<OutputIdx> for OutputColumn<T> {
     type Output = T;
 
-    fn index(&self, i: I) -> &T {
-        &self.values[i.idx()]
+    fn index(&self, index: OutputIdx) -> &T {
+        &self.values[index.idx()]
     }
 }
 
-impl<I: ColumnIndex, T> IndexMut<I> for Column<I, T> {
-    fn index_mut(&mut self, i: I) -> &mut T {
-        &mut self.values[i.idx()]
+impl<T> IndexMut<OutputIdx> for OutputColumn<T> {
+    fn index_mut(&mut self, index: OutputIdx) -> &mut T {
+        &mut self.values[index.idx()]
     }
 }
 
@@ -136,11 +113,7 @@ fn reset_node_map<T: Clone>(
     map.extend(node_ids.map(|node_id| (node_id, value.clone())));
 }
 
-/// A column aligned to the program's flat output pool. Node-local views are sliced by
-/// their compiled output span, while individual entries require an [`OutputIdx`].
-pub(crate) type OutputColumn<T> = Column<OutputIdx, T>;
-
-impl<T> Column<OutputIdx, T> {
+impl<T> OutputColumn<T> {
     pub(crate) fn slice(&self, outputs: Span) -> &[T] {
         &self.values[outputs.range()]
     }
@@ -383,7 +356,7 @@ impl ExecutionEngine {
     /// digest is the same bytes, so [`DiskStore::store`] skips it. Also a no-op for a
     /// node with no resident value.
     pub(crate) async fn store_resident_caches(&mut self) {
-        for node_id in self.compiled.program.node_ids() {
+        for node_id in self.compiled.program.e_nodes.keys().copied() {
             if !self.compiled.program.e_nodes[&node_id]
                 .cache
                 .persists_to_disk()
@@ -484,36 +457,31 @@ impl ExecutionEngine {
         Ok(())
     }
 
-    pub(crate) fn by_id(&self, node_id: &NodeId) -> Option<&ExecutionNode> {
-        self.compiled.program.e_nodes.get(node_id)
-    }
-
-    pub(crate) fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
+    pub(crate) fn node_inputs(&self, node_id: NodeId) -> &[program::ExecutionInput] {
         self.compiled
             .program
-            .e_nodes
-            .values()
-            .find(|node| node.name == node_name)
+            .node_inputs(&self.compiled.program.e_nodes[&node_id])
     }
 
-    pub(crate) fn node_inputs(&self, e_node: &ExecutionNode) -> &[program::ExecutionInput] {
-        self.compiled.program.node_inputs(e_node)
+    pub(crate) fn node_events(&self, node_id: NodeId) -> &[program::ExecutionEvent] {
+        let events = self.compiled.program.e_nodes[&node_id].events;
+        &self.compiled.program.events[events.range()]
     }
 
-    pub(crate) fn node_events(&self, e_node: &ExecutionNode) -> &[program::ExecutionEvent] {
-        &self.compiled.program.events[e_node.events.range()]
+    pub(crate) fn node_output_demand(&self, node_id: NodeId) -> &[OutputDemand] {
+        self.resolver
+            .run
+            .outputs
+            .demand
+            .slice(self.compiled.program.e_nodes[&node_id].outputs)
     }
 
-    pub(crate) fn node_verdict(&self, e_node: &ExecutionNode) -> plan::NodeVerdict {
-        self.plan.verdicts[&e_node.id]
-    }
-
-    pub(crate) fn node_output_demand(&self, e_node: &ExecutionNode) -> &[OutputDemand] {
-        self.resolver.run.outputs.demand.slice(e_node.outputs)
-    }
-
-    pub(crate) fn node_output_readers(&self, e_node: &ExecutionNode) -> &[u32] {
-        self.resolver.run.outputs.readers.slice(e_node.outputs)
+    pub(crate) fn node_output_readers(&self, node_id: NodeId) -> &[u32] {
+        self.resolver
+            .run
+            .outputs
+            .readers
+            .slice(self.compiled.program.e_nodes[&node_id].outputs)
     }
 
     /// Whether `node_id` recomputed (rather than reused a cache) in the last run.
@@ -521,14 +489,9 @@ impl ExecutionEngine {
         self.executor.ran(node_id)
     }
 
-    pub(crate) fn runtime_slot(&self, e_node: &ExecutionNode) -> &cache::RuntimeSlot {
-        &self.cache.slots[&e_node.id]
-    }
-
     /// Seed a node's cached output (simulating a prior run): set the value and
     /// stamp `produced_under` from the current digest, so the planner sees a hit.
-    pub(crate) fn set_output_values(&mut self, node_name: &str, values: Vec<DynamicValue>) {
-        let node_id = self.by_name(node_name).unwrap().id;
+    pub(crate) fn set_output_values(&mut self, node_id: NodeId, values: Vec<DynamicValue>) {
         let slot = self.cache.slots.get_mut(&node_id).unwrap();
         let coverage = cache::CachedOutputCoverage::from_values(&values);
         slot.value = cache::ValueState::Resident {

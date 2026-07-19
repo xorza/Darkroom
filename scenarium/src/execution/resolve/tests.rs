@@ -19,6 +19,7 @@ struct CachedNode {
 #[derive(Default)]
 struct Fix {
     program: ExecutionProgram,
+    order: Vec<NodeId>,
 }
 
 impl Fix {
@@ -40,11 +41,10 @@ impl Fix {
             .resize(outputs_start as usize + outputs as usize, false);
         let idx = self.program.e_nodes.len();
         let node_id = NodeId::from_u128(idx as u128 + 1);
-        self.program.node_order.push(node_id);
+        self.order.push(node_id);
         self.program.e_nodes.insert(
             node_id,
             ExecutionNode {
-                id: node_id,
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(idx as u128 + 1),
                 inputs: Span::new(inputs_start, inputs.len() as u32),
@@ -64,17 +64,19 @@ impl Fix {
     ) -> ResolvedRun {
         let mut verdicts: NodeMap<NodeVerdict> = self
             .program
-            .node_ids()
+            .e_nodes
+            .keys()
+            .copied()
             .map(|node_id| (node_id, NodeVerdict::Execute))
             .collect();
         for node_id in missing {
             *verdicts.get_mut(node_id).unwrap() = NodeVerdict::MissingInputs;
         }
         let plan = ExecutionPlan {
-            process_order: self.program.node_order.clone(),
+            process_order: self.order.clone(),
             verdicts,
-            roots: roots.to_vec(),
-            pinned: pinned.to_vec(),
+            roots: roots.iter().copied().collect(),
+            pinned: pinned.iter().copied().collect(),
         };
         let mut cache = RuntimeCache::default();
         cache.reconcile(&self.program);
