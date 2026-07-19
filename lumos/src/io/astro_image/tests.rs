@@ -22,6 +22,7 @@ fn test_metadata_default() {
     let meta = AstroImageMetadata::default();
     assert!(meta.object.is_none());
     assert!(meta.header_dimensions.is_empty());
+    assert!(meta.camera_white_balance.is_none());
 }
 
 #[test]

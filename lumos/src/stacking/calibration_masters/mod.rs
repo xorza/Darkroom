@@ -126,7 +126,7 @@ pub struct CalibrationMasters {
 }
 
 const CACHE_MAGIC: [u8; 8] = *b"LUMOSCM\0";
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 2;
 
 #[derive(Debug, serde::Serialize)]
 struct CalibrationMastersCacheRef<'a> {

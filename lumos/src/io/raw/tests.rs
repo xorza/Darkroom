@@ -297,6 +297,45 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
     }
 }
 
+#[test]
+fn camera_white_balance_is_canonicalized() {
+    let bayer = SensorType::Bayer(CfaPattern::Rggb);
+    assert_eq!(
+        canonical_camera_white_balance(&bayer, [4.0, 2.0, 3.0, 2.0]),
+        Some([2.0, 1.0, 1.5, 1.0])
+    );
+    assert_eq!(
+        canonical_camera_white_balance(&bayer, [2.0, 1.0, 1.5, 0.0]),
+        Some([2.0, 1.0, 1.5, 1.0])
+    );
+    assert_eq!(
+        canonical_camera_white_balance(&SensorType::XTrans, [2.0, 1.0, 1.5, 9.0]),
+        Some([2.0, 1.0, 1.5, 1.0])
+    );
+    assert_eq!(
+        canonical_camera_white_balance(&SensorType::Monochrome, [2.0, 1.0, 1.5, 1.0]),
+        None
+    );
+}
+
+#[test]
+fn invalid_camera_white_balance_is_absent() {
+    let invalid = [
+        [0.0; 4],
+        [2.0, -1.0, 1.5, 1.0],
+        [2.0, f32::NAN, 1.5, 1.0],
+        [2.0, f32::INFINITY, 1.5, 1.0],
+    ];
+    let sensor_type = SensorType::Bayer(CfaPattern::Rggb);
+
+    for input in invalid {
+        assert!(
+            canonical_camera_white_balance(&sensor_type, input).is_none(),
+            "{input:?}"
+        );
+    }
+}
+
 /// Test that margin pixels (outside active area) are zero after normalization
 /// when raw values are below black level.
 #[test]

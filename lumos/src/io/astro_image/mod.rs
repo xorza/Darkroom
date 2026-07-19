@@ -151,6 +151,11 @@ pub struct AstroImageMetadata {
     /// CFA sensor type, if the image originated from a raw sensor.
     /// `None` for non-CFA sources (FITS, monochrome sensors).
     pub cfa_type: Option<cfa::CfaType>,
+    /// Camera-recorded white-balance multipliers `[R, G1, B, G2]`, normalized so the smallest
+    /// multiplier is `1.0`. X-Trans and RAW metadata without a second green duplicate `G1`.
+    ///
+    /// Metadata only: RAW decoding and calibration keep unity white balance.
+    pub camera_white_balance: Option<[f32; 4]>,
     /// Filter name (e.g. "Ha", "OIII", "L", "R"). Critical for narrowband.
     pub filter: Option<String>,
     /// Camera gain setting (unitless, camera-specific).

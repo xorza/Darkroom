@@ -119,6 +119,9 @@ fn stacked_master_inherits_reference_frame_metadata() {
     f0.metadata.exposure_time = Some(10.0);
     f1.metadata.exposure_time = Some(20.0);
     f2.metadata.exposure_time = Some(30.0);
+    f0.metadata.camera_white_balance = Some([1.5, 1.0, 2.0, 1.0]);
+    f1.metadata.camera_white_balance = Some([2.0, 1.0, 1.25, 1.0]);
+    f2.metadata.camera_white_balance = Some([1.25, 1.0, 1.75, 1.0]);
 
     let config = AlignStackConfig {
         reference: Reference::Index(1),
@@ -131,6 +134,10 @@ fn stacked_master_inherits_reference_frame_metadata() {
         result.product.image.metadata.exposure_time,
         Some(20.0),
         "master must inherit the reference (index 1) metadata, not frame 0's"
+    );
+    assert_eq!(
+        result.product.image.metadata.camera_white_balance,
+        Some([2.0, 1.0, 1.25, 1.0])
     );
 }
 

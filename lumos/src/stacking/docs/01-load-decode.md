@@ -408,8 +408,10 @@ lumos deliberately keeps camera white balance at unity on every RAW path, includ
 the LibRaw fallback. Direct demosaic and calibrate-then-demosaic therefore produce the
 same raw-linear color domain: each channel stays proportional to its sensor signal,
 which is the correct input for per-channel flat division, noise modeling, stacking,
-and photometry. A later explicit color-calibration or display operation may scale
-channels without changing the science pipeline's decode contract.
+and photometry. The camera multipliers remain available as canonical
+`AstroImageMetadata::camera_white_balance` values in `[R, G1, B, G2]` order; they are
+metadata only. A later explicit color-calibration or display operation may apply them
+without changing the science pipeline's decode contract.
 
 The thing astro must **never** do is libraw's full *post-processing* color pipeline:
 `output_color != 0` (camera→sRGB/Adobe matrix), a nonlinear `gamm[]` curve, or
@@ -889,10 +891,9 @@ A concrete, opinionated Stage-1 recipe for an OSC astro pipeline.
 3. Subtract black in linear ADU. For **calibration frames, do not clamp to zero** —
    keep sub-pedestal scatter so master darks/bias are unbiased. Clamp only the white
    end, and only as a saturation flag.
-4. White balance: either leave unity (preferred for rigorous color calibration later)
-   or apply camera multipliers **min-normalized to 1.0** (libraw `!highlight`
-   behavior). Either way it is a per-channel multiply — keep it linear. Never apply
-   `output_color`, gamma, or auto-bright.
+4. Keep white balance at unity. Retain camera multipliers **min-normalized to 1.0**
+   as metadata for optional later color calibration, but never apply them during
+   decode. Never apply `output_color`, gamma, or auto-bright.
 5. **Calibrate on the mosaic**: dark/bias subtract, divide by the prepared flat whose
    divisor uses **per-CFA-color means**, then defect-correct against a
    dark-derived map using same-color neighbors.

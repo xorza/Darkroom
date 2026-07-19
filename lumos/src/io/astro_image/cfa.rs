@@ -209,6 +209,7 @@ mod tests {
             data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
             metadata: AstroImageMetadata {
                 cfa_type: Some(CfaType::Bayer(CfaPattern::Bggr)),
+                camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
                 ..Default::default()
             },
         };
@@ -222,6 +223,10 @@ mod tests {
             loaded.metadata.cfa_type,
             Some(CfaType::Bayer(CfaPattern::Bggr))
         ));
+        assert_eq!(
+            loaded.metadata.camera_white_balance,
+            Some([2.0, 1.0, 1.5, 1.0])
+        );
     }
 
     #[test]

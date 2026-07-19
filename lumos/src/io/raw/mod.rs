@@ -219,6 +219,29 @@ fn consolidate_black_levels(
     })
 }
 
+fn canonical_camera_white_balance(sensor_type: &SensorType, cam_mul: [f32; 4]) -> Option<[f32; 4]> {
+    if matches!(sensor_type, SensorType::Monochrome) {
+        return None;
+    }
+
+    let mut multipliers = cam_mul;
+    if matches!(sensor_type, SensorType::XTrans) || multipliers[3] == 0.0 {
+        multipliers[3] = multipliers[1];
+    }
+    if multipliers
+        .iter()
+        .any(|multiplier| !multiplier.is_finite() || *multiplier <= 0.0)
+    {
+        return None;
+    }
+
+    let minimum = multipliers.iter().copied().fold(f32::MAX, f32::min);
+    for multiplier in &mut multipliers {
+        *multiplier /= minimum;
+    }
+    Some(multipliers)
+}
+
 /// Apply per-channel black delta correction to Bayer data.
 ///
 /// Operates on data already normalized with the common black level.
@@ -318,6 +341,7 @@ struct UnpackedRaw {
     black_level: BlackLevel,
     filters: u32,
     sensor_type: SensorType,
+    camera_white_balance: Option<[f32; 4]>,
     iso: Option<u32>,
 }
 
@@ -692,6 +716,9 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     let black_level = consolidate_black_levels(&cblack_raw, black_raw, maximum_raw, filters)
         .map_err(|reason| raw_err(path, reason))?;
 
+    // SAFETY: inner is valid, and color.cam_mul is initialized after unpack.
+    let cam_mul = unsafe { (*inner).color.cam_mul };
+    let camera_white_balance = canonical_camera_white_balance(&sensor_type, cam_mul);
     let iso = extract_iso(inner);
 
     Ok(UnpackedRaw {
@@ -708,6 +735,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
         black_level,
         filters,
         sensor_type,
+        camera_white_balance,
         iso,
     })
 }
@@ -818,6 +846,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
         bitpix: BitPix::UInt16,
         header_dimensions: vec![height, width, channels],
         cfa_type,
+        camera_white_balance: raw.camera_white_balance,
         ..Default::default()
     };
     drop(raw);
@@ -891,6 +920,7 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage, ImageError> {
         bitpix: BitPix::UInt16,
         header_dimensions: vec![raw.height, raw.width, 1],
         cfa_type: Some(cfa_type),
+        camera_white_balance: raw.camera_white_balance,
         ..Default::default()
     };
 

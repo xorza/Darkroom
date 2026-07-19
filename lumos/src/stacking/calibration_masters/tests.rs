@@ -738,6 +738,7 @@ fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
         ),
         metadata: AstroImageMetadata {
             cfa_type: Some(cfa_type.clone()),
+            camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
             ..Default::default()
         },
     };
@@ -800,6 +801,10 @@ fn prepared_master_cache_round_trips_flat_and_calibration_bit_exactly() {
             .map(|value| value.to_bits())
             .collect::<Vec<_>>(),
         prepared_bits
+    );
+    assert_eq!(
+        loaded.flat.as_ref().unwrap().metadata.camera_white_balance,
+        Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
         loaded.components().collect::<Vec<_>>(),

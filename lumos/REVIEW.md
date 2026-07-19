@@ -168,8 +168,8 @@ detectors through parallel frame processing without thread-local state. On the 1
 
 - [x] **Choose one white-balance policy for calibrated and direct RAW output.**
   Both workflows now keep camera white balance at unity, so direct decode and
-  calibrate-then-demosaic remain raw-linear and comparable. Camera preview multipliers are not
-  carried or applied; color scaling is an explicit downstream operation.
+  calibrate-then-demosaic remain raw-linear and comparable. Canonical camera preview multipliers
+  are retained in metadata but never applied; color scaling is an explicit downstream operation.
 
 ## Deferred pending evidence or product direction
 

@@ -2,17 +2,18 @@ use std::io::{Error, ErrorKind};
 
 use imaginarium::Buffer2;
 use lumos::{
-    AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, CacheConfig,
-    CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet, CombineMethod,
-    DefectSummary, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FrameStoreError,
-    GesdConfig, ImageDimensions, InterpolationMethod, LinearFitClipConfig, NoiseModel,
-    Normalization, PercentileClipConfig, RansacConfig, RegistrationCatalog, RegistrationConfig,
-    RegistrationError, RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN,
-    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
-    StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionConfigError,
-    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
-    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
-    Transform, TransformType, TriangleConfig, WarpParams, Weighting, WinsorizedClipConfig,
+    AlignStackError, AlignStackResult, AlignmentSummary, AstroImage, AstroImageMetadata,
+    CacheConfig, CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet,
+    CombineMethod, DefectSummary, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame,
+    FrameStoreError, GesdConfig, ImageDimensions, InterpolationMethod, LinearFitClipConfig,
+    NoiseModel, Normalization, PercentileClipConfig, RansacConfig, RegistrationCatalog,
+    RegistrationConfig, RegistrationError, RegistrationMatchingConfig, Rejection, SigmaClipConfig,
+    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
+    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
+    StarDetectionConfigError, StarDetectionDiagnostics, StarDetectionFilterConfig,
+    StarDetectionFwhmConfig, StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics,
+    StarDetector, StarMatch, Transform, TransformType, TriangleConfig, WarpParams, Weighting,
+    WinsorizedClipConfig,
 };
 
 #[test]
@@ -138,6 +139,12 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
 
 #[test]
 fn invariant_types_expose_validated_state_from_the_crate_root() {
+    let metadata = AstroImageMetadata {
+        camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
+        ..Default::default()
+    };
+    assert_eq!(metadata.camera_white_balance, Some([2.0, 1.0, 1.5, 1.0]));
+
     let dimensions = ImageDimensions::new((12, 8), 3);
     assert_eq!(dimensions.size(), (12, 8).into());
     assert_eq!(dimensions.channels(), 3);

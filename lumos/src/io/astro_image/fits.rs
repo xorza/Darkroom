@@ -119,6 +119,7 @@ fn read_metadata(
         bitpix,
         header_dimensions,
         cfa_type: read_cfa_from_headers(header)?,
+        camera_white_balance: None,
         filter: read_text(header, "FILTER")?,
         gain: header.get_real("GAIN")?,
         egain: header.get_real("EGAIN")?,

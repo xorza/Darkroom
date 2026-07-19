@@ -88,7 +88,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 ## io/raw — RAW decode & demosaic
 
-- `load_raw` (`io/raw/mod.rs:722`): libraw unpack → black-level consolidation (replicates libraw `adjust_bl()`) → sensor-type dispatch: Mono (no demosaic) / Bayer (RCD) / X-Trans (Markesteijn) / Unknown (libraw fallback). Camera white balance is deliberately disabled on every path, keeping channels raw-linear for calibration, stacking, and later explicit color calibration. Returns `AstroImage`.
+- `load_raw` (`io/raw/mod.rs:722`): libraw unpack → black-level consolidation (replicates libraw `adjust_bl()`) → sensor-type dispatch: Mono (no demosaic) / Bayer (RCD) / X-Trans (Markesteijn) / Unknown (libraw fallback). Camera white balance is deliberately disabled on every path, keeping channels raw-linear for calibration, stacking, and later explicit color calibration; canonical `[R, G1, B, G2]` camera multipliers are retained as metadata only. Returns `AstroImage`.
 - `load_raw_cfa` (`io/raw/mod.rs:792`): un-demosaiced single-channel `CfaImage` for the calibration path (defect correction before demosaic).
 - `normalize.rs`: `normalize_u16_to_f32_parallel` (`clamp((v-black).max(0) * inv_range)`), SIMD SSE4.1/NEON + scalar.
 - `demosaic/bayer`: `CfaPattern` (RGGB/BGGR/GRBG/GBRG, `from_bayerpat`/`flip_*`/`color_at`), `BayerImage`, `demosaic_bayer` → RCD (Ratio-Corrected Demosaicing v2.3, fused V/H direction detection, 4-px border, rayon row-parallel).

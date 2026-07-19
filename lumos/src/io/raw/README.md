@@ -38,6 +38,8 @@ raw/
 
 Every path keeps camera white balance at unity. RAW channel values therefore remain proportional
 to sensor signal; color scaling belongs to a later explicit color-calibration or display step.
+The camera-recorded multipliers are retained canonically as `[R, G1, B, G2]` in
+`AstroImageMetadata` for optional downstream use, but are never applied during RAW decoding.
 
 ## SIMD Strategy
 
