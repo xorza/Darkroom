@@ -51,6 +51,46 @@ fn test_two_separated_stars_deblend() {
 }
 
 #[test]
+fn test_late_gaussian_split_uses_full_threshold_ladder() {
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(100, 100, &[(44, 50, 1.0, 4.0), (56, 50, 1.0, 4.0)]);
+
+    let threshold_count = 32;
+    let low = data
+        .iter_pixels(&pixels, &labels)
+        .map(|pixel| pixel.value)
+        .fold(f32::MAX, f32::min);
+    let high = data.find_peak(&pixels, &labels).value;
+    let low = low.max(high * 1e-6).max(f32::MIN_POSITIVE);
+    let ratio = (high / low).max(1.0);
+    let saddle = pixels[(50, 50)];
+    let split_level = (0..=threshold_count)
+        .find(|&level| {
+            let t = level as f32 / threshold_count as f32;
+            low * ratio.powf(t) > saddle
+        })
+        .unwrap();
+
+    assert!(
+        split_level > 4,
+        "fixture must stay connected through the old four-level early-exit window, split at {split_level}"
+    );
+
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, threshold_count, 3, 0.005);
+    let mut peaks: Vec<_> = result.iter().map(|region| region.peak.x).collect();
+    peaks.sort_unstable();
+
+    assert_eq!(
+        peaks,
+        vec![44, 56],
+        "the configured full ladder must reach both peaks after crossing their saddle"
+    );
+}
+
+#[test]
 fn test_faint_secondary_below_contrast() {
     let TestComponent {
         pixels,

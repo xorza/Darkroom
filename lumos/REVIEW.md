@@ -6,14 +6,13 @@ Updated 2026-07-19 against the current Lumos source.
 
 The review now tracks implementation status instead of preserving the original snapshot:
 
-- 12 findings completed;
-- 13 concrete findings open;
+- 15 findings completed;
+- 10 concrete findings open;
 - 1 allocation finding partially resolved;
 - 2 proposals deferred until there is a product decision or measured failure.
 
-The remaining highest-priority work is algorithmic correctness in deblending, FWHM propagation,
-background fitting, and final RANSAC refits. Lower-priority work is mostly invariant enforcement
-and repeated whole-frame work.
+The remaining highest-priority work is correctness in final RANSAC refits. Lower-priority work is
+mostly invariant enforcement and repeated whole-frame work.
 
 Scope: production code under `lumos/src`, `lumos/Cargo.toml`, production callers, and the published
 surface. Paths and symbol names are used instead of brittle line numbers.
@@ -82,28 +81,27 @@ surface. Paths and symbol names are used instead of brittle line numbers.
   Integer `BLANK` and floating non-finite samples are rejected with their total count and first
   linear index until the image model carries a validity plane.
 
+- [x] **Process the full multi-threshold deblend ladder.**
+  `stacking::star_detection::deblend::multi_threshold` no longer treats four levels without a
+  split as terminal because a later threshold can still cross a connected pair's saddle. A
+  two-Gaussian regression stays connected through that old exit window and separates at the
+  expected late ladder level.
+
+- [x] **Use the effective FWHM for final star measurement.**
+  The same manual, estimated, or fallback FWHM now drives matched-filter detection, measurement
+  stamp radius, and centroid weighting. Narrow and broad synthetic PSFs cross-check auto mode
+  against a fixed run using the returned estimate.
+
+- [x] **Fit background surfaces with rank-checked SVD.**
+  `image_ops::background_extraction` solves the original design matrix instead of normal equations
+  and LU. Rank-deficient sample geometry returns `OpError::RankDeficient` without rewriting the
+  failed channel instead of silently substituting a zero surface.
+
 Completed follow-up work not present in the original review: `DetectorPool` threads reusable
 detectors through parallel frame processing without thread-local state. On the 16 × 1 MP,
 8-thread benchmark, reuse reduced the median from 50.06 ms to 41.91 ms.
 
 ## Batch 1 — Algorithmic correctness
-
-- [ ] **Remove the invalid multi-threshold deblend early exit.**
-  `stacking::star_detection::deblend::multi_threshold` stops after four levels without a split,
-  although connected peaks can split only after a later threshold crosses their saddle. Process
-  the configured ladder fully unless a mathematically terminal state is reached, and compare a
-  late-splitting two-Gaussian fixture with a full-ladder reference.
-
-- [ ] **Use the auto-estimated FWHM for final measurement.**
-  Detection receives the effective estimate, but measurement still receives
-  `config.fwhm.expected`. That seed controls stamp radius and centroid weighting. Pass the
-  estimated value with its explicit fallback and validate narrow and broad synthetic PSFs far from
-  the configured seed.
-
-- [ ] **Use a stable least-squares solve for background extraction and report rank failure.**
-  `image_ops::background_extraction::solve_ls` forms normal equations, solves with LU, and silently
-  substitutes zero coefficients on failure. Solve the original system with pivoted QR or SVD and
-  propagate `OpError`; do not let subtract/divide silently succeed as a no-op.
 
 - [ ] **Accept the final RANSAC refit only when it preserves the robust solution.**
   Hypotheses and local optimization are checked for plausibility and score improvement, but the

@@ -4,7 +4,7 @@
 
 use imaginarium::{ColorFormat, Image};
 
-/// Why a display/processing op was rejected before it ran.
+/// Why a display/processing op failed.
 #[derive(Debug, thiserror::Error)]
 pub enum OpError {
     /// The image isn't a linear f32 master (`L_F32` or `RGB_F32`).
@@ -13,6 +13,13 @@ pub enum OpError {
     /// A configuration parameter is outside its valid range.
     #[error("invalid config: {0}")]
     InvalidConfig(String),
+    /// A model's design matrix does not contain enough independent information.
+    #[error("{operation} is rank deficient: rank {rank}, requires {required_rank}")]
+    RankDeficient {
+        operation: &'static str,
+        rank: usize,
+        required_rank: usize,
+    },
 }
 
 /// The display ops are defined on a linear f32 master in L or RGB; reject anything else

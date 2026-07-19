@@ -433,11 +433,6 @@ pub(crate) fn deblend_multi_threshold(
     assign_pixels_to_objects(data, pixels, labels, &tree, &leaves)
 }
 
-/// Number of consecutive levels without splits before early termination.
-/// Once all regions have stabilized (no further splits), continuing is unlikely
-/// to find new structure. This saves ~30-50% of iterations in typical cases.
-const EARLY_TERMINATION_LEVELS: usize = 4;
-
 /// Inline capacity for deblend tree SmallVec.
 /// Measurements show avg ~3 nodes, max ~170, so 16 covers most cases on stack.
 const TREE_INLINE_CAP: usize = 16;
@@ -448,7 +443,6 @@ type DeblendTree = SmallVec<[DeblendNode; TREE_INLINE_CAP]>;
 /// Build the deblending tree by tracking connectivity at each threshold level.
 ///
 /// Uses exponentially spaced thresholds for better resolution at faint levels.
-/// Implements early termination: stops if no splits occur for N consecutive levels.
 #[allow(clippy::too_many_arguments)]
 fn build_deblend_tree(
     data: &ComponentData,
@@ -486,9 +480,6 @@ fn build_deblend_tree(
         .pixel_to_node
         .reset_with_pixels(&buffers.component_pixels);
 
-    // Early termination: track consecutive levels without splits
-    let mut levels_without_splits = 0;
-
     // Process each threshold level from low to high
     for level in 0..=n_thresholds {
         let t = level as f32 / n_thresholds.max(1) as f32;
@@ -504,7 +495,7 @@ fn build_deblend_tree(
         );
 
         if buffers.above_threshold.is_empty() {
-            continue;
+            break;
         }
 
         // Recycle previous regions before finding new ones
@@ -518,8 +509,6 @@ fn build_deblend_tree(
             &mut buffers.pixel_grid,
             &mut buffers.bfs_queue,
         );
-
-        let tree_size_before = tree.len();
 
         if level == 0 {
             process_root_level(&mut tree, &mut buffers.pixel_to_node, &buffers.regions);
@@ -536,16 +525,6 @@ fn build_deblend_tree(
                 &mut buffers.pixel_grid,
                 &mut buffers.bfs_queue,
             );
-        }
-
-        // Check for early termination: no new nodes created means no splits
-        if tree.len() == tree_size_before && level > 0 {
-            levels_without_splits += 1;
-            if levels_without_splits >= EARLY_TERMINATION_LEVELS {
-                break;
-            }
-        } else {
-            levels_without_splits = 0;
         }
     }
 

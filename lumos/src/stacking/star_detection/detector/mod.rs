@@ -150,6 +150,7 @@ impl StarDetector {
             &self.config.filter,
             resources,
         );
+        let effective_fwhm = fwhm_result.fwhm.unwrap_or(0.0);
 
         // Step 4: Detect star candidate regions (with optional matched filter)
         let detect_result = stages::detect::detect(
@@ -165,7 +166,7 @@ impl StarDetector {
             connected_components: detect_result.connected_components,
             candidates_after_filtering: detect_result.regions.len(),
             deblended_components: detect_result.deblended_components,
-            estimated_fwhm: fwhm_result.fwhm.unwrap_or(0.0),
+            estimated_fwhm: effective_fwhm,
             fwhm_estimation_star_count: fwhm_result.stars_used,
             fwhm_was_auto_estimated: fwhm_result.stars_used > 0,
             ..Default::default()
@@ -178,7 +179,7 @@ impl StarDetector {
             &grayscale_image,
             &background,
             &self.config.measurement,
-            self.config.fwhm.expected,
+            effective_fwhm,
         );
         diagnostics.stars_after_centroid = stars.len();
 
@@ -234,6 +235,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use crate::stacking::star_detection::detector::*;
+    use crate::stacking::star_detection::synthetic_tests::Scenario;
 
     #[test]
     fn constructor_rejects_invalid_configuration() {
@@ -249,5 +251,67 @@ mod tests {
             error,
             StarDetectionConfigError::InvalidSigmaThreshold { value: 0.0 }
         );
+    }
+
+    #[test]
+    fn auto_estimated_fwhm_is_used_for_final_measurement() {
+        for (actual_fwhm, configured_seed, flux) in
+            [(2.5, 8.0, (3.0, 8.0)), (7.0, 1.0, (10.0, 30.0))]
+        {
+            let frame = Scenario {
+                num_stars: 40,
+                flux,
+                fwhm: actual_fwhm,
+                ..Default::default()
+            }
+            .frame();
+            let mut auto_config = Config::default();
+            auto_config.fwhm.expected = configured_seed;
+            auto_config.fwhm.auto_estimate = true;
+            auto_config.fwhm.min_stars = 5;
+            auto_config.filter.min_snr = 1.0;
+            auto_config.filter.max_eccentricity = 1.0;
+            auto_config.filter.max_sharpness = 1.0;
+            auto_config.filter.max_roundness = 1.0;
+            auto_config.filter.max_fwhm_deviation = 0.0;
+            auto_config.filter.duplicate_min_separation = 0.0;
+
+            let auto_result = StarDetector::from_config(auto_config.clone())
+                .unwrap()
+                .detect(&frame.image);
+            assert!(
+                auto_result.diagnostics.fwhm_was_auto_estimated,
+                "FWHM {actual_fwhm} fixture must produce a genuine estimate"
+            );
+            let effective_fwhm = auto_result.diagnostics.estimated_fwhm;
+            assert!(
+                (effective_fwhm - configured_seed).abs() > 1.0,
+                "fixture must estimate far from its configured seed: estimate {effective_fwhm}, seed {configured_seed}"
+            );
+
+            let mut manual_config = auto_config;
+            manual_config.fwhm.expected = effective_fwhm;
+            manual_config.fwhm.auto_estimate = false;
+            let manual_result = StarDetector::from_config(manual_config)
+                .unwrap()
+                .detect(&frame.image);
+
+            assert_eq!(
+                auto_result.stars.len(),
+                manual_result.stars.len(),
+                "auto and equivalent manual FWHM must retain the same stars for PSF {actual_fwhm}"
+            );
+            for (auto, manual) in auto_result.stars.iter().zip(&manual_result.stars) {
+                assert_eq!(auto.pos, manual.pos);
+                assert_eq!(auto.flux.to_bits(), manual.flux.to_bits());
+                assert_eq!(auto.fwhm.to_bits(), manual.fwhm.to_bits());
+                assert_eq!(auto.eccentricity.to_bits(), manual.eccentricity.to_bits());
+                assert_eq!(auto.snr.to_bits(), manual.snr.to_bits());
+                assert_eq!(auto.peak.to_bits(), manual.peak.to_bits());
+                assert_eq!(auto.sharpness.to_bits(), manual.sharpness.to_bits());
+                assert_eq!(auto.roundness1.to_bits(), manual.roundness1.to_bits());
+                assert_eq!(auto.roundness2.to_bits(), manual.roundness2.to_bits());
+            }
+        }
     }
 }

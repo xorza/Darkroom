@@ -89,19 +89,12 @@ From astronomical surveys:
 - Connected component finding uses grid-based lookup for O(1) pixel access
 - For very large components, consider reducing `n_thresholds`
 
-### Early Termination Optimization
+### Full-Ladder Processing
 
-The implementation includes an early termination optimization that stops processing threshold levels if no splits occur for 4 consecutive levels. This is safe because:
-
-1. **Branching semantics**: SExtractor's tree "branches every time there are pixels above a threshold separated by pixels below it". Once a region stops branching, continuing to higher thresholds won't create new branches - it will only shrink existing regions.
-
-2. **Contrast criterion is the quality gate**: The `min_contrast` parameter (DEBLEND_MINCONT) determines whether a branch is a separate object, not the number of threshold levels processed. If splits have converged, additional levels add no information.
-
-3. **Structure stabilization**: When regions have stabilized (no further splits), there are no hidden sub-peaks that would reveal themselves at higher thresholds.
-
-4. **Safety margin**: The 4 consecutive levels buffer accounts for noise or threshold spacing that might delay a split.
-
-This optimization provides ~65% speedup in benchmarks while maintaining detection accuracy (all 83 deblend tests pass).
+The implementation processes every configured threshold because several levels without a split are
+not terminal: a later threshold can still cross the saddle between connected peaks. It stops early
+only when no component pixels remain above the current threshold, since all later thresholds are
+higher.
 
 ### Edge Cases
 
@@ -111,13 +104,15 @@ This optimization provides ~65% speedup in benchmarks while maintaining detectio
 
 ## File Structure
 
-- `multi_threshold.rs` - Main algorithm implementation
-- `local_maxima.rs` - Faster alternative for well-separated stars
-- `mod.rs` - Module exports and shared types (`ComponentData`, `Pixel`)
+- `multi_threshold/mod.rs` - Main algorithm implementation
+- `multi_threshold/tests.rs` - Correctness and regression tests
+- `multi_threshold/bench.rs` - Quickbench performance tests
+- `local_maxima/` - Faster alternative for well-separated stars
+- `deblend/mod.rs` - Shared types (`ComponentData`, `Pixel`)
 
 ## Testing
 
-22 tests cover:
+Regression tests cover:
 - Single/multiple star deblending
 - Contrast criterion at boundary
 - Pixel conservation

@@ -137,7 +137,8 @@ impl Denoise {
                 self.strength,
                 &mut scratch,
             );
-        });
+            Ok(())
+        })?;
         Ok(())
     }
 

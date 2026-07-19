@@ -204,3 +204,35 @@ fn rejects_degree_out_of_range() {
         "expected an InvalidConfig degree error, got {err:?}"
     );
 }
+
+#[test]
+fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
+    let mut img = gray(8, 64, |x, y| 0.2 + 0.01 * x as f32 + 0.001 * y as f32);
+    let before = channel(&img, 0).pixels().to_vec();
+
+    let err = ExtractBackground {
+        degree: 1,
+        tile_size: 8,
+        iterations: 0,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap_err();
+
+    assert!(
+        matches!(
+            &err,
+            OpError::RankDeficient {
+                operation: "background surface fit",
+                rank: 2,
+                required_rank: 3,
+            }
+        ),
+        "expected the one-column sample grid's rank failure, got {err:?}"
+    );
+    assert_eq!(
+        channel(&img, 0).pixels(),
+        before,
+        "a failed fit must not partially rewrite its channel"
+    );
+}

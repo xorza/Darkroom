@@ -33,6 +33,8 @@ use common::Rgb;
 use imaginarium::{Buffer2, ChannelCount, Image};
 use rayon::prelude::*;
 
+use crate::image_ops::op::OpError;
+
 /// Pixels per rayon work item. Parallelizing per pixel (`par_chunks_mut(3)`) drowns a cheap
 /// per-pixel op in rayon's recursive split/join overhead (it dominated SCNR); a coarse block
 /// amortizes that while staying load-balanced and letting the inner loop auto-vectorize.
@@ -146,14 +148,18 @@ fn apply_intensity_remap(image: &mut Image, intensity: &Buffer2<f32>, mapped: &B
 /// whose per-channel 2D work is cache-friendly on planar data. Streaming bounds the
 /// planar scratch at a single plane whatever the channel count — a full RGB deinterleave
 /// would hold three (~an extra full image resident).
-pub(crate) fn process_channels(image: &mut Image, mut process: impl FnMut(&mut Buffer2<f32>)) {
+pub(crate) fn process_channels(
+    image: &mut Image,
+    mut process: impl FnMut(&mut Buffer2<f32>) -> Result<(), OpError>,
+) -> Result<(), OpError> {
     let channels = image.desc.color_format.channel_count.channel_count() as usize;
     let mut plane = Buffer2::new_default(image.desc.width, image.desc.height);
     for channel in 0..channels {
         gather_channel(image, channel, channels, &mut plane);
-        process(&mut plane);
+        process(&mut plane)?;
         scatter_channel(image, channel, channels, &plane);
     }
+    Ok(())
 }
 
 /// Copy channel `channel` of the interleaved `image` into `plane`.
@@ -246,7 +252,9 @@ mod tests {
             for p in plane.pixels_mut() {
                 *p += 1.0;
             }
-        });
+            Ok(())
+        })
+        .unwrap();
         // Each channel arrived as its contiguous plane, R then G then B...
         assert_eq!(
             seen,
@@ -265,7 +273,9 @@ mod tests {
             for p in plane.pixels_mut() {
                 *p *= 2.0;
             }
-        });
+            Ok(())
+        })
+        .unwrap();
         assert_eq!(bytemuck::cast_slice::<u8, f32>(l.bytes()), &[0.5, 1.0, 1.5]);
     }
 }

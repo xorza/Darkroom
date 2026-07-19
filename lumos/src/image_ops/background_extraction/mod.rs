@@ -111,15 +111,15 @@ impl ExtractBackground {
     ///
     /// # Errors
     /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32`; [`OpError::InvalidConfig`]
-    /// on out-of-range parameters.
+    /// on out-of-range parameters; [`OpError::RankDeficient`] when the sample geometry cannot
+    /// determine the requested polynomial.
     pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
         self.validate()?;
         require_f32_master(image)?;
         let mut workspace = MeshWorkspace::default();
         process_channels(image, |plane| {
-            extract_background_plane(plane, self, &mut workspace);
-        });
-        Ok(())
+            extract_background_plane(plane, self, &mut workspace)
+        })
     }
 
     fn validate(&self) -> Result<(), OpError> {
@@ -145,22 +145,23 @@ fn extract_background_plane(
     plane: &mut Buffer2<f32>,
     config: &ExtractBackground,
     workspace: &mut MeshWorkspace,
-) {
+) -> Result<(), OpError> {
     let samples = collect_samples(plane, config.tile_size, workspace);
     let terms = poly_terms(effective_degree(samples.len(), config.degree));
-    let coeffs = fit_surface(&samples, &terms, config.rejection_sigma, config.iterations);
+    let coeffs = fit_surface(&samples, &terms, config.rejection_sigma, config.iterations)?;
     let surface = Surface::new(&coeffs, &terms, plane.width(), plane.height());
     match config.mode {
         BackgroundMode::Subtract => surface.remove(plane, |p, m| p - m),
         BackgroundMode::Divide => {
             let mean = surface.mean();
             if mean <= 0.0 {
-                return; // degenerate model (mean ≤ 0) — leave the channel untouched
+                return Ok(()); // degenerate model (mean ≤ 0) — leave the channel untouched
             }
             let (mean, floor) = (mean as f32, config.divide_floor);
             surface.remove(plane, |p, m| p / (m / mean).max(floor));
         }
     }
+    Ok(())
 }
 
 /// One robust sky sample per tile, at the tile centre, with coordinates normalized to `[-1, 1]`.
@@ -238,18 +239,28 @@ fn eval(coeffs: &DVector<f64>, terms: &[(u32, u32)], x: f64, y: f64) -> f64 {
         .sum()
 }
 
-/// Least-squares solve of the normal equations `AᵀA c = Aᵀz` for the given samples and terms.
-fn solve_ls(samples: &[Sample], terms: &[(u32, u32)]) -> DVector<f64> {
+/// Least-squares solve of the original design matrix using SVD.
+fn solve_ls(samples: &[Sample], terms: &[(u32, u32)]) -> Result<DVector<f64>, OpError> {
     let (m, k) = (samples.len(), terms.len());
     let a = DMatrix::from_fn(m, k, |r, c| {
         let (i, j) = terms[c];
         samples[r].x.powi(i as i32) * samples[r].y.powi(j as i32)
     });
     let z = DVector::from_fn(m, |r, _| samples[r].z);
-    let at = a.transpose();
-    let ata = &at * &a;
-    let atz = &at * z;
-    ata.lu().solve(&atz).unwrap_or_else(|| DVector::zeros(k))
+    let svd = a.svd(true, true);
+    let largest_singular_value = svd.singular_values.iter().copied().fold(0.0, f64::max);
+    let tolerance = f64::EPSILON * m.max(k) as f64 * largest_singular_value;
+    let rank = svd.rank(tolerance);
+    if rank < k {
+        return Err(OpError::RankDeficient {
+            operation: "background surface fit",
+            rank,
+            required_rank: k,
+        });
+    }
+    Ok(svd
+        .solve(&z, tolerance)
+        .expect("SVD was constructed with both singular-vector matrices"))
 }
 
 /// Fit the surface, then iteratively reject samples whose residual exceeds `kappa·σ` and refit
@@ -259,9 +270,9 @@ fn fit_surface(
     terms: &[(u32, u32)],
     kappa: f32,
     iterations: usize,
-) -> DVector<f64> {
+) -> Result<DVector<f64>, OpError> {
     let mut active: Vec<Sample> = samples.to_vec();
-    let mut coeffs = solve_ls(&active, terms);
+    let mut coeffs = solve_ls(&active, terms)?;
     for _ in 0..iterations {
         let residuals: Vec<f64> = active
             .iter()
@@ -282,9 +293,9 @@ fn fit_surface(
             break; // converged, or refusing to drop below a determined fit
         }
         active = kept;
-        coeffs = solve_ls(&active, terms);
+        coeffs = solve_ls(&active, terms)?;
     }
-    coeffs
+    Ok(coeffs)
 }
 
 /// MAD-scaled robust sigma of residuals (`1.4826 · median|r − median(r)|`).
