@@ -143,8 +143,9 @@ impl DiskStore {
         snapshot: &OutputSnapshot,
         ctx: &mut ContextManager,
     ) {
+        let coverage = CachedOutputCoverage::from_values(&snapshot.values);
         if target.coverage().is_some_and(|stored| {
-            stored.ports.len() == snapshot.coverage.ports.len() && stored.covers(&snapshot.coverage)
+            stored.ports.len() == coverage.ports.len() && stored.covers(&coverage)
         }) {
             return;
         }
@@ -161,7 +162,6 @@ impl DiskStore {
         // other event-loop tasks). `serialize_outputs` above already did the heavy encode.
         let path = target.path.clone();
         let digest = target.digest;
-        let coverage = snapshot.coverage.clone();
         let result =
             tokio::task::spawn_blocking(move || atomic_write(&path, digest, &coverage, &bytes))
                 .await
@@ -224,11 +224,11 @@ fn read_blocking(path: &Path, digest: Digest, library: &Library) -> Option<Outpu
     let body = &frame[8 + output_count..];
     match deserialize_outputs(body, library) {
         Ok(values) if values.len() == output_count => {
-            let snapshot = OutputSnapshot::try_new(values, coverage);
-            if snapshot.is_none() {
+            if !coverage.matches_values(&values) {
                 tracing::warn!(path = %path.display(), "cached coverage does not match output values; recomputing");
+                return None;
             }
-            snapshot
+            Some(OutputSnapshot::new(values))
         }
         Ok(values) => {
             tracing::warn!(

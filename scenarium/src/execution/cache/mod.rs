@@ -34,12 +34,6 @@ pub(crate) struct CachedOutputCoverage {
 }
 
 impl CachedOutputCoverage {
-    pub(crate) fn none(output_count: usize) -> Self {
-        Self {
-            ports: vec![false; output_count],
-        }
-    }
-
     pub(crate) fn from_values(values: &[DynamicValue]) -> Self {
         Self {
             ports: values
@@ -62,8 +56,35 @@ impl CachedOutputCoverage {
         self.ports.iter().map(|port| u8::from(*port)).collect()
     }
 
-    pub(crate) fn covers_demand(&self, demand: &[OutputDemand]) -> bool {
-        assert_eq!(
+    pub(crate) fn matches_values(&self, values: &[DynamicValue]) -> bool {
+        self.ports.len() == values.len()
+            && self
+                .ports
+                .iter()
+                .zip(values)
+                .all(|(covered, value)| *covered == !matches!(value, DynamicValue::Unbound))
+    }
+
+    fn is_satisfied_by(&self, values: &[DynamicValue]) -> bool {
+        self.ports.len() == values.len()
+            && self
+                .ports
+                .iter()
+                .zip(values)
+                .all(|(required, value)| !*required || !matches!(value, DynamicValue::Unbound))
+    }
+
+    fn covers_values(&self, values: &[DynamicValue]) -> bool {
+        self.ports.len() == values.len()
+            && self
+                .ports
+                .iter()
+                .zip(values)
+                .all(|(covered, value)| *covered || matches!(value, DynamicValue::Unbound))
+    }
+
+    fn covers_demand(&self, demand: &[OutputDemand]) -> bool {
+        debug_assert_eq!(
             self.ports.len(),
             demand.len(),
             "cached output coverage must match output demand arity"
@@ -90,50 +111,32 @@ impl CachedOutputCoverage {
 #[derive(Debug)]
 pub(crate) struct OutputSnapshot {
     pub(crate) values: Vec<DynamicValue>,
-    pub(crate) coverage: CachedOutputCoverage,
 }
 
 impl OutputSnapshot {
-    pub(crate) fn new(values: Vec<DynamicValue>, coverage: CachedOutputCoverage) -> Self {
-        assert_eq!(
-            values.len(),
-            coverage.ports.len(),
-            "cached values and coverage must have equal arity"
-        );
-        assert!(
-            Self::coverage_matches_values(&values, &coverage),
-            "cached output coverage must match bound output values"
-        );
-        Self { values, coverage }
-    }
-
-    pub(crate) fn try_new(
-        values: Vec<DynamicValue>,
-        coverage: CachedOutputCoverage,
-    ) -> Option<Self> {
-        (values.len() == coverage.ports.len() && Self::coverage_matches_values(&values, &coverage))
-            .then_some(Self { values, coverage })
+    pub(crate) fn new(values: Vec<DynamicValue>) -> Self {
+        Self { values }
     }
 
     fn empty(output_count: usize) -> Self {
-        Self::new(
-            vec![DynamicValue::Unbound; output_count],
-            CachedOutputCoverage::none(output_count),
-        )
+        Self::new(vec![DynamicValue::Unbound; output_count])
     }
 
     fn reset(&mut self, output_count: usize) {
         self.values.clear();
         self.values.resize(output_count, DynamicValue::Unbound);
-        self.coverage = CachedOutputCoverage::none(output_count);
     }
 
-    fn coverage_matches_values(values: &[DynamicValue], coverage: &CachedOutputCoverage) -> bool {
-        coverage
-            .ports
+    fn covers_demand(&self, demand: &[OutputDemand]) -> bool {
+        debug_assert_eq!(
+            self.values.len(),
+            demand.len(),
+            "cached output values must match output demand arity"
+        );
+        self.values
             .iter()
-            .zip(values)
-            .all(|(covered, value)| *covered == !matches!(value, DynamicValue::Unbound))
+            .zip(demand)
+            .all(|(value, demand)| !matches!(value, DynamicValue::Unbound) || demand.is_skip())
     }
 }
 
@@ -265,16 +268,10 @@ impl RuntimeSlot {
     /// key its disk blob is stored under.
     pub(crate) fn stamp_produced(&mut self) {
         let digest = self.current_digest;
-        let ValueState::Resident {
-            produced_under,
-            snapshot,
-            ..
-        } = &mut self.value
-        else {
+        let ValueState::Resident { produced_under, .. } = &mut self.value else {
             panic!("a node's output must be resident when it is stamped produced");
         };
         *produced_under = digest;
-        snapshot.coverage = CachedOutputCoverage::from_values(&snapshot.values);
     }
 }
 
@@ -392,7 +389,7 @@ impl RuntimeCache {
                     ..
                 },
                 Some(d),
-            ) => *produced_under == Some(d) && snapshot.coverage.covers_demand(demand),
+            ) => *produced_under == Some(d) && snapshot.covers_demand(demand),
             _ => false,
         }
     }
@@ -429,7 +426,6 @@ impl RuntimeCache {
         };
         assert_eq!(snapshot.values.len(), arity);
         Some(if take {
-            snapshot.coverage.ports[port] = false;
             std::mem::take(&mut snapshot.values[port])
         } else {
             snapshot.values[port].clone()
@@ -447,7 +443,6 @@ impl RuntimeCache {
         };
         assert!(port < snapshot.values.len(), "output port must be in range");
         snapshot.values[port] = DynamicValue::Unbound;
-        snapshot.coverage.ports[port] = false;
     }
 
     /// Stamp `node_id`'s structural content digest into its slot. The producer-first resolver
@@ -550,11 +545,16 @@ impl RuntimeCache {
             // consumer's arity assert panic.
             let arity = program.e_nodes[&node_id].outputs.len as usize;
             match self.disk_store.read(&target).await {
-                Some(snapshot)
-                    if snapshot.values.len() == arity
-                        && snapshot.coverage.ports.len() == arity
-                        && snapshot.coverage.covers(&required) =>
-                {
+                Some(snapshot) if snapshot.values.len() == arity => {
+                    if !required.is_satisfied_by(&snapshot.values) {
+                        tracing::warn!(
+                            path = %target.path.display(),
+                            "cached outputs no longer cover the probed outputs; ignoring blob"
+                        );
+                        target.delete();
+                        self.slots.get_mut(&node_id).unwrap().clear_output();
+                        return false;
+                    }
                     self.slots.get_mut(&node_id).unwrap().value = ValueState::Resident {
                         snapshot,
                         produced_under: Some(target.digest),
@@ -566,7 +566,6 @@ impl RuntimeCache {
                         path = %target.path.display(),
                         expected = arity,
                         values = snapshot.values.len(),
-                        coverage = snapshot.coverage.ports.len(),
                         "cached outputs have the wrong count; ignoring blob"
                     );
                 }
@@ -623,8 +622,8 @@ impl RuntimeCache {
     /// executor, once a non-RAM node's every output is read) and the end-of-run
     /// [`evict_unused`](Self::evict_unused) sweep. The *caller* decides eligibility.
     pub(crate) fn reclaim_slot(&mut self, program: &ExecutionProgram, node_id: NodeId) {
-        let required = match &self.slots[&node_id].value {
-            ValueState::Resident { snapshot, .. } => snapshot.coverage.clone(),
+        let values = match &self.slots[&node_id].value {
+            ValueState::Resident { snapshot, .. } => &snapshot.values,
             _ => return,
         };
         let stored = self
@@ -635,9 +634,7 @@ impl RuntimeCache {
                 self.slots[&node_id].current_digest,
             )
             .and_then(|target| target.coverage())
-            .filter(|coverage| {
-                coverage.ports.len() == required.ports.len() && coverage.covers(&required)
-            });
+            .filter(|coverage| coverage.covers_values(values));
         if let Some(coverage) = stored {
             self.slots.get_mut(&node_id).unwrap().value = ValueState::OnDisk { coverage };
         } else if !program.e_nodes[&node_id].cache.caches_in_ram() {

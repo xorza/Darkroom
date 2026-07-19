@@ -1,6 +1,6 @@
 use super::*;
 use crate::DataType;
-use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot, RuntimeCache, ValueState};
+use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{
     ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress,
@@ -84,9 +84,8 @@ impl Fix {
         stamp_digests(&self.program, &mut cache, &resource_stamps, &plan);
         for cached in cached {
             let digest = cache.slots[&cached.node_id].current_digest.unwrap();
-            let coverage = CachedOutputCoverage::from_values(&cached.values);
             cache.slots.get_mut(&cached.node_id).unwrap().value = ValueState::Resident {
-                snapshot: OutputSnapshot::new(cached.values, coverage),
+                snapshot: OutputSnapshot::new(cached.values),
                 produced_under: Some(digest),
             };
         }

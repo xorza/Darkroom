@@ -27,8 +27,7 @@ fn target(path: &Path, digest: Digest) -> BlobTarget {
 }
 
 fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
-    let coverage = CachedOutputCoverage::from_values(&values);
-    OutputSnapshot::new(values, coverage)
+    OutputSnapshot::new(values)
 }
 
 /// The full store↔read contract on one file: a stored blob round-trips under the
@@ -43,14 +42,11 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
     let d_b = Digest([8u8; 32]);
 
     // Config A: three plain values, stamped D_A.
-    let snapshot_a = OutputSnapshot::new(
-        vec![
-            DynamicValue::Unbound,
-            DynamicValue::Static(StaticValue::Int(7)),
-            DynamicValue::Static(StaticValue::String("x".into())),
-        ],
-        CachedOutputCoverage::from_bytes(&[0, 1, 1]).unwrap(),
-    );
+    let snapshot_a = OutputSnapshot::new(vec![
+        DynamicValue::Unbound,
+        DynamicValue::Static(StaticValue::Int(7)),
+        DynamicValue::Static(StaticValue::String("x".into())),
+    ]);
     store
         .store(
             &target(&file.0, d_a),
@@ -75,10 +71,6 @@ async fn store_then_read_round_trips_and_overwrites_under_a_new_digest() {
 
     let back = store.read(&target(&file.0, d_a)).await.expect("hit");
     assert_eq!(back.values.len(), 3);
-    assert_eq!(
-        back.coverage,
-        CachedOutputCoverage::from_bytes(&[0, 1, 1]).unwrap()
-    );
     assert!(matches!(back.values[0], DynamicValue::Unbound));
     assert_eq!(back.values[1].as_i64(), Some(7));
     assert_eq!(back.values[2].as_string(), Some("x"));
@@ -116,13 +108,10 @@ async fn store_replaces_same_digest_blob_when_output_coverage_expands() {
     let store = DiskStore::default();
     let digest = Digest([11; 32]);
     let target = target(&file.0, digest);
-    let partial = OutputSnapshot::new(
-        vec![
-            DynamicValue::Static(StaticValue::Int(7)),
-            DynamicValue::Unbound,
-        ],
-        CachedOutputCoverage::from_bytes(&[1, 0]).unwrap(),
-    );
+    let partial = OutputSnapshot::new(vec![
+        DynamicValue::Static(StaticValue::Int(7)),
+        DynamicValue::Unbound,
+    ]);
     store
         .store(&target, &partial, &mut ContextManager::default())
         .await;
@@ -137,10 +126,10 @@ async fn store_replaces_same_digest_blob_when_output_coverage_expands() {
 
     let cached = store.read(&target).await.expect("expanded blob");
     assert_eq!(
-        cached.coverage,
-        CachedOutputCoverage {
-            ports: vec![true, true],
-        }
+        target.coverage(),
+        Some(CachedOutputCoverage {
+            ports: vec![true, true]
+        })
     );
     assert_eq!(cached.values[0].as_i64(), Some(7));
     assert_eq!(cached.values[1].as_i64(), Some(9));
@@ -183,15 +172,17 @@ async fn non_codecable_custom_is_skipped_not_written() {
     assert!(!file.0.exists(), "no codec ⇒ silent skip, no blob created");
 }
 
-/// A blob whose format-version header doesn't match the current one decodes to a
-/// miss (recompute), not a silent mis-decode — guards against a `CachedValue` shape
-/// change serving garbage through the non-self-describing bitcode frame.
+/// Invalid version or coverage metadata decodes to a miss rather than admitting
+/// values under a corrupt disk-availability claim.
 #[tokio::test]
-async fn read_rejects_an_unknown_format_version() {
+async fn read_rejects_invalid_version_and_coverage_metadata() {
     let file = temp_file("badversion");
     let store = DiskStore::default();
     let digest = Digest([2u8; 32]);
-    let snapshot = complete_snapshot(vec![DynamicValue::Static(StaticValue::Int(1))]);
+    let snapshot = OutputSnapshot::new(vec![
+        DynamicValue::Static(StaticValue::Int(1)),
+        DynamicValue::Unbound,
+    ]);
     store
         .store(
             &target(&file.0, digest),
@@ -202,7 +193,8 @@ async fn read_rejects_an_unknown_format_version() {
     // Corrupt the 4-byte little-endian version header, which sits right after the
     // 32-byte digest — the digest itself still matches, so the miss below is the
     // codec frame's doing, not the digest check's.
-    let mut bytes = std::fs::read(&file.0).unwrap();
+    let original = std::fs::read(&file.0).unwrap();
+    let mut bytes = original.clone();
     bytes[32] ^= 0xff;
     std::fs::write(&file.0, &bytes).unwrap();
 
@@ -214,5 +206,22 @@ async fn read_rejects_an_unknown_format_version() {
     assert!(
         store.read(&target(&file.0, digest)).await.is_none(),
         "a blob with an unknown format version is treated as a miss"
+    );
+
+    let mut bytes = original;
+    bytes[COVERAGE_OFFSET as usize] = 0;
+    std::fs::write(&file.0, &bytes).unwrap();
+    assert!(
+        store.read(&target(&file.0, digest)).await.is_none(),
+        "coverage metadata cannot omit a decoded bound value"
+    );
+
+    let mut bytes = std::fs::read(&file.0).unwrap();
+    bytes[COVERAGE_OFFSET as usize] = 1;
+    bytes[COVERAGE_OFFSET as usize + 1] = 1;
+    std::fs::write(&file.0, &bytes).unwrap();
+    assert!(
+        store.read(&target(&file.0, digest)).await.is_none(),
+        "coverage metadata cannot claim a decoded unbound value"
     );
 }

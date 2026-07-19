@@ -1,7 +1,7 @@
 use super::*;
 use crate::StaticValue;
+use crate::execution::cache::OutputSnapshot;
 use crate::execution::cache::test_support::hydrate;
-use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot};
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::execution::resource::RunResourceStamps;
 use crate::execution::resource::test_support::prepare_node;
@@ -273,7 +273,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
             hydrate(
                 &mut cache,
                 node_id(0),
-                OutputSnapshot::new(vec![value], CachedOutputCoverage { ports: vec![true] }),
+                OutputSnapshot::new(vec![value]),
                 producer,
             );
         }
@@ -346,10 +346,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     hydrate(
         &mut cache,
         node_id(0),
-        OutputSnapshot::new(
-            vec![DynamicValue::Static(StaticValue::FsPath(path))],
-            CachedOutputCoverage { ports: vec![true] },
-        ),
+        OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::FsPath(path))]),
         producer,
     );
     cache.slots.get_mut(&node_id(0)).unwrap().current_digest = Some(Digest([9; 32]));
@@ -403,10 +400,7 @@ fn custom_stamper_folds_referent_version() {
         hydrate(
             &mut cache,
             node_id(0),
-            OutputSnapshot::new(
-                vec![StaticValue::Int(42).into()],
-                CachedOutputCoverage { ports: vec![true] },
-            ),
+            OutputSnapshot::new(vec![StaticValue::Int(42).into()]),
             producer,
         );
         prepare_node(&mut resource_stamps, &p.program, &cache, node_id(1));

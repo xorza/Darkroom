@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 
 use super::*;
 use crate::async_lambda;
-use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot, RuntimeCache, ValueState};
+use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
 use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
@@ -718,10 +718,7 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     cache.reconcile(&p.program);
     // A stale prior value on the lambda-less node must not be served as this run's result.
     cache.slots.get_mut(&a).unwrap().value = ValueState::Resident {
-        snapshot: OutputSnapshot::new(
-            vec![DynamicValue::Static(StaticValue::Int(9))],
-            CachedOutputCoverage { ports: vec![true] },
-        ),
+        snapshot: OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
         produced_under: None,
     };
     let stats = run_with(&p.program, &plan.plan, &mut cache).await;

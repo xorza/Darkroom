@@ -8,7 +8,7 @@ use common::{CancelToken, Span};
 use tokio::sync::Notify;
 
 use crate::execution::cache::test_support::hydrate;
-use crate::execution::cache::{CachedOutputCoverage, OutputSnapshot, RuntimeCache};
+use crate::execution::cache::{OutputSnapshot, RuntimeCache};
 use crate::execution::digest::{Digest, DigestHasher};
 use crate::execution::plan::{ExecutionPlan, NodeVerdict};
 use crate::execution::program::{
@@ -310,10 +310,7 @@ fn bound_resource_fixture(stamper: Arc<dyn ResourceStamper>) -> BoundResourceFix
     hydrate(
         &mut cache,
         producer,
-        OutputSnapshot::new(
-            vec![DynamicValue::from_custom(TestHandle)],
-            CachedOutputCoverage { ports: vec![true] },
-        ),
+        OutputSnapshot::new(vec![DynamicValue::from_custom(TestHandle)]),
         producer_digest,
     );
     BoundResourceFixture {

@@ -260,8 +260,8 @@ value:          ValueState        // Empty | Resident { snapshot, produced_under
 `ValueState` is one enum, not the old three loosely-coupled fields — so the previously
 representable bad combos ("resident *and* flagged on disk", a stale RAM value masking a
 fresh blob) can't be built. The reuse test is **`is_resident_hit`** — the slot is
-`Resident`, its `produced_under` equals the current digest, and its snapshot coverage
-covers the current `OutputDemand`. A `None` `current_digest` (impure cone) never hits.
+`Resident`, its `produced_under` equals the current digest, and every demanded snapshot
+value is bound. A `None` `current_digest` (impure cone) never hits.
 `OnDisk` means a decodable frame exists for this digest and demand but is not yet
 loaded: a cheap header probe, so a disk-cached value behind another reused node is served
 without entering RAM (B.6).
@@ -279,23 +279,24 @@ recomputed on reopen. A digest folding a Bind-delivered resource value it can't 
 loop prepares that identity off-thread and re-stamps it at reach time, serving the cache
 on a hit. Then, per surviving node, once its digest is computed:
 
-1. **resident hit?** — reuse only when the digest matches and the resident
-   coverage contains every demanded output.
+1. **resident hit?** — reuse only when the digest matches and every demanded resident
+   output is non-`Unbound`.
 2. **else `mark_on_disk_if_present`.** If the node's blob carries the digest and a
    coverage containing current demand **and** the outputs are decodable (every custom output type has a codec —
    predicted without reading), flag the slot `OnDisk` and reuse it — a 32-byte header
    read + codec check, **no body bytes**. The value loads only if a running consumer
    actually reads it.
-3. **else run.** The output buffer is cleared before invocation, and the successful
-   result's coverage is derived from its non-`Unbound` values. Returning `Unbound` for a
-   demanded output fails the node; skipped outputs may remain `Unbound`. `store_node` skips
-   an existing frame only when both digest and coverage match; a broader result overwrites it.
+3. **else run.** The output buffer is cleared before invocation. Returning `Unbound` for a
+   demanded output fails the node; skipped outputs may remain `Unbound`. Resident snapshots
+   store only those values; `store_node` derives disk coverage from them and skips an existing
+   frame only when both digest and coverage match. A broader result overwrites it.
 4. **Lazy load — `hydrate_slot`.** When a *running* node reads a bound input whose
    producer is `OnDisk`, `collect_inputs` pulls that one blob into RAM. Producers behind
    a *reused* consumer are never read, so a disk-cached chain loads only its frontier — a
-   blob can't be the wrong type (the signature is in the digest, §B.2), but if it fails
-   to *load* (corrupt/deleted) the bad file is deleted and the demanding consumer is
-   dropped for this run; the next reopen recomputes it.
+   blob can't be the wrong type (the signature is in the digest, §B.2). The loader verifies
+   that decoded bound values exactly match the header coverage before admitting the values
+   into RAM; if the blob fails to *load* (corrupt/deleted) the bad file is deleted and the
+   demanding consumer is dropped for this run; the next reopen recomputes it.
 5. **mid-run release — `reclaim_slot`.** The executor copies the plan's binding-reader
    counts into `RemainingOutputReads` and counts them *down* as each running consumer reads a bound producer
    (`ExecutionFrame::collect_inputs`). When an output reaches zero its value is cleared one output

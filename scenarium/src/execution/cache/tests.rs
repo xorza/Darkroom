@@ -9,8 +9,7 @@ fn out() -> Vec<DynamicValue> {
 const DEMANDED: &[OutputDemand] = &[OutputDemand::Produce];
 
 fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
-    let coverage = CachedOutputCoverage::from_values(&values);
-    OutputSnapshot::new(values, coverage)
+    OutputSnapshot::new(values)
 }
 
 fn insert_slot(cache: &mut RuntimeCache, id: u128, slot: RuntimeSlot) -> NodeId {
@@ -162,7 +161,7 @@ fn replacing_disk_store_clears_only_disk_availability() {
 }
 
 #[test]
-fn resident_hit_requires_coverage_for_every_demanded_output() {
+fn resident_hit_derives_coverage_from_values() {
     let digest = Digest([5; 32]);
     let mut cache = RuntimeCache::default();
     let mut slot = RuntimeSlot {
@@ -176,7 +175,8 @@ fn resident_hit_requires_coverage_for_every_demanded_output() {
     let ValueState::Resident { snapshot, .. } = &cache.slots[&node_id].value else {
         panic!("the invocation result was stamped resident");
     };
-    assert_eq!(snapshot.coverage.ports, [true, false]);
+    assert_eq!(snapshot.values[0].as_i64(), Some(10));
+    assert!(matches!(snapshot.values[1], DynamicValue::Unbound));
 
     assert!(cache.is_resident_hit(node_id, &[OutputDemand::Produce, OutputDemand::Skip]));
     assert!(!cache.is_resident_hit(node_id, &[OutputDemand::Produce, OutputDemand::Produce]));
@@ -185,56 +185,10 @@ fn resident_hit_requires_coverage_for_every_demanded_output() {
     let ValueState::Resident { snapshot, .. } = &cache.slots[&node_id].value else {
         panic!("clearing one output keeps the snapshot resident");
     };
-    assert_eq!(snapshot.coverage.ports, [false, false]);
     assert!(matches!(
         snapshot.values.as_slice(),
         [DynamicValue::Unbound, DynamicValue::Unbound]
     ));
-
-    let mismatch = std::panic::catch_unwind(|| {
-        CachedOutputCoverage::from_bytes(&[1, 0])
-            .unwrap()
-            .covers_demand(&[OutputDemand::Produce]);
-    });
-    assert!(
-        mismatch.is_err(),
-        "a coverage mask with the wrong arity is corrupt internal state"
-    );
-
-    let mismatch = std::panic::catch_unwind(|| {
-        OutputSnapshot::new(vec![DynamicValue::Unbound], CachedOutputCoverage::none(2));
-    });
-    assert!(
-        mismatch.is_err(),
-        "a snapshot cannot pair values with coverage of another arity"
-    );
-
-    let invalid = std::panic::catch_unwind(|| {
-        OutputSnapshot::new(
-            vec![DynamicValue::Unbound],
-            CachedOutputCoverage { ports: vec![true] },
-        );
-    });
-    assert!(
-        invalid.is_err(),
-        "coverage cannot claim that an unbound value was produced"
-    );
-    assert!(
-        OutputSnapshot::try_new(
-            vec![DynamicValue::Unbound],
-            CachedOutputCoverage { ports: vec![true] },
-        )
-        .is_none(),
-        "invalid persisted coverage is rejected as a cache miss"
-    );
-    assert!(
-        OutputSnapshot::try_new(
-            vec![DynamicValue::Static(StaticValue::Int(1))],
-            CachedOutputCoverage::none(1),
-        )
-        .is_none(),
-        "coverage cannot omit a bound cached value"
-    );
 
     let missing_invocation = std::panic::catch_unwind(|| {
         RuntimeSlot::default().stamp_produced();

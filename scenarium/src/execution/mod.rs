@@ -493,9 +493,8 @@ impl ExecutionEngine {
     /// stamp `produced_under` from the current digest, so the planner sees a hit.
     pub(crate) fn set_output_values(&mut self, node_id: NodeId, values: Vec<DynamicValue>) {
         let slot = self.cache.slots.get_mut(&node_id).unwrap();
-        let coverage = cache::CachedOutputCoverage::from_values(&values);
         slot.value = cache::ValueState::Resident {
-            snapshot: cache::OutputSnapshot::new(values, coverage),
+            snapshot: cache::OutputSnapshot::new(values),
             produced_under: slot.current_digest,
         };
     }
