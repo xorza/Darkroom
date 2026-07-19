@@ -38,5 +38,3 @@ grapuh public methods
 pub graph fields and node and func
 
 project - json file in zip file
-
-minmag texturefilter for imageviewer
