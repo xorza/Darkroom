@@ -27,7 +27,7 @@ fn stats(pixels: &[f32]) -> Stats {
 }
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn stretch_stacked_light() {
     init_tracing();
 

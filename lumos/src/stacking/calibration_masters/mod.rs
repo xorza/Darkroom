@@ -5,7 +5,7 @@ pub(crate) mod defect_map;
 
 #[cfg(test)]
 mod bench;
-#[cfg(test)]
+#[cfg(all(test, feature = "real-data"))]
 mod real_data_tests;
 #[cfg(test)]
 mod synthetic_tests;

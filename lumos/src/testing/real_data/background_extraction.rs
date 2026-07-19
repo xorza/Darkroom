@@ -40,7 +40,7 @@ fn corner_background_spread(image: &Image) -> f32 {
 }
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn extract_flattens_background_on_stretched_master() {
     init_tracing();
 

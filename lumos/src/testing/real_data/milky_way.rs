@@ -35,7 +35,7 @@ fn assert_displayable(image: &Image, label: &str) {
 }
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn milky_way_best_pipeline() {
     init_tracing();
     let path = calibration_dir().join("stacked_light.tiff");

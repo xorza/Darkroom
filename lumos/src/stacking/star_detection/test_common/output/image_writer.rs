@@ -1,6 +1,6 @@
 //! Image writing utilities for visual tests.
 
-use image::{GrayImage, Rgb, RgbImage};
+use image::GrayImage;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
@@ -86,6 +86,7 @@ pub(crate) fn to_gray_stretched(pixels: &[f32], width: usize, height: usize) -> 
 }
 
 /// Convert boolean mask to grayscale image.
+#[cfg(feature = "real-data")]
 pub(crate) fn mask_to_gray(mask: &[bool], width: usize, height: usize) -> GrayImage {
     let bytes: Vec<u8> = mask.iter().map(|&b| if b { 255 } else { 0 }).collect();
     GrayImage::from_raw(width as u32, height as u32, bytes).unwrap()
@@ -94,7 +95,10 @@ pub(crate) fn mask_to_gray(mask: &[bool], width: usize, height: usize) -> GrayIm
 /// Convert labeled image to colored visualization.
 ///
 /// Each label gets a unique color for easy visualization.
-pub(crate) fn labels_to_rgb(labels: &imaginarium::Buffer2<u32>) -> RgbImage {
+#[cfg(feature = "real-data")]
+pub(crate) fn labels_to_rgb(labels: &imaginarium::Buffer2<u32>) -> image::RgbImage {
+    use image::{Rgb, RgbImage};
+
     // Generate distinct colors for labels using golden ratio
     let label_to_color = |label: u32| -> Rgb<u8> {
         if label == 0 {
@@ -116,7 +120,10 @@ pub(crate) fn labels_to_rgb(labels: &imaginarium::Buffer2<u32>) -> RgbImage {
 }
 
 /// Convert HSV to RGB color.
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Rgb<u8> {
+#[cfg(feature = "real-data")]
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> image::Rgb<u8> {
+    use image::Rgb;
+
     let c = v * s;
     let x = c * (1.0 - ((h * 6.0) % 2.0 - 1.0).abs());
     let m = v - c;
@@ -145,6 +152,7 @@ pub(crate) fn save_grayscale(pixels: &[f32], width: usize, height: usize, path: 
 }
 
 /// Save grayscale image with auto-stretch to file using the configured test output format.
+#[cfg(feature = "real-data")]
 pub(crate) fn save_grayscale_stretched(pixels: &[f32], width: usize, height: usize, path: &Path) {
     let out = output_path(path);
     let img = to_gray_stretched(pixels, width, height);
@@ -153,7 +161,8 @@ pub(crate) fn save_grayscale_stretched(pixels: &[f32], width: usize, height: usi
 }
 
 /// Save RGB image to file using the configured test output format.
-pub(crate) fn save_rgb(image: &RgbImage, path: &Path) {
+#[cfg(feature = "real-data")]
+pub(crate) fn save_rgb(image: &image::RgbImage, path: &Path) {
     let out = output_path(path);
     image.save(&out).expect("Failed to save RGB image");
 }
@@ -174,6 +183,7 @@ pub(crate) fn save_comparison(
 }
 
 /// Save mask to file using the configured test output format.
+#[cfg(feature = "real-data")]
 pub(crate) fn save_mask(mask: &[bool], width: usize, height: usize, path: &Path) {
     let out = output_path(path);
     let img = mask_to_gray(mask, width, height);

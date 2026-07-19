@@ -16,7 +16,7 @@ use imaginarium::ColorFormat;
 use imaginarium::drawing::draw_circle;
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn test_detect_rho_opiuchi() {
     init_tracing();
 
@@ -111,7 +111,7 @@ fn test_detect_rho_opiuchi() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data inspection test; run explicitly with --ignored"]
 fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::stacking::star_detection::background::estimate_background;
     use crate::stacking::star_detection::buffer_pool::BufferPool;

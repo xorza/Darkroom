@@ -6,7 +6,7 @@ use crate::stacking::progress::ProgressCallback;
 use crate::testing::{calibration_dir, init_tracing};
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn test_stack_registered_lights() {
     init_tracing();
 

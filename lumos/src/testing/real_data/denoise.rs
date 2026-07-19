@@ -30,7 +30,7 @@ fn highfreq_noise(image: &Image, channel: usize) -> f32 {
 }
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn denoise_reduces_linear_noise() {
     init_tracing();
 

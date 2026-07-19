@@ -52,7 +52,7 @@ fn load_two_calibrated_lights() -> Option<(AstroImage, AstroImage)> {
 }
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn test_register_two_calibrated_lights() {
     let Some((img1, img2)) = load_two_calibrated_lights() else {
         return;
@@ -334,7 +334,7 @@ fn bench_register_stars(b: ::quickbench::Bencher) {
 /// centroids. Runs the calibrated pair through `GaussianFit` with and without a
 /// `NoiseModel`, registers each, and compares.
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn test_weighted_fit_registration_rms() {
     let Some((img1, img2)) = load_two_calibrated_lights() else {
         return;

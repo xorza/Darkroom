@@ -1,6 +1,6 @@
 use std::fs;
 
-use crate::testing::{ScratchDirectory, first_raw_file, init_tracing};
+use crate::testing::ScratchDirectory;
 
 use crate::io::raw::*;
 
@@ -39,9 +39,12 @@ fn test_load_raw_rejects_invalid_files() {
     }
 }
 
+#[cfg(feature = "real-data")]
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn test_load_raw_valid_file() {
+    use crate::testing::{first_raw_file, init_tracing};
+
     let Some(path) = first_raw_file() else {
         eprintln!("No RAW file found for testing, skipping");
         return;
@@ -74,9 +77,12 @@ fn test_load_raw_valid_file() {
     assert!(mean < 1.0, "Mean is >= 1.0, image may be overexposed");
 }
 
+#[cfg(feature = "real-data")]
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn test_load_raw_dimensions_match() {
+    use crate::testing::first_raw_file;
+
     let Some(path) = first_raw_file() else {
         eprintln!("No RAW file found for testing, skipping");
         return;

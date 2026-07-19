@@ -14,7 +14,7 @@ fn spread(bg: Rgb) -> f32 {
 }
 
 #[test]
-#[cfg_attr(not(feature = "real-data"), ignore)]
+#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn neutralize_then_stretch_removes_green() {
     init_tracing();
 
