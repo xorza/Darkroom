@@ -469,6 +469,7 @@ mod tests {
     use crate::stacking::combine::rejection::Rejection;
     use crate::stacking::combine::stack::*;
     use crate::stacking::frame_store::store_light_frame;
+    use crate::testing::ScratchDirectory;
     use crate::{
         io::astro_image::{AstroImage, ImageDimensions},
         stacking::combine::cache::tests::make_test_cache,
@@ -516,9 +517,8 @@ mod tests {
         )
         .unwrap();
 
-        let cache_dir =
-            std::env::temp_dir().join(format!("lumos_tier_test_{}", std::process::id()));
-        let spill_directory = SpillDirectory::create(cache_dir, false).unwrap();
+        let scratch = ScratchDirectory::new("lumos_tier_test");
+        let spill_directory = SpillDirectory::create(scratch.join("cache"), false).unwrap();
         let metadata = frames[0].image.metadata().clone();
         let stored = frames
             .into_iter()
@@ -728,7 +728,7 @@ mod tests {
 
         let frame = StackFrame {
             image: AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
-            coverage: Some(Buffer2::new(2, 2, vec![1.0; 4])),
+            coverage: Some(Buffer2::new_filled(2, 2, 1.0)),
         };
         let error = stack_images(
             vec![frame],
@@ -1219,9 +1219,7 @@ mod tests {
     fn disk_backed_stack_combines_via_mmap() {
         // Force the disk tier (1-byte memory budget) so the full chunked combine reads
         // memory-mapped `Plane`s: mean(10, 20, 30) = 20 at every pixel.
-        let temp_dir = std::env::temp_dir().join("lumos_disk_stack_combine_test");
-        let _ = std::fs::remove_dir_all(&temp_dir);
-        std::fs::create_dir_all(&temp_dir).unwrap();
+        let temp_dir = ScratchDirectory::new("lumos_disk_stack_combine_test");
 
         let dims = ImageDimensions::new((4, 4), 1);
         let mut paths = Vec::new();
@@ -1255,8 +1253,6 @@ mod tests {
                 "disk-backed mean should be 20, got {p}"
             );
         }
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

@@ -44,7 +44,7 @@ fn transform_image(
     let transform = Transform::similarity(DVec2::new(dx, dy), angle_rad, scale);
     let inverse = transform.inverse();
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
-    let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
+    let mut output = Buffer2::new_default(width, height);
     warp_image(
         &src_buf,
         &mut output,
@@ -61,7 +61,7 @@ fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy:
     let transform = Transform::translation(DVec2::new(dx, dy));
     let inverse = transform.inverse();
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
-    let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
+    let mut output = Buffer2::new_default(width, height);
     warp_image(
         &src_buf,
         &mut output,

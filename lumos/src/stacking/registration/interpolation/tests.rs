@@ -368,7 +368,7 @@ fn test_lanczos_at_pixel_centers() {
 fn test_lanczos_preserves_dc() {
     // A uniform image should remain uniform after Lanczos interpolation.
     // This tests that weights sum to ~1 (partition of unity).
-    let input_buf = Buffer2::new(8, 8, vec![0.5f32; 64]);
+    let input_buf = Buffer2::new_filled(8, 8, 0.5f32);
 
     let val1 = interp(
         &input_buf,
@@ -462,7 +462,7 @@ fn test_different_methods_produce_different_results() {
 
 #[test]
 fn test_border_value_returned_out_of_bounds() {
-    let data_buf = Buffer2::new(2, 2, vec![1.0; 4]);
+    let data_buf = Buffer2::new_filled(2, 2, 1.0);
 
     // Inside: bilinear on uniform should give 1.0
     assert!((interp(&data_buf, 0.5, 0.5, InterpolationMethod::Bilinear) - 1.0).abs() < TOL);
@@ -474,7 +474,7 @@ fn test_border_value_returned_out_of_bounds() {
 
 #[test]
 fn test_custom_border_value() {
-    let data_buf = Buffer2::new(2, 2, vec![1.0; 4]);
+    let data_buf = Buffer2::new_filled(2, 2, 1.0);
     let params = WarpParams {
         method: InterpolationMethod::Bilinear,
         border_value: -99.0,
@@ -622,7 +622,7 @@ fn test_warp_identity_preserves_image() {
     let input: Vec<f32> = (0..16).map(|i| i as f32).collect();
     let input_buf = Buffer2::new(4, 4, input.clone());
 
-    let mut output = Buffer2::new(4, 4, vec![0.0; 16]);
+    let mut output = Buffer2::new_default(4, 4);
     warp_image(
         &input_buf,
         &mut output,
@@ -648,7 +648,7 @@ fn test_warp_integer_translation() {
 
     let transform = Transform::translation(DVec2::new(1.0, 1.0));
 
-    let mut output = Buffer2::new(4, 4, vec![0.0; 16]);
+    let mut output = Buffer2::new_default(4, 4);
     warp_image(
         &input_buf,
         &mut output,
@@ -677,7 +677,7 @@ fn test_warp_image_lanczos3_identity() {
     let input: Vec<f32> = (0..width * height).map(|i| (i as f32) / 1024.0).collect();
     let input_buf = Buffer2::new(width, height, input);
 
-    let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
+    let mut output = Buffer2::new_filled(width, height, 0.0);
     warp_image(
         &input_buf,
         &mut output,
@@ -707,7 +707,7 @@ fn test_warp_image_lanczos3_integer_translation() {
     // output[p] = input[p + (5,3)]
     let transform = Transform::translation(DVec2::new(5.0, 3.0));
 
-    let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
+    let mut output = Buffer2::new_filled(width, height, 0.0);
     warp_image(
         &input_buf,
         &mut output,
@@ -739,7 +739,7 @@ fn test_warp_image_lanczos3_matches_per_pixel() {
     let input_buf = Buffer2::new(width, height, input);
     let transform = Transform::similarity(DVec2::new(16.0, 16.0), 0.03, 1.02);
 
-    let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
+    let mut output = Buffer2::new_filled(width, height, 0.0);
     let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
     warp_image(
         &input_buf,
@@ -959,7 +959,7 @@ fn test_generic_stepping_disabled_for_homography() {
 #[test]
 fn samplers_renormalize_partial_kernel_at_edge() {
     const V: f32 = 0.7;
-    let img = Buffer2::new(16, 16, vec![V; 16 * 16]);
+    let img = Buffer2::new_filled(16, 16, V);
 
     for method in [
         InterpolationMethod::Bicubic,
@@ -1032,7 +1032,7 @@ fn warp_tiny_image_smaller_than_lanczos4_kernel() {
     // 3×3 image with Lanczos4 (8-tap window > image): every output pixel's kernel is mostly
     // out of bounds, exercising the renormalized slow path. DC must be preserved.
     let (w, h) = (3, 3);
-    let input = Buffer2::new(w, h, vec![0.5f32; w * h]);
+    let input = Buffer2::new_filled(w, h, 0.5f32);
     let mut output = Buffer2::new_default(w, h);
     let wt = WarpTransform::new(Transform::identity());
     let params = WarpParams::new(InterpolationMethod::Lanczos4 { deringing: -1.0 });

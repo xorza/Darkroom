@@ -1,4 +1,6 @@
-use crate::testing::{first_raw_file, init_tracing};
+use std::fs;
+
+use crate::testing::{ScratchDirectory, first_raw_file, init_tracing};
 
 use crate::io::raw::*;
 
@@ -11,30 +13,30 @@ fn test_load_raw_invalid_path() {
 }
 
 #[test]
-fn test_load_raw_invalid_data() {
-    // Create a temp file with invalid data
-    let temp_dir = std::env::temp_dir();
-    let temp_file = temp_dir.join("invalid_raw_test.raf");
-    fs::write(&temp_file, b"not a valid raw file").unwrap();
+fn test_load_raw_rejects_invalid_files() {
+    #[derive(Debug)]
+    struct InvalidRawCase {
+        name: &'static str,
+        contents: &'static [u8],
+    }
 
-    let result = load_raw(&temp_file);
-    assert!(result.is_err());
+    let directory = ScratchDirectory::new("invalid_raw_files");
+    let cases = [
+        InvalidRawCase {
+            name: "invalid_data",
+            contents: b"not a valid raw file",
+        },
+        InvalidRawCase {
+            name: "empty",
+            contents: b"",
+        },
+    ];
 
-    // Cleanup
-    let _ = fs::remove_file(&temp_file);
-}
-
-#[test]
-fn test_load_raw_empty_file() {
-    let temp_dir = std::env::temp_dir();
-    let temp_file = temp_dir.join("empty_raw_test.raf");
-    fs::write(&temp_file, b"").unwrap();
-
-    let result = load_raw(&temp_file);
-    assert!(result.is_err());
-
-    // Cleanup
-    let _ = fs::remove_file(&temp_file);
+    for case in cases {
+        let path = directory.join(format!("{}.raf", case.name));
+        fs::write(&path, case.contents).unwrap();
+        assert!(load_raw(&path).is_err(), "{case:?}");
+    }
 }
 
 #[test]

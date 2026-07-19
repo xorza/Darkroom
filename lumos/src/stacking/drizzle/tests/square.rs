@@ -9,7 +9,7 @@ use crate::stacking::drizzle::tests::*;
 #[test]
 fn test_square_kernel_identity_uniform() {
     let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
-    let image = AstroImage::from_pixels(ImageDimensions::new((5, 5), 1), pixels.clone());
+    let image = mono_image(5, 5, pixels.clone());
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -42,8 +42,8 @@ fn test_square_kernel_identity_uniform() {
 #[test]
 fn test_square_kernel_matches_turbo_no_rotation() {
     let pixels: Vec<f32> = (0..100).map(|i| (i as f32) * 0.01).collect();
-    let image1 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), pixels.clone());
-    let image2 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), pixels);
+    let image1 = mono_image(10, 10, pixels.clone());
+    let image2 = mono_image(10, 10, pixels);
     let transform = Transform::translation(DVec2::new(0.3, -0.2));
 
     // Turbo
@@ -92,7 +92,7 @@ fn test_square_kernel_matches_turbo_no_rotation() {
 /// Also verify that there is meaningful coverage in the output interior.
 #[test]
 fn test_square_kernel_rotation() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), vec![3.0; 20 * 20]);
+    let image = constant_mono_image(20, 20, 3.0);
 
     // 45° rotation around center (10, 10)
     let angle = FRAC_PI_4;
@@ -160,7 +160,7 @@ fn test_square_kernel_pixfrac() {
     // Single bright pixel at (2,2)
     let mut pixels1 = vec![0.0f32; 6 * 6];
     pixels1[2 * 6 + 2] = 1.0;
-    let image1 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), pixels1);
+    let image1 = mono_image(6, 6, pixels1);
 
     let config1 = DrizzleConfig {
         scale: 2.0,
@@ -176,7 +176,7 @@ fn test_square_kernel_pixfrac() {
 
     let mut pixels2 = vec![0.0f32; 6 * 6];
     pixels2[2 * 6 + 2] = 1.0;
-    let image2 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), pixels2);
+    let image2 = mono_image(6, 6, pixels2);
 
     let config2 = DrizzleConfig {
         scale: 2.0,
@@ -204,7 +204,7 @@ fn test_square_kernel_pixfrac() {
 /// scale=1, pixfrac=1. Output (1,1) should be fill_value, others = 5.0.
 #[test]
 fn test_square_kernel_with_pixel_weights() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![5.0; 16]);
+    let image = constant_mono_image(4, 4, 5.0);
 
     let mut pw = Buffer2::new_filled(4, 4, 1.0f32);
     *pw.get_mut(1, 1) = 0.0;
@@ -253,7 +253,7 @@ fn test_square_kernel_with_pixel_weights() {
 fn test_square_kernel_scale2_single_pixel() {
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[5] = 2.0; // pixel (1,1)
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
+    let image = mono_image(4, 4, pixels);
 
     let config = DrizzleConfig {
         scale: 2.0,
@@ -296,7 +296,7 @@ fn test_square_kernel_jacobian_weighted_average() {
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[0] = 10.0; // pixel (0,0)
     pixels[1] = 20.0; // pixel (1,0)
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
+    let image = mono_image(4, 4, pixels);
 
     let config = DrizzleConfig {
         scale: 2.0,
@@ -421,8 +421,8 @@ fn test_square_differs_from_turbo_under_rotation() {
             x as f32
         })
         .collect();
-    let image1 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), pixels.clone());
-    let image2 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), pixels);
+    let image1 = mono_image(10, 10, pixels.clone());
+    let image2 = mono_image(10, 10, pixels);
 
     // 15° rotation around center — enough to produce measurable overlap differences
     let angle = 15.0_f64.to_radians();
@@ -519,7 +519,7 @@ fn test_square_kernel_flux_conservation() {
     // = 16 * 10 + 384 * 1 = 544.0
     assert!((total_input_flux - 544.0).abs() < f32::EPSILON);
 
-    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), pixels);
+    let image = mono_image(20, 20, pixels);
 
     // 15° rotation around center
     let angle = 15.0_f64.to_radians();
@@ -588,8 +588,8 @@ fn test_square_kernel_flux_conservation() {
 /// Expected: (2.0 * 1.0 + 8.0 * 3.0) / (1.0 + 3.0) = 26.0 / 4.0 = 6.5
 #[test]
 fn test_square_kernel_two_frame_weighted_mean() {
-    let image1 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), vec![2.0; 36]);
-    let image2 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), vec![8.0; 36]);
+    let image1 = constant_mono_image(6, 6, 2.0);
+    let image2 = constant_mono_image(6, 6, 8.0);
 
     let config = DrizzleConfig {
         scale: 1.0,

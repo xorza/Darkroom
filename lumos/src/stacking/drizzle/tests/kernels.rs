@@ -14,7 +14,7 @@ fn test_turbo_kernel_overlap_exact() {
     // Single bright pixel at (1,1) with value 2.0
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[5] = 2.0; // pixel (1,1) = index 1*4+1 = 5
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
+    let image = mono_image(4, 4, pixels);
 
     let config = DrizzleConfig::x2(); // scale=2, pixfrac=0.8
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
@@ -54,7 +54,7 @@ fn test_turbo_kernel_overlap_exact() {
 #[test]
 fn test_turbo_kernel_fractional_shift() {
     // Uniform image so weighted mean is always 1.0 regardless of overlap pattern
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 4 * 4]);
+    let image = constant_mono_image(4, 4, 1.0);
 
     let config = DrizzleConfig::x2().with_pixfrac(1.0); // drop_size = 2.0
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
@@ -90,7 +90,7 @@ fn test_turbo_kernel_fractional_shift() {
 fn test_min_coverage_normalized() {
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[0] = 1.0;
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
+    let image = mono_image(4, 4, pixels);
 
     let config = DrizzleConfig::x2().with_pixfrac(0.5).with_min_coverage(0.6);
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
@@ -113,7 +113,7 @@ fn test_min_coverage_normalized() {
 /// approximately 3.0 everywhere in the interior (edges may differ due to truncation).
 #[test]
 fn test_gaussian_kernel_uniform_preserves_value() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), vec![3.0; 10 * 10]);
+    let image = constant_mono_image(10, 10, 3.0);
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
     let mut acc = accumulator(ImageDimensions::new((10, 10), 1), config);
@@ -138,7 +138,7 @@ fn test_gaussian_kernel_uniform_preserves_value() {
 /// uniform value, since the normalized Lanczos weights sum to 1.
 #[test]
 fn test_lanczos_kernel_uniform_preserves_value() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), vec![5.0; 20 * 20]);
+    let image = constant_mono_image(20, 20, 5.0);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -169,7 +169,7 @@ fn test_lanczos_kernel_uniform_preserves_value() {
 fn test_lanczos_clamping_no_negative_output() {
     let mut pixels = vec![0.0f32; 20 * 20];
     pixels[10 * 20 + 10] = 100.0; // bright point source
-    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), pixels);
+    let image = mono_image(20, 20, pixels);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -201,8 +201,8 @@ fn test_lanczos_clamping_no_negative_output() {
 /// (2.0 * 1.0 + 6.0 * 3.0) / (1.0 + 3.0) = (2 + 18) / 4 = 5.0
 #[test]
 fn test_two_frame_weighted_mean() {
-    let image1 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), vec![2.0; 10 * 10]);
-    let image2 = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), vec![6.0; 10 * 10]);
+    let image1 = constant_mono_image(10, 10, 2.0);
+    let image2 = constant_mono_image(10, 10, 6.0);
 
     let config = DrizzleConfig::x2();
     let mut acc = accumulator(ImageDimensions::new((10, 10), 1), config);
@@ -235,7 +235,7 @@ fn test_pixfrac_changes_weight_distribution() {
     // Covers output pixels (4,4),(5,4),(6,4),(4,5),(5,5),(6,5),(4,6),(5,6),(6,6) = 9 pixels
     let mut pixels1 = vec![0.0f32; 6 * 6];
     pixels1[2 * 6 + 2] = 1.0;
-    let image1 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), pixels1);
+    let image1 = mono_image(6, 6, pixels1);
 
     let config1 = DrizzleConfig::x2().with_pixfrac(1.0);
     let mut acc1 = accumulator(ImageDimensions::new((6, 6), 1), config1);
@@ -248,7 +248,7 @@ fn test_pixfrac_changes_weight_distribution() {
     // Drop (4.9,4.9)→(5.5,5.5): overlaps (4,4),(5,4),(4,5),(5,5) = 4 pixels
     let mut pixels2 = vec![0.0f32; 6 * 6];
     pixels2[2 * 6 + 2] = 1.0;
-    let image2 = AstroImage::from_pixels(ImageDimensions::new((6, 6), 1), pixels2);
+    let image2 = mono_image(6, 6, pixels2);
 
     let config2 = DrizzleConfig::x2().with_pixfrac(0.3);
     let mut acc2 = accumulator(ImageDimensions::new((6, 6), 1), config2);
@@ -311,7 +311,7 @@ fn test_rgb_channels_independent() {
 #[test]
 fn test_scale1_pixfrac1_identity() {
     let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
-    let image = AstroImage::from_pixels(ImageDimensions::new((5, 5), 1), pixels.clone());
+    let image = mono_image(5, 5, pixels.clone());
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -346,7 +346,7 @@ fn test_scale1_pixfrac1_identity() {
 /// With fill_value = -999.0, those gaps should contain -999.0 instead of 0.0.
 #[test]
 fn test_fill_value_in_uncovered_pixels() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
+    let image = constant_mono_image(4, 4, 1.0);
 
     let config = DrizzleConfig {
         scale: 2.0,
@@ -390,8 +390,8 @@ fn test_fill_value_in_uncovered_pixels() {
 /// Result should be 3.0 everywhere (zero-weight frame contributes nothing).
 #[test]
 fn test_zero_weight_frame_ignored() {
-    let image1 = AstroImage::from_pixels(ImageDimensions::new((8, 8), 1), vec![3.0; 64]);
-    let image2 = AstroImage::from_pixels(ImageDimensions::new((8, 8), 1), vec![100.0; 64]);
+    let image1 = constant_mono_image(8, 8, 3.0);
+    let image2 = constant_mono_image(8, 8, 100.0);
 
     let config = DrizzleConfig::x2();
     let mut acc = accumulator(ImageDimensions::new((8, 8), 1), config);
@@ -417,7 +417,7 @@ fn test_zero_weight_frame_ignored() {
 /// This tests that Gaussian + translation still preserves uniform values.
 #[test]
 fn test_gaussian_kernel_with_translation() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((12, 12), 1), vec![4.0; 144]);
+    let image = constant_mono_image(12, 12, 4.0);
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
     let mut acc = accumulator(ImageDimensions::new((12, 12), 1), config);
@@ -459,7 +459,7 @@ fn test_gaussian_kernel_with_translation() {
 /// Interior pixels should still be ~7.0 since the weighted mean of uniform values is invariant.
 #[test]
 fn test_lanczos_kernel_with_translation() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), vec![7.0; 400]);
+    let image = constant_mono_image(20, 20, 7.0);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -506,7 +506,7 @@ fn test_lanczos_kernel_with_translation() {
 fn test_pixel_weight_zero_excludes_pixel() {
     let mut pixels = vec![1.0f32; 4 * 4];
     pixels[5] = 100.0; // (1,1) = row 1 * 4 + col 1 = 5 (bad pixel)
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
+    let image = mono_image(4, 4, pixels);
 
     let mut pw = Buffer2::new_filled(4, 4, 1.0f32);
     *pw.get_mut(1, 1) = 0.0; // Exclude (1,1)
@@ -553,8 +553,8 @@ fn test_pixel_weight_zero_excludes_pixel() {
 /// At other pixels: weighted mean = (2.0 * 1.0 + 6.0 * 1.0) / (1.0 + 1.0) = 4.0
 #[test]
 fn test_pixel_weight_scales_contribution() {
-    let image1 = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![2.0; 16]);
-    let image2 = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![6.0; 16]);
+    let image1 = constant_mono_image(4, 4, 2.0);
+    let image2 = constant_mono_image(4, 4, 6.0);
 
     let mut pw1 = Buffer2::new_filled(4, 4, 1.0f32);
     *pw1.get_mut(1, 1) = 0.5;
@@ -595,7 +595,7 @@ fn test_pixel_weight_scales_contribution() {
 /// scale=1, pixfrac=1. Bad pixels produce fill_value; all others = 5.0.
 #[test]
 fn test_pixel_weight_bad_pixel_mask() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((8, 8), 1), vec![5.0; 64]);
+    let image = constant_mono_image(8, 8, 5.0);
 
     let mut pw = Buffer2::new_filled(8, 8, 1.0f32);
     *pw.get_mut(2, 3) = 0.0;
@@ -660,7 +660,7 @@ fn test_pixel_weight_with_point_kernel() {
     let mut pixels = vec![1.0f32; 4 * 4];
     pixels[5] = 10.0; // (1,1) bad pixel
     pixels[0] = 3.0;
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), pixels);
+    let image = mono_image(4, 4, pixels);
 
     let mut pw = Buffer2::new_filled(4, 4, 1.0f32);
     *pw.get_mut(1, 1) = 0.0;
@@ -694,7 +694,7 @@ fn test_pixel_weight_with_point_kernel() {
 /// Interior pixels far from the bad pixel should still be ~4.0.
 #[test]
 fn test_pixel_weight_with_gaussian_kernel() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((12, 12), 1), vec![4.0; 12 * 12]);
+    let image = constant_mono_image(12, 12, 4.0);
 
     let mut pw = Buffer2::new_filled(12, 12, 1.0f32);
     *pw.get_mut(5, 5) = 0.0;

@@ -11,7 +11,7 @@ use imaginarium::Buffer2;
 fn test_uniform_background() {
     let width = 128;
     let height = 128;
-    let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 0.5);
 
     let bg = estimate_background(
         &pixels,
@@ -39,7 +39,7 @@ fn test_uniform_background() {
 fn test_small_image_below_tile_size_does_not_panic() {
     // A tile_size larger than the image must clamp to the image (a single tile) rather than panic;
     // a uniform image then yields a uniform background at the pixel value.
-    let pixels = Buffer2::new(20, 20, vec![0.7; 20 * 20]);
+    let pixels = Buffer2::new_filled(20, 20, 0.7);
 
     let bg = estimate_background(
         &pixels,
@@ -115,7 +115,7 @@ fn test_background_with_stars() {
 fn test_noise_estimation() {
     let width = 128;
     let height = 128;
-    let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 0.5);
 
     let bg = estimate_background(
         &pixels,
@@ -138,7 +138,7 @@ fn test_noise_estimation() {
 fn test_non_square_image() {
     let width = 256;
     let height = 64;
-    let pixels = Buffer2::new(width, height, vec![0.4; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 0.4);
 
     let bg = estimate_background(
         &pixels,
@@ -224,7 +224,7 @@ fn test_interpolation_produces_valid_values() {
 fn test_large_image() {
     let width = 256;
     let height = 256;
-    let pixels = Buffer2::new(width, height, vec![0.33; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 0.33);
 
     let bg = estimate_background(
         &pixels,
@@ -281,7 +281,7 @@ fn test_invalid_tile_sizes_return_exact_errors() {
 fn test_single_tile_image() {
     // Image size equals tile size - exercises tx1 == tx0 branch in interpolation
     let size = 32;
-    let pixels = Buffer2::new(size, size, vec![0.42; size * size]);
+    let pixels = Buffer2::new_filled(size, size, 0.42);
 
     let bg = estimate_background(
         &pixels,
@@ -394,7 +394,7 @@ fn test_iterative_background_uniform() {
     // Uniform image should produce same result as non-iterative
     let width = 128;
     let height = 128;
-    let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 0.5);
 
     let config = BackgroundConfig {
         tile_size: 32,
@@ -569,7 +569,7 @@ fn test_iterative_background_no_refinement() {
     // No refinement should work fine
     let width = 64;
     let height = 64;
-    let pixels = Buffer2::new(width, height, vec![0.3; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 0.3);
 
     let config = BackgroundConfig {
         refinement: BackgroundRefinement::None,
@@ -863,7 +863,7 @@ fn test_bicubic_single_tile_column() {
     // With tiles_x=1, the X-direction solve gets n=1. Should produce constant fill.
     let width = 32; // 1 tile column
     let height = 128;
-    let pixels = Buffer2::new(width, height, vec![0.42; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 0.42);
 
     let bg = estimate_background(
         &pixels,
@@ -947,7 +947,7 @@ fn test_bicubic_single_tile_row() {
     // With tiles_y=1, Y direction should be constant (no Y interpolation needed)
     let width = 128;
     let height = 32; // 1 tile row
-    let pixels = Buffer2::new(width, height, vec![0.77; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 0.77);
 
     let bg = estimate_background(
         &pixels,

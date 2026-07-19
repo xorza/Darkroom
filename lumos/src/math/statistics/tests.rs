@@ -2,34 +2,42 @@
 
 use crate::math::statistics::*;
 
-#[test]
-fn test_median_odd() {
-    let mut values = [1.0f32, 3.0, 2.0, 5.0, 4.0];
-    assert!((median_f32_mut(&mut values) - 3.0).abs() < f32::EPSILON);
+#[derive(Debug)]
+struct MedianCase {
+    values: &'static [f32],
+    expected: f32,
 }
 
 #[test]
-fn test_median_even() {
-    let mut values = [1.0f32, 2.0, 3.0, 4.0];
-    assert!((median_f32_mut(&mut values) - 2.5).abs() < f32::EPSILON);
-}
+fn median_f32_truth_table() {
+    let cases = [
+        MedianCase {
+            values: &[1.0, 3.0, 2.0, 5.0, 4.0],
+            expected: 3.0,
+        },
+        MedianCase {
+            values: &[1.0, 2.0, 3.0, 4.0],
+            expected: 2.5,
+        },
+        MedianCase {
+            values: &[1.0, 5.0],
+            expected: 3.0,
+        },
+        MedianCase {
+            values: &[42.0],
+            expected: 42.0,
+        },
+        MedianCase {
+            values: &[-5.0, -3.0, -1.0, 2.0, 4.0],
+            expected: -1.0,
+        },
+    ];
 
-#[test]
-fn test_median_two_elements() {
-    let mut values = [1.0f32, 5.0];
-    assert!((median_f32_mut(&mut values) - 3.0).abs() < f32::EPSILON);
-}
-
-#[test]
-fn test_median_f32_single() {
-    let mut values = [42.0f32];
-    assert!((median_f32_mut(&mut values) - 42.0).abs() < f32::EPSILON);
-}
-
-#[test]
-fn test_median_f32_negative() {
-    let mut values = [-5.0f32, -3.0, -1.0, 2.0, 4.0];
-    assert!((median_f32_mut(&mut values) - (-1.0)).abs() < f32::EPSILON);
+    for case in cases {
+        let mut values = case.values.to_vec();
+        let actual = median_f32_mut(&mut values);
+        assert!((actual - case.expected).abs() < f32::EPSILON, "{case:?}");
+    }
 }
 
 #[test]
@@ -328,32 +336,43 @@ fn test_sigma_clip_asymmetric_outliers() {
     );
 }
 
-#[test]
-fn test_abs_deviation_inplace_basic() {
-    let mut values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
-    abs_deviation_inplace(&mut values, 3.0);
-    assert_eq!(values, [2.0, 1.0, 0.0, 1.0, 2.0]);
+#[derive(Debug)]
+struct AbsoluteDeviationCase {
+    values: &'static [f32],
+    center: f32,
+    expected: &'static [f32],
 }
 
 #[test]
-fn test_abs_deviation_inplace_negative() {
-    let mut values = [-4.0f32, -2.0, 0.0, 2.0, 4.0];
-    abs_deviation_inplace(&mut values, 0.0);
-    assert_eq!(values, [4.0, 2.0, 0.0, 2.0, 4.0]);
-}
+fn absolute_deviation_truth_table() {
+    let cases = [
+        AbsoluteDeviationCase {
+            values: &[1.0, 2.0, 3.0, 4.0, 5.0],
+            center: 3.0,
+            expected: &[2.0, 1.0, 0.0, 1.0, 2.0],
+        },
+        AbsoluteDeviationCase {
+            values: &[-4.0, -2.0, 0.0, 2.0, 4.0],
+            center: 0.0,
+            expected: &[4.0, 2.0, 0.0, 2.0, 4.0],
+        },
+        AbsoluteDeviationCase {
+            values: &[5.0],
+            center: 3.0,
+            expected: &[2.0],
+        },
+        AbsoluteDeviationCase {
+            values: &[],
+            center: 0.0,
+            expected: &[],
+        },
+    ];
 
-#[test]
-fn test_abs_deviation_inplace_single() {
-    let mut values = [5.0f32];
-    abs_deviation_inplace(&mut values, 3.0);
-    assert_eq!(values, [2.0]);
-}
-
-#[test]
-fn test_abs_deviation_inplace_empty() {
-    let mut values: [f32; 0] = [];
-    abs_deviation_inplace(&mut values, 0.0);
-    assert!(values.is_empty());
+    for case in cases {
+        let mut values = case.values.to_vec();
+        abs_deviation_inplace(&mut values, case.center);
+        assert_eq!(values, case.expected, "{case:?}");
+    }
 }
 
 #[test]
@@ -468,22 +487,39 @@ fn test_sigma_clipped_arrayvec_matches_vec_version() {
 }
 
 #[test]
-fn test_median_f32_fast_odd() {
-    // Sorted: [1, 2, 3, 5, 8], mid=2, median=3
-    let mut values = [5.0f32, 2.0, 8.0, 1.0, 3.0];
-    assert!((median_f32_fast(&mut values) - 3.0).abs() < f32::EPSILON);
-}
+fn median_f32_fast_truth_table() {
+    let cases = [
+        MedianCase {
+            values: &[5.0, 2.0, 8.0, 1.0, 3.0],
+            expected: 3.0,
+        },
+        MedianCase {
+            values: &[5.0, 2.0, 8.0, 1.0],
+            expected: 5.0,
+        },
+        MedianCase {
+            values: &[42.0],
+            expected: 42.0,
+        },
+        MedianCase {
+            values: &[7.0, 3.0],
+            expected: 7.0,
+        },
+        MedianCase {
+            values: &[5.0; 20],
+            expected: 5.0,
+        },
+        MedianCase {
+            values: &[3.0, -5.0, 7.0, -10.0, -2.0],
+            expected: -2.0,
+        },
+    ];
 
-#[test]
-fn test_median_f32_fast_even_returns_upper_middle() {
-    // Sorted: [1, 2, 5, 8], mid=2, returns values[2]=5 (upper-middle)
-    // This differs from median_f32_mut which returns (2+5)/2 = 3.5
-    let mut values = [5.0f32, 2.0, 8.0, 1.0];
-    let fast = median_f32_fast(&mut values);
-    assert!(
-        (fast - 5.0).abs() < f32::EPSILON,
-        "expected 5.0, got {fast}"
-    );
+    for case in cases {
+        let mut values = case.values.to_vec();
+        let actual = median_f32_fast(&mut values);
+        assert!((actual - case.expected).abs() < f32::EPSILON, "{case:?}");
+    }
 }
 
 #[test]
@@ -513,32 +549,6 @@ fn test_median_f32_fast_agrees_with_exact_on_odd() {
     let exact = median_f32_mut(&mut values_exact);
     assert!((fast - exact).abs() < f32::EPSILON);
     assert!((fast - 6.0).abs() < f32::EPSILON);
-}
-
-#[test]
-fn test_median_f32_fast_single() {
-    let mut values = [42.0f32];
-    assert!((median_f32_fast(&mut values) - 42.0).abs() < f32::EPSILON);
-}
-
-#[test]
-fn test_median_f32_fast_two_elements() {
-    // Sorted: [3, 7], mid=1, returns 7 (upper-middle)
-    let mut values = [7.0f32, 3.0];
-    assert!((median_f32_fast(&mut values) - 7.0).abs() < f32::EPSILON);
-}
-
-#[test]
-fn test_median_f32_fast_all_equal() {
-    let mut values = [5.0f32; 20];
-    assert!((median_f32_fast(&mut values) - 5.0).abs() < f32::EPSILON);
-}
-
-#[test]
-fn test_median_f32_fast_negative_values() {
-    // Sorted: [-10, -5, -2, 3, 7], mid=2, median=-2
-    let mut values = [3.0f32, -5.0, 7.0, -10.0, -2.0];
-    assert!((median_f32_fast(&mut values) - (-2.0)).abs() < f32::EPSILON);
 }
 
 #[test]

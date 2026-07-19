@@ -5,10 +5,7 @@ fn test_drizzle_accumulator_rejects_invalid_frame_inputs() {
     let config = DrizzleConfig::x2();
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
 
-    let mut frame = DrizzleFrame::new(
-        AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
-        Transform::identity(),
-    );
+    let mut frame = DrizzleFrame::new(constant_mono_image(4, 4, 1.0), Transform::identity());
     frame.pixel_weight_map = Some(Buffer2::new_filled(3, 3, 1.0));
     let error = acc.add_frame(frame).unwrap_err();
     assert!(matches!(
@@ -22,10 +19,7 @@ fn test_drizzle_accumulator_rejects_invalid_frame_inputs() {
         }
     ));
 
-    let mut frame = DrizzleFrame::new(
-        AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
-        Transform::identity(),
-    );
+    let mut frame = DrizzleFrame::new(constant_mono_image(4, 4, 1.0), Transform::identity());
     frame.weight = f32::NAN;
     let error = acc.add_frame(frame).unwrap_err();
     assert!(matches!(
@@ -35,10 +29,7 @@ fn test_drizzle_accumulator_rejects_invalid_frame_inputs() {
 
     let mut pixel_weights = vec![1.0; 16];
     pixel_weights[5] = -0.25;
-    let mut frame = DrizzleFrame::new(
-        AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
-        Transform::identity(),
-    );
+    let mut frame = DrizzleFrame::new(constant_mono_image(4, 4, 1.0), Transform::identity());
     frame.pixel_weight_map = Some(Buffer2::new(4, 4, pixel_weights));
     let error = acc.add_frame(frame).unwrap_err();
     assert!(matches!(

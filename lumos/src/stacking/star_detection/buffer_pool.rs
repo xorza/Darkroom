@@ -228,13 +228,24 @@ mod tests {
         pool.release_f32(buf1);
         pool.release_bit(buf2);
         pool.release_u32(buf3);
+        assert_eq!(
+            pool.counts(),
+            PoolCounts {
+                floats: 1,
+                bitmasks: 1,
+                labels: 1,
+            }
+        );
 
         pool.clear();
-
-        // After clear, new acquires allocate fresh buffers
-        let _ = pool.acquire_f32();
-        let _ = pool.acquire_bit();
-        let _ = pool.acquire_u32();
+        assert_eq!(
+            pool.counts(),
+            PoolCounts {
+                floats: 0,
+                bitmasks: 0,
+                labels: 0,
+            }
+        );
     }
 
     #[test]

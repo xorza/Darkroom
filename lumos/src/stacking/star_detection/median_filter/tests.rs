@@ -328,8 +328,7 @@ fn test_bayer_pattern_removal() {
 }
 
 #[test]
-fn test_median_at_left_edge() {
-    // 5x5 image
+fn median_at_side_edges() {
     #[rustfmt::skip]
     let pixels = vec![
         0.1, 0.2, 0.3, 0.4, 0.5,
@@ -339,45 +338,27 @@ fn test_median_at_left_edge() {
         2.1, 2.2, 2.3, 2.4, 2.5,
     ];
 
-    // Left edge at y=1 (interior row), x=0
-    // Neighbors: [0.1, 0.2, 0.6, 0.7, 1.1, 1.2]
-    // Sorted: [0.1, 0.2, 0.6, 0.7, 1.1, 1.2]
-    // Median of 6 = (0.6 + 0.7) / 2 = 0.65
-    let result = median_at_left_edge(&pixels, 5, 1);
+    let left = median_at_left_edge(&pixels, 5, 1);
     assert!(
-        (result - 0.65).abs() < 1e-6,
-        "Left edge median should be 0.65, got {}",
-        result
+        (left - 0.65).abs() < 1e-6,
+        "left edge median should be 0.65, got {left}"
+    );
+    let right = median_at_right_edge(&pixels, 5, 1);
+    assert!(
+        (right - 0.95).abs() < 1e-6,
+        "right edge median should be 0.95, got {right}"
     );
 }
 
 #[test]
-fn test_median_at_right_edge() {
-    // 5x5 image
-    #[rustfmt::skip]
-    let pixels = vec![
-        0.1, 0.2, 0.3, 0.4, 0.5,
-        0.6, 0.7, 0.8, 0.9, 1.0,
-        1.1, 1.2, 1.3, 1.4, 1.5,
-        1.6, 1.7, 1.8, 1.9, 2.0,
-        2.1, 2.2, 2.3, 2.4, 2.5,
-    ];
+fn median_at_edge_truth_table() {
+    #[derive(Debug)]
+    struct EdgeMedianCase {
+        x: usize,
+        y: usize,
+        expected: f32,
+    }
 
-    // Right edge at y=1 (interior row), x=4
-    // Neighbors: [0.4, 0.5, 0.9, 1.0, 1.4, 1.5]
-    // Sorted: [0.4, 0.5, 0.9, 1.0, 1.4, 1.5]
-    // Median of 6 = (0.9 + 1.0) / 2 = 0.95
-    let result = median_at_right_edge(&pixels, 5, 1);
-    assert!(
-        (result - 0.95).abs() < 1e-6,
-        "Right edge median should be 0.95, got {}",
-        result
-    );
-}
-
-#[test]
-fn test_median_at_edge_top_left_corner() {
-    // 4x4 image
     #[rustfmt::skip]
     let pixels = vec![
         0.1, 0.2, 0.3, 0.4,
@@ -385,141 +366,43 @@ fn test_median_at_edge_top_left_corner() {
         0.9, 1.0, 1.1, 1.2,
         1.3, 1.4, 1.5, 1.6,
     ];
-
-    // Top-left corner (0,0): neighbors [0.1, 0.2, 0.5, 0.6]
-    // Median of 4 = (0.2 + 0.5) / 2 = 0.35
-    let result = median_at_edge(&pixels, 4, 4, 0, 0);
-    assert!(
-        (result - 0.35).abs() < 1e-6,
-        "Top-left corner should be 0.35, got {}",
-        result
-    );
-}
-
-#[test]
-fn test_median_at_edge_top_right_corner() {
-    // 4x4 image
-    #[rustfmt::skip]
-    let pixels = vec![
-        0.1, 0.2, 0.3, 0.4,
-        0.5, 0.6, 0.7, 0.8,
-        0.9, 1.0, 1.1, 1.2,
-        1.3, 1.4, 1.5, 1.6,
+    let cases = [
+        EdgeMedianCase {
+            x: 0,
+            y: 0,
+            expected: 0.35,
+        },
+        EdgeMedianCase {
+            x: 3,
+            y: 0,
+            expected: 0.55,
+        },
+        EdgeMedianCase {
+            x: 0,
+            y: 3,
+            expected: 1.15,
+        },
+        EdgeMedianCase {
+            x: 3,
+            y: 3,
+            expected: 1.35,
+        },
+        EdgeMedianCase {
+            x: 1,
+            y: 0,
+            expected: 0.4,
+        },
+        EdgeMedianCase {
+            x: 1,
+            y: 3,
+            expected: 1.2,
+        },
     ];
 
-    // Top-right corner (3,0): neighbors [0.3, 0.4, 0.7, 0.8]
-    // Median of 4 = (0.4 + 0.7) / 2 = 0.55
-    let result = median_at_edge(&pixels, 4, 4, 3, 0);
-    assert!(
-        (result - 0.55).abs() < 1e-6,
-        "Top-right corner should be 0.55, got {}",
-        result
-    );
-}
-
-#[test]
-fn test_median_at_edge_bottom_left_corner() {
-    // 4x4 image
-    #[rustfmt::skip]
-    let pixels = vec![
-        0.1, 0.2, 0.3, 0.4,
-        0.5, 0.6, 0.7, 0.8,
-        0.9, 1.0, 1.1, 1.2,
-        1.3, 1.4, 1.5, 1.6,
-    ];
-
-    // Bottom-left corner (0,3): neighbors [0.9, 1.0, 1.3, 1.4]
-    // Median of 4 = (1.0 + 1.3) / 2 = 1.15
-    let result = median_at_edge(&pixels, 4, 4, 0, 3);
-    assert!(
-        (result - 1.15).abs() < 1e-6,
-        "Bottom-left corner should be 1.15, got {}",
-        result
-    );
-}
-
-#[test]
-fn test_median_at_edge_bottom_right_corner() {
-    // 4x4 image
-    #[rustfmt::skip]
-    let pixels = vec![
-        0.1, 0.2, 0.3, 0.4,
-        0.5, 0.6, 0.7, 0.8,
-        0.9, 1.0, 1.1, 1.2,
-        1.3, 1.4, 1.5, 1.6,
-    ];
-
-    // Bottom-right corner (3,3): neighbors [1.1, 1.2, 1.5, 1.6]
-    // Median of 4 = (1.2 + 1.5) / 2 = 1.35
-    let result = median_at_edge(&pixels, 4, 4, 3, 3);
-    assert!(
-        (result - 1.35).abs() < 1e-6,
-        "Bottom-right corner should be 1.35, got {}",
-        result
-    );
-}
-
-#[test]
-fn test_median_at_edge_top_row() {
-    // 4x4 image
-    #[rustfmt::skip]
-    let pixels = vec![
-        0.1, 0.2, 0.3, 0.4,
-        0.5, 0.6, 0.7, 0.8,
-        0.9, 1.0, 1.1, 1.2,
-        1.3, 1.4, 1.5, 1.6,
-    ];
-
-    // Top row middle (1,0): neighbors [0.1, 0.2, 0.3, 0.5, 0.6, 0.7]
-    // Median of 6 = (0.3 + 0.5) / 2 = 0.4
-    let result = median_at_edge(&pixels, 4, 4, 1, 0);
-    assert!(
-        (result - 0.4).abs() < 1e-6,
-        "Top row should be 0.4, got {}",
-        result
-    );
-}
-
-#[test]
-fn test_median_at_edge_bottom_row() {
-    // 4x4 image
-    #[rustfmt::skip]
-    let pixels = vec![
-        0.1, 0.2, 0.3, 0.4,
-        0.5, 0.6, 0.7, 0.8,
-        0.9, 1.0, 1.1, 1.2,
-        1.3, 1.4, 1.5, 1.6,
-    ];
-
-    // Bottom row middle (1,3): neighbors [0.9, 1.0, 1.1, 1.3, 1.4, 1.5]
-    // Median of 6 = (1.1 + 1.3) / 2 = 1.2
-    let result = median_at_edge(&pixels, 4, 4, 1, 3);
-    assert!(
-        (result - 1.2).abs() < 1e-6,
-        "Bottom row should be 1.2, got {}",
-        result
-    );
-}
-
-#[test]
-fn test_median9_scalar() {
-    // Test the SIMD module's scalar median9 function
-    let result = simd::median9_scalar(0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4, 0.5);
-    assert!(
-        (result - 0.5).abs() < 1e-6,
-        "median9_scalar should be 0.5, got {}",
-        result
-    );
-}
-
-#[test]
-fn test_median9_scalar_all_same() {
-    let result = simd::median9_scalar(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
-    assert!(
-        (result - 0.5).abs() < 1e-6,
-        "median9_scalar all same should be 0.5, got {}",
-        result
-    );
+    for case in cases {
+        let actual = median_at_edge(&pixels, 4, 4, case.x, case.y);
+        assert!((actual - case.expected).abs() < 1e-6, "{case:?}");
+    }
 }
 
 #[test]

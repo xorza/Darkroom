@@ -41,6 +41,14 @@ fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAcc
     DrizzleAccumulator::new(input_dims, config).expect("test drizzle config must be valid")
 }
 
+fn mono_image(width: usize, height: usize, pixels: Vec<f32>) -> AstroImage {
+    AstroImage::from_pixels(ImageDimensions::new((width, height), 1), pixels)
+}
+
+fn constant_mono_image(width: usize, height: usize, value: f32) -> AstroImage {
+    mono_image(width, height, vec![value; width * height])
+}
+
 fn drizzle_frames(
     images: Vec<AstroImage>,
     transforms: &[Transform],

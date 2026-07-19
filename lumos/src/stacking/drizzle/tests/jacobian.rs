@@ -31,11 +31,11 @@ fn test_point_jacobian_two_frame_weighted_mean() {
     let h = 12;
     let mut pixels_a = vec![0.0f32; w * h];
     pixels_a[4 * w + 4] = 10.0;
-    let image_a = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_a);
+    let image_a = mono_image(w, h, pixels_a);
 
     let mut pixels_b = vec![0.0f32; w * h];
     pixels_b[2 * w + 2] = 0.0; // explicitly zero
-    let image_b = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_b);
+    let image_b = mono_image(w, h, pixels_b);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -67,11 +67,11 @@ fn test_point_jacobian_two_frame_both_nonzero() {
     let h = 12;
     let mut pixels_a = vec![0.0f32; w * h];
     pixels_a[4 * w + 4] = 10.0;
-    let image_a = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_a);
+    let image_a = mono_image(w, h, pixels_a);
 
     let mut pixels_b = vec![0.0f32; w * h];
     pixels_b[2 * w + 2] = 2.0;
-    let image_b = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_b);
+    let image_b = mono_image(w, h, pixels_b);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -107,11 +107,11 @@ fn test_turbo_jacobian_two_frame_weighted_mean() {
     let h = 12;
     let mut pixels_a = vec![0.0f32; w * h];
     pixels_a[4 * w + 4] = 10.0;
-    let image_a = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_a);
+    let image_a = mono_image(w, h, pixels_a);
 
     let mut pixels_b = vec![0.0f32; w * h];
     pixels_b[2 * w + 2] = 2.0;
-    let image_b = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels_b);
+    let image_b = mono_image(w, h, pixels_b);
 
     let config = DrizzleConfig {
         scale: 1.0,
@@ -172,8 +172,8 @@ fn test_turbo_matches_square_affine_with_jacobian() {
         ..Default::default()
     };
 
-    let image_turbo = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels.clone());
-    let image_square = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels);
+    let image_turbo = mono_image(w, h, pixels.clone());
+    let image_square = mono_image(w, h, pixels);
 
     let mut acc_turbo = accumulator(ImageDimensions::new((w, h), 1), config_turbo);
     acc_turbo.add_image(image_turbo, &transform, 1.0, None);
@@ -227,8 +227,8 @@ fn test_gaussian_jacobian_two_frame_weighted_mean() {
         ..Default::default()
     };
     let combine = |b_transform: &Transform| -> f32 {
-        let image_a = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), vec![10.0; w * h]);
-        let image_b = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), vec![2.0; w * h]);
+        let image_a = constant_mono_image(w, h, 10.0);
+        let image_b = constant_mono_image(w, h, 2.0);
         let mut acc = accumulator(ImageDimensions::new((w, h), 1), config.clone());
         acc.add_image(image_a, &Transform::identity(), 1.0, None);
         acc.add_image(image_b, b_transform, 1.0, None);
@@ -268,8 +268,8 @@ fn test_lanczos_jacobian_two_frame_weighted_mean() {
         ..Default::default()
     };
     let combine = |b_transform: &Transform| -> f32 {
-        let image_a = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), vec![10.0; w * h]);
-        let image_b = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), vec![2.0; w * h]);
+        let image_a = constant_mono_image(w, h, 10.0);
+        let image_b = constant_mono_image(w, h, 2.0);
         let mut acc = accumulator(ImageDimensions::new((w, h), 1), config.clone());
         acc.add_image(image_a, &Transform::identity(), 1.0, None);
         acc.add_image(image_b, b_transform, 1.0, None);
@@ -324,7 +324,7 @@ fn test_all_kernels_jacobian_matches_square_affine() {
         kernel: DrizzleKernel::Square,
         ..Default::default()
     };
-    let image_sq = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels.clone());
+    let image_sq = mono_image(w, h, pixels.clone());
     let mut acc_sq = accumulator(ImageDimensions::new((w, h), 1), config_sq);
     acc_sq.add_image(image_sq, &transform, 1.0, None);
     let result_sq = acc_sq.finalize();
@@ -342,7 +342,7 @@ fn test_all_kernels_jacobian_matches_square_affine() {
             kernel,
             ..Default::default()
         };
-        let image = AstroImage::from_pixels(ImageDimensions::new((w, h), 1), pixels.clone());
+        let image = mono_image(w, h, pixels.clone());
         let mut acc = accumulator(ImageDimensions::new((w, h), 1), config);
         acc.add_image(image, &transform, 1.0, None);
         let result = acc.finalize();

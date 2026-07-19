@@ -23,6 +23,7 @@ use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::frame_store::{fits_in_memory, load_concurrency, memory_budget};
 use crate::stacking::progress::ProgressCallback;
+use crate::testing::ScratchDirectory;
 
 /// The tiered loader's core guarantee, as an invariant sweep: for any (frame size, count, budget),
 /// the chosen concurrency must not let peak *load* heap exceed the usable budget. Project that peak
@@ -76,8 +77,7 @@ fn write_const_fits(path: &std::path::Path, w: usize, h: usize, value: u16) {
 /// through the loader itself, so FITS normalization can't skew the expectation.
 #[test]
 fn disk_and_memory_tiers_produce_identical_masters() {
-    let dir = std::env::temp_dir().join("lumos_mem_tier_test");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = ScratchDirectory::new("lumos_mem_tier_test");
     let (w, h, n) = (24usize, 24usize, 6usize);
 
     // Distinct per-frame constant → a spatially-uniform master bracketed by the frame values, so a
@@ -136,6 +136,4 @@ fn disk_and_memory_tiers_produce_identical_masters() {
         (first - expected).abs() < 1e-6,
         "master mean {first} != mean-of-frames {expected}"
     );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }

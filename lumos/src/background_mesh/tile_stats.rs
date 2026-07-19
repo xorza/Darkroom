@@ -205,10 +205,6 @@ fn subsample_in_place(values: &mut Vec<f32>, target_size: usize) {
 mod tests {
     use crate::background_mesh::tile_stats::*;
 
-    fn create_uniform_image(width: usize, height: usize, value: f32) -> Buffer2<f32> {
-        Buffer2::new(width, height, vec![value; width * height])
-    }
-
     #[test]
     fn sextractor_sky_hand_computed() {
         let stats = |median: f32, mean: f32, sigma: f32| ClippedStats {
@@ -246,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_collect_sampled_pixels_small_tile() {
-        let pixels = create_uniform_image(32, 32, 0.5);
+        let pixels = Buffer2::new_filled(32, 32, 0.5);
         let mut values = Vec::new();
         collect_sampled_pixels(&pixels, 0, 32, 0, 32, 32, &mut values);
         // Small tile should collect all or most pixels
@@ -256,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_collect_sampled_pixels_large_tile() {
-        let pixels = create_uniform_image(256, 256, 0.5);
+        let pixels = Buffer2::new_filled(256, 256, 0.5);
         let mut values = Vec::new();
         collect_sampled_pixels(&pixels, 0, 256, 0, 256, 256, &mut values);
         // Large tile should sample ~MAX_TILE_SAMPLES
@@ -266,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_collect_unmasked_pixels_none_masked() {
-        let pixels = create_uniform_image(64, 64, 0.5);
+        let pixels = Buffer2::new_filled(64, 64, 0.5);
         let mask = BitBuffer2::new_filled(64, 64, false);
         let mut values = Vec::new();
         collect_unmasked_pixels(&pixels, &mask, 0, 64, 0, 64, 64, &mut values);
@@ -275,7 +271,7 @@ mod tests {
 
     #[test]
     fn test_collect_unmasked_pixels_all_masked() {
-        let pixels = create_uniform_image(64, 64, 0.5);
+        let pixels = Buffer2::new_filled(64, 64, 0.5);
         let mask = BitBuffer2::new_filled(64, 64, true);
         let mut values = Vec::new();
         collect_unmasked_pixels(&pixels, &mask, 0, 64, 0, 64, 64, &mut values);
@@ -286,7 +282,7 @@ mod tests {
     fn test_collect_unmasked_pixels_partial_mask() {
         let width = 64;
         let height = 64;
-        let pixels = create_uniform_image(width, height, 0.5);
+        let pixels = Buffer2::new_filled(width, height, 0.5);
 
         // Mask every other pixel
         let mut mask = BitBuffer2::new_filled(width, height, false);
@@ -306,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_collect_unmasked_pixels_partial_tile() {
-        let pixels = create_uniform_image(100, 100, 0.5);
+        let pixels = Buffer2::new_filled(100, 100, 0.5);
         let mask = BitBuffer2::new_filled(100, 100, false);
         let mut values = Vec::new();
         // Collect from a sub-region not aligned to 64-bit boundaries

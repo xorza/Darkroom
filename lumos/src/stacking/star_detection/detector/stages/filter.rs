@@ -199,6 +199,7 @@ fn compact_by_mask(stars: &mut Vec<Star>, kept: &[bool]) -> usize {
 #[cfg(test)]
 mod tests {
     use crate::stacking::star_detection::detector::stages::filter::*;
+    use crate::testing::TestRng;
     use glam::DVec2;
 
     fn make_test_star(fwhm: f32, flux: f32) -> Star {
@@ -823,16 +824,14 @@ mod tests {
     #[test]
     fn test_remove_duplicate_stars_spatial_hash_consistency() {
         // Verify spatial hash gives same results as simple algorithm
-        use rand::prelude::*;
-
-        let mut rng = StdRng::seed_from_u64(12345);
+        let mut rng = TestRng::new(12345);
 
         // Generate 500 random stars
         let base_stars: Vec<Star> = (0..500)
             .map(|i| {
                 make_star_at(
-                    rng.random_range(0.0..1000.0),
-                    rng.random_range(0.0..1000.0),
+                    rng.next_f32() * 1000.0,
+                    rng.next_f32() * 1000.0,
                     1000.0 - i as f32,
                 )
             })

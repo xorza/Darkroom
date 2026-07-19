@@ -3,7 +3,7 @@ use crate::stacking::drizzle::tests::*;
 #[test]
 fn test_drizzle_single_image() {
     // Create a simple test image
-    let image = AstroImage::from_pixels(ImageDimensions::new((100, 100), 1), vec![0.5; 100 * 100]);
+    let image = constant_mono_image(100, 100, 0.5);
 
     let config = DrizzleConfig::x2();
     let mut acc = accumulator(ImageDimensions::new((100, 100), 1), config);
@@ -44,7 +44,7 @@ fn test_drizzle_single_image() {
 
 #[test]
 fn test_drizzle_point_kernel() {
-    let image = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), vec![1.0; 10 * 10]);
+    let image = constant_mono_image(10, 10, 1.0);
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
     let mut acc = accumulator(ImageDimensions::new((10, 10), 1), config);
@@ -100,7 +100,7 @@ fn test_drizzle_images_empty() {
 fn test_drizzle_images_matches_accumulator() {
     // drizzle_images with one identity-transformed frame must reproduce the
     // single-image accumulator path: 200x200 output, interior pixels = 0.5.
-    let image = AstroImage::from_pixels(ImageDimensions::new((100, 100), 1), vec![0.5; 100 * 100]);
+    let image = constant_mono_image(100, 100, 0.5);
     let result = drizzle_images(
         vec![DrizzleFrame::new(image, Transform::identity())],
         &DrizzleConfig::x2(),
@@ -120,8 +120,8 @@ fn test_drizzle_images_matches_accumulator() {
 
 #[test]
 fn test_drizzle_images_dimension_mismatch() {
-    let a = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), vec![0.5; 400]);
-    let b = AstroImage::from_pixels(ImageDimensions::new((10, 10), 1), vec![0.5; 100]);
+    let a = constant_mono_image(20, 20, 0.5);
+    let b = constant_mono_image(10, 10, 0.5);
     let result = drizzle_images(
         drizzle_frames(vec![a, b], &[Transform::identity(), Transform::identity()]),
         &DrizzleConfig::default(),
@@ -165,7 +165,7 @@ fn test_drizzle_with_translation() {
     // Single bright pixel at (10,10), all others zero
     let mut pixels = vec![0.0f32; 20 * 20];
     pixels[10 * 20 + 10] = 1.0;
-    let image = AstroImage::from_pixels(ImageDimensions::new((20, 20), 1), pixels);
+    let image = mono_image(20, 20, pixels);
 
     // scale=2, pixfrac=0.8: drop_size = 0.8*2 = 1.6, half_drop = 0.8
     let config = DrizzleConfig::x2();
@@ -222,7 +222,7 @@ fn test_drizzle_with_translation() {
 #[test]
 fn test_coverage_map() {
     // Point kernel with identity: covered at even coords, uncovered at odd
-    let image = AstroImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
+    let image = constant_mono_image(4, 4, 1.0);
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);

@@ -27,7 +27,7 @@ fn do_warp(
     method: InterpolationMethod,
 ) -> Buffer2<f32> {
     let inverse = transform.inverse();
-    let mut output = Buffer2::new(input.width(), input.height(), vec![0.0; input.len()]);
+    let mut output = Buffer2::new_default(input.width(), input.height());
     warp_image(
         input,
         &mut output,
@@ -642,8 +642,8 @@ fn test_warp_with_sip_correction() {
         .clone();
 
     // Warp the same image with and without SIP
-    let mut output_no_sip = Buffer2::new(width, height, vec![0.0; width * height]);
-    let mut output_with_sip = Buffer2::new(width, height, vec![0.0; width * height]);
+    let mut output_no_sip = Buffer2::new_default(width, height);
+    let mut output_with_sip = Buffer2::new_default(width, height);
 
     warp_image(
         &ref_buf,

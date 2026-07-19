@@ -1,8 +1,9 @@
 //! Tests for Gaussian convolution.
 
-use std::f32::consts::{FRAC_PI_2, PI};
+use std::f32::consts::FRAC_PI_2;
 
 use crate::stacking::star_detection::convolution::*;
+use crate::testing::TestRng;
 use crate::{
     math::FWHM_TO_SIGMA, stacking::star_detection::convolution::elliptical_gaussian_kernel_2d,
 };
@@ -80,7 +81,7 @@ fn test_gaussian_convolve_uniform_image() {
     // Convolving a uniform image should return the same uniform value
     let width = 32;
     let height = 32;
-    let pixels = Buffer2::new(width, height, vec![0.5f32; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
@@ -289,7 +290,7 @@ fn test_gaussian_convolve_small_image() {
     // Should trigger direct 2D fallback and preserve uniform values exactly
     let width = 8;
     let height = 8;
-    let pixels = Buffer2::new(width, height, vec![1.0f32; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 1.0f32);
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
@@ -310,8 +311,8 @@ fn test_gaussian_convolve_small_image() {
 fn test_matched_filter_subtracts_background() {
     let width = 32;
     let height = 32;
-    let background = Buffer2::new(width, height, vec![0.3f32; width * height]);
-    let pixels = Buffer2::new(width, height, vec![0.3f32; width * height]); // Same as background
+    let background = Buffer2::new_filled(width, height, 0.3f32);
+    let pixels = Buffer2::new_filled(width, height, 0.3f32); // Same as background
 
     let mut result = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
@@ -339,7 +340,7 @@ fn test_matched_filter_subtracts_background() {
 fn test_matched_filter_detects_star() {
     let width = 32;
     let height = 32;
-    let background = Buffer2::new(width, height, vec![0.1f32; width * height]);
+    let background = Buffer2::new_filled(width, height, 0.1f32);
     let mut pixels = vec![0.1f32; width * height];
 
     // Add a star
@@ -382,7 +383,7 @@ fn test_matched_filter_detects_star() {
 fn test_matched_filter_boosts_snr() {
     let width = 64;
     let height = 64;
-    let background = Buffer2::new(width, height, vec![0.1f32; width * height]);
+    let background = Buffer2::new_filled(width, height, 0.1f32);
 
     // Create star with noise
     let mut pixels = vec![0.1f32; width * height];
@@ -447,8 +448,8 @@ fn test_matched_filter_boosts_snr() {
 fn test_matched_filter_preserves_negative_residuals() {
     let width = 16;
     let height = 16;
-    let background = Buffer2::new(width, height, vec![0.5f32; width * height]);
-    let pixels = Buffer2::new(width, height, vec![0.3f32; width * height]); // Below background
+    let background = Buffer2::new_filled(width, height, 0.5f32);
+    let pixels = Buffer2::new_filled(width, height, 0.3f32); // Below background
 
     let mut result = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
@@ -478,8 +479,6 @@ fn test_matched_filter_preserves_negative_residuals() {
 
 #[test]
 fn test_matched_filter_noise_normalization() {
-    use rand::prelude::*;
-
     // After noise normalization, the standard deviation of the output on a
     // pure-noise image should approximately match the input noise level.
     // This verifies the sqrt(sum(K^2)) normalization is correct.
@@ -488,21 +487,13 @@ fn test_matched_filter_noise_normalization() {
     let bg_level = 1000.0f32;
     let noise_sigma = 10.0f32;
 
-    // Generate spatially uncorrelated Gaussian noise via Box-Muller
-    let mut rng = StdRng::seed_from_u64(42);
+    let mut rng = TestRng::new(42);
     let mut pixels = vec![bg_level; width * height];
-    for chunk in pixels.chunks_mut(2) {
-        let u1: f32 = rng.random_range(1e-10f32..1.0);
-        let u2: f32 = rng.random_range(0.0f32..1.0);
-        let r = (-2.0 * u1.ln()).sqrt() * noise_sigma;
-        let theta = 2.0 * PI * u2;
-        chunk[0] += r * theta.cos();
-        if chunk.len() > 1 {
-            chunk[1] += r * theta.sin();
-        }
+    for pixel in &mut pixels {
+        *pixel += rng.next_gaussian_f32() * noise_sigma;
     }
 
-    let background = Buffer2::new(width, height, vec![bg_level; width * height]);
+    let background = Buffer2::new_filled(width, height, bg_level);
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
@@ -585,7 +576,7 @@ fn test_large_image_convolution() {
     // Just verify it completes without error
     let width = 512;
     let height = 512;
-    let pixels = Buffer2::new(width, height, vec![0.5f32; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
@@ -658,7 +649,7 @@ fn test_elliptical_kernel_elongation() {
 fn test_elliptical_convolve_uniform_image() {
     let width = 32;
     let height = 32;
-    let pixels = Buffer2::new(width, height, vec![0.5f32; width * height]);
+    let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
