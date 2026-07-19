@@ -178,17 +178,15 @@ surfaced on the flat node as `ExecutionNode.cache`. Disk is a **request**, honor
 
 ## B.2 The content digest is the cache key (`digest.rs`)
 
-A node's output is a pure function of: its func (`func_id` + `func_version`), its
-resolved input values, the outputs of its upstream producers, and the content of any
-external files it reads. `node_digest` (`digest.rs`) folds exactly that into a 256-bit
-BLAKE3 `Digest`. The **executor** computes it for each node as it reaches the node
-(producer-first order), reading each `Bind` producer's *already-stamped* `current_digest`
-— so no recursion, no memoization, and it's the single place any digest is computed.
+A node's output is a pure function of its `func_id`, resolved input values, upstream
+outputs, and the content of any external files it reads. `node_digest` (`digest.rs`)
+folds exactly that into a 256-bit BLAKE3 `Digest`. The **executor** computes it for each
+node as it reaches the node (producer-first order), reading each `Bind` producer's
+*already-stamped* `current_digest` — so no recursion, no memoization, and it's the
+single place any digest is computed.
 
-- **Equal digest ⇒ identical computation**, on any machine — so the digest is at once
-  the cache *key* and the *invalidation* signal. Change any const, binding, func
-  version, or upstream output and every downstream digest changes.
-- **Equal digest ⇒ identical computation**, on any machine.
+- **Equal digest ⇒ identical computation** only while the implementation behind each
+  `FuncId` remains stable for the cache's lifetime.
 - **Reproducibility taint.** Only `Pure` nodes are hashed; an `Impure` node, or any node
   with a non-reproducible producer, has digest `None` = "always recompute, never cache",
   for RAM and disk alike (a `None` producer folds to a `None` consumer).
@@ -211,9 +209,9 @@ BLAKE3 `Digest`. The **executor** computes it for each node as it reaches the no
   `DOMAIN` separator versions the hashing scheme itself.
 - **Output signature.** Each node's resolved output types (arity + each type, wildcards
   followed) are folded in, so redefining a func's outputs (`Int → Float`, an added port)
-  re-keys it *without* a version bump. This is what makes "a blob exists for this digest
-  but is the wrong type" impossible by construction: a type change is a key change, so
-  the stale blob is never looked up.
+  re-keys it. This is what makes "a blob exists for this digest but is the wrong type"
+  impossible by construction: a type change is a key change, so the stale blob is never
+  looked up.
 A node's digest is computed at **execution** (once per run, in the pre-run resolve sweep —
 the run loop reads the resolver's verdicts rather than re-deriving, since a digest folds
 live filesystem state and could drift mid-run), not `update`: only then are its producers'
@@ -324,10 +322,9 @@ source, which then runs.
 ### Invalidation summary
 
 - Any upstream change re-keys the digest → miss → recompute → store under the new key.
-- `func_version` bump invalidates a func's cached outputs across binaries.
 - **Output-type change** — a redefined output signature (type or arity) re-keys the
-  digest (§B.2), so a stale blob of the wrong type is never even looked up. No version
-  bump needed, no runtime type check: wrong-type-for-key is impossible by construction.
+  digest (§B.2), so a stale blob of the wrong type is never even looked up. No runtime
+  type check is needed: wrong-type-for-key is impossible by construction.
 - Impure cone → no digest → never cached.
 - Missing codec / corrupt / deleted blob → treated as a miss, not a failure
   (`mark_on_disk_if_present`'s codec check keeps a codec-less blob off the hot path; a

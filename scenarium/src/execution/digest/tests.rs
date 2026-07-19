@@ -85,17 +85,10 @@ struct Prog {
 
 impl Prog {
     /// Add a `Pure` (content-cacheable) node; outputs default to `Int`.
-    fn add(
-        &mut self,
-        func: u128,
-        version: u64,
-        outputs: u32,
-        bindings: &[ExecutionBinding],
-    ) -> usize {
+    fn add(&mut self, func: u128, outputs: u32, bindings: &[ExecutionBinding]) -> usize {
         self.add_with(
             FuncBehavior::Pure,
             func,
-            version,
             &vec![DataType::Int; outputs as usize],
             bindings,
         )
@@ -108,7 +101,7 @@ impl Prog {
         types: &[DataType],
         bindings: &[ExecutionBinding],
     ) -> usize {
-        self.add_with(FuncBehavior::Pure, func, 0, types, bindings)
+        self.add_with(FuncBehavior::Pure, func, types, bindings)
     }
 
     /// Add an `Impure` node — its `node_digest` is always `None`.
@@ -116,7 +109,6 @@ impl Prog {
         self.add_with(
             FuncBehavior::Impure,
             func,
-            0,
             &vec![DataType::Int; outputs as usize],
             bindings,
         )
@@ -133,7 +125,6 @@ impl Prog {
         &mut self,
         behavior: FuncBehavior,
         func: u128,
-        version: u64,
         types: &[DataType],
         bindings: &[ExecutionBinding],
     ) -> usize {
@@ -156,7 +147,6 @@ impl Prog {
                 id: node_id,
                 behavior,
                 func_id: FuncId::from_u128(func),
-                func_version: version,
                 inputs: Span::new(inputs_start, bindings.len() as u32),
                 outputs: Span::new(outputs_start, types.len() as u32),
                 ..Default::default()
@@ -214,9 +204,9 @@ fn digests(prog: &Prog) -> Vec<Option<Digest>> {
 fn deterministic_and_per_function_distinct() {
     // A → B (B binds A.0), plus an independent C with a const input.
     let mut p = Prog::default();
-    p.add(10, 0, 1, &[]); // A
-    p.add(20, 0, 1, &[bind(0, 0)]); // B
-    p.add(30, 0, 1, &[konst(StaticValue::Int(5))]); // C
+    p.add(10, 1, &[]); // A
+    p.add(20, 1, &[bind(0, 0)]); // B
+    p.add(30, 1, &[konst(StaticValue::Int(5))]); // C
 
     let first = digests(&p);
     let second = digests(&p); // same engine inputs → identical digests
@@ -232,9 +222,9 @@ fn deterministic_and_per_function_distinct() {
 fn const_change_propagates_downstream_only() {
     let build = |a_const: i64| {
         let mut p = Prog::default();
-        p.add(10, 0, 1, &[konst(StaticValue::Int(a_const))]); // A
-        p.add(20, 0, 1, &[bind(0, 0)]); // B binds A
-        p.add(30, 0, 1, &[konst(StaticValue::Int(9))]); // C, independent
+        p.add(10, 1, &[konst(StaticValue::Int(a_const))]); // A
+        p.add(20, 1, &[bind(0, 0)]); // B binds A
+        p.add(30, 1, &[konst(StaticValue::Int(9))]); // C, independent
         p
     };
     let base = digests(&build(1));
@@ -246,46 +236,23 @@ fn const_change_propagates_downstream_only() {
 }
 
 #[test]
-fn version_bump_invalidates_self_and_downstream_but_not_upstream() {
-    let build = |a_ver: u64, b_ver: u64| {
-        let mut p = Prog::default();
-        p.add(10, a_ver, 1, &[]); // A
-        p.add(20, b_ver, 1, &[bind(0, 0)]); // B binds A
-        p
-    };
-    let base = digests(&build(0, 0));
-    let bump_b = digests(&build(0, 1));
-    let bump_a = digests(&build(1, 0));
-
-    // Bumping B (downstream) changes only B.
-    assert_eq!(base[0], bump_b[0]);
-    assert_ne!(base[1], bump_b[1]);
-
-    // Bumping A (upstream) changes A and ripples into B.
-    assert_ne!(base[0], bump_a[0]);
-    assert_ne!(base[1], bump_a[1]);
-}
-
-#[test]
 fn structurally_identical_nodes_share_digest() {
-    // Two nodes, same func+version, same (input-identical) bindings ⇒ equal
+    // Two nodes, same func, same (input-identical) bindings ⇒ equal
     // node digests — the property that lets the store dedup repeated work.
     let mut p = Prog::default();
-    p.add(10, 2, 1, &[konst(StaticValue::Int(7))]);
-    p.add(10, 2, 1, &[konst(StaticValue::Int(7))]);
+    p.add(10, 1, &[konst(StaticValue::Int(7))]);
+    p.add(10, 1, &[konst(StaticValue::Int(7))]);
     let d = digests(&p);
     assert_eq!(d[0], d[1]);
 
-    // Differ in func, version, or const ⇒ digests diverge.
+    // Differ in func or const ⇒ digests diverge.
     let mut q = Prog::default();
-    q.add(10, 2, 1, &[konst(StaticValue::Int(7))]);
-    q.add(11, 2, 1, &[konst(StaticValue::Int(7))]); // different func
-    q.add(10, 3, 1, &[konst(StaticValue::Int(7))]); // different version
-    q.add(10, 2, 1, &[konst(StaticValue::Int(8))]); // different const
+    q.add(10, 1, &[konst(StaticValue::Int(7))]);
+    q.add(11, 1, &[konst(StaticValue::Int(7))]); // different func
+    q.add(10, 1, &[konst(StaticValue::Int(8))]); // different const
     let dq = digests(&q);
     assert_ne!(dq[0], dq[1]);
     assert_ne!(dq[0], dq[2]);
-    assert_ne!(dq[0], dq[3]);
 }
 
 #[test]
@@ -299,7 +266,7 @@ fn fs_path_folds_file_identity_and_path() {
     let path = file.to_string_lossy().into_owned();
     let prog_for = |path: &str| {
         let mut p = Prog::default();
-        p.add(10, 0, 1, &[konst(StaticValue::FsPath(path.into()))]);
+        p.add(10, 1, &[konst(StaticValue::FsPath(path.into()))]);
         p
     };
 
@@ -340,9 +307,9 @@ fn bound_fs_path_folds_delivered_file_identity() {
     // producer (0) → consumer (1) with its input declared `FsPath`; a control consumer (2)
     // reads the same port through an undeclared input — no fold.
     let mut p = Prog::default();
-    p.add(10, 0, 1, &[]);
-    p.add(20, 0, 1, &[bind(0, 0)]);
-    p.add(20, 0, 1, &[bind(0, 0)]);
+    p.add(10, 1, &[]);
+    p.add(20, 1, &[bind(0, 0)]);
+    p.add(20, 1, &[bind(0, 0)]);
     p.stamp_input(1, 0, InputStamper::FsPath);
 
     // Stamp the producer and install `value` as its delivered output (`None` leaves the
@@ -435,9 +402,9 @@ fn custom_stamper_folds_referent_version() {
     // unstamped. The delivered value is an ordinary resident value — what identity it
     // yields is the stamper's business, not the framework's.
     let mut p = Prog::default();
-    p.add(10, 0, 1, &[]);
-    p.add(20, 0, 1, &[bind(0, 0)]);
-    p.add(20, 0, 1, &[bind(0, 0)]);
+    p.add(10, 1, &[]);
+    p.add(20, 1, &[bind(0, 0)]);
+    p.add(20, 1, &[bind(0, 0)]);
     p.stamp_input(
         1,
         0,
@@ -485,9 +452,9 @@ fn custom_stamper_folds_referent_version() {
 fn output_ports_are_disambiguated() {
     // One producer with two outputs; consumers on different ports differ.
     let mut p = Prog::default();
-    p.add(10, 0, 2, &[]); // A, two outputs
-    p.add(20, 0, 1, &[bind(0, 0)]); // B binds A.0
-    p.add(20, 0, 1, &[bind(0, 1)]); // C binds A.1 (same func as B)
+    p.add(10, 2, &[]); // A, two outputs
+    p.add(20, 1, &[bind(0, 0)]); // B binds A.0
+    p.add(20, 1, &[bind(0, 1)]); // C binds A.1 (same func as B)
 
     let a = digest_at(&p.program, 0).unwrap();
     assert_ne!(
@@ -502,7 +469,7 @@ fn output_ports_are_disambiguated() {
 /// The output signature is part of the key: a flipped type, an added port, or a
 /// distinct custom type re-keys the node, and a producer's change propagates to
 /// its consumers — so a redefined func can never serve a stale blob of the wrong
-/// type without a version bump.
+/// type.
 #[test]
 fn output_signature_folds_into_digest_and_propagates() {
     use crate::TypeId;
@@ -552,8 +519,8 @@ fn cycle_yields_none() {
     // A binds B.0, B binds A.0 — a malformed program (the planner rejects it
     // separately); the digest pass must break the recursion, not loop.
     let mut p = Prog::default();
-    p.add(10, 0, 1, &[bind(1, 0)]); // A binds B (idx 1)
-    p.add(20, 0, 1, &[bind(0, 0)]); // B binds A (idx 0)
+    p.add(10, 1, &[bind(1, 0)]); // A binds B (idx 1)
+    p.add(20, 1, &[bind(0, 0)]); // B binds A (idx 0)
     assert_eq!(digest_at(&p.program, 0), None);
 }
 
@@ -563,9 +530,9 @@ fn impure_node_and_its_dependents_are_none() {
     // whole downstream chain; an independent pure node stays `Some`.
     let mut p = Prog::default();
     p.add_impure(10, 1, &[]); // 0: impure source
-    p.add(20, 0, 1, &[bind(0, 0)]); // 1: pure, binds impure
-    p.add(30, 0, 1, &[bind(1, 0)]); // 2: pure, binds tainted
-    p.add(40, 0, 1, &[konst(StaticValue::Int(5))]); // 3: independent pure
+    p.add(20, 1, &[bind(0, 0)]); // 1: pure, binds impure
+    p.add(30, 1, &[bind(1, 0)]); // 2: pure, binds tainted
+    p.add(40, 1, &[konst(StaticValue::Int(5))]); // 3: independent pure
 
     let d = digests(&p);
     assert_eq!(d[0], None, "impure node ⇒ None");

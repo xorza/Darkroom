@@ -110,11 +110,6 @@ pub(crate) struct ExecutionNode {
 
     pub func_id: FuncId,
 
-    /// Copied from [`Func::version`](crate::node::definition::Func::version) at flatten
-    /// time so the content digest is self-contained in the program. Bumping a
-    /// func's version flows here and invalidates its disk-cached outputs.
-    pub func_version: u64,
-
     pub lambda: FuncLambda,
 
     pub name: String,

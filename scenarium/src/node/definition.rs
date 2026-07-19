@@ -203,12 +203,6 @@ pub struct Func {
 
     pub behavior: FuncBehavior,
 
-    /// Algorithm version, folded into the disk-cache content digest so a changed
-    /// implementation invalidates results computed by an older binary. Bump it
-    /// whenever the func's output for identical inputs changes. Pure cache
-    /// metadata — execution never reads it.
-    pub version: u64,
-
     pub description: Option<String>,
     pub inputs: Vec<FuncInput>,
     pub outputs: Vec<FuncOutput>,
@@ -242,14 +236,6 @@ impl Func {
 
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
-        self
-    }
-
-    /// Stamp the func's algorithm [`version`](Func::version). Bump when the
-    /// implementation changes its output for the same inputs, to invalidate
-    /// disk-cached results from older binaries.
-    pub fn version(mut self, version: u64) -> Self {
-        self.version = version;
         self
     }
 

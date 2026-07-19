@@ -101,9 +101,8 @@ mod cache_persistence {
     }
 
     /// A `persist` node's output survives a fresh engine (reopen), its sole-consumer
-    /// upstream is pruned on the hit, and a digest change (a bumped func version,
-    /// standing in for any input change) invalidates it — *overwriting* the node's
-    /// one blob rather than orphaning it beside a new one.
+    /// upstream is pruned on the hit, and an input change invalidates it —
+    /// *overwriting* the node's one blob rather than orphaning it beside a new one.
     #[tokio::test]
     async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
         let dir = TempDir::new("e2e");
@@ -169,17 +168,16 @@ mod cache_persistence {
             "mult did not recompute"
         );
 
-        // Digest change: bump `mult`'s func version ⇒ miss ⇒ mult recomputes, which now needs
-        // `get_a` again — so the cut keeps it alive and it runs.
-        let mut bumped = make_lib();
-        bumped.by_name_mut("mult").unwrap().version = 1;
+        // Changing one input to a const makes `mult` miss, while its other input
+        // still needs `get_a`, so the cut keeps the source alive and it runs.
+        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
         let mut engine = disk_engine(&dir);
-        engine.update(&graph, &bumped).unwrap();
+        engine.update(&graph, &make_lib()).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(
             get_a_calls.load(Ordering::SeqCst),
             2,
-            "version bump ⇒ mult misses and recomputes from get_a"
+            "input change makes mult miss and recompute from get_a"
         );
         assert!(
             !stats.cached_nodes.contains(&mult_id),
@@ -5332,14 +5330,12 @@ mod compile_regressions {
         );
     }
 
-    /// An `Update` may carry an evolved library: a func that gained an input under
-    /// the same id must recompile without carrying stale per-input state (the old
-    /// carry-over indexed out of bounds), and a changed lambda — re-keyed by a
-    /// version bump — must actually run instead of the stale clone.
+    /// An `Update` may carry an evolved library: changed inputs and lambdas must
+    /// replace their prior compiled forms under the reused flat node.
     #[tokio::test]
     async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
         let printed = Arc::new(StdMutex::new(Vec::<i64>::new()));
-        let make_lib = |version: u64, result: i64, extra_input: bool| {
+        let make_lib = |result: i64, extra_input: bool| {
             let mut lib = test_func_lib(TestFuncHooks {
                 print: {
                     let p = printed.clone();
@@ -5350,7 +5346,6 @@ mod compile_regressions {
             let mut generator = Func::new("3cb06374-2a86-45e1-91db-fec227538a97", "generate")
                 .category("Test")
                 .pure()
-                .version(version)
                 .output(FuncOutput::new("V", DataType::Int))
                 .lambda(async_lambda!(move |_, _, _, _, _, outputs| {
                     outputs[0] = StaticValue::Int(result).into();
@@ -5363,7 +5358,7 @@ mod compile_regressions {
             lib
         };
 
-        let lib_v1 = make_lib(0, 1, false);
+        let lib_v1 = make_lib(1, false);
         let mut graph = Graph::default();
         graph.add(node(&lib_v1, "generate"));
         graph.add(node(&lib_v1, "Print"));
@@ -5382,8 +5377,8 @@ mod compile_regressions {
         engine.execute_sinks().await.unwrap();
         assert_eq!(*printed.lock().unwrap(), vec![1], "v1 lambda ran");
 
-        // v2: same FuncId, one more input, bumped version, different lambda.
-        let lib_v2 = make_lib(1, 2, true);
+        // v2: same FuncId, one more input, different lambda.
+        let lib_v2 = make_lib(2, true);
         engine.update(&graph, &lib_v2).unwrap();
         assert_eq!(
             engine
@@ -5396,7 +5391,7 @@ mod compile_regressions {
         assert_eq!(
             *printed.lock().unwrap(),
             vec![1, 2],
-            "the version bump re-keyed the digest and the *new* lambda ran"
+            "the input-shape change re-keyed the digest and the new lambda ran"
         );
     }
 

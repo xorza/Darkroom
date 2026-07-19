@@ -346,7 +346,6 @@ impl<'a> Run<'a> {
 
             let e_node = self.e_nodes.get_mut(&flat_id).unwrap();
             e_node.func_id = func.id;
-            e_node.func_version = func.version;
             // Refreshed every build (an Arc clone), so a reused flat node can't keep
             // executing a previous library's lambda after an in-session change.
             e_node.lambda = func.lambda.clone();

@@ -1,8 +1,8 @@
 //! Content digests for node outputs — the validity key for the per-slot RAM cache
 //! and the node-keyed disk cache.
 //!
-//! A node's output is a pure function of its function (identity + version), its
-//! resolved input values, the outputs of its upstream producers, and the content of
+//! A node's output is a pure function of its function identity, its resolved input
+//! values, the outputs of its upstream producers, and the content of
 //! any external files it reads. [`node_digest`] folds exactly that into a 256-bit
 //! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
 //! (the executor computes digests producer-first, so no recursion or memoization is
@@ -12,9 +12,8 @@
 //!
 //! **Trust boundary (what is *not* folded).** The digest is only as honest as these
 //! assumptions; violating one is a *false hit* (a stale value served):
-//! - **`func_version` is the behavior contract.** Output *types* are folded, but a
-//!   lambda whose value logic (or a default for an unbound optional input) changes with
-//!   the same signature and no version bump re-uses the old digest. Bump the version.
+//! - **`FuncId` is the behavior contract.** Output *types* are folded, but changing a
+//!   lambda's value logic under the same identity and signature can reuse an old digest.
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
 //!   cached).
@@ -45,10 +44,10 @@ use crate::{DataType, StaticValue};
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
-const DOMAIN: &[u8] = b"scenarium-cache-v1";
+const DOMAIN: &[u8] = b"scenarium-cache-v2";
 
 /// 256-bit content digest. Cross-machine stable for a given binary: equal
-/// digests mean the same func+version, params, upstream outputs, and file inputs.
+/// digests mean the same function identity, params, upstream outputs, and file inputs.
 /// A newtype, not a bare `[u8; 32]`, so an arbitrary byte array can't silently pose
 /// as a digest where one is expected.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -270,8 +269,7 @@ pub(crate) fn node_digest(
     let mut hasher = DigestHasher::new();
     hasher
         .write_bytes(DOMAIN)
-        .write_pod(e_node.func_id.as_u128())
-        .write_pod(e_node.func_version);
+        .write_pod(e_node.func_id.as_u128());
 
     let out_types = program.node_output_types(e_node);
     hasher.write_pod(out_types.len() as u64);
