@@ -18,6 +18,7 @@ imaginarium = { workspace = true }
 # in `main.rs`). Already in the workspace graph via imaginarium.
 image = { workspace = true }
 glam = { workspace = true }
+indexmap = { workspace = true }
 serde = { workspace = true }
 anyhow = { workspace = true }
 

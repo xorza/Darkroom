@@ -60,7 +60,7 @@ impl NodeMenuUi {
         // skipped), read from last frame's response. Right-click selects the
         // clicked node when it isn't already part of the selection, so the
         // chosen action always targets a coherent set ("select then act").
-        for n in &scene.nodes {
+        for n in scene.nodes.values() {
             if !n.boundary
                 && ui.response_for(node_widget_id(n.id)).right.clicked()
                 && let Some(p) = ui.pointer_pos()
@@ -82,7 +82,7 @@ impl NodeMenuUi {
             // runs while the menu is open.
             let run_target = self
                 .target
-                .and_then(|id| scene.nodes.iter().find(|n| n.id == id))
+                .and_then(|id| scene.nodes.get(&id))
                 .filter(|n| n.runnable())
                 .map(|n| n.id);
             if let Some(node_id) = run_target {

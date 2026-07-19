@@ -46,13 +46,13 @@ impl GraphView {
         }
 
         let mut row_in_col: HashMap<u32, u32> = HashMap::new();
-        for item in self.item_placements.iter_mut() {
-            let ItemRef::Node(id) = item.key else {
+        for (key, position) in &mut self.item_placements {
+            let ItemRef::Node(id) = *key else {
                 continue;
             };
             let d = depth.get(&id).copied().unwrap_or(0);
             let row = row_in_col.entry(d).or_insert(0);
-            item.pos = AUTO_LAYOUT_ORIGIN
+            *position = AUTO_LAYOUT_ORIGIN
                 + Vec2::new(
                     d as f32 * AUTO_LAYOUT_COL_SPACING,
                     *row as f32 * AUTO_LAYOUT_ROW_SPACING,
@@ -65,21 +65,21 @@ impl GraphView {
         let pin_positions: Vec<(ItemRef, Vec2)> = self
             .item_placements
             .iter()
-            .filter_map(|item| {
-                let ItemRef::Pin(port) = item.key else {
+            .filter_map(|(key, _)| {
+                let ItemRef::Pin(port) = *key else {
                     return None;
                 };
                 let owner = self
                     .item_placements
-                    .by_key(&ItemRef::Node(port.node_id))
-                    .map(|o| o.pos)
+                    .get(&ItemRef::Node(port.node_id))
+                    .copied()
                     .unwrap_or(AUTO_LAYOUT_ORIGIN);
                 let pos = owner + PIN_LAYOUT_OFFSET + PIN_LAYOUT_STAGGER * port.port_idx as f32;
-                Some((item.key, pos))
+                Some((*key, pos))
             })
             .collect();
         for (key, pos) in pin_positions {
-            self.item_placements.by_key_mut(&key).unwrap().pos = pos;
+            *self.item_placements.get_mut(&key).unwrap() = pos;
         }
     }
 }
@@ -119,7 +119,7 @@ mod tests {
         let mut view = GraphView::for_graph(&graph);
         view.auto_layout(&graph);
 
-        let pos = |key: ItemRef| view.item_placements.by_key(&key).unwrap().pos;
+        let pos = |key: ItemRef| *view.item_placements.get(&key).unwrap();
         let source_pos = pos(ItemRef::Node(source_id));
         let middle_pos = pos(ItemRef::Node(middle_id));
         let downstream_pos = pos(ItemRef::Node(downstream_id));

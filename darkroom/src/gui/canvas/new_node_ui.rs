@@ -225,8 +225,7 @@ fn category_column(
     let shows = |name: &str| cat_match || name_matches(name, query_lc);
     let mut entries: Vec<PaletteEntry> = ctx
         .library
-        .funcs
-        .iter()
+        .funcs()
         .filter(|f| f.category == category && shows(&f.name))
         .map(PaletteEntry::Func)
         .chain(
@@ -289,8 +288,7 @@ fn name_matches(name: &str, query_lc: &str) -> bool {
 fn sorted_categories<'a>(ctx: &'a AppContext<'_>) -> Vec<&'a str> {
     let mut cats: Vec<&str> = ctx
         .library
-        .funcs
-        .iter()
+        .funcs()
         .map(|f| f.category.as_str())
         .chain(
             ctx.library

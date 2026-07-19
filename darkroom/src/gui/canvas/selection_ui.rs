@@ -113,7 +113,7 @@ impl SelectionUI {
         }
         let rect = band.rect();
         let mut selected: BTreeSet<ItemRef> = self.base.clone();
-        for n in &scene.nodes {
+        for n in scene.nodes.values() {
             // The cached-size world rect, so nodes the viewport cull
             // skipped this frame still sweep. Never-measured nodes
             // (first frame) can't be hit yet — skip.

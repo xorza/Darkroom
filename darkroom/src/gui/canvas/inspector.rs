@@ -101,7 +101,7 @@ impl Inspectors {
     /// chip toggle), so a chip click never reads as its own outside
     /// action — the click lands on the chip, not the canvas or a body.
     pub(crate) fn apply(&mut self, ui: &Ui, scene: &Scene) {
-        for n in &scene.nodes {
+        for n in scene.nodes.values() {
             if ui.response_for(inspect_badge_wid(n.id)).left.clicked() {
                 match cycle(self.modes.get(&n.id).copied()) {
                     Some(m) => {
@@ -116,8 +116,7 @@ impl Inspectors {
         if outside_action(ui, scene) {
             self.close_unpinned();
         }
-        self.modes
-            .retain(|id, _| scene.nodes.iter().any(|n| n.id == *id));
+        self.modes.retain(|id, _| scene.nodes.contains_key(id));
     }
 
     /// Record a panel for every open inspector, positioned just right of
@@ -140,7 +139,7 @@ impl Inspectors {
             run_state,
         };
         for (&id, &mode) in &self.modes {
-            let Some(node) = scene.nodes.iter().find(|n| n.id == id) else {
+            let Some(node) = scene.nodes.get(&id) else {
                 continue;
             };
             // Boundary nodes (GraphInput/GraphOutput) are pure
@@ -325,7 +324,7 @@ fn outside_action(ui: &Ui, scene: &Scene) -> bool {
         || oc.scroll.lines != Vec2::ZERO
         || oc.scroll.pixels != Vec2::ZERO
         || (oc.scroll.zoom - 1.0).abs() > f32::EPSILON;
-    let node_acted = scene.nodes.iter().any(|n| {
+    let node_acted = scene.nodes.values().any(|n| {
         let r = ui.response_for(node_widget_id(n.id));
         r.left.clicked() || r.left.drag.started()
     });

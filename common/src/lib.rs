@@ -24,7 +24,6 @@ pub(crate) mod file_format;
 pub(crate) mod float_ext;
 pub(crate) mod fnv;
 pub(crate) mod introspect;
-pub(crate) mod key_index_vec;
 pub(crate) mod normalize_string;
 pub(crate) mod pause_gate;
 pub(crate) mod ready_state;
@@ -46,7 +45,6 @@ pub use introspect::{
     FieldDesc, FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect,
     IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,
 };
-pub use key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 pub use normalize_string::NormalizeString;
 pub use pause_gate::{PauseGate, PauseGateCloseGuard};
 pub use ready_state::ReadyState;

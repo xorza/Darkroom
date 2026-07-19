@@ -59,7 +59,7 @@ pub(crate) fn selected_group_positions(
 ) -> Vec<(ItemRef, Vec2)> {
     let mut positions: Vec<(ItemRef, Vec2)> = scene
         .nodes
-        .iter()
+        .values()
         .filter(|n| selected.contains(&ItemRef::Node(n.id)))
         .map(|n| (ItemRef::Node(n.id), n.pos))
         .collect();

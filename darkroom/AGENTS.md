@@ -33,7 +33,7 @@ default look just run the tests and commit the asset diff (see `theme.rs`).
   (in `main.rs`) drives both. All widgets, input, layout, theming, texture
   upload come from here. Pre-1.0, breaks freely — coordinate changes with
   aperture.
-- **`common`** — `SerdeFormat`, `serialize`/`deserialize`, `KeyIndexVec`.
+- **`common`** — `SerdeFormat`, `serialize`/`deserialize`, and shared utilities.
 - **`lens`** — `image_library()` / `astro_library()` (image + astro node libraries).
 - **`tokio`** — multi-thread runtime backing the execution worker (graph runs
   off the UI thread; results drain back on-frame).
@@ -154,8 +154,8 @@ Everything else is editor view-state, split per graph:
 - **`GraphRef`** — `Main` (root graph) or `Local(GraphId)` (a local graph).
   The active-graph handle threaded through the whole edit pipeline.
 - **`GraphView`** — per-graph view metadata: `item_placements`
-  (`KeyIndexVec<ItemRef, CanvasItemPlacement>` of node-body and pinned-output
-  preview positions whose *order* is the shared paint stack — later items
+  (`IndexMap<ItemRef, Vec2>` of node-body and pinned-output preview positions
+  whose *order* is the shared paint stack — later items
   draw in front, `Intent::Raise` lifts either kind; `check()` asserts one
   `Node` item per graph node and one `Pin` item per pinned output),
   `viewport`, and `selected` (a `BTreeSet` so equality/serde are

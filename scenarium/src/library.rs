@@ -7,7 +7,6 @@ use crate::graph::interface::GraphId;
 use crate::node::definition::{Func, FuncId};
 use crate::{CustomValueCodec, ResourceStamper};
 use crate::{DataType, EnumVariants, TypeId};
-use common::KeyIndexVec;
 use hashbrown::HashMap as GraphMap;
 
 /// The metadata of a registered nominal type — a `Custom`
@@ -109,35 +108,40 @@ impl TypeEntry {
 /// process-assembled library.
 #[derive(Default, Debug, Clone)]
 pub struct Library {
-    pub funcs: KeyIndexVec<FuncId, Func>,
+    funcs: HashMap<FuncId, Func>,
 
     /// Shared graphs. Editing one propagates to every shared instance.
     pub graphs: GraphMap<GraphId, Graph>,
 
     /// Registered nominal types (`Custom`/`Enum`), keyed by [`TypeId`]. The home
     /// for type metadata and the disk codecs the output cache dispatches through.
-    /// Lookup-only (never iterated in order), so a plain map rather than a
-    /// `KeyIndexVec`.
+    /// Lookup-only (never iterated in order), so a plain map rather than an
+    /// ordered map.
     pub types: HashMap<TypeId, TypeEntry>,
 }
 
 impl Library {
     pub fn by_id(&self, id: &FuncId) -> Option<&Func> {
         assert!(!id.is_nil());
-        self.funcs.by_key(id)
+        self.funcs.get(id)
     }
+
     pub fn by_name(&self, name: &str) -> Option<&Func> {
         assert!(!name.is_empty());
-        self.funcs.iter().find(|func| func.name == name)
+        self.funcs().find(|func| func.name == name)
     }
-    pub fn by_name_mut(&mut self, name: &str) -> Option<&mut Func> {
-        assert!(!name.is_empty());
-        self.funcs.iter_mut().find(|func| func.name == name)
+
+    pub fn funcs(&self) -> impl ExactSizeIterator<Item = &Func> {
+        self.funcs.values()
     }
+
     pub fn add(&mut self, func: Func) {
         func.validate();
+        self.funcs.insert(func.id, func);
+    }
 
-        self.funcs.add(func);
+    pub fn remove(&mut self, id: &FuncId) -> Option<Func> {
+        self.funcs.remove(id)
     }
 
     pub fn graph_by_id(&self, id: &GraphId) -> Option<&Graph> {
@@ -198,7 +202,7 @@ impl Library {
 
     pub fn merge<T: Into<Library>>(&mut self, other: T) {
         let other = other.into();
-        for func in other.funcs {
+        for func in other.funcs.into_values() {
             self.add(func);
         }
         for (id, graph) in other.graphs {

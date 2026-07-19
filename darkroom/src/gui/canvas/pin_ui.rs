@@ -165,7 +165,7 @@ impl PinUi {
         out: &mut Vec<Intent>,
     ) {
         if let Some(anchor) = self.drag.clone() {
-            if scene.nodes.by_key(&anchor.key.node_id).is_none() {
+            if !scene.nodes.contains_key(&anchor.key.node_id) {
                 // Stale: the node vanished mid-drag (breaker/undo). Drop
                 // rather than build an intent against a missing node.
                 self.drag = None;
@@ -302,7 +302,7 @@ impl PinUi {
         // A pin item only exists for a pinned output on a live node, but
         // the projection can still come up short (a missing-func stub
         // renders portless), so a failed lookup just skips the card.
-        let Some(n) = scene.nodes.by_key(&port.node_id) else {
+        let Some(n) = scene.nodes.get(&port.node_id) else {
             return;
         };
         let Some(output) = scene.outputs(n.outputs).get(port.port_idx) else {
@@ -454,7 +454,7 @@ fn pin_targeted(
 fn scan_port_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<PortRef> {
     let keys = scene
         .nodes
-        .iter()
+        .values()
         .flat_map(|n| node_ports(n, PortKind::Output));
     geometry.ports.first_drag_started(keys)
 }

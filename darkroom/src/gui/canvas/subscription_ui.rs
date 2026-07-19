@@ -276,7 +276,7 @@ impl SubscriptionUI {
 
 /// First emitter event glyph whose drag started this frame, or `None`.
 fn scan_event_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<EventRef> {
-    let keys = scene.nodes.iter().flat_map(|n| {
+    let keys = scene.nodes.values().flat_map(|n| {
         (0..n.events.len as usize).map(move |event_idx| EventRef {
             node_id: n.id,
             event_idx,
@@ -288,7 +288,7 @@ fn scan_event_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<Eve
 /// First subscription pin whose drag started this frame, or `None`. Only
 /// sink nodes render a pin, so only they can start a reverse event drag.
 fn scan_sub_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<NodeId> {
-    let keys = scene.nodes.iter().filter(|n| n.sink).map(|n| n.id);
+    let keys = scene.nodes.values().filter(|n| n.sink).map(|n| n.id);
     geometry.subs.first_drag_started(keys)
 }
 
@@ -303,7 +303,7 @@ fn scan_sub_target(
     emitter: EventRef,
 ) -> Option<NodeId> {
     let pointer = ui.pointer_pos()?;
-    for n in &scene.nodes {
+    for n in scene.nodes.values() {
         if n.id == emitter.node_id || !n.sink {
             continue;
         }
@@ -325,7 +325,7 @@ fn scan_emitter_target(
     subscriber: NodeId,
 ) -> Option<EventRef> {
     let pointer = ui.pointer_pos()?;
-    for n in &scene.nodes {
+    for n in scene.nodes.values() {
         if n.id == subscriber {
             continue;
         }

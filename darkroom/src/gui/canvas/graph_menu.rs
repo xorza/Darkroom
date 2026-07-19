@@ -31,7 +31,7 @@ impl GraphMenuUi {
     ) {
         // Latch on a secondary-click of any local-graph node's badge,
         // read from last frame's response (same timing as the open).
-        for n in &scene.nodes {
+        for n in scene.nodes.values() {
             if matches!(n.graph, Some(GraphLink::Local(_)))
                 && ui.response_for(graph_badge_wid(n.id)).right.clicked()
                 && let Some(p) = ui.pointer_pos()

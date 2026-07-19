@@ -1,21 +1,21 @@
 pub(crate) mod auto_layout;
-pub(crate) mod canvas_item_placement;
 pub(crate) mod dock;
+mod serde;
 pub(crate) mod validate;
 
+use ::serde::{Deserialize, Serialize};
 use anyhow::{Result, bail};
-use common::{KeyIndexVec, SerdeFormat};
+use common::SerdeFormat;
 use glam::Vec2;
+use indexmap::IndexMap;
 use scenarium::GraphId;
 use scenarium::GraphLink;
 use scenarium::Library;
 use scenarium::{DetachedNode, Graph as CoreGraph, NodeId, NodeSearch, OutputPort};
 use scenarium::{Node, NodeKind};
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
 use crate::core::document::auto_layout::AUTO_LAYOUT_ORIGIN;
-use crate::core::document::canvas_item_placement::CanvasItemPlacement;
 use crate::core::document::dock::DockLayout;
 use crate::core::edit::reconcile::reconcile_graph;
 
@@ -162,7 +162,7 @@ impl Default for Viewport {
 /// a file restores the exact camera and selection, and Ctrl+Z walks
 /// camera/selection changes alongside structural edits (see the long
 /// note that used to live on `Document`).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct GraphView {
     /// Node bodies and pinned-output preview widgets in one list — the
     /// canvas's **paint stack**: the order is the shared z-order (later
@@ -176,12 +176,26 @@ pub(crate) struct GraphView {
     /// widget sits where it was put and does *not* follow its node when
     /// that node is moved — only its wire re-routes, like a connection
     /// to another node would.
-    pub item_placements: KeyIndexVec<ItemRef, CanvasItemPlacement>,
+    #[serde(with = "crate::core::document::serde")]
+    pub item_placements: IndexMap<ItemRef, Vec2>,
     pub viewport: Viewport,
     /// `BTreeSet` so equality and serialization are order-independent
     /// (no spurious undo entries from reordering). Holds both node bodies
     /// and pinned-output preview widgets — see [`ItemRef`].
     pub selected: BTreeSet<ItemRef>,
+}
+
+impl PartialEq for GraphView {
+    fn eq(&self, other: &Self) -> bool {
+        self.viewport == other.viewport
+            && self.selected == other.selected
+            && self.item_placements.len() == other.item_placements.len()
+            && self
+                .item_placements
+                .iter()
+                .zip(&other.item_placements)
+                .all(|(left, right)| left == right)
+    }
 }
 
 impl Eq for GraphView {}
@@ -191,17 +205,26 @@ impl GraphView {
     /// `graph` and every pinned output (callers usually `auto_layout`
     /// right after, which places both kinds).
     pub(crate) fn for_graph(graph: &CoreGraph) -> Self {
-        let mut item_placements = KeyIndexVec::with_capacity(graph.len());
+        let mut item_placements = IndexMap::with_capacity(graph.len());
         for node in graph.iter() {
-            item_placements.add(CanvasItemPlacement::node(node.id, Vec2::ZERO));
+            item_placements.insert(ItemRef::Node(node.id), Vec2::ZERO);
         }
         for port in graph.pinned_outputs() {
-            item_placements.add(CanvasItemPlacement::pin(port, Vec2::ZERO));
+            item_placements.insert(ItemRef::Pin(port), Vec2::ZERO);
         }
         Self {
             item_placements,
             ..Default::default()
         }
+    }
+
+    pub(crate) fn move_item_to_index(&mut self, key: &ItemRef, target_index: usize) {
+        let from = self
+            .item_placements
+            .get_index_of(key)
+            .expect("view item to move must exist");
+        let to = target_index.min(self.item_placements.len() - 1);
+        self.item_placements.move_index(from, to);
     }
 }
 
@@ -228,7 +251,7 @@ impl EditScope<'_> {
     pub(crate) fn remove_node(&mut self, node_id: &NodeId) -> DetachedNode {
         self.view
             .item_placements
-            .retain(|item| !item.key.belongs_to(*node_id));
+            .retain(|key, _| !key.belongs_to(*node_id));
         let detached = self.graph.detach_node(*node_id);
         self.view.selected.retain(|k| !k.belongs_to(*node_id));
         detached
@@ -465,15 +488,15 @@ impl Document {
         let inst_id = self.graph.add(inst);
         self.main_view
             .item_placements
-            .add(CanvasItemPlacement::node(inst_id, inst_pos));
+            .insert(ItemRef::Node(inst_id), inst_pos);
 
         let mut view = GraphView::default();
         view.item_placements
-            .add(CanvasItemPlacement::node(input_id, AUTO_LAYOUT_ORIGIN));
-        view.item_placements.add(CanvasItemPlacement::node(
-            output_id,
+            .insert(ItemRef::Node(input_id), AUTO_LAYOUT_ORIGIN);
+        view.item_placements.insert(
+            ItemRef::Node(output_id),
             AUTO_LAYOUT_ORIGIN + Vec2::new(BOUNDARY_LAYOUT_GAP, 0.0),
-        ));
+        );
         self.local_views.insert(id, view);
 
         id
@@ -806,7 +829,7 @@ mod tests {
         let node_id = doc.graph.add(node);
         doc.main_view
             .item_placements
-            .add(CanvasItemPlacement::node(node_id, Vec2::ZERO));
+            .insert(ItemRef::Node(node_id), Vec2::ZERO);
 
         let step = build_step(Intent::DetachGraph { node_id }, &doc, GraphRef::Main)
             .expect("detach builds");
@@ -853,9 +876,7 @@ mod tests {
     fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
         let node = Node::new(NodeKind::Func(FuncId::unique()));
         let id = doc.graph.add(node);
-        doc.main_view
-            .item_placements
-            .add(CanvasItemPlacement::node(id, pos));
+        doc.main_view.item_placements.insert(ItemRef::Node(id), pos);
         id
     }
 
@@ -930,14 +951,14 @@ mod tests {
         let view = doc.local_views.get(&id).expect("view seeded on create");
         let ip = view
             .item_placements
-            .by_key(&ItemRef::Node(input_id))
-            .unwrap()
-            .pos;
+            .get(&ItemRef::Node(input_id))
+            .copied()
+            .unwrap();
         let op = view
             .item_placements
-            .by_key(&ItemRef::Node(output_id))
-            .unwrap()
-            .pos;
+            .get(&ItemRef::Node(output_id))
+            .copied()
+            .unwrap();
         assert!(op.x > ip.x, "output boundary sits right of input");
         assert_eq!(ip.y, op.y, "boundaries are level");
 
@@ -950,7 +971,7 @@ mod tests {
         assert!(
             doc.main_view
                 .item_placements
-                .by_key(&ItemRef::Node(inst.id))
+                .get(&ItemRef::Node(inst.id))
                 .is_some(),
             "instance has a main view item"
         );
@@ -1127,16 +1148,20 @@ mod tests {
     fn document_roundtrip() {
         let view = build_test_doc().main_view;
         let mut reordered = view.clone();
-        let first_key = reordered.item_placements[0].key;
+        let first_key = *reordered.item_placements.get_index(0).unwrap().0;
         let last_index = reordered.item_placements.len() - 1;
-        reordered
-            .item_placements
-            .move_to_index(&first_key, last_index);
+        reordered.move_item_to_index(&first_key, last_index);
         assert_ne!(view, reordered);
 
         for format in SerdeFormat::all_formats_for_testing() {
             assert_roundtrip(format);
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "view item to move must exist")]
+    fn moving_missing_view_item_panics() {
+        GraphView::default().move_item_to_index(&ItemRef::Node(NodeId::unique()), 0);
     }
 
     fn build_test_doc() -> Document {
@@ -1172,23 +1197,19 @@ mod tests {
         let mut doc: Document = graph.into();
         let key = ItemRef::Pin(port);
         let pos = Vec2::new(5.0, 6.0);
-        doc.main_view.item_placements.by_key_mut(&key).unwrap().pos = pos;
+        *doc.main_view.item_placements.get_mut(&key).unwrap() = pos;
         doc.debug_check();
 
         let bytes = doc.serialize(SerdeFormat::Json).expect("serialize");
         let reloaded = Document::deserialize(SerdeFormat::Json, &bytes).expect("load");
         assert_eq!(
-            reloaded
-                .main_view
-                .item_placements
-                .by_key(&key)
-                .map(|i| i.pos),
+            reloaded.main_view.item_placements.get(&key).copied(),
             Some(pos),
             "the pinned output's position round-trips"
         );
         assert_eq!(
-            reloaded.main_view.item_placements.index_of_key(&key),
-            doc.main_view.item_placements.index_of_key(&key),
+            reloaded.main_view.item_placements.get_index_of(&key),
+            doc.main_view.item_placements.get_index_of(&key),
             "the pinned output's paint-stack slot round-trips"
         );
     }
@@ -1228,7 +1249,7 @@ mod tests {
         doc.graph.set_output_pinned(port, false);
         doc.main_view
             .item_placements
-            .add(CanvasItemPlacement::pin(port, Vec2::ZERO));
+            .insert(ItemRef::Pin(port), Vec2::ZERO);
         let err = doc.check().unwrap_err();
         assert!(
             format!("{err:#}").contains("view item references an output that isn't pinned"),

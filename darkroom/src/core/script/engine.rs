@@ -205,9 +205,10 @@ impl<'a> From<&'a Func> for ScriptFunc<'a> {
 /// `list_funcs()` → array of script-facing function descriptors.
 fn register_introspection(engine: &mut Engine, library: Arc<Library>) {
     engine.register_fn("list_funcs", move || -> Array {
-        library
-            .funcs
-            .iter()
+        let mut funcs: Vec<&Func> = library.funcs().collect();
+        funcs.sort_by(|left, right| left.name.cmp(&right.name));
+        funcs
+            .into_iter()
             .map(|func| {
                 rhai::serde::to_dynamic(ScriptFunc::from(func))
                     .expect("script function descriptor must serialize")

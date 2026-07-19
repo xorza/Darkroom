@@ -2,8 +2,9 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use aperture::{InternedStr, Ui};
-use common::{KeyIndexKey, KeyIndexVec, Span};
+use common::Span;
 use glam::Vec2;
+use indexmap::IndexMap;
 use scenarium::GraphLink;
 use scenarium::Library;
 use scenarium::{
@@ -22,10 +23,9 @@ pub(crate) struct Scene {
     /// drawn in front. The canvas draw pass iterates this and dispatches on
     /// the key kind; everything else looks items up through `nodes`.
     pub z_order: Vec<ItemRef>,
-    /// Keyed node projections (`by_key` is O(1)). Iteration order mirrors
-    /// the node items' relative order in `item_placements`, but the paint pass
-    /// walks [`Self::z_order`], not this.
-    pub nodes: KeyIndexVec<NodeId, SceneNode>,
+    /// Keyed node projections in relative paint order. Interaction scans use
+    /// this order to resolve overlapping node and port hits.
+    pub nodes: IndexMap<NodeId, SceneNode>,
     pub connections: Vec<SceneConnection>,
     /// Event-subscription edges (emitter event → subscriber node), mirrored
     /// from the active graph each rebuild. Drawn as event wires; the editor
@@ -210,12 +210,6 @@ impl SceneNode {
     }
 }
 
-impl KeyIndexKey<NodeId> for SceneNode {
-    fn key(&self) -> &NodeId {
-        &self.id
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct SceneConnection {
     /// Producer side — the output feeding the wire.
@@ -253,13 +247,13 @@ impl Scene {
         self.events.clear();
         self.value_variants_pool.clear();
 
-        for item in view.item_placements.iter() {
-            let id = match item.key {
+        for (key, position) in &view.item_placements {
+            let id = match *key {
                 ItemRef::Node(id) => id,
                 ItemRef::Pin(_) => {
                     // A pin's card draws from its owner's `SceneOutput`;
                     // only its slot in the shared paint order lives here.
-                    self.z_order.push(item.key);
+                    self.z_order.push(*key);
                     continue;
                 }
             };
@@ -436,8 +430,8 @@ impl Scene {
                         },
                         pin_position: view
                             .item_placements
-                            .by_key(&ItemRef::Pin(OutputPort::new(id, i)))
-                            .map(|item| item.pos),
+                            .get(&ItemRef::Pin(OutputPort::new(id, i)))
+                            .copied(),
                     }),
             );
             let events = extend_pool(
@@ -454,29 +448,32 @@ impl Scene {
                 (NodeKind::GraphOutput, true) => ui.intern("Outputs"),
                 _ => ui.intern(&node.name),
             };
-            self.nodes.add(SceneNode {
+            self.nodes.insert(
                 id,
-                pos: item.pos,
-                name,
-                kind_label: interface.kind_label,
-                description: interface.description,
-                inputs,
-                outputs,
-                events,
-                graph: interface.graph,
-                sink: interface.sink,
-                disabled: node.disabled,
-                cache: node.cache,
-                cacheable: !interface.uncacheable
-                    && !interface.outputs.is_empty()
-                    && !interface.impure,
-                impure: interface.impure,
-                boundary: matches!(node.kind, NodeKind::GraphInput | NodeKind::GraphOutput),
-                exec_status: run_state.status(id),
-                ram: run_state.ram(id),
-                missing,
-            });
-            self.z_order.push(item.key);
+                SceneNode {
+                    id,
+                    pos: *position,
+                    name,
+                    kind_label: interface.kind_label,
+                    description: interface.description,
+                    inputs,
+                    outputs,
+                    events,
+                    graph: interface.graph,
+                    sink: interface.sink,
+                    disabled: node.disabled,
+                    cache: node.cache,
+                    cacheable: !interface.uncacheable
+                        && !interface.outputs.is_empty()
+                        && !interface.impure,
+                    impure: interface.impure,
+                    boundary: matches!(node.kind, NodeKind::GraphInput | NodeKind::GraphOutput),
+                    exec_status: run_state.status(id),
+                    ram: run_state.ram(id),
+                    missing,
+                },
+            );
+            self.z_order.push(*key);
         }
 
         for (tgt, src) in graph.edges() {
@@ -499,7 +496,7 @@ impl Scene {
     /// Every pinned output in the scene — the one iteration the pin scans
     /// (drag/click polls, wire draw, rubber-band sweep) share.
     pub(crate) fn pinned_outputs(&self) -> impl Iterator<Item = PinnedOutput<'_>> {
-        self.nodes.iter().flat_map(|n| {
+        self.nodes.values().flat_map(|n| {
             self.outputs(n.outputs)
                 .iter()
                 .enumerate()
@@ -706,8 +703,21 @@ mod tests {
         );
 
         assert_eq!(scene.nodes.len(), 2, "both boundary nodes render");
-        let input_node = scene.nodes.iter().find(|n| n.id == fixture.input).unwrap();
-        let output_node = scene.nodes.iter().find(|n| n.id == fixture.output).unwrap();
+        let expected_node_order = view
+            .item_placements
+            .keys()
+            .filter_map(|item| match item {
+                ItemRef::Node(node_id) => Some(*node_id),
+                ItemRef::Pin(_) => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            scene.nodes.keys().copied().collect::<Vec<_>>(),
+            expected_node_order,
+            "node projection follows paint order"
+        );
+        let input_node = scene.nodes.get(&fixture.input).unwrap();
+        let output_node = scene.nodes.get(&fixture.output).unwrap();
 
         // Boundary nodes are labeled by role.
         assert_eq!(&*input_node.kind_label.borrow_str(), "Input");
@@ -796,9 +806,9 @@ mod tests {
         // Every node renders, not silently dropped — so the unresolvable ones
         // stay selectable and deletable to repair the document.
         assert_eq!(scene.nodes.len(), 3, "all nodes render");
-        let known_node = scene.nodes.iter().find(|n| n.id == known_id).unwrap();
-        let ghost_func_node = scene.nodes.iter().find(|n| n.id == ghost_func_id).unwrap();
-        let ghost_graph_node = scene.nodes.iter().find(|n| n.id == ghost_graph_id).unwrap();
+        let known_node = scene.nodes.get(&known_id).unwrap();
+        let ghost_func_node = scene.nodes.get(&ghost_func_id).unwrap();
+        let ghost_graph_node = scene.nodes.get(&ghost_graph_id).unwrap();
 
         // The flag tracks resolution; the label names what's missing.
         assert!(!known_node.missing, "a resolved func is not a stub");
@@ -848,7 +858,7 @@ mod tests {
         let mut ui = Ui::default();
         scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
 
-        let n = scene.nodes.iter().find(|n| n.id == node_id).unwrap();
+        let n = scene.nodes.get(&node_id).unwrap();
         let event_names: Vec<String> = scene
             .events(n.events)
             .iter()
@@ -884,12 +894,12 @@ mod tests {
 
         let mut view = GraphView::for_graph(&graph);
         let pin_key = ItemRef::Pin(port);
-        view.item_placements.by_key_mut(&pin_key).unwrap().pos = Vec2::new(320.0, -40.0);
+        *view.item_placements.get_mut(&pin_key).unwrap() = Vec2::new(320.0, -40.0);
         let mut scene = Scene::default();
         let mut ui = Ui::default();
         scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
 
-        let n = scene.nodes.iter().find(|n| n.id == node_id).unwrap();
+        let n = scene.nodes.get(&node_id).unwrap();
         let pins: Vec<Option<Vec2>> = scene
             .outputs(n.outputs)
             .iter()
@@ -910,7 +920,7 @@ mod tests {
         );
 
         // ...and a reorder (pin buried beneath the node) projects verbatim.
-        view.item_placements.move_to_index(&pin_key, 0);
+        view.move_item_to_index(&pin_key, 0);
         scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
         assert_eq!(
             scene.z_order,
@@ -972,7 +982,7 @@ mod tests {
         scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
 
         for (id, mode) in ids {
-            let projected = scene.nodes.iter().find(|n| n.id == id).unwrap();
+            let projected = scene.nodes.get(&id).unwrap();
             assert_eq!(projected.cache, mode, "{mode:?} projects verbatim");
         }
     }
@@ -1005,8 +1015,8 @@ mod tests {
         let mut ui = Ui::default();
         scene.rebuild(&mut ui, &graph, &view, &library, &RunState::default());
 
-        let pure = scene.nodes.iter().find(|n| n.id == pure_id).unwrap();
-        let impure = scene.nodes.iter().find(|n| n.id == impure_id).unwrap();
+        let pure = scene.nodes.get(&pure_id).unwrap();
+        let impure = scene.nodes.get(&impure_id).unwrap();
 
         assert!(!pure.impure, "a Pure func keeps its cache chips");
         assert!(impure.impure, "an Impure func hides its cache chips");

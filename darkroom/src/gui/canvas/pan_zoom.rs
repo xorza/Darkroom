@@ -254,7 +254,7 @@ fn reset_target(geometry: &CanvasGeometry, scene: &Scene, pane: Vec2) -> Viewpor
 /// `None` when no node qualifies.
 fn node_bounds(geometry: &CanvasGeometry, scene: &Scene, selected_only: bool) -> Option<Rect> {
     let mut acc: Option<(Vec2, Vec2)> = None;
-    for n in &scene.nodes {
+    for n in scene.nodes.values() {
         if selected_only && !scene.selected.contains(&ItemRef::Node(n.id)) {
             continue;
         }
@@ -320,13 +320,13 @@ mod tests {
         let mut ui = Ui::default();
         scene
             .nodes
-            .add(scene_node_stub(&mut ui, a, Vec2::new(0.0, 0.0)));
+            .insert(a, scene_node_stub(&mut ui, a, Vec2::new(0.0, 0.0)));
         scene
             .nodes
-            .add(scene_node_stub(&mut ui, b, Vec2::new(1000.0, 500.0)));
+            .insert(b, scene_node_stub(&mut ui, b, Vec2::new(1000.0, 500.0)));
         scene
             .nodes
-            .add(scene_node_stub(&mut ui, c, Vec2::new(-50.0, 300.0)));
+            .insert(c, scene_node_stub(&mut ui, c, Vec2::new(-50.0, 300.0)));
         let mut geometry = CanvasGeometry::default();
         geometry.seed_node_size(a, Size::new(150.0, 80.0));
         geometry.seed_node_size(b, Size::new(200.0, 100.0));

@@ -5,7 +5,7 @@ use crate::execution::compile::CompileError;
 use crate::execution::program::ExecutionBinding;
 use crate::graph::{Binding, CacheMode, Graph, InputPort, Node, NodeSearch, OutputPort};
 use crate::library::Library;
-use crate::node::definition::FuncBehavior;
+use crate::node::definition::{Func, FuncBehavior};
 use crate::node::lambda::OutputDemand;
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
@@ -98,6 +98,12 @@ fn default_hooks() -> TestFuncHooks {
         get_b: Arc::new(move || 11),
         print: Arc::new(move |_| {}),
     }
+}
+
+fn mutate_func(library: &mut Library, name: &str, mutate: impl FnOnce(&mut Func)) {
+    let mut func = library.by_name(name).unwrap().clone();
+    mutate(&mut func);
+    library.add(func);
 }
 
 /// Instantiate a `Node` for `func_name` with a fixed id; caller wires bindings.
@@ -1208,7 +1214,9 @@ mod cache_persistence {
     async fn impure_cone_persist_node_is_not_disk_cached() {
         let dir = TempDir::new("impure-cone");
         let mut library = test_func_lib(default_hooks());
-        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+        mutate_func(&mut library, "get_b", |func| {
+            func.behavior = FuncBehavior::Impure;
+        });
 
         // get_b (impure) → mult (persist) → print. mult's cone is impure.
         let mut graph = Graph::default();
@@ -2123,7 +2131,9 @@ mod missing_inputs {
 
         // sum missing-required; mult[0] stays bound to sum but is made optional.
         bind(&mut graph, "sum", 0, Binding::None);
-        library.by_name_mut("mult").unwrap().inputs[0].required = false;
+        mutate_func(&mut library, "mult", |func| {
+            func.inputs[0].required = false;
+        });
 
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
@@ -2153,7 +2163,9 @@ mod missing_inputs {
 
         // mult[0] unbound + optional (not wired to anything).
         bind(&mut graph, "mult", 0, Binding::None);
-        library.by_name_mut("mult").unwrap().inputs[0].required = false;
+        mutate_func(&mut library, "mult", |func| {
+            func.inputs[0].required = false;
+        });
 
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.prepare_execution(true, false, &[])?;
@@ -2193,7 +2205,9 @@ mod missing_inputs {
         // propagation specifically. mult and print end up gated.
         bind(&mut graph, "mult", 0, Binding::bind(get_b_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(sum_id, 0));
-        library.by_name_mut("mult").unwrap().inputs[1].required = false;
+        mutate_func(&mut library, "mult", |func| {
+            func.inputs[1].required = false;
+        });
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
@@ -2267,7 +2281,9 @@ mod disabled_nodes {
             .find_mut(&sum_id, NodeSearch::TopLevel)
             .unwrap()
             .disabled = true;
-        library.by_name_mut("mult").unwrap().inputs[0].required = false;
+        mutate_func(&mut library, "mult", |func| {
+            func.inputs[0].required = false;
+        });
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
@@ -2833,7 +2849,9 @@ mod behavior {
         let graph = test_graph();
         let mut library = test_func_lib(TestFuncHooks::default());
 
-        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+        mutate_func(&mut library, "get_b", |func| {
+            func.behavior = FuncBehavior::Impure;
+        });
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
@@ -2859,7 +2877,9 @@ mod behavior {
         // inspector can read the last value even though there's no disk fallback.
         let graph = test_graph();
         let mut library = test_func_lib(default_hooks());
-        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+        mutate_func(&mut library, "get_b", |func| {
+            func.behavior = FuncBehavior::Impure;
+        });
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
@@ -2947,7 +2967,9 @@ mod composite_behavior {
         // An impure interior recomputes across a composite boundary like any
         // impure node — flattening must preserve its impurity.
         let mut library = test_func_lib(TestFuncHooks::default());
-        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+        mutate_func(&mut library, "get_b", |func| {
+            func.behavior = FuncBehavior::Impure;
+        });
         let def = impure_output_def(&library, "S", "inner");
         let graph = main_with(&library, def);
         assert!(
@@ -2965,7 +2987,7 @@ mod composite_behavior {
         let graph = main_with(&library, def);
         let get_b = library.by_name("get_b").unwrap().id;
         let mut incomplete_library = library.clone();
-        incomplete_library.funcs.remove_by_key(&get_b).unwrap();
+        incomplete_library.remove(&get_b).unwrap();
 
         // A `Local` def resolves from the graph itself, so validation reaches
         // its interior while every top-level func remains resolvable.
@@ -2982,7 +3004,9 @@ mod composite_behavior {
         // A doubly-nested impure node recomputes — flattening preserves its
         // impurity through two composite levels whose map-local ids coincide.
         let mut library = test_func_lib(TestFuncHooks::default());
-        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+        mutate_func(&mut library, "get_b", |func| {
+            func.behavior = FuncBehavior::Impure;
+        });
         let inner_def = impure_output_def(&library, "Inner", "deep");
         let repeated_id = GraphId::unique();
         let mut outer_interior = Graph::new("Outer").output(int_output("Out"));
@@ -3152,7 +3176,9 @@ mod execution {
         assert_eq!(test_values.try_lock()?.result, 35);
 
         // Make get_b Impure: now it re-reads the value
-        library.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+        mutate_func(&mut library, "get_b", |func| {
+            func.behavior = FuncBehavior::Impure;
+        });
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
@@ -3638,7 +3664,9 @@ mod argument_values {
         let mut graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
 
-        library.by_name_mut("mult").unwrap().inputs[1].required = false;
+        mutate_func(&mut library, "mult", |func| {
+            func.inputs[1].required = false;
+        });
         bind(&mut graph, "mult", 1, Binding::None);
         let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
 
@@ -3979,7 +4007,9 @@ mod events {
             .unwrap()
             .id;
         f.graph.unsubscribe(emit_id, 0, recv_id);
-        f.library.by_name_mut("emit").unwrap().sink = true;
+        mutate_func(&mut f.library, "emit", |func| {
+            func.sink = true;
+        });
 
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();

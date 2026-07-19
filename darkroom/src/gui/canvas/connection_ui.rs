@@ -228,7 +228,7 @@ impl ConnectionUI {
         if !body.contains(pointer) {
             return None;
         }
-        let node = scene.nodes.by_key(&start.node_id)?;
+        let node = scene.nodes.get(&start.node_id)?;
         // Boundary ports route the interface, not literal values.
         if node.boundary {
             return None;
@@ -391,7 +391,7 @@ fn port_gradient(start: Color, end: Color) -> CurveBrush {
 /// `pin_ui.rs`), so the two controllers never both latch the same press.
 fn scan_drag_start(geometry: &CanvasGeometry, scene: &Scene, ui: &mut Ui) -> Option<PortRef> {
     let cmd_reserved_for_pin = ui.modifiers().ctrl;
-    let keys = scene.nodes.iter().flat_map(move |n| {
+    let keys = scene.nodes.values().flat_map(move |n| {
         [PortKind::Input, PortKind::Output]
             .into_iter()
             .filter(move |&kind| !(kind == PortKind::Output && cmd_reserved_for_pin))
@@ -408,7 +408,7 @@ fn input_const_only(scene: &Scene, port: PortRef) -> bool {
     }
     scene
         .nodes
-        .by_key(&port.node_id)
+        .get(&port.node_id)
         .and_then(|n| scene.inputs(n.inputs).get(port.port_idx))
         .is_some_and(|i| i.const_only)
 }
@@ -437,12 +437,9 @@ fn scan_snap_target(
     // the worker — disallow it by never snapping one boundary node onto
     // the other. The only boundary→boundary link possible is exactly that
     // passthrough, so a blanket reject is precise.
-    let start_boundary = scene
-        .nodes
-        .by_key(&start.node_id)
-        .is_some_and(|n| n.boundary);
+    let start_boundary = scene.nodes.get(&start.node_id).is_some_and(|n| n.boundary);
     let start_type = port_data_type(scene, start);
-    for n in &scene.nodes {
+    for n in scene.nodes.values() {
         if n.id == start.node_id {
             continue;
         }
@@ -501,7 +498,7 @@ fn dropped_on_empty_canvas(ui: &mut Ui, scene: &Scene) -> bool {
         .rect
         .is_some_and(|r| r.contains(pointer));
     over_canvas
-        && !scene.nodes.iter().any(|n| {
+        && !scene.nodes.values().any(|n| {
             ui.response_for(node_widget_id(n.id))
                 .rect
                 .is_some_and(|r| r.contains(pointer))
@@ -512,7 +509,7 @@ fn dropped_on_empty_canvas(ui: &mut Ui, scene: &Scene) -> bool {
 /// if the port isn't present (e.g. mid-rebuild). `pub(crate)`: also used by
 /// `PinUi` to tint its pin-creation drag preview.
 pub(crate) fn port_data_type(scene: &Scene, port: PortRef) -> Option<DataType> {
-    let node = scene.nodes.iter().find(|n| n.id == port.node_id)?;
+    let node = scene.nodes.get(&port.node_id)?;
     let ty = match port.kind {
         PortKind::Input => scene.inputs(node.inputs).get(port.port_idx)?.ty.clone(),
         PortKind::Output => scene.outputs(node.outputs).get(port.port_idx)?.ty.clone(),

@@ -233,7 +233,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
             .input(port)
             .output(FuncOutput::new("out", DataType::Int));
         let mut library = Library::default();
-        library.funcs.add(func.clone());
+        library.add(func.clone());
 
         let mut graph = Graph::default();
         let producer = graph.add_func_node(&func);
@@ -270,10 +270,10 @@ fn check_for_execution_rejects_type_mismatched_bindings_through_passthroughs() {
         .output(FuncOutput::new("o", DataType::Int));
     let pass_func = passthrough_func();
     let mut library = Library::default();
-    library.funcs.add(int_src.clone());
-    library.funcs.add(str_sink.clone());
-    library.funcs.add(int_sink.clone());
-    library.funcs.add(pass_func.clone());
+    library.add(int_src.clone());
+    library.add(str_sink.clone());
+    library.add(int_sink.clone());
+    library.add(pass_func.clone());
 
     // Direct Int → String is rejected at the compile boundary.
     let mut g = Graph::default();
@@ -346,7 +346,7 @@ fn check_for_execution_rejects_out_of_range_pinned_output() {
 
     let func = Func::new(FuncId::unique(), "one_out").output(FuncOutput::new("o", DataType::Int));
     let mut library = Library::default();
-    library.funcs.add(func.clone());
+    library.add(func.clone());
 
     let mut graph = Graph::default();
     let id = graph.add_func_node(&func);
@@ -371,8 +371,8 @@ fn resolve_output_type_follows_passthrough_chain() {
     let producer = Func::new(FuncId::unique(), "src").output(FuncOutput::new("out", DataType::Int));
     let pass_func = passthrough_func();
     let mut library = Library::default();
-    library.funcs.add(producer.clone());
-    library.funcs.add(pass_func.clone());
+    library.add(producer.clone());
+    library.add(pass_func.clone());
 
     let mut graph = Graph::default();
     let src = graph.add_func_node(&producer);
@@ -453,7 +453,7 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
         .wildcard_output("path_out", 0)
         .wildcard_output("mode_out", 1);
     let mut library = Library::default();
-    library.funcs.add(func.clone());
+    library.add(func.clone());
 
     let mut graph = Graph::default();
     let n = graph.add_func_node(&func);
@@ -493,10 +493,10 @@ fn edges_invalidated_by_follows_wildcard_chains() {
         .output(FuncOutput::new("o", DataType::Float));
     let pass_func = passthrough_func();
     let mut library = Library::default();
-    library.funcs.add(float_src.clone());
-    library.funcs.add(str_src.clone());
-    library.funcs.add(float_sink.clone());
-    library.funcs.add(pass_func.clone());
+    library.add(float_src.clone());
+    library.add(str_src.clone());
+    library.add(float_sink.clone());
+    library.add(pass_func.clone());
 
     let add_pass = |g: &mut Graph| g.add_func_node(&pass_func);
 
@@ -579,7 +579,7 @@ fn resolve_output_type_breaks_a_binding_cycle() {
     // editor can momentarily hold. Resolution must terminate as `Any`.
     let pass_func = passthrough_func();
     let mut library = Library::default();
-    library.funcs.add(pass_func.clone());
+    library.add(pass_func.clone());
     let mut graph = Graph::default();
     let id = graph.add_func_node(&pass_func);
     graph.set_input_binding(InputPort::new(id, 0), Binding::bind(id, 0));
@@ -599,7 +599,7 @@ fn input_type_resolves_declared_types_and_skips_boundaries() {
         .input(FuncInput::required("x", DataType::Float))
         .output(FuncOutput::new("out", DataType::Float));
     let mut library = Library::default();
-    library.funcs.add(consumer.clone());
+    library.add(consumer.clone());
 
     let mut graph = Graph::default();
     let dst = graph.add_func_node(&consumer);

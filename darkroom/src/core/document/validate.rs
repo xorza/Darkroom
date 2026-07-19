@@ -13,19 +13,19 @@ impl GraphView {
             "graph viewport must have finite pan and positive finite zoom"
         );
 
-        // KeyIndexVec rejects duplicate keys, so counts plus reverse membership
+        // IndexMap guarantees unique keys, so counts plus reverse membership
         // prove the graph and view contain exactly the same node and pin sets.
         let mut node_items = 0usize;
-        for item in self.item_placements.iter() {
+        for (key, position) in &self.item_placements {
             ensure!(
-                item.pos.is_finite(),
+                position.is_finite(),
                 "view item {:?} position must be finite",
-                item.key
+                key
             );
-            match item.key {
+            match key {
                 ItemRef::Node(_) => node_items += 1,
                 ItemRef::Pin(port) => ensure!(
-                    graph.is_output_pinned(port),
+                    graph.is_output_pinned(*port),
                     "view item references an output that isn't pinned"
                 ),
             }
@@ -36,22 +36,20 @@ impl GraphView {
         );
         for node in graph.iter() {
             ensure!(
-                self.item_placements
-                    .by_key(&ItemRef::Node(node.id))
-                    .is_some(),
+                self.item_placements.get(&ItemRef::Node(node.id)).is_some(),
                 "graph view missing a position for node {:?}",
                 node.id
             );
         }
         for port in graph.pinned_outputs() {
             ensure!(
-                self.item_placements.by_key(&ItemRef::Pin(port)).is_some(),
+                self.item_placements.get(&ItemRef::Pin(port)).is_some(),
                 "pinned output must have a view item"
             );
         }
         for key in &self.selected {
             ensure!(
-                self.item_placements.by_key(key).is_some(),
+                self.item_placements.get(key).is_some(),
                 "selected item {key:?} has no view item"
             );
         }

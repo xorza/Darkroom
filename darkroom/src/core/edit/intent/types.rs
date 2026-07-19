@@ -18,7 +18,6 @@ use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, OutputPort, Subscri
 use scenarium::{DetachedNode, Graph, GraphId};
 use serde::{Deserialize, Serialize};
 
-use crate::core::document::canvas_item_placement::CanvasItemPlacement;
 use crate::core::document::dock::{DockLayout, DockOp, DockPath};
 use crate::core::document::{BoundarySide, ItemRef, Viewport};
 
@@ -244,7 +243,7 @@ pub(crate) enum GraphStep {
         /// undo restores positions, pins, *and* stacking exactly
         /// (re-inserting in ascending order reproduces the original
         /// interleaving).
-        item_placements: Vec<(usize, CanvasItemPlacement)>,
+        item_placements: Vec<(usize, ItemRef, Vec2)>,
         /// The selection members that lived on this node (its own key +
         /// any pinned-output keys) — removal prunes them, undo re-adds.
         selected: Vec<ItemRef>,

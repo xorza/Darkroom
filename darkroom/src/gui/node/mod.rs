@@ -138,7 +138,7 @@ impl NodeUI {
                     continue;
                 }
             };
-            let Some(n) = rcx.scene.nodes.by_key(&id) else {
+            let Some(n) = rcx.scene.nodes.get(&id) else {
                 continue;
             };
             let keeps_focus = ui.focus_within(node_widget_id(n.id));
@@ -158,7 +158,7 @@ impl NodeUI {
         // (mid-drag delete). Without this, the slot would linger and
         // could fire when a fresh node reused the id.
         if let Some(a) = &self.drag_anchor
-            && rcx.scene.nodes.by_key(&a.key).is_none()
+            && !rcx.scene.nodes.contains_key(&a.key)
         {
             self.drag_anchor = None;
         }
@@ -305,7 +305,7 @@ impl NodeUI {
         // emitted `MoveSelection` would target a missing node and panic in
         // `build_step`. `draw_all` also clears stale anchors, but only
         // after this prepass runs.
-        if scene.nodes.by_key(&key).is_none() {
+        if !scene.nodes.contains_key(&key) {
             self.drag_anchor = None;
             return;
         }

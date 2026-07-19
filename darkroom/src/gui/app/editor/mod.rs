@@ -571,8 +571,6 @@ mod tests {
         use scenarium::FuncId;
         use scenarium::{Node, NodeKind};
 
-        use crate::core::document::canvas_item_placement::CanvasItemPlacement;
-
         let lib = Library::default();
         let mut editor = Editor::new(Document::default());
         assert!(!editor.dirty, "a freshly opened document is clean");
@@ -584,7 +582,7 @@ mod tests {
             .document
             .main_view
             .item_placements
-            .add(CanvasItemPlacement::node(id, Vec2::ZERO));
+            .insert(ItemRef::Node(id), Vec2::ZERO);
         editor.apply_edit(
             Intent::RenameNode {
                 node_id: id,
@@ -627,7 +625,6 @@ mod tests {
         use scenarium::{Node, NodeKind};
 
         use crate::core::document::PortKind;
-        use crate::core::document::canvas_item_placement::CanvasItemPlacement;
         use crate::gui::image_viewer::ImageViewer;
 
         let lib = Library::default();
@@ -638,7 +635,7 @@ mod tests {
             .document
             .main_view
             .item_placements
-            .add(CanvasItemPlacement::node(id, Vec2::ZERO));
+            .insert(ItemRef::Node(id), Vec2::ZERO);
         let port = |port_idx| PortRef {
             node_id: id,
             kind: PortKind::Output,

@@ -31,7 +31,7 @@ use crate::gui::scene::{InputBindingView, Scene};
 /// connections draw with no first-frame gap. Linked graphs aren't
 /// editable targets yet, so only `Local` opens.
 pub(crate) fn emit_graph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiAction>) {
-    for n in &scene.nodes {
+    for n in scene.nodes.values() {
         // Instances are always `Local` (library graphs are localized on
         // instance), so the "G" chip opens the graph directly.
         if let Some(GraphLink::Local(id)) = n.graph
@@ -50,7 +50,7 @@ pub(crate) fn emit_graph_opens(ui: &Ui, scene: &Scene, actions: &mut Vec<UiActio
 pub(crate) fn emit_play_clicks(ui: &Ui, scene: &Scene) -> Option<NodeId> {
     scene
         .nodes
-        .iter()
+        .values()
         .find(|n| n.runnable() && ui.response_for(play_badge_wid(n.id)).left.clicked())
         .map(|n| n.id)
 }
@@ -73,7 +73,7 @@ pub(crate) struct PathPickRequest {
 /// hit — one pick per frame — for the caller to open a blocking file dialog
 /// after authoring.
 pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest> {
-    for node in &scene.nodes {
+    for node in scene.nodes.values() {
         for (port_idx, input) in scene.inputs(node.inputs).iter().enumerate() {
             let port = InputPort::new(node.id, port_idx);
             if let InputBindingView::Const(StaticValue::FsPath(_)) = &input.binding
@@ -100,7 +100,7 @@ pub(crate) fn emit_path_picks(ui: &Ui, scene: &Scene) -> Option<PathPickRequest>
 /// lets the node arrange at its settled size and the wires re-anchor the same
 /// frame, instead of floating until the relayout pass.
 pub(crate) fn emit_port_dblclicks(ui: &Ui, scene: &Scene, out: &mut Vec<Intent>) {
-    for node in &scene.nodes {
+    for node in scene.nodes.values() {
         // Boundary ports route the interface — no const affordance, so an
         // unbound one has nothing to seed (its label double-click renames).
         let can_set = !node.boundary;

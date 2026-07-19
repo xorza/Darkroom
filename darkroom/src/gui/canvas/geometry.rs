@@ -177,7 +177,7 @@ impl CanvasGeometry {
         self.ports.live.clear();
         self.events.live.clear();
         self.subs.live.clear();
-        for n in &scene.nodes {
+        for n in scene.nodes.values() {
             // Port offsets within a node are stable; the node's
             // canvas-local position changes when the user drags. Take
             // `port_offset = port_rect.center - node_rect.min` from

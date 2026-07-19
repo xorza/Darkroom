@@ -291,7 +291,7 @@ fn passthrough_in_graph_exposes_the_resolved_output_type() {
         .input(FuncInput::required("x", DataType::Any))
         .wildcard_output("o", 0);
     let mut library = lib();
-    library.funcs.add(pass_func.clone());
+    library.add(pass_func.clone());
     let sum_id = library.by_name("sum").unwrap().id;
     let want_ty = library.by_name("sum").unwrap().outputs[0].ty.declared();
     assert_ne!(

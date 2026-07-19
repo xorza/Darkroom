@@ -4,7 +4,6 @@ use crate::graph::CacheMode;
 use crate::node::event::EventLambda;
 use crate::node::lambda::FuncLambda;
 use crate::{DataType, StaticValue};
-use common::KeyIndexKey;
 use common::id_type;
 use serde::{Deserialize, Serialize};
 
@@ -209,12 +208,6 @@ pub struct Func {
     pub events: Vec<FuncEvent>,
     pub required_contexts: Vec<ContextType>,
     pub lambda: FuncLambda,
-}
-
-impl KeyIndexKey<FuncId> for Func {
-    fn key(&self) -> &FuncId {
-        &self.id
-    }
 }
 
 impl Func {

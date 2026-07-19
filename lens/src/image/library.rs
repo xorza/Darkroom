@@ -414,8 +414,7 @@ mod tests {
     use super::*;
 
     fn func<'a>(lib: &'a Library, name: &str) -> &'a Func {
-        lib.funcs
-            .iter()
+        lib.funcs()
             .find(|f| f.name == name)
             .unwrap_or_else(|| panic!("{name} registered"))
     }

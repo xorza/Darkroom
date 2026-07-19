@@ -5,7 +5,6 @@ use scenarium::{Binding, InputPort, Node, NodeId, NodeKind, NodeSearch};
 
 use super::*;
 use crate::core::document::ItemRef;
-use crate::core::document::canvas_item_placement::CanvasItemPlacement;
 
 #[test]
 fn apply_intents_adds_node_and_flags_reconcile() {
@@ -76,7 +75,7 @@ fn apply_intents_selection_skips_reconcile() {
     let id = doc.graph.add(node);
     doc.main_view
         .item_placements
-        .add(CanvasItemPlacement::node(id, Vec2::ZERO));
+        .insert(ItemRef::Node(id), Vec2::ZERO);
 
     // Selecting an existing node is a real change but a pure view edit —
     // no interface impact, so it must not request a reconcile.

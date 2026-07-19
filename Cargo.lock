@@ -1255,6 +1255,7 @@ dependencies = [
  "glam 0.33.2",
  "image",
  "imaginarium",
+ "indexmap",
  "lens",
  "lz4_flex",
  "rfd",

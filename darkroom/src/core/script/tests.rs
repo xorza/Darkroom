@@ -28,23 +28,23 @@ fn expect_apply(rx: &mut mpsc::UnboundedReceiver<ScriptMessage>) -> Vec<Intent> 
 }
 
 #[test]
-fn list_funcs_returns_full_func_objects_in_insertion_order() {
+fn list_funcs_returns_full_func_objects_sorted_by_name() {
     use scenarium::{EventLambda, Func, FuncId};
 
     let mut lib = Library::default();
+    lib.add(Func::new(FuncId::unique(), "beta").category("io"));
     lib.add(
         Func::new(FuncId::unique(), "alpha")
             .category("math")
             .event("changed", EventLambda::default()),
     );
-    lib.add(Func::new(FuncId::unique(), "beta").category("io"));
 
     let state = Arc::new(Mutex::new(String::new()));
     let (tx, _rx) = test_inbound();
     let engine = engine::build_engine(state, tx, Arc::new(lib));
 
     // Each entry is a Rhai Map with fields mirroring `Func`. Verify
-    // both insertion order and that the per-func subfields round-trip.
+    // both deterministic name order and that the per-func subfields round-trip.
     let names: Array = engine.eval("list_funcs().map(|f| f.name)").unwrap();
     let names: Vec<String> = names
         .into_iter()

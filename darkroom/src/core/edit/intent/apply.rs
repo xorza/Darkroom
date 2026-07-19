@@ -10,7 +10,6 @@ use scenarium::GraphLink;
 use scenarium::Library;
 use scenarium::{Binding, NodeId, NodeKind, NodeSearch, OutputPort};
 
-use crate::core::document::canvas_item_placement::CanvasItemPlacement;
 use crate::core::document::{Document, EditScope, GraphRef, ItemRef};
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::{DocStep, GraphStep, Intent, NodeProperty, UndoStep};
@@ -162,7 +161,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope
                 .view
                 .item_placements
-                .add(CanvasItemPlacement::node(*node_id, *pos));
+                .insert(ItemRef::Node(*node_id), *pos);
         }
         GraphStep::DuplicateNodes {
             nodes,
@@ -176,7 +175,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
                 scope
                     .view
                     .item_placements
-                    .add(CanvasItemPlacement::node(*node_id, *pos));
+                    .insert(ItemRef::Node(*node_id), *pos);
             }
             for (port, binding) in bindings {
                 scope.graph.set_input_binding(*port, binding.clone());
@@ -199,8 +198,8 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         }
         GraphStep::MoveSelection { moves, .. } => {
             for (key, _, to) in moves {
-                if let Some(item) = scope.view.item_placements.by_key_mut(key) {
-                    item.pos = *to;
+                if let Some(position) = scope.view.item_placements.get_mut(key) {
+                    *position = *to;
                 }
             }
         }
@@ -218,7 +217,7 @@ fn apply_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             scope.view.selected = to.clone();
         }
         GraphStep::Raise { key, to_index, .. } => {
-            scope.view.item_placements.move_to_index(key, *to_index);
+            scope.view.move_item_to_index(key, *to_index);
         }
         GraphStep::SetNodeProperty { node_id, to, .. } => {
             set_node_property(scope, node_id, *to);
@@ -301,18 +300,15 @@ fn set_output_pinned(
     scope.graph.set_output_pinned(output, pinned);
     let key = ItemRef::Pin(output);
     if pinned {
-        if scope.view.item_placements.by_key(&key).is_none() {
+        if scope.view.item_placements.get(&key).is_none() {
             let (slot, pos) = restore_slot.unwrap_or((usize::MAX, Vec2::ZERO));
-            scope
-                .view
-                .item_placements
-                .add(CanvasItemPlacement::pin(output, pos));
-            // `move_to_index` clamps, so the `usize::MAX` fresh-pin case
-            // stays where `add` put it — the top of the stack.
-            scope.view.item_placements.move_to_index(&key, slot);
+            scope.view.item_placements.insert(key, pos);
+            // The move clamps, so the `usize::MAX` fresh-pin case stays where
+            // insertion put it — the top of the stack.
+            scope.view.move_item_to_index(&key, slot);
         }
     } else {
-        scope.view.item_placements.remove_by_key(&key);
+        scope.view.item_placements.shift_remove(&key);
         scope.view.selected.remove(&key);
     }
 }
@@ -386,14 +382,14 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
             // interleaving comes back exactly. A pin item goes through
             // `set_output_pinned` — it also re-pins the graph port
             // (`detach_node` cleared the pinned set too).
-            for (slot, item) in item_placements {
-                match item.key {
+            for (slot, key, position) in item_placements {
+                match key {
                     ItemRef::Pin(port) => {
-                        set_output_pinned(scope, port, true, Some((*slot, item.pos)));
+                        set_output_pinned(scope, *port, true, Some((*slot, *position)));
                     }
                     ItemRef::Node(_) => {
-                        scope.view.item_placements.add(item.clone());
-                        scope.view.item_placements.move_to_index(&item.key, *slot);
+                        scope.view.item_placements.insert(*key, *position);
+                        scope.view.move_item_to_index(key, *slot);
                     }
                 }
             }
@@ -401,8 +397,8 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         }
         GraphStep::MoveSelection { moves, .. } => {
             for (key, from, _) in moves {
-                if let Some(item) = scope.view.item_placements.by_key_mut(key) {
-                    item.pos = *from;
+                if let Some(position) = scope.view.item_placements.get_mut(key) {
+                    *position = *from;
                 }
             }
         }
@@ -422,7 +418,7 @@ fn revert_graph(step: &GraphStep, scope: &mut EditScope<'_>) {
         GraphStep::Raise {
             key, from_index, ..
         } => {
-            scope.view.item_placements.move_to_index(key, *from_index);
+            scope.view.move_item_to_index(key, *from_index);
         }
         GraphStep::SetNodeProperty { node_id, from, .. } => {
             set_node_property(scope, node_id, *from);

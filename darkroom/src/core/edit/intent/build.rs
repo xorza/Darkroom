@@ -104,8 +104,8 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
                 .item_placements
                 .iter()
                 .enumerate()
-                .filter(|(_, item)| item.key.belongs_to(node_id))
-                .map(|(slot, item)| (slot, item.clone()))
+                .filter(|(_, (key, _))| key.belongs_to(node_id))
+                .map(|(slot, (&key, &position))| (slot, key, position))
                 .collect();
             let selected = view
                 .selected
@@ -125,8 +125,8 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             let moves = moves
                 .into_iter()
                 .filter_map(|(key, to)| {
-                    let item = view.item_placements.by_key(&key)?;
-                    Some((key, item.pos, to))
+                    let from = *view.item_placements.get(&key)?;
+                    Some((key, from, to))
                 })
                 .collect();
             GraphStep::MoveSelection { grabbed, moves }
@@ -149,7 +149,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             to,
         },
         Intent::Raise { key } => {
-            let from_index = view.item_placements.index_of_key(&key)?;
+            let from_index = view.item_placements.get_index_of(&key)?;
             // Top of the stack is the last slot — painted last, drawn in front.
             let to_index = view.item_placements.len() - 1;
             GraphStep::Raise {
@@ -226,8 +226,8 @@ pub(crate) fn build_step(intent: Intent, doc: &Document, target: GraphRef) -> Op
             // puts the widget back in its exact paint-stack slot.
             let prior_slot = view
                 .item_placements
-                .index_of_key(&key)
-                .map(|slot| (slot, view.item_placements[slot].pos));
+                .get_index_of(&key)
+                .map(|slot| (slot, view.item_placements[slot]));
             GraphStep::SetOutputPinned {
                 output,
                 from: graph.is_output_pinned(output),
