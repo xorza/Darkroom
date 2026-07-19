@@ -16,7 +16,7 @@ use imaginarium::Buffer2;
 use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
 
-use crate::background_mesh::TileGrid;
+use crate::background_mesh::workspace::MeshWorkspace;
 use crate::image_ops::op::{OpError, ensure, require_f32_master};
 use crate::image_ops::process_channels;
 use crate::math::statistics::MAD_TO_SIGMA;
@@ -115,7 +115,10 @@ impl ExtractBackground {
     pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
         self.validate()?;
         require_f32_master(image)?;
-        process_channels(image, |plane| extract_background_plane(plane, self));
+        let mut workspace = MeshWorkspace::default();
+        process_channels(image, |plane| {
+            extract_background_plane(plane, self, &mut workspace);
+        });
         Ok(())
     }
 
@@ -138,8 +141,12 @@ impl ExtractBackground {
 /// Fit and remove the background surface of one channel plane, in place. The model is
 /// evaluated on the fly inside the removal pass ([`Surface::remove`]) — a degree ≤ 4
 /// polynomial needs no full-resolution model plane.
-fn extract_background_plane(plane: &mut Buffer2<f32>, config: &ExtractBackground) {
-    let samples = collect_samples(plane, config.tile_size);
+fn extract_background_plane(
+    plane: &mut Buffer2<f32>,
+    config: &ExtractBackground,
+    workspace: &mut MeshWorkspace,
+) {
+    let samples = collect_samples(plane, config.tile_size, workspace);
     let terms = poly_terms(effective_degree(samples.len(), config.degree));
     let coeffs = fit_surface(&samples, &terms, config.rejection_sigma, config.iterations);
     let surface = Surface::new(&coeffs, &terms, plane.width(), plane.height());
@@ -165,24 +172,28 @@ struct Sample {
 }
 
 /// One robust sky sample per tile — the tile centre with coordinates normalized to `[-1, 1]` and the
-/// shared [`TileGrid`] SExtractor-style sky estimate (per-tile ±σ-clip → Pearson mode). Reuses the
+/// shared [`crate::background_mesh::TileGrid`] SExtractor-style sky estimate (per-tile ±σ-clip →
+/// Pearson mode). Reuses the
 /// exact estimator star detection uses, so the gradient fit and the detector see the same sky. The
 /// grid 3×3 median filter is **off** (it would bias a real gradient's boundary tiles; outlier tiles
 /// are instead rejected by the surface fit's residual clip). A `None` object mask for now — passing a
 /// star/bright-signal mask here is the §6.2 refinement.
-fn collect_samples(channel: &Buffer2<f32>, tile: usize) -> Vec<Sample> {
+fn collect_samples(
+    channel: &Buffer2<f32>,
+    tile: usize,
+    workspace: &mut MeshWorkspace,
+) -> Vec<Sample> {
     let (w, h) = (channel.width(), channel.height());
-    let mut grid = TileGrid::new_uninit(w, h, tile);
-    grid.compute(channel, None, SKY_CLIP_ITERATIONS, false);
+    let grid = workspace.compute(channel, None, tile, SKY_CLIP_ITERATIONS, false);
 
-    let mut samples = Vec::with_capacity(grid.tiles_x() * grid.tiles_y());
-    for ty in 0..grid.tiles_y() {
-        let y = norm(grid.center_y(ty) as f64, h);
+    let mut samples = Vec::with_capacity(grid.stats.width() * grid.stats.height());
+    for ty in 0..grid.stats.height() {
+        let y = norm(grid.centers_y[ty] as f64, h);
         for (tx, &cx) in grid.centers_x.iter().enumerate() {
             samples.push(Sample {
                 x: norm(cx as f64, w),
                 y,
-                z: grid.get(tx, ty).sky as f64,
+                z: grid.stats[(tx, ty)].sky as f64,
             });
         }
     }

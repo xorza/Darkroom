@@ -11,8 +11,8 @@ use crate::io::astro_image::cfa::{CfaImage, CfaType};
 use crate::io::astro_image::{ASTRO_IMAGE_EXTENSIONS, AstroImage, AstroImageMetadata};
 use crate::io::raw::RAW_EXTENSIONS;
 use crate::stacking::star_detection::background::{self, estimate::BackgroundEstimate};
-use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::BackgroundConfig;
+use crate::stacking::star_detection::resources::DetectionResources;
 
 pub mod mem_probe;
 #[cfg(feature = "real-data")]
@@ -107,7 +107,7 @@ pub(crate) fn estimate_background(
     pixels: &Buffer2<f32>,
     config: &BackgroundConfig,
 ) -> BackgroundEstimate {
-    let mut pool = BufferPool::new(pixels.width(), pixels.height());
+    let mut pool = DetectionResources::new(pixels.width(), pixels.height());
     background::estimate_background(pixels, config, &mut pool)
 }
 

@@ -2,7 +2,7 @@
 
 use imaginarium::Buffer2;
 
-use crate::stacking::star_detection::buffer_pool::BufferPool;
+use crate::stacking::star_detection::resources::DetectionResources;
 
 /// Per-pixel background and noise estimates for an image.
 ///
@@ -19,7 +19,7 @@ pub(crate) struct BackgroundEstimate {
 
 impl BackgroundEstimate {
     /// Release buffers back to the pool.
-    pub(crate) fn release_to_pool(self, pool: &mut BufferPool) {
+    pub(crate) fn release_to_pool(self, pool: &mut DetectionResources) {
         pool.release_f32(self.background);
         pool.release_f32(self.noise);
     }

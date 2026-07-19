@@ -4,8 +4,8 @@ use rayon::prelude::*;
 
 use crate::AstroImage;
 use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
-use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::median_filter::median_filter_3x3;
+use crate::stacking::star_detection::resources::DetectionResources;
 use imaginarium::Buffer2;
 
 /// Reduce an input image to a single-channel detection plane, applying CFA
@@ -17,7 +17,7 @@ use imaginarium::Buffer2;
 ///   2. 3×3 median filter to suppress Bayer/X-Trans artifacts (if CFA).
 ///
 /// The returned buffer is acquired from `pool`; the caller owns it.
-pub(crate) fn prepare(image: &AstroImage, pool: &mut BufferPool) -> Buffer2<f32> {
+pub(crate) fn prepare(image: &AstroImage, pool: &mut DetectionResources) -> Buffer2<f32> {
     let mut pixels = pool.acquire_f32();
 
     if image.is_grayscale() {
@@ -122,7 +122,7 @@ mod tests {
         let data = vec![0.5f32; 64 * 64];
         let image = AstroImage::from_pixels(dim, data);
 
-        let mut pool = BufferPool::new(64, 64);
+        let mut pool = DetectionResources::new(64, 64);
         let result = prepare(&image, &mut pool);
 
         assert_eq!(result.width(), 64);
@@ -143,7 +143,7 @@ mod tests {
         let dim = ImageDimensions::new((width, height), 1);
         let image = AstroImage::from_pixels(dim, data);
 
-        let mut pool = BufferPool::new(width, height);
+        let mut pool = DetectionResources::new(width, height);
         let result = prepare(&image, &mut pool);
 
         // Star pixel should be preserved (no CFA, no defects)
@@ -222,7 +222,7 @@ mod tests {
         let b = channel_with_mad(0.70, 0.02);
         let image = AstroImage::from_planar_channels(dims, vec![r.clone(), g.clone(), b.clone()]);
 
-        let mut pool = BufferPool::new(4, 4);
+        let mut pool = DetectionResources::new(4, 4);
         let out = prepare(&image, &mut pool);
 
         for (i, &out_v) in out.pixels().iter().enumerate() {
@@ -246,7 +246,7 @@ mod tests {
         let b = channel_with_mad(0.10, 0.01);
         let image = AstroImage::from_planar_channels(dims, vec![r, g, b]);
 
-        let mut pool = BufferPool::new(4, 4);
+        let mut pool = DetectionResources::new(4, 4);
         let out = prepare(&image, &mut pool);
 
         // Background ~0.10; star pixel should be well above it (~0.10*2/3 + 0.90/3 ≈ 0.37).

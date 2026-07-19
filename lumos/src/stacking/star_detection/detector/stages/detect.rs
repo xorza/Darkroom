@@ -3,6 +3,8 @@
 //! Combines matched filtering (optional), thresholding, connected component
 //! labeling, and deblending into a single stage that returns detected regions.
 
+use std::collections::HashMap;
+
 use rayon::prelude::*;
 
 use crate::math::rect::URect;
@@ -10,7 +12,6 @@ use common::Vec2us;
 use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::DetectionConfig;
 use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
 use crate::stacking::star_detection::deblend::ComponentData;
@@ -20,6 +21,7 @@ use crate::stacking::star_detection::deblend::multi_threshold::{
 };
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::labeling::LabelMap;
+use crate::stacking::star_detection::resources::DetectionResources;
 
 use crate::stacking::star_detection::threshold_mask::{
     create_threshold_mask, create_threshold_mask_filtered,
@@ -55,7 +57,7 @@ pub(crate) fn detect(
     stats: &BackgroundEstimate,
     fwhm: Option<f32>,
     config: &DetectionConfig,
-    pool: &mut BufferPool,
+    pool: &mut DetectionResources,
 ) -> DetectResult {
     let width = pixels.width();
     let height = pixels.height();
@@ -189,16 +191,12 @@ fn extract_candidates(
         "Processing components for candidate extraction"
     );
 
-    let filtered: Vec<_> = component_data
-        .into_iter()
-        .filter(|data| data.area > 0 && data.area <= config.max_area)
-        .collect();
-
     // Track (regions, deblended_count) where deblended_count is the number of
     // components that produced more than one region.
     let result = if config.is_multi_threshold() {
-        let (regions, deblended_components) = filtered
+        let (regions, deblended_components) = component_data
             .into_par_iter()
+            .filter(|data| data.area > 0 && data.area <= config.max_area)
             .fold(
                 || (Vec::new(), 0usize, DeblendBuffers::new()),
                 |(mut regions, mut deblended, mut buffers), data| {
@@ -231,8 +229,9 @@ fn extract_candidates(
             deblended_components,
         }
     } else {
-        let (regions, deblended_components) = filtered
+        let (regions, deblended_components) = component_data
             .into_par_iter()
+            .filter(|data| data.area > 0 && data.area <= config.max_area)
             .fold(
                 || (Vec::new(), 0usize),
                 |(mut regions, mut deblended), data| {
@@ -274,9 +273,6 @@ fn extract_candidates(
 
 /// Collect component metadata (bounding boxes and areas) from label map.
 fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
-    use parking_lot::Mutex;
-    use rayon::prelude::*;
-
     let num_labels = label_map.num_labels();
     let labels = label_map.labels();
     let width = label_map.width();
@@ -284,47 +280,14 @@ fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
 
     // Calculate optimal number of jobs for parallel processing
     let num_jobs = (rayon::current_num_threads()).min(height).max(1);
-    let rows_per_job = (height / num_jobs).max(1);
+    let rows_per_job = height.div_ceil(num_jobs);
 
-    let result = Mutex::new(vec![
-        ComponentData {
-            bbox: URect::empty(),
-            label: 0,
-            area: 0,
-        };
-        num_labels
-    ]);
-
-    (0..num_jobs).into_par_iter().for_each_init(
-        || {
-            (
-                vec![
-                    ComponentData {
-                        bbox: URect::empty(),
-                        label: 0,
-                        area: 0,
-                    };
-                    num_labels
-                ],
-                Vec::<usize>::with_capacity(1024),
-            )
-        },
-        |(local_data, touched), job_idx| {
+    let partial = (0..num_jobs)
+        .into_par_iter()
+        .map(|job_idx| {
             let start_row = job_idx * rows_per_job;
-            let end_row = if job_idx == num_jobs - 1 {
-                height
-            } else {
-                ((job_idx + 1) * rows_per_job).min(height)
-            };
-
-            for &idx in touched.iter() {
-                local_data[idx] = ComponentData {
-                    bbox: URect::empty(),
-                    label: 0,
-                    area: 0,
-                };
-            }
-            touched.clear();
+            let end_row = (start_row + rows_per_job).min(height);
+            let mut local = HashMap::new();
 
             for y in start_row..end_row {
                 let row_start = y * width;
@@ -333,29 +296,39 @@ fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
                     if label == 0 {
                         continue;
                     }
-                    let idx = (label - 1) as usize;
-                    let data = &mut local_data[idx];
-                    if data.area == 0 {
-                        touched.push(idx);
-                    }
+                    let data = local.entry(label).or_insert_with(|| ComponentData {
+                        bbox: URect::empty(),
+                        label,
+                        area: 0,
+                    });
                     data.bbox.include(Vec2us::new(x, y));
-                    data.label = label;
                     data.area += 1;
                 }
             }
-
-            let mut result = result.lock();
-            for &idx in touched.iter() {
-                let partial_comp = &local_data[idx];
-                let data = &mut result[idx];
-                data.bbox = data.bbox.union(partial_comp.bbox);
-                data.label = partial_comp.label;
-                data.area += partial_comp.area;
+            local
+        })
+        .reduce(HashMap::new, |mut left, mut right| {
+            if left.len() < right.len() {
+                std::mem::swap(&mut left, &mut right);
             }
-        },
-    );
+            for (label, partial_comp) in right {
+                let data = left.entry(label).or_default();
+                merge_component_data(data, partial_comp);
+            }
+            left
+        });
 
-    result.into_inner()
+    let mut result = vec![ComponentData::default(); num_labels];
+    for (label, partial_comp) in partial {
+        merge_component_data(&mut result[(label - 1) as usize], partial_comp);
+    }
+    result
+}
+
+fn merge_component_data(target: &mut ComponentData, source: ComponentData) {
+    target.bbox = target.bbox.union(source.bbox);
+    target.label = source.label;
+    target.area += source.area;
 }
 
 #[cfg(test)]
@@ -436,6 +409,46 @@ mod tests {
 
         assert_eq!(result.regions.len(), 1);
         assert_eq!(result.deblended_components, 0);
+    }
+
+    #[test]
+    fn component_collection_merges_sparse_cross_job_metadata_exactly() {
+        let width = 5;
+        let height = 6;
+        let mut labels = Buffer2::new_filled(width, height, 0u32);
+        for (x, y, label) in [
+            (0, 0, 1),
+            (1, 0, 1),
+            (0, 3, 1),
+            (4, 1, 2),
+            (3, 4, 2),
+            (2, 5, 3),
+        ] {
+            labels[(x, y)] = label;
+        }
+        let label_map = label_map_from_raw(labels, 3);
+
+        let components = collect_component_data(&label_map);
+
+        assert_eq!(components.len(), 3);
+        assert_eq!(components[0].label, 1);
+        assert_eq!(components[0].area, 3);
+        assert_eq!(
+            components[0].bbox,
+            URect::new(Vec2us::new(0, 0), Vec2us::new(2, 4))
+        );
+        assert_eq!(components[1].label, 2);
+        assert_eq!(components[1].area, 2);
+        assert_eq!(
+            components[1].bbox,
+            URect::new(Vec2us::new(3, 1), Vec2us::new(5, 5))
+        );
+        assert_eq!(components[2].label, 3);
+        assert_eq!(components[2].area, 1);
+        assert_eq!(
+            components[2].bbox,
+            URect::new(Vec2us::new(2, 5), Vec2us::new(3, 6))
+        );
     }
 
     #[test]

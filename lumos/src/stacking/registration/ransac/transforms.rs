@@ -6,7 +6,7 @@
 use std::f64::consts::SQRT_2;
 
 use glam::DVec2;
-use nalgebra::{DMatrix, SVD};
+use nalgebra::{DMatrix, SMatrix, SVD};
 
 use crate::math::dmat3::DMat3;
 use crate::stacking::registration::transform::{Transform, TransformType};
@@ -173,9 +173,8 @@ pub(crate) fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> 
         return None;
     }
 
-    // Normalize points for numerical stability (same pattern as homography)
-    let (ref_norm, ref_t) = normalize_points(ref_points);
-    let (tar_norm, tar_t) = normalize_points(target_points);
+    let ref_norm = point_normalization(ref_points);
+    let tar_norm = point_normalization(target_points);
 
     // Solve: target = A * ref + b in normalized space
     // In matrix form: [tx] = [a b] [rx] + [e]
@@ -184,7 +183,7 @@ pub(crate) fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> 
     // We solve two systems: one for x-coordinates, one for y-coordinates
     // Using normal equations: A^T A x = A^T b
 
-    let n = ref_norm.len() as f64;
+    let n = ref_points.len() as f64;
 
     // Compute sums on normalized points
     let mut sum_x = 0.0;
@@ -199,7 +198,9 @@ pub(crate) fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> 
     let mut sum_x_ty = 0.0;
     let mut sum_y_ty = 0.0;
 
-    for (r, t) in ref_norm.iter().zip(tar_norm.iter()) {
+    for (&r, &t) in ref_points.iter().zip(target_points) {
+        let r = ref_norm.apply(r);
+        let t = tar_norm.apply(t);
         sum_x += r.x;
         sum_y += r.y;
         sum_xx += r.x * r.x;
@@ -248,8 +249,8 @@ pub(crate) fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> 
 
     // Denormalize: A = T_target^{-1} * A_norm * T_ref
     let a_norm = Transform::affine([a, b, e, c, d, f]);
-    let tar_t_inv = tar_t.inverse();
-    let transform = tar_t_inv.compose(&a_norm).compose(&ref_t);
+    let tar_t_inv = tar_norm.transform.inverse();
+    let transform = tar_t_inv.compose(&a_norm).compose(&ref_norm.transform);
 
     if transform.is_valid() {
         Some(transform)
@@ -267,56 +268,51 @@ pub(crate) fn estimate_homography(
         return None;
     }
 
-    // Normalize points for numerical stability
-    let (ref_norm, ref_t) = normalize_points(ref_points);
-    let (tar_norm, tar_t) = normalize_points(target_points);
+    let ref_norm = point_normalization(ref_points);
+    let tar_norm = point_normalization(target_points);
 
     // Build the DLT matrix A where Ah = 0
     // Each point gives 2 equations:
     // [-x -y -1  0  0  0  x*x'  y*x'  x']
     // [ 0  0  0 -x -y -1  x*y'  y*y'  y']
 
-    let n = ref_norm.len();
+    let n = ref_points.len();
 
-    // Build the full 2n×9 design matrix A directly (instead of A^T A)
-    // to preserve condition number (κ instead of κ²)
-    let mut a_data = vec![0.0f64; 2 * n * 9];
-    for i in 0..n {
-        let r = ref_norm[i];
-        let t = tar_norm[i];
-        let base = i * 2 * 9;
-        a_data[base..base + 9].copy_from_slice(&[
-            -r.x,
-            -r.y,
-            -1.0,
-            0.0,
-            0.0,
-            0.0,
-            r.x * t.x,
-            r.y * t.x,
-            t.x,
-        ]);
-        a_data[base + 9..base + 18].copy_from_slice(&[
-            0.0,
-            0.0,
-            0.0,
-            -r.x,
-            -r.y,
-            -1.0,
-            r.x * t.y,
-            r.y * t.y,
-            t.y,
-        ]);
-    }
-    let a = DMatrix::from_row_slice(2 * n, 9, &a_data);
-
-    let h = solve_homogeneous_svd(a)?;
+    let h = if n == 4 {
+        let mut design = SMatrix::<f64, 9, 9>::zeros();
+        for i in 0..n {
+            let rows = dlt_rows(
+                ref_norm.apply(ref_points[i]),
+                tar_norm.apply(target_points[i]),
+            );
+            for col in 0..9 {
+                design[(2 * i, col)] = rows[0][col];
+                design[(2 * i + 1, col)] = rows[1][col];
+            }
+        }
+        solve_homogeneous_svd_fixed(design)?
+    } else {
+        // Keep the full rectangular matrix for overdetermined refits: direct SVD preserves
+        // condition number κ, unlike the allocation-free but less stable AᵀA formulation.
+        let mut design = DMatrix::zeros(2 * n, 9);
+        for i in 0..n {
+            let rows = dlt_rows(
+                ref_norm.apply(ref_points[i]),
+                tar_norm.apply(target_points[i]),
+            );
+            for col in 0..9 {
+                design[(2 * i, col)] = rows[0][col];
+                design[(2 * i + 1, col)] = rows[1][col];
+            }
+        }
+        solve_homogeneous_svd_dynamic(design)?
+    };
 
     // Denormalize: H = T_target^-1 * H_norm * T_ref
     let h_norm = Transform::from_matrix(h, TransformType::Homography);
-    let tar_t_inv = tar_t.inverse(); // Normalization transforms are always invertible
+    let tar_t_inv = tar_norm.transform.inverse(); // Normalization transforms are always invertible
 
-    let h_denorm = tar_t_inv.compose(&h_norm).compose(&ref_t);
+    let h_denorm = tar_t_inv.compose(&h_norm).compose(&ref_norm.transform);
 
     // Normalize so h[8] = 1
     let scale = h_denorm.matrix[8];
@@ -338,10 +334,28 @@ pub(crate) fn estimate_homography(
     }
 }
 
-/// Normalize points for numerical stability.
-pub(crate) fn normalize_points(points: &[DVec2]) -> (Vec<DVec2>, Transform) {
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PointNormalization {
+    pub(crate) transform: Transform,
+    centroid: DVec2,
+    scale: f64,
+}
+
+impl PointNormalization {
+    #[inline]
+    pub(crate) fn apply(self, point: DVec2) -> DVec2 {
+        (point - self.centroid) * self.scale
+    }
+}
+
+/// Compute the Hartley normalization applied lazily by the estimators.
+pub(crate) fn point_normalization(points: &[DVec2]) -> PointNormalization {
     if points.is_empty() {
-        return (Vec::new(), Transform::identity());
+        return PointNormalization {
+            transform: Transform::identity(),
+            centroid: DVec2::ZERO,
+            scale: 1.0,
+        };
     }
 
     // Compute centroid
@@ -355,16 +369,18 @@ pub(crate) fn normalize_points(points: &[DVec2]) -> (Vec<DVec2>, Transform) {
     avg_dist /= points.len() as f64;
 
     if avg_dist < 1e-10 {
-        return (points.to_vec(), Transform::identity());
+        return PointNormalization {
+            transform: Transform::identity(),
+            centroid: DVec2::ZERO,
+            scale: 1.0,
+        };
     }
 
     // Scale so average distance is sqrt(2)
     let scale = SQRT_2 / avg_dist;
 
-    let normalized: Vec<DVec2> = points.iter().map(|p| (*p - c) * scale).collect();
-
     // Transformation matrix: translate then scale
-    let t = Transform::from_matrix(
+    let transform = Transform::from_matrix(
         [
             scale,
             0.0,
@@ -380,43 +396,63 @@ pub(crate) fn normalize_points(points: &[DVec2]) -> (Vec<DVec2>, Transform) {
         TransformType::Affine,
     );
 
-    (normalized, t)
+    PointNormalization {
+        transform,
+        centroid: c,
+        scale,
+    }
 }
 
-/// Solve homogeneous system Ah=0 via direct SVD of the m×9 design matrix.
-///
-/// Returns the right singular vector corresponding to the smallest singular value
-/// (last row of V^T). Using the full rectangular matrix preserves condition number κ,
-/// vs κ² when SVD-ing A^T A.
-fn solve_homogeneous_svd(a: DMatrix<f64>) -> Option<DMat3> {
-    let nrows = a.nrows();
-    let ncols = a.ncols();
+#[inline]
+fn dlt_rows(reference: DVec2, target: DVec2) -> [[f64; 9]; 2] {
+    [
+        [
+            -reference.x,
+            -reference.y,
+            -1.0,
+            0.0,
+            0.0,
+            0.0,
+            reference.x * target.x,
+            reference.y * target.x,
+            target.x,
+        ],
+        [
+            0.0,
+            0.0,
+            0.0,
+            -reference.x,
+            -reference.y,
+            -1.0,
+            reference.x * target.y,
+            reference.y * target.y,
+            target.y,
+        ],
+    ]
+}
 
-    // nalgebra computes thin SVD: V^T has min(m,n) × n shape.
-    // For m < 9, we'd miss the null-space vector (row 8 of full V^T).
-    // Pad with zero rows so m >= 9 — zeros don't affect the null space.
-    let a = if nrows < ncols {
-        let mut padded = DMatrix::zeros(ncols, ncols);
-        padded.view_mut((0, 0), (nrows, ncols)).copy_from(&a);
-        padded
-    } else {
-        a
-    };
-
-    // Compute SVD — only need V (right singular vectors), skip U
+fn solve_homogeneous_svd_fixed(a: SMatrix<f64, 9, 9>) -> Option<DMat3> {
     let svd = SVD::new(a, false, true);
-
-    // Get V^T (right singular vectors as rows, 9×9)
     let v_t = svd.v_t?;
-
-    // The last row of V^T corresponds to the smallest singular value
     let last_row = v_t.row(8);
-
     let mut data = [0.0f64; 9];
     for (i, &val) in last_row.iter().enumerate() {
         data[i] = val;
     }
 
+    Some(DMat3::from_array(data))
+}
+
+/// Solve an overdetermined homogeneous system directly so conditioning remains κ rather than κ².
+fn solve_homogeneous_svd_dynamic(a: DMatrix<f64>) -> Option<DMat3> {
+    debug_assert!(a.nrows() >= a.ncols());
+    let svd = SVD::new(a, false, true);
+    let v_t = svd.v_t?;
+    let last_row = v_t.row(8);
+    let mut data = [0.0f64; 9];
+    for (i, &val) in last_row.iter().enumerate() {
+        data[i] = val;
+    }
     Some(DMat3::from_array(data))
 }
 

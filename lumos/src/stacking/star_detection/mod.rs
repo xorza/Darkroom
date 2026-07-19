@@ -49,7 +49,6 @@
 //! ```
 
 pub(crate) mod background;
-pub(crate) mod buffer_pool;
 pub(crate) mod centroid;
 pub(crate) mod config;
 mod convolution;
@@ -59,6 +58,7 @@ pub(crate) mod error;
 pub(crate) mod labeling;
 mod mask_dilation;
 mod median_filter;
+pub(crate) mod resources;
 pub(crate) mod star;
 pub(crate) mod threshold_mask;
 

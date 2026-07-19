@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use rayon::prelude::*;
 
 use crate::concurrency::UnsafeSendPtr;
-use crate::stacking::star_detection::buffer_pool::BufferPool;
+use crate::stacking::star_detection::resources::DetectionResources;
 use common::BitBuffer2;
 use imaginarium::Buffer2;
 
@@ -193,21 +193,21 @@ pub(crate) struct LabelMap {
 }
 
 impl LabelMap {
-    /// Create a label map by acquiring a buffer from a pool.
+    /// Create a label map by acquiring a reusable buffer.
     ///
     /// # Arguments
     /// * `mask` - Binary mask of foreground pixels
     /// * `connectivity` - Four (default) or Eight connectivity
-    /// * `pool` - Buffer pool to acquire the u32 buffer from
+    /// * `resources` - Detection resources that provide the label buffer
     pub(crate) fn from_pool(
         mask: &BitBuffer2,
         connectivity: Connectivity,
-        pool: &mut BufferPool,
+        resources: &mut DetectionResources,
     ) -> Self {
-        assert_eq!(mask.width(), pool.width());
-        assert_eq!(mask.height(), pool.height());
+        debug_assert_eq!(mask.width(), resources.dimensions.x);
+        debug_assert_eq!(mask.height(), resources.dimensions.y);
 
-        let mut labels = pool.acquire_u32();
+        let mut labels = resources.acquire_u32();
         // Clear the buffer (it may contain old labels)
         labels.pixels_mut().fill(0);
 
@@ -254,7 +254,7 @@ impl LabelMap {
     }
 
     /// Release this LabelMap's buffer back to the pool.
-    pub(crate) fn release_to_pool(self, pool: &mut BufferPool) {
+    pub(crate) fn release_to_pool(self, pool: &mut DetectionResources) {
         pool.release_u32(self.labels);
     }
 

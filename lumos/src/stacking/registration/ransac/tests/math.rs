@@ -44,10 +44,9 @@ fn test_centroid_asymmetric() {
 
 #[test]
 fn test_normalize_points_empty() {
-    let (normalized, transform) = normalize_points(&[]);
-    assert!(normalized.is_empty());
+    let normalization = point_normalization(&[]);
     // Transform should be identity
-    let p = transform.apply(DVec2::new(1.0, 2.0));
+    let p = normalization.transform.apply(DVec2::new(1.0, 2.0));
     assert!((p.x - 1.0).abs() < TOL);
     assert!((p.y - 2.0).abs() < TOL);
 }
@@ -56,9 +55,10 @@ fn test_normalize_points_empty() {
 fn test_normalize_points_coincident() {
     // All points at same location: avg_dist=0 → returns identity transform
     let points = vec![DVec2::new(5.0, 5.0); 4];
-    let (normalized, _) = normalize_points(&points);
+    let normalization = point_normalization(&points);
     // Should return original points unchanged
-    for p in &normalized {
+    for &point in &points {
+        let p = normalization.apply(point);
         assert!((p.x - 5.0).abs() < TOL);
         assert!((p.y - 5.0).abs() < TOL);
     }
@@ -79,7 +79,11 @@ fn test_normalize_points_centroid_and_avg_distance() {
         DVec2::new(10.0, 10.0),
         DVec2::new(0.0, 10.0),
     ];
-    let (normalized, transform) = normalize_points(&points);
+    let normalization = point_normalization(&points);
+    let normalized: Vec<_> = points
+        .iter()
+        .map(|&point| normalization.apply(point))
+        .collect();
 
     // Centroid of normalized points should be at origin
     let c = centroid(&normalized);
@@ -98,7 +102,7 @@ fn test_normalize_points_centroid_and_avg_distance() {
     assert!((normalized[1].y - (-1.0)).abs() < TOL);
 
     // Inverse transform should recover original points
-    let inv = transform.inverse();
+    let inv = normalization.transform.inverse();
     for (orig, norm) in points.iter().zip(normalized.iter()) {
         let r = inv.apply(*norm);
         assert!((r.x - orig.x).abs() < 1e-8);
@@ -116,7 +120,11 @@ fn test_normalize_points_extreme_values() {
         DVec2::new(1e10 + 1.0, 1e10 + 1.0),
     ];
 
-    let (normalized, transform) = normalize_points(&points);
+    let normalization = point_normalization(&points);
+    let normalized: Vec<_> = points
+        .iter()
+        .map(|&point| normalization.apply(point))
+        .collect();
 
     // Centroid at origin
     let c = centroid(&normalized);
@@ -124,7 +132,7 @@ fn test_normalize_points_extreme_values() {
     assert!(c.y.abs() < 1e-10, "Centroid y not at origin: {}", c.y);
 
     // Inverse recovers original (may lose some precision at 1e10 scale)
-    let inv = transform.inverse();
+    let inv = normalization.transform.inverse();
     for (orig, norm) in points.iter().zip(normalized.iter()) {
         let r = inv.apply(*norm);
         assert!((r.x - orig.x).abs() < 1e-3, "X: {} vs {}", r.x, orig.x);

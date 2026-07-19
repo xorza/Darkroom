@@ -1,13 +1,13 @@
-//! Buffer pool for reusing allocations across multiple star detections.
+//! Reusable resources for star detection.
 //!
-//! This module provides a pool of reusable buffers to avoid repeated allocations
-//! when processing multiple images of the same dimensions.
+//! The resources retain image buffers and stage-specific workspaces across detections.
 
+use crate::stacking::star_detection::background::workspace::BackgroundWorkspace;
 use common::BitBuffer2;
 use common::Vec2us;
 use imaginarium::Buffer2;
 
-/// Pool of reusable buffers for star detection.
+/// Reusable buffers and stage workspaces for star detection.
 ///
 /// Buffers are stored and reused across multiple `detect()` calls to avoid
 /// allocation overhead. All buffers in the pool have the same dimensions.
@@ -15,37 +15,27 @@ use imaginarium::Buffer2;
 /// `acquire_*` returns buffers with **unspecified contents**: a freshly allocated buffer is
 /// zeroed, but a reused one keeps its previous data. Callers must overwrite before reading.
 #[derive(Debug)]
-pub(crate) struct BufferPool {
-    dimensions: Vec2us,
+pub(crate) struct DetectionResources {
+    pub(crate) dimensions: Vec2us,
     /// Pool of f32 buffers (for grayscale, scratch, background, noise, etc.)
     f32_buffers: Vec<Buffer2<f32>>,
     /// Pool of BitBuffer2 (for threshold masks, dilation scratch, etc.)
     bit_buffers: Vec<BitBuffer2>,
     /// Single u32 buffer for label map (only one needed at a time)
     u32_buffer: Option<Buffer2<u32>>,
+    pub(crate) background: BackgroundWorkspace,
 }
 
-impl BufferPool {
-    /// Create a new buffer pool for the given image dimensions.
+impl DetectionResources {
+    /// Create resources for the given image dimensions.
     pub(crate) fn new(width: usize, height: usize) -> Self {
         Self {
             dimensions: Vec2us::new(width, height),
             f32_buffers: Vec::new(),
             bit_buffers: Vec::new(),
             u32_buffer: None,
+            background: BackgroundWorkspace::default(),
         }
-    }
-
-    /// Get the expected width for buffers in this pool.
-    #[inline]
-    pub(crate) fn width(&self) -> usize {
-        self.dimensions.x
-    }
-
-    /// Get the expected height for buffers in this pool.
-    #[inline]
-    pub(crate) fn height(&self) -> usize {
-        self.dimensions.y
     }
 
     /// Acquire an f32 buffer from the pool, or allocate a new one.
@@ -109,6 +99,7 @@ impl BufferPool {
         self.f32_buffers.clear();
         self.bit_buffers.clear();
         self.u32_buffer = None;
+        self.background.clear();
     }
 
     /// Reset the pool for new dimensions, clearing all buffers.
@@ -121,48 +112,54 @@ impl BufferPool {
     }
 }
 
-/// Snapshot of how many buffers the pool currently holds, per kind. Memory tests read it to assert
-/// the detection working set stays flat across detections (no per-frame buffer leak).
 #[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PoolCounts {
-    pub floats: usize,
-    pub bitmasks: usize,
-    pub labels: usize,
-}
+pub(crate) mod test_support {
+    use crate::stacking::star_detection::resources::DetectionResources;
 
-/// Dimension check and pool-size introspection used only by tests to assert pool sizing/reuse.
-#[cfg(test)]
-impl BufferPool {
-    pub(crate) fn matches_dimensions(&self, width: usize, height: usize) -> bool {
-        self.dimensions.x == width && self.dimensions.y == height
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) struct BufferCounts {
+        pub floats: usize,
+        pub bitmasks: usize,
+        pub labels: usize,
     }
 
-    pub(crate) fn counts(&self) -> PoolCounts {
-        PoolCounts {
-            floats: self.f32_buffers.len(),
-            bitmasks: self.bit_buffers.len(),
-            labels: self.u32_buffer.is_some() as usize,
+    pub(crate) fn matches_dimensions(
+        resources: &DetectionResources,
+        width: usize,
+        height: usize,
+    ) -> bool {
+        resources.dimensions.x == width && resources.dimensions.y == height
+    }
+
+    pub(crate) fn buffer_counts(resources: &DetectionResources) -> BufferCounts {
+        BufferCounts {
+            floats: resources.f32_buffers.len(),
+            bitmasks: resources.bit_buffers.len(),
+            labels: resources.u32_buffer.is_some() as usize,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::stacking::star_detection::buffer_pool::*;
+    use crate::stacking::star_detection::resources::DetectionResources;
+    use crate::stacking::star_detection::resources::test_support::BufferCounts;
+    use crate::stacking::star_detection::resources::test_support::buffer_counts;
+    use crate::stacking::star_detection::resources::test_support::matches_dimensions;
+    use common::Vec2us;
+    use imaginarium::Buffer2;
 
     #[test]
     fn test_pool_creation() {
-        let pool = BufferPool::new(100, 50);
-        assert_eq!(pool.width(), 100);
-        assert_eq!(pool.height(), 50);
-        assert!(pool.matches_dimensions(100, 50));
-        assert!(!pool.matches_dimensions(50, 100));
+        let pool = DetectionResources::new(100, 50);
+        assert_eq!(pool.dimensions, Vec2us::new(100, 50));
+        assert!(matches_dimensions(&pool, 100, 50));
+        assert!(!matches_dimensions(&pool, 50, 100));
     }
 
     #[test]
     fn test_f32_buffer_acquire_release() {
-        let mut pool = BufferPool::new(64, 64);
+        let mut pool = DetectionResources::new(64, 64);
 
         // First acquire allocates
         let buf1 = pool.acquire_f32();
@@ -186,7 +183,7 @@ mod tests {
 
     #[test]
     fn test_bit_buffer_acquire_release() {
-        let mut pool = BufferPool::new(128, 64);
+        let mut pool = DetectionResources::new(128, 64);
 
         let buf1 = pool.acquire_bit();
         assert_eq!(buf1.width(), 128);
@@ -202,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_u32_buffer_acquire_release() {
-        let mut pool = BufferPool::new(32, 32);
+        let mut pool = DetectionResources::new(32, 32);
 
         let buf1 = pool.acquire_u32();
         assert_eq!(buf1.width(), 32);
@@ -219,7 +216,7 @@ mod tests {
 
     #[test]
     fn test_pool_clear() {
-        let mut pool = BufferPool::new(64, 64);
+        let mut pool = DetectionResources::new(64, 64);
 
         let buf1 = pool.acquire_f32();
         let buf2 = pool.acquire_bit();
@@ -229,8 +226,8 @@ mod tests {
         pool.release_bit(buf2);
         pool.release_u32(buf3);
         assert_eq!(
-            pool.counts(),
-            PoolCounts {
+            buffer_counts(&pool),
+            BufferCounts {
                 floats: 1,
                 bitmasks: 1,
                 labels: 1,
@@ -239,8 +236,8 @@ mod tests {
 
         pool.clear();
         assert_eq!(
-            pool.counts(),
-            PoolCounts {
+            buffer_counts(&pool),
+            BufferCounts {
                 floats: 0,
                 bitmasks: 0,
                 labels: 0,
@@ -254,14 +251,14 @@ mod tests {
         // A mismatched buffer must be rejected even in release builds: downstream SIMD kernels
         // do unchecked-length loads/stores off the pool's declared dimensions, so a silently
         // accepted mismatch would be out-of-bounds UB, not just a wrong pixel.
-        let mut pool = BufferPool::new(64, 64);
+        let mut pool = DetectionResources::new(64, 64);
         let wrong_size = Buffer2::new_default(32, 32);
         pool.release_f32(wrong_size);
     }
 
     #[test]
     fn test_pool_reset() {
-        let mut pool = BufferPool::new(64, 64);
+        let mut pool = DetectionResources::new(64, 64);
 
         let buf = pool.acquire_f32();
         pool.release_f32(buf);
@@ -272,8 +269,7 @@ mod tests {
 
         // Reset to different dimensions clears buffers
         pool.reset(128, 128);
-        assert_eq!(pool.width(), 128);
-        assert_eq!(pool.height(), 128);
+        assert_eq!(pool.dimensions, Vec2us::new(128, 128));
         assert!(pool.f32_buffers.is_empty());
     }
 }

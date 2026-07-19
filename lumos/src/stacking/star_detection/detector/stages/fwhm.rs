@@ -5,13 +5,13 @@
 
 use crate::math::statistics::{mad_f32_with_scratch, mad_floored, median_f32_mut};
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::buffer_pool::BufferPool;
 use crate::stacking::star_detection::config::{
     DetectionConfig, FilterConfig, FwhmConfig, MeasurementConfig,
 };
 use crate::stacking::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
 use crate::stacking::star_detection::detector::stages::detect::detect;
 use crate::stacking::star_detection::detector::stages::measure;
+use crate::stacking::star_detection::resources::DetectionResources;
 use crate::stacking::star_detection::star::{SATURATION_PEAK, Star};
 use imaginarium::Buffer2;
 
@@ -57,7 +57,7 @@ pub(crate) fn estimate_fwhm(
     detection_config: &DetectionConfig,
     measurement_config: &MeasurementConfig,
     filter_config: &FilterConfig,
-    pool: &mut BufferPool,
+    pool: &mut DetectionResources,
 ) -> FwhmResult {
     // Auto-estimation takes precedence; `expected_fwhm` becomes its fallback when too few stars
     // are found (see `estimate_from_bright_stars`).
@@ -95,7 +95,7 @@ fn estimate_from_bright_stars(
     detection_config: &DetectionConfig,
     measurement_config: &MeasurementConfig,
     filter_config: &FilterConfig,
-    pool: &mut BufferPool,
+    pool: &mut DetectionResources,
 ) -> FwhmResult {
     let first_pass_config = DetectionConfig {
         sigma_threshold: detection_config.sigma_threshold * config.estimation_sigma_factor,

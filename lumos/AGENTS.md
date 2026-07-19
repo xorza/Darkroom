@@ -21,7 +21,7 @@ A stack of telescope exposures → one calibrated, aligned, combined deep-sky im
 5. **Combine** — `stacking::combine` (statistical per-pixel combine with rejection/normalization/weighting, memory-tiered) **or** `stacking::drizzle` (Fruchter & Hook variable-pixel reconstruction for dithered/super-resolution sets).
 6. **Stretch** (`stretching`, *display-domain, optional*) — map the linear stacked master to a viewable image with a non-linear tone curve (MTF/STF auto-stretch or color-preserving arcsinh), parameters auto-derived from the background. The science deliverable is the linear master from step 5; stretching is display-prep that runs strictly after all linear-domain work.
 
-`math` (SIMD sums, robust statistics, transforms) and `concurrency` (`UnsafeSendPtr`) support all stages. `lib.rs` defines the entire public surface.
+`math` (SIMD sums, robust statistics, transforms) and `concurrency` (Rayon pointer safety and reusable per-job scratch) support all stages. `lib.rs` defines the entire public surface.
 
 ## Crate layout
 
@@ -39,7 +39,7 @@ src/
 ├── io/         astro_image (container + FITS/standard load) · raw (libraw decode + demosaic)
 ├── math/       robust stats, SIMD sum, DMat3, bbox
 ├── background_mesh/  shared SExtractor-style TileGrid (used by star_detection + background_extraction)
-├── concurrency.rs  UnsafeSendPtr (send raw pointers across rayon closures)
+├── concurrency.rs  UnsafeSendPtr + reusable Rayon job scratch leases
 └── testing/    #[cfg(test)] forward-model synthetic generator + real_data fixtures
 ```
 
@@ -63,7 +63,7 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 | `io::astro_image` | `pub(crate)` (types re-exported) | `AstroImage` container, FITS/standard loading, metadata, CFA, sensor detection. |
 | `io::raw` | `pub(crate)` | libraw RAW decode + Bayer (RCD) / X-Trans (Markesteijn) demosaicing; owns the authoritative `RAW_EXTENSIONS` policy. |
 | `math` | `pub(crate)` | `DMat3`, half-open `Rect`/`URect`, compensated SIMD `sum`, robust statistics. (`Vec2us` lives in the workspace `common` crate.) |
-| `concurrency` | `pub(crate)` | `UnsafeSendPtr` (send raw pointers across rayon closures). |
+| `concurrency` | `pub(crate)` | `UnsafeSendPtr` plus reusable per-job scratch leases for Rayon work. |
 | `testing` | `#[cfg(test)]` | Forward-model synthetic generator (`synthetic/`: `Scene` → `Camera` → `observe::render` → `SimFrame{image, truth}`, graded by `metrics`) + `real_data/` fixtures, for tests/benches. |
 
 `common::{Buffer2, BitBuffer2, cpu_features}` (the workspace `common` crate, distinct from the in-crate `concurrency` module) underpin pixel storage and SIMD dispatch. This file is the crate-level map; read the code in each module for algorithm specifics.
@@ -96,14 +96,14 @@ Every op in `image_ops/` is an op-named config struct (`Stretch`, `Denoise`, `Hd
 
 ## stacking/star_detection — detection pipeline
 
-`StarDetector` holds a reusable `BufferPool`; fallible `from_config` validates once through `StarDetectionConfigError`, then `detect(&AstroImage)` → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`). Measurement constructs `Star` directly, while filtering produces the `QualityFilterDiagnostics` component stored unchanged in `Diagnostics`. Alignment pipelines propagate invalid detection configuration through `AlignStackError` before doing useful work.
+`StarDetector` holds reusable `DetectionResources` (pooled image buffers plus background mesh/interpolation workspaces); fallible `from_config` validates once through `StarDetectionConfigError`, then `detect(&AstroImage)` → `DetectionResult` (`stars: Vec<Star>` flux-sorted + `Diagnostics`). Measurement constructs `Star` directly, while filtering produces the `QualityFilterDiagnostics` component stored unchanged in `Diagnostics`. Alignment pipelines propagate invalid detection configuration through `AlignStackError` before doing useful work.
 
 `Star` (`star.rs:8`): `pos: DVec2`, `flux`, `fwhm`, `eccentricity`, `snr`, `peak`, `sharpness`, `roundness1`/`roundness2` (DAOFIND GROUND/SROUND), with `is_saturated`/`is_cosmic_ray`/`is_round`.
 
 `Config` (re-exported as `StarDetectionConfig`) composes `BackgroundConfig`, `DetectionConfig`, `FwhmConfig`, `MeasurementConfig`, and `FilterConfig`, with presets `wide_field` / `high_resolution` / `crowded_field` / `precise_ground`. `validate()` delegates to every component and reports `StarDetectionConfigError`. Notable knobs: `CentroidMethod` (`WeightedMoments | GaussianFit | MoffatFit{beta}`), `Connectivity` (`Four | Eight`, default 8), `BackgroundRefinement` (`None | Iterative{iterations}`), `LocalBackgroundMethod` (`GlobalMap | LocalAnnulus`), optional `NoiseModel{gain, read_noise}`, and `detection.deblend_n_thresholds` (0 = local-maxima, ≥2 = multi-threshold).
 
 **Six processing stages** (background stays in `background/`; the other five boundaries live in
-`detector/stages/`; buffers come from the pool):
+`detector/stages/`; working memory comes from the detector resources):
 1. **prepare** (`prepare.rs:20`) — reduce to a single detection plane (copy for grayscale; inverse-variance / noise-weighted channel combination for RGB — the linear analogue of the SExtractor χ² detection image, kept linear so downstream flux/centroid stay valid); 3×3 median filter for CFA images.
 2. **background** (`background/mod.rs:30`; the tiled estimator itself lives in the shared top-level `background_mesh::TileGrid`, promoted out of `star_detection` so `background_extraction` reuses it) — tiled (default 64-px, 3 clip iterations) SExtractor crowding-aware sky per tile (Pearson mode `2.5·median − 1.5·mean` of the clip survivors when `|mean − median| < 0.3σ`, median fallback when strongly skewed) + MAD σ, 3×3 tile median filter, natural bicubic-spline interpolation; optional iterative object-masking refinement for crowded fields → `BackgroundEstimate{background, noise}`.
 3. **fwhm** (`fwhm.rs`) — fixed `fwhm.expected` if set, or auto-estimate via a stricter first pass + robust median/MAD of bright stars.

@@ -107,7 +107,7 @@ roundness, FWHM outliers, and duplicates.
 | `deblend/` | Local-maxima and multi-threshold separation |
 | `centroid/` | Moments, profile fits, and stellar measurements |
 | `star.rs` | Canonical detected-star value |
-| `buffer_pool.rs` | Allocation reuse across detections |
+| `resources.rs` | Allocation reuse across detections |
 
 ## Performance and accuracy
 

@@ -7,7 +7,12 @@ mod benches;
 mod tests;
 
 use libraw_sys as sys;
+#[cfg(unix)]
+use std::ffi::CString;
+#[cfg(not(unix))]
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::slice;
 use std::time::Instant;
@@ -24,7 +29,7 @@ use demosaic::bayer::{BayerImage, CfaPattern, demosaic_bayer};
 use demosaic::xtrans::process_xtrans;
 use imaginarium::Buffer2;
 
-use normalize::{normalize_u16_to_f32_parallel, normalize_u16_to_f32_parallel_unclamped};
+use normalize::{normalize_u16_to_f32_into, normalize_u16_to_f32_parallel};
 
 /// Camera-RAW extensions accepted by this decoder.
 pub const RAW_EXTENSIONS: &[&str] = &["raf", "cr2", "cr3", "nef", "arw", "dng"];
@@ -256,20 +261,6 @@ fn apply_channel_corrections(
     apply_channel_corrections_impl::<true>(data, raw_width, filters, delta_norm, wb_mul);
 }
 
-/// Like [`apply_channel_corrections`] but without the `[0, 1]` clamp, for the
-/// calibration path — flooring the channel-delta result would reintroduce the
-/// master-bias the unclamped normalize avoids (see
-/// [`normalize_u16_to_f32_parallel_unclamped`]).
-fn apply_channel_corrections_unclamped(
-    data: &mut [f32],
-    raw_width: usize,
-    filters: u32,
-    delta_norm: &[f32; 4],
-    wb_mul: &[f32; 4],
-) {
-    apply_channel_corrections_impl::<false>(data, raw_width, filters, delta_norm, wb_mul);
-}
-
 /// `CLAMP` monomorphizes the per-pixel floor/ceil away — the light path keeps
 /// the `[0, 1]` clamp, the calibration path drops it, sharing one kernel.
 fn apply_channel_corrections_impl<const CLAMP: bool>(
@@ -312,6 +303,50 @@ fn raw_err(path: &Path, reason: impl Into<String>) -> ImageError {
         path: path.to_path_buf(),
         reason: reason.into(),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RawActiveArea {
+    raw_width: usize,
+    width: usize,
+    height: usize,
+    top_margin: usize,
+    left_margin: usize,
+}
+
+fn normalize_active_area<const CLAMP: bool>(
+    raw_data: &[u16],
+    area: RawActiveArea,
+    black: f32,
+    inv_range: f32,
+    filters: u32,
+    channel_delta: Option<&[f32; 4]>,
+) -> Vec<f32> {
+    let output_size = area.width * area.height;
+    // SAFETY: Every element is written by the parallel row pass below.
+    let mut pixels = unsafe { alloc_uninit_vec::<f32>(output_size) };
+    pixels
+        .par_chunks_mut(area.width)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let raw_y = area.top_margin + y;
+            let src_start = raw_y * area.raw_width + area.left_margin;
+            let source = &raw_data[src_start..src_start + area.width];
+            normalize_u16_to_f32_into::<CLAMP>(source, row, black, inv_range);
+
+            if let Some(delta) = channel_delta {
+                for (x, pixel) in row.iter_mut().enumerate() {
+                    let channel = fc(filters, raw_y, area.left_margin + x);
+                    let corrected = *pixel - delta[channel];
+                    *pixel = if CLAMP {
+                        corrected.clamp(0.0, 1.0)
+                    } else {
+                        corrected
+                    };
+                }
+            }
+        });
+    pixels
 }
 
 /// Unpacked raw file data from libraw, ready for sensor-specific processing.
@@ -364,26 +399,6 @@ impl UnpackedRaw {
     fn extract_cfa_pixels<const CLAMP: bool>(&self) -> Result<Vec<f32>, ImageError> {
         let raw_data = self.raw_image_slice()?;
 
-        // Pass 1: SIMD normalize with common black level
-        let mut normalized = if CLAMP {
-            normalize_u16_to_f32_parallel(
-                raw_data,
-                self.black_level.common,
-                self.black_level.inv_range,
-            )
-        } else {
-            normalize_u16_to_f32_parallel_unclamped(
-                raw_data,
-                self.black_level.common,
-                self.black_level.inv_range,
-            )
-        };
-
-        // Pass 2: per-channel black delta correction (no WB). The `fc()` macro inside
-        // `apply_channel_corrections` is Bayer-only, so this is skipped for X-Trans — which would
-        // need the 6×6 pattern to index same-color stencils, and whose sensors report a uniform
-        // black anyway (delta ≈ 0). Applying the Bayer macro there would correct wrong positions and
-        // make the calibration and display decode paths disagree.
         let is_xtrans = matches!(self.sensor_type, SensorType::XTrans);
         let has_delta = self
             .black_level
@@ -395,40 +410,22 @@ impl UnpackedRaw {
                 "X-Trans per-channel black delta present but unsupported; applying common black only"
             );
         }
-        if has_delta && !is_xtrans {
-            let delta = &self.black_level.channel_delta_norm;
-            let wb = &[1.0; 4]; // No WB for calibration path
-            if CLAMP {
-                apply_channel_corrections(&mut normalized, self.raw_width, self.filters, delta, wb);
-            } else {
-                apply_channel_corrections_unclamped(
-                    &mut normalized,
-                    self.raw_width,
-                    self.filters,
-                    delta,
-                    wb,
-                );
-            }
-        }
-
-        // Extract the active area
-        let output_size = self.width * self.height;
-        // SAFETY: Every element is written by the parallel copy_from_slice pass below.
-        let mut pixels = unsafe { alloc_uninit_vec::<f32>(output_size) };
-        let width = self.width;
-        let raw_width = self.raw_width;
-        let top_margin = self.top_margin;
-        let left_margin = self.left_margin;
-        pixels
-            .par_chunks_mut(width)
-            .enumerate()
-            .for_each(|(y, row)| {
-                let src_y = top_margin + y;
-                let src_start = src_y * raw_width + left_margin;
-                row.copy_from_slice(&normalized[src_start..src_start + width]);
-            });
-
-        Ok(pixels)
+        let channel_delta =
+            (has_delta && !is_xtrans).then_some(&self.black_level.channel_delta_norm);
+        Ok(normalize_active_area::<CLAMP>(
+            raw_data,
+            RawActiveArea {
+                raw_width: self.raw_width,
+                width: self.width,
+                height: self.height,
+                top_margin: self.top_margin,
+                left_margin: self.left_margin,
+            },
+            self.black_level.common,
+            self.black_level.inv_range,
+            self.filters,
+            channel_delta,
+        ))
     }
 
     /// Process Bayer sensor data using our fast SIMD demosaic. Returns planar
@@ -498,7 +495,7 @@ impl UnpackedRaw {
 
     /// Process X-Trans sensor data using our Markesteijn demosaic.
     ///
-    /// Drops guard and buf before the expensive demosaicing step,
+    /// Drops LibRaw state and any fallback input buffer before the expensive demosaicing step,
     /// reducing peak memory by ~77 MB.
     fn demosaic_xtrans(&mut self) -> Result<[Vec<f32>; 3], ImageError> {
         let raw_data = self.raw_image_slice()?;
@@ -516,7 +513,7 @@ impl UnpackedRaw {
             None => [1.0; 3],
         };
 
-        // Drop libraw and file buffer to reduce peak memory during demosaicing
+        // Drop libraw and any fallback file buffer to reduce peak memory during demosaicing
         self.guard.take();
         self.buf.take();
 
@@ -667,14 +664,9 @@ impl UnpackedRaw {
 
 /// Open and unpack a raw file using libraw.
 ///
-/// Performs: file read, libraw init, open_buffer, unpack, dimension/color
+/// Performs: libraw init, file open, unpack, dimension/color
 /// validation, sensor type detection, and ISO extraction.
 fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
-    let buf = fs::read(path).map_err(|e| ImageError::Io {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-
     // SAFETY: libraw_init returns a valid pointer or null on failure.
     let inner = unsafe { sys::libraw_init(0) };
     if inner.is_null() {
@@ -684,14 +676,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     // Guard ensures cleanup even on early return or panic
     let guard = LibrawGuard(inner);
 
-    // SAFETY: inner is valid (checked above), buf is valid for the duration of this call.
-    let ret = unsafe { sys::libraw_open_buffer(inner, buf.as_ptr() as *const _, buf.len()) };
-    if ret != 0 {
-        return Err(raw_err(
-            path,
-            format!("libraw: Failed to open buffer, error code: {}", ret),
-        ));
-    }
+    let buf = open_libraw_input(inner, path)?;
 
     // SAFETY: inner is valid and open_buffer succeeded.
     let ret = unsafe { sys::libraw_unpack(inner) };
@@ -769,7 +754,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     Ok(UnpackedRaw {
         inner,
         guard: Some(guard),
-        buf: Some(buf),
+        buf,
         path: path.to_path_buf(),
         raw_width,
         raw_height,
@@ -783,6 +768,44 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
         sensor_type,
         iso,
     })
+}
+
+#[cfg(unix)]
+fn open_libraw_input(
+    inner: *mut sys::libraw_data_t,
+    path: &Path,
+) -> Result<Option<Vec<u8>>, ImageError> {
+    let path_c = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| raw_err(path, "libraw: path contains an interior NUL byte"))?;
+    // SAFETY: `inner` is valid and the C string remains alive for the complete call.
+    let ret = unsafe { sys::libraw_open_file(inner, path_c.as_ptr()) };
+    if ret != 0 {
+        return Err(raw_err(
+            path,
+            format!("libraw: Failed to open file, error code: {ret}"),
+        ));
+    }
+    Ok(None)
+}
+
+#[cfg(not(unix))]
+fn open_libraw_input(
+    inner: *mut sys::libraw_data_t,
+    path: &Path,
+) -> Result<Option<Vec<u8>>, ImageError> {
+    let buf = fs::read(path).map_err(|e| ImageError::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    // SAFETY: `inner` is valid and `buf` remains owned by the returned `UnpackedRaw`.
+    let ret = unsafe { sys::libraw_open_buffer(inner, buf.as_ptr() as *const _, buf.len()) };
+    if ret != 0 {
+        return Err(raw_err(
+            path,
+            format!("libraw: Failed to open buffer, error code: {ret}"),
+        ));
+    }
+    Ok(Some(buf))
 }
 
 /// Load raw file using libraw (C library, broader camera support).
@@ -874,16 +897,11 @@ pub fn load_raw(path: &Path) -> Result<AstroImage, ImageError> {
 ///
 /// For Unknown sensor types, falls back to `load_raw()` then wraps
 /// the demosaiced result as a Mono CfaImage.
-/// Read just the output pixel dimensions of a RAW file from its header — `libraw_open_buffer`
+/// Read just the output pixel dimensions of a RAW file from its header — opening through LibRaw
 /// without the expensive `libraw_unpack`. Returns the same `width × height` [`load_raw_cfa`]
 /// produces, so `w · h · size_of::<f32>()` is the in-memory CFA frame footprint. Cheap enough to
 /// size a memory budget before committing to full decodes.
 pub(crate) fn raw_dimensions(path: &Path) -> Result<Vec2us, ImageError> {
-    let buf = fs::read(path).map_err(|e| ImageError::Io {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-
     // SAFETY: libraw_init returns a valid pointer or null on failure.
     let inner = unsafe { sys::libraw_init(0) };
     if inner.is_null() {
@@ -892,17 +910,11 @@ pub(crate) fn raw_dimensions(path: &Path) -> Result<Vec2us, ImageError> {
     // Drops (frees libraw state) on every return path.
     let _guard = LibrawGuard(inner);
 
-    // SAFETY: inner is valid; buf is valid for the duration of this call. `sizes` is populated by
-    // open (metadata parse), so no unpack/decode is needed for the dimensions.
-    let ret = unsafe { sys::libraw_open_buffer(inner, buf.as_ptr() as *const _, buf.len()) };
-    if ret != 0 {
-        return Err(raw_err(
-            path,
-            format!("libraw: Failed to open buffer, error code: {ret}"),
-        ));
-    }
+    // Retain the fallback buffer until after metadata is read on platforms where the path cannot
+    // be passed losslessly through LibRaw's narrow file API.
+    let _buf = open_libraw_input(inner, path)?;
 
-    // SAFETY: open_buffer succeeded → the sizes struct is initialized.
+    // SAFETY: opening succeeded, so the sizes struct is initialized.
     let width = unsafe { (*inner).sizes.width } as usize;
     let height = unsafe { (*inner).sizes.height } as usize;
     if width == 0 || height == 0 {

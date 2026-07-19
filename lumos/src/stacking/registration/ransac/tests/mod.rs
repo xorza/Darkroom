@@ -1,6 +1,6 @@
 //! Tests for RANSAC module.
 
-use crate::stacking::registration::ransac::transforms::{centroid, normalize_points};
+use crate::stacking::registration::ransac::transforms::{centroid, point_normalization};
 use crate::stacking::registration::ransac::*;
 use crate::stacking::registration::triangle::voting::PointMatch;
 use glam::DVec2;

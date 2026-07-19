@@ -8,20 +8,6 @@ pub(crate) fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range:
     normalize_generic::<true>(data, black, inv_range)
 }
 
-/// Calibration normalization: `(value - black) * inv_range`, **no** `[0, 1]`
-/// clamp. Master dark/bias frames must keep the signed noise distribution
-/// around the pedestal — flooring at 0 clips the sub-pedestal tail and biases
-/// the stacked master's mean upward, which then leaks a residual offset into
-/// every calibrated light. The downstream subtract/divide math tolerates the
-/// negatives (`CfaImage` keeps them too).
-pub(crate) fn normalize_u16_to_f32_parallel_unclamped(
-    data: &[u16],
-    black: f32,
-    inv_range: f32,
-) -> Vec<f32> {
-    normalize_generic::<false>(data, black, inv_range)
-}
-
 /// Shared parallel driver. `CLAMP` is a compile-time switch so each variant
 /// monomorphizes to branch-free SIMD — the light path keeps its `[0, 1]` clamp,
 /// the calibration path drops it, with no duplicated kernel.
@@ -35,7 +21,7 @@ fn normalize_generic<const CLAMP: bool>(data: &[u16], black: f32, inv_range: f32
         .par_chunks_mut(CHUNK_SIZE)
         .zip(data.par_chunks(CHUNK_SIZE))
         .for_each(|(out_chunk, in_chunk)| {
-            normalize_chunk_simd::<CLAMP>(in_chunk, out_chunk, black, inv_range);
+            normalize_u16_to_f32_into::<CLAMP>(in_chunk, out_chunk, black, inv_range);
         });
 
     result
@@ -53,14 +39,15 @@ fn normalize_one<const CLAMP: bool>(val: u16, black: f32, inv_range: f32) -> f32
     }
 }
 
-/// Normalize a chunk of u16 data to f32 using SIMD when available.
+/// Normalize `input` directly into equally sized caller-owned storage.
 #[inline]
-fn normalize_chunk_simd<const CLAMP: bool>(
+pub(crate) fn normalize_u16_to_f32_into<const CLAMP: bool>(
     input: &[u16],
     output: &mut [f32],
     black: f32,
     inv_range: f32,
 ) {
+    debug_assert_eq!(input.len(), output.len());
     #[cfg(target_arch = "x86_64")]
     {
         // Prefer SSE4.1 for faster u16->i32 conversion (pmovzxwd)
@@ -294,7 +281,7 @@ mod tests {
         );
 
         let mut simd_clamped = vec![0.0f32; data.len()];
-        normalize_chunk_simd::<true>(&data, &mut simd_clamped, black, inv_range);
+        normalize_u16_to_f32_into::<true>(&data, &mut simd_clamped, black, inv_range);
         assert_eq!(
             simd_clamped,
             scalar_ref::<true>(&data, black, inv_range),
@@ -302,7 +289,7 @@ mod tests {
         );
 
         let mut simd_unclamped = vec![0.0f32; data.len()];
-        normalize_chunk_simd::<false>(&data, &mut simd_unclamped, black, inv_range);
+        normalize_u16_to_f32_into::<false>(&data, &mut simd_unclamped, black, inv_range);
         assert_eq!(
             simd_unclamped,
             scalar_ref::<false>(&data, black, inv_range),

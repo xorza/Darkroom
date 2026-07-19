@@ -43,7 +43,7 @@ pub(crate) struct Pixel {
 ///
 /// Instead of storing pixel coordinates, we store the component label
 /// and iterate over the bounding box on-demand, checking the labels buffer.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ComponentData {
     /// Bounding box of the component.
     pub bbox: URect,

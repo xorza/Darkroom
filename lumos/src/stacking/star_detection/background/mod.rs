@@ -12,6 +12,7 @@ pub(crate) mod estimate;
 mod simd;
 #[cfg(test)]
 mod tests;
+pub(crate) mod workspace;
 
 use common::BitBuffer2;
 use imaginarium::Buffer2;
@@ -19,9 +20,11 @@ use rayon::prelude::*;
 
 use crate::background_mesh::TileGrid;
 use crate::background_mesh::spline::{cubic_spline_eval, solve_natural_spline_d2};
-use crate::stacking::star_detection::buffer_pool::BufferPool;
+use crate::concurrency::JobScratchPool;
+use crate::stacking::star_detection::background::workspace::InterpolateScratch;
 use crate::stacking::star_detection::config::BackgroundConfig;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
+use crate::stacking::star_detection::resources::DetectionResources;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
 use estimate::BackgroundEstimate;
 
@@ -32,21 +35,25 @@ use estimate::BackgroundEstimate;
 pub(crate) fn estimate_background(
     pixels: &Buffer2<f32>,
     config: &BackgroundConfig,
-    pool: &mut BufferPool,
+    resources: &mut DetectionResources,
 ) -> BackgroundEstimate {
-    let width = pixels.width();
-    let height = pixels.height();
+    let mut background = resources.acquire_f32();
+    let mut noise = resources.acquire_f32();
 
-    // Acquire buffers from pool
-    let mut background = pool.acquire_f32();
-    let mut noise = pool.acquire_f32();
-
-    // Create tile grid and compute statistics (new_uninit clamps tile_size to the image)
-    let mut tile_grid = TileGrid::new_uninit(width, height, config.tile_size);
-    tile_grid.compute(pixels, None, config.sigma_clip_iterations, true);
-
-    // Interpolate from tile grid to per-pixel values
-    interpolate_from_grid(&tile_grid, &mut background, &mut noise);
+    let workspace = &mut resources.background;
+    let tile_grid = workspace.mesh.compute(
+        pixels,
+        None,
+        config.tile_size,
+        config.sigma_clip_iterations,
+        true,
+    );
+    interpolate_from_grid(
+        tile_grid,
+        &mut background,
+        &mut noise,
+        &workspace.interpolation,
+    );
 
     BackgroundEstimate { background, noise }
 }
@@ -59,18 +66,15 @@ pub(crate) fn refine_background(
     estimate: &mut BackgroundEstimate,
     config: &BackgroundConfig,
     detection_sigma: f32,
-    pool: &mut BufferPool,
+    resources: &mut DetectionResources,
 ) {
     let iterations = config.refinement.iterations();
     if iterations == 0 {
         return;
     }
 
-    let width = pixels.width();
-    let height = pixels.height();
-    let mut tile_grid = TileGrid::new_uninit(width, height, config.tile_size);
-    let mut mask = pool.acquire_bit();
-    let mut scratch = pool.acquire_bit();
+    let mut mask = resources.acquire_bit();
+    let mut scratch = resources.acquire_bit();
 
     for _iter in 0..iterations {
         create_object_mask(
@@ -83,42 +87,35 @@ pub(crate) fn refine_background(
             &mut scratch,
         );
 
-        tile_grid.compute(pixels, Some(&mask), config.sigma_clip_iterations, true);
-
-        interpolate_from_grid(&tile_grid, &mut estimate.background, &mut estimate.noise);
+        let workspace = &mut resources.background;
+        let tile_grid = workspace.mesh.compute(
+            pixels,
+            Some(&mask),
+            config.tile_size,
+            config.sigma_clip_iterations,
+            true,
+        );
+        interpolate_from_grid(
+            tile_grid,
+            &mut estimate.background,
+            &mut estimate.noise,
+            &workspace.interpolation,
+        );
     }
 
-    pool.release_bit(scratch);
-    pool.release_bit(mask);
-}
-
-/// Per-thread scratch buffers for `interpolate_row`, avoiding heap allocations per row.
-#[derive(Debug)]
-struct InterpolateScratch {
-    node_bg: Vec<f32>,
-    node_noise: Vec<f32>,
-    d2x_bg: Vec<f32>,
-    d2x_noise: Vec<f32>,
-    spline_scratch: Vec<f32>,
-}
-
-impl InterpolateScratch {
-    fn new(tiles_x: usize) -> Self {
-        let spline_n = tiles_x.saturating_sub(2);
-        Self {
-            node_bg: vec![0.0; tiles_x],
-            node_noise: vec![0.0; tiles_x],
-            d2x_bg: vec![0.0; tiles_x],
-            d2x_noise: vec![0.0; tiles_x],
-            spline_scratch: vec![0.0; spline_n],
-        }
-    }
+    resources.release_bit(scratch);
+    resources.release_bit(mask);
 }
 
 /// Interpolate background map from tile grid into output buffers.
-fn interpolate_from_grid(grid: &TileGrid, background: &mut Buffer2<f32>, noise: &mut Buffer2<f32>) {
+fn interpolate_from_grid(
+    grid: &TileGrid,
+    background: &mut Buffer2<f32>,
+    noise: &mut Buffer2<f32>,
+    interpolation: &JobScratchPool<InterpolateScratch>,
+) {
     let width = background.width();
-    let tiles_x = grid.tiles_x();
+    let tiles_x = grid.stats.width();
 
     background
         .pixels_mut()
@@ -126,8 +123,9 @@ fn interpolate_from_grid(grid: &TileGrid, background: &mut Buffer2<f32>, noise: 
         .zip(noise.pixels_mut().par_chunks_mut(width))
         .enumerate()
         .for_each_init(
-            || InterpolateScratch::new(tiles_x),
+            || interpolation.acquire(),
             |scratch, (y, (bg_row, noise_row))| {
+                scratch.resize(tiles_x);
                 interpolate_row(bg_row, noise_row, y, grid, scratch);
             },
         );
@@ -172,13 +170,13 @@ fn interpolate_row(
 ) {
     let fy = y as f32;
     let width = bg_row.len();
-    let tiles_x = grid.tiles_x();
+    let tiles_x = grid.stats.width();
     let centers_x = &grid.centers_x;
 
     let ty0 = grid.find_lower_tile_y(fy);
-    let ty1 = (ty0 + 1).min(grid.tiles_y() - 1);
-    let cy0 = grid.center_y(ty0);
-    let cy1 = grid.center_y(ty1);
+    let ty1 = (ty0 + 1).min(grid.stats.height() - 1);
+    let cy0 = grid.centers_y[ty0];
+    let cy1 = grid.centers_y[ty1];
     let hy = cy1 - cy0;
     let ty = if ty1 != ty0 {
         ((fy - cy0) / hy).clamp(0.0, 1.0)
@@ -191,14 +189,14 @@ fn interpolate_row(
     let node_noise = &mut scratch.node_noise[..tiles_x];
 
     for tx in 0..tiles_x {
-        let f0_bg = grid.get(tx, ty0).sky;
-        let f1_bg = grid.get(tx, ty1).sky;
+        let f0_bg = grid.stats[(tx, ty0)].sky;
+        let f1_bg = grid.stats[(tx, ty1)].sky;
         let d0_bg = grid.d2y_sky(tx, ty0);
         let d1_bg = grid.d2y_sky(tx, ty1);
         node_bg[tx] = cubic_spline_eval(f0_bg, f1_bg, d0_bg, d1_bg, hy, ty);
 
-        let f0_n = grid.get(tx, ty0).sigma;
-        let f1_n = grid.get(tx, ty1).sigma;
+        let f0_n = grid.stats[(tx, ty0)].sigma;
+        let f1_n = grid.stats[(tx, ty1)].sigma;
         let d0_n = grid.d2y_sigma(tx, ty0);
         let d1_n = grid.d2y_sigma(tx, ty1);
         node_noise[tx] = cubic_spline_eval(f0_n, f1_n, d0_n, d1_n, hy, ty);

@@ -14,14 +14,12 @@ use crate::io::astro_image::AstroImage;
 
 use crate::math::statistics::median_f32_mut;
 use crate::stacking::star_detection::background::{estimate_background, refine_background};
-use crate::stacking::star_detection::buffer_pool::BufferPool;
-#[cfg(test)]
-use crate::stacking::star_detection::buffer_pool::PoolCounts;
 use crate::stacking::star_detection::config::Config;
 #[cfg(test)]
 use crate::stacking::star_detection::config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::filter::FilterOutcome;
 use crate::stacking::star_detection::error::StarDetectionConfigError;
+use crate::stacking::star_detection::resources::DetectionResources;
 use crate::stacking::star_detection::star::Star;
 
 /// Result of star detection with diagnostics.
@@ -81,12 +79,12 @@ pub struct Diagnostics {
     pub fwhm_was_auto_estimated: bool,
 }
 
-/// Star detector with reusable buffer pool.
+/// Star detector with reusable processing resources.
 #[derive(Debug)]
 pub struct StarDetector {
     config: Config,
-    /// Buffer pool for reusing allocations across detections.
-    buffer_pool: Option<BufferPool>,
+    /// Working memory retained across detections.
+    resources: Option<DetectionResources>,
 }
 
 impl Default for StarDetector {
@@ -105,7 +103,7 @@ impl StarDetector {
         config.validate()?;
         Ok(Self {
             config,
-            buffer_pool: None,
+            resources: None,
         })
     }
 
@@ -119,17 +117,17 @@ impl StarDetector {
         let width = image.width();
         let height = image.height();
 
-        // Initialize or reset buffer pool for current dimensions
-        let pool = self
-            .buffer_pool
-            .get_or_insert_with(|| BufferPool::new(width, height));
-        pool.reset(width, height);
+        let resources = self
+            .resources
+            .get_or_insert_with(|| DetectionResources::new(width, height));
+        resources.reset(width, height);
 
         // Step 1: Image preparation (grayscale, CFA filter)
-        let grayscale_image = stages::prepare::prepare(image, pool);
+        let grayscale_image = stages::prepare::prepare(image, resources);
 
         // Step 2: Estimate background and noise
-        let mut background = estimate_background(&grayscale_image, &self.config.background, pool);
+        let mut background =
+            estimate_background(&grayscale_image, &self.config.background, resources);
 
         // Step 2b: Refine background if iterative refinement is enabled
         if self.config.background.refinement.iterations() > 0 {
@@ -138,7 +136,7 @@ impl StarDetector {
                 &mut background,
                 &self.config.background,
                 self.config.detection.sigma_threshold,
-                pool,
+                resources,
             );
         }
 
@@ -150,7 +148,7 @@ impl StarDetector {
             &self.config.detection,
             &self.config.measurement,
             &self.config.filter,
-            pool,
+            resources,
         );
 
         // Step 4: Detect star candidate regions (with optional matched filter)
@@ -159,7 +157,7 @@ impl StarDetector {
             &background,
             fwhm_result.fwhm,
             &self.config.detection,
-            pool,
+            resources,
         );
 
         let mut diagnostics = Diagnostics {
@@ -184,10 +182,8 @@ impl StarDetector {
         );
         diagnostics.stars_after_centroid = stars.len();
 
-        // Release image buffers back to pool
-        let pool = self.buffer_pool.as_mut().unwrap();
-        background.release_to_pool(pool);
-        pool.release_f32(grayscale_image);
+        background.release_to_pool(resources);
+        resources.release_f32(grayscale_image);
 
         // Step 6: Apply quality filters, sort, and remove duplicates
         let FilterOutcome {
@@ -225,11 +221,13 @@ impl StarDetector {
 }
 
 #[cfg(test)]
-impl StarDetector {
-    /// Current buffer-pool working-set counts, or `None` before the first `detect`. For the memory
-    /// tests that assert the pool stays flat in the frame count across repeated detections.
-    pub(crate) fn pool_counts(&self) -> Option<PoolCounts> {
-        self.buffer_pool.as_ref().map(|pool| pool.counts())
+pub(crate) mod test_support {
+    use crate::stacking::star_detection::detector::StarDetector;
+    use crate::stacking::star_detection::resources::test_support::BufferCounts;
+    use crate::stacking::star_detection::resources::test_support::buffer_counts;
+
+    pub(crate) fn buffer_counts_for(detector: &StarDetector) -> Option<BufferCounts> {
+        detector.resources.as_ref().map(buffer_counts)
     }
 }
 

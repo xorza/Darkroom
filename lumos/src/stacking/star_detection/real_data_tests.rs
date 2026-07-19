@@ -114,12 +114,12 @@ fn test_detect_rho_opiuchi() {
 #[ignore = "real-data inspection test; run explicitly with --ignored"]
 fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::stacking::star_detection::background::estimate_background;
-    use crate::stacking::star_detection::buffer_pool::BufferPool;
     use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
     use crate::stacking::star_detection::detector::stages::fwhm::estimate_fwhm;
     use crate::stacking::star_detection::detector::stages::prepare;
     use crate::stacking::star_detection::labeling::LabelMap;
     use crate::stacking::star_detection::mask_dilation::dilate_mask;
+    use crate::stacking::star_detection::resources::DetectionResources;
     use crate::stacking::star_detection::test_common::output::image_writer;
     use crate::stacking::star_detection::threshold_mask::create_threshold_mask_filtered;
     use imaginarium::Buffer2;
@@ -144,7 +144,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Image size: {width}x{height}");
 
     let config = Config::precise_ground();
-    let mut pool = BufferPool::new(width, height);
+    let mut pool = DetectionResources::new(width, height);
 
     let out = |name: &str| test_output_path(&format!("rho-opiuchi-inspect/{name}"));
 

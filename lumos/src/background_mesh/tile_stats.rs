@@ -8,7 +8,7 @@ use common::BitBuffer2;
 use imaginarium::Buffer2;
 
 /// Maximum samples per tile for statistics computation.
-const MAX_TILE_SAMPLES: usize = 1024;
+pub(crate) const MAX_TILE_SAMPLES: usize = 1024;
 
 /// Compute sigma-clipped statistics for a tile region.
 ///
@@ -36,12 +36,9 @@ pub(crate) fn compute_tile_stats(
     match mask {
         Some(m) => {
             collect_unmasked_pixels(pixels, m, x_start, x_end, y_start, y_end, width, values);
-
             if values.is_empty() {
                 // All pixels masked — no choice but to use all pixels
                 collect_sampled_pixels(pixels, x_start, x_end, y_start, y_end, width, values);
-            } else if values.len() > MAX_TILE_SAMPLES {
-                subsample_in_place(values, MAX_TILE_SAMPLES);
             }
         }
         None => {
@@ -111,7 +108,7 @@ fn collect_sampled_pixels(
     values: &mut Vec<f32>,
 ) {
     let tile_pixels = (x_end - x_start) * (y_end - y_start);
-    let stride = ((tile_pixels / MAX_TILE_SAMPLES).max(1) as f32)
+    let stride = ((tile_pixels as f32 / MAX_TILE_SAMPLES as f32).max(1.0))
         .sqrt()
         .ceil() as usize;
 
@@ -123,7 +120,6 @@ fn collect_sampled_pixels(
     }
 }
 
-/// Collect unmasked pixels using word-level bit operations.
 #[inline]
 #[allow(clippy::too_many_arguments)]
 fn collect_unmasked_pixels(
@@ -148,56 +144,32 @@ fn collect_unmasked_pixels(
             let word_idx = x / 64;
             let bit_offset = x % 64;
             let mask_word = mask_words[word_row_start + word_idx];
-
-            let bits_in_word = 64 - bit_offset;
-            let bits_to_process = bits_in_word.min(x_end - x);
-
+            let bits_to_process = (64 - bit_offset).min(x_end - x);
             let relevant_bits = if bits_to_process == 64 {
                 !0u64
             } else {
                 ((1u64 << bits_to_process) - 1) << bit_offset
             };
-
-            let unmasked = !mask_word & relevant_bits;
-
-            if unmasked != 0 {
-                let mut bits = unmasked >> bit_offset;
-                let mut local_x = x;
-
-                while bits != 0 && local_x < x_end {
-                    let offset = bits.trailing_zeros() as usize;
-                    local_x = x + offset;
-
-                    if local_x < x_end {
-                        values.push(pixels[row_start + local_x]);
-                    }
-                    bits &= bits - 1;
-                }
+            let mut bits = (!mask_word & relevant_bits) >> bit_offset;
+            while bits != 0 {
+                values.push(pixels[row_start + x + bits.trailing_zeros() as usize]);
+                bits &= bits - 1;
             }
-
             x += bits_to_process;
         }
     }
+    subsample_in_place(values, MAX_TILE_SAMPLES);
 }
 
-/// Subsample a vector in place to exactly `target_size` elements, evenly spread across the input.
-///
-/// Picks `read_idx = i * len / target_size` so the kept samples span the whole tile rather than its
-/// first rows (an integer `len / target_size` stride collapses to 1 for `len` just above the target,
-/// keeping only the leading run). `read_idx >= write_idx` always (since `len > target_size`), so the
-/// in-place overwrite never clobbers an unread element.
 #[inline]
 fn subsample_in_place(values: &mut Vec<f32>, target_size: usize) {
     let len = values.len();
     if len <= target_size {
         return;
     }
-
-    for write_idx in 0..target_size {
-        let read_idx = write_idx * len / target_size;
-        values[write_idx] = values[read_idx];
+    for write_index in 0..target_size {
+        values[write_index] = values[write_index * len / target_size];
     }
-
     values.truncate(target_size);
 }
 
@@ -225,22 +197,6 @@ mod tests {
     }
 
     #[test]
-    fn test_subsample_in_place_no_change_when_small() {
-        let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        subsample_in_place(&mut values, 10);
-        assert_eq!(values.len(), 5);
-    }
-
-    #[test]
-    fn test_subsample_in_place_reduces_size() {
-        let mut values: Vec<f32> = (0..1000).map(|i| i as f32).collect();
-        subsample_in_place(&mut values, 100);
-        assert!(values.len() <= 100);
-        // First element should be preserved
-        assert_eq!(values[0], 0.0);
-    }
-
-    #[test]
     fn test_collect_sampled_pixels_small_tile() {
         let pixels = Buffer2::new_filled(32, 32, 0.5);
         let mut values = Vec::new();
@@ -255,8 +211,7 @@ mod tests {
         let pixels = Buffer2::new_filled(256, 256, 0.5);
         let mut values = Vec::new();
         collect_sampled_pixels(&pixels, 0, 256, 0, 256, 256, &mut values);
-        // Large tile should sample ~MAX_TILE_SAMPLES
-        assert!(values.len() <= MAX_TILE_SAMPLES * 2);
+        assert!(values.len() <= MAX_TILE_SAMPLES);
         assert!(values.iter().all(|&v| (v - 0.5).abs() < 0.01));
     }
 
@@ -266,7 +221,7 @@ mod tests {
         let mask = BitBuffer2::new_filled(64, 64, false);
         let mut values = Vec::new();
         collect_unmasked_pixels(&pixels, &mask, 0, 64, 0, 64, 64, &mut values);
-        assert_eq!(values.len(), 64 * 64);
+        assert_eq!(values.len(), MAX_TILE_SAMPLES);
     }
 
     #[test]
@@ -275,7 +230,7 @@ mod tests {
         let mask = BitBuffer2::new_filled(64, 64, true);
         let mut values = Vec::new();
         collect_unmasked_pixels(&pixels, &mask, 0, 64, 0, 64, 64, &mut values);
-        assert_eq!(values.len(), 0);
+        assert!(values.is_empty());
     }
 
     #[test]
@@ -296,8 +251,7 @@ mod tests {
 
         let mut values = Vec::new();
         collect_unmasked_pixels(&pixels, &mask, 0, 64, 0, 64, 64, &mut values);
-        // Half pixels should be unmasked
-        assert_eq!(values.len(), 64 * 64 / 2);
+        assert_eq!(values.len(), MAX_TILE_SAMPLES);
     }
 
     #[test]
@@ -305,8 +259,44 @@ mod tests {
         let pixels = Buffer2::new_filled(100, 100, 0.5);
         let mask = BitBuffer2::new_filled(100, 100, false);
         let mut values = Vec::new();
-        // Collect from a sub-region not aligned to 64-bit boundaries
         collect_unmasked_pixels(&pixels, &mask, 10, 70, 20, 80, 100, &mut values);
-        assert_eq!(values.len(), 60 * 60);
+        assert_eq!(values.len(), MAX_TILE_SAMPLES);
+    }
+
+    #[test]
+    fn masked_sampling_matches_evenly_spaced_unmasked_ordinals() {
+        let width = 40;
+        let height = 40;
+        let pixels = Buffer2::new(
+            width,
+            height,
+            (0..width * height).map(|i| i as f32).collect(),
+        );
+        let mut mask = BitBuffer2::new_filled(width, height, false);
+        for y in 0..height {
+            for x in 0..width {
+                if (x + 3 * y) % 7 == 0 {
+                    mask.set_xy(x, y, true);
+                }
+            }
+        }
+
+        let expected_all: Vec<f32> = (0..height)
+            .flat_map(|y| {
+                let mask = &mask;
+                let pixels = &pixels;
+                (0..width)
+                    .filter(move |&x| !mask.get_xy(x, y))
+                    .map(move |x| pixels[y * width + x])
+            })
+            .collect();
+        let expected: Vec<f32> = (0..MAX_TILE_SAMPLES)
+            .map(|i| expected_all[i * expected_all.len() / MAX_TILE_SAMPLES])
+            .collect();
+
+        let mut values = Vec::new();
+        collect_unmasked_pixels(&pixels, &mask, 0, width, 0, height, width, &mut values);
+
+        assert_eq!(values, expected);
     }
 }

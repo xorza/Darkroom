@@ -1,8 +1,10 @@
 //! Tests for background estimation.
 
 use crate::{
+    stacking::star_detection::background,
     stacking::star_detection::config::{BackgroundConfig, BackgroundRefinement},
     stacking::star_detection::error::StarDetectionConfigError,
+    stacking::star_detection::resources::DetectionResources,
     testing::estimate_background,
 };
 use imaginarium::Buffer2;
@@ -261,6 +263,46 @@ fn test_different_tile_sizes() {
             tile_size
         );
     }
+}
+
+#[test]
+fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
+    let pixels = Buffer2::new(
+        96,
+        64,
+        (0..64)
+            .flat_map(|y| (0..96).map(move |x| (3 * x + y) as f32 / 512.0))
+            .collect(),
+    );
+    let config = BackgroundConfig {
+        tile_size: 16,
+        ..Default::default()
+    };
+    let mut resources = DetectionResources::new(96, 64);
+
+    let first = background::estimate_background(&pixels, &config, &mut resources);
+    let expected_background = first.background.pixels().to_vec();
+    let expected_noise = first.noise.pixels().to_vec();
+    first.release_to_pool(&mut resources);
+
+    let second = background::estimate_background(&pixels, &config, &mut resources);
+    assert_eq!(second.background.pixels(), expected_background);
+    assert_eq!(second.noise.pixels(), expected_noise);
+    second.release_to_pool(&mut resources);
+
+    resources.reset(48, 32);
+    let resized_pixels = Buffer2::new_filled(48, 32, 0.25);
+    let resized = background::estimate_background(&resized_pixels, &config, &mut resources);
+    assert_eq!(resized.background.width(), 48);
+    assert_eq!(resized.background.height(), 32);
+    assert!(
+        resized
+            .background
+            .pixels()
+            .iter()
+            .all(|&value| value == 0.25)
+    );
+    assert!(resized.noise.pixels().iter().all(|&value| value == 0.0));
 }
 
 #[test]

@@ -252,21 +252,27 @@ fn test_estimate_homography_hand_computed() {
     let known = Transform::homography([1.1, 0.1, 5.0, -0.05, 1.0, 3.0, 0.0001, 0.00005]);
     let target_points = apply_all(&known, &ref_points);
 
-    let estimated =
-        estimate_transform(&ref_points, &target_points, TransformType::Homography).unwrap();
+    for point_count in [4, ref_points.len()] {
+        let estimated = estimate_transform(
+            &ref_points[..point_count],
+            &target_points[..point_count],
+            TransformType::Homography,
+        )
+        .unwrap();
 
-    for (&rp, &tp) in ref_points.iter().zip(target_points.iter()) {
-        let pp = estimated.apply(rp);
-        assert!(
-            (pp.x - tp.x).abs() < 0.5 && (pp.y - tp.y).abs() < 0.5,
-            "At ({},{}): expected ({:.4},{:.4}), got ({:.4},{:.4})",
-            rp.x,
-            rp.y,
-            tp.x,
-            tp.y,
-            pp.x,
-            pp.y
-        );
+        for (&rp, &tp) in ref_points.iter().zip(target_points.iter()) {
+            let pp = estimated.apply(rp);
+            assert!(
+                (pp.x - tp.x).abs() < 0.5 && (pp.y - tp.y).abs() < 0.5,
+                "{point_count}-point fit at ({},{}): expected ({:.4},{:.4}), got ({:.4},{:.4})",
+                rp.x,
+                rp.y,
+                tp.x,
+                tp.y,
+                pp.x,
+                pp.y
+            );
+        }
     }
 }
 

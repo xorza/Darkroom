@@ -3,7 +3,7 @@
 //!
 //! Detects stars across a stream of synthetic frames through one reused [`StarDetector`] and
 //! *watches* peak heap. The point it demonstrates: because the detector recycles its image-sized
-//! scratch through a [`BufferPool`], peak heap is bounded by *one* detection's working set plus the
+//! scratch through a [`DetectionResources`], peak heap is bounded by *one* detection's working set plus the
 //! few frames kept resident — **flat in the frame count**, not linear. It holds only a small ring of
 //! frames in RAM and detects them round-robin, so if a stage leaked a buffer per frame, peak heap
 //! would climb with the frame count and blow the ceiling this test asserts.
