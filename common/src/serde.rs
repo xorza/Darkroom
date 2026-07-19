@@ -8,6 +8,22 @@ use crate::normalize_string::NormalizeString;
 
 pub type Result<T> = anyhow::Result<T>;
 
+const LZ4_HEADER_LEN: usize = size_of::<u32>();
+const LZ4_MAX_UNCOMPRESSED_SIZE: usize = 1 << 30;
+
+fn checked_lz4_uncompressed_size(uncompressed_size: usize) -> Result<u32> {
+    let header_size = u32::try_from(uncompressed_size).map_err(|_| {
+        anyhow::anyhow!("lz4 uncompressed size {uncompressed_size} exceeds 32-bit header capacity")
+    })?;
+    if uncompressed_size > LZ4_MAX_UNCOMPRESSED_SIZE {
+        anyhow::bail!(
+            "lz4 uncompressed size {uncompressed_size} exceeds limit \
+             {LZ4_MAX_UNCOMPRESSED_SIZE}"
+        );
+    }
+    Ok(header_size)
+}
+
 pub fn serialize<T: Serialize>(value: &T, format: SerdeFormat) -> Result<Vec<u8>> {
     let mut buffer = Vec::new();
     let mut temp_buffer = Vec::new();
@@ -41,7 +57,8 @@ pub fn serialize_into<T: Serialize, W: Write>(
             serde_json::to_writer(&mut *temp_buffer, &value)?;
 
             let uncompressed_size = temp_buffer.len();
-            writer.write_all(&(uncompressed_size as u32).to_le_bytes())?;
+            let header_size = checked_lz4_uncompressed_size(uncompressed_size)?;
+            writer.write_all(&header_size.to_le_bytes())?;
 
             let max_compressed_size = lz4_flex::block::get_maximum_output_size(uncompressed_size);
             temp_buffer.resize(uncompressed_size + max_compressed_size, 0);
@@ -84,27 +101,25 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
 
             // Trust-boundary parser: the header length is attacker-controlled, so
             // every step is bounds-/range-checked and returns `Err` rather than panicking.
-            const HEADER_LEN: usize = 4;
-            const MAX_UNCOMPRESSED: usize = 1 << 30; // 1 GiB ceiling against alloc-bomb inputs
-
-            if temp_buffer.len() < HEADER_LEN {
+            if temp_buffer.len() < LZ4_HEADER_LEN {
                 anyhow::bail!("lz4 payload too short: {} bytes", temp_buffer.len());
             }
 
             let uncompressed_size =
-                u32::from_le_bytes(temp_buffer[0..HEADER_LEN].try_into().unwrap()) as usize;
-            if uncompressed_size > MAX_UNCOMPRESSED {
+                u32::from_le_bytes(temp_buffer[0..LZ4_HEADER_LEN].try_into().unwrap()) as usize;
+            if uncompressed_size > LZ4_MAX_UNCOMPRESSED_SIZE {
                 anyhow::bail!(
-                    "lz4 uncompressed size {uncompressed_size} exceeds limit {MAX_UNCOMPRESSED}"
+                    "lz4 uncompressed size {uncompressed_size} exceeds limit \
+                     {LZ4_MAX_UNCOMPRESSED_SIZE}"
                 );
             }
 
-            let compressed_len = temp_buffer.len() - HEADER_LEN;
-            temp_buffer.resize(HEADER_LEN + compressed_len + uncompressed_size, 0);
+            let compressed_len = temp_buffer.len() - LZ4_HEADER_LEN;
+            temp_buffer.resize(LZ4_HEADER_LEN + compressed_len + uncompressed_size, 0);
 
             let (compressed_part, decompressed_part) =
-                temp_buffer.split_at_mut(HEADER_LEN + compressed_len);
-            let compressed = &compressed_part[HEADER_LEN..];
+                temp_buffer.split_at_mut(LZ4_HEADER_LEN + compressed_len);
+            let compressed = &compressed_part[LZ4_HEADER_LEN..];
 
             let decompressed_len = lz4_flex::decompress_into(compressed, decompressed_part)?;
             if decompressed_len != uncompressed_size {
@@ -131,6 +146,32 @@ mod tests {
         assert_eq!(payload, br#"[1,2,3,1000,-42]"#);
         let back: Vec<i64> = deserialize(&bytes, SerdeFormat::Lz4).unwrap();
         assert_eq!(back, value);
+    }
+
+    #[test]
+    fn lz4_encode_size_boundaries_are_checked() {
+        assert_eq!(
+            checked_lz4_uncompressed_size(LZ4_MAX_UNCOMPRESSED_SIZE).unwrap(),
+            LZ4_MAX_UNCOMPRESSED_SIZE as u32
+        );
+
+        let over_limit = LZ4_MAX_UNCOMPRESSED_SIZE + 1;
+        let err = checked_lz4_uncompressed_size(over_limit).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "lz4 uncompressed size {over_limit} exceeds limit \
+                 {LZ4_MAX_UNCOMPRESSED_SIZE}"
+            )
+        );
+
+        if let Ok(over_header) = usize::try_from(u64::from(u32::MAX) + 1) {
+            let err = checked_lz4_uncompressed_size(over_header).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("lz4 uncompressed size {over_header} exceeds 32-bit header capacity")
+            );
+        }
     }
 
     #[test]
