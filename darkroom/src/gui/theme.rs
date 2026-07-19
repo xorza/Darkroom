@@ -234,7 +234,7 @@ pub(crate) mod light {
 /// the colour-granularity peer of aperture's `StatefulLook`: the pair
 /// is structural (a hover variant can't exist without its rest), and
 /// state → colour goes through one `pick`.
-#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct HoverColor {
     pub rest: Color,
     pub hover: Color,
@@ -581,19 +581,16 @@ fn aperture_theme_for(p: &aperture::Palette, chrome_fill: Color) -> aperture::Th
     // muted until hovered, and the whole thing at the smaller menu scale.
     // hover/pressed keep the `elem_hover`/`elem_active` fills that
     // `recolour_aperture` set.
-    let base = theme.text;
+    let base = &theme.text;
     // Font-only shrink (keeps each look's own colour) for the context-menu
     // rows; menu-bar triggers also recolour per state, so they use `restyle`.
     let shrink = |look: &mut WidgetLook| {
-        look.text = Some(look.text.unwrap_or(base).with_font_size(MENU_FONT_SIZE));
+        let text = look.text.take().unwrap_or_else(|| base.clone());
+        look.text = Some(text.with_font_size(MENU_FONT_SIZE));
     };
     let restyle = |look: &mut WidgetLook, color: Color| {
-        look.text = Some(
-            look.text
-                .unwrap_or(base)
-                .with_color(color)
-                .with_font_size(MENU_FONT_SIZE),
-        );
+        let text = look.text.take().unwrap_or_else(|| base.clone());
+        look.text = Some(text.with_color(color).with_font_size(MENU_FONT_SIZE));
     };
     let mb = &mut theme.menu_button;
     restyle(&mut mb.looks.normal, p.text_muted);
@@ -707,7 +704,7 @@ impl PaletteColors {
 
 /// Result of [`Theme::card_border`]: the resolved outline color plus the
 /// width every selectable card draws it at.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct CardBorder {
     pub color: Color,
     pub width: f32,
@@ -888,6 +885,15 @@ impl Default for Theme {
 mod tests {
     use super::*;
     use common::SerdeFormat;
+    use static_assertions::assert_not_impl_any;
+
+    assert_not_impl_any!(Theme: Copy);
+    assert_not_impl_any!(PaletteColors: Copy);
+    assert_not_impl_any!(TypeColors: Copy);
+    assert_not_impl_any!(HoverColor: Copy);
+    assert_not_impl_any!(CardBorder: Copy);
+    assert_not_impl_any!(StaticValueEditorTheme: Copy);
+    assert_not_impl_any!(InlineRenameTheme: Copy);
 
     /// Keep the checked-in `assets/ayu-graphite.toml` in sync with the
     /// const-defined [`Theme::default`]: serialize the default and rewrite

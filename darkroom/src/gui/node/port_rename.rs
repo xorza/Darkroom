@@ -50,9 +50,9 @@ pub(crate) fn port_label(
         // through) so the type tooltip has a trigger anchor. Muted ink —
         // the value column is each row's strong element, not the label.
         let snapshot = Text::new(name)
-            .style(TextStyle {
+            .style(&TextStyle {
                 color: rcx.theme.colors.port_label,
-                ..ui.theme.text
+                ..ui.theme.text.clone()
             })
             .sense(Sense::HOVER)
             .show(ui)

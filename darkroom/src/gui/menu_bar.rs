@@ -32,9 +32,10 @@ fn dropdown(
     label: &'static str,
     build: impl FnOnce(&mut Ui, &PopupHandle) -> Option<AppCommand>,
 ) -> Option<AppCommand> {
+    let menu_button = ui.theme.menu_button.clone();
     let trigger = Button::new()
         .label(label)
-        .style(ui.theme.menu_button.clone())
+        .style(&menu_button)
         .show(ui)
         .snapshot();
     if trigger.left.clicked()

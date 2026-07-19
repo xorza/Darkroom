@@ -449,7 +449,7 @@ fn readout_pill<'a>(ui: &mut Ui, theme: &Theme, panel: Panel, text: impl Into<Te
         .background(pill_background(theme))
         .show(ui, |ui| {
             let style = muted_text(ui, theme, 12.0);
-            Text::new(text).style(style).show(ui);
+            Text::new(text).style(&style).show(ui);
         });
 }
 
@@ -536,7 +536,7 @@ fn draw_fit(ui: &mut Ui, s: f32, color: Color) {
 /// "1:1" label — zoom to 100%.
 fn draw_100(ui: &mut Ui, _s: f32, color: Color) {
     let style = colored_text(ui, color, 11.0);
-    Text::new("1:1").style(style).align(Align::CENTER).show(ui);
+    Text::new("1:1").style(&style).align(Align::CENTER).show(ui);
 }
 
 /// 2×2 grid of hard squares — nearest (pixelated) sampling.

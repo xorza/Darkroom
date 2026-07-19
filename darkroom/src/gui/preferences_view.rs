@@ -142,7 +142,7 @@ fn section(ui: &mut Ui, theme: &Theme, title: &'static str, body: impl FnOnce(&m
                 weight: FontWeight::Bold,
                 ..muted_text(ui, theme, 13.0)
             };
-            Text::new(title).style(style).show(ui);
+            Text::new(title).style(&style).show(ui);
             body(ui);
         });
 }
@@ -243,7 +243,7 @@ fn model_row(
                         .id_salt("label")
                         .size((Sizing::fixed(ML_LABEL_WIDTH), Sizing::HUG))
                         .show(ui, |ui| {
-                            Text::new(label).style(sized_text(ui, 13.0)).show(ui);
+                            Text::new(label).style(&sized_text(ui, 13.0)).show(ui);
                         });
 
                     let mut edit = TextEdit::new(&mut draft)
@@ -253,7 +253,7 @@ fn model_row(
                         .placeholder("/path/to/model.onnx");
                     // A broken committed path recolors the field's chrome to
                     // the error tint (message under the row says what's wrong).
-                    if problem.is_some() {
+                    let error_style = problem.is_some().then(|| {
                         let mut style = ui.theme.text_edit.clone();
                         for look in [
                             &mut style.looks.normal,
@@ -265,6 +265,9 @@ fn model_row(
                                     Stroke::solid(theme.colors.exec_errored_glow, bg.stroke.width);
                             }
                         }
+                        style
+                    });
+                    if let Some(style) = error_style.as_ref() {
                         edit = edit.style(style);
                     }
                     let resp = edit.show(ui);
@@ -298,7 +301,7 @@ fn model_row(
             if let Some(problem) = problem {
                 indented_line(ui, "problem", |ui| {
                     Text::new(problem)
-                        .style(colored_text(ui, theme.colors.exec_errored_glow, 12.0))
+                        .style(&colored_text(ui, theme.colors.exec_errored_glow, 12.0))
                         .show(ui);
                 });
             }
@@ -346,7 +349,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
             .sense(Sense::CLICK)
             .show(ui, |ui| {
                 Text::new(link_label)
-                    .style(colored_text(ui, link_color, 12.0))
+                    .style(&colored_text(ui, link_color, 12.0))
                     .show(ui);
             });
         let snapshot = link.response.snapshot();
@@ -357,7 +360,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
         // link goes before clicking — the URL isn't otherwise visible.
         Tooltip::on(&snapshot).text(url).show(ui);
         Text::new(DOWNLOAD_HINT)
-            .style(muted_text(ui, theme, 12.0))
+            .style(&muted_text(ui, theme, 12.0))
             .show(ui);
     });
 }

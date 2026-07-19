@@ -334,7 +334,7 @@ fn outside_action(ui: &Ui, scene: &Scene) -> bool {
 
 fn line<'a>(ui: &mut Ui, text: impl Into<TextInput<'a>>, style: TextStyle) {
     Text::new(text)
-        .style(style)
+        .style(&style)
         .text_wrap(TextWrap::Wrap)
         .show(ui);
 }
@@ -343,7 +343,7 @@ fn line<'a>(ui: &mut Ui, text: impl Into<TextInput<'a>>, style: TextStyle) {
 /// by proximity inside the panel's tight line rhythm.
 fn section(ui: &mut Ui, theme: &Theme, text: &'static str) {
     Text::new(text)
-        .style(TextStyle {
+        .style(&TextStyle {
             weight: FontWeight::Bold,
             ..muted_style(theme, ui)
         })

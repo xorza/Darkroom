@@ -160,9 +160,9 @@ pub(crate) fn draw_widget<'ui>(
                     // read as one style at two widths, not two independently
                     // tuned looks.
                     Text::new(title)
-                        .style(TextStyle {
+                        .style(&TextStyle {
                             weight: FontWeight::Bold,
-                            ..ui.theme.text
+                            ..ui.theme.text.clone()
                         })
                         .text_wrap(TextWrap::Wrap)
                         .show(ui);
@@ -196,7 +196,7 @@ pub(crate) fn draw_widget<'ui>(
                             .justify(Justify::Center)
                             .show(ui, |ui| {
                                 Text::new(text)
-                                    .style(sized_text(ui, 11.0))
+                                    .style(&sized_text(ui, 11.0))
                                     .text_wrap(TextWrap::Wrap)
                                     .show(ui);
                             });
@@ -256,7 +256,7 @@ fn format_label(format: ColorFormat) -> String {
 /// A bare mono-styled value with no label — used where the value's own
 /// shape (`1920×1080`, `RGBA · 8-bit`) already says what it is.
 fn bare_value(ui: &mut Ui, text: String) {
-    Text::new(text).style(mono_text(ui, 10.5)).show(ui);
+    Text::new(text).style(&mono_text(ui, 10.5)).show(ui);
 }
 
 #[cfg(test)]

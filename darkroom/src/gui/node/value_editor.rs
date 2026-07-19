@@ -75,7 +75,7 @@ pub(crate) fn show(
         let mut idx = before;
         ComboBox::new(&mut idx, &names)
             .id(id)
-            .style(theme.drag_value.chip.clone())
+            .style(&theme.drag_value.chip)
             .size((Sizing::FILL, Sizing::FILL))
             .min_size((width, 0.0))
             .show(ui);
@@ -112,7 +112,7 @@ pub(crate) fn show(
             Button::new()
                 .id(id)
                 .label(path_preview(path))
-                .style(theme.drag_value.chip.clone())
+                .style(&theme.drag_value.chip)
                 .text_wrap(TextWrap::Ellipsis)
                 .size((Sizing::FILL, Sizing::FILL))
                 .min_size((width, 0.0))
@@ -137,7 +137,7 @@ pub(crate) fn show(
             let mut idx = before;
             ComboBox::new(&mut idx, &options)
                 .id(id)
-                .style(theme.drag_value.chip.clone())
+                .style(&theme.drag_value.chip)
                 .size((Sizing::FILL, Sizing::FILL))
                 .min_size((width, 0.0))
                 .show(ui);
@@ -221,7 +221,7 @@ fn read_only_label(
     let mut buf = value.to_value_string();
     TextEdit::new(&mut buf)
         .id(id)
-        .style(editor.clone())
+        .style(editor)
         .size((Sizing::fixed(width), Sizing::FILL))
         .show(ui);
     None
@@ -271,7 +271,7 @@ fn buffered_text_edit<T>(
     let mut text = std::mem::take(&mut ui.state_mut::<EditBuffer>(id).text);
     let submitted = TextEdit::new(&mut text)
         .id(id)
-        .style(editor.clone())
+        .style(editor)
         .size((Sizing::fixed(width), Sizing::FILL))
         .show(ui)
         .submitted;
@@ -310,7 +310,7 @@ fn numeric_edit(
             let committed = DragValue::new(&mut draft)
                 .editable(true)
                 .speed(int_speed(*current))
-                .style(theme.drag_value.clone())
+                .style(&theme.drag_value)
                 .size((Sizing::fixed(width), Sizing::FILL))
                 .id(id)
                 .show(ui)
@@ -323,7 +323,7 @@ fn numeric_edit(
                 .editable(true)
                 .speed(float_speed(*current))
                 .decimals(3)
-                .style(theme.drag_value.clone())
+                .style(&theme.drag_value)
                 .size((Sizing::fixed(width), Sizing::FILL))
                 .id(id)
                 .show(ui)

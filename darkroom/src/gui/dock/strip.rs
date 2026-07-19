@@ -123,7 +123,7 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
                 ..muted_text(ui, theme, 15.0)
             };
             Text::new("+")
-                .style(style)
+                .style(&style)
                 .text_align(Align::CENTER)
                 .show(ui);
         });
@@ -277,7 +277,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
                             &theme.inline_rename,
                         )
                         .max_chars(GRAPH_NAME_MAX_CHARS)
-                        .style(label_style)
+                        .style(&label_style)
                         .show(ui);
                         if let Some(to) = ev.committed {
                             s.out.push(Intent::RenameGraph { id: graph_id, to });
@@ -285,7 +285,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel, index: usize, a
                     } else {
                         // Main / non-graph tab: plain label, activation handled
                         // by the outer chip in `DockUi::scan`.
-                        Text::new(label.text.clone()).style(label_style).show(ui);
+                        Text::new(label.text.clone()).style(&label_style).show(ui);
                     }
                     if closable(label.tab) {
                         close_button(ui, theme, tab_close_wid(s.group, index));
@@ -321,7 +321,7 @@ fn close_button(ui: &mut Ui, theme: &Theme, close_wid: WidgetId) {
                 ..muted_text(ui, theme, 13.0)
             };
             Text::new("\u{00d7}")
-                .style(style)
+                .style(&style)
                 .text_align(Align::CENTER)
                 .show(ui);
         });

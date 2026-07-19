@@ -447,9 +447,9 @@ fn event_cell(
         .show(ui, |ui| {
             // Muted like the data-port labels (see `port_label`).
             Text::new(event.name.clone())
-                .style(TextStyle {
+                .style(&TextStyle {
                     color: theme.colors.port_label,
-                    ..ui.theme.text
+                    ..ui.theme.text.clone()
                 })
                 .show(ui);
             event_glyph(

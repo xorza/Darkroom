@@ -178,7 +178,7 @@ fn palette_body(
     TextEdit::new(query)
         .id(search_id)
         .placeholder("Search…")
-        .style(ctx.theme.inline_rename.text_edit.clone())
+        .style(&ctx.theme.inline_rename.text_edit)
         .size((Sizing::fill(1.0), Sizing::HUG))
         .min_size((200.0, 0.0))
         .margin(Spacing::new(0.0, 0.0, 0.0, SEARCH_ROW_GAP))

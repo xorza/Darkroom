@@ -59,7 +59,7 @@ pub(crate) struct InlineRename<'a> {
     name: InternedStr,
     theme: &'a InlineRenameTheme,
     max_chars: usize,
-    style: Option<TextStyle>,
+    style: Option<&'a TextStyle>,
     halign: HAlign,
 }
 
@@ -84,7 +84,7 @@ impl<'a> InlineRename<'a> {
     /// Override the text style of both the idle label and the active
     /// editor (font size / colour / family). Defaults to ambient
     /// `ui.theme.text`.
-    pub(crate) fn style(mut self, style: TextStyle) -> Self {
+    pub(crate) fn style(mut self, style: &'a TextStyle) -> Self {
         self.style = Some(style);
         self
     }
@@ -124,7 +124,7 @@ impl<'a> InlineRename<'a> {
         // zero height). Derived from the (possibly overridden) text
         // style so overriding the font size also tightens the click
         // target.
-        let style_for_metrics = style.unwrap_or(ui.theme.text);
+        let style_for_metrics = style.unwrap_or(&ui.theme.text);
         let line_h = style_for_metrics.line_height_for(style_for_metrics.font_size_px);
         // Resolve the editor theme up front so the idle path can
         // mirror the active TextEdit's trailing caret-room — without
@@ -193,9 +193,10 @@ impl<'a> InlineRename<'a> {
         }
 
         let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).edit.text);
+        let edit_style = edit_style(theme, style);
         TextEdit::new(&mut draft)
             .id(id)
-            .style(edit_style(theme, style))
+            .style(&edit_style)
             .max_chars(max_chars)
             .size((Sizing::HUG, Sizing::HUG))
             .min_size((MIN_EDIT_WIDTH, line_h))
@@ -230,18 +231,18 @@ impl<'a> InlineRename<'a> {
 
 /// Build the active editor's theme: start from the bundle's flat
 /// `text_edit` (no padding/margin/border, transparent fill) and, when
-/// a label style is supplied, copy it into every WidgetLook's text
+/// a label style is supplied, clone it into every WidgetLook's text
 /// slot so the field renders at the same font as the idle label.
-fn edit_style(theme: &InlineRenameTheme, text: Option<TextStyle>) -> TextEditTheme {
+fn edit_style(theme: &InlineRenameTheme, text: Option<&TextStyle>) -> TextEditTheme {
     let mut style = theme.text_edit.clone();
-    if text.is_some() {
+    if let Some(text) = text {
         for look in [
             &mut style.looks.normal,
             &mut style.looks.hovered,
             &mut style.looks.active,
             &mut style.looks.disabled,
         ] {
-            look.text = text;
+            look.text = Some(text.clone());
         }
     }
     style

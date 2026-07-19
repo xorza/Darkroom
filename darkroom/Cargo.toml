@@ -39,6 +39,7 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 common = { workspace = true, features = ["test-support"] }
 scenarium = { workspace = true, features = ["internals"] }
+static_assertions = { workspace = true }
 
 [features]
 # Forward aperture's tracy backend so `cargo run -p darkroom --features

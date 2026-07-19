@@ -230,11 +230,11 @@ pub(crate) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                     Spinner::new().size(BADGE_FONT).color(color).show(ui);
                 }
                 Text::new(fmt_elapsed(secs))
-                    .style(TextStyle {
+                    .style(&TextStyle {
                         color,
                         font_size_px: BADGE_FONT,
                         family: FontFamily::Mono,
-                        ..ui.theme.text
+                        ..ui.theme.text.clone()
                     })
                     .show(ui);
             }
@@ -396,9 +396,9 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Vec<Intent
     let id = node_rename_wid(node.id);
     let ev = InlineRename::new(id, node.name.clone(), &rcx.theme.inline_rename)
         .max_chars(NODE_NAME_MAX_CHARS)
-        .style(TextStyle {
+        .style(&TextStyle {
             weight: FontWeight::Bold,
-            ..ui.theme.text
+            ..ui.theme.text.clone()
         })
         .show(ui);
     if ev.clicked {
@@ -580,11 +580,11 @@ impl Badge {
         let chip = panel.show(ui, |ui| match glyph {
             BadgeGlyph::Char(glyph) => {
                 Text::new(glyph)
-                    .style(TextStyle {
+                    .style(&TextStyle {
                         color,
                         font_size_px: BADGE_FONT,
                         weight: FontWeight::Bold,
-                        ..ui.theme.text
+                        ..ui.theme.text.clone()
                     })
                     .show(ui);
             }

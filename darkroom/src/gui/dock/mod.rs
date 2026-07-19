@@ -317,7 +317,7 @@ fn draw_drag_feedback(ui: &mut Ui, theme: &Theme, doc: &Document, dragged: &TabD
                         .with_stroke(Stroke::solid(accent, 1.0)),
                 )
                 .show(ui, |ui| {
-                    Text::new(text).style(label_style).show(ui);
+                    Text::new(text).style(&label_style).show(ui);
                 });
         });
     }
