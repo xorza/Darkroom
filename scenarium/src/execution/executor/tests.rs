@@ -6,7 +6,7 @@ use super::*;
 use crate::async_lambda;
 use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
 use crate::execution::plan::NodeVerdict;
-use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress};
+use crate::execution::program::{ExecutionInput, ExecutionNode, ExecutionPortAddress, OutputIdx};
 use crate::execution::resolve::{Disposition, ResolvedOutputs, ResolvedRun, Resolver};
 use crate::execution::resource::RunResourceStamps;
 use crate::graph::CacheMode;
@@ -164,6 +164,34 @@ fn structural_plan(program: &ExecutionProgram) -> ExecutionPlan {
         roots: process_order.into_iter().collect(),
         pinned: NodeSet::new(),
     }
+}
+
+#[test]
+#[cfg(debug_assertions)]
+fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let mut p = Prog::default();
+    let node_id = p.node(&[], 1, FuncLambda::default());
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| p.program.output_idx(node_id, 1))).is_err(),
+        "a node-local output outside its compiled span must trip in debug"
+    );
+
+    if let Ok(index) = usize::try_from(u64::from(u32::MAX) + 1) {
+        assert!(
+            catch_unwind(|| OutputIdx::from(index)).is_err(),
+            "the output pool cannot exceed its u32 index representation"
+        );
+    }
+
+    let mut reads = RemainingOutputReads {
+        counts: OutputColumn::from(vec![0]),
+    };
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| reads.consume(OutputIdx(0)))).is_err(),
+        "a reader count cannot be consumed below zero"
+    );
 }
 
 async fn run(program: &ExecutionProgram, run: &TestRun) -> (RuntimeCache, ExecutionStats) {

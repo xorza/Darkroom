@@ -3,7 +3,7 @@ use crate::DataType;
 use crate::execution::cache::{OutputSnapshot, RuntimeCache, ValueState};
 use crate::execution::plan::NodeVerdict;
 use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress,
+    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionPortAddress, OutputIdx,
 };
 use crate::graph::NodeId;
 use crate::node::definition::{FuncBehavior, FuncId};
@@ -104,6 +104,21 @@ fn bind(node_id: NodeId, port_idx: usize) -> ExecutionBinding {
 
 fn value(value: i64) -> DynamicValue {
     DynamicValue::Static(StaticValue::Int(value))
+}
+
+#[test]
+#[cfg(debug_assertions)]
+fn reader_overflow_trips_the_debug_invariant() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let mut outputs = ResolvedOutputs::default();
+    outputs.reset(1);
+    outputs.readers[OutputIdx(0)] = u32::MAX;
+
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| outputs.add_reader(OutputIdx(0)))).is_err(),
+        "a graph cannot have more readers than the counter represents"
+    );
 }
 
 #[test]

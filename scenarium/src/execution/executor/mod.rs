@@ -100,11 +100,11 @@ impl RemainingOutputReads {
 
     fn consume(&mut self, output_idx: OutputIdx) -> bool {
         let remaining = &mut self.counts[output_idx];
-        assert!(
+        debug_assert!(
             *remaining > 0,
             "read an output more often than the resolved run counted"
         );
-        *remaining -= 1;
+        *remaining = remaining.wrapping_sub(1);
         *remaining == 0
     }
 
@@ -409,7 +409,7 @@ impl Executor {
 
                 let output_count = e_node.outputs.len as usize;
                 let event_state = frame.cache.slots[&node_id].event_state.clone();
-                assert!(matches!(self.outcomes[&node_id], NodeOutcome::Pending));
+                debug_assert!(matches!(self.outcomes[&node_id], NodeOutcome::Pending));
 
                 // Attribute any logs this node emits to it (read by
                 // `ContextManager::log`).

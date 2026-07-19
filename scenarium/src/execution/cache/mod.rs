@@ -96,7 +96,7 @@ impl CachedOutputCoverage {
     }
 
     pub(crate) fn covers(&self, required: &Self) -> bool {
-        assert_eq!(
+        debug_assert_eq!(
             self.ports.len(),
             required.ports.len(),
             "cached output coverage masks must have equal arity"
@@ -248,7 +248,7 @@ impl RuntimeSlot {
         let ValueState::Resident { snapshot, .. } = &self.value else {
             panic!("a node's output must be resident immediately after invocation");
         };
-        assert_eq!(
+        debug_assert_eq!(
             snapshot.values.len(),
             demand.len(),
             "node output values must match output demand arity"
@@ -413,7 +413,7 @@ impl RuntimeCache {
         else {
             return None;
         };
-        assert_eq!(snapshot.values.len(), arity);
+        debug_assert_eq!(snapshot.values.len(), arity);
         Some(if take {
             std::mem::take(&mut snapshot.values[port])
         } else {
@@ -430,7 +430,7 @@ impl RuntimeCache {
         else {
             panic!("an output can only be released from a resident slot");
         };
-        assert!(port < snapshot.values.len(), "output port must be in range");
+        debug_assert!(port < snapshot.values.len(), "output port must be in range");
         snapshot.values[port] = DynamicValue::Unbound;
     }
 

@@ -70,20 +70,20 @@ impl FlattenMap {
             instances: self.instance_path(scope),
             node_id: interior,
         };
-        assert!(
-            self.leaves
-                .insert(
-                    flat_id,
-                    Leaf {
-                        scope,
-                        address: address.clone(),
-                    },
-                )
-                .is_none(),
+        let previous_leaf = self.leaves.insert(
+            flat_id,
+            Leaf {
+                scope,
+                address: address.clone(),
+            },
+        );
+        debug_assert!(
+            previous_leaf.is_none(),
             "flattened node id collision for {flat_id:?}"
         );
-        assert!(
-            self.flat_nodes.insert(address.clone(), flat_id).is_none(),
+        let previous_flat = self.flat_nodes.insert(address.clone(), flat_id);
+        debug_assert!(
+            previous_flat.is_none(),
             "duplicate authoring node address {address:?}"
         );
         self.representatives.entry(interior).or_insert(address);

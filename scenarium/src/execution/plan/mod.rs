@@ -177,7 +177,7 @@ impl Planner {
             let node_id = match visit {
                 Visit::Discover(node_id) => node_id,
                 Visit::Done(node_id) => {
-                    assert_eq!(self.color[&node_id], Color::Gray);
+                    debug_assert_eq!(self.color[&node_id], Color::Gray);
                     *self.color.get_mut(&node_id).unwrap() = Color::Black;
                     plan.process_order.push(node_id);
                     // Runnable unless a required input is unbound or fed by a

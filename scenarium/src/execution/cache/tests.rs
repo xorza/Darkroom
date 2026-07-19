@@ -1,6 +1,8 @@
 use super::*;
 use crate::StaticValue;
+use crate::execution::program::ExecutionNode;
 use crate::node::lambda::OutputDemand;
+use common::Span;
 
 fn out() -> Vec<DynamicValue> {
     vec![DynamicValue::Static(StaticValue::Int(1))]
@@ -196,6 +198,63 @@ fn resident_hit_derives_coverage_from_values() {
     assert!(
         missing_invocation.is_err(),
         "only an invoked resident output can be stamped produced"
+    );
+}
+
+#[test]
+#[cfg(debug_assertions)]
+fn debug_assertions_reject_invalid_cache_arities_and_ports() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let coverage = CachedOutputCoverage { ports: vec![true] };
+    let required = CachedOutputCoverage {
+        ports: vec![true, false],
+    };
+    assert!(
+        catch_unwind(|| coverage.covers(&required)).is_err(),
+        "coverage comparisons require equal output arity"
+    );
+
+    let snapshot = OutputSnapshot::new(vec![DynamicValue::Unbound]);
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            snapshot.covers_demand(&[OutputDemand::Produce, OutputDemand::Skip]);
+        }))
+        .is_err(),
+        "resident values and output demand require equal arity"
+    );
+
+    let node_id = NodeId::from_u128(1);
+    let mut program = ExecutionProgram::default();
+    program.e_nodes.insert(
+        node_id,
+        ExecutionNode {
+            outputs: Span::new(0, 2),
+            ..Default::default()
+        },
+    );
+    let mut cache = RuntimeCache::default();
+    insert_slot(
+        &mut cache,
+        1,
+        RuntimeSlot {
+            value: ValueState::Resident {
+                snapshot: OutputSnapshot::new(vec![DynamicValue::Unbound]),
+                produced_under: None,
+            },
+            ..Default::default()
+        },
+    );
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            cache.read_output_port(&program, node_id, 0, false);
+        }))
+        .is_err(),
+        "resident values must match the compiled output arity"
+    );
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| cache.clear_output_port(node_id, 1))).is_err(),
+        "a released output port must be in range"
     );
 }
 

@@ -111,7 +111,7 @@ impl Flattener {
             // A hand-built `ExecutionProgram` (as in the
             // executor's low-level tests, which never call `Flattener::build`) doesn't
             // get this guarantee — that's a separate, already-tolerant read path.
-            assert_eq!(
+            debug_assert_eq!(
                 run.output_pinned.len(),
                 run.n_outputs as usize,
                 "output_pinned must have exactly one entry per pooled output port"
@@ -228,7 +228,7 @@ impl<'a> Run<'a> {
 
     /// Descend one composite level. A legitimate graph never nests this deep.
     fn push_level(&mut self, instance_id: NodeId) {
-        assert!(
+        debug_assert!(
             self.path.len() < MAX_DEPTH,
             "graph nesting exceeds {MAX_DEPTH} levels (recursive definition?)"
         );
@@ -318,25 +318,21 @@ impl<'a> Run<'a> {
                 });
             }
 
-            assert!(
-                self.e_nodes
-                    .insert(
-                        flat_id,
-                        ExecutionNode {
-                            sink: func.sink,
-                            behavior: func.behavior,
-                            cache: node.cache,
-                            special,
-                            inputs: Span::new(inputs_start, input_count as u32),
-                            outputs: Span::new(outputs_start, func.outputs.len() as u32),
-                            events: Span::new(events_start, func.events.len() as u32),
-                            func_id: func.id,
-                            lambda: func.lambda.clone(),
-                        },
-                    )
-                    .is_none(),
-                "flattened node ids must be unique"
+            let previous = self.e_nodes.insert(
+                flat_id,
+                ExecutionNode {
+                    sink: func.sink,
+                    behavior: func.behavior,
+                    cache: node.cache,
+                    special,
+                    inputs: Span::new(inputs_start, input_count as u32),
+                    outputs: Span::new(outputs_start, func.outputs.len() as u32),
+                    events: Span::new(events_start, func.events.len() as u32),
+                    func_id: func.id,
+                    lambda: func.lambda.clone(),
+                },
             );
+            debug_assert!(previous.is_none(), "flattened node ids must be unique");
 
             // Record where this flat node came from (current scope + authoring
             // id) so stats map back to editor nodes.

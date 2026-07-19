@@ -88,9 +88,9 @@ impl ResolvedOutputs {
     }
 
     fn add_reader(&mut self, output_idx: OutputIdx) {
-        self.readers[output_idx] = self.readers[output_idx]
-            .checked_add(1)
-            .expect("output reader count overflowed u32");
+        let readers = &mut self.readers[output_idx];
+        debug_assert_ne!(*readers, u32::MAX, "output reader count overflowed u32");
+        *readers = readers.wrapping_add(1);
         self.demand[output_idx] = OutputDemand::Produce;
     }
 }

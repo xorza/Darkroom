@@ -30,7 +30,11 @@ impl OutputIdx {
 
 impl From<usize> for OutputIdx {
     fn from(i: usize) -> Self {
-        OutputIdx(u32::try_from(i).expect("output pool index must fit in u32"))
+        debug_assert!(
+            u32::try_from(i).is_ok(),
+            "output pool index must fit in u32"
+        );
+        OutputIdx(i as u32)
     }
 }
 
@@ -141,12 +145,15 @@ impl ExecutionProgram {
 
     pub(crate) fn output_idx(&self, node_id: NodeId, port_idx: usize) -> OutputIdx {
         let outputs = self.e_nodes[&node_id].outputs;
-        assert!(
+        debug_assert!(
             port_idx < outputs.len as usize,
             "output port is out of range"
         );
-        let port_idx = u32::try_from(port_idx).expect("output port index must fit in u32");
-        OutputIdx(outputs.start + port_idx)
+        debug_assert!(
+            outputs.start.checked_add(port_idx as u32).is_some(),
+            "output pool index must fit in u32"
+        );
+        OutputIdx(outputs.start.wrapping_add(port_idx as u32))
     }
 
     pub(crate) fn is_output_pinned(&self, output_idx: OutputIdx) -> bool {
