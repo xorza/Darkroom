@@ -47,8 +47,8 @@ Choosing a representative instance is an explicit host-side policy.
 | `execution/flatten/` | Composite lowering |
 | `execution/identity.rs` | Scoped authoring addresses and flatten provenance |
 | `execution/program.rs` | Private flat runtime program |
-| `execution/plan/` | Structural scheduling and output demand |
-| `execution/resolve/` | Demand-aware cache reuse and cone pruning |
+| `execution/plan/` | Structural scheduling and missing-input verdicts |
+| `execution/resolve/` | Cache-aware liveness, reuse, output demand, and reader counts |
 | `execution/executor/` | Invocation, delivery, reclamation, and stats |
 | `execution/cache/` | Cross-run values and output coverage |
 | `execution/codec.rs` | Cache framing plus downstream custom-value codec API |

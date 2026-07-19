@@ -5,8 +5,8 @@ design home that the module's `//!` docs point at. Two parts:
 
 - **A. Composite graphs** — how graphs used as nodes are authored and flattened
   away (`flatten/`; authoring types in `graph/`).
-- **B. Disk cache** — the node-keyed, digest-stamped output cache for disk-backed
-  (`Disk`/`Both`) nodes (`digest.rs`, `cache.rs`, `disk_store.rs`, `codec.rs`).
+- **B. Runtime cache** — the node-keyed, digest-stamped RAM and disk cache
+  (`digest.rs`, `cache/`, `disk_store/`, `codec.rs`).
   `RuntimeCache` owns the RAM slots and `DiskStore` and applies the caching policy
   across both.
 
@@ -135,10 +135,10 @@ caching therefore need no composite-specific behavior.
 
 ---
 
-# Part B — Disk (node-keyed output) cache
+# Part B — Runtime (node-keyed output) cache
 
-How a disk-backed node's outputs survive a reload — staying correct (never serve
-a stale value) and lean (never hold bytes a run won't use).
+How node outputs are reused in RAM or survive a reload on disk — staying correct
+(never serve a stale value) and lean (never hold bytes a run won't use).
 
 ## B.0 The cache mode is two storage bits
 
@@ -225,7 +225,7 @@ only a node whose bound resource becomes readable after its producers settle is 
 at reach time, using the same run stamps. The planner is purely structural and never
 touches digests.
 
-## B.3 Storage (`disk_store.rs`)
+## B.3 Storage (`disk_store/`)
 
 A node's blob lives at `<disk_root>/<hex(node id)>` — **one file per node**. Its outer
 header is the 32-byte content digest, a format version, the output count, and one
@@ -247,7 +247,7 @@ registers a `CustomValueCodec` on its `Library` type-table entry; that one entry
 custom output whose type has no codec makes the whole node uncacheable, so a reload
 never yields a half-real output set.
 
-## B.5 The RAM tier (`cache.rs`)
+## B.5 The RAM tier (`cache/`)
 
 Each flat `NodeId` has a `RuntimeSlot` in the ID-keyed runtime cache:
 
@@ -266,18 +266,23 @@ value is bound. A `None` `current_digest` (impure cone) never hits.
 loaded: a cheap header probe, so a disk-cached value behind another reused node is served
 without entering RAM (B.6).
 
-## B.6 Execution-time lifecycle (`cache.rs` policy over `disk_store.rs` I/O)
+## B.6 Execution-time lifecycle (`cache/` policy over `disk_store/` I/O)
 
 All of it happens *during the run*, not at plan time — the planner is structural and does
 no cache work. First the engine prepares one per-run resource stamp set on the blocking
-pool. The resolver then performs the **pre-run cut** (`resolve.rs`): fold every node's
-digest producer-first (from upstream digests and prepared resource identities), decide
-reuse, then prune any cone that feeds *only* reuse hits (a backward walk from the plan's
-roots). So a disk-cached node's now-unneeded upstream — a memory-only source, say — isn't
-recomputed on reopen. A digest folding a Bind-delivered resource value it can't read yet
-(§B.2 wired resource inputs) stamps `None` — resolved `Run`, cone kept alive — and the run
-loop prepares that identity off-thread and re-stamps it at reach time, serving the cache
-on a hit. Then, per surviving node, once its digest is computed:
+pool. The resolver then makes two passes over the structural schedule: a producer-first
+pass stamps content digests from upstream digests and prepared resource identities; a
+consumer-first pass derives cache-aware liveness, exact output demand, and exact binding
+reader counts together. The reverse pass starts from the plan's roots, tests reuse only
+after all live downstream demand has accumulated, and propagates demand and readers only
+through nodes that will run. Cache hits and missing-input nodes therefore cut their entire
+upstream cone. A disk-cached node's now-unneeded upstream — a memory-only source, say —
+isn't recomputed on reopen.
+
+A digest folding a Bind-delivered resource value it can't read yet (§B.2 wired resource
+inputs) stamps `None` — resolved `Run`, cone kept alive — and the run loop prepares that
+identity off-thread and re-stamps it at reach time, serving the cache on a hit. Then, as
+the executor reaches each surviving node:
 
 1. **resident hit?** — reuse only when the digest matches and every demanded resident
    output is non-`Unbound`.
@@ -297,15 +302,16 @@ on a hit. Then, per surviving node, once its digest is computed:
    that decoded bound values exactly match the header coverage before admitting the values
    into RAM; if the blob fails to *load* (corrupt/deleted) the bad file is deleted and the
    demanding consumer is dropped for this run; the next reopen recomputes it.
-5. **mid-run release — `reclaim_slot`.** The executor copies the plan's binding-reader
-   counts into `RemainingOutputReads` and counts them *down* as each running consumer reads a bound producer
-   (`ExecutionFrame::collect_inputs`). When an output reaches zero its value is cleared one output
-   at a time, and once *every* output of a **non-RAM** node is spent its whole slot is reclaimed
-   the instant its last consumer reads it — `reclaim_slot` demotes it to `OnDisk` if a blob
-   serves it (a `Disk` value), else drops it (`None`). A `Ram`/`Both` node is left resident
-   (kept hot for reuse). This bounds a chain's peak RAM to its active frontier instead of every
-   intermediate at once. A node no consumer reads (a sink, or all its consumers cut) is
-   reclaimed the moment it finishes.
+5. **mid-run release — `reclaim_slot`.** The executor seeds `RemainingOutputReads` from
+   the resolver's exact, cache-aware reader counts and counts them *down* as each running
+   consumer reads a bound producer (`ExecutionFrame::collect_inputs`). When an output
+   reaches zero its value is cleared one output at a time, and once *every* output of a
+   **non-RAM** node is spent its whole slot is reclaimed the instant its last consumer
+   reads it — `reclaim_slot` demotes it to `OnDisk` if a blob serves it (a `Disk` value),
+   else drops it (`None`). A `Ram`/`Both` node is left resident (kept hot for reuse).
+   This bounds a chain's peak RAM to its active frontier instead of every intermediate
+   at once. A node no consumer reads (a sink, or all its consumers cut) is reclaimed the
+   moment it finishes.
 6. **after the run → `evict_unused`.** The same `reclaim_slot` decision, swept over the
    leftovers step 5 didn't reach — a prior run's untouched value, or a non-RAM value a consumer
    never read (so its outputs never all went spent). A `caches_in_ram` node (`Ram`/`Both`) the
