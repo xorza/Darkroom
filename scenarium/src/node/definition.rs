@@ -133,7 +133,7 @@ pub enum OutputType {
     /// resolved type of input `mirrors`. It reads as
     /// the wildcard `Any` until the editor resolves it by following the wire
     /// (see [`Graph::resolve_output_type`](crate::graph::Graph::resolve_output_type));
-    /// the engine never type-checks, so it ignores the distinction.
+    /// compilation resolves the same type into the cache signature and codec preflight.
     Wildcard { mirrors: usize },
 }
 

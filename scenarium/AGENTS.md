@@ -33,6 +33,7 @@ Choosing a representative instance is an explicit host-side policy.
 | `data/dynamic_value.rs` | Runtime values, custom values, and RAM accounting |
 | `data/resource.rs` | External-resource stamps and stampers |
 | `node/definition.rs` | Function declarations and port metadata |
+| `node/output_type.rs` | Shared wildcard-output type resolution |
 | `node/lambda.rs` | Function invocation ABI and output demand |
 | `node/event.rs` | Event-lambda ABI |
 | `graph/mod.rs` | Core authoring structs, construction, and serialization |

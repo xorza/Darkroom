@@ -241,7 +241,7 @@ fn hash_data_type(hasher: &mut DigestHasher, ty: &DataType) {
 }
 
 /// A node's **content digest** — the one content key it's cached under, folding its identity
-/// (func id/version + output types) plus its structural inputs. The single digest the whole
+/// (func id + output types) plus its structural inputs. The single digest the whole
 /// cache keys on: RAM reuse ([`RuntimeCache::is_resident_hit`]), disk load/store, and downstream
 /// folding all read the node's stamped `current_digest`. Computed producer-first
 /// (topological), so a `Bind` producer's `current_digest` is already stamped when read.

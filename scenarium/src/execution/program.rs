@@ -15,6 +15,7 @@ use crate::library::Library;
 use crate::node::definition::{Func, FuncBehavior, FuncId, OutputType};
 use crate::node::event::EventLambda;
 use crate::node::lambda::FuncLambda;
+use crate::node::output_type::{OutputTypeResolver, OutputTypeSource};
 use crate::node::special::SpecialNode;
 use crate::{DataType, ResourceStamper, StaticValue};
 
@@ -185,62 +186,52 @@ impl ExecutionProgram {
 
     /// Fill the `output_types` pool by resolving each node's declared output types
     /// (wildcards followed through bindings) from the full `library` — done once at
-    /// flatten, where every compiled node's func is guaranteed present (`check_for_execution`
-    /// resolved them). An unresolved wildcard port stores `DataType::Any`. Builds
-    /// into a fresh buffer first so the per-node reads don't alias the write-back.
-    /// Each node's types are written through its span because the output pool is
-    /// independent from the node map's storage order.
+    /// flatten, where every compiled node's func is guaranteed present
+    /// (`check_for_execution` resolved them). Results are memoized by [`OutputIdx`];
+    /// unresolved and cyclic wildcard ports store `DataType::Any`.
     pub(crate) fn resolve_output_types(&mut self, library: &Library) {
         let total: usize = self.e_nodes.values().map(|n| n.outputs.len as usize).sum();
-        let mut types = vec![DataType::Any; total];
+        let mut owners = vec![None; total];
         for node_id in self.node_ids() {
             let span = self.e_nodes[&node_id].outputs;
-            for port in 0..span.len as usize {
-                types[span.start as usize + port] =
-                    effective_output_type(self, library, node_id, port, 0).unwrap_or(DataType::Any);
+            for output_idx in span.range() {
+                owners[output_idx] = Some(node_id);
             }
         }
-        self.output_types = types;
-    }
-}
-
-/// Backstop for a wildcard chain that cycles (a malformed program the planner rejects
-/// as `CycleDetected`, but output types resolve at flatten, before planning): beyond
-/// this depth resolution gives up with `None` rather than recursing forever.
-/// Legitimate reroute chains are a handful deep.
-const MAX_WILDCARD_DEPTH: usize = 64;
-
-/// The concrete declared output type of `node_id`'s `port`, resolving a wildcard
-/// reroute by following its mirrored input through the program's bindings. `None`
-/// *only* for an output with no concrete type — a wildcard whose mirror isn't a
-/// `Bind` (a const/unbound mirror is never a custom value), an out-of-range port, or
-/// a cyclic chain past [`MAX_WILDCARD_DEPTH`]. An **absent func is not a `None` case**:
-/// every compiled node's func resolved at `check_for_execution`, so its absence is an invariant
-/// violation that panics rather than silently degrading.
-fn effective_output_type(
-    program: &ExecutionProgram,
-    library: &Library,
-    node_id: NodeId,
-    port: usize,
-    depth: usize,
-) -> Option<DataType> {
-    if depth > MAX_WILDCARD_DEPTH {
-        return None;
-    }
-    let func = node_func(program, library, node_id).expect(
-        "a compiled node's func is registered in the library (validated at check_for_execution)",
-    );
-    match &func.outputs.get(port)?.ty {
-        OutputType::Fixed(data_type) => Some(data_type.clone()),
-        OutputType::Wildcard { mirrors } => {
-            let span = program.e_nodes[&node_id].inputs;
-            match &program.inputs[span.range()].get(*mirrors)?.binding {
-                ExecutionBinding::Bind(addr) => {
-                    effective_output_type(program, library, addr.target, addr.port_idx, depth + 1)
+        let types = {
+            let source = |output_idx: OutputIdx| {
+                let node_id =
+                    owners[output_idx.idx()].expect("every output pool entry must have an owner");
+                let e_node = &self.e_nodes[&node_id];
+                let port = (output_idx.0 - e_node.outputs.start) as usize;
+                let func = node_func(self, library, node_id).expect(
+                    "a compiled node's func is registered in the library \
+                     (validated at check_for_execution)",
+                );
+                match &func.outputs[port].ty {
+                    OutputType::Fixed(data_type) => OutputTypeSource::Fixed(data_type.clone()),
+                    OutputType::Wildcard { mirrors } => {
+                        let input = &self.inputs[e_node.inputs.range()][*mirrors];
+                        let declared = &func.inputs[*mirrors].data_type;
+                        match &input.binding {
+                            ExecutionBinding::Bind(address) => OutputTypeSource::Bind(
+                                self.output_idx(address.target, address.port_idx),
+                            ),
+                            ExecutionBinding::Const(value) => OutputTypeSource::Const {
+                                declared: declared.clone(),
+                                value: value.clone(),
+                            },
+                            ExecutionBinding::None => OutputTypeSource::Unresolved,
+                        }
+                    }
                 }
-                _ => None,
-            }
-        }
+            };
+            let mut resolver = OutputTypeResolver::new(total);
+            (0..total)
+                .map(|idx| resolver.resolve(OutputIdx::from(idx), &source))
+                .collect()
+        };
+        self.output_types = types;
     }
 }
 

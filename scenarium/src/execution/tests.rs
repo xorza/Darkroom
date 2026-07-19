@@ -1070,9 +1070,9 @@ mod cache_persistence {
     }
 
     /// A redefined output type can't serve a stale blob: `produce`'s func is changed
-    /// `Int → Float` with the *same* id+version, but the output signature is folded
-    /// into the content digest, so the Float node re-keys away from the Int blob and
-    /// recomputes — the consumer sees the correct `Float`, never the stale `Int`.
+    /// `Int → Float` with the same id, but the output signature is folded into the
+    /// content digest, so the Float node re-keys away from the Int blob and recomputes
+    /// — the consumer sees the correct `Float`, never the stale `Int`.
     #[tokio::test]
     async fn redefined_output_type_rekeys_and_recomputes() {
         use std::sync::Mutex;
@@ -1089,9 +1089,9 @@ mod cache_persistence {
         let received = Arc::new(Mutex::new(f64::NAN));
 
         // `produce` is a pure, Disk-persisted source; its declared output type and
-        // value are `Int` when `as_float` is false, `Float` when true — same func id
-        // and version, so its digest (which folds neither) is identical either way.
-        // `consume` (sink) reads it and records the value as f64.
+        // value are `Int` when `as_float` is false, `Float` when true. The func id and
+        // inputs stay unchanged, isolating output-signature invalidation. `consume`
+        // (sink) reads it and records the value as f64.
         let build_lib =
             |as_float: bool| -> Library {
                 let mut lib = Library::default();
@@ -5296,10 +5296,13 @@ mod mid_run_release {
 mod compile_regressions {
     use super::*;
     use crate::async_lambda;
+    use crate::execution::program::{ExecutionInput, ExecutionPortAddress, ExecutionProgram};
     use crate::graph::Graph;
     use crate::graph::NodeKind;
     use crate::graph::interface::{GraphId, GraphLink};
     use crate::node::definition::{Func, FuncInput, FuncOutput};
+    use crate::{FsPathConfig, FsPathMode};
+    use common::Span;
     use std::sync::Mutex as StdMutex;
 
     /// The output-type pool is span-addressed: when a consumer precedes its producer
@@ -5361,6 +5364,115 @@ mod compile_regressions {
             engine.compiled.program.node_output_types(make_str),
             &[DataType::String],
             "make_str reads its own type, not its neighbor's"
+        );
+    }
+
+    #[test]
+    fn compiled_output_types_match_authoring_resolution() {
+        let fixed =
+            Func::new(FuncId::unique(), "fixed").output(FuncOutput::new("Value", DataType::Int));
+        let passthrough = Func::new(FuncId::unique(), "passthrough")
+            .input(FuncInput::required("Value", DataType::Any))
+            .wildcard_output("Value", 0);
+        let path_type = DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile)));
+        let typed_path = Func::new(FuncId::unique(), "typed_path")
+            .input(FuncInput::required("Value", path_type.clone()))
+            .wildcard_output("Value", 0);
+        let mut library = Library::default();
+        library.add(fixed.clone());
+        library.add(passthrough.clone());
+        library.add(typed_path.clone());
+
+        let mut graph = Graph::default();
+        let fixed_id = graph.add_func_node(&fixed);
+        let mut long_chain_id = fixed_id;
+        for _ in 0..70 {
+            let next = graph.add_func_node(&passthrough);
+            graph.set_input_binding(InputPort::new(next, 0), Binding::bind(long_chain_id, 0));
+            long_chain_id = next;
+        }
+
+        let scalar_const_id = graph.add_func_node(&passthrough);
+        graph.set_input_binding(
+            InputPort::new(scalar_const_id, 0),
+            Binding::Const(StaticValue::Bool(true)),
+        );
+        let ambiguous_const_id = graph.add_func_node(&passthrough);
+        graph.set_input_binding(
+            InputPort::new(ambiguous_const_id, 0),
+            Binding::Const(StaticValue::Enum("A".into())),
+        );
+        let typed_const_id = graph.add_func_node(&typed_path);
+        graph.set_input_binding(
+            InputPort::new(typed_const_id, 0),
+            Binding::Const(StaticValue::FsPath("input.fit".into())),
+        );
+        let unbound_id = graph.add_func_node(&passthrough);
+
+        let mut engine = ExecutionEngine::default();
+        engine.update(&graph, &library).unwrap();
+        let program = &engine.compiled.program;
+        let cases = [
+            (fixed_id, DataType::Int),
+            (long_chain_id, DataType::Int),
+            (scalar_const_id, DataType::Bool),
+            (ambiguous_const_id, DataType::Any),
+            (typed_const_id, path_type),
+            (unbound_id, DataType::Any),
+        ];
+        for (node_id, expected) in cases {
+            assert_eq!(
+                graph.resolve_output_type(&library, OutputPort::new(node_id, 0)),
+                expected,
+                "authoring resolution for {node_id}"
+            );
+            assert_eq!(
+                program.node_output_types(&program.e_nodes[&node_id]),
+                std::slice::from_ref(&expected),
+                "compiled resolution for {node_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn authoring_and_compiled_output_resolution_break_cycles_as_any() {
+        let passthrough = Func::new(FuncId::unique(), "passthrough")
+            .input(FuncInput::required("Value", DataType::Any))
+            .wildcard_output("Value", 0);
+        let mut library = Library::default();
+        library.add(passthrough.clone());
+        let mut graph = Graph::default();
+        let node_id = graph.add_func_node(&passthrough);
+        graph.set_input_binding(InputPort::new(node_id, 0), Binding::bind(node_id, 0));
+        assert_eq!(
+            graph.resolve_output_type(&library, OutputPort::new(node_id, 0)),
+            DataType::Any
+        );
+
+        let mut program = ExecutionProgram::default();
+        program.inputs.push(ExecutionInput {
+            required: true,
+            stamper: None,
+            binding: ExecutionBinding::Bind(ExecutionPortAddress {
+                target: node_id,
+                port_idx: 0,
+            }),
+        });
+        program.node_order.push(node_id);
+        program.e_nodes.insert(
+            node_id,
+            ExecutionNode {
+                id: node_id,
+                func_id: passthrough.id,
+                inputs: Span::new(0, 1),
+                outputs: Span::new(0, 1),
+                ..Default::default()
+            },
+        );
+        program.resolve_output_types(&library);
+        assert_eq!(
+            program.node_output_types(&program.e_nodes[&node_id]),
+            &[DataType::Any]
         );
     }
 

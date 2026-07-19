@@ -7,7 +7,8 @@ use hashbrown::HashSet;
 use crate::graph::{Binding, Graph, InputPort, Node, NodeId, NodeKind, NodeSearch, OutputPort};
 use crate::library::Library;
 use crate::node::definition::{FuncInput, FuncOutput, OutputType};
-use crate::{DataType, StaticValue, closes_data_cycle};
+use crate::node::output_type::{OutputTypeResolver, OutputTypeSource};
+use crate::{DataType, closes_data_cycle};
 
 impl Graph {
     /// The declared type of input `port`, or `None` when it can't be resolved —
@@ -84,59 +85,29 @@ impl Graph {
     /// binding cycle is hit. Used by the editor for port-type display, connection
     /// compatibility, graph-interface inference, and compile-time validation.
     pub fn resolve_output_type(&self, library: &Library, port: OutputPort) -> DataType {
-        self.resolve_output_type_inner(library, port, &mut HashSet::new())
+        OutputTypeResolver::new(0).resolve(port, &|output| self.output_type_source(library, output))
     }
 
-    fn resolve_output_type_inner(
+    fn output_type_source(
         &self,
         library: &Library,
         port: OutputPort,
-        visiting: &mut HashSet<NodeId>,
-    ) -> DataType {
+    ) -> OutputTypeSource<OutputPort> {
         let Some(out) = self.output_spec(library, port) else {
-            return DataType::Any;
+            return OutputTypeSource::Unresolved;
         };
-
-        // A fixed output is just its declared type; a wildcard reports the type
-        // of whatever feeds the input it mirrors (any func/special node can
-        // declare one).
         let OutputType::Wildcard { mirrors } = &out.ty else {
-            return out.ty.declared();
+            return OutputTypeSource::Fixed(out.ty.declared());
         };
-        let mirrors = *mirrors;
-
-        // A binding cycle can momentarily exist in the editor graph (flatten and
-        // the planner reject it later) — break it as polymorphic rather than
-        // recurse forever.
-        if !visiting.insert(port.node_id) {
-            return DataType::Any;
-        }
-        let mirror = InputPort::new(port.node_id, mirrors);
-        let resolved = match self.input_binding(mirror) {
-            Binding::Bind(src) => self.resolve_output_type_inner(library, src, visiting),
-            // The mirrored input's *declared* type already carries the full
-            // `FsPathConfig` / `Enum` id (and a `Custom` id for a preset port), so
-            // a const of any kind resolves to it. A wildcard (`Any`-declared)
-            // input instead takes the const's own, more specific scalar type; a
-            // bare path/enum/null const there isn't reconstructable from the
-            // value alone, so it stays polymorphic (`Any`).
-            Binding::Const(v) => match self.input_type(library, mirror) {
-                Some(declared) if !matches!(declared, DataType::Any) => declared,
-                _ => match v {
-                    StaticValue::Float(_) => DataType::Float,
-                    StaticValue::Int(_) => DataType::Int,
-                    StaticValue::Bool(_) => DataType::Bool,
-                    StaticValue::String(_) => DataType::String,
-                    StaticValue::Null | StaticValue::FsPath(_) | StaticValue::Enum(_) => {
-                        DataType::Any
-                    }
-                },
+        let mirror = InputPort::new(port.node_id, *mirrors);
+        match self.input_binding(mirror) {
+            Binding::Bind(source) => OutputTypeSource::Bind(source),
+            Binding::Const(value) => OutputTypeSource::Const {
+                declared: self.input_type(library, mirror).unwrap_or_default(),
+                value,
             },
-            // Nothing wired in yet — polymorphic.
-            Binding::None => DataType::Any,
-        };
-        visiting.remove(&port.node_id);
-        resolved
+            Binding::None => OutputTypeSource::Unresolved,
+        }
     }
 
     /// The output ports `node` declares (func / special spec, or graph
