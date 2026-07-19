@@ -260,6 +260,43 @@ fn test_normalize_active_area_crops_and_applies_bayer_deltas() {
     }
 }
 
+#[test]
+fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
+    let raw_data = [550, 460, 730, 820];
+    let black = 100.0;
+    let inv_range = 1.0 / 900.0;
+    let filters = 0x94949494;
+    let channel_delta = [0.1, 0.05, 0.2, 0.05];
+
+    let mut direct = normalize::normalize_u16_to_f32_parallel(&raw_data, black, inv_range);
+    apply_bayer_black_deltas(&mut direct, 2, filters, &channel_delta);
+    let calibration = normalize_active_area::<false>(
+        &raw_data,
+        RawActiveArea {
+            raw_width: 2,
+            width: 2,
+            height: 2,
+            top_margin: 0,
+            left_margin: 0,
+        },
+        black,
+        inv_range,
+        filters,
+        Some(&channel_delta),
+    );
+
+    let expected = [0.4, 0.35, 0.65, 0.6];
+    for (index, ((direct, calibration), expected)) in
+        direct.iter().zip(&calibration).zip(expected).enumerate()
+    {
+        assert!((direct - expected).abs() < 1e-6, "direct[{index}]");
+        assert!(
+            (calibration - expected).abs() < 1e-6,
+            "calibration[{index}]"
+        );
+    }
+}
+
 /// Test that margin pixels (outside active area) are zero after normalization
 /// when raw values are below black level.
 #[test]
@@ -454,60 +491,6 @@ fn test_consolidate_black_levels_xtrans_1x1_fold() {
 }
 
 #[test]
-fn test_compute_wb_multipliers_normal() {
-    let cam_mul = [2.0, 1.0, 1.5, 1.0];
-    let result = compute_wb_multipliers(cam_mul).unwrap();
-
-    // Min is 1.0, so normalized = [2.0, 1.0, 1.5, 1.0]
-    assert!((result[0] - 2.0).abs() < 1e-6);
-    assert!((result[1] - 1.0).abs() < 1e-6);
-    assert!((result[2] - 1.5).abs() < 1e-6);
-    assert!((result[3] - 1.0).abs() < 1e-6);
-}
-
-#[test]
-fn test_compute_wb_multipliers_three_channel() {
-    // cam_mul[3]==0 → should copy from cam_mul[1]
-    let cam_mul = [2.0, 1.0, 1.5, 0.0];
-    let result = compute_wb_multipliers(cam_mul).unwrap();
-
-    assert!((result[0] - 2.0).abs() < 1e-6);
-    assert!((result[1] - 1.0).abs() < 1e-6);
-    assert!((result[2] - 1.5).abs() < 1e-6);
-    assert!((result[3] - 1.0).abs() < 1e-6); // copied from [1]
-}
-
-#[test]
-fn test_compute_wb_multipliers_normalization() {
-    let cam_mul = [4.0, 2.0, 3.0, 2.0];
-    let result = compute_wb_multipliers(cam_mul).unwrap();
-
-    // Min is 2.0, so all divided by 2.0
-    assert!((result[0] - 2.0).abs() < 1e-6);
-    assert!((result[1] - 1.0).abs() < 1e-6);
-    assert!((result[2] - 1.5).abs() < 1e-6);
-    assert!((result[3] - 1.0).abs() < 1e-6);
-}
-
-#[test]
-fn test_compute_wb_multipliers_all_zeros() {
-    let cam_mul = [0.0; 4];
-    assert!(compute_wb_multipliers(cam_mul).is_none());
-}
-
-#[test]
-fn test_compute_wb_multipliers_negative() {
-    let cam_mul = [2.0, -1.0, 1.5, 1.0];
-    assert!(compute_wb_multipliers(cam_mul).is_none());
-}
-
-#[test]
-fn test_compute_wb_multipliers_nan() {
-    let cam_mul = [2.0, f32::NAN, 1.5, 1.0];
-    assert!(compute_wb_multipliers(cam_mul).is_none());
-}
-
-#[test]
 fn test_fc_rggb() {
     // RGGB Bayer pattern: 0x94949494
     let filters = 0x94949494u32;
@@ -526,12 +509,11 @@ fn test_fc_rggb() {
 }
 
 #[test]
-fn test_apply_channel_corrections_identity() {
+fn test_apply_bayer_black_deltas_identity() {
     let mut data = vec![0.5f32; 4];
     let delta = [0.0; 4];
-    let wb = [1.0; 4];
 
-    apply_channel_corrections(&mut data, 2, 0x94949494, &delta, &wb);
+    apply_bayer_black_deltas(&mut data, 2, 0x94949494, &delta);
 
     // No change expected
     for &v in &data {
@@ -540,13 +522,12 @@ fn test_apply_channel_corrections_identity() {
 }
 
 #[test]
-fn test_apply_channel_corrections_delta_only() {
+fn test_apply_bayer_black_deltas() {
     // 2x2 RGGB: positions (0,0)=R, (0,1)=G, (1,0)=G, (1,1)=B
     let mut data = vec![0.5f32; 4];
     let delta = [0.1, 0.0, 0.05, 0.0]; // R has delta=0.1, B has delta=0.05
-    let wb = [1.0; 4];
 
-    apply_channel_corrections(&mut data, 2, 0x94949494, &delta, &wb);
+    apply_bayer_black_deltas(&mut data, 2, 0x94949494, &delta);
 
     assert!(
         (data[0] - 0.4).abs() < 1e-6,
@@ -563,78 +544,12 @@ fn test_apply_channel_corrections_delta_only() {
 }
 
 #[test]
-fn test_apply_channel_corrections_wb_only() {
-    let mut data = vec![0.5f32; 4];
-    let delta = [0.0; 4];
-    let wb = [2.0, 1.0, 1.5, 1.0]; // R×2, G×1, B×1.5
-
-    apply_channel_corrections(&mut data, 2, 0x94949494, &delta, &wb);
-
-    assert!(
-        (data[0] - 1.0).abs() < 1e-6,
-        "R: 0.5*2=1.0, got {}",
-        data[0]
-    );
-    assert!(
-        (data[1] - 0.5).abs() < 1e-6,
-        "G: 0.5*1=0.5, got {}",
-        data[1]
-    );
-    assert!(
-        (data[2] - 0.5).abs() < 1e-6,
-        "G: 0.5*1=0.5, got {}",
-        data[2]
-    );
-    assert!(
-        (data[3] - 0.75).abs() < 1e-6,
-        "B: 0.5*1.5=0.75, got {}",
-        data[3]
-    );
-}
-
-#[test]
-fn test_apply_channel_corrections_clamps_negative() {
+fn test_apply_bayer_black_deltas_clamps_negative() {
     let mut data = vec![0.05f32; 4];
     let delta = [0.1, 0.0, 0.0, 0.0]; // R delta bigger than value
-    let wb = [1.0; 4];
 
-    apply_channel_corrections(&mut data, 2, 0x94949494, &delta, &wb);
+    apply_bayer_black_deltas(&mut data, 2, 0x94949494, &delta);
 
     // R at (0,0): (0.05 - 0.1).max(0.0) = 0.0
     assert_eq!(data[0], 0.0, "Should clamp to 0.0");
-}
-
-#[test]
-fn test_apply_channel_corrections_delta_and_wb_combined() {
-    // 2x2 RGGB: (0,0)=R, (0,1)=G, (1,0)=G, (1,1)=B
-    let mut data = vec![0.5f32; 4];
-    let delta = [0.1, 0.0, 0.05, 0.0]; // R delta=0.1, B delta=0.05
-    let wb = [2.0, 1.0, 1.5, 1.0]; // R×2, G×1, B×1.5
-
-    apply_channel_corrections(&mut data, 2, 0x94949494, &delta, &wb);
-
-    // R at (0,0): (0.5-0.1)*2.0 = 0.8
-    assert!(
-        (data[0] - 0.8).abs() < 1e-6,
-        "R: (0.5-0.1)*2=0.8, got {}",
-        data[0]
-    );
-    // G at (0,1): (0.5-0.0)*1.0 = 0.5
-    assert!(
-        (data[1] - 0.5).abs() < 1e-6,
-        "G: no change, got {}",
-        data[1]
-    );
-    // G at (1,0): (0.5-0.0)*1.0 = 0.5
-    assert!(
-        (data[2] - 0.5).abs() < 1e-6,
-        "G: no change, got {}",
-        data[2]
-    );
-    // B at (1,1): (0.5-0.05)*1.5 = 0.675
-    assert!(
-        (data[3] - 0.675).abs() < 1e-6,
-        "B: (0.5-0.05)*1.5=0.675, got {}",
-        data[3]
-    );
 }

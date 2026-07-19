@@ -361,23 +361,17 @@ The actual subtraction (`subtract_black_internal`,
 `CLIP` clamps the result to `[0, 65535]` — so **libraw clips negative
 post-black values to zero by default.**
 
-lumos's port is structurally faithful but makes one deliberate optimization and one
-deliberate divergence:
+lumos's port is structurally faithful but splits direct lights from calibration inputs:
 
-- *Optimization*: it splits the subtraction into a SIMD pass that removes the
+- *Direct lights*: a SIMD pass removes the
   `common` pedestal uniformly (`normalize_u16_to_f32_parallel`, which also does the
   `1/(max−common)` scale in the same pass), then a second pass that applies the
-  per-channel delta (`apply_channel_corrections`, `src/raw/mod.rs:240-262`). This is
+  per-channel delta (`apply_bayer_black_deltas`). This is
   exactly libraw's "common + delta" decomposition, just executed in two vectorizable
-  passes.
-- *Divergence to watch*: lumos clamps each pixel to `[0, 1]` (`.max(0.0)…​.min(1.0)`).
-  Clamping the bottom to 0 matches libraw's `CLIP`, **but for calibration frames this
-  is not ideal** — dark and bias frames legitimately produce values that scatter
-  *below* the pedestal (read noise is symmetric), and clamping them to zero injects a
-  positive bias into the master frame. lumos partly mitigates this: `CfaImage::subtract`
-  (`src/astro_image/cfa.rs:146-159`) deliberately *keeps* negatives during dark
-  subtraction. But the initial `normalize` clamp at load time has already removed the
-  sub-pedestal scatter for the raw frames themselves. (See §5 and §6.)
+  passes, with the final result clamped to `[0, 1]`.
+- *Calibration inputs*: `normalize_active_area::<false>` performs the same common and
+  per-channel subtraction without a floor or ceiling. Dark and bias samples below the
+  pedestal therefore remain negative instead of biasing their stacked masters upward.
 
 **Why per-channel matters:** if you subtract a single scalar black from a sensor
 whose green channels sit 8 ADU higher than red, the residual offset survives into the
@@ -385,7 +379,7 @@ demosaic and shows up as a faint color cast that flat-fielding cannot remove (fl
 correct *multiplicative* response, not *additive* offset). Photometry on such data
 has a per-color zero-point error.
 
-### 2.3 White balance / camera multipliers — and why astro keeps them near unity
+### 2.3 White balance / camera multipliers — why lumos keeps unity
 
 LibRaw's `scale_colors()` (`.tmp/refs/LibRaw/src/postprocessing/postprocessing_utils_dcrdefs.cpp:106-249`)
 computes the white-balance multipliers `pre_mul[4]` (from camera `cam_mul`,
@@ -410,24 +404,12 @@ pixel *down*, so a near-saturated pixel in the weakest channel does not get push
 above the white level and clipped. When highlight recovery is on, it normalizes by
 `dmax` instead (multipliers `≤ 1.0`), trading headroom for highlight detail.
 
-lumos mirrors the `!highlight` behavior precisely: `compute_wb_multipliers`
-(`src/raw/mod.rs:213-234`) normalizes so the **minimum** multiplier is 1.0, and
-applies WB only on the demosaic (light-frame) path — never on the calibration
-(`extract_cfa_pixels`) path, where it passes `&[1.0; 4]`.
-
-**Should astro apply WB at all?** Two defensible positions:
-
-- *Keep WB unity (raw-linear).* Many astro pipelines (Siril's raw import, PixInsight's
-  preference for raw mono channels) deliberately apply *no* WB at decode and let a
-  later, physically-motivated color-calibration step (e.g. photometric color
-  calibration against a star catalog, or simple background-neutralization) set the
-  channel scaling. This keeps each channel's values proportional to that channel's
-  electrons, which is exactly what per-channel flat division and noise modeling want.
-- *Apply camera WB (min-normalized).* Applying the camera multipliers with the
-  min-normalization above is still a per-channel *affine* (multiplicative) operation,
-  so it does **not** break linearity, and it makes the channels roughly equal in scale
-  for nicer previews. The risk is purely that an aggressive multiplier can clip
-  highlights — which the min-normalization specifically avoids.
+lumos deliberately keeps camera white balance at unity on every RAW path, including
+the LibRaw fallback. Direct demosaic and calibrate-then-demosaic therefore produce the
+same raw-linear color domain: each channel stays proportional to its sensor signal,
+which is the correct input for per-channel flat division, noise modeling, stacking,
+and photometry. A later explicit color-calibration or display operation may scale
+channels without changing the science pipeline's decode contract.
 
 The thing astro must **never** do is libraw's full *post-processing* color pipeline:
 `output_color != 0` (camera→sRGB/Adobe matrix), a nonlinear `gamm[]` curve, or
@@ -452,18 +434,10 @@ from photometry (lumos's star detector flags `is_saturated`), not reconstructed.
 Clipping the top to 1.0 is acceptable *as a flag of saturation*; what matters is that
 the saturation level is known so those pixels can be masked, not silently trusted.
 
-**Saturation is per-channel and interacts with WB and demosaic.** The true saturation
-threshold is at the *raw* white level `maximum`, **per CFA color**. Two subtleties:
-
-- *WB pushes the saturation point.* Applying WB multipliers (all ≥ 1.0 under
-  min-normalization, §2.3) *scales up* every channel, so a pixel that was just below
-  `maximum` in the weakest channel can be lifted toward or past the clip after WB. This
-  is exactly why the `!highlight` min-normalization exists (no channel is scaled *down*,
-  so an already-valid pixel is never pushed *over* by a sub-unity multiplier) — but it
-  means the saturation flag should be derived from the **pre-WB raw** value, not the
-  post-WB normalized one. A star saturated in red but not green/blue produces a
-  *magenta/cyan core* after demosaic if not masked, because only two channels clip.
-- *Demosaic spreads clipping.* Once a saturated photosite is interpolated, its clipped
+**Saturation is per-channel and interacts with demosaic.** The true saturation
+threshold is at the *raw* white level `maximum`, **per CFA color**. Unity white balance
+keeps that threshold in the decoded raw-linear domain, but demosaic still spreads
+clipping: once a saturated photosite is interpolated, its clipped
   value bleeds into neighbors, so the saturated region after demosaic is larger and
   fuzzier than the true clipped set. Hence saturation masks, like defect maps, are most
   reliable when computed on the **mosaic** (§2.5) and carried through, rather than
@@ -992,39 +966,31 @@ a summary until the image model has a validity plane.
 
 **RAW** (`src/raw/mod.rs`): strong. `consolidate_black_levels` is a faithful port of
 libraw `adjust_bl()` including the 2×2/X-Trans spatial folding, common-minimum
-extraction, and per-channel deltas. WB via `compute_wb_multipliers` matches libraw's
-`!highlight` min-normalization and is applied only on the light path, never on
-calibration. Sensor dispatch picks our fast RCD (Bayer) / Markesteijn-1-pass
-(X-Trans) and falls back to libraw configured for **linear** output
-(`gamm={1,1}`, `output_color=0`, `no_auto_bright`). The separate `load_raw_cfa` path
+extraction, and per-channel deltas. Camera WB stays at unity for direct and calibration
+workflows. Sensor dispatch picks our fast RCD (Bayer) / Markesteijn-1-pass (X-Trans)
+and falls back to libraw configured for **linear**, unity-WB output (`gamm={1,1}`,
+`output_color=0`, `no_auto_bright`). The separate `load_raw_cfa` path
 returning an un-demosaiced `CfaImage` is exactly right and enables the
 calibrate-then-debayer ordering, with flat division using per-CFA-color means.
 
 **Gaps / opportunities:**
 
-1. **Load-time zero-clamp biases calibration frames.** `normalize_u16_to_f32_parallel`
-   and `apply_channel_corrections` clamp to `[0, 1]` (`mod.rs:259`, `normalize.rs`).
-   For *light* frames this matches libraw. For *dark/bias* frames the lower clamp
-   discards symmetric read-noise scatter below the pedestal and biases the master
-   high. `CfaImage::subtract` keeps negatives, but the raw frames are already clamped
-   before they are stacked into a master. Consider an unclamped calibration load path
-   (subtract pedestal, allow negative f32).
-2. **No native CFA-drizzle wiring.** lumos has both a drizzle stage and an
+1. **No native CFA-drizzle wiring.** lumos has both a drizzle stage and an
    un-demosaiced `CfaImage`, but they aren't connected into a CFA/Bayer-drizzle path.
    Given RawPedia/Siril guidance that CFA drizzle is the artifact-free OSC ideal, a
    `drizzle_stack` variant that consumes mosaics (scale = pixfrac = 1.0, dithered) is
    a high-value addition.
-3. **No superpixel / split-CFA mode.** A trivial, exactly-linear half-res debayer
+2. **No superpixel / split-CFA mode.** A trivial, exactly-linear half-res debayer
    would be a useful fast/trustworthy alternative and a photometric ground truth for
    testing the RCD path.
-4. **No DNG linearization-table handling (pass 2).** lumos assumes post-unpack
+3. **No DNG linearization-table handling (pass 2).** lumos assumes post-unpack
    linearity; a sensor shipping a DNG `LinearizationTable` would be mis-handled (§2.4).
    Mainstream astro CMOS is natively linear so this is low-priority, but worth noting.
-5. **Defect correction is dark-derived (good) but lives in the calibration module**,
+4. **Defect correction is dark-derived (good) but lives in the calibration module**,
    not the load module — fine architecturally, but the load docs should make the
    "defects corrected on the mosaic before demosaic" ordering explicit so callers
    don't accidentally demosaic the uncalibrated `load_raw` output for OSC data.
-9. **Standard formats are loaded without a linearity check (pass 3).** `from_file`
+5. **Standard formats are loaded without a linearity check (pass 3).** `from_file`
    (`mod.rs:276-287`) routes TIFF/PNG/JPEG to imaginarium with no gamma decode and no
    linear/nonlinear provenance check (§2.6). An 8-bit sRGB JPEG fed as stacking input
    silently violates `pixel ∝ photons`. Consider refusing 8-bit lossy formats as
@@ -1044,7 +1010,7 @@ calibrate-then-debayer ordering, with flat division using per-CFA-color means.
   libraw's default zero-clamp.
 - `LibRaw/src/postprocessing/postprocessing_utils_dcrdefs.cpp:106-249` —
   `scale_colors()`: WB multiplier computation and the `!highlight ⇒ dmax=dmin`
-  min-normalization that lumos mirrors.
+  min-normalization that lumos deliberately does not apply.
 - `LibRaw/src/postprocessing/dcraw_process.cpp` — demosaic dispatch by quality level
   (`n=0` linear … `n=3` AHD, `n=11/12` DHT/AAHD; X-Trans 1-pass/3-pass).
 - `librtprocess/src/demosaic/rcd.cc` — RCD v2.3 reference (LuisSR, MIT): direction

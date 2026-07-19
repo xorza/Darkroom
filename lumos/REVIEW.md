@@ -6,11 +6,11 @@ Updated 2026-07-19 against the current Lumos source.
 
 The review now tracks implementation status instead of preserving the original snapshot:
 
-- 25 findings completed;
-- 1 concrete finding open;
+- 26 findings completed;
+- 0 concrete findings open;
 - 2 proposals deferred until there is a product decision or measured failure.
 
-The remaining concrete work is one RAW color-policy decision.
+All concrete review findings are complete.
 
 Scope: production code under `lumos/src`, `lumos/Cargo.toml`, production callers, and the published
 surface. Paths and symbol names are used instead of brittle line numbers.
@@ -166,10 +166,10 @@ detectors through parallel frame processing without thread-local state. On the 1
   variance equation, with hand-computed formula tests and an example showing the
   electrons-per-ADU conversion.
 
-- [ ] **Choose one white-balance policy for calibrated and direct RAW output.**
-  Direct RAW loading applies camera white balance before demosaic. Calibration loading omits it,
-  and `CfaImage::demosaic` does not retain the coefficients. If the workflows should produce
-  comparable colour, preserve WB metadata and apply it at one defined post-calibration stage.
+- [x] **Choose one white-balance policy for calibrated and direct RAW output.**
+  Both workflows now keep camera white balance at unity, so direct decode and
+  calibrate-then-demosaic remain raw-linear and comparable. Camera preview multipliers are not
+  carried or applied; color scaling is an explicit downstream operation.
 
 ## Deferred pending evidence or product direction
 

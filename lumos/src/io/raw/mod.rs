@@ -219,62 +219,19 @@ fn consolidate_black_levels(
     })
 }
 
-/// Compute normalized WB multipliers from camera multipliers.
-///
-/// Normalizes so the smallest multiplier is 1.0 (avoids clipping).
-/// Returns None if cam_mul appears invalid (all zeros or non-finite).
-fn compute_wb_multipliers(cam_mul: [f32; 4]) -> Option<[f32; 4]> {
-    let mut mul = cam_mul;
-    // cam_mul[3] may be 0 for 3-color cameras; use cam_mul[1] (green) as fallback
-    if mul[3] == 0.0 {
-        mul[3] = mul[1];
-    }
-
-    // Validate: all must be positive and finite
-    if mul.iter().any(|&m| m <= 0.0 || !m.is_finite()) {
-        tracing::warn!("Invalid camera WB multipliers: {cam_mul:?}, skipping WB");
-        return None;
-    }
-
-    // Normalize so minimum is 1.0
-    let min_mul = mul.iter().copied().fold(f32::MAX, f32::min);
-    for m in &mut mul {
-        *m /= min_mul;
-    }
-
-    tracing::debug!("WB multipliers (normalized): {mul:?} (raw: {cam_mul:?})");
-    Some(mul)
-}
-
-/// Apply per-channel black delta correction and white balance to Bayer data.
+/// Apply per-channel black delta correction to Bayer data.
 ///
 /// Operates on data already normalized with the common black level.
 /// Channel is determined by the libraw `filters` bitmask using the FC macro.
-/// Apply per-channel black delta + white balance in place, clamped to `[0, 1]`
-/// (light-frame contract).
-fn apply_channel_corrections(
+/// Results are clamped to the direct light-frame `[0, 1]` contract.
+fn apply_bayer_black_deltas(
     data: &mut [f32],
     raw_width: usize,
     filters: u32,
     delta_norm: &[f32; 4],
-    wb_mul: &[f32; 4],
 ) {
-    apply_channel_corrections_impl::<true>(data, raw_width, filters, delta_norm, wb_mul);
-}
-
-/// `CLAMP` monomorphizes the per-pixel floor/ceil away — the light path keeps
-/// the `[0, 1]` clamp, the calibration path drops it, sharing one kernel.
-fn apply_channel_corrections_impl<const CLAMP: bool>(
-    data: &mut [f32],
-    raw_width: usize,
-    filters: u32,
-    delta_norm: &[f32; 4],
-    wb_mul: &[f32; 4],
-) {
-    // Check if corrections are trivial (skip for performance)
     let has_delta = delta_norm.iter().any(|&d| d.abs() > f32::EPSILON);
-    let has_wb = wb_mul.iter().any(|&w| (w - 1.0).abs() > f32::EPSILON);
-    if !has_delta && !has_wb {
+    if !has_delta {
         return;
     }
 
@@ -283,12 +240,7 @@ fn apply_channel_corrections_impl<const CLAMP: bool>(
         .for_each(|(row, row_data)| {
             for (col, pixel) in row_data.iter_mut().enumerate() {
                 let ch = fc(filters, row, col);
-                let corrected = *pixel - delta_norm[ch];
-                *pixel = if CLAMP {
-                    (corrected.max(0.0) * wb_mul[ch]).min(1.0)
-                } else {
-                    corrected * wb_mul[ch]
-                };
+                *pixel = (*pixel - delta_norm[ch]).clamp(0.0, 1.0);
             }
         });
 }
@@ -365,7 +317,6 @@ struct UnpackedRaw {
     left_margin: usize,
     black_level: BlackLevel,
     filters: u32,
-    wb_multipliers: Option<[f32; 4]>,
     sensor_type: SensorType,
     iso: Option<u32>,
 }
@@ -441,14 +392,12 @@ impl UnpackedRaw {
             self.black_level.inv_range,
         );
 
-        // Pass 2: Per-channel black delta + white balance
-        let wb = self.wb_multipliers.unwrap_or([1.0; 4]);
-        apply_channel_corrections(
+        // Pass 2: Per-channel black delta
+        apply_bayer_black_deltas(
             &mut normalized_data,
             self.raw_width,
             self.filters,
             &self.black_level.channel_delta_norm,
-            &wb,
         );
 
         let bayer = BayerImage::with_margins(
@@ -507,13 +456,9 @@ impl UnpackedRaw {
         // P×2 bytes (~47 MB) instead of P×4 bytes (~93 MB) for normalized f32.
         let raw_u16: Vec<u16> = raw_data.to_vec();
 
-        // Convert 4-channel black/WB to 3-channel for X-Trans (R=0, G=1, B=2)
+        // Convert 4-channel black to 3-channel for X-Trans (R=0, G=1, B=2)
         let bl = &self.black_level;
         let channel_black = [bl.per_channel[0], bl.per_channel[1], bl.per_channel[2]];
-        let wb_mul = match self.wb_multipliers {
-            Some(wb) => [wb[0], wb[1], wb[2]],
-            None => [1.0; 3],
-        };
 
         // Drop libraw and any fallback file buffer to reduce peak memory during demosaicing
         self.guard.take();
@@ -530,7 +475,6 @@ impl UnpackedRaw {
             xtrans_pattern,
             channel_black,
             bl.inv_range,
-            wb_mul,
         );
 
         Ok(pixels)
@@ -550,8 +494,10 @@ impl UnpackedRaw {
             (*self.inner).params.gamm[1] = 1.0;
             // No brightness adjustment
             (*self.inner).params.bright = 1.0;
-            // Use camera white balance
-            (*self.inner).params.use_camera_wb = 1;
+            // LibRaw otherwise falls back to daylight WB when camera and auto WB are disabled.
+            (*self.inner).params.user_mul = [1.0; 4];
+            (*self.inner).params.use_auto_wb = 0;
+            (*self.inner).params.use_camera_wb = 0;
             // Output 16-bit
             (*self.inner).params.output_bps = 16;
             // Linear color space (raw)
@@ -746,11 +692,6 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     let black_level = consolidate_black_levels(&cblack_raw, black_raw, maximum_raw, filters)
         .map_err(|reason| raw_err(path, reason))?;
 
-    // Extract camera white balance multipliers
-    // SAFETY: inner is valid, color.cam_mul is initialized after unpack.
-    let cam_mul: [f32; 4] = unsafe { (*inner).color.cam_mul };
-    let wb_multipliers = compute_wb_multipliers(cam_mul);
-
     let iso = extract_iso(inner);
 
     Ok(UnpackedRaw {
@@ -766,7 +707,6 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
         left_margin,
         black_level,
         filters,
-        wb_multipliers,
         sensor_type,
         iso,
     })

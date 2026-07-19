@@ -36,6 +36,9 @@ raw/
 | X-Trans | `normalize_u16_to_f32_parallel()` (SIMD) | Markesteijn 1-pass (rayon) | 3-channel RGB |
 | Unknown | libraw `dcraw_process` | libraw built-in | 3-channel RGB |
 
+Every path keeps camera white balance at unity. RAW channel values therefore remain proportional
+to sensor signal; color scaling belongs to a later explicit color-calibration or display step.
+
 ## SIMD Strategy
 
 ### Normalization (`normalize.rs`)
