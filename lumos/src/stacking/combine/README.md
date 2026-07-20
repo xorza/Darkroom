@@ -83,6 +83,10 @@ and disk-backed combines check between chunks. Cancellation discards partial out
 | Percentile Clipping | `Percentile` | Very small stacks | 3+ |
 | GESD | `Gesd` | Gaussian stacks, controlled false-positive rate | 15+ |
 
+Automatic GESD considers up to 25% of the stack, capped at two candidates below 25 frames and ten
+thereafter. Set `GesdConfig::max_outliers` explicitly only when a larger, independently validated
+contamination model is appropriate.
+
 ### Sigma Thresholds
 
 - **2.0-2.5**: Aggressive — removes satellites, airplane trails

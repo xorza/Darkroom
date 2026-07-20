@@ -216,7 +216,8 @@ impl StackConfig {
         }
     }
 
-    /// Preset: GESD with a median fallback below its supported sample size.
+    /// Preset: validation-constrained automatic GESD with a median fallback below its supported
+    /// sample size.
     pub fn gesd() -> Self {
         Self {
             method: CombineMethod::Mean(Rejection::gesd()),

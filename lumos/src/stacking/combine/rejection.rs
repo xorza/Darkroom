@@ -602,7 +602,8 @@ pub struct GesdConfig {
     /// Significance level for the test (typically 0.05).
     pub alpha: f32,
     /// Maximum number of outliers to detect.
-    /// If None, uses 25% of data size.
+    /// If `None`, targets 25% of the data within Rosner's validated limits: at most two
+    /// candidates below 25 samples and at most ten otherwise.
     pub max_outliers: Option<usize>,
 }
 
@@ -623,9 +624,12 @@ impl GesdConfig {
         }
     }
 
-    /// Get maximum outliers, defaulting to 25% of data size.
+    /// Get the configured maximum or the validation-constrained automatic maximum.
     pub fn max_outliers_for_size(&self, n: usize) -> usize {
-        self.max_outliers.unwrap_or(n / 4)
+        self.max_outliers.unwrap_or_else(|| {
+            let validation_cap = if n < 25 { 2 } else { 10 };
+            (n / 4).min(validation_cap)
+        })
     }
 
     /// Partition values by GESD test, returning the number of survivors.
@@ -1088,10 +1092,35 @@ mod tests {
         let config = GesdConfig::default();
         assert!((config.alpha - 0.05).abs() < f32::EPSILON);
         assert!(config.max_outliers.is_none());
-        assert_eq!(config.max_outliers_for_size(100), 25);
 
-        let config_explicit = GesdConfig::new(0.05, Some(10));
-        assert_eq!(config_explicit.max_outliers_for_size(100), 10);
+        let automatic_cases = [
+            (0, 0),
+            (3, 0),
+            (4, 1),
+            (8, 2),
+            (15, 2),
+            (24, 2),
+            (25, 6),
+            (39, 9),
+            (40, 10),
+            (44, 10),
+            (100, 10),
+        ];
+        for (sample_count, expected) in automatic_cases {
+            assert_eq!(
+                config.max_outliers_for_size(sample_count),
+                expected,
+                "automatic limit for {sample_count} samples"
+            );
+        }
+
+        for (sample_count, configured) in [(15, 3), (44, 11), (100, 25)] {
+            assert_eq!(
+                GesdConfig::new(0.05, Some(configured)).max_outliers_for_size(sample_count),
+                configured,
+                "explicit limit for {sample_count} samples"
+            );
+        }
     }
 
     #[test]

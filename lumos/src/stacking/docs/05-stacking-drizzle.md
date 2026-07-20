@@ -456,8 +456,10 @@ that, neither the t- nor the normal-approximation should be trusted much.
 - lumos `Gesd` (`GesdConfig`, `rejection.rs:616`; `reject` at `:668`) implements the
   same two-sided mean/sample-sd statistic and backward scan as NIST. Critical values use
   an accurate Student-t inverse CDF and the live sample count, and are cached per rayon
-  worker for a `(sample count, max outliers, α)` configuration. `max_outliers` defaults
-  to `N/4`; the `StackConfig::gesd()` preset falls back to median below 15 frames.
+  worker for a `(sample count, max outliers, α)` configuration. Automatic `max_outliers`
+  targets `N/4`, capped at two below 25 samples and ten thereafter; explicit values remain
+  available for independently validated contamination policies. The `StackConfig::gesd()`
+  preset falls back to median below 15 frames.
   The implementation is checked against NIST's 54-value worked example and all ten
   tabulated statistics and critical values. Deterministic Gaussian Monte Carlo at
   `N = 15, 25, 50, 100` verifies the family-wise false-positive rate against `α = 0.05`.
